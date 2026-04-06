@@ -1,0 +1,37 @@
+node_modules/
+**/node_modules/
+
+# TypeScript / build outputs
+apps/desktop/dist/
+packages/shared-types/dist/
+packages/shared-types/src/*.js
+packages/shared-types/src/*.d.ts
+packages/shared-types/src/*.js.map
+dist/
+**/*.tsbuildinfo
+
+# Go build outputs and caches
+daemon/bin/
+daemon/*.exe
+.cache/
+.claude/
+daemon/coverage.out
+coverage.out
+
+# Installer / packaging artifacts
+apps/desktop/release/
+apps/desktop/out/
+apps/desktop/.webpack/
+
+# Logs / temp files
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.tmp
+tmp/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db

@@ -1,0 +1,42 @@
+{
+  "FixedFileInfo": {
+    "FileVersion": {
+      "Major": 0,
+      "Minor": 3,
+      "Patch": 0,
+      "Build": 0
+    },
+    "ProductVersion": {
+      "Major": 0,
+      "Minor": 3,
+      "Patch": 0,
+      "Build": 0
+    },
+    "FileFlagsMask": "3f",
+    "FileFlags": "",
+    "FileOS": "040004",
+    "FileType": "01",
+    "FileSubType": "00"
+  },
+  "StringFileInfo": {
+    "Comments": "",
+    "CompanyName": "PangeaVPN",
+    "FileDescription": "PangeaVPN Daemon",
+    "FileVersion": "0.3.0.0",
+    "InternalName": "PangeaDaemon",
+    "LegalCopyright": "Copyright (c) PangeaVPN",
+    "OriginalFilename": "PangeaDaemon.exe",
+    "PrivateBuild": "",
+    "ProductName": "PangeaVPN",
+    "ProductVersion": "0.3.0.0",
+    "SpecialBuild": ""
+  },
+  "VarFileInfo": {
+    "Translation": {
+      "LangID": "0409",
+      "CharsetID": "04B0"
+    }
+  },
+  "IconPath": "pangeavpn.ico",
+  "ManifestPath": ""
+}
