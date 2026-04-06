@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' http://127.0.0.1:8787"
+    />
+    <title>Pangea VPN</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <canvas id="bgCanvas" aria-hidden="true"></canvas>
+    <script src="./bg.js"></script>
+    <div id="loadingScreen" class="loading-screen">
+      <div class="loading-content">
+        <h1>Pangea VPN</h1>
+        <span class="spinner loading-spinner"></span>
+        <p id="loadingMessage">Starting daemon...</p>
+      </div>
+    </div>
+
+    <div id="toastContainer" class="toast-container"></div>
+
+    <div id="loginScreen" class="login-screen" hidden>
+      <div class="login-content">
+        <div class="login-logo">
+          <svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M24 4L6 14v12c0 11 8 18 18 20 10-2 18-9 18-20V14L24 4z" stroke="currentColor" stroke-width="2" fill="none" opacity="0.3"/>
+            <path d="M24 10L12 17v8c0 8 5.5 13 12 14.5 6.5-1.5 12-6.5 12-14.5v-8L24 10z" stroke="currentColor" stroke-width="1.5" fill="none" opacity="0.5"/>
+            <circle cx="24" cy="22" r="4" fill="currentColor" opacity="0.6"/>
+          </svg>
+        </div>
+        <h1>Pangea VPN</h1>
+        <p class="login-subtitle">Enter your VPN token to connect. <a class="login-link" id="loginDashboardLink" href="#">Get your token</a></p>
+        <input
+          id="loginTokenInput"
+          class="login-token-input"
+          type="text"
+          inputmode="numeric"
+          maxlength="16"
+          placeholder="0000000000000000"
+          autocomplete="off"
+          spellcheck="false"
+        />
+        <button id="loginScreenBtn" class="login-button" type="button">Sign In</button>
+        <p id="loginScreenMessage" class="login-message"></p>
+      </div>
+    </div>
+
+    <main class="shell" hidden>
+      <header class="header">
+        <div class="header-row">
+          <h1>Pangea VPN <span id="appVersion" class="app-version">v-</span></h1>
+          <nav class="header-menu" aria-label="View options">
+            <span id="authBar" class="auth-bar" hidden>
+              <span id="authUserLabel" class="auth-user-label"></span>
+            </span>
+            <button id="loginBtn" class="btn-ghost" type="button" hidden>Sign In</button>
+            <button id="themeToggleBtn" class="btn-icon" type="button" aria-pressed="false" title="Toggle theme">&#9789;</button>
+            <div class="menu-wrapper">
+              <button id="menuBtn" class="btn-icon menu-btn-wrapper" type="button" title="Menu" aria-expanded="false">&#9776;<span id="menuBadge" class="menu-badge" hidden>!</span></button>
+              <div id="menuDropdown" class="menu-dropdown">
+                <button id="menuUpdateBtn" class="menu-item menu-update-item" type="button" hidden>Update Available</button>
+                <a id="manageSubLink" class="menu-item" href="#">Manage Subscription</a>
+                <button id="logoutBtn" class="menu-item" type="button">Sign Out</button>
+              </div>
+            </div>
+          </nav>
+        </div>
+      </header>
+
+      <!-- Hero connection card -->
+      <section id="heroCard" class="hero-card" data-state="DISCONNECTED">
+        <div class="hero-indicator">
+          <div class="hero-dot"></div>
+        </div>
+
+        <div class="hero-state">
+          <strong id="state" class="hero-state-label">DISCONNECTED</strong>
+          <span id="detail" class="hero-detail"></span>
+        </div>
+
+        <div id="heroMeta" class="hero-meta" hidden>
+          <span id="heroServer" class="hero-meta-item"></span>
+        </div>
+
+        <div id="serverPanel" class="hero-server" hidden>
+          <select id="serverSelect" hidden></select>
+          <div class="server-picker-wrapper">
+            <button id="serverPickerBtn" class="server-picker" type="button">
+              <span id="serverPickerLabel" class="server-picker-label">Select server</span>
+              <span class="server-picker-arrow">&#9662;</span>
+            </button>
+            <div id="serverPickerDropdown" class="server-picker-dropdown" hidden></div>
+          </div>
+          <button id="serverRefreshBtn" class="btn-ghost" type="button" title="Refresh servers">&#8635;</button>
+        </div>
+
+        <div class="hero-actions">
+          <button id="serverConnectBtn" class="btn-primary btn-lg">Connect</button>
+          <button id="serverDisconnectBtn" class="btn-danger btn-lg">Disconnect</button>
+          <span id="serverIndicator" class="refresh-indicator" aria-live="polite" aria-hidden="true">
+            <span class="spinner" aria-hidden="true"></span>
+            <span id="serverIndicatorLabel">Provisioning...</span>
+          </span>
+        </div>
+
+        <div class="hero-pills">
+          <span class="status-pill">
+            <span class="pill-dot" id="ksDot"></span>
+            <span>Kill Switch</span>
+          </span>
+          <span class="status-pill">
+            <span class="pill-dot" id="cloakDot"></span>
+            <span>Cloak</span>
+            <span id="cloak" class="pill-value">-</span>
+          </span>
+          <span class="status-pill">
+            <span class="pill-dot" id="wgDot"></span>
+            <span>WireGuard</span>
+            <span id="wireguard" class="pill-value">-</span>
+          </span>
+        </div>
+
+        <p id="uiMessage" class="hero-message"></p>
+      </section>
+
+      <div id="throughputPanel" class="throughput-panel" hidden>
+        <span class="throughput-item">↑ <span id="txBytes">0 B</span></span>
+        <span class="throughput-sep">·</span>
+        <span class="throughput-item">↓ <span id="rxBytes">0 B</span></span>
+      </div>
+
+      <!-- Profiles (collapsible) -->
+      <section class="panel collapsible" data-collapsible>
+        <button class="collapse-toggle" type="button" aria-expanded="false" aria-controls="profilesContent">
+          <span>Profiles</span>
+          <span class="collapse-arrow" aria-hidden="true">&#9662;</span>
+        </button>
+        <div id="profilesContent" class="collapse-content" aria-hidden="true">
+          <div class="controls-panel">
+            <label for="profileSelect">Profile</label>
+            <select id="profileSelect"></select>
+
+            <div class="button-row">
+              <button id="connectBtn">Connect</button>
+              <button id="disconnectBtn" class="secondary">Disconnect</button>
+              <button id="refreshBtn" class="btn-ghost">Refresh</button>
+              <span id="refreshIndicator" class="refresh-indicator" aria-live="polite" aria-hidden="true">
+                <span class="spinner" aria-hidden="true"></span>
+                <span id="refreshIndicatorLabel">Working...</span>
+              </span>
+            </div>
+          </div>
+
+          <!-- Encoded import -->
+          <div id="encodedImportSection" style="margin-top: 12px;">
+            <label for="encodedImportInput" style="font-size: 0.82rem; color: var(--text-secondary); display: block; margin-bottom: 4px;">Base64 profile payload</label>
+            <textarea
+              id="encodedImportInput"
+              rows="4"
+              placeholder="eyJwcm9maWxlbmFtZSI6Ii4uLiIsInJlbW90ZWhvc3QiOiIuLi4ifQ=="
+              style="resize: vertical; min-height: 80px;"
+            ></textarea>
+            <div class="button-row" style="margin-top: 6px;">
+              <button id="importEncodedProfileBtn" type="button">Import</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Manual profile editor (hidden by default) -->
+      <section id="manualBuilderSection" class="panel manual-builder-panel" hidden>
+        <h2>Manual Profile Editor</h2>
+        <p class="profile-help">Create or update a profile manually, then choose it in Profiles and press Connect.</p>
+        <form id="manualBuilderForm" class="profile-form">
+          <div class="form-grid">
+            <label>
+              Profile name
+              <input id="manualName" required placeholder="My Cloak Tunnel" />
+            </label>
+            <label>
+              Profile ID (optional)
+              <input id="manualId" placeholder="auto-from-name" />
+            </label>
+            <label>
+              Tunnel name (optional)
+              <input id="manualTunnelName" placeholder="auto-from-id" />
+            </label>
+            <label>
+              Cloak remote host
+              <input id="manualRemoteHost" required placeholder="example.com" />
+            </label>
+            <label>
+              Cloak UID
+              <input id="manualUid" required />
+            </label>
+            <label>
+              Cloak public key
+              <input id="manualPublicKey" required />
+            </label>
+            <label class="wide">
+              WireGuard config text
+              <textarea id="manualWgConfigText" required rows="6" placeholder="[Interface]&#10;PrivateKey = ...&#10;Address = ...&#10;&#10;[Peer]&#10;PublicKey = ...&#10;Endpoint = ..."></textarea>
+            </label>
+          </div>
+
+          <div class="button-row">
+            <button id="saveManualProfileBtn" type="submit">Save</button>
+            <button id="exportEncodedProfileBtn" type="button" class="btn-ghost">Export</button>
+            <button id="deleteManualProfileBtn" type="button" class="btn-ghost">Delete Selected</button>
+          </div>
+
+          <div class="manual-export">
+            <label for="encodedExportOutput">Encoded profile payload</label>
+            <textarea
+              id="encodedExportOutput"
+              rows="4"
+              readonly
+              placeholder="Press &quot;Export&quot; to generate a base64 payload."
+            ></textarea>
+            <div class="button-row">
+              <button id="copyEncodedExportBtn" type="button" class="btn-ghost">Copy</button>
+            </div>
+          </div>
+        </form>
+      </section>
+
+      <!-- Settings -->
+      <section class="panel settings-panel collapsible" data-collapsible>
+        <button class="collapse-toggle" type="button" aria-expanded="false" aria-controls="settingsContent">
+          <span>Settings</span>
+          <span class="collapse-arrow" aria-hidden="true">&#9662;</span>
+        </button>
+        <div id="settingsContent" class="collapse-content" aria-hidden="true">
+          <div class="settings-section">
+            <h3 class="settings-heading">Censorship Bypass</h3>
+            <p class="settings-description">Enable if your network blocks access to VPN services.</p>
+            <div class="settings-toggles">
+              <label class="toggle-label">
+                <input id="directIpToggle" type="checkbox" />
+                <div>
+                  <span class="toggle-title">Direct IP</span>
+                  <span class="toggle-hint">Connect to the API server by IP address, bypassing DNS entirely.</span>
+                </div>
+              </label>
+              <label class="toggle-label">
+                <input id="directIpOnlyToggle" type="checkbox" />
+                <div>
+                  <span class="toggle-title">Direct IP Only</span>
+                  <span class="toggle-hint">Always use direct IP connections. Skips normal API calls entirely — use if your network blocks HTTPS to our servers.</span>
+                </div>
+              </label>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Logs -->
+      <section class="panel logs-panel collapsible" data-collapsible>
+        <button class="collapse-toggle" type="button" aria-expanded="false" aria-controls="logsSectionContent">
+          <span>Logs</span>
+          <span class="collapse-arrow" aria-hidden="true">&#9662;</span>
+        </button>
+        <div id="logsSectionContent" class="collapse-content" aria-hidden="true">
+          <div class="logs-actions">
+            <button id="toggleManualBuilderBtn" type="button" class="btn-ghost">Manual Editor</button>
+            <button id="copyDiagnosticsBtn" type="button" class="btn-ghost">Diagnostics</button>
+            <button id="copyLogsBtn" type="button" class="btn-ghost">Copy Logs</button>
+            <button id="clearLogsBtn" type="button" class="btn-ghost">Clear</button>
+          </div>
+          <div id="logs" class="logs"></div>
+        </div>
+      </section>
+
+    </main>
+
+    <!-- Update modal -->
+    <div id="updateOverlay" class="update-overlay">
+      <div class="update-modal">
+        <button id="updateCloseBtn" class="update-close" type="button">&times;</button>
+        <h2 class="update-title">Update Available</h2>
+        <p class="update-versions">
+          <span class="update-version-label">Current</span>
+          <span id="updateCurrentVersion" class="update-version-value">-</span>
+          <span class="update-arrow">→</span>
+          <span class="update-version-label">Latest</span>
+          <span id="updateLatestVersion" class="update-version-value">-</span>
+        </p>
+        <div id="updateProgressWrap" class="update-progress-wrap" hidden>
+          <div class="update-progress-bar">
+            <div id="updateProgressFill" class="update-progress-fill"></div>
+          </div>
+          <span id="updateProgressText" class="update-progress-text">0%</span>
+        </div>
+        <button id="updateDownloadBtn" class="login-button update-download-btn" type="button">Download Update</button>
+        <p id="updateMessage" class="update-message"></p>
+      </div>
+    </div>
+
+    <script type="module" src="./index.js"></script>
+  </body>
+</html>

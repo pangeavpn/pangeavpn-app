@@ -1,0 +1,99 @@
+#!/bin/sh
+set -eu
+
+APP_NAME="PangeaVPN.app"
+SERVICE_LABEL="com.pangea.pangeavpn.daemon"
+SERVICE_PLIST="/Library/LaunchDaemons/${SERVICE_LABEL}.plist"
+SERVICE_NAME="system/${SERVICE_LABEL}"
+SYSTEM_SUPPORT_DIR="/Library/Application Support/PangeaVPN"
+SYSTEM_DAEMON_PATH="${SYSTEM_SUPPORT_DIR}/PangeaDaemon"
+SYSTEM_BIN_DIR="${SYSTEM_SUPPORT_DIR}/bin/mac"
+LOG_PATH="/var/log/pangeavpn-daemon.log"
+
+install_base="${2:-/Applications}"
+volume_root="${3:-/}"
+app_path=""
+candidate_a="${volume_root%/}${install_base%/}/${APP_NAME}"
+candidate_b="${install_base%/}/${APP_NAME}"
+candidate_c="/Applications/${APP_NAME}"
+
+for candidate in "$candidate_a" "$candidate_b" "$candidate_c"; do
+  if [ -x "${candidate}/Contents/Resources/daemon/daemon" ]; then
+    app_path="${candidate}"
+    break
+  fi
+done
+
+if [ -z "${app_path}" ]; then
+  mdfind_output="$(/usr/bin/mdfind 'kMDItemCFBundleIdentifier == "com.pangea.pangeavpn"' 2>/dev/null || true)"
+  if [ -n "${mdfind_output}" ]; then
+    echo "${mdfind_output}" | while IFS= read -r candidate; do
+      if [ -n "${candidate}" ] && [ -x "${candidate}/Contents/Resources/daemon/daemon" ]; then
+        app_path="${candidate}"
+        echo "${app_path}" > "/tmp/pangeavpn-app-path.$$"
+        break
+      fi
+    done
+    if [ -f "/tmp/pangeavpn-app-path.$$" ]; then
+      app_path="$(cat "/tmp/pangeavpn-app-path.$$" 2>/dev/null || true)"
+      rm -f "/tmp/pangeavpn-app-path.$$"
+    fi
+  fi
+fi
+
+if [ -z "${app_path}" ]; then
+  echo "PangeaVPN.app not found in expected install locations; skipping launchd setup"
+  exit 0
+fi
+daemon_src="${app_path}/Contents/Resources/daemon/daemon"
+app_bin_dir="${app_path}/Contents/Resources/bin/mac"
+cloak_src=""
+if [ -x "${app_bin_dir}/ck-client" ]; then
+  cloak_src="${app_bin_dir}/ck-client"
+elif [ -x "${app_bin_dir}/cloak" ]; then
+  cloak_src="${app_bin_dir}/cloak"
+fi
+if [ -z "${cloak_src}" ]; then
+  echo "cloak binary not found in ${app_bin_dir}"
+  exit 1
+fi
+if [ ! -x "${app_bin_dir}/wireguard-go" ]; then
+  echo "wireguard-go binary not found in ${app_bin_dir}"
+  exit 1
+fi
+if [ ! -x "${app_bin_dir}/wg" ]; then
+  echo "wg binary not found in ${app_bin_dir}"
+  exit 1
+fi
+
+/bin/mkdir -p "${SYSTEM_SUPPORT_DIR}"
+/bin/mkdir -p "${SYSTEM_BIN_DIR}"
+
+# Strip quarantine from source binaries before copying — downloaded .pkg files
+# propagate the com.apple.quarantine xattr to all extracted files and macOS
+# Gatekeeper will kill quarantined unsigned binaries on Apple Silicon.
+/usr/bin/xattr -dr com.apple.quarantine "${app_path}" >/dev/null 2>&1 || true
+
+/usr/bin/install -m 755 -o root -g wheel "${daemon_src}" "${SYSTEM_DAEMON_PATH}"
+/usr/bin/install -m 755 -o root -g wheel "${cloak_src}" "${SYSTEM_BIN_DIR}/ck-client"
+/usr/bin/install -m 755 -o root -g wheel "${app_bin_dir}/wireguard-go" "${SYSTEM_BIN_DIR}/wireguard-go"
+/usr/bin/install -m 755 -o root -g wheel "${app_bin_dir}/wg" "${SYSTEM_BIN_DIR}/wg"
+/usr/sbin/chown root:wheel "${SYSTEM_SUPPORT_DIR}"
+/usr/sbin/chown root:wheel "${SYSTEM_SUPPORT_DIR}/bin" "${SYSTEM_BIN_DIR}"
+/bin/chmod 755 "${SYSTEM_SUPPORT_DIR}"
+/bin/chmod 755 "${SYSTEM_SUPPORT_DIR}/bin" "${SYSTEM_BIN_DIR}"
+
+# Strip quarantine from installed binaries and re-sign with ad-hoc signature.
+# Apple Silicon requires all executables to carry a valid signature — copying
+# can invalidate the original ad-hoc signature so we force re-sign here.
+/usr/bin/xattr -dr com.apple.quarantine "${SYSTEM_SUPPORT_DIR}" >/dev/null 2>&1 || true
+for bin in "${SYSTEM_DAEMON_PATH}" "${SYSTEM_BIN_DIR}/ck-client" "${SYSTEM_BIN_DIR}/wireguard-go" "${SYSTEM_BIN_DIR}/wg"; do
+  /usr/bin/codesign --force --sign - "${bin}" >/dev/null 2>&1 || true
+done
+
+# Do NOT start the daemon here. The install-mac.sh script handles token
+# creation, plist registration, and daemon startup. Starting the daemon
+# from postinstall without a token causes a crash loop (KeepAlive=true)
+# and overwrites signed binaries when install-mac.sh copies them again.
+
+exit 0

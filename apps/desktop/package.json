@@ -1,0 +1,113 @@
+{
+  "name": "@pangeavpn/desktop",
+  "version": "0.3.0",
+  "private": true,
+  "main": "dist/main/main.js",
+  "scripts": {
+    "dev": "node ./scripts/dev.mjs",
+    "build": "tsc -p tsconfig.main.json && tsc -p tsconfig.renderer.json && node ./scripts/copy-static.mjs",
+    "pack": "npm run build && node ./scripts/build-daemon.mjs && node ./scripts/verify-pack-resources.mjs && electron-builder && node ./scripts/stage-mac-installer.mjs"
+  },
+  "dependencies": {
+    "@pangeavpn/shared-types": "file:../../packages/shared-types"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.5",
+    "electron": "^34.1.0",
+    "electron-builder": "^25.1.8",
+    "typescript": "^5.7.3"
+  },
+  "build": {
+    "appId": "com.pangea.pangeavpn",
+    "productName": "PangeaVPN",
+    "electronVersion": "34.1.0",
+    "npmRebuild": false,
+    "files": [
+      "dist/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "build/PangeaVPN.png",
+        "to": "build/PangeaVPN.png"
+      },
+      {
+        "from": "build/PangeaVPN_connected.png",
+        "to": "build/PangeaVPN_connected.png"
+      }
+    ],
+    "directories": {
+      "output": "../../dist/installers"
+    },
+    "win": {
+      "icon": "built/pangeavpn.ico",
+      "target": [
+        "nsis"
+      ],
+      "extraResources": [
+        {
+          "from": "resources/bin/win",
+          "to": "bin/win"
+        },
+        {
+          "from": "../../daemon/bin/PangeaDaemon.exe",
+          "to": "daemon/PangeaDaemon.exe"
+        },
+        {
+          "from": "../../daemon/bin/wireguard.dll",
+          "to": "daemon/wireguard.dll"
+        },
+        {
+          "from": "../../daemon/bin/wintun.dll",
+          "to": "daemon/wintun.dll"
+        },
+        {
+          "from": "built/pangeavpn.ico",
+          "to": "build/PangeaVPN.ico"
+        },
+        {
+          "from": "build/PangeaVPN_connected.ico",
+          "to": "build/PangeaVPN_connected.ico"
+        }
+      ]
+    },
+    "nsis": {
+      "perMachine": true,
+      "allowElevation": true,
+      "oneClick": true,
+      "include": "build/installer.nsh",
+      "installerIcon": "built/pangeavpn.ico",
+      "uninstallerIcon": "built/pangeavpn.ico",
+      "installerHeaderIcon": "built/pangeavpn.ico"
+    },
+    "mac": {
+      "icon": "PangeaVPN.icns",
+      "target": [
+        "pkg",
+        "zip"
+      ],
+      "category": "public.app-category.utilities",
+      "extraResources": [
+        {
+          "from": "resources/bin/mac",
+          "to": "bin/mac"
+        },
+        {
+          "from": "../../daemon/bin/daemon",
+          "to": "daemon/daemon"
+        },
+        {
+          "from": "built/pangeavpn.icns",
+          "to": "build/PangeaVPN.icns"
+        }
+      ]
+    },
+    "pkg": {
+      "scripts": "build/pkg-scripts",
+      "allowAnywhere": false,
+      "allowCurrentUserHome": false,
+      "allowRootDirectory": true,
+      "isRelocatable": false
+    }
+  }
+}
