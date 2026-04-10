@@ -12,6 +12,24 @@ import (
 
 	"github.com/godbus/dbus/v5"
 	"github.com/vishvananda/netlink"
+	"golang.org/x/sys/unix"
+)
+
+// ---------------------------------------------------------------------------
+// Policy routing constants (mirrors wg-quick behaviour)
+// ---------------------------------------------------------------------------
+
+const (
+	// policyRoutingTable is the custom routing table ID for tunnel routes.
+	policyRoutingTable = 51820
+	// policyRoutingFwmark is the firewall mark used to let WireGuard's own
+	// UDP packets bypass the policy rule and use the real default route.
+	policyRoutingFwmark uint32 = 51820
+	// policyRulePriority must be lower than the standard main-table rule
+	// (32766) so our rules are evaluated first.
+	policyRulePriority = 32764
+	// suppressRulePriority for the suppress_prefixlength rule on main table.
+	suppressRulePriority = 32765
 )
 
 // ---------------------------------------------------------------------------
@@ -119,14 +137,30 @@ func removeLinuxEndpointRoutes(routes []routeSpec) {
 	}
 }
 
-// addLinuxAllowedIPRoutes adds routes for all WireGuard allowed-IP prefixes
-// through the tunnel interface.
-func addLinuxAllowedIPRoutes(interfaceName string, allowedIPs []string) error {
+// ---------------------------------------------------------------------------
+// Policy routing (replaces simple main-table /1 routes)
+//
+// NetworkManager binds connectivity probes to the physical interface via
+// SO_BINDTODEVICE. Simple /1 routes in the main table don't override that,
+// so NM's probes bypass the tunnel, get blocked by the kill switch, and the
+// desktop reports "no internet."
+//
+// The fix mirrors wg-quick's approach:
+//   1. Add tunnel routes to a dedicated routing table (51820).
+//   2. ip rule: all traffic without fwmark 51820 → use table 51820.
+//   3. ip rule: suppress default route in main table so it can't compete.
+//   4. WireGuard's own UDP socket is marked with fwmark 51820, so its
+//      packets use the real default route and don't loop.
+// ---------------------------------------------------------------------------
+
+// addLinuxPolicyRouting sets up the custom routing table, routes, and ip rules.
+func addLinuxPolicyRouting(interfaceName string, allowedIPs []string) error {
 	link, err := netlink.LinkByName(interfaceName)
 	if err != nil {
 		return fmt.Errorf("lookup interface %s for routes: %w", interfaceName, err)
 	}
 
+	// Add routes to the custom table.
 	for _, prefix := range allowedIPs {
 		routePrefixes, _, err := normalizedRoutesForPrefix(prefix)
 		if err != nil {
@@ -140,17 +174,62 @@ func addLinuxAllowedIPRoutes(interfaceName string, allowedIPs []string) error {
 			nlRoute := &netlink.Route{
 				LinkIndex: link.Attrs().Index,
 				Dst:       dst,
+				Table:     policyRoutingTable,
 			}
 			if err := netlink.RouteAdd(nlRoute); err != nil && !errors.Is(err, os.ErrExist) {
-				return fmt.Errorf("add route %s via %s: %w", rp, interfaceName, err)
+				return fmt.Errorf("add route %s to table %d: %w", rp, policyRoutingTable, err)
 			}
 		}
 	}
+
+	// ip rule: packets without our fwmark use the custom table.
+	fwmask := uint32(policyRoutingFwmark)
+	notRule := netlink.NewRule()
+	notRule.Invert = true
+	notRule.Mark = policyRoutingFwmark
+	notRule.Mask = &fwmask
+	notRule.Table = policyRoutingTable
+	notRule.Priority = policyRulePriority
+	notRule.Family = unix.AF_INET
+	if err := netlink.RuleAdd(notRule); err != nil && !errors.Is(err, os.ErrExist) {
+		return fmt.Errorf("add fwmark ip rule: %w", err)
+	}
+
+	// ip rule: suppress the main table's default route so it can't compete
+	// with the custom table's routes.
+	suppressRule := netlink.NewRule()
+	suppressRule.Table = unix.RT_TABLE_MAIN
+	suppressRule.SuppressPrefixlen = 0
+	suppressRule.Priority = suppressRulePriority
+	suppressRule.Family = unix.AF_INET
+	if err := netlink.RuleAdd(suppressRule); err != nil && !errors.Is(err, os.ErrExist) {
+		return fmt.Errorf("add suppress ip rule: %w", err)
+	}
+
 	return nil
 }
 
-// removeLinuxAllowedIPRoutes removes routes for allowed-IP prefixes.
-func removeLinuxAllowedIPRoutes(interfaceName string, allowedIPs []string) {
+// removeLinuxPolicyRouting tears down the custom table, routes, and ip rules.
+func removeLinuxPolicyRouting(interfaceName string, allowedIPs []string) {
+	// Remove ip rules first.
+	fwmask := uint32(policyRoutingFwmark)
+	notRule := netlink.NewRule()
+	notRule.Invert = true
+	notRule.Mark = policyRoutingFwmark
+	notRule.Mask = &fwmask
+	notRule.Table = policyRoutingTable
+	notRule.Priority = policyRulePriority
+	notRule.Family = unix.AF_INET
+	_ = netlink.RuleDel(notRule)
+
+	suppressRule := netlink.NewRule()
+	suppressRule.Table = unix.RT_TABLE_MAIN
+	suppressRule.SuppressPrefixlen = 0
+	suppressRule.Priority = suppressRulePriority
+	suppressRule.Family = unix.AF_INET
+	_ = netlink.RuleDel(suppressRule)
+
+	// Remove routes from custom table.
 	link, err := netlink.LinkByName(interfaceName)
 	if err != nil {
 		return
@@ -168,6 +247,7 @@ func removeLinuxAllowedIPRoutes(interfaceName string, allowedIPs []string) {
 			_ = netlink.RouteDel(&netlink.Route{
 				LinkIndex: link.Attrs().Index,
 				Dst:       dst,
+				Table:     policyRoutingTable,
 			})
 		}
 	}

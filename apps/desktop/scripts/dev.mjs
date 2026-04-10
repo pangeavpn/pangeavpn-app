@@ -16,7 +16,12 @@ runOrExit(npmCmd, ["run", "build"], {
 const env = { ...process.env };
 delete env.ELECTRON_RUN_AS_NODE;
 
-runOrExit(resolveElectronBinary(), ["."], {
+const electronArgs = ["."];
+if (process.platform === "linux") {
+  electronArgs.push("--class=PangeaVPN");
+}
+
+runOrExit(resolveElectronBinary(), electronArgs, {
   shell: false,
   env,
   cwd: packageDir

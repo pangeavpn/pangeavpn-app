@@ -1,5 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
+import crypto from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 
@@ -21,26 +23,47 @@ if (daemonWasRunning && isWin) {
   killPort8787();
 }
 
-const daemonHandle = isWin ? await startWindowsElevatedDaemon() : daemonWasRunning ? null : await startDaemon();
-const desktop = startDesktopProcess();
-
-const children = [desktop];
-if (daemonHandle?.managed && daemonHandle.child) {
-  children.push(daemonHandle.child);
-}
-
+const children = [];
 let stopping = false;
 
+const daemonHandle = isWin ? await startWindowsElevatedDaemon() : daemonWasRunning ? null : await startDaemon();
+
+if (daemonHandle?.managed && daemonHandle.child) {
+  children.push(daemonHandle.child);
+  daemonHandle.child.on("exit", (code) => {
+    void handleDaemonExit(code);
+  });
+  daemonHandle.child.on("error", (error) => {
+    console.error(`Failed to start daemon process: ${error.message}`);
+    shutdown(1);
+  });
+}
+
+if (!daemonWasRunning && daemonHandle?.managed) {
+  console.log("Waiting for daemon to be ready...");
+  const ready = await waitForDaemon(60000, daemonHandle.child);
+  if (!ready) {
+    console.error("Daemon did not become reachable within 60 seconds.");
+    shutdown(1);
+  }
+}
+
+const desktop = startDesktopProcess();
+children.push(desktop);
+
 function killDaemonSync() {
-  if (!isWin) return;
-  try {
-    spawnSync("taskkill", ["/F", "/IM", "PangeaDaemon.exe"], {
-      stdio: "pipe",
-      shell: false,
-      timeout: 5000
-    });
-  } catch {
-    // best-effort
+  if (isWin) {
+    try {
+      spawnSync("taskkill", ["/F", "/IM", "PangeaDaemon.exe"], {
+        stdio: "pipe",
+        shell: false,
+        timeout: 5000
+      });
+    } catch {
+      // best-effort
+    }
+  } else {
+    killPort8787();
   }
 }
 
@@ -76,31 +99,29 @@ function shutdown(exitCode = 0) {
   stopping = true;
 
   for (const child of children) {
-    if (!child.killed) {
-      child.kill("SIGTERM");
-    }
+    killTree(child, "SIGTERM");
   }
 
   killDaemonSync();
 
   setTimeout(() => {
     for (const child of children) {
-      if (!child.killed) {
-        child.kill("SIGKILL");
-      }
+      killTree(child, "SIGKILL");
     }
     process.exit(exitCode);
   }, 1500);
 }
 
-if (daemonHandle?.managed && daemonHandle.child) {
-  daemonHandle.child.on("exit", (code) => {
-    void handleDaemonExit(code);
-  });
-  daemonHandle.child.on("error", (error) => {
-    console.error(`Failed to start daemon process: ${error.message}`);
-    shutdown(1);
-  });
+function killTree(child, signal) {
+  if (!child || child.killed) {
+    return;
+  }
+  try {
+    // Negative PID sends to the entire process group (works for detached children).
+    process.kill(-child.pid, signal);
+  } catch {
+    try { child.kill(signal); } catch { /* best-effort */ }
+  }
 }
 
 desktop.on("exit", (code) => shutdown(code ?? 1));
@@ -111,7 +132,12 @@ desktop.on("error", (error) => {
 
 process.on("SIGINT", () => shutdown(0));
 process.on("SIGTERM", () => shutdown(0));
-process.on("exit", () => killDaemonSync());
+process.on("exit", () => {
+  for (const child of children) {
+    killTree(child, "SIGKILL");
+  }
+  killDaemonSync();
+});
 
 function runOrExit(command, args, options = {}) {
   const result = spawnSync(command, args, {
@@ -145,11 +171,21 @@ async function handleDaemonExit(code) {
 
 async function startDaemon() {
   const daemonEnv = daemonRuntimeEnv();
+  // On Linux/macOS, the daemon needs root to manage network interfaces (WireGuard/tun).
+  // If we're not already root (and not in a sudo-as-user context), elevate via sudo.
+  const needsSudo = !isWin && typeof process.getuid === "function" && process.getuid() !== 0;
+
+  if (needsSudo) {
+    acquireSudo();
+  }
 
   if (goCmd) {
+    const [cmd, args] = needsSudo
+      ? ["sudo", [...buildSudoEnvArgs(daemonEnv), goCmd, "run", "./cmd/daemon"]]
+      : [goCmd, ["run", "./cmd/daemon"]];
     return {
       managed: true,
-      child: spawn(goCmd, ["run", "./cmd/daemon"], {
+      child: spawn(cmd, args, {
         cwd: "daemon",
         stdio: "inherit",
         shell: false,
@@ -160,9 +196,12 @@ async function startDaemon() {
 
   const daemonBinary = localDaemonBinaryPath();
   if (fs.existsSync(daemonBinary)) {
+    const [cmd, args] = needsSudo
+      ? ["sudo", [...buildSudoEnvArgs(daemonEnv), daemonBinary]]
+      : [daemonBinary, []];
     return {
       managed: true,
-      child: spawn(daemonBinary, [], {
+      child: spawn(cmd, args, {
         cwd: path.dirname(daemonBinary),
         stdio: "inherit",
         shell: false,
@@ -174,6 +213,15 @@ async function startDaemon() {
   console.error("Go is not installed or not reachable from this shell.");
   console.error(`Install Go 1.22+ or place a daemon binary at ${daemonBinary}.`);
   process.exit(1);
+}
+
+function acquireSudo() {
+  console.log("Daemon requires root privileges. You may be prompted for your sudo password.");
+  const result = spawnSync("sudo", ["-v"], { stdio: "inherit", shell: false });
+  if (result.error || (result.status ?? 1) !== 0) {
+    console.error("Failed to obtain sudo privileges.");
+    process.exit(1);
+  }
 }
 
 async function startWindowsElevatedDaemon() {
@@ -246,14 +294,20 @@ function restartDaemonElevatedWindows(filePath) {
   return { ok: true, message: "" };
 }
 
-async function waitForDaemon(timeoutMs) {
+async function waitForDaemon(timeoutMs, child) {
+  let childExited = false;
+  const onExit = () => { childExited = true; };
+  if (child) child.on("exit", onExit);
+
   const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
+  while (Date.now() < deadline && !childExited) {
     if (await isDaemonReachable()) {
+      if (child) child.removeListener("exit", onExit);
       return true;
     }
     await sleep(250);
   }
+  if (child) child.removeListener("exit", onExit);
   return false;
 }
 
@@ -263,9 +317,19 @@ function goEnv() {
   const goModCache = path.join(root, "go-mod");
   const goTmp = path.join(root, "go-tmp");
 
-  fs.mkdirSync(goCache, { recursive: true });
-  fs.mkdirSync(goModCache, { recursive: true });
-  fs.mkdirSync(goTmp, { recursive: true });
+  try {
+    fs.mkdirSync(goCache, { recursive: true });
+    fs.mkdirSync(goModCache, { recursive: true });
+    fs.mkdirSync(goTmp, { recursive: true });
+    fs.accessSync(goCache, fs.constants.W_OK);
+    fs.accessSync(goModCache, fs.constants.W_OK);
+    fs.accessSync(goTmp, fs.constants.W_OK);
+  } catch {
+    // Cache dirs exist but are not writable (e.g. created by a prior sudo run).
+    // Let Go use its default locations (~/.cache/go) instead.
+    console.warn("Warning: .cache/ is not writable; using Go's default cache dirs.");
+    return { ...process.env };
+  }
 
   return {
     ...process.env,
@@ -295,6 +359,7 @@ function startDesktopProcess() {
     return spawn(npmCmd, ["run", "dev", "--workspace", "@pangeavpn/desktop"], {
       stdio: "inherit",
       shell: isWin,
+      detached: !isWin,
       env: desktopEnv
     });
   }
@@ -317,6 +382,7 @@ function startDesktopProcess() {
   return spawn("sudo", args, {
     stdio: "inherit",
     shell: false,
+    detached: true,
     env: desktopEnv
   });
 }
@@ -341,49 +407,91 @@ function runNpmOrExit(args) {
   runOrExit("sudo", commandArgs, { shell: false });
 }
 
+function buildSudoEnvArgs(env) {
+  const keys = ["HOME", "USER", "LOGNAME", "PATH", "GOMODCACHE", "GOCACHE", "GOTMPDIR"];
+  const pairs = keys.filter((k) => env[k] != null).map((k) => `${k}=${env[k]}`);
+  return ["env", ...pairs];
+}
+
+function resolveAppSupportDir(home) {
+  if (process.platform === "darwin") {
+    return path.join(home, "Library", "Application Support", "pangeavpn-desktop");
+  }
+  return path.join(home, ".config", "pangeavpn-desktop");
+}
+
 function ensureSudoUserRuntimeFiles() {
-  if (!sudoContext) {
+  if (sudoContext) {
+    // Running as root via `sudo npm run dev` — create files as the real user.
+    const appDir = resolveAppSupportDir(sudoContext.home);
+    const tokenPath = path.join(appDir, "daemon-token.txt");
+    const configPath = path.join(appDir, "config.json");
+    const initScript = [
+      "const crypto = require('node:crypto');",
+      "const fs = require('node:fs');",
+      "const appDir = process.argv[1];",
+      "const tokenPath = process.argv[2];",
+      "const configPath = process.argv[3];",
+      "fs.mkdirSync(appDir, { recursive: true });",
+      "let token = '';",
+      "if (fs.existsSync(tokenPath)) { token = String(fs.readFileSync(tokenPath, 'utf8')).trim(); }",
+      "if (!token) {",
+      "  token = crypto.randomBytes(32).toString('hex');",
+      "  fs.writeFileSync(tokenPath, `${token}\\n`, { mode: 0o600 });",
+      "}",
+      "if (!fs.existsSync(configPath)) {",
+      "  fs.writeFileSync(configPath, JSON.stringify({ profiles: [] }, null, 2) + '\\n', { mode: 0o600 });",
+      "}"
+    ].join(" ");
+
+    const args = [
+      "-u",
+      sudoContext.user,
+      "env",
+      `HOME=${sudoContext.home}`,
+      `USER=${sudoContext.user}`,
+      `LOGNAME=${sudoContext.user}`,
+      `PATH=${process.env.PATH ?? ""}`,
+      "node",
+      "-e",
+      initScript,
+      appDir,
+      tokenPath,
+      configPath
+    ];
+
+    runOrExit("sudo", args, { shell: false });
     return;
   }
 
-  const appDir = path.join(sudoContext.home, "Library", "Application Support", "pangeavpn-desktop");
+  // Running as normal user — daemon will be elevated via sudo later.
+  // Create runtime files now so the daemon (as root) reads the existing
+  // token instead of creating a root-owned one the user cannot read.
+  if (isWin) {
+    return;
+  }
+
+  const home = process.env.HOME || os.homedir();
+  const appDir = resolveAppSupportDir(home);
   const tokenPath = path.join(appDir, "daemon-token.txt");
   const configPath = path.join(appDir, "config.json");
-  const initScript = [
-    "const crypto = require('node:crypto');",
-    "const fs = require('node:fs');",
-    "const appDir = process.argv[1];",
-    "const tokenPath = process.argv[2];",
-    "const configPath = process.argv[3];",
-    "fs.mkdirSync(appDir, { recursive: true });",
-    "let token = '';",
-    "if (fs.existsSync(tokenPath)) { token = String(fs.readFileSync(tokenPath, 'utf8')).trim(); }",
-    "if (!token) {",
-    "  token = crypto.randomBytes(32).toString('hex');",
-    "  fs.writeFileSync(tokenPath, `${token}\\n`, { mode: 0o600 });",
-    "}",
-    "if (!fs.existsSync(configPath)) {",
-    "  fs.writeFileSync(configPath, JSON.stringify({ profiles: [] }, null, 2) + '\\n', { mode: 0o600 });",
-    "}"
-  ].join(" ");
 
-  const args = [
-    "-u",
-    sudoContext.user,
-    "env",
-    `HOME=${sudoContext.home}`,
-    `USER=${sudoContext.user}`,
-    `LOGNAME=${sudoContext.user}`,
-    `PATH=${process.env.PATH ?? ""}`,
-    "node",
-    "-e",
-    initScript,
-    appDir,
-    tokenPath,
-    configPath
-  ];
+  fs.mkdirSync(appDir, { recursive: true });
 
-  runOrExit("sudo", args, { shell: false });
+  let token = "";
+  try {
+    token = fs.readFileSync(tokenPath, "utf8").trim();
+  } catch {
+    // missing or unreadable
+  }
+  if (!token) {
+    token = crypto.randomBytes(32).toString("hex");
+    fs.writeFileSync(tokenPath, `${token}\n`, { mode: 0o600 });
+  }
+
+  if (!fs.existsSync(configPath)) {
+    fs.writeFileSync(configPath, JSON.stringify({ profiles: [] }, null, 2) + "\n", { mode: 0o600 });
+  }
 }
 
 function cleanElectronEnv(baseEnv) {
@@ -460,6 +568,14 @@ function resolveSudoContext() {
   }
   if (typeof process.getuid !== "function" || process.getuid() !== 0) {
     return null;
+  }
+
+  // On Linux, running as root is not supported. The daemon is elevated automatically
+  // via sudo when needed — just run `npm run dev` as your regular user.
+  if (process.platform === "linux") {
+    console.error("Error: do not run 'sudo npm run dev' on Linux.");
+    console.error("Run as your regular user instead — the daemon will ask for your sudo password when it starts.");
+    process.exit(1);
   }
 
   const sudoUser = String(process.env.SUDO_USER ?? "").trim();

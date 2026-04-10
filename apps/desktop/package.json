@@ -2,6 +2,11 @@
   "name": "@pangeavpn/desktop",
   "version": "0.3.0",
   "private": true,
+  "author": {
+    "name": "Pangea",
+    "email": "support@pangeavpn.org"
+  },
+  "homepage": "https://pangeavpn.org",
   "main": "dist/main/main.js",
   "scripts": {
     "dev": "node ./scripts/dev.mjs",
@@ -9,7 +14,8 @@
     "pack": "npm run build && node ./scripts/build-daemon.mjs && node ./scripts/verify-pack-resources.mjs && electron-builder && node ./scripts/stage-mac-installer.mjs"
   },
   "dependencies": {
-    "@pangeavpn/shared-types": "file:../../packages/shared-types"
+    "@pangeavpn/shared-types": "file:../../packages/shared-types",
+    "electron-updater": "^6.3.9"
   },
   "devDependencies": {
     "@types/node": "^22.13.5",
@@ -36,6 +42,11 @@
         "to": "build/PangeaVPN_connected.png"
       }
     ],
+    "publish": {
+      "provider": "github",
+      "owner": "pangeavpn",
+      "repo": "pangeavpn-app"
+    },
     "directories": {
       "output": "../../dist/installers"
     },
@@ -100,6 +111,35 @@
           "from": "built/pangeavpn.icns",
           "to": "build/PangeaVPN.icns"
         }
+      ]
+    },
+    "linux": {
+      "icon": "build/PangeaVPN_linux.png",
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Network",
+      "extraResources": [
+        {
+          "from": "../../daemon/bin/daemon",
+          "to": "daemon/daemon"
+        },
+        {
+          "from": "build/PangeaVPN_linux.png",
+          "to": "build/PangeaVPN_linux.png"
+        },
+        {
+          "from": "build/PangeaVPN_connected_linux.png",
+          "to": "build/PangeaVPN_connected_linux.png"
+        }
+      ]
+    },
+    "deb": {
+      "artifactName": "PangeaVPN_${version}_${arch}.deb",
+      "depends": [
+        "iproute2",
+        "wireguard-tools"
       ]
     },
     "pkg": {

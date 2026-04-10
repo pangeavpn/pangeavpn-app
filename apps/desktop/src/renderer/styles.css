@@ -59,6 +59,10 @@
   --card-shadow: 0 1px 3px rgba(0, 0, 0, 0.12), 0 8px 32px rgba(0, 0, 0, 0.24);
 }
 
+html[data-theme="light"] {
+  --bg-base: #fbf9f2;
+}
+
 body[data-theme="light"] {
   color-scheme: light;
 
@@ -271,6 +275,28 @@ body {
 .login-button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.cached-token-btn {
+  margin-top: 8px;
+  padding: 8px 12px;
+  font-size: 0.8rem;
+  font-family: monospace;
+  word-break: break-all;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-secondary);
+  background: var(--surface);
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+  max-width: 100%;
+  text-align: center;
+}
+
+.cached-token-btn:hover {
+  background: var(--surface-hover, var(--border));
+  border-color: var(--accent);
+  color: var(--text);
 }
 
 .login-link {
@@ -843,10 +869,8 @@ body[data-theme="light"] .menu-dropdown {
   right: 0;
   max-height: 200px;
   overflow-y: auto;
-  background: color-mix(in srgb, var(--bg-surface) 50%, transparent);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
-  border: 1px solid color-mix(in srgb, var(--border) 30%, transparent);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
   border-radius: 16px;
   padding: 4px;
   z-index: 50;
@@ -863,7 +887,7 @@ body[data-theme="light"] .server-picker-dropdown {
   flex-direction: column;
   gap: 1px;
   padding: 8px 12px;
-  border-radius: 6px;
+  border-radius: 12px;
   cursor: pointer;
   transition: background 0.1s ease;
 }

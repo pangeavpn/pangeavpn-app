@@ -52,19 +52,25 @@ declare global {
     getDirectIp: () => Promise<boolean>;
     setDirectIpOnly: (enabled: boolean) => Promise<void>;
     getDirectIpOnly: () => Promise<boolean>;
-    checkVersion: () => Promise<{
-      version: string;
-      downloadUrl: string;
-    } | null>;
     getCachedServers: () => Promise<ServerInfo[]>;
     cacheServers: (servers: ServerInfo[]) => Promise<void>;
-    downloadUpdate: (url: string) => Promise<string>;
-    onUpdateProgress: (callback: (percent: number) => void) => void;
+  }
+
+  interface AutoUpdaterApi {
+    checkForUpdates: () => Promise<{ version: string; releaseNotes?: string } | null>;
+    downloadUpdate: () => Promise<void>;
+    installUpdate: () => void;
+    onUpdateAvailable: (callback: (info: { version: string; releaseNotes?: string; macOnly?: boolean }) => void) => void;
+    onUpdateNotAvailable: (callback: () => void) => void;
+    onUpdateError: (callback: (message: string) => void) => void;
+    onDownloadProgress: (callback: (percent: number) => void) => void;
+    onUpdateDownloaded: (callback: () => void) => void;
   }
 
   interface Window {
     daemonApi?: DaemonApi;
     pangeaApi?: PangeaApi;
+    autoUpdater?: AutoUpdaterApi;
     openExternal?: (url: string) => Promise<void>;
     onAuthInvalidated?: (callback: () => void) => void;
   }

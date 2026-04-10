@@ -8,6 +8,7 @@ import { getConnectedTrayIconPath, getTrayIconPath, getWindowsAppIconPath } from
 import { IPC_CHANNELS } from "../shared/ipc";
 import * as auth from "./auth";
 import { PangeaApiClient, AuthError } from "./pangeaApiClient";
+import { setupAutoUpdater } from "./autoUpdater";
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -21,6 +22,8 @@ let lastConnectedProfileId: string | null = null;
 let trayDefaultImage: NativeImage | null = null;
 let trayConnectedImage: NativeImage | null = null;
 let lastDaemonRestartAttemptAtMs = 0;
+let setWidth = 610;
+let setHeight = 440;
 const daemonRestartBackoffMs = 5000;
 
 const daemonClient = new DaemonClient("http://127.0.0.1:8787", readDaemonTokens);
@@ -34,8 +37,8 @@ function getTaskbarPosition(): { x: number; y: number } {
   const display = screen.getPrimaryDisplay();
   const { width: screenW, height: screenH } = display.workAreaSize;
   const { x: workX, y: workY } = display.workArea;
-  const winW = 610;
-  const winH = 440;
+  const winW = setWidth;
+  const winH = setHeight;
 
   if (process.platform === "darwin") {
     // macOS: menu bar at top, anchor top-right
@@ -49,8 +52,8 @@ function createWindow(): void {
   const windowIconPath = getWindowsAppIconPath(__dirname);
   const pos = getTaskbarPosition();
   mainWindow = new BrowserWindow({
-    width: 610,
-    height: 475,
+    width: setWidth,
+    height: setHeight,
     x: pos.x,
     y: pos.y,
     frame: false,
@@ -129,11 +132,12 @@ function showMainWindow(): void {
   showing = true;
 
   const pos = getTaskbarPosition();
+  const useSlide = process.platform !== "linux";
   const slideOffset = process.platform === "darwin" ? -20 : 20;
-  const startY = pos.y + slideOffset;
+  const startY = useSlide ? pos.y + slideOffset : pos.y;
 
   mainWindow.setOpacity(0);
-  mainWindow.setPosition(pos.x, startY);
+  mainWindow.setBounds({ x: pos.x, y: startY, width: setWidth, height: setHeight });
 
   if (mainWindow.isMinimized()) {
     mainWindow.restore();
@@ -153,12 +157,14 @@ function showMainWindow(): void {
     const t = step / steps;
     const ease = 1 - Math.pow(1 - t, 3);
     mainWindow?.setOpacity(ease);
-    mainWindow?.setPosition(pos.x, Math.round(startY + (pos.y - startY) * ease));
+    if (useSlide) {
+      mainWindow?.setPosition(pos.x, Math.round(startY + (pos.y - startY) * ease));
+    }
 
     if (step >= steps) {
       clearInterval(timer);
       mainWindow?.setOpacity(1);
-      mainWindow?.setPosition(pos.x, pos.y);
+      mainWindow?.setBounds({ x: pos.x, y: pos.y, width: setWidth, height: setHeight });
       showing = false;
     }
   }, interval);
@@ -174,6 +180,7 @@ function hideMainWindow(): void {
   showing = false;
 
   const [startX, startY] = mainWindow.getPosition();
+  const useSlide = process.platform !== "linux";
   const slideOffset = process.platform === "darwin" ? -20 : 20;
   const endY = startY + slideOffset;
   const duration = 150;
@@ -186,7 +193,9 @@ function hideMainWindow(): void {
     const t = step / steps;
     const ease = t * t;
     mainWindow?.setOpacity(1 - ease);
-    mainWindow?.setPosition(startX, Math.round(startY + (endY - startY) * ease));
+    if (useSlide) {
+      mainWindow?.setPosition(startX, Math.round(startY + (endY - startY) * ease));
+    }
 
     if (step >= steps) {
       clearInterval(timer);
@@ -207,7 +216,7 @@ function toggleMainWindowVisibility(): void {
 }
 
 function createTray(): void {
-  if (tray || (process.platform !== "win32" && process.platform !== "darwin")) {
+  if (tray || (process.platform !== "win32" && process.platform !== "darwin" && process.platform !== "linux")) {
     return;
   }
 
@@ -230,7 +239,7 @@ function createTray(): void {
 
   tray = new Tray(trayDefaultImage);
   tray.setToolTip("PangeaVPN");
-  if (process.platform === "win32") {
+  if (process.platform === "win32" || process.platform === "linux") {
     tray.on("click", () => {
       toggleMainWindowVisibility();
     });
@@ -250,6 +259,8 @@ function loadTrayImage(iconPath: string): NativeImage | null {
     const lower = iconPath.toLowerCase();
     const looksLikeTemplate = lower.includes("template");
     icon.setTemplateImage(looksLikeTemplate);
+  } else if (process.platform === "linux") {
+    icon = icon.resize({ height: 22 });
   }
   return icon;
 }
@@ -665,65 +676,6 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.getDirectIpOnly, async () => pangeaApiClient.isDirectIpOnly());
 
-  ipcMain.handle(IPC_CHANNELS.checkVersion, async () => {
-    try {
-      return await pangeaApiClient.checkVersion();
-    } catch {
-      return null;
-    }
-  });
-
-  ipcMain.handle(IPC_CHANNELS.downloadUpdate, async (_event, url: string) => {
-    const { net } = await import("electron");
-    const fs = (await import("node:fs")).default;
-    const nodePath = (await import("node:path")).default;
-    const downloadsDir = app.getPath("downloads");
-    const fileName = decodeURIComponent(url.split("/").pop() ?? "PangeaVPN-Update.exe");
-    const filePath = nodePath.join(downloadsDir, fileName);
-    const writer = fs.createWriteStream(filePath);
-
-    return new Promise<string>((resolve, reject) => {
-      const request = net.request(url);
-      let totalBytes = 0;
-      let receivedBytes = 0;
-
-      request.on("response", (response) => {
-        const contentLength = response.headers["content-length"];
-        if (contentLength) {
-          totalBytes = parseInt(Array.isArray(contentLength) ? contentLength[0] : contentLength, 10) || 0;
-        }
-
-        response.on("data", (chunk) => {
-          receivedBytes += chunk.length;
-          writer.write(chunk);
-          if (totalBytes > 0) {
-            mainWindow?.webContents.send("update:progress", Math.round((receivedBytes / totalBytes) * 100));
-          }
-        });
-
-        response.on("end", () => {
-          writer.end(() => {
-            const { shell } = require("electron") as typeof import("electron");
-            shell.openPath(filePath).catch(() => {});
-            resolve(filePath);
-          });
-        });
-
-        response.on("error", (err) => {
-          writer.destroy();
-          reject(err);
-        });
-      });
-
-      request.on("error", (err) => {
-        writer.destroy();
-        reject(err);
-      });
-
-      request.end();
-    });
-  });
-
   ipcMain.handle(IPC_CHANNELS.getCachedServers, async () => {
     try {
       const cachePath = (await import("node:path")).join(
@@ -749,7 +701,19 @@ function registerIpcHandlers(): void {
     }
   });
 
-  ipcMain.handle(IPC_CHANNELS.getServers, async () => pangeaApiClient.getServers());
+  ipcMain.handle(IPC_CHANNELS.getServers, async () => {
+    try {
+      return await pangeaApiClient.getServers();
+    } catch (err) {
+      if (err instanceof AuthError) {
+        pangeaApiClient.clearCache();
+        await auth.logout();
+        mainWindow?.webContents.send("auth:invalidated");
+        return [];
+      }
+      throw err;
+    }
+  });
 
   ipcMain.handle(IPC_CHANNELS.provisionAndConnect, async (_event, serverId: string) => {
     try {
@@ -924,6 +888,9 @@ async function boot(): Promise<void> {
 
   registerIpcHandlers();
   createWindow();
+  if (mainWindow) {
+    setupAutoUpdater(mainWindow);
+  }
   createTray();
   daemonProcess.ensureRunning().catch((err) => {
     console.error("failed to ensure daemon on startup", err);

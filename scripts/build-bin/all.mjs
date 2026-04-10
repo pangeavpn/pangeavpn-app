@@ -15,6 +15,12 @@ const targets = [
     script: path.join(rootDir, "scripts", "build-bin", "mac.mjs"),
     outputDir: path.join(rootDir, "dist", "bin", "mac"),
     manifestPath: path.join(rootDir, "dist", "bin", "mac", "manifest.json")
+  },
+  {
+    name: "linux",
+    script: path.join(rootDir, "scripts", "build-bin", "linux.mjs"),
+    outputDir: path.join(rootDir, "dist", "bin", "linux"),
+    manifestPath: path.join(rootDir, "dist", "bin", "linux", "manifest.json")
   }
 ];
 
