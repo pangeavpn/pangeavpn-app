@@ -1,6 +1,6 @@
 package main
 
-//go:generate goversioninfo -icon=pangeavpn.ico
+//go:generate goversioninfo -icon=pangeavpn.ico -o resource_windows.syso
 
 import (
 	"context"

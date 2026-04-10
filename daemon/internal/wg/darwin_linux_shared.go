@@ -40,8 +40,9 @@ type tunnelSession struct {
 	// Networking state for cleanup.
 	endpointRoutes   []routeSpec
 	dnsOverrides     []darwinDNSOverride // macOS
-	linuxDNSOverride *linuxDNSOverride   // Linux
-	windowsLUID      uint64              // Windows
+	linuxDNSOverride *linuxDNSOverride // Linux
+	linuxAllowedIPs  []string          // Linux: for policy routing cleanup
+	windowsLUID      uint64            // Windows
 	windowsRoutes    []windowsRouteSpec  // Windows endpoint bypass routes
 }
 
@@ -518,13 +519,6 @@ func uniqueStringsPreserveOrder(values []string) []string {
 		return nil
 	}
 	return out
-}
-
-func formatDebugStringList(values []string) string {
-	if len(values) == 0 {
-		return "(none)"
-	}
-	return strings.Join(values, ", ")
 }
 
 // ---------------------------------------------------------------------------

@@ -53,6 +53,11 @@ func (m *wireGuardGoManager) startLinux(ctx context.Context, profile state.WireG
 		return fmt.Errorf("wireguard tunnel %s is already running", profile.TunnelName)
 	}
 
+	// Inject FwMark into the WireGuard config so the device's UDP socket is
+	// marked. Policy routing uses this mark to let WireGuard endpoint traffic
+	// bypass the tunnel and use the real default route.
+	parsed.wgConfig = injectFwMark(parsed.wgConfig, policyRoutingFwmark)
+
 	// Create in-process TUN device and WireGuard device.
 	dev, tunDev, err := m.createInProcessDevice(interfaceName, parsed.mtu, parsed.wgConfig)
 	if err != nil {
@@ -81,11 +86,13 @@ func (m *wireGuardGoManager) startLinux(ctx context.Context, profile state.WireG
 	// Add endpoint bypass routes via netlink.
 	endpointRoutes, _ := addLinuxEndpointRoutes(ctx, parsed.endpointHosts)
 
-	// Add allowed-IP routes via netlink.
-	if err := addLinuxAllowedIPRoutes(interfaceName, allowedIPs); err != nil {
+	// Set up policy routing (custom table + ip rules) so that all traffic,
+	// including SO_BINDTODEVICE probes from NetworkManager, goes through
+	// the tunnel.
+	if err := addLinuxPolicyRouting(interfaceName, allowedIPs); err != nil {
 		removeLinuxEndpointRoutes(endpointRoutes)
 		closeDevice(dev)
-		return fmt.Errorf("add allowed-ip routes: %w", err)
+		return fmt.Errorf("add policy routing: %w", err)
 	}
 
 	// Configure DNS via D-Bus (systemd-resolved) or resolv.conf fallback.
@@ -93,7 +100,7 @@ func (m *wireGuardGoManager) startLinux(ctx context.Context, profile state.WireG
 	if len(parsed.dnsServers) > 0 {
 		override, dnsErr := applyLinuxDNSServers(interfaceName, parsed.dnsServers)
 		if dnsErr != nil {
-			removeLinuxAllowedIPRoutes(interfaceName, allowedIPs)
+			removeLinuxPolicyRouting(interfaceName, allowedIPs)
 			removeLinuxEndpointRoutes(endpointRoutes)
 			closeDevice(dev)
 			return fmt.Errorf("apply DNS: %w", dnsErr)
@@ -108,6 +115,7 @@ func (m *wireGuardGoManager) startLinux(ctx context.Context, profile state.WireG
 		tunDevice:        tunDev,
 		endpointRoutes:   endpointRoutes,
 		linuxDNSOverride: linuxDNS,
+		linuxAllowedIPs:  allowedIPs,
 	})
 
 	m.logs.Add(state.LogInfo, state.SourceWireGuard, fmt.Sprintf("wireguard started for %s on %s (in-process)", profile.TunnelName, interfaceName))
@@ -136,6 +144,9 @@ func (m *wireGuardGoManager) stopLinux(ctx context.Context, profile state.WireGu
 			m.logs.Add(state.LogInfo, state.SourceWireGuard, fmt.Sprintf("restored DNS settings (%s)", session.linuxDNSOverride.mode))
 		}
 	}
+
+	// Remove policy routing (ip rules + custom table routes).
+	removeLinuxPolicyRouting(interfaceName, session.linuxAllowedIPs)
 
 	// Remove endpoint routes.
 	removeLinuxEndpointRoutes(session.endpointRoutes)
@@ -172,6 +183,48 @@ func (m *wireGuardGoManager) statusLinux(_ context.Context, profile state.WireGu
 		Running: false,
 		Detail:  "not running",
 	}, nil
+}
+
+// injectFwMark adds a FwMark line to the [Interface] section of a WireGuard
+// config if one is not already present. The mark lets policy routing identify
+// WireGuard's own UDP packets so they bypass the tunnel.
+func injectFwMark(wgConfig string, mark uint32) string {
+	lines := strings.Split(wgConfig, "\n")
+	out := make([]string, 0, len(lines)+1)
+	injected := false
+	inInterface := false
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+
+		// Track which section we're in.
+		if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
+			// Leaving [Interface] without having injected — insert before new section.
+			if inInterface && !injected {
+				out = append(out, fmt.Sprintf("FwMark = %d", mark))
+				injected = true
+			}
+			section := strings.ToLower(strings.TrimSpace(trimmed[1 : len(trimmed)-1]))
+			inInterface = section == "interface"
+		}
+
+		// Skip any existing FwMark line.
+		if inInterface {
+			key, _, ok := parseKeyValue(trimmed)
+			if ok && strings.EqualFold(key, "fwmark") {
+				continue
+			}
+		}
+
+		out = append(out, line)
+	}
+
+	// If config ended while still in [Interface].
+	if inInterface && !injected {
+		out = append(out, fmt.Sprintf("FwMark = %d", mark))
+	}
+
+	return strings.Join(out, "\n")
 }
 
 func linuxInterfaceName(tunnelKey string) string {

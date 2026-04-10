@@ -17,6 +17,11 @@ const archTargets = [
   { arch: "arm64", goArch: "arm64" },
   { arch: "x64", goArch: "amd64" }
 ];
+const mebibyte = 1024 * 1024;
+const installerDmgMinSizeBytes = 256 * mebibyte;
+const installerDmgPaddingBytes = 128 * mebibyte;
+const installerDmgAlignmentBytes = 32 * mebibyte;
+const installerDmgGrowthFactor = 1.25;
 
 if (process.platform !== "darwin") {
   console.error("build-bin:mac must run on a macOS host.");
@@ -210,6 +215,38 @@ function addArchSuffix(fileName, suffix) {
   return `${fileName.slice(0, -ext.length)}${suffix}${ext}`;
 }
 
+async function getDirectorySizeBytes(targetDir) {
+  const entries = await fs.readdir(targetDir, { withFileTypes: true });
+  let total = 0;
+
+  for (const entry of entries) {
+    const entryPath = path.join(targetDir, entry.name);
+    if (entry.isDirectory()) {
+      total += await getDirectorySizeBytes(entryPath);
+      continue;
+    }
+
+    const stat = await fs.lstat(entryPath);
+    total += stat.size;
+  }
+
+  return total;
+}
+
+function roundUpToMultiple(value, multiple) {
+  return Math.ceil(value / multiple) * multiple;
+}
+
+function getInstallerDmgSizeArg(payloadBytes) {
+  const estimatedBytes = Math.max(
+    installerDmgMinSizeBytes,
+    payloadBytes + installerDmgPaddingBytes,
+    Math.ceil(payloadBytes * installerDmgGrowthFactor)
+  );
+
+  return `${Math.ceil(roundUpToMultiple(estimatedBytes, installerDmgAlignmentBytes) / mebibyte)}m`;
+}
+
 async function bundleInstallerDmg(pkgPath, pkgName, installerOut, arch) {
   const installScript = path.join(rootDir, "scripts", "install-mac.sh");
   if (!fsSync.existsSync(installScript)) {
@@ -222,6 +259,7 @@ async function bundleInstallerDmg(pkgPath, pkgName, installerOut, arch) {
   const volumeName = `PangeaVPN Installer (${arch})`;
   const stagingDir = path.join(installerOut, ".bundle-staging");
 
+  await fs.rm(stagingDir, { recursive: true, force: true });
   await fs.mkdir(stagingDir, { recursive: true });
   await fs.copyFile(pkgPath, path.join(stagingDir, pkgName));
   await fs.copyFile(installScript, path.join(stagingDir, "install-mac.sh"));
@@ -229,28 +267,36 @@ async function bundleInstallerDmg(pkgPath, pkgName, installerOut, arch) {
 
   // Remove stale DMG if present (hdiutil won't overwrite)
   await fs.rm(dmgPath, { force: true });
+  const stagingSizeBytes = await getDirectorySizeBytes(stagingDir);
+  const dmgSizeArg = getInstallerDmgSizeArg(stagingSizeBytes);
 
-  runOrThrow("hdiutil", [
-    "create",
-    "-volname", volumeName,
-    "-srcfolder", stagingDir,
-    "-ov",
-    "-format", "UDZO",
-    dmgPath
-  ], { cwd: rootDir, shell: false });
+  try {
+    runOrThrow("hdiutil", [
+      "create",
+      "-volname", volumeName,
+      "-srcfolder", stagingDir,
+      "-ov",
+      "-format", "UDZO",
+      "-size", dmgSizeArg,
+      dmgPath
+    ], { cwd: rootDir, shell: false });
 
-  await fs.rm(stagingDir, { recursive: true, force: true });
-
-  const stat = await fs.stat(dmgPath);
-  return {
-    type: "installer-bundle",
-    arch,
-    fileName: dmgName,
-    sourcePath: relPath(dmgPath),
-    outputPath: relPath(dmgPath),
-    sizeBytes: stat.size,
-    sha256: await sha256File(dmgPath)
-  };
+    const stat = await fs.stat(dmgPath);
+    return {
+      type: "installer-bundle",
+      arch,
+      fileName: dmgName,
+      sourcePath: relPath(dmgPath),
+      outputPath: relPath(dmgPath),
+      sizeBytes: stat.size,
+      sha256: await sha256File(dmgPath)
+    };
+  } catch (error) {
+    await fs.rm(dmgPath, { force: true }).catch(() => {});
+    throw error;
+  } finally {
+    await fs.rm(stagingDir, { recursive: true, force: true });
+  }
 }
 
 function resolveInstallerAppPath(arch) {

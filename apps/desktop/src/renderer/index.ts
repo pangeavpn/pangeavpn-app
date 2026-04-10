@@ -1,5 +1,19 @@
 import type { LogEntry, Profile, StatusResponse } from "@pangeavpn/shared-types";
 
+let verboseErrors = localStorage.getItem("pangea:verboseErrors") === "1";
+
+function reportError(context: string, error: unknown, friendly?: string): string {
+  // Log full error to console (captured by Electron logs / devtools)
+  console.error(`[${context}]`, error);
+  if (verboseErrors) return `[${context}] ${error instanceof Error ? error.message : String(error)}`;
+  if (friendly) return friendly;
+  const msg = String(error).toLowerCase();
+  if (msg.includes("timeout") || msg.includes("etimedout") || msg.includes("network") || msg.includes("fetch") || msg.includes("econn")) {
+    return "Please check your internet connection and try again.";
+  }
+  return "Something went wrong. Please try again later.";
+}
+
 const stateEl = must<HTMLSpanElement>("state");
 const detailEl = must<HTMLSpanElement>("detail");
 const cloakEl = must<HTMLSpanElement>("cloak");
@@ -176,9 +190,10 @@ connectBtn.addEventListener("click", async () => {
   } catch (error) {
     const msg = String(error);
     if (msg.includes("timeout") || msg.includes("ETIMEDOUT")) {
+      console.error("[connect]", error);
       setUiMessage("Connect failed: connection timed out. Check your network.");
     } else {
-      setUiMessage(`Connect failed: ${msg}`);
+      setUiMessage(reportError("connect", error));
     }
   } finally {
     uiWorking = false;
@@ -207,8 +222,7 @@ disconnectBtn.addEventListener("click", async () => {
     }
     await refreshStatus();
   } catch (error) {
-    const msg = String(error);
-    setUiMessage(`Disconnect failed: ${msg}`);
+    setUiMessage(reportError("disconnect", error));
   } finally {
     uiWorking = false;
     updateBusyIndicator();
@@ -232,7 +246,7 @@ copyLogsBtn.addEventListener("click", async () => {
     await copyTextToClipboard(text);
     setUiMessage("Logs copied to clipboard.");
   } catch (error) {
-    setUiMessage(`Copy logs failed: ${String(error)}`);
+    setUiMessage(reportError("copyLogs", error));
   }
 });
 
@@ -249,7 +263,7 @@ copyDiagnosticsBtn.addEventListener("click", async () => {
     await copyTextToClipboard(report);
     setUiMessage("Diagnostics copied to clipboard.");
   } catch (error) {
-    setUiMessage(`Copy diagnostics failed: ${String(error)}`);
+    setUiMessage(reportError("copyDiagnostics", error));
   } finally {
     uiWorking = false;
     updateBusyIndicator();
@@ -287,7 +301,7 @@ manualBuilderForm.addEventListener("submit", async (event) => {
     await refreshConfig(nextProfile.id);
     setUiMessage(`Saved manual profile "${nextProfile.name}".`);
   } catch (error) {
-    setUiMessage(`Manual profile save failed: ${String(error)}`);
+    setUiMessage(reportError("manualProfileSave", error));
   }
 });
 
@@ -300,7 +314,7 @@ exportEncodedProfileBtn.addEventListener("click", () => {
     encodedExportOutput.select();
     setUiMessage(`Exported encoded profile for "${manualProfile.name}".`);
   } catch (error) {
-    setUiMessage(`Encoded export failed: ${String(error)}`);
+    setUiMessage(reportError("encodedExport", error));
   }
 });
 
@@ -315,7 +329,7 @@ copyEncodedExportBtn.addEventListener("click", async () => {
     await navigator.clipboard.writeText(encodedPayload);
     setUiMessage("Encoded payload copied to clipboard.");
   } catch (error) {
-    setUiMessage(`Copy encoded payload failed: ${String(error)}`);
+    setUiMessage(reportError("copyEncodedPayload", error));
   }
 });
 
@@ -371,7 +385,7 @@ importEncodedProfileBtn.addEventListener("click", async () => {
     encodedImportInput.value = "";
     setUiMessage(`Imported profile "${importedProfile.name}".`);
   } catch (error) {
-    setUiMessage(`Import failed: ${String(error)}`);
+    setUiMessage(reportError("import", error));
   } finally {
     uiWorking = false;
     updateBusyIndicator();
@@ -398,13 +412,35 @@ logoutBtn.addEventListener("click", async () => {
     await refreshConfig();
     setUiMessage("Signed out.");
   } catch (error) {
-    setUiMessage(`Sign out failed: ${String(error)}`);
+    setUiMessage(reportError("signOut", error));
   } finally {
     logoutBtn.disabled = false;
   }
 });
 
 const loginTokenInput = must<HTMLInputElement>("loginTokenInput");
+const cachedTokenBtn = must<HTMLButtonElement>("cachedTokenBtn");
+
+// Show cached token button if a previous token exists
+function refreshCachedTokenBtn(): void {
+  const cached = localStorage.getItem("pangea:lastToken");
+  if (cached) {
+    cachedTokenBtn.textContent = cached;
+    cachedTokenBtn.hidden = false;
+  } else {
+    cachedTokenBtn.hidden = true;
+  }
+}
+refreshCachedTokenBtn();
+
+cachedTokenBtn.addEventListener("click", () => {
+  const cached = localStorage.getItem("pangea:lastToken");
+  if (cached) {
+    loginTokenInput.value = cached;
+    loginTokenInput.dispatchEvent(new Event("input"));
+    loginScreenBtn.click();
+  }
+});
 
 loginTokenInput.addEventListener("keydown", (e) => {
   if (e.key === "Enter") {
@@ -450,6 +486,7 @@ loginScreenBtn.addEventListener("click", async () => {
     authState = await pangeaApi.login(token);
     updateAuthUI();
     if (authState.authenticated) {
+      localStorage.setItem("pangea:lastToken", token);
       loginScreenMessage.textContent = "";
       loginTokenInput.value = "";
       await refreshServers();
@@ -459,7 +496,7 @@ loginScreenBtn.addEventListener("click", async () => {
       loginScreenMessage.textContent = "Invalid VPN token.";
     }
   } catch (error) {
-    loginScreenMessage.textContent = `Sign in failed: ${String(error)}`;
+    loginScreenMessage.textContent = reportError("signIn", error);
   } finally {
     loginScreenBtn.disabled = false;
     loginTokenInput.disabled = false;
@@ -504,7 +541,7 @@ serverConnectBtn.addEventListener("click", async () => {
         // ignore
       }
     }
-    setUiMessage(`Connect failed: ${String(error)}`);
+    setUiMessage(reportError("serverConnect", error));
     await refreshStatus();
   } finally {
     serverWorking = false;
@@ -524,7 +561,7 @@ serverDisconnectBtn.addEventListener("click", async () => {
     setUiMessage(result.ok ? "Disconnected." : "Disconnect failed.");
     await refreshStatus();
   } catch (error) {
-    setUiMessage(`Disconnect failed: ${String(error)}`);
+    setUiMessage(reportError("serverDisconnect", error));
   } finally {
     serverWorking = false;
     updateServerBusyIndicator(false);
@@ -600,6 +637,7 @@ function showLoginScreen(): void {
   loginScreen.hidden = false;
   loginScreen.style.opacity = "";
   loginScreen.style.transform = "";
+  refreshCachedTokenBtn();
   loginTokenInput.focus();
 }
 
@@ -708,9 +746,11 @@ const updateMessageEl = must<HTMLParagraphElement>("updateMessage");
 const menuBadge = must<HTMLSpanElement>("menuBadge");
 const menuUpdateBtn = must<HTMLButtonElement>("menuUpdateBtn");
 
-let pendingUpdate: { version: string; downloadUrl: string } | null = null;
+let pendingUpdate: { version: string; macOnly?: boolean } | null = null;
+let updateDownloaded = false;
 let currentAppVersion = "";
 const UPDATE_DISMISSED_KEY = "pangea-vpn-update-dismissed";
+const updater = window.autoUpdater;
 
 function isUpdateDismissed(version: string): boolean {
   return localStorage.getItem(UPDATE_DISMISSED_KEY) === version;
@@ -725,15 +765,53 @@ function showUpdateModal(): void {
   updateCurrentVersionEl.textContent = currentAppVersion || "-";
   updateLatestVersionEl.textContent = pendingUpdate.version;
   updateDownloadBtn.disabled = false;
-  updateDownloadBtn.textContent = "Download Update";
   updateProgressWrap.hidden = true;
-  updateMessageEl.textContent = "";
+  if (pendingUpdate.macOnly) {
+    updateDownloadBtn.textContent = "View Download";
+    updateMessageEl.textContent = "";
+  } else if (updateDownloaded) {
+    updateDownloadBtn.textContent = "Restart to Update";
+    updateMessageEl.textContent = "Update downloaded and ready to install.";
+  } else {
+    updateDownloadBtn.textContent = "Download Update";
+    updateMessageEl.textContent = "";
+  }
   updateOverlay.classList.add("visible");
 }
 
 function hideUpdateModal(): void {
   if (pendingUpdate) dismissUpdate(pendingUpdate.version);
   updateOverlay.classList.remove("visible");
+}
+
+// Wire up electron-updater push events
+if (updater) {
+  updater.onUpdateAvailable((info) => {
+    pendingUpdate = { version: info.version, macOnly: info.macOnly };
+    menuBadge.hidden = false;
+    menuUpdateBtn.hidden = false;
+    showUpdateModal();
+  });
+
+  updater.onDownloadProgress((percent) => {
+    updateProgressFill.style.width = `${percent}%`;
+    updateProgressText.textContent = `${Math.round(percent)}%`;
+  });
+
+  updater.onUpdateDownloaded(() => {
+    updateDownloaded = true;
+    updateDownloadBtn.disabled = false;
+    updateDownloadBtn.textContent = "Restart to Update";
+    updateProgressFill.style.width = "100%";
+    updateProgressText.textContent = "100%";
+    updateMessageEl.textContent = "Update downloaded and ready to install.";
+  });
+
+  updater.onUpdateError((message) => {
+    updateDownloadBtn.disabled = false;
+    updateDownloadBtn.textContent = "Retry Download";
+    updateMessageEl.textContent = message;
+  });
 }
 
 updateCloseBtn.addEventListener("click", (e) => {
@@ -753,7 +831,22 @@ menuUpdateBtn.addEventListener("click", () => {
 });
 
 updateDownloadBtn.addEventListener("click", async () => {
-  if (!pendingUpdate || !pangeaApi) return;
+  if (!pendingUpdate) return;
+
+  if (!updater || !pendingUpdate) return;
+
+  // macOS: open release page in browser
+  if (pendingUpdate.macOnly) {
+    await updater.downloadUpdate();
+    return;
+  }
+
+  // If update already downloaded, restart to install
+  if (updateDownloaded) {
+    updater.installUpdate();
+    return;
+  }
+
   updateDownloadBtn.disabled = true;
   updateDownloadBtn.textContent = "Downloading...";
   updateProgressFill.style.width = "0%";
@@ -761,48 +854,19 @@ updateDownloadBtn.addEventListener("click", async () => {
   updateProgressWrap.hidden = false;
   updateMessageEl.textContent = "";
 
-  pangeaApi.onUpdateProgress((percent) => {
-    updateProgressFill.style.width = `${percent}%`;
-    updateProgressText.textContent = `${percent}%`;
-  });
-
   try {
-    const filePath = await pangeaApi.downloadUpdate(pendingUpdate.downloadUrl);
-    updateDownloadBtn.textContent = "Downloaded";
-    updateMessageEl.textContent = `Saved to ${filePath}`;
-    updateProgressFill.style.width = "100%";
-    updateProgressText.textContent = "100%";
+    await updater.downloadUpdate();
   } catch (error) {
     updateDownloadBtn.disabled = false;
     updateDownloadBtn.textContent = "Retry Download";
-    updateMessageEl.textContent = `Download failed: ${String(error)}`;
+    updateMessageEl.textContent = reportError("updateDownload", error);
   }
 });
 
-function isNewerVersion(latest: string, current: string): boolean {
-  const parse = (v: string) => v.replace(/^v/, "").split(".").map(Number);
-  const l = parse(latest);
-  const c = parse(current);
-  for (let i = 0; i < Math.max(l.length, c.length); i++) {
-    const a = l[i] ?? 0;
-    const b = c[i] ?? 0;
-    if (a > b) return true;
-    if (a < b) return false;
-  }
-  return false;
-}
-
 async function checkForUpdate(): Promise<void> {
-  if (!pangeaApi || !currentAppVersion) return;
+  if (!updater) return;
   try {
-    const result = await pangeaApi.checkVersion();
-    if (!result?.version || !result.downloadUrl) return;
-    if (!isNewerVersion(result.version, currentAppVersion)) return;
-
-    pendingUpdate = result;
-    menuBadge.hidden = false;
-    menuUpdateBtn.hidden = false;
-    showUpdateModal();
+    await updater.checkForUpdates();
   } catch {
     // non-critical
   }
@@ -823,6 +887,24 @@ async function renderAppVersion(): Promise<void> {
   }
 }
 
+// Tap version label 5 times to toggle verbose error messages
+{
+  let versionTapCount = 0;
+  let versionTapTimer = 0;
+  appVersionEl.style.cursor = "pointer";
+  appVersionEl.addEventListener("click", () => {
+    versionTapCount++;
+    clearTimeout(versionTapTimer);
+    versionTapTimer = window.setTimeout(() => { versionTapCount = 0; }, 1500);
+    if (versionTapCount >= 5) {
+      versionTapCount = 0;
+      verboseErrors = !verboseErrors;
+      localStorage.setItem("pangea:verboseErrors", verboseErrors ? "1" : "0");
+      showToast(verboseErrors ? "Verbose errors enabled" : "Verbose errors disabled");
+    }
+  });
+}
+
 async function refreshAll(showIndicator = false): Promise<void> {
   if (showIndicator) {
     uiRefreshing = true;
@@ -833,14 +915,15 @@ async function refreshAll(showIndicator = false): Promise<void> {
     await Promise.all([refreshConfig(), refreshStatus(), refreshLogs()]);
     setUiMessage("Ready.");
   } catch (error) {
-    setUiMessage(`Daemon sync error: ${String(error)}. Retrying...`);
+    console.error("[daemonSync]", error);
+    setUiMessage("Something went wrong. Retrying...");
     // Retry once after a short delay
     try {
       await new Promise((r) => setTimeout(r, 2000));
       await Promise.all([refreshConfig(), refreshStatus(), refreshLogs()]);
       setUiMessage("Ready.");
-    } catch {
-      setUiMessage(`Daemon sync error: ${String(error)}. Click refresh to retry.`);
+    } catch (retryError) {
+      setUiMessage(reportError("daemonSyncRetry", retryError));
     }
   } finally {
     if (showIndicator) {
@@ -969,7 +1052,7 @@ async function refreshStatus(): Promise<StatusResponse | null> {
     renderStatus(status);
     return status;
   } catch (error) {
-    setUiMessage(`Status error: ${String(error)}`);
+    setUiMessage(reportError("status", error));
     return null;
   }
 }
@@ -990,7 +1073,7 @@ async function refreshLogs(): Promise<void> {
     }
     renderLogs(logEntries);
   } catch (error) {
-    setUiMessage(`Log fetch error: ${String(error)}`);
+    setUiMessage(reportError("logFetch", error));
   }
 }
 
@@ -1324,6 +1407,7 @@ function initTheme(): void {
 }
 
 function applyTheme(theme: ThemeMode): void {
+  document.documentElement.dataset.theme = theme;
   document.body.dataset.theme = theme;
   themeToggleBtn.textContent = theme === "dark" ? "\u2600" : "\u263D";
   themeToggleBtn.setAttribute("aria-pressed", String(theme === "dark"));
@@ -1397,7 +1481,7 @@ async function refreshServers(): Promise<void> {
     renderServers();
     pangeaApi.cacheServers(servers).catch(() => {});
   } catch (error) {
-    setUiMessage(`Failed to load servers: ${String(error)}`);
+    setUiMessage(reportError("loadServers", error));
   }
 }
 

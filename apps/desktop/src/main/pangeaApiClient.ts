@@ -649,10 +649,6 @@ export class PangeaApiClient {
     }
   }
 
-  async checkVersion(): Promise<{ version: string; downloadUrl: string }> {
-    return this.hubRequest<{ version: string; downloadUrl: string }>("GET", "/api/client/version");
-  }
-
   async getServers(): Promise<ServerInfo[]> {
     if (!this.licenseKey) throw new Error("Not authenticated");
     const data = await this.hubRequest<ServerInfo[]>("GET", "/api/client/regions");
@@ -760,7 +756,7 @@ export class PangeaApiClient {
 
       if (!response.ok) {
         const text = await response.text();
-        if (response.status === 401 || response.status === 403) {
+        if (response.status === 401 || response.status === 403 || text.includes("DEVICE_NOT_REGISTERED")) {
           throw new AuthError(`Hub API auth error (${response.status}): ${text}`, response.status);
         }
         throw new Error(`Hub API error (${response.status}): ${text}`);

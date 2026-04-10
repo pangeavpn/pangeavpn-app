@@ -94,6 +94,10 @@ function daemonTokenCandidates(): string[] {
     add(path.join(app.getPath("appData"), APP_FOLDER, "daemon-token.txt"));
   }
 
+  if (process.platform === "linux") {
+    add(path.join("/etc/pangeavpn", "daemon-token.txt"));
+  }
+
   return candidates;
 }
 

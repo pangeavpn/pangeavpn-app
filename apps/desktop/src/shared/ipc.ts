@@ -25,10 +25,16 @@ export const IPC_CHANNELS = {
   getDirectIp: "pangea:getDirectIp",
   setDirectIpOnly: "pangea:setDirectIpOnly",
   getDirectIpOnly: "pangea:getDirectIpOnly",
-  checkVersion: "pangea:checkVersion",
   getCachedServers: "pangea:getCachedServers",
   cacheServers: "pangea:cacheServers",
-  downloadUpdate: "pangea:downloadUpdate"
+  checkForUpdates: "app:checkForUpdates",
+  downloadAppUpdate: "app:downloadAppUpdate",
+  installUpdate: "app:installUpdate",
+  updateAvailable: "app:updateAvailable",
+  updateNotAvailable: "app:updateNotAvailable",
+  updateError: "app:updateError",
+  updateDownloadProgress: "app:updateDownloadProgress",
+  updateDownloaded: "app:updateDownloaded"
 } as const;
 
 export interface DaemonApi {
@@ -76,7 +82,6 @@ export interface PangeaApi {
   getDirectIp: () => Promise<boolean>;
   setDirectIpOnly: (enabled: boolean) => Promise<void>;
   getDirectIpOnly: () => Promise<boolean>;
-  checkVersion: () => Promise<{ version: string; downloadUrl: string } | null>;
   getCachedServers: () => Promise<ServerInfo[]>;
   cacheServers: (servers: ServerInfo[]) => Promise<void>;
 }
