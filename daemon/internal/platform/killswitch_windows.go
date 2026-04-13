@@ -5,8 +5,11 @@ package platform
 import (
 	"context"
 	"fmt"
+	"net"
 	"strings"
 	"sync"
+
+	"golang.zx2c4.com/wireguard/windows/tunnel/winipcfg"
 )
 
 const (
@@ -46,9 +49,10 @@ func cleanupPersistentSublayer() {
 }
 
 type windowsKillSwitch struct {
-	mu     sync.Mutex
-	active bool
-	engine *wfpEngine // dynamic session — closing handle removes all filters
+	mu             sync.Mutex
+	active         bool
+	engine         *wfpEngine // dynamic session — closing handle removes all filters
+	tunnelFilterId uint64     // WFP filter ID for the tunnel interface permit
 }
 
 func (ks *windowsKillSwitch) Enable(ctx context.Context, endpointHost string) error {
@@ -163,10 +167,31 @@ func (ks *windowsKillSwitch) Update(ctx context.Context, tunnelInterface string)
 		return fmt.Errorf("empty tunnel interface name")
 	}
 
-	// WireGuard traffic flows: app → TUN adapter → wireguard-go → Cloak
-	// (127.0.0.1) → Cloak endpoint IP. The loopback and endpoint IP permits
-	// already cover this path. No blanket permit-all is needed — that would
-	// defeat the kill switch by allowing traffic out non-tunnel interfaces.
+	// Resolve the tunnel adapter's LUID so we can permit traffic through it.
+	iface, err := net.InterfaceByName(tunnelInterface)
+	if err != nil {
+		return fmt.Errorf("kill switch update: resolve interface %q: %w", tunnelInterface, err)
+	}
+	luid, err := winipcfg.LUIDFromIndex(uint32(iface.Index))
+	if err != nil {
+		return fmt.Errorf("kill switch update: LUID for %q: %w", tunnelInterface, err)
+	}
+
+	// Remove previous tunnel permit if we're being called again (e.g. reconnect).
+	if ks.tunnelFilterId != 0 {
+		_ = ks.engine.deleteFilter(ks.tunnelFilterId)
+		ks.tunnelFilterId = 0
+	}
+
+	// App traffic hits the WFP ALE_AUTH_CONNECT layer before reaching the TUN
+	// adapter. Without a permit scoped to the tunnel interface LUID, the
+	// block-all-outbound rule drops every packet at socket level — explaining
+	// "general failure" on ping even though the WireGuard handshake succeeds.
+	filterId, err := ks.engine.addPermitTunnelInterface(uint64(luid))
+	if err != nil {
+		return fmt.Errorf("kill switch update: permit tunnel interface: %w", err)
+	}
+	ks.tunnelFilterId = filterId
 
 	st, _ := loadKillSwitchState()
 	st.TunnelInterface = tunnelInterface

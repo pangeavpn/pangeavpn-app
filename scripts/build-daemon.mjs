@@ -19,6 +19,12 @@ if (!goCmd) {
 const env = goEnv(rootDir);
 
 if (isWin) {
+  // Clean any pre-existing .syso that may have incompatible relocations.
+  const sysoPath = path.join(daemonDir, "cmd", "daemon", "resource_windows.syso");
+  if (fs.existsSync(sysoPath)) {
+    fs.unlinkSync(sysoPath);
+  }
+
   const genResult = spawnSync(goCmd, ["generate", "./cmd/daemon"], {
     cwd: daemonDir,
     stdio: "inherit",
@@ -26,7 +32,17 @@ if (isWin) {
     env
   });
   if (genResult.error || (genResult.status ?? 1) !== 0) {
-    console.warn("goversioninfo generation skipped (install with: go install github.com/josephspurrier/goversioninfo/cmd/goversioninfo@latest)");
+    console.warn(
+      "goversioninfo generation skipped (install with: go install github.com/josephspurrier/goversioninfo/cmd/goversioninfo@latest)"
+    );
+  }
+
+  // goversioninfo may produce .syso with relocations incompatible with
+  // newer Go linkers ("unknown relocation type 7" on Go 1.26+).
+  // Remove so the build proceeds without embedded version/icon resources.
+  if (fs.existsSync(sysoPath)) {
+    fs.unlinkSync(sysoPath);
+    console.warn("removed resource_windows.syso (incompatible with current Go toolchain)");
   }
 }
 
