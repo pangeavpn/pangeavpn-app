@@ -41,6 +41,7 @@ const (
 	fwpUint8      uint32 = 1
 	fwpUint16     uint32 = 2
 	fwpUint32     uint32 = 3
+	fwpUint64     uint32 = 4
 	fwpV4AddrMask uint32 = 0x100
 
 	fwpMatchEqual       uint32 = 0
@@ -73,7 +74,8 @@ var (
 	fwpmConditionIpRemoteAddress = windows.GUID{Data1: 0xb235ae9a, Data2: 0x1d64, Data3: 0x49b8, Data4: [8]byte{0xa4, 0x4c, 0x5f, 0xf3, 0xd9, 0x09, 0x50, 0x45}}
 	fwpmConditionIpProtocol      = windows.GUID{Data1: 0x3971ef2b, Data2: 0x623e, Data3: 0x4f9a, Data4: [8]byte{0x8c, 0xb1, 0x6e, 0x79, 0xb8, 0x06, 0xb9, 0xa6}}
 	fwpmConditionIpRemotePort    = windows.GUID{Data1: 0xc35a604d, Data2: 0xd22b, Data3: 0x440d, Data4: [8]byte{0xa1, 0xd4, 0x0f, 0x22, 0x44, 0xd3, 0xb2, 0xe2}}
-	fwpmConditionIpLocalPort     = windows.GUID{Data1: 0x0c1ba1af, Data2: 0x5765, Data3: 0x453f, Data4: [8]byte{0xaf, 0x22, 0xa8, 0xf4, 0xfe, 0x04, 0x5f, 0x71}}
+	fwpmConditionIpLocalPort      = windows.GUID{Data1: 0x0c1ba1af, Data2: 0x5765, Data3: 0x453f, Data4: [8]byte{0xaf, 0x22, 0xa8, 0xf4, 0xfe, 0x04, 0x5f, 0x71}}
+	fwpmConditionIpLocalInterface = windows.GUID{Data1: 0x4cd62a49, Data2: 0x59c3, Data3: 0x4969, Data4: [8]byte{0xb7, 0xf3, 0xbd, 0xa5, 0xd3, 0x28, 0x90, 0xa4}}
 )
 
 // PangeaVPN sublayer GUID — deterministic, unique to this application.
@@ -398,6 +400,22 @@ func (e *wfpEngine) addPermitDHCP() (uint64, error) {
 		},
 	}
 	return e.addFilter(fwpmLayerAleAuthConnectV4, "PangeaVPN Allow DHCP", 10, fwpActionPermit, conditions)
+}
+
+func (e *wfpEngine) addPermitTunnelInterface(luid uint64) (uint64, error) {
+	conditions := []fwpmFilterCondition0{
+		{
+			fieldKey:  fwpmConditionIpLocalInterface,
+			matchType: fwpMatchEqual,
+			conditionValue: fwpValue0{
+				valueType: fwpUint64,
+				value:     uintptr(unsafe.Pointer(&luid)),
+			},
+		},
+	}
+	id, err := e.addFilter(fwpmLayerAleAuthConnectV4, "PangeaVPN Allow Tunnel Interface", 10, fwpActionPermit, conditions)
+	runtime.KeepAlive(&luid)
+	return id, err
 }
 
 func (e *wfpEngine) addBlockAllOutboundV6() (uint64, error) {

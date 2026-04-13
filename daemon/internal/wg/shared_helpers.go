@@ -15,6 +15,13 @@ func sanitizeTunnelName(name string) string {
 	return cleaned
 }
 
+func formatDebugStringList(items []string) string {
+	if len(items) == 0 {
+		return "(none)"
+	}
+	return "[" + strings.Join(items, ", ") + "]"
+}
+
 func compactDiagnosticOutput(output string, maxLines int, maxChars int) string {
 	rawLines := strings.Split(strings.ReplaceAll(output, "\r\n", "\n"), "\n")
 	lines := make([]string, 0, len(rawLines))
