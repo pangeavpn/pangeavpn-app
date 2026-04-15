@@ -112,39 +112,22 @@ log "Stopping any existing daemon..."
 sudo launchctl bootout "system/$DAEMON_LABEL" 2>/dev/null || true
 sleep 1
 
-# ── Copy daemon & helper binaries to system paths ───────────────────────────
+# ── Copy daemon binary to system path ───────────────────────────────────────
+# WireGuard and Cloak run in-process inside the daemon, so no helper binaries
+# need to be staged.
 log "Setting up system daemon..."
 DAEMON_SRC="$APP_PATH/Contents/Resources/daemon/daemon"
-APP_BIN_DIR="$APP_PATH/Contents/Resources/bin/mac"
 
 if [[ ! -f "$DAEMON_SRC" ]]; then
     fail "Daemon binary not found at $DAEMON_SRC. The .pkg may be incomplete."
 fi
 
-sudo mkdir -p "$SUPPORT_DIR/bin/mac"
+sudo mkdir -p "$SUPPORT_DIR"
 
 sudo install -m 755 -o root -g wheel "$DAEMON_SRC" "$SUPPORT_DIR/PangeaDaemon"
 
-# Cloak binary may be named ck-client or cloak depending on the build
-if [[ -f "$APP_BIN_DIR/ck-client" ]]; then
-    CLOAK_NAME="ck-client"
-elif [[ -f "$APP_BIN_DIR/cloak" ]]; then
-    CLOAK_NAME="cloak"
-else
-    fail "Cloak binary not found in $APP_BIN_DIR (checked ck-client and cloak)."
-fi
-sudo install -m 755 -o root -g wheel "$APP_BIN_DIR/$CLOAK_NAME" "$SUPPORT_DIR/bin/mac/ck-client"
-
-for helper in wireguard-go wg; do
-    if [[ -f "$APP_BIN_DIR/$helper" ]]; then
-        sudo install -m 755 -o root -g wheel "$APP_BIN_DIR/$helper" "$SUPPORT_DIR/bin/mac/$helper"
-    else
-        fail "$helper not found in $APP_BIN_DIR"
-    fi
-done
-
-sudo chown root:wheel "$SUPPORT_DIR" "$SUPPORT_DIR/bin" "$SUPPORT_DIR/bin/mac"
-sudo chmod 755 "$SUPPORT_DIR" "$SUPPORT_DIR/bin" "$SUPPORT_DIR/bin/mac"
+sudo chown root:wheel "$SUPPORT_DIR"
+sudo chmod 755 "$SUPPORT_DIR"
 
 # ── Strip quarantine from copied binaries ────────────────────────────────────
 sudo xattr -dr com.apple.quarantine "$SUPPORT_DIR" 2>/dev/null || true
@@ -180,8 +163,6 @@ sudo tee "$DAEMON_PLIST" > /dev/null <<PLIST
     <dict>
       <key>PANGEA_APP_SUPPORT_DIR</key>
       <string>${SUPPORT_DIR}</string>
-      <key>PANGEA_BIN_DIR</key>
-      <string>${SUPPORT_DIR}/bin/mac</string>
     </dict>
     <key>RunAtLoad</key>
     <true/>
@@ -198,17 +179,11 @@ PLIST
 sudo chown root:wheel "$DAEMON_PLIST"
 sudo chmod 644 "$DAEMON_PLIST"
 
-# ── Re-sign binaries for Apple Silicon ───────────────────────────────────────
+# ── Re-sign daemon for Apple Silicon ────────────────────────────────────────
 # Copying invalidates ad-hoc signatures and Apple Silicon requires all
 # executables to carry a valid code signature.
-log "Signing binaries for Apple Silicon compatibility..."
-for bin in \
-    "$SUPPORT_DIR/PangeaDaemon" \
-    "$SUPPORT_DIR/bin/mac/ck-client" \
-    "$SUPPORT_DIR/bin/mac/wireguard-go" \
-    "$SUPPORT_DIR/bin/mac/wg"; do
-    sudo codesign --force --sign - "$bin"
-done
+log "Signing daemon for Apple Silicon compatibility..."
+sudo codesign --force --sign - "$SUPPORT_DIR/PangeaDaemon"
 
 # ── Start the LaunchDaemon ───────────────────────────────────────────────────
 log "Starting PangeaVPN daemon..."

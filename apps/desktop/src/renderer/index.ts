@@ -2,6 +2,10 @@ import type { LogEntry, Profile, StatusResponse } from "@pangeavpn/shared-types"
 
 let verboseErrors = localStorage.getItem("pangea:verboseErrors") === "1";
 
+// Local record of this install's device name, so we can mark "this device" in the
+// devices list. Written after a successful login; cleared on logout.
+const MY_DEVICE_NAME_KEY = "pangea:myDeviceName";
+
 function reportError(context: string, error: unknown, friendly?: string): string {
   // Log full error to console (captured by Electron logs / devtools)
   console.error(`[${context}]`, error);
@@ -404,6 +408,7 @@ logoutBtn.addEventListener("click", async () => {
   setUiMessage("Signing out...");
   try {
     await pangeaApi.logout();
+    localStorage.removeItem(MY_DEVICE_NAME_KEY);
     authState = { authenticated: false, user: null };
     servers = [];
     updateAuthUI();
@@ -472,6 +477,260 @@ loginDashboardLink.addEventListener("click", (e) => {
   window.openExternal?.("https://pangeavpn.org/");
 });
 
+// ── Device management screen (login-flow: device limit reached) ──
+
+const deviceLimitScreen = must<HTMLElement>("deviceLimitScreen");
+const deviceLimitTitle = must<HTMLElement>("deviceLimitTitle");
+const deviceLimitSubtitle = must<HTMLElement>("deviceLimitSubtitle");
+const deviceList = must<HTMLElement>("deviceList");
+const deviceLimitContinueBtn = must<HTMLButtonElement>("deviceLimitContinueBtn");
+const deviceLimitLogoutBtn = must<HTMLButtonElement>("deviceLimitLogoutBtn");
+const deviceLimitMessage = must<HTMLParagraphElement>("deviceLimitMessage");
+
+// ── Devices modal (menu, logged-in) ──────────────────────────
+
+const devicesModal = must<HTMLElement>("devicesModal");
+const devicesModalList = must<HTMLElement>("devicesModalList");
+const devicesModalCloseBtn = must<HTMLButtonElement>("devicesModalCloseBtn");
+const devicesModalMessage = must<HTMLParagraphElement>("devicesModalMessage");
+const menuDevicesBtn = must<HTMLButtonElement>("menuDevicesBtn");
+
+let pendingLoginToken: string | null = null;
+let deviceRemovedCount = 0;
+
+function formatDeviceDate(iso: string): string {
+  try {
+    return new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+  } catch {
+    return iso;
+  }
+}
+
+function generateFallbackName(): string {
+  const adj = ["Swift", "Bold", "Bright", "Calm", "Cool", "Fast", "Iron", "Kind", "Pale", "True", "Wild"][Math.floor(Math.random() * 11)];
+  const noun = ["Bear", "Eagle", "Fox", "Hawk", "Lion", "Owl", "Stag", "Tiger", "Wolf", "Wren"][Math.floor(Math.random() * 10)];
+  return `${adj} ${noun}`;
+}
+
+async function showDeviceLimitScreen(token: string): Promise<void> {
+  if (!pangeaApi) return;
+  pendingLoginToken = token;
+  deviceRemovedCount = 0;
+  deviceLimitTitle.textContent = "Device Limit Reached";
+  deviceLimitSubtitle.textContent = "Your account has reached the maximum number of devices. Remove one to continue signing in.";
+  deviceLimitContinueBtn.hidden = true;
+  deviceLimitLogoutBtn.textContent = "Cancel & Sign Out";
+  deviceLimitMessage.textContent = "";
+  loginScreen.hidden = true;
+  deviceLimitScreen.hidden = false;
+
+  deviceList.innerHTML = '<div class="device-list-loading"><span class="spinner"></span></div>';
+  try {
+    const devices = await pangeaApi.listDevices();
+    renderDeviceList(devices);
+  } catch (err) {
+    deviceList.innerHTML = "";
+    deviceLimitMessage.textContent = reportError("listDevices", err, "Could not load devices. Please try again.");
+  }
+}
+
+async function showDevicesModal(): Promise<void> {
+  if (!pangeaApi) return;
+  devicesModalMessage.textContent = "";
+  devicesModalList.innerHTML = '<div class="device-list-loading"><span class="spinner"></span></div>';
+  devicesModal.classList.add("visible");
+
+  try {
+    const devices = await pangeaApi.listDevices();
+    renderDevicesModalList(devices);
+  } catch (err) {
+    devicesModalList.innerHTML = "";
+    devicesModalMessage.textContent = reportError("listDevices", err, "Could not load devices. Please try again.");
+  }
+}
+
+function renderDevicesModalList(devices: DeviceInfo[]): void {
+  devicesModalList.innerHTML = "";
+  if (devices.length === 0) {
+    devicesModalMessage.textContent = "No devices found.";
+    return;
+  }
+  devicesModalMessage.textContent = "";
+
+  // Match the stored local name against the list to identify "this device".
+  const myName = localStorage.getItem(MY_DEVICE_NAME_KEY);
+  // Put "this device" at the top so the user sees it first.
+  const sorted = [...devices].sort((a, b) => {
+    const aMine = myName !== null && a.friendlyName === myName;
+    const bMine = myName !== null && b.friendlyName === myName;
+    if (aMine === bMine) return 0;
+    return aMine ? -1 : 1;
+  });
+
+  for (const device of sorted) {
+    const name = device.friendlyName || generateFallbackName();
+    const isMine = myName !== null && device.friendlyName === myName;
+    const dateStr = formatDeviceDate(device.createdAt);
+    const item = document.createElement("div");
+    item.className = "device-item";
+    item.dataset.deviceId = device.id;
+    const info = document.createElement("div");
+    info.className = "device-info";
+    const nameHtml = isMine
+      ? `<span class="device-name">${name} <span class="device-current-badge">This device</span></span>`
+      : `<span class="device-name">${name}</span>`;
+    info.innerHTML = `${nameHtml}<span class="device-date">Added ${dateStr}</span>`;
+    const removeBtn = document.createElement("button");
+    removeBtn.className = "device-remove-btn";
+    if (isMine) {
+      removeBtn.textContent = "This device";
+      removeBtn.disabled = true;
+      removeBtn.title = "Sign out to remove this device";
+    } else {
+      removeBtn.textContent = "Remove";
+      removeBtn.addEventListener("click", () => void handleDevicesModalRemove(device.id, item, removeBtn));
+    }
+    item.appendChild(info);
+    item.appendChild(removeBtn);
+    devicesModalList.appendChild(item);
+  }
+}
+
+async function handleDevicesModalRemove(deviceId: string, itemEl: HTMLElement, btn: HTMLButtonElement): Promise<void> {
+  if (!pangeaApi) return;
+  btn.disabled = true;
+  btn.textContent = "Removing...";
+  devicesModalMessage.textContent = "";
+  try {
+    await pangeaApi.removeDevice(deviceId);
+    itemEl.remove();
+    showToast("Device removed.", 4000, true);
+    if (devicesModalList.children.length === 0) {
+      devicesModalMessage.textContent = "No devices remaining.";
+    }
+  } catch (err) {
+    btn.disabled = false;
+    btn.textContent = "Remove";
+    devicesModalMessage.textContent = reportError("removeDevice", err, "Failed to remove device. Please try again.");
+  }
+}
+
+function renderDeviceList(devices: DeviceInfo[]): void {
+  deviceList.innerHTML = "";
+  if (devices.length === 0) {
+    deviceLimitMessage.textContent = "No devices found. You can continue signing in now.";
+    deviceLimitContinueBtn.hidden = false;
+    return;
+  }
+
+  for (const device of devices) {
+    const name = device.friendlyName || generateFallbackName();
+    const dateStr = formatDeviceDate(device.createdAt);
+
+    const item = document.createElement("div");
+    item.className = "device-item";
+    item.dataset.deviceId = device.id;
+
+    const info = document.createElement("div");
+    info.className = "device-info";
+    info.innerHTML = `<span class="device-name">${name}</span><span class="device-date">Added ${dateStr}</span>`;
+
+    const removeBtn = document.createElement("button");
+    removeBtn.className = "device-remove-btn";
+    removeBtn.textContent = "Remove";
+    removeBtn.addEventListener("click", () => void handleDeviceRemove(device.id, item, removeBtn));
+
+    item.appendChild(info);
+    item.appendChild(removeBtn);
+    deviceList.appendChild(item);
+  }
+}
+
+async function handleDeviceRemove(deviceId: string, itemEl: HTMLElement, btn: HTMLButtonElement): Promise<void> {
+  if (!pangeaApi) return;
+  btn.disabled = true;
+  btn.textContent = "Removing...";
+  deviceLimitMessage.textContent = "";
+  try {
+    await pangeaApi.removeDevice(deviceId);
+    itemEl.remove();
+    deviceRemovedCount++;
+    deviceLimitContinueBtn.hidden = false;
+    showToast("Device removed successfully.", 4000, true);
+  } catch (err) {
+    btn.disabled = false;
+    btn.textContent = "Remove";
+    deviceLimitMessage.textContent = reportError("removeDevice", err, "Failed to remove device. Please try again.");
+  }
+}
+
+deviceLimitContinueBtn.addEventListener("click", async () => {
+  if (!pangeaApi || !pendingLoginToken) return;
+  deviceLimitContinueBtn.disabled = true;
+  deviceLimitMessage.textContent = "Signing in...";
+  try {
+    authState = await pangeaApi.login(pendingLoginToken);
+    if (authState.authenticated) {
+      localStorage.setItem("pangea:lastToken", pendingLoginToken);
+      pendingLoginToken = null;
+      deviceLimitScreen.hidden = true;
+      loginScreenMessage.textContent = "";
+      loginTokenInput.value = "";
+      updateAuthUI();
+      if (authState.friendlyName) {
+        localStorage.setItem(MY_DEVICE_NAME_KEY, authState.friendlyName);
+        showToast(`Your device is called "${authState.friendlyName}".`, 6000, true);
+      }
+      await refreshServers();
+    } else if (authState.error === "DEVICE_LIMIT_REACHED") {
+      deviceLimitMessage.textContent = "Still at device limit. Please remove another device.";
+      // Reload the updated device list
+      try {
+        const devices = await pangeaApi.listDevices();
+        renderDeviceList(devices);
+      } catch {
+        // best-effort
+      }
+    } else {
+      deviceLimitMessage.textContent = authState.error || "Sign in failed.";
+    }
+  } catch (err) {
+    deviceLimitMessage.textContent = reportError("deviceLimitSignIn", err);
+  } finally {
+    deviceLimitContinueBtn.disabled = false;
+  }
+});
+
+deviceLimitLogoutBtn.addEventListener("click", async () => {
+  if (!pangeaApi) return;
+  deviceLimitLogoutBtn.disabled = true;
+  try {
+    await pangeaApi.logout();
+  } catch {
+    // best-effort
+  } finally {
+    pendingLoginToken = null;
+    deviceLimitScreen.hidden = true;
+    loginScreen.hidden = false;
+    loginScreenMessage.textContent = "";
+    deviceLimitLogoutBtn.disabled = false;
+  }
+});
+
+devicesModalCloseBtn.addEventListener("click", () => {
+  devicesModal.classList.remove("visible");
+});
+
+devicesModal.addEventListener("click", (e) => {
+  if (e.target === devicesModal) devicesModal.classList.remove("visible");
+});
+
+menuDevicesBtn.addEventListener("click", () => {
+  menuDropdown.classList.remove("open");
+  menuBtn.setAttribute("aria-expanded", "false");
+  void showDevicesModal();
+});
+
 loginScreenBtn.addEventListener("click", async () => {
   if (!pangeaApi) return;
   const token = loginTokenInput.value.trim();
@@ -484,12 +743,21 @@ loginScreenBtn.addEventListener("click", async () => {
   loginScreenMessage.textContent = "Signing in...";
   try {
     authState = await pangeaApi.login(token);
-    updateAuthUI();
     if (authState.authenticated) {
       localStorage.setItem("pangea:lastToken", token);
       loginScreenMessage.textContent = "";
       loginTokenInput.value = "";
+      updateAuthUI();
+      if (authState.friendlyName) {
+        localStorage.setItem(MY_DEVICE_NAME_KEY, authState.friendlyName);
+        showToast(`Your device is called "${authState.friendlyName}".`, 6000, true);
+      }
       await refreshServers();
+    } else if (authState.error === "DEVICE_LIMIT_REACHED") {
+      loginScreenBtn.disabled = false;
+      loginTokenInput.disabled = false;
+      loginScreenMessage.textContent = "";
+      await showDeviceLimitScreen(token);
     } else if (authState.error) {
       loginScreenMessage.textContent = authState.error;
     } else {
@@ -498,8 +766,10 @@ loginScreenBtn.addEventListener("click", async () => {
   } catch (error) {
     loginScreenMessage.textContent = reportError("signIn", error);
   } finally {
-    loginScreenBtn.disabled = false;
-    loginTokenInput.disabled = false;
+    if (deviceLimitScreen.hidden) {
+      loginScreenBtn.disabled = false;
+      loginTokenInput.disabled = false;
+    }
   }
 });
 
@@ -633,6 +903,9 @@ function showAppShell(): void {
 
 function showLoginScreen(): void {
   shell.setAttribute("hidden", "");
+  // Hide device limit screen if it was showing
+  const dlScreen = document.getElementById("deviceLimitScreen");
+  if (dlScreen) dlScreen.hidden = true;
   if (!loginScreen.parentNode) document.body.insertBefore(loginScreen, shell);
   loginScreen.hidden = false;
   loginScreen.style.opacity = "";
@@ -1368,12 +1641,12 @@ function setUiMessage(message: string): void {
   uiMessageEl.textContent = message;
 }
 
-function showToast(message: string, durationMs = 5000): void {
+function showToast(message: string, durationMs = 5000, success = false): void {
   const container = document.getElementById("toastContainer");
   if (!container) return;
 
   const toast = document.createElement("div");
-  toast.className = "toast";
+  toast.className = success ? "toast toast-success" : "toast";
   toast.textContent = message;
   container.appendChild(toast);
 
@@ -1445,6 +1718,7 @@ function updateAuthUI(): void {
   if (authState.authenticated) {
     showAppShell();
     loginBtn.hidden = true;
+    menuDevicesBtn.hidden = false;
     if (authState.user) {
       authBar.hidden = false;
       authUserLabel.textContent = authState.user.email || authState.user.name;
@@ -1455,6 +1729,7 @@ function updateAuthUI(): void {
   } else {
     showLoginScreen();
     loginBtn.hidden = !pangeaApi;
+    menuDevicesBtn.hidden = true;
     authBar.hidden = true;
     serverPanel.hidden = true;
   }

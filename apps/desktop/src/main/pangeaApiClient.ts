@@ -323,6 +323,14 @@ function buildWireGuardConfig(
 interface DeviceRegisterResponse {
   deviceId: string;
   assignedIp: string;
+  friendlyName?: string | null;
+}
+
+export interface DeviceInfo {
+  id: string;
+  friendlyName: string | null;
+  createdAt: string;
+  status: string;
 }
 
 export class PangeaApiClient {
@@ -331,7 +339,7 @@ export class PangeaApiClient {
   private licenseKey: string | null = null;
   private dohEnabled = true;
   private directIpEnabled = true;
-  private directIpOnly = false;
+  private directIpOnly = true;
   identityPubkey: string | null = null;
 
   // When DoH resolves an IP, we store it here and use fetchDohResolved()
@@ -656,10 +664,11 @@ export class PangeaApiClient {
     return data;
   }
 
-  async registerDevice(identityPubkey: string): Promise<DeviceRegisterResponse> {
+  async registerDevice(identityPubkey: string, friendlyName?: string): Promise<DeviceRegisterResponse> {
     return this.hubRequest<DeviceRegisterResponse>("POST", "/api/device/register", {
       licenseKey: this.licenseKey,
-      identityPubkey
+      identityPubkey,
+      ...(friendlyName ? { friendlyName } : {})
     });
   }
 
@@ -668,6 +677,15 @@ export class PangeaApiClient {
       licenseKey: this.licenseKey,
       identityPubkey
     });
+  }
+
+  async listDevices(): Promise<DeviceInfo[]> {
+    const data = await this.hubRequest<{ devices: DeviceInfo[] }>("GET", "/api/device/list");
+    return data.devices;
+  }
+
+  async removeDevice(deviceId: string): Promise<void> {
+    await this.hubRequest<unknown>("POST", "/api/device/remove", { deviceId });
   }
 
   async provision(serverId: string): Promise<Profile> {

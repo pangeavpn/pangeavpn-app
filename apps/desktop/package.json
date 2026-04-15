@@ -1,6 +1,6 @@
 {
   "name": "@pangeavpn/desktop",
-  "version": "0.3.1",
+  "version": "0.3.3",
   "private": true,
   "author": {
     "name": "Pangea",
@@ -99,10 +99,6 @@
       ],
       "category": "public.app-category.utilities",
       "extraResources": [
-        {
-          "from": "resources/bin/mac",
-          "to": "bin/mac"
-        },
         {
           "from": "../../daemon/bin/daemon",
           "to": "daemon/daemon"

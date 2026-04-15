@@ -27,6 +27,8 @@ export const IPC_CHANNELS = {
   getDirectIpOnly: "pangea:getDirectIpOnly",
   getCachedServers: "pangea:getCachedServers",
   cacheServers: "pangea:cacheServers",
+  listDevices: "pangea:listDevices",
+  removeDevice: "pangea:removeDevice",
   checkForUpdates: "app:checkForUpdates",
   downloadAppUpdate: "app:downloadAppUpdate",
   installUpdate: "app:installUpdate",
@@ -56,6 +58,7 @@ export interface AuthState {
   authenticated: boolean;
   user: AuthUser | null;
   error?: string;
+  friendlyName?: string | null;
 }
 
 export interface ServerInfo {
@@ -68,6 +71,13 @@ export interface ServerInfo {
     uid: string;
     publicKey: string;
   };
+}
+
+export interface DeviceInfo {
+  id: string;
+  friendlyName: string | null;
+  createdAt: string;
+  status: string;
 }
 
 export interface PangeaApi {
@@ -84,4 +94,6 @@ export interface PangeaApi {
   getDirectIpOnly: () => Promise<boolean>;
   getCachedServers: () => Promise<ServerInfo[]>;
   cacheServers: (servers: ServerInfo[]) => Promise<void>;
+  listDevices: () => Promise<DeviceInfo[]>;
+  removeDevice: (deviceId: string) => Promise<void>;
 }

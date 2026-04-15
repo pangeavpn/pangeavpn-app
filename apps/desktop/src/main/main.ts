@@ -239,11 +239,12 @@ function createTray(): void {
 
   tray = new Tray(trayDefaultImage);
   tray.setToolTip("PangeaVPN");
-  if (process.platform === "win32" || process.platform === "linux") {
-    tray.on("click", () => {
-      toggleMainWindowVisibility();
-    });
-  }
+
+  // On macOS: left-click opens the window directly (no context menu).
+  // On Windows/Linux: left-click also toggles the window.
+  tray.on("click", () => {
+    toggleMainWindowVisibility();
+  });
 
   startTrayStatusPolling();
   updateTrayMenu();
@@ -285,11 +286,18 @@ function updateTrayMenu(): void {
   updateTrayImage();
 
   const stateLabel = trayStatusState;
+  tray.setToolTip(`PangeaVPN (${stateLabel})`);
+
+  // On macOS, don't set a context menu — clicking the icon opens the window directly.
+  // Setting a context menu on macOS would intercept left-clicks and show the menu instead.
+  if (process.platform === "darwin") {
+    return;
+  }
+
   const detailLabel = trayStatusDetail.trim() || "-";
   const canConnect = !trayActionInProgress && (trayStatusState === "DISCONNECTED" || trayStatusState === "ERROR");
   const canDisconnect = !trayActionInProgress && (trayStatusState === "CONNECTED" || trayStatusState === "CONNECTING");
   const windowVisible = Boolean(mainWindow && mainWindow.isVisible());
-  tray.setToolTip(`PangeaVPN (${stateLabel})`);
   tray.setContextMenu(
     Menu.buildFromTemplate([
       {
@@ -489,6 +497,23 @@ async function provisionAndConnect(serverId: string): Promise<import("@pangeavpn
   return result;
 }
 
+const FRIENDLY_ADJECTIVES = [
+  "Swift", "Bold", "Bright", "Calm", "Cool", "Dark", "Fast", "Free",
+  "Grand", "Iron", "Kind", "Light", "Neat", "Nord", "Open", "Pale",
+  "Pure", "Rare", "Rich", "Safe", "Slim", "Star", "True", "Wild"
+];
+const FRIENDLY_NOUNS = [
+  "Bear", "Buck", "Crow", "Deer", "Dove", "Eagle", "Elk", "Falcon",
+  "Fox", "Hawk", "Jay", "Kite", "Lion", "Lynx", "Moose", "Owl",
+  "Puma", "Raven", "Stag", "Swan", "Tiger", "Wolf", "Wren"
+];
+
+function generateFriendlyName(): string {
+  const adj = FRIENDLY_ADJECTIVES[Math.floor(Math.random() * FRIENDLY_ADJECTIVES.length)];
+  const noun = FRIENDLY_NOUNS[Math.floor(Math.random() * FRIENDLY_NOUNS.length)];
+  return `${adj} ${noun}`;
+}
+
 function registerIpcHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.getStatus, async () =>
     withDaemonRestartOnUnavailable(() => daemonClient.getStatus(), "status", { allowRestart: false })
@@ -541,15 +566,35 @@ function registerIpcHandlers(): void {
       const identityPrivateKey = privDer.subarray(16).toString("base64");
       const identityPublicKey = pubDer.subarray(12).toString("base64");
 
-      // Register device with the hub (reserves a device slot, max 4 per user)
+      // Generate a friendly name for this device
+      const friendlyName = generateFriendlyName();
+
+      // Register device with the hub (reserves a device slot, max 4 per user).
+      // The server returns the *effective* name (which may differ from ours if the
+      // identityPubkey was already registered and has a stored name).
+      let effectiveFriendlyName: string | null = friendlyName;
       try {
-        await pangeaApiClient.registerDevice(identityPublicKey);
+        const regResponse = await pangeaApiClient.registerDevice(identityPublicKey, friendlyName);
+        if (regResponse.friendlyName) {
+          effectiveFriendlyName = regResponse.friendlyName;
+        }
       } catch (regErr) {
-        // Device registration failed (e.g. device limit reached) — do NOT save identity key
         console.warn("device registration failed:", regErr);
+        const message = regErr instanceof Error ? regErr.message : "Device registration failed";
+
+        // If device limit reached, keep the license key in pangeaApiClient so
+        // the renderer can call listDevices / removeDevice to manage devices.
+        // The license key on disk is cleared — it will be re-saved on successful retry.
+        const isDeviceLimit =
+          message.includes("DEVICE_LIMIT_REACHED") || message.includes("Device limit");
+        if (isDeviceLimit) {
+          await auth.clearLicenseKey();
+          // Do NOT call pangeaApiClient.clearCache() — licenseKey must remain for device management
+          return { authenticated: false, user: null, error: "DEVICE_LIMIT_REACHED" };
+        }
+
         await auth.clearLicenseKey();
         pangeaApiClient.clearCache();
-        const message = regErr instanceof Error ? regErr.message : "Device registration failed";
         return { authenticated: false, user: null, error: message };
       }
 
@@ -557,7 +602,8 @@ function registerIpcHandlers(): void {
       await auth.saveIdentityKeyPair({ privateKey: identityPrivateKey, publicKey: identityPublicKey });
       pangeaApiClient.identityPubkey = identityPublicKey;
 
-      return auth.loginWithToken(data.vpnAccessToken, data.user);
+      const authState = await auth.loginWithToken(data.vpnAccessToken, data.user);
+      return { ...authState, friendlyName: effectiveFriendlyName };
     } catch (err) {
       console.warn("token login failed:", err);
       return { authenticated: false, user: null };
@@ -715,6 +761,14 @@ function registerIpcHandlers(): void {
     }
   });
 
+  ipcMain.handle(IPC_CHANNELS.listDevices, async () => {
+    return pangeaApiClient.listDevices();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.removeDevice, async (_event, deviceId: string) => {
+    await pangeaApiClient.removeDevice(deviceId);
+  });
+
   ipcMain.handle(IPC_CHANNELS.provisionAndConnect, async (_event, serverId: string) => {
     try {
       const result = await provisionAndConnect(serverId);
@@ -831,8 +885,8 @@ async function boot(): Promise<void> {
     if (settings.directIpEnabled === true) {
       pangeaApiClient.setDirectIpEnabled(true);
     }
-    if (settings.directIpOnly === true) {
-      pangeaApiClient.setDirectIpOnly(true);
+    if (settings.directIpOnly === false) {
+      pangeaApiClient.setDirectIpOnly(false);
     }
   } catch {
     // no settings file yet

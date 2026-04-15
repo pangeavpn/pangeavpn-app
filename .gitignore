@@ -13,8 +13,10 @@ dist/
 # Go build outputs and caches
 daemon/bin/
 daemon/*.exe
+daemon/**/*.syso
 .cache/
 .claude/
+docs/CLAUDE.md
 daemon/coverage.out
 coverage.out
 

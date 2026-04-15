@@ -23,6 +23,8 @@ const CH = {
   getDirectIpOnly: "pangea:getDirectIpOnly",
   getCachedServers: "pangea:getCachedServers",
   cacheServers: "pangea:cacheServers",
+  listDevices: "pangea:listDevices",
+  removeDevice: "pangea:removeDevice",
   checkForUpdates: "app:checkForUpdates",
   downloadAppUpdate: "app:downloadAppUpdate",
   installUpdate: "app:installUpdate",
@@ -58,6 +60,8 @@ const pangeaApi = {
   getDirectIpOnly: () => ipcRenderer.invoke(CH.getDirectIpOnly),
   getCachedServers: () => ipcRenderer.invoke(CH.getCachedServers),
   cacheServers: (servers: unknown[]) => ipcRenderer.invoke(CH.cacheServers, servers),
+  listDevices: () => ipcRenderer.invoke(CH.listDevices),
+  removeDevice: (deviceId: string) => ipcRenderer.invoke(CH.removeDevice, deviceId),
 };
 
 const autoUpdaterApi = {

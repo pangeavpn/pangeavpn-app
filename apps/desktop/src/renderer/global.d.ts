@@ -16,6 +16,7 @@ declare global {
     authenticated: boolean;
     user: AuthUser | null;
     error?: string;
+    friendlyName?: string | null;
   }
 
   interface ServerInfo {
@@ -40,6 +41,13 @@ declare global {
     getAppVersion: () => Promise<string>;
   }
 
+  interface DeviceInfo {
+    id: string;
+    friendlyName: string | null;
+    createdAt: string;
+    status: string;
+  }
+
   interface PangeaApi {
     login: (vpnToken: string) => Promise<AuthState>;
     logout: () => Promise<void>;
@@ -54,6 +62,8 @@ declare global {
     getDirectIpOnly: () => Promise<boolean>;
     getCachedServers: () => Promise<ServerInfo[]>;
     cacheServers: (servers: ServerInfo[]) => Promise<void>;
+    listDevices: () => Promise<DeviceInfo[]>;
+    removeDevice: (deviceId: string) => Promise<void>;
   }
 
   interface AutoUpdaterApi {

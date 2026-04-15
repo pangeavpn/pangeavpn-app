@@ -14,7 +14,8 @@ import (
 )
 
 // RouteUDP reads UDP packets from localConn and routes them through Cloak
-// multiplexed streams. It returns nil when localConn is closed.
+// multiplexed streams. It returns nil when localConn is closed or when
+// newSeshFunc returns nil (signalling that the session has been cancelled).
 func RouteUDP(localConn *net.UDPConn, streamTimeout time.Duration, singleplex bool, newSeshFunc func() *mux.Session) error {
 	var sesh *mux.Session
 
@@ -35,6 +36,10 @@ func RouteUDP(localConn *net.UDPConn, streamTimeout time.Duration, singleplex bo
 
 		if !singleplex && (sesh == nil || sesh.IsClosed()) {
 			sesh = newSeshFunc()
+			if sesh == nil {
+				log.Info("cloak session cancelled, stopping RouteUDP")
+				return nil
+			}
 		}
 
 		streamsMutex.Lock()
@@ -42,6 +47,11 @@ func RouteUDP(localConn *net.UDPConn, streamTimeout time.Duration, singleplex bo
 		if !ok {
 			if singleplex {
 				sesh = newSeshFunc()
+				if sesh == nil {
+					streamsMutex.Unlock()
+					log.Info("cloak session cancelled, stopping RouteUDP")
+					return nil
+				}
 			}
 
 			stream, err = sesh.OpenStream()
