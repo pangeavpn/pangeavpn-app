@@ -367,6 +367,182 @@ body {
   }
 }
 
+/* ── Device limit / management screen ───────────────────────── */
+
+.device-limit-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 950;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-base);
+}
+
+.device-limit-screen[hidden] {
+  display: none;
+}
+
+.device-limit-content {
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  max-width: 420px;
+  padding: 20px 28px 24px;
+}
+
+.device-limit-title {
+  margin: 0;
+  font-family: "Sora", "Space Grotesk", sans-serif;
+  font-size: 1.2rem;
+  font-weight: 700;
+}
+
+.device-limit-subtitle {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.device-list {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.device-list-loading {
+  display: flex;
+  justify-content: center;
+  padding: 16px 0;
+}
+
+.device-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  text-align: left;
+}
+
+.device-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.device-name {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.device-date {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.device-remove-btn {
+  flex-shrink: 0;
+  padding: 5px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--danger, #dc2626);
+  background: transparent;
+  color: var(--danger, #dc2626);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.device-remove-btn:hover:not(:disabled) {
+  background: var(--danger, #dc2626);
+  color: #fff;
+}
+
+.device-remove-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.device-current-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: var(--accent-glow);
+  color: var(--accent);
+  vertical-align: middle;
+}
+
+.device-limit-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin-top: 4px;
+}
+
+.device-limit-logout {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
+.toast.toast-success {
+  background: #16a34a;
+  box-shadow: 0 4px 24px rgba(22, 163, 74, 0.35);
+}
+
+/* ── Devices modal (from menu, logged-in) ───────────────────── */
+
+.devices-modal-card {
+  width: 360px;
+  max-height: 420px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.devices-modal-card .device-list {
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.devices-modal-subtitle {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.devices-modal-message {
+  margin: 0;
+  min-height: 18px;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  text-align: center;
+}
+
 /* ── App shell ────────────────────────────────────────────── */
 
 .shell {
@@ -1099,7 +1275,7 @@ button:disabled {
 }
 
 .btn-primary,
-button:not(.btn-ghost):not(.btn-danger):not(.btn-icon):not(.secondary):not(.ghost):not(.collapse-toggle) {
+button:not(.btn-ghost):not(.btn-danger):not(.btn-icon):not(.secondary):not(.ghost):not(.collapse-toggle):not(.menu-item) {
   color: var(--accent-text);
   background: var(--accent);
   border-color: transparent;
@@ -1107,7 +1283,7 @@ button:not(.btn-ghost):not(.btn-danger):not(.btn-icon):not(.secondary):not(.ghos
 }
 
 .btn-primary:hover:not(:disabled),
-button:not(.btn-ghost):not(.btn-danger):not(.btn-icon):not(.secondary):not(.ghost):not(.collapse-toggle):hover:not(:disabled) {
+button:not(.btn-ghost):not(.btn-danger):not(.btn-icon):not(.secondary):not(.ghost):not(.collapse-toggle):not(.menu-item):hover:not(:disabled) {
   background: var(--accent-hover);
 }
 

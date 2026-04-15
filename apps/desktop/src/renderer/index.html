@@ -50,6 +50,30 @@
       </div>
     </div>
 
+    <div id="deviceLimitScreen" class="device-limit-screen" hidden>
+      <div class="device-limit-content">
+        <div class="login-logo">
+          <svg width="40" height="40" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M24 4L6 14v12c0 11 8 18 18 20 10-2 18-9 18-20V14L24 4z" stroke="currentColor" stroke-width="2" fill="none" opacity="0.3"/>
+            <path d="M24 10L12 17v8c0 8 5.5 13 12 14.5 6.5-1.5 12-6.5 12-14.5v-8L24 10z" stroke="currentColor" stroke-width="1.5" fill="none" opacity="0.5"/>
+            <circle cx="24" cy="22" r="4" fill="currentColor" opacity="0.6"/>
+          </svg>
+        </div>
+        <h2 id="deviceLimitTitle" class="device-limit-title">Device Limit Reached</h2>
+        <p id="deviceLimitSubtitle" class="device-limit-subtitle">Your account has reached the maximum number of devices. Remove one to continue signing in.</p>
+        <div id="deviceList" class="device-list">
+          <div class="device-list-loading">
+            <span class="spinner"></span>
+          </div>
+        </div>
+        <div class="device-limit-actions">
+          <button id="deviceLimitContinueBtn" class="login-button" type="button" hidden>Continue Sign In</button>
+          <button id="deviceLimitLogoutBtn" class="btn-ghost device-limit-logout" type="button">Cancel &amp; Sign Out</button>
+        </div>
+        <p id="deviceLimitMessage" class="login-message"></p>
+      </div>
+    </div>
+
     <main class="shell" hidden>
       <header class="header">
         <div class="header-row">
@@ -65,6 +89,7 @@
               <div id="menuDropdown" class="menu-dropdown">
                 <button id="menuUpdateBtn" class="menu-item menu-update-item" type="button" hidden>Update Available</button>
                 <a id="manageSubLink" class="menu-item" href="#">Manage Subscription</a>
+                <button id="menuDevicesBtn" class="menu-item" type="button" hidden>Devices</button>
                 <button id="logoutBtn" class="menu-item" type="button">Sign Out</button>
               </div>
             </div>
@@ -277,6 +302,19 @@
       </section>
 
     </main>
+
+    <!-- Devices modal (accessed from menu when signed in) -->
+    <div id="devicesModal" class="update-overlay" role="dialog" aria-modal="true" aria-label="Devices">
+      <div class="update-modal devices-modal-card">
+        <button id="devicesModalCloseBtn" class="update-close" type="button">&times;</button>
+        <h2 class="update-title" style="margin-bottom:0">Devices</h2>
+        <p class="devices-modal-subtitle">Devices signed in to your account.</p>
+        <div id="devicesModalList" class="device-list">
+          <div class="device-list-loading"><span class="spinner"></span></div>
+        </div>
+        <p id="devicesModalMessage" class="devices-modal-message"></p>
+      </div>
+    </div>
 
     <!-- Update modal -->
     <div id="updateOverlay" class="update-overlay">

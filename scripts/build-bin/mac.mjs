@@ -305,28 +305,17 @@ function resolveInstallerAppPath(arch) {
 }
 
 function verifyPackagedMacAppBundle(appBundlePath, arch) {
+  // WireGuard and Cloak run in-process inside the daemon, so the app bundle
+  // only needs the app executable and the daemon binary.
   const requiredFiles = [
     path.join(appBundlePath, "Contents", "MacOS", "PangeaVPN"),
-    path.join(appBundlePath, "Contents", "Resources", "daemon", "daemon"),
-    path.join(appBundlePath, "Contents", "Resources", "bin", "mac", "wireguard-go"),
-    path.join(appBundlePath, "Contents", "Resources", "bin", "mac", "wg")
-  ];
-
-  const cloakCandidates = [
-    path.join(appBundlePath, "Contents", "Resources", "bin", "mac", "ck-client"),
-    path.join(appBundlePath, "Contents", "Resources", "bin", "mac", "cloak")
+    path.join(appBundlePath, "Contents", "Resources", "daemon", "daemon")
   ];
 
   for (const filePath of requiredFiles) {
     if (!fsSync.existsSync(filePath)) {
       throw new Error(`Missing required file in ${arch} app bundle: ${filePath}`);
     }
-  }
-
-  if (!cloakCandidates.some((candidate) => fsSync.existsSync(candidate))) {
-    throw new Error(
-      `Missing cloak binary in ${arch} app bundle. Expected one of: ${cloakCandidates.join(", ")}`
-    );
   }
 }
 

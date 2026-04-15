@@ -7,7 +7,6 @@ SERVICE_PLIST="/Library/LaunchDaemons/${SERVICE_LABEL}.plist"
 SERVICE_NAME="system/${SERVICE_LABEL}"
 SYSTEM_SUPPORT_DIR="/Library/Application Support/PangeaVPN"
 SYSTEM_DAEMON_PATH="${SYSTEM_SUPPORT_DIR}/PangeaDaemon"
-SYSTEM_BIN_DIR="${SYSTEM_SUPPORT_DIR}/bin/mac"
 LOG_PATH="/var/log/pangeavpn-daemon.log"
 
 install_base="${2:-/Applications}"
@@ -46,50 +45,25 @@ if [ -z "${app_path}" ]; then
   exit 0
 fi
 daemon_src="${app_path}/Contents/Resources/daemon/daemon"
-app_bin_dir="${app_path}/Contents/Resources/bin/mac"
-cloak_src=""
-if [ -x "${app_bin_dir}/ck-client" ]; then
-  cloak_src="${app_bin_dir}/ck-client"
-elif [ -x "${app_bin_dir}/cloak" ]; then
-  cloak_src="${app_bin_dir}/cloak"
-fi
-if [ -z "${cloak_src}" ]; then
-  echo "cloak binary not found in ${app_bin_dir}"
-  exit 1
-fi
-if [ ! -x "${app_bin_dir}/wireguard-go" ]; then
-  echo "wireguard-go binary not found in ${app_bin_dir}"
-  exit 1
-fi
-if [ ! -x "${app_bin_dir}/wg" ]; then
-  echo "wg binary not found in ${app_bin_dir}"
-  exit 1
-fi
 
 /bin/mkdir -p "${SYSTEM_SUPPORT_DIR}"
-/bin/mkdir -p "${SYSTEM_BIN_DIR}"
 
-# Strip quarantine from source binaries before copying — downloaded .pkg files
+# Strip quarantine from source daemon before copying — downloaded .pkg files
 # propagate the com.apple.quarantine xattr to all extracted files and macOS
 # Gatekeeper will kill quarantined unsigned binaries on Apple Silicon.
 /usr/bin/xattr -dr com.apple.quarantine "${app_path}" >/dev/null 2>&1 || true
 
+# WireGuard and Cloak run in-process inside the daemon, so only the daemon
+# binary itself needs to be staged.
 /usr/bin/install -m 755 -o root -g wheel "${daemon_src}" "${SYSTEM_DAEMON_PATH}"
-/usr/bin/install -m 755 -o root -g wheel "${cloak_src}" "${SYSTEM_BIN_DIR}/ck-client"
-/usr/bin/install -m 755 -o root -g wheel "${app_bin_dir}/wireguard-go" "${SYSTEM_BIN_DIR}/wireguard-go"
-/usr/bin/install -m 755 -o root -g wheel "${app_bin_dir}/wg" "${SYSTEM_BIN_DIR}/wg"
 /usr/sbin/chown root:wheel "${SYSTEM_SUPPORT_DIR}"
-/usr/sbin/chown root:wheel "${SYSTEM_SUPPORT_DIR}/bin" "${SYSTEM_BIN_DIR}"
 /bin/chmod 755 "${SYSTEM_SUPPORT_DIR}"
-/bin/chmod 755 "${SYSTEM_SUPPORT_DIR}/bin" "${SYSTEM_BIN_DIR}"
 
-# Strip quarantine from installed binaries and re-sign with ad-hoc signature.
+# Strip quarantine from installed daemon and re-sign with ad-hoc signature.
 # Apple Silicon requires all executables to carry a valid signature — copying
 # can invalidate the original ad-hoc signature so we force re-sign here.
 /usr/bin/xattr -dr com.apple.quarantine "${SYSTEM_SUPPORT_DIR}" >/dev/null 2>&1 || true
-for bin in "${SYSTEM_DAEMON_PATH}" "${SYSTEM_BIN_DIR}/ck-client" "${SYSTEM_BIN_DIR}/wireguard-go" "${SYSTEM_BIN_DIR}/wg"; do
-  /usr/bin/codesign --force --sign - "${bin}" >/dev/null 2>&1 || true
-done
+/usr/bin/codesign --force --sign - "${SYSTEM_DAEMON_PATH}" >/dev/null 2>&1 || true
 
 # Do NOT start the daemon here. The install-mac.sh script handles token
 # creation, plist registration, and daemon startup. Starting the daemon

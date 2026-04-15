@@ -2,14 +2,13 @@
 
 ## Repo binary locations
 
-- Windows binaries: `apps/desktop/resources/bin/win/`
-- macOS binaries: `apps/desktop/resources/bin/mac/`
+- Windows runtime DLLs: `apps/desktop/resources/bin/win/wintun.dll`
 - Windows `wireguard.dll` sources: `apps/desktop/build/{amd64|arm|arm64|x86}/wireguard.dll`
 - Windows `wintun.dll` sources: `apps/desktop/build/{amd64|arm|arm64|x86}/wintun.dll`
 
 Put `wintun.dll` in the Windows folder.
 Put architecture-matched `wireguard.dll` files in the Windows build arch folders above.
-No tunnel binaries (`wireguard-go`, `wg`, `cloak`, `ck-client`) are required — WireGuard and Cloak run in-process inside the daemon.
+No tunnel binaries (`wireguard-go`, `wg`, `cloak`, `ck-client`, `wireguard.exe`) are required on any platform — WireGuard and Cloak run in-process inside the daemon. Only `wintun.dll` / `wireguard.dll` are loaded at runtime (via `syscall.LoadLibrary` on Windows).
 
 ## Runtime binary resolution
 
