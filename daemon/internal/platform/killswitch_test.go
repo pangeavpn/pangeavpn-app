@@ -106,7 +106,7 @@ func TestResolveEndpointIPs_Deduplication(t *testing.T) {
 func TestNoopKillSwitch(t *testing.T) {
 	ks := &noopKillSwitch{}
 
-	if err := ks.Enable(context.Background(), "1.2.3.4"); err != nil {
+	if err := ks.Enable(context.Background(), "1.2.3.4", false); err != nil {
 		t.Errorf("enable should not fail: %v", err)
 	}
 	if err := ks.Update(context.Background(), "wg0"); err != nil {

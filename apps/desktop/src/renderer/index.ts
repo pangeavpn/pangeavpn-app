@@ -73,6 +73,7 @@ const serverIndicator = must<HTMLSpanElement>("serverIndicator");
 const serverIndicatorLabel = must<HTMLSpanElement>("serverIndicatorLabel");
 const directIpToggle = must<HTMLInputElement>("directIpToggle");
 const directIpOnlyToggle = must<HTMLInputElement>("directIpOnlyToggle");
+const allowLanToggle = must<HTMLInputElement>("allowLanToggle");
 const loginScreen = must<HTMLElement>("loginScreen");
 const loginScreenBtn = must<HTMLButtonElement>("loginScreenBtn");
 const loginScreenMessage = must<HTMLParagraphElement>("loginScreenMessage");
@@ -861,6 +862,14 @@ directIpOnlyToggle.addEventListener("change", async () => {
   setUiMessage(directIpOnlyToggle.checked ? "Direct IP only mode enabled." : "Direct IP only mode disabled.");
 });
 
+allowLanToggle.addEventListener("change", async () => {
+  if (!pangeaApi) return;
+  await pangeaApi.setAllowLan(allowLanToggle.checked);
+  setUiMessage(allowLanToggle.checked
+    ? "Allow LAN enabled. Reconnect for it to take effect."
+    : "Allow LAN disabled. Reconnect for it to take effect.");
+});
+
 
 
 const loadingScreen = must<HTMLElement>("loadingScreen");
@@ -971,6 +980,7 @@ async function init(): Promise<void> {
     try {
       directIpToggle.checked = await pangeaApi.getDirectIp();
       directIpOnlyToggle.checked = await pangeaApi.getDirectIpOnly();
+      allowLanToggle.checked = await pangeaApi.getAllowLan();
       if (directIpOnlyToggle.checked) {
         directIpToggle.checked = true;
         directIpToggle.disabled = true;

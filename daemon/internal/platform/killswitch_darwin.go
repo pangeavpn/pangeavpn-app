@@ -22,11 +22,12 @@ func init() {
 }
 
 type darwinKillSwitch struct {
-	mu     sync.Mutex
-	active bool
+	mu       sync.Mutex
+	active   bool
+	allowLAN bool
 }
 
-func (ks *darwinKillSwitch) Enable(ctx context.Context, endpointHost string) error {
+func (ks *darwinKillSwitch) Enable(ctx context.Context, endpointHost string, allowLAN bool) error {
 	ks.mu.Lock()
 	defer ks.mu.Unlock()
 
@@ -41,19 +42,21 @@ func (ks *darwinKillSwitch) Enable(ctx context.Context, endpointHost string) err
 
 	st := KillSwitchState{
 		Active:      true,
+		AllowLAN:    allowLAN,
 		EndpointIPs: ips,
 	}
 	if err := saveKillSwitchState(st); err != nil {
 		return fmt.Errorf("kill switch enable: save state: %w", err)
 	}
 
-	if err := applyPFAnchor(ctx, ips, ""); err != nil {
+	if err := applyPFAnchor(ctx, ips, "", allowLAN); err != nil {
 		_ = removePFAnchor(ctx)
 		_ = removeKillSwitchState()
 		return fmt.Errorf("kill switch enable: %w", err)
 	}
 
 	ks.active = true
+	ks.allowLAN = allowLAN
 	return nil
 }
 
@@ -74,7 +77,7 @@ func (ks *darwinKillSwitch) Update(ctx context.Context, tunnelInterface string) 
 	st.TunnelInterface = tunnelInterface
 	_ = saveKillSwitchState(st)
 
-	if err := applyPFAnchor(ctx, st.EndpointIPs, tunnelInterface); err != nil {
+	if err := applyPFAnchor(ctx, st.EndpointIPs, tunnelInterface, ks.allowLAN); err != nil {
 		return fmt.Errorf("kill switch update: %w", err)
 	}
 
@@ -111,7 +114,7 @@ func (ks *darwinKillSwitch) Active() bool {
 // ---------------------------------------------------------------------------
 
 // buildPFRules generates a PF ruleset for the kill-switch anchor.
-func buildPFRules(endpointIPs []string, tunnelInterface string) string {
+func buildPFRules(endpointIPs []string, tunnelInterface string, allowLAN bool) string {
 	var rules []string
 
 	// Allow all loopback traffic.
@@ -128,6 +131,14 @@ func buildPFRules(endpointIPs []string, tunnelInterface string) string {
 	// Allow DHCP.
 	rules = append(rules, "pass out quick inet proto udp from any port 68 to any port 67")
 
+	// Allow LAN ranges so captive portals and gateway probes work on
+	// restrictive WiFi. Only applied when the user opts in.
+	if allowLAN {
+		for _, cidr := range LANAllowPrefixes {
+			rules = append(rules, fmt.Sprintf("pass out quick inet to %s", cidr))
+		}
+	}
+
 	// Allow traffic on the tunnel interface if set.
 	if tunnelInterface != "" {
 		rules = append(rules, fmt.Sprintf("pass out quick on %s inet all", tunnelInterface))
@@ -140,8 +151,8 @@ func buildPFRules(endpointIPs []string, tunnelInterface string) string {
 }
 
 // applyPFAnchor loads the kill-switch rules into a PF anchor.
-func applyPFAnchor(ctx context.Context, endpointIPs []string, tunnelInterface string) error {
-	rules := buildPFRules(endpointIPs, tunnelInterface)
+func applyPFAnchor(ctx context.Context, endpointIPs []string, tunnelInterface string, allowLAN bool) error {
+	rules := buildPFRules(endpointIPs, tunnelInterface, allowLAN)
 
 	// Load rules into the anchor via stdin.
 	cmd := exec.CommandContext(ctx, "pfctl", "-a", pfAnchorPath, "-f", "-")

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -17,24 +18,33 @@ import (
 // ---------------------------------------------------------------------------
 
 type fakeCloakManager struct {
-	mu         sync.Mutex
-	running    bool
-	startErr   error
-	stopErr    error
-	waitErr    error
-	startCount int
-	stopCount  int
+	mu              sync.Mutex
+	running         bool
+	startErr        error
+	stopErr         error
+	waitErr         error
+	startCount      int
+	stopCount       int
+	startLocalPort  int
+	boundLocalPort  int
 }
 
-func (f *fakeCloakManager) Start(_ context.Context, _ state.CloakProfile) error {
+func (f *fakeCloakManager) Start(_ context.Context, profile state.CloakProfile) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.startCount++
+	f.startLocalPort = profile.LocalPort
 	if f.startErr != nil {
 		return f.startErr
 	}
 	f.running = true
 	return nil
+}
+
+func (f *fakeCloakManager) BoundLocalPort() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.boundLocalPort
 }
 
 func (f *fakeCloakManager) Stop(_ context.Context) error {
@@ -129,6 +139,7 @@ type fakeKillSwitch struct {
 	mu              sync.Mutex
 	active          bool
 	enableEndpoint  string
+	enableAllowLAN  bool
 	updateInterface string
 	enableCount     int
 	updateCount     int
@@ -138,11 +149,12 @@ type fakeKillSwitch struct {
 	clearErr        error
 }
 
-func (f *fakeKillSwitch) Enable(_ context.Context, endpoint string) error {
+func (f *fakeKillSwitch) Enable(_ context.Context, endpoint string, allowLAN bool) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.enableCount++
 	f.enableEndpoint = endpoint
+	f.enableAllowLAN = allowLAN
 	if f.enableErr != nil {
 		return f.enableErr
 	}
@@ -241,7 +253,7 @@ func TestConnect_KillSwitchEnabledBeforeCloakAndWG(t *testing.T) {
 	ks := &fakeKillSwitch{}
 	svc := newTestService(t, cloak, wgMgr, ks, profile)
 
-	err := svc.Connect(context.Background(), profile.ID)
+	err := svc.Connect(context.Background(), profile.ID, ConnectOptions{})
 	if err != nil {
 		t.Fatalf("connect failed: %v", err)
 	}
@@ -267,7 +279,7 @@ func TestConnect_UpdateCalledAfterWGSuccess(t *testing.T) {
 	ks := &fakeKillSwitch{}
 	svc := newTestService(t, cloak, wgMgr, ks, profile)
 
-	err := svc.Connect(context.Background(), profile.ID)
+	err := svc.Connect(context.Background(), profile.ID, ConnectOptions{})
 	if err != nil {
 		t.Fatalf("connect failed: %v", err)
 	}
@@ -290,7 +302,7 @@ func TestConnect_UsesReportedWireGuardInterfaceForKillSwitch(t *testing.T) {
 	ks := &fakeKillSwitch{}
 	svc := newTestService(t, cloak, wgMgr, ks, profile)
 
-	err := svc.Connect(context.Background(), profile.ID)
+	err := svc.Connect(context.Background(), profile.ID, ConnectOptions{})
 	if err != nil {
 		t.Fatalf("connect failed: %v", err)
 	}
@@ -313,7 +325,7 @@ func TestConnect_WGFailure_KillSwitchStaysActive(t *testing.T) {
 	ks := &fakeKillSwitch{}
 	svc := newTestService(t, cloak, wgMgr, ks, profile)
 
-	err := svc.Connect(context.Background(), profile.ID)
+	err := svc.Connect(context.Background(), profile.ID, ConnectOptions{})
 	if err == nil {
 		t.Fatal("expected connect to fail")
 	}
@@ -339,7 +351,7 @@ func TestConnect_CloakSessionFailure_KillSwitchStaysActive(t *testing.T) {
 	ks := &fakeKillSwitch{}
 	svc := newTestService(t, cloak, wgMgr, ks, profile)
 
-	err := svc.Connect(context.Background(), profile.ID)
+	err := svc.Connect(context.Background(), profile.ID, ConnectOptions{})
 	if err == nil {
 		t.Fatal("expected connect to fail when cloak session is not established")
 	}
@@ -359,7 +371,7 @@ func TestConnect_CloakFailure_KillSwitchStaysActive(t *testing.T) {
 	ks := &fakeKillSwitch{}
 	svc := newTestService(t, cloak, wgMgr, ks, profile)
 
-	err := svc.Connect(context.Background(), profile.ID)
+	err := svc.Connect(context.Background(), profile.ID, ConnectOptions{})
 	if err == nil {
 		t.Fatal("expected connect to fail")
 	}
@@ -383,7 +395,7 @@ func TestDisconnect_ClearsKillSwitch(t *testing.T) {
 	svc := newTestService(t, cloak, wgMgr, ks, profile)
 
 	// Connect first.
-	if err := svc.Connect(context.Background(), profile.ID); err != nil {
+	if err := svc.Connect(context.Background(), profile.ID, ConnectOptions{}); err != nil {
 		t.Fatalf("connect failed: %v", err)
 	}
 
@@ -411,7 +423,7 @@ func TestDisconnect_ClearsKillSwitchAfterFailedConnect(t *testing.T) {
 	svc := newTestService(t, cloak, wgMgr, ks, profile)
 
 	// Connect fails — kill switch remains active.
-	_ = svc.Connect(context.Background(), profile.ID)
+	_ = svc.Connect(context.Background(), profile.ID, ConnectOptions{})
 	if !ks.Active() {
 		t.Fatal("expected kill switch active after failed connect")
 	}
@@ -438,7 +450,7 @@ func TestConnect_KillSwitchEnableError_ReturnsError(t *testing.T) {
 	ks := &fakeKillSwitch{enableErr: errors.New("firewall error")}
 	svc := newTestService(t, cloak, wgMgr, ks, profile)
 
-	err := svc.Connect(context.Background(), profile.ID)
+	err := svc.Connect(context.Background(), profile.ID, ConnectOptions{})
 	if err == nil {
 		t.Fatal("expected connect to fail when kill switch enable fails")
 	}
@@ -467,7 +479,7 @@ func TestConnect_WGPreflightFailure_DoesNotEnableKillSwitch(t *testing.T) {
 	ks := &fakeKillSwitch{}
 	svc := newTestService(t, cloak, wgMgr, ks, profile)
 
-	err := svc.Connect(context.Background(), profile.ID)
+	err := svc.Connect(context.Background(), profile.ID, ConnectOptions{})
 	if err == nil {
 		t.Fatal("expected connect to fail when wireguard preflight fails")
 	}
@@ -526,5 +538,81 @@ func TestTunnelNamesForCleanup_UsesProfileTunnelNames(t *testing.T) {
 	want := []string{"current-tunnel", "wg-alpha", "actual-tunnel-name"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("tunnelNamesForCleanup() = %v, want %v", got, want)
+	}
+}
+
+func TestRewriteLoopbackEndpointPort(t *testing.T) {
+	tests := []struct {
+		name       string
+		in         string
+		newPort    int
+		wantSub    string
+		wantRepl   bool
+		mustNotSub string
+	}{
+		{
+			name:     "rewrites loopback endpoint",
+			in:       "[Interface]\nPrivateKey = x\n\n[Peer]\nPublicKey = y\nEndpoint = 127.0.0.1:51820\nAllowedIPs = 0.0.0.0/0\n",
+			newPort:  54321,
+			wantSub:  "Endpoint = 127.0.0.1:54321",
+			wantRepl: true,
+		},
+		{
+			name:       "ignores non-loopback endpoint",
+			in:         "[Peer]\nEndpoint = 10.0.0.1:51820\n",
+			newPort:    54321,
+			wantRepl:   false,
+			mustNotSub: "54321",
+		},
+		{
+			name:     "preserves trailing whitespace",
+			in:       "[Peer]\nEndpoint = 127.0.0.1:51820  \n",
+			newPort:  9999,
+			wantSub:  "Endpoint = 127.0.0.1:9999",
+			wantRepl: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, replaced := rewriteLoopbackEndpointPort(tc.in, tc.newPort)
+			if replaced != tc.wantRepl {
+				t.Errorf("replaced = %v, want %v", replaced, tc.wantRepl)
+			}
+			if tc.wantSub != "" && !strings.Contains(got, tc.wantSub) {
+				t.Errorf("output missing %q:\n%s", tc.wantSub, got)
+			}
+			if tc.mustNotSub != "" && strings.Contains(got, tc.mustNotSub) {
+				t.Errorf("output should not contain %q:\n%s", tc.mustNotSub, got)
+			}
+		})
+	}
+}
+
+func TestConnect_UsesEphemeralCloakPortAndRewritesEndpoint(t *testing.T) {
+	profile := testProfile()
+	profile.WireGuard.ConfigText = "[Interface]\nPrivateKey = YWJjZGVmZw==\n\n[Peer]\nPublicKey = eHl6MTIzNDU=\nEndpoint = 127.0.0.1:51820\nAllowedIPs = 0.0.0.0/0\n"
+
+	cloak := &fakeCloakManager{boundLocalPort: 61234}
+	wgMgr := &fakeWGManager{}
+	ks := &fakeKillSwitch{}
+	svc := newTestService(t, cloak, wgMgr, ks, profile)
+
+	if err := svc.Connect(context.Background(), profile.ID); err != nil {
+		t.Fatalf("connect failed: %v", err)
+	}
+
+	cloak.mu.Lock()
+	if cloak.startLocalPort != 0 {
+		t.Errorf("cloak.Start should receive LocalPort=0 to request ephemeral; got %d", cloak.startLocalPort)
+	}
+	cloak.mu.Unlock()
+
+	stored, ok := svc.getCurrentProfile()
+	if !ok {
+		t.Fatal("expected current profile to be set after connect")
+	}
+	if stored.Cloak.LocalPort != 61234 {
+		t.Errorf("stored profile Cloak.LocalPort = %d, want 61234 (bound port)", stored.Cloak.LocalPort)
 	}
 }

@@ -31,6 +31,7 @@ const daemonProcess = new DaemonProcessManager(daemonClient);
 const pangeaApiClient = new PangeaApiClient();
 let managedProfileId: string | null = null;
 let lastServerId: string | null = null;
+let allowLanEnabled = true;
 
 function getTaskbarPosition(): { x: number; y: number } {
   const { screen } = require("electron") as typeof import("electron");
@@ -722,6 +723,24 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.getDirectIpOnly, async () => pangeaApiClient.isDirectIpOnly());
 
+  ipcMain.handle(IPC_CHANNELS.setAllowLan, async (_event, enabled: boolean) => {
+    allowLanEnabled = !!enabled;
+    try {
+      const settingsPath = (await import("node:path")).join(
+        (await import("./platformPaths")).getAppSupportDir(),
+        "settings.json"
+      );
+      const raw = await (await import("node:fs/promises")).default.readFile(settingsPath, "utf8").catch(() => "{}");
+      const settings = JSON.parse(raw) as Record<string, unknown>;
+      settings.allowLan = allowLanEnabled;
+      await (await import("node:fs/promises")).default.writeFile(settingsPath, JSON.stringify(settings, null, 2));
+    } catch (err) {
+      console.warn("Failed to persist allowLan setting:", err);
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.getAllowLan, async () => allowLanEnabled);
+
   ipcMain.handle(IPC_CHANNELS.getCachedServers, async () => {
     try {
       const cachePath = (await import("node:path")).join(
@@ -850,7 +869,8 @@ function isUnauthorizedError(error: unknown): boolean {
 }
 
 async function connectWithRecovery(profileId: string): Promise<OkResponse> {
-  const firstAttempt = await withDaemonRestartOnUnavailable(() => daemonClient.connect(profileId), "connect");
+  const opts = { allowLAN: allowLanEnabled };
+  const firstAttempt = await withDaemonRestartOnUnavailable(() => daemonClient.connect(profileId, opts), "connect");
   if (firstAttempt.ok) {
     return firstAttempt;
   }
@@ -861,7 +881,7 @@ async function connectWithRecovery(profileId: string): Promise<OkResponse> {
 
   try {
     await daemonProcess.ensureRunning({ forceRestart: true });
-    return await daemonClient.connect(profileId);
+    return await daemonClient.connect(profileId, opts);
   } catch (error) {
     console.warn("mac connect recovery failed", error);
     return firstAttempt;
@@ -887,6 +907,9 @@ async function boot(): Promise<void> {
     }
     if (settings.directIpOnly === false) {
       pangeaApiClient.setDirectIpOnly(false);
+    }
+    if (settings.allowLan === false) {
+      allowLanEnabled = false;
     }
   } catch {
     // no settings file yet

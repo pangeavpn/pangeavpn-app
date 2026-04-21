@@ -34,12 +34,13 @@ func init() {
 }
 
 type linuxKillSwitch struct {
-	mu     sync.Mutex
-	active bool
-	useNFT bool // true = nftables, false = iptables
+	mu       sync.Mutex
+	active   bool
+	useNFT   bool // true = nftables, false = iptables
+	allowLAN bool
 }
 
-func (ks *linuxKillSwitch) Enable(ctx context.Context, endpointHost string) error {
+func (ks *linuxKillSwitch) Enable(ctx context.Context, endpointHost string, allowLAN bool) error {
 	ks.mu.Lock()
 	defer ks.mu.Unlock()
 
@@ -54,6 +55,7 @@ func (ks *linuxKillSwitch) Enable(ctx context.Context, endpointHost string) erro
 
 	st := KillSwitchState{
 		Active:      true,
+		AllowLAN:    allowLAN,
 		EndpointIPs: ips,
 	}
 	if err := saveKillSwitchState(st); err != nil {
@@ -63,14 +65,14 @@ func (ks *linuxKillSwitch) Enable(ctx context.Context, endpointHost string) erro
 	// Try nftables first, fall back to iptables.
 	if hasNFT(ctx) {
 		ks.useNFT = true
-		if err := applyNFTRules(ctx, ips, ""); err != nil {
+		if err := applyNFTRules(ctx, ips, "", allowLAN); err != nil {
 			_ = removeNFTRules(ctx)
 			_ = removeKillSwitchState()
 			return fmt.Errorf("kill switch enable (nft): %w", err)
 		}
 	} else {
 		ks.useNFT = false
-		if err := applyIPTablesRules(ctx, ips, ""); err != nil {
+		if err := applyIPTablesRules(ctx, ips, "", allowLAN); err != nil {
 			_ = removeIPTablesRules(ctx)
 			_ = removeKillSwitchState()
 			return fmt.Errorf("kill switch enable (iptables): %w", err)
@@ -78,6 +80,7 @@ func (ks *linuxKillSwitch) Enable(ctx context.Context, endpointHost string) erro
 	}
 
 	ks.active = true
+	ks.allowLAN = allowLAN
 	return nil
 }
 
@@ -99,11 +102,11 @@ func (ks *linuxKillSwitch) Update(ctx context.Context, tunnelInterface string) e
 	_ = saveKillSwitchState(st)
 
 	if ks.useNFT {
-		if err := applyNFTRules(ctx, st.EndpointIPs, tunnelInterface); err != nil {
+		if err := applyNFTRules(ctx, st.EndpointIPs, tunnelInterface, ks.allowLAN); err != nil {
 			return fmt.Errorf("kill switch update (nft): %w", err)
 		}
 	} else {
-		if err := applyIPTablesRules(ctx, st.EndpointIPs, tunnelInterface); err != nil {
+		if err := applyIPTablesRules(ctx, st.EndpointIPs, tunnelInterface, ks.allowLAN); err != nil {
 			return fmt.Errorf("kill switch update (iptables): %w", err)
 		}
 	}
@@ -152,7 +155,7 @@ func hasNFT(ctx context.Context) bool {
 }
 
 // buildNFTRuleset generates a complete nftables ruleset for the kill switch.
-func buildNFTRuleset(endpointIPs []string, tunnelInterface string) string {
+func buildNFTRuleset(endpointIPs []string, tunnelInterface string, allowLAN bool) string {
 	var b strings.Builder
 
 	fmt.Fprintf(&b, "table %s %s {\n", nftFamily, nftTableName)
@@ -174,6 +177,14 @@ func buildNFTRuleset(endpointIPs []string, tunnelInterface string) string {
 		fmt.Fprintf(&b, "    ip daddr %s accept\n", ip)
 	}
 
+	// Allow LAN ranges so captive portals and gateway probes work on
+	// restrictive WiFi. Only applied when the user opts in.
+	if allowLAN {
+		for _, cidr := range LANAllowPrefixes {
+			fmt.Fprintf(&b, "    ip daddr %s accept\n", cidr)
+		}
+	}
+
 	// Allow IPv4 traffic on tunnel interface.
 	if tunnelInterface != "" {
 		fmt.Fprintf(&b, "    meta nfproto ipv4 oifname \"%s\" accept\n", tunnelInterface)
@@ -185,11 +196,11 @@ func buildNFTRuleset(endpointIPs []string, tunnelInterface string) string {
 	return b.String()
 }
 
-func applyNFTRules(ctx context.Context, endpointIPs []string, tunnelInterface string) error {
+func applyNFTRules(ctx context.Context, endpointIPs []string, tunnelInterface string, allowLAN bool) error {
 	// Delete existing table first (ignore error if it doesn't exist).
 	_ = removeNFTRules(ctx)
 
-	ruleset := buildNFTRuleset(endpointIPs, tunnelInterface)
+	ruleset := buildNFTRuleset(endpointIPs, tunnelInterface, allowLAN)
 
 	cmd := exec.CommandContext(ctx, "nft", "-f", "-")
 	cmd.Stdin = strings.NewReader(ruleset)
@@ -217,7 +228,7 @@ func removeNFTRules(ctx context.Context) error {
 // iptables fallback backend
 // ---------------------------------------------------------------------------
 
-func applyIPTablesRules(ctx context.Context, endpointIPs []string, tunnelInterface string) error {
+func applyIPTablesRules(ctx context.Context, endpointIPs []string, tunnelInterface string, allowLAN bool) error {
 	// Clean up any previous rules.
 	_ = removeIPTablesRules(ctx)
 
@@ -243,6 +254,15 @@ func applyIPTablesRules(ctx context.Context, endpointIPs []string, tunnelInterfa
 		}
 		if err := iptCmd(ctx, "-A", iptChainName, "-d", ip, "-j", "ACCEPT"); err != nil {
 			return fmt.Errorf("allow endpoint %s: %w", ip, err)
+		}
+	}
+
+	// Allow LAN ranges when the user opts in.
+	if allowLAN {
+		for _, cidr := range LANAllowPrefixes {
+			if err := iptCmd(ctx, "-A", iptChainName, "-d", cidr, "-j", "ACCEPT"); err != nil {
+				return fmt.Errorf("allow LAN %s: %w", cidr, err)
+			}
 		}
 	}
 

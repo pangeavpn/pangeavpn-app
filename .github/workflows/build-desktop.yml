@@ -1,0 +1,134 @@
+name: Build Desktop Installers
+
+on:
+  push:
+    tags:
+      - 'v*'
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+  workflow_dispatch:
+    inputs:
+      publish_release:
+        description: 'Create a draft GitHub release with the built installers'
+        default: false
+        type: boolean
+
+concurrency:
+  group: build-desktop-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-windows:
+    name: Windows (x64 + arm64)
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: true
+          cache-dependency-path: daemon/go.sum
+
+      - name: Install goversioninfo
+        run: go install github.com/josephspurrier/goversioninfo/cmd/goversioninfo@latest
+
+      - name: Install workspace dependencies
+        run: npm ci
+
+      - name: Build Windows installers
+        run: npm run build-bin:windows
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Windows NSIS installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: pangeavpn-windows-installers
+          path: dist/bin/windows/installer/**/*.exe
+          if-no-files-found: error
+          retention-days: 14
+
+  build-mac:
+    name: macOS (arm64 + x64)
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: true
+          cache-dependency-path: daemon/go.sum
+
+      - name: Install workspace dependencies
+        run: npm ci
+
+      - name: Build macOS installers
+        run: npm run build-bin:mac
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: Upload macOS installer DMGs
+        uses: actions/upload-artifact@v4
+        with:
+          name: pangeavpn-mac-installers
+          path: dist/bin/mac/installer/**/*-installer.dmg
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: Draft GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v') || github.event.inputs.publish_release == 'true'
+    needs: [build-windows, build-mac]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download Windows installers
+        uses: actions/download-artifact@v4
+        with:
+          name: pangeavpn-windows-installers
+          path: artifacts/windows
+
+      - name: Download macOS installers
+        uses: actions/download-artifact@v4
+        with:
+          name: pangeavpn-mac-installers
+          path: artifacts/mac
+
+      - name: Flatten into release directory
+        run: |
+          mkdir -p release
+          find artifacts/windows -type f -name '*.exe' -exec cp {} release/ \;
+          find artifacts/mac -type f -name '*-installer.dmg' -exec cp {} release/ \;
+          ls -la release/
+
+      - name: Create draft release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          generate_release_notes: true
+          files: release/*

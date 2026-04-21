@@ -55,7 +55,7 @@ type windowsKillSwitch struct {
 	tunnelFilterId uint64     // WFP filter ID for the tunnel interface permit
 }
 
-func (ks *windowsKillSwitch) Enable(ctx context.Context, endpointHost string) error {
+func (ks *windowsKillSwitch) Enable(ctx context.Context, endpointHost string, allowLAN bool) error {
 	ks.mu.Lock()
 	defer ks.mu.Unlock()
 
@@ -72,6 +72,7 @@ func (ks *windowsKillSwitch) Enable(ctx context.Context, endpointHost string) er
 	// modify the Windows Firewall outbound policy.
 	st := KillSwitchState{
 		Active:      true,
+		AllowLAN:    allowLAN,
 		EndpointIPs: ips,
 	}
 	if err := saveKillSwitchState(st); err != nil {
@@ -122,6 +123,20 @@ func (ks *windowsKillSwitch) Enable(ctx context.Context, endpointHost string) er
 
 	// DHCP best-effort — ALE layer may not see broadcast DHCP traffic.
 	_, _ = engine.addPermitDHCP()
+
+	// Permit LAN ranges so captive portals / gateway probes / mDNS work on
+	// restrictive WiFi. Only applied when the user opts in — fail-open would
+	// defeat the kill switch.
+	if allowLAN {
+		for _, cidr := range LANAllowPrefixes {
+			if _, err := engine.addPermitIPv4Subnet(cidr); err != nil {
+				engine.abortTransaction()
+				engine.close()
+				_ = removeKillSwitchState()
+				return fmt.Errorf("kill switch enable: permit LAN %s: %w", cidr, err)
+			}
+		}
+	}
 
 	// Block all IPv6 traffic except loopback to prevent IPv6 leaks.
 	if _, err := engine.addBlockAllOutboundV6(); err != nil {

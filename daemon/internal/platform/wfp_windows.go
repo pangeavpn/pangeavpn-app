@@ -372,6 +372,50 @@ func (e *wfpEngine) addPermitEndpointIP(ipStr string) (uint64, error) {
 	return id, err
 }
 
+// addPermitIPv4Subnet permits outbound traffic to the given IPv4 CIDR.
+// Used for the "Allow LAN" option — permits RFC1918, link-local, and
+// multicast ranges so captive portals and gateway probes work on
+// restrictive WiFi.
+func (e *wfpEngine) addPermitIPv4Subnet(cidr string) (uint64, error) {
+	_, network, err := net.ParseCIDR(cidr)
+	if err != nil {
+		return 0, fmt.Errorf("invalid CIDR %s: %w", cidr, err)
+	}
+	ip := network.IP.To4()
+	if ip == nil {
+		return 0, fmt.Errorf("CIDR %s is not IPv4", cidr)
+	}
+	ones, bits := network.Mask.Size()
+	if bits != 32 {
+		return 0, fmt.Errorf("CIDR %s has non-IPv4 mask", cidr)
+	}
+	var maskUint uint32
+	if ones == 0 {
+		maskUint = 0
+	} else {
+		maskUint = uint32(0xFFFFFFFF) << uint32(32-ones)
+	}
+
+	addrMask := fwpV4AddrAndMask{
+		addr: uint32(ip[0])<<24 | uint32(ip[1])<<16 | uint32(ip[2])<<8 | uint32(ip[3]),
+		mask: maskUint,
+	}
+
+	conditions := []fwpmFilterCondition0{
+		{
+			fieldKey:  fwpmConditionIpRemoteAddress,
+			matchType: fwpMatchEqual,
+			conditionValue: fwpValue0{
+				valueType: fwpV4AddrMask,
+				value:     uintptr(unsafe.Pointer(&addrMask)),
+			},
+		},
+	}
+	id, err := e.addFilter(fwpmLayerAleAuthConnectV4, "PangeaVPN Allow LAN "+cidr, 10, fwpActionPermit, conditions)
+	runtime.KeepAlive(&addrMask)
+	return id, err
+}
+
 func (e *wfpEngine) addPermitDHCP() (uint64, error) {
 	conditions := []fwpmFilterCondition0{
 		{
