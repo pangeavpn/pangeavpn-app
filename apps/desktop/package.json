@@ -1,6 +1,6 @@
 {
   "name": "@pangeavpn/desktop",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "private": true,
   "author": {
     "name": "Pangea",
@@ -89,7 +89,11 @@
       "include": "build/installer.nsh",
       "installerIcon": "built/pangeavpn.ico",
       "uninstallerIcon": "built/pangeavpn.ico",
-      "installerHeaderIcon": "built/pangeavpn.ico"
+      "installerHeaderIcon": "built/pangeavpn.ico",
+      "artifactName": "PangeaVPN-Setup-${version}-${arch}.${ext}"
+    },
+    "portable": {
+      "artifactName": "PangeaVPN-Portable-${version}-${arch}.${ext}"
     },
     "mac": {
       "icon": "PangeaVPN.icns",

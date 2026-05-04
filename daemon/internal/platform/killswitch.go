@@ -18,8 +18,11 @@ import (
 // only by an explicit disconnect.
 type KillSwitch interface {
 	// Enable resolves the endpoint host and blocks all outbound traffic
-	// except loopback and the resolved endpoint IP(s).
-	Enable(ctx context.Context, endpointHost string) error
+	// except loopback and the resolved endpoint IP(s). If allowLAN is true,
+	// local-network IPv4 ranges (RFC1918, link-local, multicast, broadcast)
+	// are also permitted so captive-portal re-checks and gateway liveness
+	// probes on restrictive WiFi don't trip Windows into "No internet".
+	Enable(ctx context.Context, endpointHost string, allowLAN bool) error
 
 	// Update adds an allow rule for the active tunnel interface so that
 	// VPN-routed traffic can egress.
@@ -33,10 +36,24 @@ type KillSwitch interface {
 	Active() bool
 }
 
+// LANAllowPrefixes are the IPv4 ranges the kill switch permits when
+// allowLAN is set. Keep in sync with wg.LANExcludePrefixes — traffic that
+// leaves the tunnel (because AllowedIPs excludes these) must also be
+// allowed by the firewall.
+var LANAllowPrefixes = []string{
+	"10.0.0.0/8",
+	"172.16.0.0/12",
+	"192.168.0.0/16",
+	"169.254.0.0/16",
+	"224.0.0.0/4",
+	"255.255.255.255/32",
+}
+
 // KillSwitchState is persisted to disk so that crash/startup reconciliation
 // can restore normal networking or re-apply the lock.
 type KillSwitchState struct {
 	Active          bool              `json:"active"`
+	AllowLAN        bool              `json:"allowLAN,omitempty"`
 	EndpointIPs     []string          `json:"endpointIPs"`
 	TunnelInterface string            `json:"tunnelInterface,omitempty"`
 	PreviousPolicy  map[string]string `json:"previousPolicy,omitempty"`
@@ -62,10 +79,10 @@ func NewKillSwitch() KillSwitch {
 // noopKillSwitch is used on platforms without a kill-switch backend.
 type noopKillSwitch struct{}
 
-func (n *noopKillSwitch) Enable(_ context.Context, _ string) error { return nil }
-func (n *noopKillSwitch) Update(_ context.Context, _ string) error { return nil }
-func (n *noopKillSwitch) Clear(_ context.Context) error            { return nil }
-func (n *noopKillSwitch) Active() bool                             { return false }
+func (n *noopKillSwitch) Enable(_ context.Context, _ string, _ bool) error { return nil }
+func (n *noopKillSwitch) Update(_ context.Context, _ string) error         { return nil }
+func (n *noopKillSwitch) Clear(_ context.Context) error                    { return nil }
+func (n *noopKillSwitch) Active() bool                                     { return false }
 
 // ---------------------------------------------------------------------------
 // Shared helpers for state persistence

@@ -25,8 +25,12 @@ export class DaemonClient {
     return this.request<StatusResponse>("GET", "/status");
   }
 
-  async connect(profileId: string): Promise<OkResponse> {
-    return this.request<OkResponse>("POST", "/connect", { profileId }, this.connectTimeoutMs);
+  async connect(profileId: string, opts?: { allowLAN?: boolean }): Promise<OkResponse> {
+    const body: Record<string, unknown> = { profileId };
+    if (opts?.allowLAN) {
+      body.allowLAN = true;
+    }
+    return this.request<OkResponse>("POST", "/connect", body, this.connectTimeoutMs);
   }
 
   async disconnect(): Promise<OkResponse> {

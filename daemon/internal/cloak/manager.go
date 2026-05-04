@@ -42,6 +42,10 @@ type inProcessManager struct {
 	hasSession    bool
 	sessionCtx    context.Context
 	sessionCancel context.CancelFunc
+	// boundLocalPort is the actual loopback UDP port the listener is bound
+	// to. Differs from profile.LocalPort when the caller requested dynamic
+	// allocation (LocalPort=0). Zero when not running.
+	boundLocalPort int
 	// generation bumps every Start; goroutine cleanup only clobbers shared
 	// state if its generation still matches the current one. Prevents a
 	// zombie RouteUDP goroutine from a previous Start from nuking the state
@@ -99,6 +103,14 @@ func (m *inProcessManager) Start(ctx context.Context, profile state.CloakProfile
 		return fmt.Errorf("listen UDP %s: %w", localAddr, err)
 	}
 
+	// Resolve the actual bound port; when the caller passed LocalPort=0 the
+	// kernel picks an ephemeral port and we need to surface it upward.
+	boundPort := udpAddr.Port
+	if laddr, ok := udpConn.LocalAddr().(*net.UDPAddr); ok {
+		boundPort = laddr.Port
+	}
+	boundLocalAddr := udpConn.LocalAddr().String()
+
 	worldState := common.RealWorldState
 	localConfig, remoteConfig, authInfo, err := rawConfig.ProcessRawConfig(worldState)
 	if err != nil {
@@ -121,10 +133,11 @@ func (m *inProcessManager) Start(ctx context.Context, profile state.CloakProfile
 	m.hasSession = false
 	m.sessionCtx = sessionCtx
 	m.sessionCancel = sessionCancel
+	m.boundLocalPort = boundPort
 	m.mu.Unlock()
 
 	pid := os.Getpid()
-	m.logs.Add(state.LogInfo, state.SourceCloak, fmt.Sprintf("in-process cloak started (pid=%d) listening on %s", pid, localAddr))
+	m.logs.Add(state.LogInfo, state.SourceCloak, fmt.Sprintf("in-process cloak started (pid=%d) listening on %s", pid, boundLocalAddr))
 	m.logs.Add(state.LogInfo, state.SourceCloak, fmt.Sprintf("cloak remote=%s encryption=%s numConn=%d udp=%t",
 		remoteConfig.RemoteAddr, profile.EncryptionMethod, remoteConfig.NumConn, authInfo.Unordered))
 
@@ -162,6 +175,7 @@ func (m *inProcessManager) Start(ctx context.Context, profile state.CloakProfile
 			m.done = nil
 			m.session = nil
 			m.stopping = false
+			m.boundLocalPort = 0
 			if m.sessionCancel != nil {
 				m.sessionCancel()
 			}
@@ -318,6 +332,7 @@ func (m *inProcessManager) forceResetStateLocked() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.running = false
+	m.boundLocalPort = 0
 	m.udpConn = nil
 	m.done = nil
 	m.session = nil
@@ -347,6 +362,19 @@ func (m *inProcessManager) Status() state.CloakStatus {
 	}
 }
 
+// BoundLocalPort reports the loopback UDP port the manager is currently bound
+// to, or 0 when not running. Callers that requested dynamic allocation
+// (LocalPort=0) use this to discover the kernel-assigned port so downstream
+// config (e.g. WireGuard peer endpoint) can be rewritten to match.
+func (m *inProcessManager) BoundLocalPort() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if !m.running {
+		return 0
+	}
+	return m.boundLocalPort
+}
+
 func buildRawConfig(profile state.CloakProfile, remoteHost string) (*client.RawConfig, error) {
 	uid, err := base64.StdEncoding.DecodeString(profile.UID)
 	if err != nil {
@@ -363,9 +391,12 @@ func buildRawConfig(profile state.CloakProfile, remoteHost string) (*client.RawC
 		encMethod = "plain"
 	}
 
+	// LocalPort == 0 is intentional: it requests an ephemeral port from the
+	// kernel. Loopback-only, so any port works — this sidesteps Windows
+	// Hyper-V UDP exclusion ranges that can claim 51820 at boot.
 	localPort := strconv.Itoa(profile.LocalPort)
-	if profile.LocalPort <= 0 {
-		localPort = "51820"
+	if profile.LocalPort < 0 {
+		return nil, fmt.Errorf("LocalPort must be >= 0, got %d", profile.LocalPort)
 	}
 
 	remotePort := strconv.Itoa(profile.RemotePort)

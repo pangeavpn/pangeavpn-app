@@ -65,6 +65,7 @@ const maxBodySize = 1 << 20
 
 type connectRequest struct {
 	ProfileID string `json:"profileId"`
+	AllowLAN  bool   `json:"allowLAN,omitempty"`
 }
 
 type okResponse struct {
@@ -108,7 +109,7 @@ func NewHandler(token string, service *Service) http.Handler {
 			return
 		}
 
-		err := service.Connect(r.Context(), req.ProfileID)
+		err := service.Connect(r.Context(), req.ProfileID, ConnectOptions{AllowLAN: req.AllowLAN})
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, okResponse{OK: false})
 			return

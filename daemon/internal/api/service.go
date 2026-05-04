@@ -39,11 +39,20 @@ type cloakSessionWaiter interface {
 	WaitForSession(ctx context.Context, timeout time.Duration) error
 }
 
+type cloakBoundPortReporter interface {
+	BoundLocalPort() int
+}
+
 type wgActiveInterfaceReporter interface {
 	ActiveInterfaceName(ctx context.Context, profile state.WireGuardProfile) (string, error)
 }
 
 var wgListenPortPattern = regexp.MustCompile(`(?im)^\s*ListenPort\s*=\s*(\d+)\s*$`)
+
+// wgLoopbackEndpointPattern matches "Endpoint = 127.0.0.1:<port>" lines in a
+// WireGuard config's [Peer] section. We rewrite the port when cloak's
+// loopback UDP socket binds to an ephemeral port instead of the default.
+var wgLoopbackEndpointPattern = regexp.MustCompile(`(?im)^(\s*Endpoint\s*=\s*127\.0\.0\.1:)\d+(\s*)$`)
 
 func NewService(
 	machine *state.Machine,
@@ -68,7 +77,16 @@ func (s *Service) StartBackground(ctx context.Context) {
 	go s.healthLoop(ctx)
 }
 
-func (s *Service) Connect(ctx context.Context, profileID string) error {
+// ConnectOptions carries per-connect toggles from the client. Defaults to
+// strict behavior (no LAN bypass) when zero-valued.
+type ConnectOptions struct {
+	// AllowLAN permits local-network IPv4 ranges both at the kill switch
+	// and in the WireGuard AllowedIPs, so captive-portal re-checks and
+	// gateway liveness probes work on restrictive WiFi.
+	AllowLAN bool
+}
+
+func (s *Service) Connect(ctx context.Context, profileID string, opts ConnectOptions) error {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
 
@@ -107,6 +125,14 @@ func (s *Service) Connect(ctx context.Context, profileID string) error {
 	}
 
 	wireGuardProfile := withCloakBypassHost(profile)
+	if opts.AllowLAN {
+		rewritten, err := wg.TransformWGConfigExcludeLAN(wireGuardProfile.ConfigText)
+		if err != nil {
+			s.setError(fmt.Sprintf("allow-lan config transform failed: %v", err))
+			return err
+		}
+		wireGuardProfile.ConfigText = rewritten
+	}
 	if checker, ok := s.wg.(wgPreflightChecker); ok {
 		if err := checker.Preflight(ctx, wireGuardProfile); err != nil {
 			s.setError(fmt.Sprintf("wireguard preflight failed: %v", err))
@@ -128,7 +154,7 @@ func (s *Service) Connect(ctx context.Context, profileID string) error {
 	s.machine.Set(state.StateConnecting, "enabling kill switch")
 	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("connect requested with profile %s", profile.ID))
 	stepStart := time.Now()
-	if err := s.killSwitch.Enable(ctx, profile.Cloak.RemoteHost); err != nil {
+	if err := s.killSwitch.Enable(ctx, profile.Cloak.RemoteHost, opts.AllowLAN); err != nil {
 		s.setError(fmt.Sprintf("kill switch enable failed: %v", err))
 		return err
 	}
@@ -138,9 +164,29 @@ func (s *Service) Connect(ctx context.Context, profileID string) error {
 	s.machine.Set(state.StateConnecting, "starting cloak")
 	stepStart = time.Now()
 	if !s.cloak.Status().Running {
-		if err := s.cloak.Start(ctx, profile.Cloak); err != nil {
+		// Ask cloak to bind an ephemeral loopback UDP port instead of the
+		// client-supplied default. The port is purely internal glue between
+		// cloak and wireguard-go, and requesting 0 lets the OS avoid
+		// reserved ranges (e.g. Windows Hyper-V UDP exclusions) that can
+		// claim the default 51820 after a reboot.
+		cloakStartProfile := profile.Cloak
+		cloakStartProfile.LocalPort = 0
+		if err := s.cloak.Start(ctx, cloakStartProfile); err != nil {
 			s.setError(fmt.Sprintf("cloak start failed: %v", err))
 			return err
+		}
+	}
+
+	if reporter, ok := s.cloak.(cloakBoundPortReporter); ok {
+		if boundPort := reporter.BoundLocalPort(); boundPort > 0 && boundPort != profile.Cloak.LocalPort {
+			rewritten, replaced := rewriteLoopbackEndpointPort(wireGuardProfile.ConfigText, boundPort)
+			if replaced {
+				s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("cloak bound loopback port %d; rewrote wireguard peer endpoint", boundPort))
+				wireGuardProfile.ConfigText = rewritten
+				profile.Cloak.LocalPort = boundPort
+			} else {
+				s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("cloak bound loopback port %d but no matching Endpoint=127.0.0.1 line found in wireguard config; connection may fail", boundPort))
+			}
 		}
 	}
 
@@ -732,6 +778,17 @@ func parseWireGuardListenPort(configText string) (int, bool) {
 		return 0, false
 	}
 	return port, true
+}
+
+// rewriteLoopbackEndpointPort replaces the port in "Endpoint = 127.0.0.1:<n>"
+// lines of a WireGuard config. Returns the rewritten text and whether any
+// replacement was made.
+func rewriteLoopbackEndpointPort(configText string, newPort int) (string, bool) {
+	if !wgLoopbackEndpointPattern.MatchString(configText) {
+		return configText, false
+	}
+	replacement := fmt.Sprintf("${1}%d${2}", newPort)
+	return wgLoopbackEndpointPattern.ReplaceAllString(configText, replacement), true
 }
 
 func withCloakBypassHost(profile state.Profile) state.WireGuardProfile {

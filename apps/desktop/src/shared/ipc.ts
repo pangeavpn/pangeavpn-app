@@ -25,6 +25,8 @@ export const IPC_CHANNELS = {
   getDirectIp: "pangea:getDirectIp",
   setDirectIpOnly: "pangea:setDirectIpOnly",
   getDirectIpOnly: "pangea:getDirectIpOnly",
+  setAllowLan: "pangea:setAllowLan",
+  getAllowLan: "pangea:getAllowLan",
   getCachedServers: "pangea:getCachedServers",
   cacheServers: "pangea:cacheServers",
   listDevices: "pangea:listDevices",
@@ -92,6 +94,8 @@ export interface PangeaApi {
   getDirectIp: () => Promise<boolean>;
   setDirectIpOnly: (enabled: boolean) => Promise<void>;
   getDirectIpOnly: () => Promise<boolean>;
+  setAllowLan: (enabled: boolean) => Promise<void>;
+  getAllowLan: () => Promise<boolean>;
   getCachedServers: () => Promise<ServerInfo[]>;
   cacheServers: (servers: ServerInfo[]) => Promise<void>;
   listDevices: () => Promise<DeviceInfo[]>;

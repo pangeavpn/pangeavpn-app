@@ -60,6 +60,8 @@ declare global {
     getDirectIp: () => Promise<boolean>;
     setDirectIpOnly: (enabled: boolean) => Promise<void>;
     getDirectIpOnly: () => Promise<boolean>;
+    setAllowLan: (enabled: boolean) => Promise<void>;
+    getAllowLan: () => Promise<boolean>;
     getCachedServers: () => Promise<ServerInfo[]>;
     cacheServers: (servers: ServerInfo[]) => Promise<void>;
     listDevices: () => Promise<DeviceInfo[]>;
