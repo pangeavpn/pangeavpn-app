@@ -9,6 +9,8 @@ import (
 	"os"
 	"strings"
 
+	"golang.zx2c4.com/wireguard/tun"
+
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/state"
 )
 
@@ -59,7 +61,7 @@ func (m *wireGuardGoManager) startLinux(ctx context.Context, profile state.WireG
 	parsed.wgConfig = injectFwMark(parsed.wgConfig, policyRoutingFwmark)
 
 	// Create in-process TUN device and WireGuard device.
-	dev, tunDev, err := m.createInProcessDevice(interfaceName, parsed.mtu, parsed.wgConfig)
+	dev, tunDev, err := m.createInProcessDeviceWithFactory(interfaceName, parsed.mtu, parsed.wgConfig, tun.CreateTUN)
 	if err != nil {
 		return err
 	}

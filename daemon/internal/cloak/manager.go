@@ -14,9 +14,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/cloak/ck/client"
-	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/cloak/ck/common"
-	mux "github.com/pangeavpn/pangeavpn-desktop/daemon/internal/cloak/ck/multiplex"
+	"github.com/pangeavpn/cloak/client"
+	"github.com/pangeavpn/cloak/common"
+	mux "github.com/pangeavpn/cloak/multiplex"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/state"
 	log "github.com/sirupsen/logrus"
 )
@@ -410,7 +410,7 @@ func buildRawConfig(profile state.CloakProfile, remoteHost string) (*client.RawC
 		EncryptionMethod: encMethod,
 		UID:              uid,
 		PublicKey:        pubKey,
-		NumConn:          4,
+		NumConn:          3,
 		LocalHost:        "127.0.0.1",
 		LocalPort:        localPort,
 		RemoteHost:       remoteHost,

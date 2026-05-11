@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"errors"
-	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -499,48 +498,6 @@ func TestConnect_WGPreflightFailure_DoesNotEnableKillSwitch(t *testing.T) {
 	}
 }
 
-func TestTunnelNamesForCleanup_UsesProfileTunnelNames(t *testing.T) {
-	cfg := state.Config{
-		Profiles: []state.Profile{
-			{
-				ID:   "profile-one",
-				Name: "Profile One",
-				WireGuard: state.WireGuardProfile{
-					TunnelName: "wg-alpha",
-				},
-			},
-			{
-				ID:   "profile-two",
-				Name: "Profile Two",
-				WireGuard: state.WireGuardProfile{
-					TunnelName: "actual-tunnel-name",
-				},
-			},
-			{
-				ID:   "profile-three",
-				Name: "Profile Three",
-				WireGuard: state.WireGuardProfile{
-					TunnelName: "WG-ALPHA",
-				},
-			},
-		},
-	}
-
-	current := state.Profile{
-		ID:   "selected-profile-id",
-		Name: "Selected Profile",
-		WireGuard: state.WireGuardProfile{
-			TunnelName: "current-tunnel",
-		},
-	}
-
-	got := tunnelNamesForCleanup(cfg, current)
-	want := []string{"current-tunnel", "wg-alpha", "actual-tunnel-name"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("tunnelNamesForCleanup() = %v, want %v", got, want)
-	}
-}
-
 func TestRewriteLoopbackEndpointPort(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -598,7 +555,7 @@ func TestConnect_UsesEphemeralCloakPortAndRewritesEndpoint(t *testing.T) {
 	ks := &fakeKillSwitch{}
 	svc := newTestService(t, cloak, wgMgr, ks, profile)
 
-	if err := svc.Connect(context.Background(), profile.ID); err != nil {
+	if err := svc.Connect(context.Background(), profile.ID, ConnectOptions{}); err != nil {
 		t.Fatalf("connect failed: %v", err)
 	}
 

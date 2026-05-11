@@ -471,7 +471,7 @@ async function resolveTrayServerId(): Promise<string | null> {
   return null;
 }
 
-async function provisionAndConnect(serverId: string): Promise<import("@pangeavpn/shared-types").OkResponse> {
+async function provisionProfileForServer(serverId: string): Promise<Profile> {
   const profile = await pangeaApiClient.provision(serverId);
 
   const config = await withDaemonRestartOnUnavailable(
@@ -490,8 +490,36 @@ async function provisionAndConnect(serverId: string): Promise<import("@pangeavpn
   lastServerId = serverId;
 
   await withDaemonRestartOnUnavailable(() => daemonClient.setConfig(profiles), "provision-setConfig");
+  return profile;
+}
 
+async function provisionAndConnect(serverId: string): Promise<import("@pangeavpn/shared-types").OkResponse> {
+  const profile = await provisionProfileForServer(serverId);
   const result = await connectWithRecovery(profile.id);
+  if (result.ok) {
+    lastConnectedProfileId = profile.id;
+  }
+  return result;
+}
+
+async function provisionAndSwitch(serverId: string): Promise<import("@pangeavpn/shared-types").OkResponse> {
+  let profile: Profile;
+  try {
+    profile = await provisionProfileForServer(serverId);
+  } catch (err) {
+    if (err instanceof AuthError) throw err;
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(`provision: ${msg}`);
+  }
+
+  const opts = { allowLAN: allowLanEnabled };
+  let result: import("@pangeavpn/shared-types").OkResponse;
+  try {
+    result = await withDaemonRestartOnUnavailable(() => daemonClient.switch(profile.id, opts), "switch");
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(`switch: ${msg}`);
+  }
   if (result.ok) {
     lastConnectedProfileId = profile.id;
   }
@@ -791,6 +819,22 @@ function registerIpcHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.provisionAndConnect, async (_event, serverId: string) => {
     try {
       const result = await provisionAndConnect(serverId);
+      void refreshTrayStatus();
+      return result;
+    } catch (err) {
+      if (err instanceof AuthError) {
+        pangeaApiClient.clearCache();
+        await auth.logout();
+        mainWindow?.webContents.send("auth:invalidated");
+        return { ok: false };
+      }
+      throw err;
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.provisionAndSwitch, async (_event, serverId: string) => {
+    try {
+      const result = await provisionAndSwitch(serverId);
       void refreshTrayStatus();
       return result;
     } catch (err) {

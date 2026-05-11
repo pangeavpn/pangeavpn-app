@@ -27,6 +27,13 @@ type Service struct {
 
 	opMu sync.Mutex
 
+	// cancelConnect aborts the in-flight Connect when set. Disconnect uses
+	// it to interrupt a connect that's still inside WaitForSession (up to
+	// the 10s cloak timeout) so the user can bail without waiting for the
+	// timeout to fire.
+	cancelMu      sync.Mutex
+	cancelConnect context.CancelFunc
+
 	profileMu      sync.RWMutex
 	currentProfile *state.Profile
 }
@@ -90,6 +97,19 @@ func (s *Service) Connect(ctx context.Context, profileID string, opts ConnectOpt
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
 
+	// Make this Connect interruptible by Disconnect — see cancelConnect docs.
+	connectCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	s.cancelMu.Lock()
+	s.cancelConnect = cancel
+	s.cancelMu.Unlock()
+	defer func() {
+		s.cancelMu.Lock()
+		s.cancelConnect = nil
+		s.cancelMu.Unlock()
+	}()
+	ctx = connectCtx
+
 	profile, found := s.config.FindProfile(profileID)
 	if !found {
 		return fmt.Errorf("profile not found: %s", profileID)
@@ -150,25 +170,31 @@ func (s *Service) Connect(ctx context.Context, profileID string, opts ConnectOpt
 		return err
 	}
 
-	// Step 1: Enable kill switch before any network activity.
 	s.machine.Set(state.StateConnecting, "enabling kill switch")
 	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("connect requested with profile %s", profile.ID))
 	stepStart := time.Now()
-	if err := s.killSwitch.Enable(ctx, profile.Cloak.RemoteHost, opts.AllowLAN); err != nil {
+	permittedHosts := killSwitchPermits(profile)
+	if err := s.killSwitch.Enable(ctx, permittedHosts, opts.AllowLAN); err != nil {
 		s.setError(fmt.Sprintf("kill switch enable failed: %v", err))
 		return err
 	}
 	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("kill switch enabled (%dms)", time.Since(stepStart).Milliseconds()))
 
-	// Step 2: Start Cloak. On failure, kill switch stays active (fail-closed).
+	if err := s.bringUpAfterKillSwitch(ctx, profile, wireGuardProfile); err != nil {
+		return err
+	}
+	s.logs.Add(state.LogInfo, state.SourceDaemon, "connect flow completed")
+	return nil
+}
+
+// bringUpAfterKillSwitch starts Cloak + WireGuard and updates the kill switch
+// with the tunnel interface. Assumes opMu is held and the kill switch is
+// already Enable()d. Shared by Connect and Switch.
+func (s *Service) bringUpAfterKillSwitch(ctx context.Context, profile state.Profile, wireGuardProfile state.WireGuardProfile) error {
 	s.machine.Set(state.StateConnecting, "starting cloak")
-	stepStart = time.Now()
+	stepStart := time.Now()
 	if !s.cloak.Status().Running {
-		// Ask cloak to bind an ephemeral loopback UDP port instead of the
-		// client-supplied default. The port is purely internal glue between
-		// cloak and wireguard-go, and requesting 0 lets the OS avoid
-		// reserved ranges (e.g. Windows Hyper-V UDP exclusions) that can
-		// claim the default 51820 after a reboot.
+		// Bind ephemeral loopback port to avoid Windows Hyper-V UDP exclusions on 51820.
 		cloakStartProfile := profile.Cloak
 		cloakStartProfile.LocalPort = 0
 		if err := s.cloak.Start(ctx, cloakStartProfile); err != nil {
@@ -201,7 +227,6 @@ func (s *Service) Connect(ctx context.Context, profileID string, opts ConnectOpt
 	}
 	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("cloak started (%dms)", time.Since(stepStart).Milliseconds()))
 
-	// Step 3: Start WireGuard. On failure, kill switch stays active (fail-closed).
 	s.machine.Set(state.StateConnecting, "starting wireguard")
 	stepStart = time.Now()
 	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("starting wireguard tunnel=%s", wireGuardProfile.TunnelName))
@@ -232,7 +257,6 @@ func (s *Service) Connect(ctx context.Context, profileID string, opts ConnectOpt
 	}
 	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("wireguard started (%dms)", time.Since(stepStart).Milliseconds()))
 
-	// Step 4: Wait for Cloak session and update kill switch concurrently.
 	stepStart = time.Now()
 	tunnelInterface := s.resolveWireGuardInterfaceName(ctx, wireGuardProfile)
 	updateCh := make(chan error, 1)
@@ -241,9 +265,9 @@ func (s *Service) Connect(ctx context.Context, profileID string, opts ConnectOpt
 	}()
 
 	if waiter, ok := s.cloak.(cloakSessionWaiter); ok {
-		waitCtx, cancel := context.WithTimeout(ctx, 6*time.Second)
+		waitCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		defer cancel()
-		if err := waiter.WaitForSession(waitCtx, 5*time.Second); err != nil {
+		if err := waiter.WaitForSession(waitCtx, 10*time.Second); err != nil {
 			<-updateCh
 			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cleanupCancel()
@@ -261,12 +285,107 @@ func (s *Service) Connect(ctx context.Context, profileID string, opts ConnectOpt
 
 	s.setCurrentProfile(profile)
 	s.machine.Set(state.StateConnected, "tunnel active")
-	s.logs.Add(state.LogInfo, state.SourceDaemon, "connect flow completed")
+	return nil
+}
 
+// Switch hot-swaps profile without dropping the kill switch. Interruptible
+// by Disconnect.
+func (s *Service) Switch(ctx context.Context, newProfileID string, opts ConnectOptions) error {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+
+	switchCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	s.cancelMu.Lock()
+	s.cancelConnect = cancel
+	s.cancelMu.Unlock()
+	defer func() {
+		s.cancelMu.Lock()
+		s.cancelConnect = nil
+		s.cancelMu.Unlock()
+	}()
+	ctx = switchCtx
+
+	currentState, _ := s.machine.Get()
+	if currentState != state.StateConnected {
+		return fmt.Errorf("switch requires connected state; currently %s", currentState)
+	}
+
+	oldProfile, ok := s.getCurrentProfile()
+	if !ok {
+		return errors.New("no active profile to switch from")
+	}
+
+	newProfile, found := s.config.FindProfile(newProfileID)
+	if !found {
+		return fmt.Errorf("profile not found: %s", newProfileID)
+	}
+	if newProfile.ID == oldProfile.ID {
+		s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("switch: already on %s, no-op", newProfile.ID))
+		return nil
+	}
+	if err := validateProfile(newProfile); err != nil {
+		return err
+	}
+
+	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("switch requested: %s -> %s (kill switch stays active)", oldProfile.ID, newProfile.ID))
+
+	s.machine.Set(state.StateConnecting, fmt.Sprintf("switching to %s: stopping wireguard", newProfile.ID))
+	if err := s.wg.Stop(ctx, withCloakBypassHost(oldProfile)); err != nil {
+		s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("switch: wg stop warning: %v", err))
+	}
+
+	s.machine.Set(state.StateConnecting, fmt.Sprintf("switching to %s: stopping cloak", newProfile.ID))
+	cloakStopCtx, cloakStopCancel := context.WithTimeout(context.Background(), 4*time.Second)
+	if err := s.cloak.Stop(cloakStopCtx); err != nil {
+		s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("switch: cloak stop warning: %v", err))
+	}
+	cloakStopCancel()
+
+	s.clearCurrentProfile()
+
+	wireGuardProfile := withCloakBypassHost(newProfile)
+	if opts.AllowLAN {
+		rewritten, err := wg.TransformWGConfigExcludeLAN(wireGuardProfile.ConfigText)
+		if err != nil {
+			s.setError(fmt.Sprintf("switch: allow-lan config transform failed: %v", err))
+			return err
+		}
+		wireGuardProfile.ConfigText = rewritten
+	}
+	if checker, ok := s.wg.(wgPreflightChecker); ok {
+		if err := checker.Preflight(ctx, wireGuardProfile); err != nil {
+			s.setError(fmt.Sprintf("switch: wireguard preflight failed: %v", err))
+			return err
+		}
+	}
+
+	s.machine.Set(state.StateConnecting, fmt.Sprintf("switching to %s: updating kill switch", newProfile.ID))
+	stepStart := time.Now()
+	if err := s.killSwitch.Enable(ctx, killSwitchPermits(newProfile), opts.AllowLAN); err != nil {
+		s.setError(fmt.Sprintf("switch: kill switch re-enable failed: %v", err))
+		return err
+	}
+	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("kill switch re-enabled for %s (%dms)", newProfile.ID, time.Since(stepStart).Milliseconds()))
+
+	if err := s.bringUpAfterKillSwitch(ctx, newProfile, wireGuardProfile); err != nil {
+		return err
+	}
+	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("switch flow completed: %s -> %s", oldProfile.ID, newProfile.ID))
 	return nil
 }
 
 func (s *Service) Disconnect(ctx context.Context) error {
+	// Interrupt any in-flight Connect first so we don't queue behind a
+	// 10s WaitForSession. The cancelled connect will exit, release opMu,
+	// and run its own cleanup — Disconnect then takes the lock and does
+	// the rest (kill switch teardown, etc).
+	s.cancelMu.Lock()
+	if cancel := s.cancelConnect; cancel != nil {
+		cancel()
+	}
+	s.cancelMu.Unlock()
+
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
 
@@ -791,6 +910,21 @@ func rewriteLoopbackEndpointPort(configText string, newPort int) (string, bool) 
 	return wgLoopbackEndpointPattern.ReplaceAllString(configText, replacement), true
 }
 
+// killSwitchPermits is the cloak endpoint plus any bypassHosts that need
+// direct reachability (e.g. Pangea hub for re-provisioning during a switch).
+func killSwitchPermits(profile state.Profile) []string {
+	out := make([]string, 0, 1+len(profile.WireGuard.BypassHosts))
+	if host := strings.TrimSpace(profile.Cloak.RemoteHost); host != "" {
+		out = append(out, host)
+	}
+	for _, h := range profile.WireGuard.BypassHosts {
+		if h = strings.TrimSpace(h); h != "" {
+			out = append(out, h)
+		}
+	}
+	return out
+}
+
 func withCloakBypassHost(profile state.Profile) state.WireGuardProfile {
 	copyProfile := profile.WireGuard
 	copyProfile.DNS = append([]string(nil), profile.WireGuard.DNS...)
@@ -801,27 +935,3 @@ func withCloakBypassHost(profile state.Profile) state.WireGuardProfile {
 	return copyProfile
 }
 
-func tunnelNamesForCleanup(cfg state.Config, current state.Profile) []string {
-	seen := make(map[string]struct{}, len(cfg.Profiles)+1)
-	names := make([]string, 0, len(cfg.Profiles)+1)
-
-	add := func(name string) {
-		trimmed := strings.TrimSpace(name)
-		if trimmed == "" {
-			return
-		}
-		key := strings.ToLower(trimmed)
-		if _, ok := seen[key]; ok {
-			return
-		}
-		seen[key] = struct{}{}
-		names = append(names, trimmed)
-	}
-
-	add(current.WireGuard.TunnelName)
-	for _, profile := range cfg.Profiles {
-		add(profile.WireGuard.TunnelName)
-	}
-
-	return names
-}

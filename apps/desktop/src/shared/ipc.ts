@@ -19,6 +19,7 @@ export const IPC_CHANNELS = {
   authGetState: "auth:getState",
   getServers: "pangea:getServers",
   provisionAndConnect: "pangea:provisionAndConnect",
+  provisionAndSwitch: "pangea:provisionAndSwitch",
   setDoh: "pangea:setDoh",
   getDoh: "pangea:getDoh",
   setDirectIp: "pangea:setDirectIp",
@@ -88,6 +89,7 @@ export interface PangeaApi {
   getAuthState: () => Promise<AuthState>;
   getServers: () => Promise<ServerInfo[]>;
   provisionAndConnect: (serverId: string) => Promise<OkResponse>;
+  provisionAndSwitch: (serverId: string) => Promise<OkResponse>;
   setDoh: (enabled: boolean) => Promise<void>;
   getDoh: () => Promise<boolean>;
   setDirectIp: (enabled: boolean) => Promise<void>;

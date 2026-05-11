@@ -17,12 +17,10 @@ import (
 // the connect flow, kept active on connect failure (fail-closed), and cleared
 // only by an explicit disconnect.
 type KillSwitch interface {
-	// Enable resolves the endpoint host and blocks all outbound traffic
-	// except loopback and the resolved endpoint IP(s). If allowLAN is true,
-	// local-network IPv4 ranges (RFC1918, link-local, multicast, broadcast)
-	// are also permitted so captive-portal re-checks and gateway liveness
-	// probes on restrictive WiFi don't trip Windows into "No internet".
-	Enable(ctx context.Context, endpointHost string, allowLAN bool) error
+	// Enable blocks all outbound except loopback + resolved IPs from each
+	// endpointHost. When allowLAN, also permits RFC1918/link-local/multicast/broadcast.
+	// Re-entrant: re-applies rules with new endpoints without opening the lock.
+	Enable(ctx context.Context, endpointHosts []string, allowLAN bool) error
 
 	// Update adds an allow rule for the active tunnel interface so that
 	// VPN-routed traffic can egress.
@@ -79,7 +77,7 @@ func NewKillSwitch() KillSwitch {
 // noopKillSwitch is used on platforms without a kill-switch backend.
 type noopKillSwitch struct{}
 
-func (n *noopKillSwitch) Enable(_ context.Context, _ string, _ bool) error { return nil }
+func (n *noopKillSwitch) Enable(_ context.Context, _ []string, _ bool) error { return nil }
 func (n *noopKillSwitch) Update(_ context.Context, _ string) error         { return nil }
 func (n *noopKillSwitch) Clear(_ context.Context) error                    { return nil }
 func (n *noopKillSwitch) Active() bool                                     { return false }
@@ -166,6 +164,67 @@ func removeKillSwitchState() error {
 // other packages (e.g. api).
 func LoadKillSwitchStatePublic() (KillSwitchState, error) {
 	return loadKillSwitchState()
+}
+
+func stringSlicesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func mergeStringSets(a, b []string) []string {
+	seen := make(map[string]struct{}, len(a)+len(b))
+	out := make([]string, 0, len(a)+len(b))
+	for _, s := range a {
+		if _, ok := seen[s]; ok {
+			continue
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
+	}
+	for _, s := range b {
+		if _, ok := seen[s]; ok {
+			continue
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// resolveEndpointHosts resolves each entry to IPs, dedups and sorts. An
+// entry that is already an IP literal contributes itself without a DNS lookup.
+func resolveEndpointHosts(ctx context.Context, hosts []string) ([]string, error) {
+	if len(hosts) == 0 {
+		return nil, fmt.Errorf("no endpoint hosts")
+	}
+	seen := make(map[string]struct{}, len(hosts))
+	out := make([]string, 0, len(hosts))
+	for _, host := range hosts {
+		ips, err := resolveEndpointIPs(ctx, host)
+		if err != nil {
+			return nil, err
+		}
+		for _, ip := range ips {
+			if _, ok := seen[ip]; ok {
+				continue
+			}
+			seen[ip] = struct{}{}
+			out = append(out, ip)
+		}
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("no IPs resolved from endpoint hosts")
+	}
+	sort.Strings(out)
+	return out, nil
 }
 
 // resolveEndpointIPs resolves a hostname or IP string to a deduplicated,

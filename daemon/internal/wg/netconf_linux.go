@@ -84,8 +84,9 @@ func setLinuxMTU(interfaceName string, mtu int) error {
 // Route management via netlink
 // ---------------------------------------------------------------------------
 
-// addLinuxEndpointRoutes adds host routes for WireGuard endpoint IPs through
-// the current default gateway so that endpoint traffic bypasses the tunnel.
+// addLinuxEndpointRoutes installs /32 bypass routes for cloak/hub IPs in
+// both the main table and the policy routing table (51820), so traffic from
+// non-fwmarked processes also escapes the tunnel.
 func addLinuxEndpointRoutes(ctx context.Context, endpointHosts []string) ([]routeSpec, error) {
 	routes := resolveEndpointRoutes(ctx, endpointHosts)
 	if len(routes) == 0 {
@@ -103,37 +104,30 @@ func addLinuxEndpointRoutes(ctx context.Context, endpointHosts []string) ([]rout
 		if route.family == "inet6" {
 			mask = net.CIDRMask(128, 128)
 		}
+		dst := &net.IPNet{IP: net.ParseIP(route.destination), Mask: mask}
 
-		nlRoute := &netlink.Route{
-			Dst: &net.IPNet{
-				IP:   net.ParseIP(route.destination),
-				Mask: mask,
-			},
-			Gw:        gwRoute.gw,
-			LinkIndex: gwRoute.linkIndex,
-		}
-		if err := netlink.RouteAdd(nlRoute); err != nil && !errors.Is(err, os.ErrExist) {
+		mainRoute := &netlink.Route{Dst: dst, Gw: gwRoute.gw, LinkIndex: gwRoute.linkIndex}
+		if err := netlink.RouteAdd(mainRoute); err != nil && !errors.Is(err, os.ErrExist) {
 			continue
 		}
+
+		policyRoute := &netlink.Route{Dst: dst, Gw: gwRoute.gw, LinkIndex: gwRoute.linkIndex, Table: policyRoutingTable}
+		_ = netlink.RouteAdd(policyRoute)
+
 		added = append(added, route)
 	}
 	return added, nil
 }
 
-// removeLinuxEndpointRoutes removes previously added endpoint bypass routes.
 func removeLinuxEndpointRoutes(routes []routeSpec) {
 	for _, route := range routes {
 		mask := net.CIDRMask(32, 32)
 		if route.family == "inet6" {
 			mask = net.CIDRMask(128, 128)
 		}
-		nlRoute := &netlink.Route{
-			Dst: &net.IPNet{
-				IP:   net.ParseIP(route.destination),
-				Mask: mask,
-			},
-		}
-		_ = netlink.RouteDel(nlRoute)
+		dst := &net.IPNet{IP: net.ParseIP(route.destination), Mask: mask}
+		_ = netlink.RouteDel(&netlink.Route{Dst: dst})
+		_ = netlink.RouteDel(&netlink.Route{Dst: dst, Table: policyRoutingTable})
 	}
 }
 
@@ -209,9 +203,13 @@ func addLinuxPolicyRouting(interfaceName string, allowedIPs []string) error {
 	return nil
 }
 
-// removeLinuxPolicyRouting tears down the custom table, routes, and ip rules.
-func removeLinuxPolicyRouting(interfaceName string, allowedIPs []string) {
-	// Remove ip rules first.
+// removeLinuxPolicyRouting tears down the ip rules and FLUSHES the entire
+// policy routing table. We own table 51820 exclusively, so the simplest
+// correct teardown is to drop every route in it — selective per-prefix
+// RouteDel calls were silently failing across switches and leaving stale
+// chunks behind. interfaceName and allowedIPs are unused but kept for
+// signature stability.
+func removeLinuxPolicyRouting(_ string, _ []string) {
 	fwmask := uint32(policyRoutingFwmark)
 	notRule := netlink.NewRule()
 	notRule.Invert = true
@@ -229,26 +227,20 @@ func removeLinuxPolicyRouting(interfaceName string, allowedIPs []string) {
 	suppressRule.Family = unix.AF_INET
 	_ = netlink.RuleDel(suppressRule)
 
-	// Remove routes from custom table.
-	link, err := netlink.LinkByName(interfaceName)
-	if err != nil {
-		return
-	}
-	for _, prefix := range allowedIPs {
-		routePrefixes, _, err := normalizedRoutesForPrefix(prefix)
+	flushPolicyRoutingTable()
+}
+
+// flushPolicyRoutingTable deletes every route currently in table 51820 for
+// both v4 and v6. Used on stop so a subsequent start gets a clean slate.
+func flushPolicyRoutingTable() {
+	for _, family := range []int{netlink.FAMILY_V4, netlink.FAMILY_V6} {
+		filter := &netlink.Route{Table: policyRoutingTable}
+		routes, err := netlink.RouteListFiltered(family, filter, netlink.RT_FILTER_TABLE)
 		if err != nil {
 			continue
 		}
-		for _, rp := range routePrefixes {
-			_, dst, parseErr := net.ParseCIDR(rp)
-			if parseErr != nil {
-				continue
-			}
-			_ = netlink.RouteDel(&netlink.Route{
-				LinkIndex: link.Attrs().Index,
-				Dst:       dst,
-				Table:     policyRoutingTable,
-			})
+		for i := range routes {
+			_ = netlink.RouteDel(&routes[i])
 		}
 	}
 }
@@ -272,8 +264,8 @@ func linuxDefaultGateway(family string) (linuxGatewayInfo, error) {
 	}
 
 	for _, route := range routes {
-		if route.Dst != nil {
-			continue // not a default route
+		if !isDefaultDst(route.Dst) {
+			continue
 		}
 		if route.Gw != nil {
 			return linuxGatewayInfo{gw: route.Gw, linkIndex: route.LinkIndex}, nil
@@ -283,6 +275,17 @@ func linuxDefaultGateway(family string) (linuxGatewayInfo, error) {
 		}
 	}
 	return linuxGatewayInfo{}, errors.New("default gateway not found")
+}
+
+// isDefaultDst reports whether dst represents 0.0.0.0/0 or ::/0. netlink
+// returns either nil or an explicit zero CIDR depending on kernel/library
+// version, so handle both.
+func isDefaultDst(dst *net.IPNet) bool {
+	if dst == nil {
+		return true
+	}
+	ones, _ := dst.Mask.Size()
+	return ones == 0 && dst.IP.IsUnspecified()
 }
 
 // deleteLinuxInterface removes the network interface via netlink.

@@ -37,6 +37,14 @@ export class DaemonClient {
     return this.request<OkResponse>("POST", "/disconnect", undefined, this.disconnectTimeoutMs);
   }
 
+  async switch(profileId: string, opts?: { allowLAN?: boolean }): Promise<OkResponse> {
+    const body: Record<string, unknown> = { profileId };
+    if (opts?.allowLAN) {
+      body.allowLAN = true;
+    }
+    return this.request<OkResponse>("POST", "/switch", body, this.connectTimeoutMs);
+  }
+
   async getLogs(since?: number): Promise<LogEntry[]> {
     const query = typeof since === "number" ? `?since=${since}` : "";
     return this.request<LogEntry[]>("GET", `/logs${query}`);

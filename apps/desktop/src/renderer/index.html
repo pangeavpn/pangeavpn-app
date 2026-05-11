@@ -114,13 +114,10 @@
 
         <div id="serverPanel" class="hero-server" hidden>
           <select id="serverSelect" hidden></select>
-          <div class="server-picker-wrapper">
-            <button id="serverPickerBtn" class="server-picker" type="button">
-              <span id="serverPickerLabel" class="server-picker-label">Select server</span>
-              <span class="server-picker-arrow">&#9662;</span>
-            </button>
-            <div id="serverPickerDropdown" class="server-picker-dropdown" hidden></div>
-          </div>
+          <button id="serverPickerBtn" class="server-picker" type="button">
+            <span id="serverPickerLabel" class="server-picker-label">Select server</span>
+            <span class="server-picker-arrow">&#9662;</span>
+          </button>
           <button id="serverRefreshBtn" class="btn-ghost" type="button" title="Refresh servers">&#8635;</button>
         </div>
 
@@ -350,6 +347,15 @@
         <button id="updateDownloadBtn" class="login-button update-download-btn" type="button">Download Update</button>
         <p id="updateMessage" class="update-message"></p>
       </div>
+    </div>
+
+    <!-- Full-screen server picker -->
+    <div id="serverPickerOverlay" class="server-picker-overlay" role="dialog" aria-modal="true" aria-label="Select server" aria-hidden="true">
+      <header class="server-picker-overlay-header">
+        <h2 class="server-picker-overlay-title">Select server</h2>
+        <button id="serverPickerOverlayCloseBtn" class="server-picker-overlay-close" type="button" aria-label="Close">&times;</button>
+      </header>
+      <div id="serverPickerOverlayList" class="server-picker-overlay-list" role="listbox" aria-label="Servers"></div>
     </div>
 
     <script type="module" src="./index.js"></script>

@@ -54,6 +54,7 @@ declare global {
     getAuthState: () => Promise<AuthState>;
     getServers: () => Promise<ServerInfo[]>;
     provisionAndConnect: (serverId: string) => Promise<OkResponse>;
+    provisionAndSwitch: (serverId: string) => Promise<OkResponse>;
     setDoh: (enabled: boolean) => Promise<void>;
     getDoh: () => Promise<boolean>;
     setDirectIp: (enabled: boolean) => Promise<void>;

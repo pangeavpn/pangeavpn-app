@@ -40,41 +40,50 @@ type linuxKillSwitch struct {
 	allowLAN bool
 }
 
-func (ks *linuxKillSwitch) Enable(ctx context.Context, endpointHost string, allowLAN bool) error {
+func (ks *linuxKillSwitch) Enable(ctx context.Context, endpointHosts []string, allowLAN bool) error {
 	ks.mu.Lock()
 	defer ks.mu.Unlock()
 
-	if ks.active {
-		return nil
-	}
-
-	ips, err := resolveEndpointIPs(ctx, endpointHost)
+	ips, err := resolveEndpointHosts(ctx, endpointHosts)
 	if err != nil {
 		return fmt.Errorf("kill switch enable: %w", err)
 	}
 
+	var tunnelInterface string
+	if ks.active {
+		prev, _ := loadKillSwitchState()
+		if stringSlicesEqual(prev.EndpointIPs, ips) && prev.AllowLAN == allowLAN {
+			return nil
+		}
+		tunnelInterface = prev.TunnelInterface
+	}
+
 	st := KillSwitchState{
-		Active:      true,
-		AllowLAN:    allowLAN,
-		EndpointIPs: ips,
+		Active:          true,
+		AllowLAN:        allowLAN,
+		EndpointIPs:     ips,
+		TunnelInterface: tunnelInterface,
 	}
 	if err := saveKillSwitchState(st); err != nil {
 		return fmt.Errorf("kill switch enable: save state: %w", err)
 	}
 
-	// Try nftables first, fall back to iptables.
 	if hasNFT(ctx) {
 		ks.useNFT = true
-		if err := applyNFTRules(ctx, ips, "", allowLAN); err != nil {
-			_ = removeNFTRules(ctx)
-			_ = removeKillSwitchState()
+		if err := applyNFTRules(ctx, ips, tunnelInterface, allowLAN); err != nil {
+			if !ks.active {
+				_ = removeNFTRules(ctx)
+				_ = removeKillSwitchState()
+			}
 			return fmt.Errorf("kill switch enable (nft): %w", err)
 		}
 	} else {
 		ks.useNFT = false
-		if err := applyIPTablesRules(ctx, ips, "", allowLAN); err != nil {
-			_ = removeIPTablesRules(ctx)
-			_ = removeKillSwitchState()
+		if err := applyIPTablesRules(ctx, ips, tunnelInterface, allowLAN); err != nil {
+			if !ks.active {
+				_ = removeIPTablesRules(ctx)
+				_ = removeKillSwitchState()
+			}
 			return fmt.Errorf("kill switch enable (iptables): %w", err)
 		}
 	}

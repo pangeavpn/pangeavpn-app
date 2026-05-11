@@ -4,7 +4,6 @@ package platform
 
 import (
 	"fmt"
-	"net/netip"
 	"regexp"
 	"strings"
 	"time"
@@ -128,69 +127,6 @@ func flushStaleLUID(luid winipcfg.LUID, alias string) []string {
 	}
 	if err := luid.FlushDNS(v6); err != nil && err != windows.ERROR_NOT_FOUND {
 		// best-effort
-	}
-
-	return actions
-}
-
-// removeStaleTunnelDefaultRoutes removes 0.0.0.0/0 routes from stale tunnel
-// adapters using native APIs.
-func removeStaleTunnelDefaultRoutes(tunnelNames []string, activeLUIDs map[uint64]struct{}) []string {
-	targets := normalizeTunnelNames(tunnelNames)
-	if len(targets) == 0 {
-		return nil
-	}
-
-	targetSet := make(map[string]struct{}, len(targets))
-	for _, t := range targets {
-		targetSet[t] = struct{}{}
-	}
-
-	defaultDst := netip.MustParsePrefix("0.0.0.0/0")
-	v4 := winipcfg.AddressFamily(windows.AF_INET)
-
-	routes, err := winipcfg.GetIPForwardTable2(v4)
-	if err != nil {
-		return nil
-	}
-
-	// Build LUID→alias map for stale tunnel adapters.
-	staleLUIDs := make(map[winipcfg.LUID]string)
-	ifaces, err := winipcfg.GetIfTable2Ex(winipcfg.MibIfEntryNormalWithoutStatistics)
-	if err != nil {
-		return nil
-	}
-	for i := range ifaces {
-		iface := &ifaces[i]
-		desc := strings.ToLower(strings.TrimSpace(iface.Description()))
-		if !strings.Contains(desc, "wintun") && !strings.Contains(desc, "wireguard") {
-			continue
-		}
-		alias := strings.TrimSpace(iface.Alias())
-		if !matchesTunnelTarget(alias, targetSet) {
-			continue
-		}
-		luid := winipcfg.LUID(iface.InterfaceLUID)
-		if _, active := activeLUIDs[uint64(luid)]; active {
-			continue
-		}
-		staleLUIDs[luid] = alias
-	}
-
-	var actions []string
-	for _, route := range routes {
-		dstPrefix := route.DestinationPrefix.Prefix()
-		if dstPrefix != defaultDst {
-			continue
-		}
-		alias, isStale := staleLUIDs[route.InterfaceLUID]
-		if !isStale {
-			continue
-		}
-		nextHop := route.NextHop.Addr()
-		if err := route.InterfaceLUID.DeleteRoute(defaultDst, nextHop); err == nil {
-			actions = append(actions, fmt.Sprintf("removed default route on %s", alias))
-		}
 	}
 
 	return actions

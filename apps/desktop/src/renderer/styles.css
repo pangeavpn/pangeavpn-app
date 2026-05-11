@@ -981,13 +981,8 @@ body[data-theme="light"] .menu-dropdown {
   flex-shrink: 0;
 }
 
-.server-picker-wrapper {
-  flex: 1;
-  position: relative;
-}
-
 .server-picker {
-  width: 100%;
+  flex: 1;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1038,53 +1033,176 @@ body[data-theme="light"] .menu-dropdown {
   transform: rotate(180deg);
 }
 
-.server-picker-dropdown {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
-  right: 0;
-  max-height: 200px;
-  overflow-y: auto;
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  padding: 4px;
-  z-index: 50;
-  box-shadow: var(--card-shadow);
-  scrollbar-width: thin;
-}
+/* ── Full-screen server picker overlay ────────────────────── */
 
-body[data-theme="light"] .server-picker-dropdown {
-  box-shadow: var(--card-shadow);
-}
-
-.server-picker-option {
+.server-picker-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1500;
   display: flex;
   flex-direction: column;
-  gap: 1px;
-  padding: 8px 12px;
-  border-radius: 12px;
-  cursor: pointer;
-  transition: background 0.1s ease;
+  background: var(--bg-base);
+  opacity: 0;
+  transform: translateX(100%);
+  pointer-events: none;
+  visibility: hidden;
+  transition: opacity 250ms ease, transform 250ms ease, visibility 0s linear 250ms;
 }
 
-.server-picker-option:hover {
+.server-picker-overlay.visible {
+  opacity: 1;
+  transform: translateX(0);
+  pointer-events: auto;
+  visibility: visible;
+  transition: opacity 250ms ease, transform 250ms ease, visibility 0s linear 0s;
+}
+
+.server-picker-overlay-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 20px 24px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.server-picker-overlay-title {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.server-picker-overlay-close {
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  color: var(--text-muted);
+  font-size: 1.4rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.server-picker-overlay-close:hover {
+  background: var(--btn-ghost-bg);
+  color: var(--text-primary);
+}
+
+.server-picker-overlay-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 16px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--accent) transparent;
+}
+
+.server-picker-overlay-list::-webkit-scrollbar {
+  width: 16px;
+}
+
+.server-picker-overlay-list::-webkit-scrollbar-track {
+  background: linear-gradient(
+    to right,
+    transparent calc(50% - 0.5px),
+    rgba(255, 255, 255, 0.55) calc(50% - 0.5px),
+    rgba(255, 255, 255, 0.55) calc(50% + 0.5px),
+    transparent calc(50% + 0.5px)
+  );
+}
+
+/* Vertical gradient caps the orange band at 60px centred regardless of natural thumb height. */
+.server-picker-overlay-list::-webkit-scrollbar-thumb {
+  background-image: linear-gradient(
+    to bottom,
+    transparent calc(50% - 30px),
+    var(--accent) calc(50% - 30px),
+    var(--accent) calc(50% + 30px),
+    transparent calc(50% + 30px)
+  );
+  background-clip: padding-box;
+  border: 4px solid transparent;
+  border-radius: 99px;
+}
+
+.server-picker-overlay-list::-webkit-scrollbar-thumb:hover {
+  background-image: linear-gradient(
+    to bottom,
+    transparent calc(50% - 30px),
+    var(--accent-hover) calc(50% - 30px),
+    var(--accent-hover) calc(50% + 30px),
+    transparent calc(50% + 30px)
+  );
+}
+
+.server-picker-overlay-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease, transform 0.08s ease;
+}
+
+.server-picker-overlay-item:hover {
   background: var(--btn-ghost-bg);
 }
 
-.server-picker-option.selected {
-  background: var(--accent-glow);
+.server-picker-overlay-item:active {
+  transform: scale(0.99);
 }
 
-.server-picker-option-name {
-  font-size: 0.85rem;
+.server-picker-overlay-item.selected {
+  background: var(--accent-glow);
+  border-color: var(--accent, var(--border));
+}
+
+.server-picker-overlay-item-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.server-picker-overlay-item-name {
+  font-size: 0.95rem;
   color: var(--text-primary);
   font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.server-picker-option-region {
+.server-picker-overlay-item-region {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+.server-picker-overlay-item-id {
   font-size: 0.72rem;
   color: var(--text-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  flex-shrink: 0;
+}
+
+.server-picker-overlay-empty {
+  padding: 32px 16px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.9rem;
 }
 
 /* ── Hero action buttons ──────────────────────────────────── */

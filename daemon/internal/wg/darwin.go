@@ -9,6 +9,8 @@ import (
 	"os"
 	"strings"
 
+	"golang.zx2c4.com/wireguard/tun"
+
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/state"
 )
 
@@ -52,7 +54,7 @@ func (m *wireGuardGoManager) startDarwin(ctx context.Context, profile state.Wire
 	}
 
 	// Create in-process TUN device (utun) and WireGuard device.
-	dev, tunDev, err := m.createInProcessDevice("utun", parsed.mtu, parsed.wgConfig)
+	dev, tunDev, err := m.createInProcessDeviceWithFactory("utun", parsed.mtu, parsed.wgConfig, tun.CreateTUN)
 	if err != nil {
 		return err
 	}

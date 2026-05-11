@@ -51,6 +51,8 @@ type routeSpec struct {
 	destination string
 }
 
+// darwinDNSOverride is populated only on macOS (see netconf_darwin.go).
+// Declared here because tunnelSession embeds it unconditionally.
 type darwinDNSOverride struct {
 	service    string
 	dnsServers []string
@@ -69,6 +71,8 @@ const (
 	linuxDNSModeResolvConf   linuxDNSMode = "resolv_conf"
 )
 
+// linuxDNSOverride is populated only on Linux (see netconf_linux.go).
+// Declared here because tunnelSession holds a pointer to it unconditionally.
 type linuxDNSOverride struct {
 	mode           linuxDNSMode
 	interfaceName  string
@@ -122,18 +126,10 @@ func (m *wireGuardGoManager) Preflight(_ context.Context, profile state.WireGuar
 // In-process device lifecycle
 // ---------------------------------------------------------------------------
 
-// createInProcessDevice creates a TUN device and WireGuard device, applies
-// the UAPI configuration, and brings the device up. The caller is responsible
-// for platform-specific address/route/DNS configuration on the returned
-// interface.
-func (m *wireGuardGoManager) createInProcessDevice(
-	interfaceName string,
-	mtu int,
-	wgConfig string,
-) (*device.Device, tun.Device, error) {
-	return m.createInProcessDeviceWithFactory(interfaceName, mtu, wgConfig, tun.CreateTUN)
-}
-
+// createInProcessDeviceWithFactory creates a TUN device via the supplied
+// factory and a WireGuard device, applies the UAPI configuration, and brings
+// the device up. The caller is responsible for platform-specific
+// address/route/DNS configuration on the returned interface.
 func (m *wireGuardGoManager) createInProcessDeviceWithFactory(
 	interfaceName string,
 	mtu int,
@@ -584,30 +580,3 @@ func resolveHostIPs(ctx context.Context, host string) []net.IP {
 	return ips
 }
 
-// normalizedRoutesForPrefix splits 0.0.0.0/0 into two /1 prefixes (and
-// similarly for ::/0) to avoid replacing the default route.
-func normalizedRoutesForPrefix(prefix string) ([]string, string, error) {
-	ip, network, err := net.ParseCIDR(prefix)
-	if err != nil {
-		return nil, "", fmt.Errorf("invalid allowed ip %s: %w", prefix, err)
-	}
-
-	ones, bits := network.Mask.Size()
-	if bits == 32 {
-		if ones == 0 {
-			return []string{"0.0.0.0/1", "128.0.0.0/1"}, "inet", nil
-		}
-		return []string{network.String()}, "inet", nil
-	}
-	if bits == 128 {
-		if ones == 0 {
-			return []string{"::/1", "8000::/1"}, "inet6", nil
-		}
-		return []string{network.String()}, "inet6", nil
-	}
-
-	if ip.To4() != nil {
-		return []string{network.String()}, "inet", nil
-	}
-	return []string{network.String()}, "inet6", nil
-}

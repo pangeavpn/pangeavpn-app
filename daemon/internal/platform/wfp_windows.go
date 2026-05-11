@@ -64,7 +64,6 @@ const (
 var (
 	fwpmLayerAleAuthConnectV4    = windows.GUID{Data1: 0xc38d57d1, Data2: 0x05a7, Data3: 0x4c33, Data4: [8]byte{0x90, 0x4f, 0x7f, 0xbc, 0xee, 0xe6, 0x0e, 0x82}}
 	fwpmLayerAleAuthConnectV6    = windows.GUID{Data1: 0x4a72393b, Data2: 0x319f, Data3: 0x44bc, Data4: [8]byte{0x84, 0xc3, 0xba, 0x54, 0xdc, 0xb3, 0xb6, 0xb4}}
-	fwpmLayerAleAuthRecvAcceptV4 = windows.GUID{Data1: 0xe1cd9fe7, Data2: 0xf4b5, Data3: 0x4273, Data4: [8]byte{0x96, 0xc0, 0x59, 0x2e, 0x48, 0x7b, 0x86, 0x50}}
 	fwpmLayerAleAuthRecvAcceptV6 = windows.GUID{Data1: 0xa3b42c97, Data2: 0x9f04, Data3: 0x4672, Data4: [8]byte{0xb8, 0x7e, 0xce, 0xe9, 0xc4, 0x83, 0x25, 0x7f}}
 )
 
@@ -171,10 +170,6 @@ type fwpV4AddrAndMask struct {
 
 type wfpEngine struct {
 	handle windows.Handle
-}
-
-func wfpAvailable() bool {
-	return modFwpuclnt.Load() == nil && procFwpmEngineOpen0.Find() == nil
 }
 
 func wfpOpen() (*wfpEngine, error) {

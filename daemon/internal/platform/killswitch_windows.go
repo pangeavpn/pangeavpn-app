@@ -55,17 +55,49 @@ type windowsKillSwitch struct {
 	tunnelFilterId uint64     // WFP filter ID for the tunnel interface permit
 }
 
-func (ks *windowsKillSwitch) Enable(ctx context.Context, endpointHost string, allowLAN bool) error {
+func (ks *windowsKillSwitch) Enable(ctx context.Context, endpointHosts []string, allowLAN bool) error {
 	ks.mu.Lock()
 	defer ks.mu.Unlock()
 
-	if ks.active {
-		return nil
-	}
-
-	ips, err := resolveEndpointIPs(ctx, endpointHost)
+	ips, err := resolveEndpointHosts(ctx, endpointHosts)
 	if err != nil {
 		return fmt.Errorf("kill switch enable: %w", err)
+	}
+
+	// Re-entry: stack new endpoint permits in one WFP transaction. Old permits
+	// linger harmlessly until Disconnect closes the dynamic session.
+	if ks.active && ks.engine != nil {
+		prev, _ := loadKillSwitchState()
+		if stringSlicesEqual(prev.EndpointIPs, ips) && prev.AllowLAN == allowLAN {
+			return nil
+		}
+
+		if err := ks.engine.beginTransaction(); err != nil {
+			return fmt.Errorf("kill switch re-enable: %w", err)
+		}
+		for _, ip := range ips {
+			if _, err := ks.engine.addPermitEndpointIP(ip); err != nil {
+				ks.engine.abortTransaction()
+				return fmt.Errorf("kill switch re-enable: permit %s: %w", ip, err)
+			}
+		}
+		// LAN permits can only be added on re-entry, not removed (no filter IDs tracked).
+		if allowLAN && !prev.AllowLAN {
+			for _, cidr := range LANAllowPrefixes {
+				if _, err := ks.engine.addPermitIPv4Subnet(cidr); err != nil {
+					ks.engine.abortTransaction()
+					return fmt.Errorf("kill switch re-enable: permit LAN %s: %w", cidr, err)
+				}
+			}
+		}
+		if err := ks.engine.commitTransaction(); err != nil {
+			return fmt.Errorf("kill switch re-enable: %w", err)
+		}
+
+		prev.EndpointIPs = mergeStringSets(prev.EndpointIPs, ips)
+		prev.AllowLAN = allowLAN || prev.AllowLAN
+		_ = saveKillSwitchState(prev)
+		return nil
 	}
 
 	// Persist state for crash recovery. No PreviousPolicy — WFP doesn't

@@ -133,6 +133,32 @@ func NewHandler(token string, service *Service) http.Handler {
 		writeJSON(w, http.StatusOK, okResponse{OK: true})
 	})))
 
+	mux.Handle("/switch", auth.RequireBearer(token, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+
+		r.Body = http.MaxBytesReader(w, r.Body, maxBodySize)
+		var req connectRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid json")
+			return
+		}
+		if req.ProfileID == "" {
+			writeError(w, http.StatusBadRequest, "profileId is required")
+			return
+		}
+
+		err := service.Switch(r.Context(), req.ProfileID, ConnectOptions{AllowLAN: req.AllowLAN})
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, okResponse{OK: false})
+			return
+		}
+
+		writeJSON(w, http.StatusOK, okResponse{OK: true})
+	})))
+
 	mux.Handle("/logs", auth.RequireBearer(token, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")

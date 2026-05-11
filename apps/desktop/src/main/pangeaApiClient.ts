@@ -310,7 +310,7 @@ function buildWireGuardConfig(
     `PrivateKey = ${privateKey}`,
     `Address = ${assignedIP}/32`,
     `DNS = ${dns}`,
-    "MTU = 1280",
+    "MTU = 1380",
     "",
     "[Peer]",
     `PublicKey = ${serverPubkey}`,
@@ -396,6 +396,62 @@ export class PangeaApiClient {
   }
 
   /**
+   * Verify that /v1/secure is reachable and decryptable on the currently
+   * selected transport path (direct domain when dohResolvedIp is null,
+   * DoH-resolved direct IP otherwise).
+   *
+   * Uses /api/client/regions as the inner probe route because the hub's
+   * /v1/secure handler enforces an ALLOWED_ROUTES whitelist; unauthenticated
+   * routes like /health are rejected with 403 before the crypto roundtrip
+   * completes. An unauthenticated call returns inner status 401 inside a
+   * successfully-decrypted envelope, which is all the probe needs.
+   */
+  private async trySecureProbeCurrentPath(): Promise<boolean> {
+    const { envelope, aesKey } = encryptRequest("GET", "/api/client/regions", {}, undefined);
+    const envelopeJson = JSON.stringify(envelope);
+
+    try {
+      let rawResponse: Response;
+      if (this.dohResolvedIp) {
+        rawResponse = await fetchDohResolved(this.dohResolvedIp, HUB_HOSTNAME, "/v1/secure", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: envelopeJson,
+          timeoutMs: 5000
+        });
+      } else {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 5000);
+        try {
+          rawResponse = await net.fetch(`${HUB_API_BASE}/v1/secure`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: envelopeJson,
+            signal: controller.signal,
+          });
+        } finally {
+          clearTimeout(timer);
+        }
+      }
+
+      if (!rawResponse.ok) {
+        return false;
+      }
+
+      const responseText = await rawResponse.text();
+      if (responseText.trimStart().startsWith("<")) {
+        return false;
+      }
+
+      const encryptedResponse = JSON.parse(responseText) as EncryptedResponse;
+      decryptResponse(aesKey, encryptedResponse);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
    * Ensure we have a working connection strategy to the hub API.
    * Tries in order:
    *   1. Direct domain (normal DNS works)
@@ -412,9 +468,9 @@ export class PangeaApiClient {
     // 1. Try direct domain (normal DNS) — skip if direct IP only mode
     if (!this.directIpOnly) {
       console.log(`[HubURL] Trying direct domain: ${HUB_API_BASE}`);
-      if (await this.tryHealthDirect()) {
-        console.log(`[HubURL] Direct domain works`);
-        this.dohResolvedIp = null;
+      this.dohResolvedIp = null;
+      if (await this.trySecureProbeCurrentPath()) {
+        console.log(`[HubURL] Direct domain secure probe works`);
         this.hubReady = true;
         return;
       }
@@ -428,18 +484,14 @@ export class PangeaApiClient {
       const resolvedIp = await resolveViaDoH(HUB_HOSTNAME);
       if (resolvedIp) {
         console.log(`[HubURL] Trying DoH-resolved IP ${resolvedIp}`);
-        try {
-          const response = await fetchDohResolved(resolvedIp, HUB_HOSTNAME, "/health", { timeoutMs: 5000 });
-          if (response.ok) {
-            console.log(`[HubURL] DoH works`);
-            this.dohResolvedIp = resolvedIp;
-            this.hubReady = true;
-            return;
-          }
-          console.log(`[HubURL] DoH health returned ${response.status}`);
-        } catch (err) {
-          console.log(`[HubURL] DoH failed: ${err instanceof Error ? err.message : err}`);
+        this.dohResolvedIp = resolvedIp;
+        if (await this.trySecureProbeCurrentPath()) {
+          console.log(`[HubURL] DoH secure probe works`);
+          this.hubReady = true;
+          return;
         }
+        console.log(`[HubURL] DoH secure probe failed`);
+        this.dohResolvedIp = null;
       }
     }
 
@@ -604,7 +656,10 @@ export class PangeaApiClient {
       const response = await this.hubFetch("/api/client/token-login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ vpnAccessToken: vpnAccessToken.trim() }),
+        body: JSON.stringify({
+          vpnAccessToken: vpnAccessToken.trim(),
+          ...(this.identityPubkey ? { identityPubkey: this.identityPubkey } : {})
+        }),
         signal: controller.signal
       });
 
@@ -659,7 +714,13 @@ export class PangeaApiClient {
 
   async getServers(): Promise<ServerInfo[]> {
     if (!this.licenseKey) throw new Error("Not authenticated");
-    const data = await this.hubRequest<ServerInfo[]>("GET", "/api/client/regions");
+    // Send identityPubkey so the hub returns this device's own cloakUid
+    // and re-pushes it to every region. Older hubs ignore the param and
+    // fall back to their LIMIT-1 path, so this is safe to send always.
+    const route = this.identityPubkey
+      ? `/api/client/regions?identityPubkey=${encodeURIComponent(this.identityPubkey)}`
+      : "/api/client/regions";
+    const data = await this.hubRequest<ServerInfo[]>("GET", route);
     this.cachedServers = data;
     return data;
   }
@@ -741,7 +802,8 @@ export class PangeaApiClient {
       wireguard: {
         configText,
         tunnelName: "pangeavpn",
-        dns: dnsServers
+        dns: dnsServers,
+        bypassHosts: this.dohResolvedIp ? [this.dohResolvedIp] : []
       }
     };
   }

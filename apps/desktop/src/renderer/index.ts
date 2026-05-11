@@ -83,7 +83,9 @@ const menuDropdown = must<HTMLElement>("menuDropdown");
 const manageSubLink = must<HTMLAnchorElement>("manageSubLink");
 const serverPickerBtn = must<HTMLButtonElement>("serverPickerBtn");
 const serverPickerLabel = must<HTMLElement>("serverPickerLabel");
-const serverPickerDropdown = must<HTMLElement>("serverPickerDropdown");
+const serverPickerOverlay = must<HTMLElement>("serverPickerOverlay");
+const serverPickerOverlayList = must<HTMLElement>("serverPickerOverlayList");
+const serverPickerOverlayCloseBtn = must<HTMLButtonElement>("serverPickerOverlayCloseBtn");
 const heroMeta = must<HTMLElement>("heroMeta");
 const heroServer = must<HTMLElement>("heroServer");
 const cloakDot = must<HTMLElement>("cloakDot");
@@ -112,6 +114,12 @@ let logEntries: LogEntry[] = [];
 let authState: AuthState = { authenticated: false, user: null };
 let servers: ServerInfo[] = [];
 let serverWorking = false;
+// True once a connect attempt has been in-flight for >= 1s, signaling the UI
+// to enable the disconnect button so the user can bail out before the 10s
+// cloak timeout fires.
+let connectCancelAllowed = false;
+let connectCancelTimer: ReturnType<typeof setTimeout> | null = null;
+const CONNECT_CANCEL_DELAY_MS = 1000;
 
 profileSelect.addEventListener("change", () => {
   const selected = profiles.find((profile) => profile.id === profileSelect.value);
@@ -146,17 +154,27 @@ manageSubLink.addEventListener("click", (e) => {
   window.openExternal?.("https://pangeavpn.org");
 });
 
-serverPickerBtn.addEventListener("click", () => {
-  const open = serverPickerDropdown.hidden;
-  serverPickerDropdown.hidden = !open;
-  serverPickerBtn.setAttribute("aria-expanded", String(open));
-});
+function openServerPicker(): void {
+  if (serverPickerBtn.disabled) return;
+  serverPickerOverlay.classList.add("visible");
+  serverPickerOverlay.setAttribute("aria-hidden", "false");
+  serverPickerBtn.setAttribute("aria-expanded", "true");
+}
 
-document.addEventListener("click", (e) => {
-  const target = e.target as Node;
-  if (!serverPickerDropdown.hidden && !serverPickerBtn.contains(target) && !serverPickerDropdown.contains(target)) {
-    serverPickerDropdown.hidden = true;
-    serverPickerBtn.setAttribute("aria-expanded", "false");
+function closeServerPicker(): void {
+  serverPickerOverlay.classList.remove("visible");
+  serverPickerOverlay.setAttribute("aria-hidden", "true");
+  serverPickerBtn.setAttribute("aria-expanded", "false");
+}
+
+serverPickerBtn.addEventListener("click", openServerPicker);
+serverPickerOverlayCloseBtn.addEventListener("click", closeServerPicker);
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && serverPickerOverlay.classList.contains("visible")) {
+    e.preventDefault();
+    e.stopPropagation();
+    closeServerPicker();
   }
 });
 
@@ -284,7 +302,7 @@ clearLogsBtn.addEventListener("click", () => {
 });
 
 toggleManualBuilderBtn.addEventListener("click", () => {
-  setManualBuilderVisibility(manualBuilderSection.hidden);
+  setManualBuilderVisibility(Boolean(manualBuilderSection.hidden));
 });
 
 manualBuilderForm.addEventListener("submit", async (event) => {
@@ -783,6 +801,13 @@ serverConnectBtn.addEventListener("click", async () => {
   }
 
   serverWorking = true;
+  connectCancelAllowed = false;
+  if (connectCancelTimer) clearTimeout(connectCancelTimer);
+  connectCancelTimer = setTimeout(() => {
+    connectCancelAllowed = true;
+    connectCancelTimer = null;
+    updateServerControlStates();
+  }, CONNECT_CANCEL_DELAY_MS);
   updateServerBusyIndicator(true, "Provisioning...");
   updateServerControlStates();
   try {
@@ -816,10 +841,69 @@ serverConnectBtn.addEventListener("click", async () => {
     await refreshStatus();
   } finally {
     serverWorking = false;
+    if (connectCancelTimer) {
+      clearTimeout(connectCancelTimer);
+      connectCancelTimer = null;
+    }
+    connectCancelAllowed = false;
     updateServerBusyIndicator(false);
     updateServerControlStates();
   }
 });
+
+async function switchToServer(serverId: string): Promise<void> {
+  if (!pangeaApi || !daemonApi) return;
+  if (!serverId) return;
+
+  serverWorking = true;
+  connectCancelAllowed = false;
+  if (connectCancelTimer) clearTimeout(connectCancelTimer);
+  connectCancelTimer = setTimeout(() => {
+    connectCancelAllowed = true;
+    connectCancelTimer = null;
+    updateServerControlStates();
+  }, CONNECT_CANCEL_DELAY_MS);
+  updateServerBusyIndicator(true, "Provisioning...");
+  updateServerControlStates();
+  try {
+    setUiMessage("Provisioning new server...");
+    const result = await pangeaApi.provisionAndSwitch(serverId);
+    if (result.ok) {
+      setUiMessage("Connected.");
+    } else {
+      setUiMessage("Switch failed.");
+    }
+    await refreshStatus();
+    await refreshConfig();
+  } catch (error) {
+    if (pangeaApi) {
+      try {
+        const state = await pangeaApi.getAuthState();
+        if (!state.authenticated) {
+          authState = { authenticated: false, user: null };
+          servers = [];
+          updateAuthUI();
+          renderServers();
+          showToast("You have been signed out. Please log in again.");
+          return;
+        }
+      } catch {
+        // ignore
+      }
+    }
+    setUiMessage(reportError("serverSwitch", error));
+    await refreshStatus();
+  } finally {
+    serverWorking = false;
+    if (connectCancelTimer) {
+      clearTimeout(connectCancelTimer);
+      connectCancelTimer = null;
+    }
+    connectCancelAllowed = false;
+    updateServerBusyIndicator(false);
+    updateServerControlStates();
+  }
+}
 
 serverDisconnectBtn.addEventListener("click", async () => {
   if (!daemonApi) return;
@@ -1773,7 +1857,7 @@ async function refreshServers(): Promise<void> {
 function renderServers(): void {
   const previousValue = serverSelect.value;
   serverSelect.innerHTML = "";
-  serverPickerDropdown.innerHTML = "";
+  serverPickerOverlayList.innerHTML = "";
 
   if (servers.length === 0) {
     const option = document.createElement("option");
@@ -1784,6 +1868,10 @@ function renderServers(): void {
     serverPickerBtn.disabled = true;
     serverPickerLabel.textContent = "No servers available";
     serverConnectBtn.disabled = true;
+    const empty = document.createElement("div");
+    empty.className = "server-picker-overlay-empty";
+    empty.textContent = "No servers available";
+    serverPickerOverlayList.append(empty);
     return;
   }
 
@@ -1794,22 +1882,37 @@ function renderServers(): void {
     serverSelect.append(option);
 
     const item = document.createElement("div");
-    item.className = "server-picker-option";
+    item.className = "server-picker-overlay-item";
     item.dataset.value = server.id;
+    item.setAttribute("role", "option");
+
+    const text = document.createElement("div");
+    text.className = "server-picker-overlay-item-text";
     const nameSpan = document.createElement("span");
-    nameSpan.className = "server-picker-option-name";
+    nameSpan.className = "server-picker-overlay-item-name";
     nameSpan.textContent = server.name;
     const regionSpan = document.createElement("span");
-    regionSpan.className = "server-picker-option-region";
-    regionSpan.textContent = server.id;
-    item.append(nameSpan, regionSpan);
+    regionSpan.className = "server-picker-overlay-item-region";
+    regionSpan.textContent = [server.country, server.region].filter(Boolean).join(" · ") || server.id;
+    text.append(nameSpan, regionSpan);
+
+    const idSpan = document.createElement("span");
+    idSpan.className = "server-picker-overlay-item-id";
+    idSpan.textContent = server.id;
+
+    item.append(text, idSpan);
     item.addEventListener("click", () => {
       serverSelect.value = server.id;
       syncServerPicker();
-      serverPickerDropdown.hidden = true;
-      serverPickerBtn.setAttribute("aria-expanded", "false");
+      closeServerPicker();
+      if (serverWorking) return;
+      if (currentDaemonState === "CONNECTED") {
+        void switchToServer(server.id);
+      } else if (!serverConnectBtn.disabled) {
+        serverConnectBtn.click();
+      }
     });
-    serverPickerDropdown.append(item);
+    serverPickerOverlayList.append(item);
   }
 
   serverSelect.disabled = false;
@@ -1834,9 +1937,11 @@ function syncServerPicker(): void {
     serverPickerLabel.textContent = "Select server";
   }
 
-  for (const opt of Array.from(serverPickerDropdown.children)) {
+  for (const opt of Array.from(serverPickerOverlayList.children)) {
     const el = opt as HTMLElement;
-    el.classList.toggle("selected", el.dataset.value === serverSelect.value);
+    if (el.dataset.value !== undefined) {
+      el.classList.toggle("selected", el.dataset.value === serverSelect.value);
+    }
   }
 }
 
@@ -1855,8 +1960,13 @@ function updateServerControlStates(): void {
     : true;
 
   serverConnectBtn.disabled = busy || !fullyDisconnected || !serverSelect.value;
-  serverDisconnectBtn.disabled =
-    !latestStatus || latestStatus.state === "DISCONNECTED" || latestStatus.state === "DISCONNECTING" || busy;
+  // Allow cancel mid-connect once the 3s grace window has elapsed, so the
+  // user can bail before the 10s cloak timeout. Outside that window the
+  // standard disabled-while-busy rule applies.
+  const cancelAllowedNow = serverWorking && connectCancelAllowed;
+  serverDisconnectBtn.disabled = cancelAllowedNow
+    ? false
+    : !latestStatus || latestStatus.state === "DISCONNECTED" || latestStatus.state === "DISCONNECTING" || busy;
 }
 
 function updateServerBusyIndicator(active: boolean, label?: string): void {

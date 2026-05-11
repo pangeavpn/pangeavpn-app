@@ -15,6 +15,7 @@ const CH = {
   authGetState: "auth:getState",
   getServers: "pangea:getServers",
   provisionAndConnect: "pangea:provisionAndConnect",
+  provisionAndSwitch: "pangea:provisionAndSwitch",
   setDoh: "pangea:setDoh",
   getDoh: "pangea:getDoh",
   setDirectIp: "pangea:setDirectIp",
@@ -54,6 +55,8 @@ const pangeaApi = {
   getServers: () => ipcRenderer.invoke(CH.getServers),
   provisionAndConnect: (serverId: string) =>
     ipcRenderer.invoke(CH.provisionAndConnect, serverId),
+  provisionAndSwitch: (serverId: string) =>
+    ipcRenderer.invoke(CH.provisionAndSwitch, serverId),
   setDoh: (enabled: boolean) => ipcRenderer.invoke(CH.setDoh, enabled),
   getDoh: () => ipcRenderer.invoke(CH.getDoh),
   setDirectIp: (enabled: boolean) => ipcRenderer.invoke(CH.setDirectIp, enabled),

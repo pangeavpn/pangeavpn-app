@@ -1,6 +1,6 @@
 {
   "name": "pangea-vpn",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -15,6 +15,6 @@
     "build-bin": "node ./scripts/build-bin/all.mjs"
   },
   "devDependencies": {
-    "app-builder-bin": "^5.0.0-alpha.10"
+    "app-builder-bin": "^5.0.0-alpha.13"
   }
 }
