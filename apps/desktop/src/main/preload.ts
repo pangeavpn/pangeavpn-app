@@ -24,6 +24,13 @@ const CH = {
   getDirectIpOnly: "pangea:getDirectIpOnly",
   setAllowLan: "pangea:setAllowLan",
   getAllowLan: "pangea:getAllowLan",
+  setLaunchAtStartup: "settings:setLaunchAtStartup",
+  getLaunchAtStartup: "settings:getLaunchAtStartup",
+  setAlwaysConnected: "settings:setAlwaysConnected",
+  getAlwaysConnected: "settings:getAlwaysConnected",
+  getLastServer: "settings:getLastServer",
+  clearLastServer: "settings:clearLastServer",
+  getIsPackaged: "app:getIsPackaged",
   getCachedServers: "pangea:getCachedServers",
   cacheServers: "pangea:cacheServers",
   listDevices: "pangea:listDevices",
@@ -65,6 +72,13 @@ const pangeaApi = {
   getDirectIpOnly: () => ipcRenderer.invoke(CH.getDirectIpOnly),
   setAllowLan: (enabled: boolean) => ipcRenderer.invoke(CH.setAllowLan, enabled),
   getAllowLan: () => ipcRenderer.invoke(CH.getAllowLan),
+  setLaunchAtStartup: (enabled: boolean) => ipcRenderer.invoke(CH.setLaunchAtStartup, enabled),
+  getLaunchAtStartup: () => ipcRenderer.invoke(CH.getLaunchAtStartup),
+  setAlwaysConnected: (enabled: boolean) => ipcRenderer.invoke(CH.setAlwaysConnected, enabled),
+  getAlwaysConnected: () => ipcRenderer.invoke(CH.getAlwaysConnected),
+  getLastServer: () => ipcRenderer.invoke(CH.getLastServer),
+  clearLastServer: () => ipcRenderer.invoke(CH.clearLastServer),
+  getIsPackaged: () => ipcRenderer.invoke(CH.getIsPackaged),
   getCachedServers: () => ipcRenderer.invoke(CH.getCachedServers),
   cacheServers: (servers: unknown[]) => ipcRenderer.invoke(CH.cacheServers, servers),
   listDevices: () => ipcRenderer.invoke(CH.listDevices),
@@ -95,6 +109,7 @@ const autoUpdaterApi = {
 contextBridge.exposeInMainWorld("daemonApi", daemonApi);
 contextBridge.exposeInMainWorld("pangeaApi", pangeaApi);
 contextBridge.exposeInMainWorld("autoUpdater", autoUpdaterApi);
+contextBridge.exposeInMainWorld("appPlatform", process.platform);
 contextBridge.exposeInMainWorld("openExternal", (url: string) => ipcRenderer.invoke("app:openExternal", url));
 contextBridge.exposeInMainWorld("onAuthInvalidated", (callback: () => void) => {
   ipcRenderer.on("auth:invalidated", () => callback());

@@ -1,4 +1,4 @@
-import { Menu, Tray, app, BrowserWindow, ipcMain, nativeImage, type NativeImage } from "electron";
+import { Menu, Tray, app, BrowserWindow, ipcMain, nativeImage, session, shell, type NativeImage } from "electron";
 import path from "node:path";
 import type { OkResponse, Profile, StatusResponse } from "@pangeavpn/shared-types";
 import { DaemonClient } from "./daemonClient";
@@ -9,6 +9,7 @@ import { IPC_CHANNELS } from "../shared/ipc";
 import * as auth from "./auth";
 import { PangeaApiClient, AuthError } from "./pangeaApiClient";
 import { setupAutoUpdater } from "./autoUpdater";
+import { setLoginItemEnabled, isLoginItemEnabled, isHiddenLaunchArg } from "./loginItem";
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -32,6 +33,9 @@ const pangeaApiClient = new PangeaApiClient();
 let managedProfileId: string | null = null;
 let lastServerId: string | null = null;
 let allowLanEnabled = true;
+let launchAtStartupEnabled = false;
+let alwaysConnectedEnabled = false;
+const hiddenLaunch = process.argv.some(isHiddenLaunchArg);
 
 function getTaskbarPosition(): { x: number; y: number } {
   const { screen } = require("electron") as typeof import("electron");
@@ -61,11 +65,13 @@ function createWindow(): void {
     resizable: false,
     skipTaskbar: true,
     alwaysOnTop: true,
+    show: false,
     ...(windowIconPath ? { icon: windowIconPath } : {}),
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      devTools: !app.isPackaged,
       preload: path.join(__dirname, "preload.js")
     }
   });
@@ -402,6 +408,7 @@ async function connectFromTray(): Promise<void> {
         const result = await connectWithRecovery(profileId);
         if (result.ok) {
           lastConnectedProfileId = profileId;
+          void persistLastConnection();
           return;
         }
       }
@@ -438,7 +445,10 @@ async function disconnectFromTray(): Promise<void> {
   trayActionInProgress = true;
   updateTrayMenu();
   try {
-    const result = await withDaemonRestartOnUnavailable(() => daemonClient.disconnect(), "tray disconnect");
+    const result = await withDaemonRestartOnUnavailable(
+      () => daemonClient.disconnect({ keepKillSwitch: alwaysConnectedEnabled }),
+      "tray disconnect"
+    );
     if (!result.ok) {
       trayStatusState = "ERROR";
       trayStatusDetail = "disconnect request failed";
@@ -498,6 +508,7 @@ async function provisionAndConnect(serverId: string): Promise<import("@pangeavpn
   const result = await connectWithRecovery(profile.id);
   if (result.ok) {
     lastConnectedProfileId = profile.id;
+    void persistLastConnection();
   }
   return result;
 }
@@ -522,8 +533,42 @@ async function provisionAndSwitch(serverId: string): Promise<import("@pangeavpn/
   }
   if (result.ok) {
     lastConnectedProfileId = profile.id;
+    void persistLastConnection();
   }
   return result;
+}
+
+async function readSettingsFile(): Promise<Record<string, unknown>> {
+  try {
+    const filePath = path.join(
+      (await import("./platformPaths")).getAppSupportDir(),
+      "settings.json"
+    );
+    const fs = (await import("node:fs/promises")).default;
+    return JSON.parse(await fs.readFile(filePath, "utf8")) as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+}
+
+async function writeSettingsFile(settings: Record<string, unknown>): Promise<void> {
+  const filePath = path.join(
+    (await import("./platformPaths")).getAppSupportDir(),
+    "settings.json"
+  );
+  const fs = (await import("node:fs/promises")).default;
+  await fs.writeFile(filePath, JSON.stringify(settings, null, 2));
+}
+
+async function persistLastConnection(): Promise<void> {
+  try {
+    const settings = await readSettingsFile();
+    settings.lastServerId = lastServerId;
+    settings.lastProfileId = lastConnectedProfileId;
+    await writeSettingsFile(settings);
+  } catch (err) {
+    console.warn("Failed to persist last connection:", err);
+  }
 }
 
 const FRIENDLY_ADJECTIVES = [
@@ -551,12 +596,16 @@ function registerIpcHandlers(): void {
     const result = await connectWithRecovery(profileId);
     if (result.ok) {
       lastConnectedProfileId = profileId;
+      void persistLastConnection();
     }
     void refreshTrayStatus();
     return result;
   });
   ipcMain.handle(IPC_CHANNELS.disconnect, async () => {
-    const result = await withDaemonRestartOnUnavailable(() => daemonClient.disconnect(), "disconnect");
+    const result = await withDaemonRestartOnUnavailable(
+      () => daemonClient.disconnect({ keepKillSwitch: alwaysConnectedEnabled }),
+      "disconnect"
+    );
     void refreshTrayStatus();
     return result;
   });
@@ -769,6 +818,70 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.getAllowLan, async () => allowLanEnabled);
 
+  ipcMain.handle(IPC_CHANNELS.setLaunchAtStartup, async (_event, enabled: boolean) => {
+    launchAtStartupEnabled = !!enabled;
+    try {
+      const settings = await readSettingsFile();
+      settings.launchAtStartup = launchAtStartupEnabled;
+      await writeSettingsFile(settings);
+    } catch (err) {
+      console.warn("Failed to persist launchAtStartup setting:", err);
+    }
+    try {
+      await setLoginItemEnabled(launchAtStartupEnabled);
+    } catch (err) {
+      console.warn("Failed to apply login item:", err);
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.getLaunchAtStartup, async () => {
+    // Self-heal: re-derive from OS in case the user toggled it elsewhere.
+    try {
+      const live = await isLoginItemEnabled();
+      launchAtStartupEnabled = live;
+      return live;
+    } catch {
+      return launchAtStartupEnabled;
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.setAlwaysConnected, async (_event, enabled: boolean) => {
+    const previouslyEnabled = alwaysConnectedEnabled;
+    alwaysConnectedEnabled = !!enabled;
+    try {
+      const settings = await readSettingsFile();
+      settings.alwaysConnected = alwaysConnectedEnabled;
+      await writeSettingsFile(settings);
+    } catch (err) {
+      console.warn("Failed to persist alwaysConnected setting:", err);
+    }
+    if (previouslyEnabled && !alwaysConnectedEnabled) {
+      try {
+        const status = await daemonClient.getStatus();
+        if (status.state !== "CONNECTED" && status.state !== "CONNECTING") {
+          await daemonClient.clearKillSwitch();
+        }
+      } catch (err) {
+        console.warn("Failed to clear kill switch on lockdown off:", err);
+      }
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.getAlwaysConnected, async () => alwaysConnectedEnabled);
+
+  ipcMain.handle(IPC_CHANNELS.getLastServer, async () => ({
+    lastServerId,
+    lastProfileId: lastConnectedProfileId
+  }));
+
+  ipcMain.handle(IPC_CHANNELS.clearLastServer, async () => {
+    lastServerId = null;
+    lastConnectedProfileId = null;
+    await persistLastConnection();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.getIsPackaged, async () => app.isPackaged);
+
   ipcMain.handle(IPC_CHANNELS.getCachedServers, async () => {
     try {
       const cachePath = (await import("node:path")).join(
@@ -935,6 +1048,29 @@ async function connectWithRecovery(profileId: string): Promise<OkResponse> {
 async function boot(): Promise<void> {
   await app.whenReady();
 
+  // Lock down navigation, new windows, embeds, permissions, and TLS.
+  app.on("web-contents-created", (_event, contents) => {
+    contents.setWindowOpenHandler(({ url }) => {
+      if (url.startsWith("https://") || url.startsWith("http://")) {
+        void shell.openExternal(url);
+      }
+      return { action: "deny" };
+    });
+    contents.on("will-navigate", (event, url) => {
+      if (!url.startsWith("file://")) {
+        event.preventDefault();
+      }
+    });
+    contents.on("will-attach-webview", (event) => {
+      event.preventDefault();
+    });
+  });
+  session.defaultSession.setPermissionRequestHandler((_wc, _perm, cb) => cb(false));
+  app.on("certificate-error", (event, _wc, _url, _err, _cert, cb) => {
+    event.preventDefault();
+    cb(false);
+  });
+
   // Restore persisted settings
   try {
     const settingsPath = (await import("node:path")).join(
@@ -955,8 +1091,27 @@ async function boot(): Promise<void> {
     if (settings.allowLan === false) {
       allowLanEnabled = false;
     }
+    if (typeof settings.launchAtStartup === "boolean") {
+      launchAtStartupEnabled = settings.launchAtStartup;
+    }
+    if (typeof settings.alwaysConnected === "boolean") {
+      alwaysConnectedEnabled = settings.alwaysConnected;
+    }
+    if (typeof settings.lastServerId === "string") {
+      lastServerId = settings.lastServerId;
+    }
+    if (typeof settings.lastProfileId === "string") {
+      lastConnectedProfileId = settings.lastProfileId;
+    }
   } catch {
     // no settings file yet
+  }
+
+  // Reconcile OS login-item state with our persisted preference (handles reinstalls).
+  try {
+    await setLoginItemEnabled(launchAtStartupEnabled);
+  } catch (err) {
+    console.warn("Failed to reconcile login item:", err);
   }
 
   const savedKey = await auth.loadLicenseKey().catch(() => null);
@@ -1013,6 +1168,9 @@ async function boot(): Promise<void> {
     setupAutoUpdater(mainWindow);
   }
   createTray();
+  if (!hiddenLaunch) {
+    showMainWindow();
+  }
   daemonProcess.ensureRunning().catch((err) => {
     console.error("failed to ensure daemon on startup", err);
   });

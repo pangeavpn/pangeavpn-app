@@ -1,6 +1,6 @@
 {
   "name": "@pangeavpn/desktop",
-  "version": "0.3.5",
+  "version": "0.3.6",
   "private": true,
   "author": {
     "name": "Pangea",
@@ -27,6 +27,16 @@
     "appId": "com.pangea.pangeavpn",
     "productName": "PangeaVPN",
     "electronVersion": "41.5.0",
+    "electronFuses": {
+      "runAsNode": false,
+      "enableCookieEncryption": true,
+      "enableNodeOptionsEnvironmentVariable": false,
+      "enableNodeCliInspectArguments": false,
+      "enableEmbeddedAsarIntegrityValidation": false,
+      "onlyLoadAppFromAsar": true,
+      "loadBrowserProcessSpecificV8Snapshot": false,
+      "grantFileProtocolExtraPrivileges": true
+    },
     "npmRebuild": false,
     "files": [
       "dist/**/*",

@@ -68,6 +68,10 @@ type connectRequest struct {
 	AllowLAN  bool   `json:"allowLAN,omitempty"`
 }
 
+type disconnectRequest struct {
+	KeepKillSwitch bool `json:"keepKillSwitch,omitempty"`
+}
+
 type okResponse struct {
 	OK bool `json:"ok"`
 }
@@ -124,8 +128,31 @@ func NewHandler(token string, service *Service) http.Handler {
 			return
 		}
 
-		err := service.Disconnect(r.Context())
+		var req disconnectRequest
+		if r.ContentLength > 0 {
+			r.Body = http.MaxBytesReader(w, r.Body, maxBodySize)
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid json")
+				return
+			}
+		}
+
+		err := service.Disconnect(r.Context(), req.KeepKillSwitch)
 		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, okResponse{OK: false})
+			return
+		}
+
+		writeJSON(w, http.StatusOK, okResponse{OK: true})
+	})))
+
+	mux.Handle("/killswitch/clear", auth.RequireBearer(token, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+
+		if err := service.ClearKillSwitch(r.Context()); err != nil {
 			writeJSON(w, http.StatusInternalServerError, okResponse{OK: false})
 			return
 		}

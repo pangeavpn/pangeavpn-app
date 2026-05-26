@@ -33,8 +33,13 @@ export class DaemonClient {
     return this.request<OkResponse>("POST", "/connect", body, this.connectTimeoutMs);
   }
 
-  async disconnect(): Promise<OkResponse> {
-    return this.request<OkResponse>("POST", "/disconnect", undefined, this.disconnectTimeoutMs);
+  async disconnect(opts?: { keepKillSwitch?: boolean }): Promise<OkResponse> {
+    const body = opts?.keepKillSwitch ? { keepKillSwitch: true } : undefined;
+    return this.request<OkResponse>("POST", "/disconnect", body, this.disconnectTimeoutMs);
+  }
+
+  async clearKillSwitch(): Promise<OkResponse> {
+    return this.request<OkResponse>("POST", "/killswitch/clear");
   }
 
   async switch(profileId: string, opts?: { allowLAN?: boolean }): Promise<OkResponse> {

@@ -63,6 +63,13 @@ declare global {
     getDirectIpOnly: () => Promise<boolean>;
     setAllowLan: (enabled: boolean) => Promise<void>;
     getAllowLan: () => Promise<boolean>;
+    setLaunchAtStartup: (enabled: boolean) => Promise<void>;
+    getLaunchAtStartup: () => Promise<boolean>;
+    setAlwaysConnected: (enabled: boolean) => Promise<void>;
+    getAlwaysConnected: () => Promise<boolean>;
+    getLastServer: () => Promise<{ lastServerId: string | null; lastProfileId: string | null }>;
+    clearLastServer: () => Promise<void>;
+    getIsPackaged: () => Promise<boolean>;
     getCachedServers: () => Promise<ServerInfo[]>;
     cacheServers: (servers: ServerInfo[]) => Promise<void>;
     listDevices: () => Promise<DeviceInfo[]>;
@@ -84,6 +91,7 @@ declare global {
     daemonApi?: DaemonApi;
     pangeaApi?: PangeaApi;
     autoUpdater?: AutoUpdaterApi;
+    appPlatform?: NodeJS.Platform;
     openExternal?: (url: string) => Promise<void>;
     onAuthInvalidated?: (callback: () => void) => void;
   }

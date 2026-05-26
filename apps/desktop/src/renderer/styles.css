@@ -669,34 +669,34 @@ body {
   font-weight: 700;
 }
 
-.update-progress-wrap {
+.update-mac-install {
   display: flex;
-  align-items: center;
-  gap: 10px;
+  flex-direction: column;
+  gap: 8px;
 }
 
-.update-progress-bar {
-  flex: 1;
-  height: 6px;
-  border-radius: 999px;
-  background: var(--border);
-  overflow: hidden;
-}
-
-.update-progress-fill {
-  width: 0%;
-  height: 100%;
-  border-radius: 999px;
-  background: var(--accent);
-  transition: width 0.2s ease;
-}
-
-.update-progress-text {
-  font-size: 0.75rem;
-  font-family: "SF Mono", "Fira Code", monospace;
+.update-mac-step {
+  margin: 0;
+  font-size: 0.82rem;
   color: var(--text-muted);
-  min-width: 36px;
-  text-align: right;
+  line-height: 1.45;
+}
+
+.update-mac-step strong {
+  color: var(--text);
+}
+
+.update-mac-command {
+  display: block;
+  font-family: "SF Mono", "Fira Code", monospace;
+  font-size: 0.78rem;
+  background: var(--border);
+  color: var(--text);
+  padding: 10px 12px;
+  border-radius: 8px;
+  user-select: all;
+  cursor: copy;
+  word-break: break-all;
 }
 
 .update-download-btn {
@@ -733,8 +733,16 @@ body {
 }
 
 .menu-update-item {
-  color: #eab308;
-  font-weight: 600;
+  background: #e2725b;
+  color: #ffffff;
+  font-weight: 700;
+  border-radius: 8px;
+  margin: 2px 0;
+  box-shadow: 0 2px 6px rgba(226, 114, 91, 0.35);
+}
+
+.menu-update-item:hover {
+  background: #c95f4b;
 }
 
 .menu-update-item[hidden] {
@@ -1711,3 +1719,4 @@ button.ghost:hover:not(:disabled) {
     grid-template-columns: 1fr;
   }
 }
+

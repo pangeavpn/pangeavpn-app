@@ -7,6 +7,29 @@ import { DaemonClient } from "./daemonClient";
 import { getBundledDaemonPath } from "./resourcePaths";
 import { ensureUserRuntimeFiles, getAppSupportDir } from "./platformPaths";
 
+function openDaemonLogStdio(): ["ignore", number, number] | "ignore" {
+  try {
+    const dir = getAppSupportDir();
+    fs.mkdirSync(dir, { recursive: true });
+    const logPath = path.join(dir, "daemon.log");
+    const fd = fs.openSync(logPath, "a");
+    fs.writeSync(fd, `\n--- daemon spawn ${new Date().toISOString()} (pid parent ${process.pid}) ---\n`);
+    return ["ignore", fd, fd];
+  } catch (err) {
+    console.warn("could not open daemon log; falling back to stdio:ignore", err);
+    return "ignore";
+  }
+}
+
+function attachExitLogger(child: ChildProcess, label: string): void {
+  child.on("exit", (code, signal) => {
+    console.warn(`[daemon ${label}] exited code=${code} signal=${signal}`);
+  });
+  child.on("error", (err) => {
+    console.warn(`[daemon ${label}] spawn error`, err);
+  });
+}
+
 type EnsureDaemonOptions = {
   forceRestart?: boolean;
 };
@@ -94,9 +117,10 @@ export class DaemonProcessManager {
 
       this.child = spawn(daemonPath, [], {
         windowsHide: true,
-        stdio: "ignore"
+        stdio: openDaemonLogStdio()
       });
 
+      attachExitLogger(this.child, "linux");
       this.child.on("exit", () => {
         this.child = null;
       });
@@ -163,7 +187,7 @@ export class DaemonProcessManager {
     this.child?.kill();
     this.child = spawn(daemonPath, [], {
       windowsHide: true,
-      stdio: "ignore",
+      stdio: openDaemonLogStdio(),
       env: {
         ...process.env,
         HOME: context.home,
@@ -172,6 +196,7 @@ export class DaemonProcessManager {
         PANGEA_APP_SUPPORT_DIR: context.appSupportDir
       }
     });
+    attachExitLogger(this.child, "mac-child");
     this.child.on("exit", () => {
       this.child = null;
     });

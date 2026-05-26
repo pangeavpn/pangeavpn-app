@@ -28,6 +28,13 @@ export const IPC_CHANNELS = {
   getDirectIpOnly: "pangea:getDirectIpOnly",
   setAllowLan: "pangea:setAllowLan",
   getAllowLan: "pangea:getAllowLan",
+  setLaunchAtStartup: "settings:setLaunchAtStartup",
+  getLaunchAtStartup: "settings:getLaunchAtStartup",
+  setAlwaysConnected: "settings:setAlwaysConnected",
+  getAlwaysConnected: "settings:getAlwaysConnected",
+  getLastServer: "settings:getLastServer",
+  clearLastServer: "settings:clearLastServer",
+  getIsPackaged: "app:getIsPackaged",
   getCachedServers: "pangea:getCachedServers",
   cacheServers: "pangea:cacheServers",
   listDevices: "pangea:listDevices",
@@ -98,6 +105,13 @@ export interface PangeaApi {
   getDirectIpOnly: () => Promise<boolean>;
   setAllowLan: (enabled: boolean) => Promise<void>;
   getAllowLan: () => Promise<boolean>;
+  setLaunchAtStartup: (enabled: boolean) => Promise<void>;
+  getLaunchAtStartup: () => Promise<boolean>;
+  setAlwaysConnected: (enabled: boolean) => Promise<void>;
+  getAlwaysConnected: () => Promise<boolean>;
+  getLastServer: () => Promise<{ lastServerId: string | null; lastProfileId: string | null }>;
+  clearLastServer: () => Promise<void>;
+  getIsPackaged: () => Promise<boolean>;
   getCachedServers: () => Promise<ServerInfo[]>;
   cacheServers: (servers: ServerInfo[]) => Promise<void>;
   listDevices: () => Promise<DeviceInfo[]>;

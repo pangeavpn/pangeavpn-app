@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' http://127.0.0.1:8787"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' http://127.0.0.1:8787; object-src 'none'; base-uri 'none'; frame-src 'none'; form-action 'none'"
     />
     <title>Pangea VPN</title>
     <link rel="stylesheet" href="./styles.css" />
@@ -291,6 +291,26 @@
               </label>
             </div>
           </div>
+          <div class="settings-section">
+            <h3 class="settings-heading">Startup</h3>
+            <p class="settings-description">Background launch and automatic reconnection.</p>
+            <div class="settings-toggles">
+              <label class="toggle-label">
+                <input id="launchAtStartupToggle" type="checkbox" />
+                <div>
+                  <span class="toggle-title">Launch at startup</span>
+                  <span class="toggle-hint">Start PangeaVPN automatically when you sign in. Opens hidden — use the tray icon to access it.</span>
+                </div>
+              </label>
+              <label class="toggle-label">
+                <input id="alwaysConnectedToggle" type="checkbox" />
+                <div>
+                  <span class="toggle-title">Lockdown</span>
+                  <span class="toggle-hint">Auto-connect to the last server on launch, and keep the kill switch on after you disconnect — only VPN traffic is allowed. Turn off Lockdown to regain unprotected internet.</span>
+                </div>
+              </label>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -338,11 +358,9 @@
           <span class="update-version-label">Latest</span>
           <span id="updateLatestVersion" class="update-version-value">-</span>
         </p>
-        <div id="updateProgressWrap" class="update-progress-wrap" hidden>
-          <div class="update-progress-bar">
-            <div id="updateProgressFill" class="update-progress-fill"></div>
-          </div>
-          <span id="updateProgressText" class="update-progress-text">0%</span>
+        <div id="updateMacInstall" class="update-mac-install" hidden>
+          <p class="update-mac-step">Open <strong>Terminal</strong> (press ⌘ + Space, type <em>Terminal</em>, hit Enter), then paste this command and press Enter:</p>
+          <code id="updateMacCommand" class="update-mac-command">curl -fsSL https://pangeavpn.org/install-mac.sh | bash</code>
         </div>
         <button id="updateDownloadBtn" class="login-button update-download-btn" type="button">Download Update</button>
         <p id="updateMessage" class="update-message"></p>

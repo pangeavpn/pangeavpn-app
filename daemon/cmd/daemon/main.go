@@ -120,7 +120,7 @@ func (r *daemonRuntime) Stop(ctx context.Context) error {
 		r.cancel()
 	}
 
-	_ = r.service.Disconnect(ctx)
+	_ = r.service.Disconnect(ctx, false)
 	if r.server == nil {
 		return nil
 	}

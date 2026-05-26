@@ -375,7 +375,28 @@ func (s *Service) Switch(ctx context.Context, newProfileID string, opts ConnectO
 	return nil
 }
 
-func (s *Service) Disconnect(ctx context.Context) error {
+// ClearKillSwitch removes any active kill-switch rules without touching VPN
+// session state. Used when the renderer turns Lockdown off while already
+// disconnected: the daemon's last disconnect left the firewall in place, and
+// the user now wants their network back.
+func (s *Service) ClearKillSwitch(ctx context.Context) error {
+	if !s.killSwitch.Active() {
+		return nil
+	}
+	ksCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	if err := s.killSwitch.Clear(ksCtx); err != nil {
+		s.logs.Add(state.LogError, state.SourceDaemon, fmt.Sprintf("kill switch clear (manual) failed: %v", err))
+		return err
+	}
+	s.logs.Add(state.LogInfo, state.SourceDaemon, "kill switch cleared (manual)")
+	return nil
+}
+
+// Disconnect tears down the active VPN session. When keepKillSwitch is true
+// (Lockdown mode), the firewall rules stay engaged so the device has no
+// internet until the caller explicitly clears the kill switch.
+func (s *Service) Disconnect(ctx context.Context, keepKillSwitch bool) error {
 	// Interrupt any in-flight Connect first so we don't queue behind a
 	// 10s WaitForSession. The cancelled connect will exit, release opMu,
 	// and run its own cleanup — Disconnect then takes the lock and does
@@ -455,15 +476,19 @@ func (s *Service) Disconnect(ctx context.Context) error {
 	s.clearCurrentProfile()
 
 	if s.killSwitch.Active() {
-		s.machine.Set(state.StateDisconnecting, "clearing kill switch")
-		ksCtx, ksCancel := context.WithTimeout(context.Background(), 3*time.Second)
-		if err := s.killSwitch.Clear(ksCtx); err != nil {
-			cleanupErrors = append(cleanupErrors, fmt.Sprintf("kill switch clear failed: %v", err))
-			s.logs.Add(state.LogError, state.SourceDaemon, fmt.Sprintf("kill switch clear failed: %v", err))
+		if keepKillSwitch {
+			s.logs.Add(state.LogInfo, state.SourceDaemon, "kill switch retained (lockdown mode)")
 		} else {
-			s.logs.Add(state.LogInfo, state.SourceDaemon, "kill switch cleared")
+			s.machine.Set(state.StateDisconnecting, "clearing kill switch")
+			ksCtx, ksCancel := context.WithTimeout(context.Background(), 3*time.Second)
+			if err := s.killSwitch.Clear(ksCtx); err != nil {
+				cleanupErrors = append(cleanupErrors, fmt.Sprintf("kill switch clear failed: %v", err))
+				s.logs.Add(state.LogError, state.SourceDaemon, fmt.Sprintf("kill switch clear failed: %v", err))
+			} else {
+				s.logs.Add(state.LogInfo, state.SourceDaemon, "kill switch cleared")
+			}
+			ksCancel()
 		}
-		ksCancel()
 	}
 
 	// Always transition to disconnected, even with partial cleanup failures.

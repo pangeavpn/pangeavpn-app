@@ -399,7 +399,7 @@ func TestDisconnect_ClearsKillSwitch(t *testing.T) {
 	}
 
 	// Disconnect should clear the kill switch.
-	if err := svc.Disconnect(context.Background()); err != nil {
+	if err := svc.Disconnect(context.Background(), false); err != nil {
 		t.Fatalf("disconnect failed: %v", err)
 	}
 
@@ -433,7 +433,7 @@ func TestDisconnect_ClearsKillSwitchAfterFailedConnect(t *testing.T) {
 	wgMgr.startErr = nil
 	wgMgr.mu.Unlock()
 
-	if err := svc.Disconnect(context.Background()); err != nil {
+	if err := svc.Disconnect(context.Background(), false); err != nil {
 		t.Fatalf("disconnect failed: %v", err)
 	}
 

@@ -1,4 +1,13 @@
 import type { LogEntry, Profile, StatusResponse } from "@pangeavpn/shared-types";
+import {
+  initAutoConnect,
+  notifyStatusTick,
+  notifyUserConnected,
+  notifyUserDisconnected,
+  notifyToggleChanged,
+  attemptInitialAutoConnect,
+  getUserIntent
+} from "./autoConnect.js";
 
 let verboseErrors = localStorage.getItem("pangea:verboseErrors") === "1";
 
@@ -74,6 +83,8 @@ const serverIndicatorLabel = must<HTMLSpanElement>("serverIndicatorLabel");
 const directIpToggle = must<HTMLInputElement>("directIpToggle");
 const directIpOnlyToggle = must<HTMLInputElement>("directIpOnlyToggle");
 const allowLanToggle = must<HTMLInputElement>("allowLanToggle");
+const launchAtStartupToggle = must<HTMLInputElement>("launchAtStartupToggle");
+const alwaysConnectedToggle = must<HTMLInputElement>("alwaysConnectedToggle");
 const loginScreen = must<HTMLElement>("loginScreen");
 const loginScreenBtn = must<HTMLButtonElement>("loginScreenBtn");
 const loginScreenMessage = must<HTMLParagraphElement>("loginScreenMessage");
@@ -109,6 +120,8 @@ let currentDaemonState: StatusResponse["state"] = "DISCONNECTED";
 let latestStatus: StatusResponse | null = null;
 let uiRefreshing = false;
 let uiWorking = false;
+let lastServerIdLocal: string | null = null;
+let alwaysConnectedLocal = false;
 let logsCursor = 0;
 let logEntries: LogEntry[] = [];
 let authState: AuthState = { authenticated: false, user: null };
@@ -202,6 +215,8 @@ connectBtn.addEventListener("click", async () => {
       return;
     }
 
+    notifyUserConnected();
+    void refreshLastServer();
     const status = await refreshStatus();
     if (status?.state === "CONNECTED") {
       setUiMessage("Connected.");
@@ -230,6 +245,7 @@ disconnectBtn.addEventListener("click", async () => {
     return;
   }
 
+  notifyUserDisconnected();
   uiWorking = true;
   updateBusyIndicator();
   try {
@@ -595,10 +611,21 @@ function renderDevicesModalList(devices: DeviceInfo[]): void {
     item.dataset.deviceId = device.id;
     const info = document.createElement("div");
     info.className = "device-info";
-    const nameHtml = isMine
-      ? `<span class="device-name">${name} <span class="device-current-badge">This device</span></span>`
-      : `<span class="device-name">${name}</span>`;
-    info.innerHTML = `${nameHtml}<span class="device-date">Added ${dateStr}</span>`;
+    const nameSpan = document.createElement("span");
+    nameSpan.className = "device-name";
+    nameSpan.textContent = name;
+    if (isMine) {
+      nameSpan.appendChild(document.createTextNode(" "));
+      const badge = document.createElement("span");
+      badge.className = "device-current-badge";
+      badge.textContent = "This device";
+      nameSpan.appendChild(badge);
+    }
+    const dateSpan = document.createElement("span");
+    dateSpan.className = "device-date";
+    dateSpan.textContent = `Added ${dateStr}`;
+    info.appendChild(nameSpan);
+    info.appendChild(dateSpan);
     const removeBtn = document.createElement("button");
     removeBtn.className = "device-remove-btn";
     if (isMine) {
@@ -652,7 +679,14 @@ function renderDeviceList(devices: DeviceInfo[]): void {
 
     const info = document.createElement("div");
     info.className = "device-info";
-    info.innerHTML = `<span class="device-name">${name}</span><span class="device-date">Added ${dateStr}</span>`;
+    const nameSpan = document.createElement("span");
+    nameSpan.className = "device-name";
+    nameSpan.textContent = name;
+    const dateSpan = document.createElement("span");
+    dateSpan.className = "device-date";
+    dateSpan.textContent = `Added ${dateStr}`;
+    info.appendChild(nameSpan);
+    info.appendChild(dateSpan);
 
     const removeBtn = document.createElement("button");
     removeBtn.className = "device-remove-btn";
@@ -815,6 +849,8 @@ serverConnectBtn.addEventListener("click", async () => {
     const result = await pangeaApi.provisionAndConnect(serverId);
     if (result.ok) {
       setUiMessage("Connected.");
+      notifyUserConnected();
+      void refreshLastServer();
     } else {
       setUiMessage("Connection failed.");
     }
@@ -870,6 +906,8 @@ async function switchToServer(serverId: string): Promise<void> {
     const result = await pangeaApi.provisionAndSwitch(serverId);
     if (result.ok) {
       setUiMessage("Connected.");
+      notifyUserConnected();
+      void refreshLastServer();
     } else {
       setUiMessage("Switch failed.");
     }
@@ -907,6 +945,7 @@ async function switchToServer(serverId: string): Promise<void> {
 
 serverDisconnectBtn.addEventListener("click", async () => {
   if (!daemonApi) return;
+  notifyUserDisconnected();
   serverWorking = true;
   updateServerBusyIndicator(true, "Disconnecting...");
   updateServerControlStates();
@@ -953,6 +992,51 @@ allowLanToggle.addEventListener("change", async () => {
     ? "Allow LAN enabled. Reconnect for it to take effect."
     : "Allow LAN disabled. Reconnect for it to take effect.");
 });
+
+launchAtStartupToggle.addEventListener("change", async () => {
+  if (!pangeaApi) return;
+  try {
+    await pangeaApi.setLaunchAtStartup(launchAtStartupToggle.checked);
+    setUiMessage(launchAtStartupToggle.checked
+      ? "PangeaVPN will launch at startup."
+      : "Launch at startup disabled.");
+  } catch (err) {
+    launchAtStartupToggle.checked = !launchAtStartupToggle.checked;
+    setUiMessage(reportError("launchAtStartup", err, "Failed to update startup setting."));
+  }
+});
+
+alwaysConnectedToggle.addEventListener("change", async () => {
+  if (!pangeaApi) return;
+  alwaysConnectedLocal = alwaysConnectedToggle.checked;
+  try {
+    await pangeaApi.setAlwaysConnected(alwaysConnectedLocal);
+  } catch (err) {
+    alwaysConnectedLocal = !alwaysConnectedLocal;
+    alwaysConnectedToggle.checked = alwaysConnectedLocal;
+    setUiMessage(reportError("alwaysConnected", err, "Failed to update setting."));
+    return;
+  }
+  notifyToggleChanged(alwaysConnectedLocal);
+  if (alwaysConnectedLocal) {
+    setUiMessage("Always connected enabled. Will auto-connect and reconnect.");
+    if (lastServerIdLocal) {
+      void attemptInitialAutoConnect();
+    }
+  } else {
+    setUiMessage("Always connected disabled.");
+  }
+});
+
+async function refreshLastServer(): Promise<void> {
+  if (!pangeaApi) return;
+  try {
+    const last = await pangeaApi.getLastServer();
+    lastServerIdLocal = last.lastServerId;
+  } catch {
+    // best-effort
+  }
+}
 
 
 
@@ -1073,9 +1157,38 @@ async function init(): Promise<void> {
       // default off
     }
 
+    try {
+      const isPackaged = await pangeaApi.getIsPackaged();
+      if (!isPackaged) {
+        launchAtStartupToggle.disabled = true;
+        launchAtStartupToggle.title = "Available in packaged builds only";
+      } else {
+        launchAtStartupToggle.checked = await pangeaApi.getLaunchAtStartup();
+      }
+      alwaysConnectedLocal = await pangeaApi.getAlwaysConnected();
+      alwaysConnectedToggle.checked = alwaysConnectedLocal;
+      const last = await pangeaApi.getLastServer();
+      lastServerIdLocal = last.lastServerId;
+    } catch {
+      // defaults already in place
+    }
+
+    initAutoConnect({
+      getEnabled: () => alwaysConnectedLocal,
+      getAuthenticated: () => authState.authenticated,
+      getDaemonState: () => currentDaemonState,
+      getUserIntent,
+      getLastServerId: () => lastServerIdLocal,
+      provisionAndSwitch: (serverId: string) => pangeaApi.provisionAndSwitch(serverId)
+    });
+
     await loadCachedServers();
     if (authState.authenticated) {
       await refreshServers();
+    }
+
+    if (alwaysConnectedLocal && lastServerIdLocal && authState.authenticated) {
+      void attemptInitialAutoConnect();
     }
   }
 
@@ -1095,6 +1208,7 @@ async function init(): Promise<void> {
       } catch {
         pollInterval = Math.min(pollInterval * 2, pollMax); // backoff on error
       }
+      notifyStatusTick();
       schedulePoll();
     }, pollInterval);
   }
@@ -1106,12 +1220,14 @@ const updateCloseBtn = must<HTMLButtonElement>("updateCloseBtn");
 const updateCurrentVersionEl = must<HTMLSpanElement>("updateCurrentVersion");
 const updateLatestVersionEl = must<HTMLSpanElement>("updateLatestVersion");
 const updateDownloadBtn = must<HTMLButtonElement>("updateDownloadBtn");
-const updateProgressWrap = must<HTMLElement>("updateProgressWrap");
-const updateProgressFill = must<HTMLElement>("updateProgressFill");
-const updateProgressText = must<HTMLSpanElement>("updateProgressText");
 const updateMessageEl = must<HTMLParagraphElement>("updateMessage");
+const updateMacInstall = must<HTMLElement>("updateMacInstall");
+const updateMacCommand = must<HTMLElement>("updateMacCommand");
 const menuBadge = must<HTMLSpanElement>("menuBadge");
 const menuUpdateBtn = must<HTMLButtonElement>("menuUpdateBtn");
+
+const MAC_INSTALL_COMMAND = "curl -fsSL https://pangeavpn.org/install-mac.sh | bash";
+const isMacPlatform = window.appPlatform === "darwin";
 
 let pendingUpdate: { version: string; macOnly?: boolean } | null = null;
 let updateDownloaded = false;
@@ -1132,16 +1248,20 @@ function showUpdateModal(): void {
   updateCurrentVersionEl.textContent = currentAppVersion || "-";
   updateLatestVersionEl.textContent = pendingUpdate.version;
   updateDownloadBtn.disabled = false;
-  updateProgressWrap.hidden = true;
-  if (pendingUpdate.macOnly) {
-    updateDownloadBtn.textContent = "View Download";
+  if (isMacPlatform) {
+    updateMacCommand.textContent = MAC_INSTALL_COMMAND;
+    updateMacInstall.hidden = false;
+    updateDownloadBtn.textContent = "Copy Install Command";
     updateMessageEl.textContent = "";
-  } else if (updateDownloaded) {
-    updateDownloadBtn.textContent = "Restart to Update";
-    updateMessageEl.textContent = "Update downloaded and ready to install.";
   } else {
-    updateDownloadBtn.textContent = "Download Update";
-    updateMessageEl.textContent = "";
+    updateMacInstall.hidden = true;
+    if (updateDownloaded) {
+      updateDownloadBtn.textContent = "Restart to Update";
+      updateMessageEl.textContent = "Update downloaded and ready to install.";
+    } else {
+      updateDownloadBtn.textContent = "View Download";
+      updateMessageEl.textContent = "";
+    }
   }
   updateOverlay.classList.add("visible");
 }
@@ -1160,17 +1280,10 @@ if (updater) {
     showUpdateModal();
   });
 
-  updater.onDownloadProgress((percent) => {
-    updateProgressFill.style.width = `${percent}%`;
-    updateProgressText.textContent = `${Math.round(percent)}%`;
-  });
-
   updater.onUpdateDownloaded(() => {
     updateDownloaded = true;
     updateDownloadBtn.disabled = false;
     updateDownloadBtn.textContent = "Restart to Update";
-    updateProgressFill.style.width = "100%";
-    updateProgressText.textContent = "100%";
     updateMessageEl.textContent = "Update downloaded and ready to install.";
   });
 
@@ -1197,35 +1310,49 @@ menuUpdateBtn.addEventListener("click", () => {
   showUpdateModal();
 });
 
+async function copyMacInstallCommand(): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(MAC_INSTALL_COMMAND);
+    updateDownloadBtn.textContent = "Copied!";
+    updateMessageEl.textContent = "Now paste the command into Terminal and press Enter.";
+    setTimeout(() => {
+      updateDownloadBtn.textContent = "Copy Install Command";
+    }, 2000);
+  } catch (error) {
+    updateMessageEl.textContent = reportError("updateCopyCommand", error);
+  }
+}
+
+updateMacCommand.addEventListener("click", () => {
+  void copyMacInstallCommand();
+});
+
 updateDownloadBtn.addEventListener("click", async () => {
   if (!pendingUpdate) return;
 
-  if (!updater || !pendingUpdate) return;
-
-  // macOS: open release page in browser
-  if (pendingUpdate.macOnly) {
-    await updater.downloadUpdate();
+  if (isMacPlatform) {
+    await copyMacInstallCommand();
     return;
   }
 
-  // If update already downloaded, restart to install
+  if (!updater) return;
+
   if (updateDownloaded) {
     updater.installUpdate();
     return;
   }
 
   updateDownloadBtn.disabled = true;
-  updateDownloadBtn.textContent = "Downloading...";
-  updateProgressFill.style.width = "0%";
-  updateProgressText.textContent = "0%";
-  updateProgressWrap.hidden = false;
+  updateDownloadBtn.textContent = "Opening...";
   updateMessageEl.textContent = "";
 
   try {
     await updater.downloadUpdate();
+    updateDownloadBtn.disabled = false;
+    updateDownloadBtn.textContent = "View Download";
   } catch (error) {
     updateDownloadBtn.disabled = false;
-    updateDownloadBtn.textContent = "Retry Download";
+    updateDownloadBtn.textContent = "Retry";
     updateMessageEl.textContent = reportError("updateDownload", error);
   }
 });
