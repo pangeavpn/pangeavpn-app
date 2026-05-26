@@ -669,6 +669,10 @@ body {
   font-weight: 700;
 }
 
+.update-mac-install[hidden] {
+  display: none;
+}
+
 .update-mac-install {
   display: flex;
   flex-direction: column;

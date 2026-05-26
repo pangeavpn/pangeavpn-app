@@ -8,8 +8,9 @@ import { getConnectedTrayIconPath, getTrayIconPath, getWindowsAppIconPath } from
 import { IPC_CHANNELS } from "../shared/ipc";
 import * as auth from "./auth";
 import { PangeaApiClient, AuthError } from "./pangeaApiClient";
-import { setupAutoUpdater } from "./autoUpdater";
+import { setupAutoUpdater, notifyConnectionStateChange } from "./autoUpdater";
 import { setLoginItemEnabled, isLoginItemEnabled, isHiddenLaunchArg } from "./loginItem";
+import { startNetworkWatcher, onNetworkChange } from "./networkWatcher";
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -389,6 +390,44 @@ async function refreshTrayStatus(): Promise<void> {
   } finally {
     trayStatusRefreshInProgress = false;
     updateTrayMenu();
+    notifyConnectionStateChange(trayStatusState);
+  }
+}
+
+let networkRecoverInProgress = false;
+let lastNetworkRecoverAtMs = 0;
+const NETWORK_RECOVER_COOLDOWN_MS = 10_000;
+
+async function recoverFromNetworkChange(): Promise<void> {
+  if (networkRecoverInProgress) return;
+  const now = Date.now();
+  if (now - lastNetworkRecoverAtMs < NETWORK_RECOVER_COOLDOWN_MS) return;
+  if (!alwaysConnectedEnabled) return;
+  if (!lastConnectedProfileId) return;
+
+  networkRecoverInProgress = true;
+  lastNetworkRecoverAtMs = now;
+  try {
+    // Refresh status first so we don't fire over an already-healthy tunnel.
+    await refreshTrayStatus();
+    if (trayStatusState === "CONNECTED" || trayStatusState === "CONNECTING") {
+      return;
+    }
+    console.log("network change detected — attempting reconnect");
+    // Tear down stale tunnel/firewall state without clearing the kill switch
+    // (we're in lockdown mode), then bring the tunnel back on the new network.
+    try {
+      await daemonClient.disconnect({ keepKillSwitch: true });
+    } catch (err) {
+      console.warn("network recover: disconnect failed", err);
+    }
+    const result = await connectWithRecovery(lastConnectedProfileId);
+    if (!result.ok) {
+      console.warn("network recover: reconnect failed", (result as { error?: string }).error);
+    }
+  } finally {
+    networkRecoverInProgress = false;
+    await refreshTrayStatus();
   }
 }
 
@@ -1173,6 +1212,11 @@ async function boot(): Promise<void> {
   }
   daemonProcess.ensureRunning().catch((err) => {
     console.error("failed to ensure daemon on startup", err);
+  });
+
+  startNetworkWatcher();
+  onNetworkChange(() => {
+    void recoverFromNetworkChange();
   });
 }
 

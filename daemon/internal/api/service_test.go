@@ -137,7 +137,7 @@ func (f *fakeWGManager) ActiveLUIDs() map[uint64]struct{} {
 type fakeKillSwitch struct {
 	mu              sync.Mutex
 	active          bool
-	enableEndpoint  string
+	enableEndpoints []string
 	enableAllowLAN  bool
 	updateInterface string
 	enableCount     int
@@ -148,11 +148,11 @@ type fakeKillSwitch struct {
 	clearErr        error
 }
 
-func (f *fakeKillSwitch) Enable(_ context.Context, endpoint string, allowLAN bool) error {
+func (f *fakeKillSwitch) Enable(_ context.Context, endpoints []string, allowLAN bool) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.enableCount++
-	f.enableEndpoint = endpoint
+	f.enableEndpoints = append(f.enableEndpoints[:0], endpoints...)
 	f.enableAllowLAN = allowLAN
 	if f.enableErr != nil {
 		return f.enableErr
@@ -263,8 +263,8 @@ func TestConnect_KillSwitchEnabledBeforeCloakAndWG(t *testing.T) {
 	if ks.enableCount != 1 {
 		t.Errorf("expected enable called once, got %d", ks.enableCount)
 	}
-	if ks.enableEndpoint != profile.Cloak.RemoteHost {
-		t.Errorf("expected enable endpoint %q, got %q", profile.Cloak.RemoteHost, ks.enableEndpoint)
+	if len(ks.enableEndpoints) == 0 || ks.enableEndpoints[0] != profile.Cloak.RemoteHost {
+		t.Errorf("expected enable endpoints[0]=%q, got %v", profile.Cloak.RemoteHost, ks.enableEndpoints)
 	}
 	if !ks.active {
 		t.Error("expected kill switch to be active after connect")

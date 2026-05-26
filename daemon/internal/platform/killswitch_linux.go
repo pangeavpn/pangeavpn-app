@@ -206,13 +206,17 @@ func buildNFTRuleset(endpointIPs []string, tunnelInterface string, allowLAN bool
 }
 
 func applyNFTRules(ctx context.Context, endpointIPs []string, tunnelInterface string, allowLAN bool) error {
-	// Delete existing table first (ignore error if it doesn't exist).
-	_ = removeNFTRules(ctx)
-
-	ruleset := buildNFTRuleset(endpointIPs, tunnelInterface, allowLAN)
+	// Replace rules atomically. nft -f processes the whole script as a single
+	// kernel transaction: `add table` is a no-op if it exists, `delete table`
+	// drops the old version, and the new `table {...}` block installs the
+	// replacement. There is never a moment with no rules in place.
+	var b strings.Builder
+	fmt.Fprintf(&b, "add table %s %s\n", nftFamily, nftTableName)
+	fmt.Fprintf(&b, "delete table %s %s\n", nftFamily, nftTableName)
+	b.WriteString(buildNFTRuleset(endpointIPs, tunnelInterface, allowLAN))
 
 	cmd := exec.CommandContext(ctx, "nft", "-f", "-")
-	cmd.Stdin = strings.NewReader(ruleset)
+	cmd.Stdin = strings.NewReader(b.String())
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("apply nft rules: %w (%s)", err, strings.TrimSpace(string(out)))

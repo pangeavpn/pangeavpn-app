@@ -9,7 +9,7 @@ import (
 )
 
 func TestBuildNFTRuleset_IPv4Only(t *testing.T) {
-	rules := buildNFTRuleset([]string{"203.0.113.10", "2001:db8::10"}, "wg-test")
+	rules := buildNFTRuleset([]string{"203.0.113.10", "2001:db8::10"}, "wg-test", false)
 
 	if strings.Contains(rules, "ip6 daddr") {
 		t.Fatalf("unexpected IPv6 endpoint allow in nft ruleset:\n%s", rules)
@@ -44,7 +44,7 @@ func TestApplyIPTablesRules_InstallsIPv6DropChain(t *testing.T) {
 		return nil
 	}
 
-	if err := applyIPTablesRules(context.Background(), []string{"203.0.113.5"}, "wg-test"); err != nil {
+	if err := applyIPTablesRules(context.Background(), []string{"203.0.113.5"}, "wg-test", false); err != nil {
 		t.Fatalf("applyIPTablesRules failed: %v", err)
 	}
 
