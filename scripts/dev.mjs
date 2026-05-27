@@ -437,7 +437,7 @@ function ensureSudoUserRuntimeFiles() {
       "if (fs.existsSync(tokenPath)) { token = String(fs.readFileSync(tokenPath, 'utf8')).trim(); }",
       "if (!token) {",
       "  token = crypto.randomBytes(32).toString('hex');",
-      "  fs.writeFileSync(tokenPath, `${token}\\n`, { mode: 0o600 });",
+      "  fs.writeFileSync(tokenPath, token + '\\n', { mode: 0o600 });",
       "}",
       "if (!fs.existsSync(configPath)) {",
       "  fs.writeFileSync(configPath, JSON.stringify({ profiles: [] }, null, 2) + '\\n', { mode: 0o600 });",
@@ -489,8 +489,10 @@ function ensureSudoUserRuntimeFiles() {
     fs.writeFileSync(tokenPath, `${token}\n`, { mode: 0o600 });
   }
 
-  if (!fs.existsSync(configPath)) {
-    fs.writeFileSync(configPath, JSON.stringify({ profiles: [] }, null, 2) + "\n", { mode: 0o600 });
+  try {
+    fs.writeFileSync(configPath, JSON.stringify({ profiles: [] }, null, 2) + "\n", { mode: 0o600, flag: "wx" });
+  } catch (err) {
+    if (err?.code !== "EEXIST") throw err;
   }
 }
 

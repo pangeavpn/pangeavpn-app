@@ -98,7 +98,6 @@ const serverPickerOverlay = must<HTMLElement>("serverPickerOverlay");
 const serverPickerOverlayList = must<HTMLElement>("serverPickerOverlayList");
 const serverPickerOverlayCloseBtn = must<HTMLButtonElement>("serverPickerOverlayCloseBtn");
 const heroMeta = must<HTMLElement>("heroMeta");
-const heroServer = must<HTMLElement>("heroServer");
 const cloakDot = must<HTMLElement>("cloakDot");
 const wgDot = must<HTMLElement>("wgDot");
 

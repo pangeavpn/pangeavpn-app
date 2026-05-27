@@ -5,12 +5,24 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/auth"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/state"
 )
+
+// sanitizeLog strips CR/LF and other control chars from values that may
+// originate from user-controlled input before they are written to logs.
+func sanitizeLog(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\r' || r < 0x20 || r == 0x7f {
+			return -1
+		}
+		return r
+	}, s)
+}
 
 // rateLimiter implements a simple token bucket rate limiter for localhost API access.
 type rateLimiter struct {
@@ -218,7 +230,7 @@ func NewHandler(token string, service *Service) http.Handler {
 				return
 			}
 			if err := service.UpdateConfig(cfg); err != nil {
-				log.Printf("config update rejected: %v", err)
+				log.Printf("config update rejected: %s", sanitizeLog(err.Error()))
 				writeError(w, http.StatusBadRequest, "invalid config")
 				return
 			}

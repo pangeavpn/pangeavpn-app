@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"net/netip"
 	"strings"
@@ -164,7 +165,7 @@ func tuneWindowsIPInterface(luid winipcfg.LUID, family winipcfg.AddressFamily, m
 	row.ManagedAddressConfigurationSupported = false
 	row.OtherStatefulConfigurationSupported = false
 
-	if mtu > 0 {
+	if mtu > 0 && mtu <= math.MaxUint32 {
 		row.NLMTU = uint32(mtu)
 	}
 	if forceMetric {

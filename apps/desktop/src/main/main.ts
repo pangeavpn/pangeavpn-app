@@ -31,6 +31,14 @@ const daemonRestartBackoffMs = 5000;
 const daemonClient = new DaemonClient("http://127.0.0.1:8787", readDaemonTokens);
 const daemonProcess = new DaemonProcessManager(daemonClient);
 const pangeaApiClient = new PangeaApiClient();
+
+// Strip CR/LF and control chars from values that may originate from
+// user- or server-controlled input before they reach the log stream.
+function sanitizeLog(value: unknown): string {
+  const text = value instanceof Error ? value.message : String(value);
+  // eslint-disable-next-line no-control-regex
+  return text.replace(/[\x00-\x1f\x7f]/g, " ");
+}
 let managedProfileId: string | null = null;
 let lastServerId: string | null = null;
 let allowLanEnabled = true;
@@ -467,7 +475,7 @@ async function connectFromTray(): Promise<void> {
       trayStatusDetail = "connect request failed";
     }
   } catch (error) {
-    console.warn("tray connect failed", error);
+    console.warn("tray connect failed", sanitizeLog(error));
     trayStatusState = "ERROR";
     trayStatusDetail = "connect failed";
   } finally {
@@ -696,7 +704,7 @@ function registerIpcHandlers(): void {
           effectiveFriendlyName = regResponse.friendlyName;
         }
       } catch (regErr) {
-        console.warn("device registration failed:", regErr);
+        console.warn("device registration failed:", sanitizeLog(regErr));
         const message = regErr instanceof Error ? regErr.message : "Device registration failed";
 
         // If device limit reached, keep the license key in pangeaApiClient so
@@ -722,7 +730,7 @@ function registerIpcHandlers(): void {
       const authState = await auth.loginWithToken(data.vpnAccessToken, data.user);
       return { ...authState, friendlyName: effectiveFriendlyName };
     } catch (err) {
-      console.warn("token login failed:", err);
+      console.warn("token login failed:", sanitizeLog(err));
       return { authenticated: false, user: null };
     }
   });
