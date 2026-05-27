@@ -1,0 +1,119 @@
+name: "CodeQL Advanced"
+
+on:
+  push:
+    branches: [ "master" ]
+    paths-ignore:
+      - 'docs/**'
+      - '**.md'
+      - 'LICENSE'
+      - '.gitignore'
+      - '.gitattributes'
+  pull_request:
+    branches: [ "master" ]
+    paths-ignore:
+      - 'docs/**'
+      - '**.md'
+      - 'LICENSE'
+      - '.gitignore'
+      - '.gitattributes'
+  schedule:
+    # Weekly drift check, catches new CodeQL rules against unchanged code.
+    - cron: '33 18 * * 0'
+  workflow_dispatch:
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }}${{ matrix.goos && format(', {0}', matrix.goos) || '' }})
+    runs-on: ${{ matrix.runs-on }}
+    timeout-minutes: 30
+
+    permissions:
+      security-events: write
+      packages: read
+      actions: read
+      contents: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Workflow files themselves: script injection, unpinned actions, etc.
+          - language: actions
+            build-mode: none
+            runs-on: ubuntu-latest
+
+          # Electron main + renderer + shared-types.
+          - language: javascript-typescript
+            build-mode: none
+            runs-on: ubuntu-latest
+
+          # Go daemon, one variant per target OS so build-tagged files
+          # (internal/wg, internal/platform kill switch, etc.) get analyzed.
+          - language: go
+            build-mode: manual
+            runs-on: ubuntu-latest
+            goos: linux
+
+          - language: go
+            build-mode: manual
+            runs-on: windows-latest
+            goos: windows
+
+          - language: go
+            build-mode: manual
+            runs-on: macos-latest
+            goos: darwin
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        if: matrix.language == 'go'
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'daemon/go.mod'
+          cache: true
+          cache-dependency-path: 'daemon/go.sum'
+
+      - name: Set up Node
+        if: matrix.language == 'javascript-typescript'
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'npm'
+        continue-on-error: true  # Fine if .nvmrc isn't present, CodeQL doesn't need npm install.
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          queries: security-extended,security-and-quality
+          # Uncomment to ignore generated files or vendored deps:
+          # config-file: ./.github/codeql/codeql-config.yml
+
+      - name: Build Go daemon
+        if: matrix.language == 'go'
+        shell: bash
+        working-directory: daemon
+        env:
+          GOOS: ${{ matrix.goos }}
+          CGO_ENABLED: 0
+        run: |
+          echo "Building Go daemon for GOOS=$GOOS"
+          go build -trimpath -buildvcs=false ./...
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:${{ matrix.language }}${{ matrix.goos && format('-{0}', matrix.goos) || '' }}"
+          upload: always
