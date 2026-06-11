@@ -575,7 +575,7 @@ async function provisionAndSwitch(serverId: string): Promise<import("@pangeavpn/
     throw new Error(`provision: ${msg}`);
   }
 
-  const opts = { allowLAN: allowLanEnabled };
+  const opts = { allowLAN: allowLanEnabled, lockdown: alwaysConnectedEnabled };
   let result: import("@pangeavpn/shared-types").OkResponse;
   try {
     result = await withDaemonRestartOnUnavailable(() => daemonClient.switch(profile.id, opts), "switch");
@@ -916,7 +916,20 @@ function registerIpcHandlers(): void {
     } catch (err) {
       console.warn("Failed to apply login item for lockdown:", err);
     }
-    if (previouslyEnabled && !alwaysConnectedEnabled) {
+    if (!previouslyEnabled && alwaysConnectedEnabled) {
+      // Lockdown on: block internet immediately (fail-closed) without connecting.
+      try {
+        const status = await daemonClient.getStatus();
+        if (status.state !== "CONNECTED" && status.state !== "CONNECTING") {
+          await daemonClient.engageKillSwitch({
+            profileId: lastConnectedProfileId ?? undefined,
+            allowLAN: allowLanEnabled
+          });
+        }
+      } catch (err) {
+        console.warn("Failed to engage kill switch on lockdown on:", err);
+      }
+    } else if (previouslyEnabled && !alwaysConnectedEnabled) {
       try {
         const status = await daemonClient.getStatus();
         if (status.state !== "CONNECTED" && status.state !== "CONNECTING") {
@@ -1087,7 +1100,7 @@ function isUnauthorizedError(error: unknown): boolean {
 }
 
 async function connectWithRecovery(profileId: string): Promise<OkResponse> {
-  const opts = { allowLAN: allowLanEnabled };
+  const opts = { allowLAN: allowLanEnabled, lockdown: alwaysConnectedEnabled };
   const firstAttempt = await withDaemonRestartOnUnavailable(() => daemonClient.connect(profileId, opts), "connect");
   if (firstAttempt.ok) {
     return firstAttempt;
@@ -1232,9 +1245,25 @@ async function boot(): Promise<void> {
   if (!hiddenLaunch) {
     showMainWindow();
   }
-  daemonProcess.ensureRunning().catch((err) => {
-    console.error("failed to ensure daemon on startup", err);
-  });
+  daemonProcess
+    .ensureRunning()
+    .then(async () => {
+      // Lockdown: make the device fail-closed at startup even before/without
+      // connecting. The daemon re-applies a persisted lock on its own restart;
+      // this covers the case where no lock state was persisted yet. No-ops if a
+      // tunnel is already up or the lock is already engaged.
+      if (!alwaysConnectedEnabled) return;
+      const status = await daemonClient.getStatus();
+      if (status.state !== "CONNECTED" && status.state !== "CONNECTING") {
+        await daemonClient.engageKillSwitch({
+          profileId: lastConnectedProfileId ?? undefined,
+          allowLAN: allowLanEnabled
+        });
+      }
+    })
+    .catch((err) => {
+      console.error("failed to ensure daemon / engage lockdown on startup", err);
+    });
 
   startNetworkWatcher();
   onNetworkChange(() => {

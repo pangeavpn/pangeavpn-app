@@ -78,10 +78,16 @@ const maxBodySize = 1 << 20
 type connectRequest struct {
 	ProfileID string `json:"profileId"`
 	AllowLAN  bool   `json:"allowLAN,omitempty"`
+	Lockdown  bool   `json:"lockdown,omitempty"`
 }
 
 type disconnectRequest struct {
 	KeepKillSwitch bool `json:"keepKillSwitch,omitempty"`
+}
+
+type engageKillSwitchRequest struct {
+	ProfileID string `json:"profileId,omitempty"`
+	AllowLAN  bool   `json:"allowLAN,omitempty"`
 }
 
 type okResponse struct {
@@ -125,7 +131,7 @@ func NewHandler(token string, service *Service) http.Handler {
 			return
 		}
 
-		err := service.Connect(r.Context(), req.ProfileID, ConnectOptions{AllowLAN: req.AllowLAN})
+		err := service.Connect(r.Context(), req.ProfileID, ConnectOptions{AllowLAN: req.AllowLAN, Lockdown: req.Lockdown})
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, okResponse{OK: false})
 			return
@@ -172,6 +178,29 @@ func NewHandler(token string, service *Service) http.Handler {
 		writeJSON(w, http.StatusOK, okResponse{OK: true})
 	})))
 
+	mux.Handle("/killswitch/engage", auth.RequireBearer(token, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+
+		var req engageKillSwitchRequest
+		if r.ContentLength > 0 {
+			r.Body = http.MaxBytesReader(w, r.Body, maxBodySize)
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid json")
+				return
+			}
+		}
+
+		if err := service.EngageKillSwitch(r.Context(), req.ProfileID, req.AllowLAN); err != nil {
+			writeJSON(w, http.StatusInternalServerError, okResponse{OK: false})
+			return
+		}
+
+		writeJSON(w, http.StatusOK, okResponse{OK: true})
+	})))
+
 	mux.Handle("/switch", auth.RequireBearer(token, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -189,7 +218,7 @@ func NewHandler(token string, service *Service) http.Handler {
 			return
 		}
 
-		err := service.Switch(r.Context(), req.ProfileID, ConnectOptions{AllowLAN: req.AllowLAN})
+		err := service.Switch(r.Context(), req.ProfileID, ConnectOptions{AllowLAN: req.AllowLAN, Lockdown: req.Lockdown})
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, okResponse{OK: false})
 			return

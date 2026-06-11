@@ -80,7 +80,12 @@ func NewService(
 }
 
 func (s *Service) StartBackground(ctx context.Context) {
-	s.reconcileStartup(ctx)
+	// Run reconciliation off the startup path so the HTTP API starts serving
+	// immediately. The kill-switch re-apply makes blocking WFP syscalls that
+	// ignore ctx and can stall at boot (Base Filtering Engine not ready);
+	// gating ListenAndServe behind it would leave the frontend unable to reach
+	// the daemon.
+	go s.reconcileStartup(ctx)
 	go s.healthLoop(ctx)
 }
 
@@ -91,6 +96,10 @@ type ConnectOptions struct {
 	// and in the WireGuard AllowedIPs, so captive-portal re-checks and
 	// gateway liveness probes work on restrictive WiFi.
 	AllowLAN bool
+
+	// Lockdown marks the kill switch as an intentional lock that survives
+	// daemon restarts (re-applied on startup rather than cleared as stale).
+	Lockdown bool
 }
 
 func (s *Service) Connect(ctx context.Context, profileID string, opts ConnectOptions) error {
@@ -174,7 +183,7 @@ func (s *Service) Connect(ctx context.Context, profileID string, opts ConnectOpt
 	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("connect requested with profile %s", profile.ID))
 	stepStart := time.Now()
 	permittedHosts := killSwitchPermits(profile)
-	if err := s.killSwitch.Enable(ctx, permittedHosts, opts.AllowLAN); err != nil {
+	if err := s.killSwitch.Enable(ctx, permittedHosts, opts.AllowLAN, opts.Lockdown); err != nil {
 		s.setError(fmt.Sprintf("kill switch enable failed: %v", err))
 		return err
 	}
@@ -362,7 +371,7 @@ func (s *Service) Switch(ctx context.Context, newProfileID string, opts ConnectO
 
 	s.machine.Set(state.StateConnecting, fmt.Sprintf("switching to %s: updating kill switch", newProfile.ID))
 	stepStart := time.Now()
-	if err := s.killSwitch.Enable(ctx, killSwitchPermits(newProfile), opts.AllowLAN); err != nil {
+	if err := s.killSwitch.Enable(ctx, killSwitchPermits(newProfile), opts.AllowLAN, opts.Lockdown); err != nil {
 		s.setError(fmt.Sprintf("switch: kill switch re-enable failed: %v", err))
 		return err
 	}
@@ -390,6 +399,35 @@ func (s *Service) ClearKillSwitch(ctx context.Context) error {
 		return err
 	}
 	s.logs.Add(state.LogInfo, state.SourceDaemon, "kill switch cleared (manual)")
+	return nil
+}
+
+// EngageKillSwitch turns on the kill switch without starting a VPN session,
+// giving the device a fail-closed network lock. Used when Lockdown is enabled
+// while disconnected: internet is blocked immediately even though nothing is
+// connected yet. When profileID names a known profile, that profile's transport
+// endpoints are permitted so a later Connect is seamless; otherwise the lock
+// blocks all outbound except loopback/DHCP.
+func (s *Service) EngageKillSwitch(ctx context.Context, profileID string, allowLAN bool) error {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+
+	if s.killSwitch.Active() {
+		return nil
+	}
+
+	// Pure block-all lock: no endpoint permits, so this lands instantly with no
+	// DNS resolution — which would otherwise delay the block (leaking until it
+	// lands) and can hang the request. The VPN endpoint is permitted later by
+	// Connect, which re-enters Enable.
+	_ = profileID
+	ksCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if err := s.killSwitch.Enable(ksCtx, nil, allowLAN, true); err != nil {
+		s.logs.Add(state.LogError, state.SourceDaemon, fmt.Sprintf("kill switch engage failed: %v", err))
+		return err
+	}
+	s.logs.Add(state.LogInfo, state.SourceDaemon, "kill switch engaged (lockdown, no connection)")
 	return nil
 }
 
@@ -691,17 +729,29 @@ func (s *Service) reconcileStartup(ctx context.Context) {
 
 	runningProfiles := s.findRunningWireGuardProfiles(startupCtx)
 
-	// If kill switch was left active from a previous session but there are
-	// no running tunnels, clear it to restore normal networking.
-	if s.killSwitch.Active() && len(runningProfiles) == 0 {
-		s.logs.Add(state.LogInfo, state.SourceDaemon, "clearing stale kill switch from previous session")
-		if err := s.killSwitch.Clear(startupCtx); err != nil {
-			s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("stale kill switch clear failed: %v", err))
-		}
-	}
-	// Also check persisted state in case in-memory state was lost (fresh start).
-	if !s.killSwitch.Active() && len(runningProfiles) == 0 {
-		if st, err := platform.LoadKillSwitchStatePublic(); err == nil && st.Active {
+	// Reconcile a kill switch left from a previous session. A Lockdown lock
+	// (state.Locked) is intentional and must stay fail-closed across daemon
+	// restarts, so re-apply it when there's no tunnel. Anything else with no
+	// tunnel is stale (e.g. a crash) and is cleared to restore networking.
+	if len(runningProfiles) == 0 {
+		persisted, _ := platform.LoadKillSwitchStatePublic()
+		switch {
+		case persisted.Active && persisted.Locked:
+			if !s.killSwitch.Active() {
+				// On Windows the dynamic WFP session was torn down on the prior
+				// exit; on pf/nftables the rules may persist. Re-Enable is
+				// idempotent and reuses the persisted endpoint IPs (no DNS).
+				s.logs.Add(state.LogInfo, state.SourceDaemon, "re-applying lockdown kill switch (no tunnel)")
+				if err := s.killSwitch.Enable(startupCtx, persisted.EndpointIPs, persisted.AllowLAN, true); err != nil {
+					s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("lockdown kill switch re-apply failed: %v", err))
+				}
+			}
+		case s.killSwitch.Active():
+			s.logs.Add(state.LogInfo, state.SourceDaemon, "clearing stale kill switch from previous session")
+			if err := s.killSwitch.Clear(startupCtx); err != nil {
+				s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("stale kill switch clear failed: %v", err))
+			}
+		case persisted.Active:
 			s.logs.Add(state.LogInfo, state.SourceDaemon, "clearing persisted kill switch state from previous session")
 			if err := s.killSwitch.Clear(startupCtx); err != nil {
 				s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("persisted kill switch clear failed: %v", err))

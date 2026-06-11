@@ -25,10 +25,13 @@ export class DaemonClient {
     return this.request<StatusResponse>("GET", "/status");
   }
 
-  async connect(profileId: string, opts?: { allowLAN?: boolean }): Promise<OkResponse> {
+  async connect(profileId: string, opts?: { allowLAN?: boolean; lockdown?: boolean }): Promise<OkResponse> {
     const body: Record<string, unknown> = { profileId };
     if (opts?.allowLAN) {
       body.allowLAN = true;
+    }
+    if (opts?.lockdown) {
+      body.lockdown = true;
     }
     return this.request<OkResponse>("POST", "/connect", body, this.connectTimeoutMs);
   }
@@ -39,13 +42,30 @@ export class DaemonClient {
   }
 
   async clearKillSwitch(): Promise<OkResponse> {
-    return this.request<OkResponse>("POST", "/killswitch/clear");
+    // Kill-switch ops hold opMu and touch WFP; allow more than the 5s default
+    // so a busy daemon isn't falsely reported unreachable.
+    return this.request<OkResponse>("POST", "/killswitch/clear", undefined, 15000);
   }
 
-  async switch(profileId: string, opts?: { allowLAN?: boolean }): Promise<OkResponse> {
+  async engageKillSwitch(opts?: { profileId?: string; allowLAN?: boolean }): Promise<OkResponse> {
+    const body: Record<string, unknown> = {};
+    if (opts?.profileId) body.profileId = opts.profileId;
+    if (opts?.allowLAN) body.allowLAN = true;
+    return this.request<OkResponse>(
+      "POST",
+      "/killswitch/engage",
+      Object.keys(body).length > 0 ? body : undefined,
+      15000
+    );
+  }
+
+  async switch(profileId: string, opts?: { allowLAN?: boolean; lockdown?: boolean }): Promise<OkResponse> {
     const body: Record<string, unknown> = { profileId };
     if (opts?.allowLAN) {
       body.allowLAN = true;
+    }
+    if (opts?.lockdown) {
+      body.lockdown = true;
     }
     return this.request<OkResponse>("POST", "/switch", body, this.connectTimeoutMs);
   }

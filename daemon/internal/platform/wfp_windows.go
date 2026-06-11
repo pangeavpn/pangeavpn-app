@@ -321,6 +321,31 @@ func (e *wfpEngine) addPermitLoopback() (uint64, error) {
 	return e.addFilter(fwpmLayerAleAuthConnectV4, "PangeaVPN Allow Loopback", 10, fwpActionPermit, conditions)
 }
 
+// addPermitLoopbackSubnet permits all outbound to 127.0.0.0/8 by address. This
+// complements the IS_LOOPBACK flag permit, which is not reliably set for fresh
+// inter-process TCP connects at ALE_AUTH_CONNECT — without it the block-all can
+// drop the local daemon API channel (127.0.0.1:8787). Loopback is non-routable,
+// so there is no leak risk.
+func (e *wfpEngine) addPermitLoopbackSubnet() (uint64, error) {
+	addrMask := fwpV4AddrAndMask{
+		addr: uint32(127) << 24,
+		mask: 0xFF000000, // /8
+	}
+	conditions := []fwpmFilterCondition0{
+		{
+			fieldKey:  fwpmConditionIpRemoteAddress,
+			matchType: fwpMatchEqual,
+			conditionValue: fwpValue0{
+				valueType: fwpV4AddrMask,
+				value:     uintptr(unsafe.Pointer(&addrMask)),
+			},
+		},
+	}
+	id, err := e.addFilter(fwpmLayerAleAuthConnectV4, "PangeaVPN Allow Loopback Subnet", 10, fwpActionPermit, conditions)
+	runtime.KeepAlive(&addrMask)
+	return id, err
+}
+
 func (e *wfpEngine) addPermitEndpointIP(ipStr string) (uint64, error) {
 	ip := net.ParseIP(ipStr).To4()
 	if ip == nil {

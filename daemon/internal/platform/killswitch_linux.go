@@ -40,7 +40,7 @@ type linuxKillSwitch struct {
 	allowLAN bool
 }
 
-func (ks *linuxKillSwitch) Enable(ctx context.Context, endpointHosts []string, allowLAN bool) error {
+func (ks *linuxKillSwitch) Enable(ctx context.Context, endpointHosts []string, allowLAN bool, locked bool) error {
 	ks.mu.Lock()
 	defer ks.mu.Unlock()
 
@@ -63,6 +63,7 @@ func (ks *linuxKillSwitch) Enable(ctx context.Context, endpointHosts []string, a
 		AllowLAN:        allowLAN,
 		EndpointIPs:     ips,
 		TunnelInterface: tunnelInterface,
+		Locked:          locked,
 	}
 	if err := saveKillSwitchState(st); err != nil {
 		return fmt.Errorf("kill switch enable: save state: %w", err)

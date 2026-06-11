@@ -19,8 +19,12 @@ import (
 type KillSwitch interface {
 	// Enable blocks all outbound except loopback + resolved IPs from each
 	// endpointHost. When allowLAN, also permits RFC1918/link-local/multicast/broadcast.
+	// An empty endpointHosts engages a pure block-all lock (no VPN session) —
+	// used when Lockdown is turned on while disconnected. When locked, the
+	// persisted state is marked so startup reconciliation re-applies the lock
+	// instead of clearing it as stale.
 	// Re-entrant: re-applies rules with new endpoints without opening the lock.
-	Enable(ctx context.Context, endpointHosts []string, allowLAN bool) error
+	Enable(ctx context.Context, endpointHosts []string, allowLAN bool, locked bool) error
 
 	// Update adds an allow rule for the active tunnel interface so that
 	// VPN-routed traffic can egress.
@@ -54,6 +58,10 @@ type KillSwitchState struct {
 	AllowLAN        bool     `json:"allowLAN,omitempty"`
 	EndpointIPs     []string `json:"endpointIPs"`
 	TunnelInterface string   `json:"tunnelInterface,omitempty"`
+	// Locked marks an intentional Lockdown lock that must survive daemon
+	// restarts — startup reconciliation re-applies it rather than clearing it
+	// as stale crash leftover.
+	Locked bool `json:"locked,omitempty"`
 }
 
 const killSwitchStateFile = "killswitch-state.json"
@@ -76,7 +84,7 @@ func NewKillSwitch() KillSwitch {
 // noopKillSwitch is used on platforms without a kill-switch backend.
 type noopKillSwitch struct{}
 
-func (n *noopKillSwitch) Enable(_ context.Context, _ []string, _ bool) error { return nil }
+func (n *noopKillSwitch) Enable(_ context.Context, _ []string, _ bool, _ bool) error { return nil }
 func (n *noopKillSwitch) Update(_ context.Context, _ string) error           { return nil }
 func (n *noopKillSwitch) Clear(_ context.Context) error                      { return nil }
 func (n *noopKillSwitch) Active() bool                                       { return false }
@@ -202,7 +210,9 @@ func mergeStringSets(a, b []string) []string {
 // entry that is already an IP literal contributes itself without a DNS lookup.
 func resolveEndpointHosts(ctx context.Context, hosts []string) ([]string, error) {
 	if len(hosts) == 0 {
-		return nil, fmt.Errorf("no endpoint hosts")
+		// No endpoints to permit: caller wants a pure block-all lock
+		// (e.g. Lockdown engaged while disconnected). Not an error.
+		return nil, nil
 	}
 	seen := make(map[string]struct{}, len(hosts))
 	out := make([]string, 0, len(hosts))

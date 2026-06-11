@@ -27,7 +27,7 @@ type darwinKillSwitch struct {
 	allowLAN bool
 }
 
-func (ks *darwinKillSwitch) Enable(ctx context.Context, endpointHosts []string, allowLAN bool) error {
+func (ks *darwinKillSwitch) Enable(ctx context.Context, endpointHosts []string, allowLAN bool, locked bool) error {
 	ks.mu.Lock()
 	defer ks.mu.Unlock()
 
@@ -50,6 +50,7 @@ func (ks *darwinKillSwitch) Enable(ctx context.Context, endpointHosts []string, 
 		AllowLAN:        allowLAN,
 		EndpointIPs:     ips,
 		TunnelInterface: tunnelInterface,
+		Locked:          locked,
 	}
 	if err := saveKillSwitchState(st); err != nil {
 		return fmt.Errorf("kill switch enable: save state: %w", err)

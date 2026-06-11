@@ -25,7 +25,7 @@ type windowsKillSwitch struct {
 	tunnelFilterId uint64     // WFP filter ID for the tunnel interface permit
 }
 
-func (ks *windowsKillSwitch) Enable(ctx context.Context, endpointHosts []string, allowLAN bool) error {
+func (ks *windowsKillSwitch) Enable(ctx context.Context, endpointHosts []string, allowLAN bool, locked bool) error {
 	ks.mu.Lock()
 	defer ks.mu.Unlock()
 
@@ -66,6 +66,7 @@ func (ks *windowsKillSwitch) Enable(ctx context.Context, endpointHosts []string,
 
 		prev.EndpointIPs = mergeStringSets(prev.EndpointIPs, ips)
 		prev.AllowLAN = allowLAN || prev.AllowLAN
+		prev.Locked = prev.Locked || locked
 		_ = saveKillSwitchState(prev)
 		return nil
 	}
@@ -76,6 +77,7 @@ func (ks *windowsKillSwitch) Enable(ctx context.Context, endpointHosts []string,
 		Active:      true,
 		AllowLAN:    allowLAN,
 		EndpointIPs: ips,
+		Locked:      locked,
 	}
 	if err := saveKillSwitchState(st); err != nil {
 		return fmt.Errorf("kill switch enable: save state: %w", err)
@@ -108,6 +110,16 @@ func (ks *windowsKillSwitch) Enable(ctx context.Context, endpointHosts []string,
 	}
 
 	if _, err := engine.addPermitLoopback(); err != nil {
+		engine.abortTransaction()
+		engine.close()
+		_ = removeKillSwitchState()
+		return fmt.Errorf("kill switch enable: %w", err)
+	}
+
+	// Permit the loopback subnet by address too — the IS_LOOPBACK flag above is
+	// not reliably set for fresh inter-process TCP connects, and the local
+	// daemon API (127.0.0.1:8787) must never be blocked.
+	if _, err := engine.addPermitLoopbackSubnet(); err != nil {
 		engine.abortTransaction()
 		engine.close()
 		_ = removeKillSwitchState()

@@ -148,7 +148,7 @@ type fakeKillSwitch struct {
 	clearErr        error
 }
 
-func (f *fakeKillSwitch) Enable(_ context.Context, endpoints []string, allowLAN bool) error {
+func (f *fakeKillSwitch) Enable(_ context.Context, endpoints []string, allowLAN bool, _ bool) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.enableCount++
