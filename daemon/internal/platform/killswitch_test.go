@@ -126,9 +126,6 @@ func TestKillSwitchStatePersistence(t *testing.T) {
 	st := KillSwitchState{
 		Active:      true,
 		EndpointIPs: []string{"1.2.3.4", "5.6.7.8"},
-		PreviousPolicy: map[string]string{
-			"domainprofile": "AllowOutbound",
-		},
 	}
 
 	if err := saveKillSwitchState(st); err != nil {

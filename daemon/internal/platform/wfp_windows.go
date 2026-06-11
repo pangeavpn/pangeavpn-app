@@ -18,19 +18,14 @@ import (
 var (
 	modFwpuclnt = windows.NewLazySystemDLL("fwpuclnt.dll")
 
-	procFwpmEngineOpen0          = modFwpuclnt.NewProc("FwpmEngineOpen0")
-	procFwpmEngineClose0         = modFwpuclnt.NewProc("FwpmEngineClose0")
-	procFwpmTransactionBegin0    = modFwpuclnt.NewProc("FwpmTransactionBegin0")
-	procFwpmTransactionCommit0   = modFwpuclnt.NewProc("FwpmTransactionCommit0")
-	procFwpmTransactionAbort0    = modFwpuclnt.NewProc("FwpmTransactionAbort0")
-	procFwpmSubLayerAdd0         = modFwpuclnt.NewProc("FwpmSubLayerAdd0")
-	procFwpmSubLayerDeleteByKey0 = modFwpuclnt.NewProc("FwpmSubLayerDeleteByKey0")
-	procFwpmFilterAdd0              = modFwpuclnt.NewProc("FwpmFilterAdd0")
-	procFwpmFilterDeleteById0       = modFwpuclnt.NewProc("FwpmFilterDeleteById0")
-	procFwpmFilterCreateEnumHandle0 = modFwpuclnt.NewProc("FwpmFilterCreateEnumHandle0")
-	procFwpmFilterEnum0             = modFwpuclnt.NewProc("FwpmFilterEnum0")
-	procFwpmFilterDestroyEnumHandle0 = modFwpuclnt.NewProc("FwpmFilterDestroyEnumHandle0")
-	procFwpmFreeMemory0             = modFwpuclnt.NewProc("FwpmFreeMemory0")
+	procFwpmEngineOpen0        = modFwpuclnt.NewProc("FwpmEngineOpen0")
+	procFwpmEngineClose0       = modFwpuclnt.NewProc("FwpmEngineClose0")
+	procFwpmTransactionBegin0  = modFwpuclnt.NewProc("FwpmTransactionBegin0")
+	procFwpmTransactionCommit0 = modFwpuclnt.NewProc("FwpmTransactionCommit0")
+	procFwpmTransactionAbort0  = modFwpuclnt.NewProc("FwpmTransactionAbort0")
+	procFwpmSubLayerAdd0       = modFwpuclnt.NewProc("FwpmSubLayerAdd0")
+	procFwpmFilterAdd0         = modFwpuclnt.NewProc("FwpmFilterAdd0")
+	procFwpmFilterDeleteById0  = modFwpuclnt.NewProc("FwpmFilterDeleteById0")
 )
 
 // ---------------------------------------------------------------------------
@@ -69,10 +64,10 @@ var (
 
 // WFP condition field GUIDs.
 var (
-	fwpmConditionFlags           = windows.GUID{Data1: 0x632ce23b, Data2: 0x5167, Data3: 0x435c, Data4: [8]byte{0x86, 0xd7, 0xe9, 0x03, 0x68, 0x4a, 0xa8, 0x0c}}
-	fwpmConditionIpRemoteAddress = windows.GUID{Data1: 0xb235ae9a, Data2: 0x1d64, Data3: 0x49b8, Data4: [8]byte{0xa4, 0x4c, 0x5f, 0xf3, 0xd9, 0x09, 0x50, 0x45}}
-	fwpmConditionIpProtocol      = windows.GUID{Data1: 0x3971ef2b, Data2: 0x623e, Data3: 0x4f9a, Data4: [8]byte{0x8c, 0xb1, 0x6e, 0x79, 0xb8, 0x06, 0xb9, 0xa6}}
-	fwpmConditionIpRemotePort    = windows.GUID{Data1: 0xc35a604d, Data2: 0xd22b, Data3: 0x440d, Data4: [8]byte{0xa1, 0xd4, 0x0f, 0x22, 0x44, 0xd3, 0xb2, 0xe2}}
+	fwpmConditionFlags            = windows.GUID{Data1: 0x632ce23b, Data2: 0x5167, Data3: 0x435c, Data4: [8]byte{0x86, 0xd7, 0xe9, 0x03, 0x68, 0x4a, 0xa8, 0x0c}}
+	fwpmConditionIpRemoteAddress  = windows.GUID{Data1: 0xb235ae9a, Data2: 0x1d64, Data3: 0x49b8, Data4: [8]byte{0xa4, 0x4c, 0x5f, 0xf3, 0xd9, 0x09, 0x50, 0x45}}
+	fwpmConditionIpProtocol       = windows.GUID{Data1: 0x3971ef2b, Data2: 0x623e, Data3: 0x4f9a, Data4: [8]byte{0x8c, 0xb1, 0x6e, 0x79, 0xb8, 0x06, 0xb9, 0xa6}}
+	fwpmConditionIpRemotePort     = windows.GUID{Data1: 0xc35a604d, Data2: 0xd22b, Data3: 0x440d, Data4: [8]byte{0xa1, 0xd4, 0x0f, 0x22, 0x44, 0xd3, 0xb2, 0xe2}}
 	fwpmConditionIpLocalPort      = windows.GUID{Data1: 0x0c1ba1af, Data2: 0x5765, Data3: 0x453f, Data4: [8]byte{0xaf, 0x22, 0xa8, 0xf4, 0xfe, 0x04, 0x5f, 0x71}}
 	fwpmConditionIpLocalInterface = windows.GUID{Data1: 0x4cd62a49, Data2: 0x59c3, Data3: 0x4969, Data4: [8]byte{0xb7, 0xf3, 0xbd, 0xa5, 0xd3, 0x28, 0x90, 0xa4}}
 )
@@ -250,21 +245,6 @@ func (e *wfpEngine) addSublayer() error {
 			return nil
 		}
 		return fmt.Errorf("FwpmSubLayerAdd0: %w", windows.Errno(r))
-	}
-	return nil
-}
-
-func (e *wfpEngine) deleteSublayer() error {
-	key := pangeaVPNSublayerKey
-	r, _, _ := procFwpmSubLayerDeleteByKey0.Call(
-		uintptr(e.handle),
-		uintptr(unsafe.Pointer(&key)),
-	)
-	if r != 0 {
-		if windows.Errno(r) == windows.ERROR_NOT_FOUND {
-			return nil
-		}
-		return fmt.Errorf("FwpmSubLayerDeleteByKey0: %w", windows.Errno(r))
 	}
 	return nil
 }
@@ -477,45 +457,4 @@ func (e *wfpEngine) addPermitLoopbackV6() (uint64, error) {
 		},
 	}
 	return e.addFilter(fwpmLayerAleAuthConnectV6, "PangeaVPN Allow Loopback IPv6", 10, fwpActionPermit, conditions)
-}
-
-// deleteAllSublayerFilters enumerates all WFP filters and deletes those
-// belonging to our sublayer. Used to clean up persistent filters left by
-// a previous version that didn't use dynamic sessions.
-func (e *wfpEngine) deleteAllSublayerFilters() {
-	var enumHandle windows.Handle
-	r, _, _ := procFwpmFilterCreateEnumHandle0.Call(
-		uintptr(e.handle),
-		0, // NULL template = all filters
-		uintptr(unsafe.Pointer(&enumHandle)),
-	)
-	if r != 0 {
-		return
-	}
-	defer procFwpmFilterDestroyEnumHandle0.Call(uintptr(e.handle), uintptr(enumHandle))
-
-	for {
-		var entries uintptr
-		var numEntries uint32
-		r, _, _ := procFwpmFilterEnum0.Call(
-			uintptr(e.handle),
-			uintptr(enumHandle),
-			100,
-			uintptr(unsafe.Pointer(&entries)),
-			uintptr(unsafe.Pointer(&numEntries)),
-		)
-		if r != 0 || numEntries == 0 {
-			break
-		}
-
-		ptrs := unsafe.Slice((*uintptr)(unsafe.Pointer(entries)), numEntries)
-		for _, ptr := range ptrs {
-			filter := (*fwpmFilter0)(unsafe.Pointer(ptr))
-			if filter.subLayerKey == pangeaVPNSublayerKey {
-				_ = e.deleteFilter(filter.filterId)
-			}
-		}
-
-		procFwpmFreeMemory0.Call(uintptr(unsafe.Pointer(&entries)))
-	}
 }

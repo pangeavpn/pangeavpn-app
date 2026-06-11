@@ -50,11 +50,10 @@ var LANAllowPrefixes = []string{
 // KillSwitchState is persisted to disk so that crash/startup reconciliation
 // can restore normal networking or re-apply the lock.
 type KillSwitchState struct {
-	Active          bool              `json:"active"`
-	AllowLAN        bool              `json:"allowLAN,omitempty"`
-	EndpointIPs     []string          `json:"endpointIPs"`
-	TunnelInterface string            `json:"tunnelInterface,omitempty"`
-	PreviousPolicy  map[string]string `json:"previousPolicy,omitempty"`
+	Active          bool     `json:"active"`
+	AllowLAN        bool     `json:"allowLAN,omitempty"`
+	EndpointIPs     []string `json:"endpointIPs"`
+	TunnelInterface string   `json:"tunnelInterface,omitempty"`
 }
 
 const killSwitchStateFile = "killswitch-state.json"
@@ -78,9 +77,9 @@ func NewKillSwitch() KillSwitch {
 type noopKillSwitch struct{}
 
 func (n *noopKillSwitch) Enable(_ context.Context, _ []string, _ bool) error { return nil }
-func (n *noopKillSwitch) Update(_ context.Context, _ string) error         { return nil }
-func (n *noopKillSwitch) Clear(_ context.Context) error                    { return nil }
-func (n *noopKillSwitch) Active() bool                                     { return false }
+func (n *noopKillSwitch) Update(_ context.Context, _ string) error           { return nil }
+func (n *noopKillSwitch) Clear(_ context.Context) error                      { return nil }
+func (n *noopKillSwitch) Active() bool                                       { return false }
 
 // ---------------------------------------------------------------------------
 // Shared helpers for state persistence

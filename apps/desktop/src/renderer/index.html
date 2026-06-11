@@ -156,8 +156,8 @@
         <span class="throughput-item">↓ <span id="rxBytes">0 B</span></span>
       </div>
 
-      <!-- Profiles (collapsible) -->
-      <section class="panel collapsible" data-collapsible>
+      <!-- Profiles (collapsible) — gated behind the verbose-errors debug toggle -->
+      <section id="profilesSection" class="panel collapsible" data-collapsible hidden>
         <button class="collapse-toggle" type="button" aria-expanded="false" aria-controls="profilesContent">
           <span>Profiles</span>
           <span class="collapse-arrow" aria-hidden="true">&#9662;</span>
@@ -306,7 +306,7 @@
                 <input id="alwaysConnectedToggle" type="checkbox" />
                 <div>
                   <span class="toggle-title">Lockdown</span>
-                  <span class="toggle-hint">Auto-connect to the last server on launch, and keep the kill switch on after you disconnect — only VPN traffic is allowed. Turn off Lockdown to regain unprotected internet.</span>
+                  <span class="toggle-hint">Launch PangeaVPN at startup (hidden in the tray), auto-connect to the last server, and keep the kill switch on after you disconnect — only VPN traffic is allowed. Turn off Lockdown to regain unprotected internet.</span>
                 </div>
               </label>
             </div>

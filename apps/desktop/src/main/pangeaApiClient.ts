@@ -408,8 +408,15 @@ export class PangeaApiClient {
       }
     }
 
-    console.log(`[HubURL] All strategies failed, falling back to direct domain`);
+    // directIpOnly (default): fail closed rather than fall back to the domain (would leak SNI in cleartext).
     this.dohResolvedIp = null;
+    if (this.directIpOnly) {
+      throw new Error(
+        "Hub unreachable: DNS-over-HTTPS resolution failed and direct-IP-only mode forbids a cleartext domain connection"
+      );
+    }
+
+    console.log(`[HubURL] All strategies failed, falling back to direct domain`);
     this.hubReady = true;
   }
 
@@ -446,6 +453,9 @@ export class PangeaApiClient {
         body: envelopeJson,
         timeoutMs: this.timeoutMs
       });
+    } else if (this.directIpOnly) {
+      // Defensive: ensureHub() should already have thrown in directIpOnly mode.
+      throw new Error("Hub transport unavailable: direct-IP-only mode forbids a cleartext domain connection");
     } else {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), this.timeoutMs);
@@ -531,34 +541,6 @@ export class PangeaApiClient {
       status: inner.status,
       headers: { "Content-Type": "application/json" },
     });
-  }
-
-  private async tryHealthDirect(): Promise<boolean> {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 3000);
-    try {
-      const response = await net.fetch(`${HUB_API_BASE}/health`, {
-        signal: controller.signal,
-      });
-      return response.ok;
-    } catch {
-      return false;
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-
-  async isReachable(): Promise<boolean> {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 3000);
-    try {
-      const response = await net.fetch(`${HUB_API_BASE}/health`, { signal: controller.signal });
-      return response.ok;
-    } catch {
-      return false;
-    } finally {
-      clearTimeout(timer);
-    }
   }
 
   async tokenLogin(vpnAccessToken: string): Promise<TokenLoginResponse> {
@@ -710,7 +692,8 @@ export class PangeaApiClient {
         uid: server.cloak.uid,
         publicKey: server.cloak.publicKey,
         encryptionMethod: "plain",
-        password: ""
+        password: "",
+        ...(server.cloak.serverName ? { serverName: server.cloak.serverName } : {})
       },
       wireguard: {
         configText,

@@ -62,6 +62,8 @@ type CloakProfile struct {
 	PublicKey        string `json:"publicKey"`
 	EncryptionMethod string `json:"encryptionMethod"`
 	Password         string `json:"password"`
+	// Cover SNI Cloak presents; empty => buildRawConfig defaults to www.microsoft.com.
+	ServerName string `json:"serverName,omitempty"`
 }
 
 type WireGuardProfile struct {

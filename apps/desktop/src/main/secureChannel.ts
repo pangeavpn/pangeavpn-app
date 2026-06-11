@@ -47,7 +47,7 @@ export function encryptRequest(
   headers: Record<string, string>,
   body?: unknown
 ): { envelope: EncryptedEnvelope; aesKey: Buffer } {
-  // Fresh ephemeral keypair per request (forward secrecy)
+  // Fresh ephemeral client keypair per request (ephemeral-static ECDH against the pinned server key; not PFS)
   const { publicKey: ephPub, privateKey: ephPriv } = generateKeyPairSync("x25519");
 
   // X25519 ECDH

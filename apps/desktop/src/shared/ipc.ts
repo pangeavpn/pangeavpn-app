@@ -80,6 +80,8 @@ export interface ServerInfo {
     remoteHost: string;
     uid: string;
     publicKey: string;
+    // Optional cover SNI advertised by the hub (daemon defaults to www.microsoft.com when absent).
+    serverName?: string;
   };
 }
 

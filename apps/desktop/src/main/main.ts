@@ -46,6 +46,11 @@ let launchAtStartupEnabled = false;
 let alwaysConnectedEnabled = false;
 const hiddenLaunch = process.argv.some(isHiddenLaunchArg);
 
+// Login item on if launch-at-startup or Lockdown is enabled — Lockdown needs the tray app on boot to reconnect.
+async function applyLoginItem(): Promise<void> {
+  await setLoginItemEnabled(launchAtStartupEnabled || alwaysConnectedEnabled);
+}
+
 function getTaskbarPosition(): { x: number; y: number } {
   const { screen } = require("electron") as typeof import("electron");
   const display = screen.getPrimaryDisplay();
@@ -174,7 +179,7 @@ function showMainWindow(): void {
     const ease = 1 - Math.pow(1 - t, 3);
     mainWindow?.setOpacity(ease);
     if (useSlide) {
-      mainWindow?.setPosition(pos.x, Math.round(startY + (pos.y - startY) * ease));
+      mainWindow?.setBounds({ x: pos.x, y: Math.round(startY + (pos.y - startY) * ease), width: setWidth, height: setHeight });
     }
 
     if (step >= steps) {
@@ -210,7 +215,7 @@ function hideMainWindow(): void {
     const ease = t * t;
     mainWindow?.setOpacity(1 - ease);
     if (useSlide) {
-      mainWindow?.setPosition(startX, Math.round(startY + (endY - startY) * ease));
+      mainWindow?.setBounds({ x: startX, y: Math.round(startY + (endY - startY) * ease), width: setWidth, height: setHeight });
     }
 
     if (step >= steps) {
@@ -875,13 +880,17 @@ function registerIpcHandlers(): void {
       console.warn("Failed to persist launchAtStartup setting:", err);
     }
     try {
-      await setLoginItemEnabled(launchAtStartupEnabled);
+      await applyLoginItem();
     } catch (err) {
       console.warn("Failed to apply login item:", err);
     }
   });
 
   ipcMain.handle(IPC_CHANNELS.getLaunchAtStartup, async () => {
+    // Lockdown forces the login item on, so return the stored preference rather than the OS state.
+    if (alwaysConnectedEnabled) {
+      return launchAtStartupEnabled;
+    }
     // Self-heal: re-derive from OS in case the user toggled it elsewhere.
     try {
       const live = await isLoginItemEnabled();
@@ -901,6 +910,11 @@ function registerIpcHandlers(): void {
       await writeSettingsFile(settings);
     } catch (err) {
       console.warn("Failed to persist alwaysConnected setting:", err);
+    }
+    try {
+      await applyLoginItem();
+    } catch (err) {
+      console.warn("Failed to apply login item for lockdown:", err);
     }
     if (previouslyEnabled && !alwaysConnectedEnabled) {
       try {
@@ -1156,7 +1170,7 @@ async function boot(): Promise<void> {
 
   // Reconcile OS login-item state with our persisted preference (handles reinstalls).
   try {
-    await setLoginItemEnabled(launchAtStartupEnabled);
+    await applyLoginItem();
   } catch (err) {
     console.warn("Failed to reconcile login item:", err);
   }

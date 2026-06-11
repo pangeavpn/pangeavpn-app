@@ -391,6 +391,12 @@ func buildRawConfig(profile state.CloakProfile, remoteHost string) (*client.RawC
 		encMethod = "plain"
 	}
 
+	// Fall back to the default cover SNI when the profile carries none.
+	serverName := strings.TrimSpace(profile.ServerName)
+	if serverName == "" {
+		serverName = "www.microsoft.com"
+	}
+
 	// LocalPort == 0 is intentional: it requests an ephemeral port from the
 	// kernel. Loopback-only, so any port works — this sidesteps Windows
 	// Hyper-V UDP exclusion ranges that can claim 51820 at boot.
@@ -405,7 +411,7 @@ func buildRawConfig(profile state.CloakProfile, remoteHost string) (*client.RawC
 	}
 
 	return &client.RawConfig{
-		ServerName:       "www.microsoft.com",
+		ServerName:       serverName,
 		ProxyMethod:      "wireguard",
 		EncryptionMethod: encMethod,
 		UID:              uid,

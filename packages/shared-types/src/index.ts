@@ -18,7 +18,9 @@ export const CloakProfileSchema = z.object({
   uid: z.string().min(1),
   publicKey: z.string().min(1),
   encryptionMethod: z.string().min(1),
-  password: z.string()
+  password: z.string(),
+  // Optional cover SNI advertised by the hub (daemon defaults to www.microsoft.com when absent).
+  serverName: z.string().optional()
 });
 
 export const WireGuardProfileSchema = z.object({

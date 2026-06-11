@@ -50,6 +50,7 @@ const copyLogsBtn = must<HTMLButtonElement>("copyLogsBtn");
 const clearLogsBtn = must<HTMLButtonElement>("clearLogsBtn");
 const logsEl = must<HTMLDivElement>("logs");
 const collapsibleSections = Array.from(document.querySelectorAll<HTMLElement>("[data-collapsible]"));
+const profilesSection = must<HTMLElement>("profilesSection");
 const encodedImportInput = must<HTMLTextAreaElement>("encodedImportInput");
 const importEncodedProfileBtn = must<HTMLButtonElement>("importEncodedProfileBtn");
 const manualBuilderSection = must<HTMLElement>("manualBuilderSection");
@@ -1380,6 +1381,12 @@ async function renderAppVersion(): Promise<void> {
   }
 }
 
+// Profiles is a debug/advanced area; reveal it only when verbose errors are on.
+function applyVerboseErrorsUi(): void {
+  profilesSection.hidden = !verboseErrors;
+}
+applyVerboseErrorsUi();
+
 // Tap version label 5 times to toggle verbose error messages
 {
   let versionTapCount = 0;
@@ -1393,6 +1400,7 @@ async function renderAppVersion(): Promise<void> {
       versionTapCount = 0;
       verboseErrors = !verboseErrors;
       localStorage.setItem("pangea:verboseErrors", verboseErrors ? "1" : "0");
+      applyVerboseErrorsUi();
       showToast(verboseErrors ? "Verbose errors enabled" : "Verbose errors disabled");
     }
   });
