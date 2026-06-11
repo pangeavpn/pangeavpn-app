@@ -1,0 +1,132 @@
+name: AI Release Notes
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to (re)generate notes for'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ai-release-notes-${{ github.event.release.tag_name || inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  notes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Resolve tag
+        id: tag
+        run: echo "tag=${{ github.event.release.tag_name || inputs.tag }}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout (full history + tags)
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Gather release context
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          PREV="$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || true)"
+          if [ -n "$PREV" ]; then RANGE="${PREV}..${TAG}"; else RANGE="$TAG"; fi
+          git log --no-merges -n 200 --pretty=format:'- %s' "$RANGE" > commits.txt || true
+          git diff --stat "$RANGE" > stat.txt || true
+          # Regenerate GitHub's changelog fresh (idempotent on re-runs, unlike reading the live body)
+          PREVFLAG=()
+          if [ -n "$PREV" ]; then PREVFLAG=(-f "previous_tag_name=$PREV"); fi
+          gh api "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
+            -f "tag_name=$TAG" "${PREVFLAG[@]}" -q .body > changelog.md 2>/dev/null || true
+          {
+            echo "## Commits since ${PREV:-the start}"
+            cat commits.txt
+            echo
+            echo "## File change summary"
+            head -80 stat.txt
+            echo
+            echo "## GitHub changelog"
+            cat changelog.md
+          } > context.md
+
+      - name: Generate notes with Claude
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          cat > instructions.txt <<EOF
+          You are writing the GitHub release for PangeaVPN ${TAG}, a desktop VPN app.
+          Using the commits, file change summary, and GitHub changelog below, produce a
+          JSON object with two fields:
+
+          headline: a short Title Case phrase naming the 2-4 marquee user-facing changes,
+            comma-separated, with NO version number — e.g. "Lockdown Mode, Launch at Startup,
+            Stealth Update Channel". Under 70 characters. If the release is only dependency
+            bumps or internal cleanup, use a single phrase like "Maintenance Release".
+          body: clear, user-facing release notes in Markdown:
+            - Open with a 1-2 sentence summary of what this release delivers.
+            - Group changes under headings (### Features, ### Fixes, ### Security, ### Internal); omit empty groups.
+            - Describe user impact, not raw commit subjects. Skip noise (version bumps, formatting, merge commits).
+            - Do not invent changes the input does not support.
+            - Do not add installation instructions; they are prepended automatically.
+            - No preamble or code fences wrapping the body.
+
+          EOF
+          cat instructions.txt context.md > prompt.txt
+          REQ="$(jq -n --rawfile p prompt.txt '{
+            model: "claude-haiku-4-5",
+            max_tokens: 4096,
+            messages: [{role: "user", content: $p}],
+            output_config: {format: {type: "json_schema", schema: {
+              type: "object",
+              additionalProperties: false,
+              required: ["headline", "body"],
+              properties: {headline: {type: "string"}, body: {type: "string"}}
+            }}}
+          }')"
+          RESP="$(curl -sS --fail-with-body https://api.anthropic.com/v1/messages \
+            -H "x-api-key: $ANTHROPIC_API_KEY" \
+            -H "anthropic-version: 2023-06-01" \
+            -H "content-type: application/json" \
+            -d "$REQ")"
+          OUT="$(printf '%s' "$RESP" | jq -r '[.content[]? | select(.type=="text") | .text] | join("")')"
+          if [ -z "$OUT" ]; then
+            echo "::error::Claude returned no text. Full response:"; printf '%s\n' "$RESP"; exit 1
+          fi
+          printf '%s' "$OUT" | jq -r '.body // empty' > notes.md
+          HEADLINE="$(printf '%s' "$OUT" | jq -r '.headline // empty')"
+          if [ ! -s notes.md ]; then
+            echo "::error::No body in model output: $OUT"; exit 1
+          fi
+          if [ -n "$HEADLINE" ]; then
+            printf '%s — %s\n' "$TAG" "$HEADLINE" > title.txt
+          else
+            printf '%s\n' "$TAG" > title.txt
+          fi
+
+      - name: Update release
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          {
+            printf '## Install (macOS)\n\n'
+            printf '```bash\ncurl -fsSL https://pangeavpn.org/install-mac.sh | bash\n```\n\n'
+            printf -- '---\n\n'
+            cat notes.md
+            if [ -s changelog.md ]; then
+              printf '\n---\n\n'
+              cat changelog.md
+            fi
+          } > final.md
+          gh release edit "$TAG" --title "$(cat title.txt)" --notes-file final.md
