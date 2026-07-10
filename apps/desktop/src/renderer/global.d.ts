@@ -24,6 +24,7 @@ declare global {
     name: string;
     region: string;
     country: string;
+    load?: number | null;
     cloak: {
       remoteHost: string;
       uid: string;
@@ -46,6 +47,12 @@ declare global {
     friendlyName: string | null;
     createdAt: string;
     status: string;
+  }
+
+  interface SubscriptionInfo {
+    status: "trialing" | "active" | "past_due" | "canceled" | "unpaid" | "incomplete" | "none";
+    renews: boolean;
+    expiresAt: string | null;
   }
 
   interface PangeaApi {
@@ -74,6 +81,7 @@ declare global {
     cacheServers: (servers: ServerInfo[]) => Promise<void>;
     listDevices: () => Promise<DeviceInfo[]>;
     removeDevice: (deviceId: string) => Promise<void>;
+    getSubscription: () => Promise<SubscriptionInfo | null>;
   }
 
   interface AutoUpdaterApi {

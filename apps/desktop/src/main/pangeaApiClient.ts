@@ -3,7 +3,7 @@ import https from "node:https";
 import { URL } from "node:url";
 import { net } from "electron";
 import type { Profile } from "@pangeavpn/shared-types";
-import type { ServerInfo } from "../shared/ipc";
+import type { ServerInfo, SubscriptionInfo } from "../shared/ipc";
 import { encryptRequest, decryptResponse, type EncryptedResponse } from "./secureChannel";
 
 export class AuthError extends Error {
@@ -642,6 +642,16 @@ export class PangeaApiClient {
 
   async removeDevice(deviceId: string): Promise<void> {
     await this.hubRequest<unknown>("POST", "/api/device/remove", { deviceId });
+  }
+
+  async getSubscription(): Promise<SubscriptionInfo | null> {
+    try {
+      const data = await this.hubRequest<{ subscription: SubscriptionInfo | null }>("GET", "/api/client/subscription");
+      return data.subscription ?? null;
+    } catch (err) {
+      console.warn("[getSubscription]", err instanceof Error ? err.message : err);
+      return null;
+    }
   }
 
   async provision(serverId: string): Promise<Profile> {

@@ -1003,6 +1003,10 @@ function registerIpcHandlers(): void {
     await pangeaApiClient.removeDevice(deviceId);
   });
 
+  ipcMain.handle(IPC_CHANNELS.getSubscription, async () => {
+    return pangeaApiClient.getSubscription();
+  });
+
   ipcMain.handle(IPC_CHANNELS.provisionAndConnect, async (_event, serverId: string) => {
     try {
       const result = await provisionAndConnect(serverId);

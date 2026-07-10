@@ -73,6 +73,7 @@ const menuSettingsBtn = document.getElementById("menuSettingsBtn") as HTMLButton
 const settingsOverlay = document.getElementById("settingsOverlay") as HTMLElement;
 const settingsOverlayCloseBtn = document.getElementById("settingsOverlayCloseBtn") as HTMLButtonElement;
 const accountUserLabel = document.getElementById("accountUserLabel") as HTMLSpanElement;
+const accountSubscription = document.getElementById("accountSubscription") as HTMLSpanElement;
 const accountTokenValue = document.getElementById("accountTokenValue") as HTMLElement;
 const accountTokenToggleBtn = document.getElementById("accountTokenToggleBtn") as HTMLButtonElement;
 const accountTokenCopyBtn = document.getElementById("accountTokenCopyBtn") as HTMLButtonElement;
@@ -155,6 +156,47 @@ function refreshAccountToken(): void {
   accountTokenToggleBtn.textContent = accountTokenRevealed ? "Hide" : "Show";
 }
 
+function formatSubscriptionDate(iso: string | null): string {
+  if (!iso) return "";
+  try {
+    return ` ${new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })}`;
+  } catch {
+    return "";
+  }
+}
+
+function subscriptionText(sub: SubscriptionInfo | null): { text: string; warn: boolean } {
+  if (!sub) return { text: "No active subscription", warn: false };
+  const when = formatSubscriptionDate(sub.expiresAt);
+  if (sub.status === "active" || sub.status === "trialing") {
+    const trial = sub.status === "trialing" ? "Free trial · " : "";
+    return { text: `${trial}${sub.renews ? "Renews" : "Expires"}${when}`, warn: false };
+  }
+  if (sub.status === "past_due") {
+    return { text: `Payment past due${when ? " —" + when : ""}`, warn: true };
+  }
+  return { text: "No active subscription", warn: false };
+}
+
+// Fetched fresh each time Settings opens so expiry/renewal is always current.
+async function refreshSubscription(): Promise<void> {
+  accountSubscription.classList.remove("account-subscription-warn");
+  if (!pangeaApi) {
+    accountSubscription.textContent = "—";
+    return;
+  }
+  accountSubscription.textContent = "Loading...";
+  let sub: SubscriptionInfo | null = null;
+  try {
+    sub = await pangeaApi.getSubscription();
+  } catch {
+    sub = null;
+  }
+  const { text, warn } = subscriptionText(sub);
+  accountSubscription.textContent = text;
+  accountSubscription.classList.toggle("account-subscription-warn", warn);
+}
+
 // ── Overlay focus management ──────────────────────────────────
 // Full-screen overlays cover the shell but leave it in the tab order, so a
 // keyboard/screen-reader user could otherwise reach controls hidden behind
@@ -189,6 +231,7 @@ function openSettings(): void {
   settingsOverlay.setAttribute("aria-hidden", "false");
   settingsVersionEl.textContent = appVersionEl.textContent || "—";
   refreshAccountToken();
+  void refreshSubscription();
   activateOverlay(settingsOverlay);
 }
 
@@ -243,6 +286,8 @@ function openServerPicker(): void {
   serverPickerOverlay.setAttribute("aria-hidden", "false");
   serverPickerBtn.setAttribute("aria-expanded", "true");
   activateOverlay(serverPickerOverlay);
+  // Refresh the list (and its load values) every time the picker opens.
+  void refreshServersWithRetry();
 }
 
 function closeServerPicker(): void {
@@ -254,6 +299,12 @@ function closeServerPicker(): void {
 
 serverPickerBtn.addEventListener("click", openServerPicker);
 serverPickerOverlayCloseBtn.addEventListener("click", closeServerPicker);
+
+// Keep the server list current whenever the app comes back into view — shown
+// from the tray, restored from minimize, or otherwise unhidden.
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") void refreshServersWithRetry();
+});
 
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && serverPickerOverlay.classList.contains("visible")) {
@@ -1671,15 +1722,61 @@ async function loadCachedServers(): Promise<void> {
   }
 }
 
-async function refreshServers(): Promise<void> {
-  if (!pangeaApi) return;
+// Fetch the latest server list and re-render. Returns true on success; never throws.
+async function fetchServers(): Promise<boolean> {
+  if (!pangeaApi) return false;
   try {
     servers = await pangeaApi.getServers();
     renderServers();
     pangeaApi.cacheServers(servers).catch(() => {});
+    return true;
   } catch (error) {
-    setUiMessage(reportError("loadServers", error));
+    console.warn("[fetchServers]", error instanceof Error ? error.message : error);
+    return false;
   }
+}
+
+async function refreshServers(): Promise<void> {
+  if (!(await fetchServers())) {
+    setUiMessage("Couldn't refresh the server list. It will retry automatically.");
+  }
+}
+
+// Refresh with backoff until it succeeds, so the list (and its load values) is
+// always current. Triggered when the picker opens or the app is shown. A newer
+// call supersedes the loop; it also stops on sign-out or while the window is hidden.
+let serverRefreshGeneration = 0;
+async function refreshServersWithRetry(): Promise<void> {
+  if (!authState.authenticated || !pangeaApi) return;
+  const gen = ++serverRefreshGeneration;
+  const backoffMs = [0, 1000, 2000, 4000, 8000, 15000];
+  for (let attempt = 0; ; attempt++) {
+    if (gen !== serverRefreshGeneration || !authState.authenticated || document.hidden) return;
+    if (await fetchServers()) return;
+    await new Promise((resolve) => setTimeout(resolve, backoffMs[Math.min(attempt, backoffMs.length - 1)]));
+  }
+}
+
+// Small load indicator (bar + %) for a server row. Returns null when load is
+// unknown (older hub / node offline) so we never imply a state we don't have.
+function buildLoadIndicator(load: number | null | undefined): HTMLElement | null {
+  if (typeof load !== "number" || !Number.isFinite(load)) return null;
+  const pct = Math.max(0, Math.min(100, Math.round(load)));
+  const level = pct < 40 ? "low" : pct < 75 ? "mid" : "high";
+  const el = document.createElement("div");
+  el.className = `server-picker-overlay-item-load load-${level}`;
+  el.title = `Server load ${pct}%`;
+  const bar = document.createElement("span");
+  bar.className = "load-bar";
+  const fill = document.createElement("span");
+  fill.className = "load-fill";
+  fill.style.width = `${pct}%`;
+  bar.append(fill);
+  const label = document.createElement("span");
+  label.className = "load-pct";
+  label.textContent = `${pct}%`;
+  el.append(bar, label);
+  return el;
 }
 
 function renderServers(): void {
@@ -1729,7 +1826,13 @@ function renderServers(): void {
     idSpan.className = "server-picker-overlay-item-id";
     idSpan.textContent = server.id;
 
-    item.append(text, idSpan);
+    const right = document.createElement("div");
+    right.className = "server-picker-overlay-item-right";
+    right.append(idSpan);
+    const loadEl = buildLoadIndicator(server.load);
+    if (loadEl) right.append(loadEl);
+
+    item.append(text, right);
     const activate = (): void => {
       closeServerPicker();
       if (serverWorking) return;

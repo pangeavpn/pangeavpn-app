@@ -39,6 +39,7 @@ export const IPC_CHANNELS = {
   cacheServers: "pangea:cacheServers",
   listDevices: "pangea:listDevices",
   removeDevice: "pangea:removeDevice",
+  getSubscription: "pangea:getSubscription",
   checkForUpdates: "app:checkForUpdates",
   downloadAppUpdate: "app:downloadAppUpdate",
   installUpdate: "app:installUpdate",
@@ -76,6 +77,8 @@ export interface ServerInfo {
   name: string;
   region: string;
   country: string;
+  /** Current server load 0–100 (composite CPU/memory). Absent/null when unknown or from an older hub. */
+  load?: number | null;
   cloak: {
     remoteHost: string;
     uid: string;
@@ -90,6 +93,14 @@ export interface DeviceInfo {
   friendlyName: string | null;
   createdAt: string;
   status: string;
+}
+
+export interface SubscriptionInfo {
+  status: "trialing" | "active" | "past_due" | "canceled" | "unpaid" | "incomplete" | "none";
+  /** True only for auto-renewing Stripe subs not set to cancel. Crypto/guest (prepaid) plans are always false. */
+  renews: boolean;
+  /** End of the current period — the renewal date if it renews, otherwise the expiry date. ISO string or null. */
+  expiresAt: string | null;
 }
 
 export interface PangeaApi {
@@ -118,4 +129,5 @@ export interface PangeaApi {
   cacheServers: (servers: ServerInfo[]) => Promise<void>;
   listDevices: () => Promise<DeviceInfo[]>;
   removeDevice: (deviceId: string) => Promise<void>;
+  getSubscription: () => Promise<SubscriptionInfo | null>;
 }
