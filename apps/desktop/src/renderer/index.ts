@@ -1,4 +1,4 @@
-import type { LogEntry, Profile, StatusResponse } from "@pangeavpn/shared-types";
+import type { LogEntry, StatusResponse } from "@pangeavpn/shared-types";
 import {
   initAutoConnect,
   notifyStatusTick,
@@ -27,95 +27,69 @@ function reportError(context: string, error: unknown, friendly?: string): string
   return "Something went wrong. Please try again later.";
 }
 
-const stateEl = must<HTMLSpanElement>("state");
-const detailEl = must<HTMLSpanElement>("detail");
-const cloakEl = must<HTMLSpanElement>("cloak");
-const wireguardEl = must<HTMLSpanElement>("wireguard");
-const ksDot = must<HTMLElement>("ksDot");
-const throughputPanel = must<HTMLElement>("throughputPanel");
-const txBytesEl = must<HTMLSpanElement>("txBytes");
-const rxBytesEl = must<HTMLSpanElement>("rxBytes");
-const profileSelect = must<HTMLSelectElement>("profileSelect");
-const connectBtn = must<HTMLButtonElement>("connectBtn");
-const disconnectBtn = must<HTMLButtonElement>("disconnectBtn");
-const refreshBtn = must<HTMLButtonElement>("refreshBtn");
-const refreshIndicator = must<HTMLSpanElement>("refreshIndicator");
-const refreshIndicatorLabel = must<HTMLSpanElement>("refreshIndicatorLabel");
-const themeToggleBtn = must<HTMLButtonElement>("themeToggleBtn");
-const uiMessageEl = must<HTMLParagraphElement>("uiMessage");
-const appVersionEl = must<HTMLSpanElement>("appVersion");
-const toggleManualBuilderBtn = must<HTMLButtonElement>("toggleManualBuilderBtn");
-const copyDiagnosticsBtn = must<HTMLButtonElement>("copyDiagnosticsBtn");
-const copyLogsBtn = must<HTMLButtonElement>("copyLogsBtn");
-const clearLogsBtn = must<HTMLButtonElement>("clearLogsBtn");
-const logsEl = must<HTMLDivElement>("logs");
+const stateEl = document.getElementById("state") as HTMLSpanElement;
+const detailEl = document.getElementById("detail") as HTMLSpanElement;
+const cloakEl = document.getElementById("cloak") as HTMLSpanElement;
+const wireguardEl = document.getElementById("wireguard") as HTMLSpanElement;
+const ksDot = document.getElementById("ksDot") as HTMLElement;
+const throughputPanel = document.getElementById("throughputPanel") as HTMLElement;
+const txBytesEl = document.getElementById("txBytes") as HTMLSpanElement;
+const rxBytesEl = document.getElementById("rxBytes") as HTMLSpanElement;
+const themeToggleBtn = document.getElementById("themeToggleBtn") as HTMLButtonElement;
+const uiMessageEl = document.getElementById("uiMessage") as HTMLParagraphElement;
+const appVersionEl = document.getElementById("appVersion") as HTMLSpanElement;
+const copyDiagnosticsBtn = document.getElementById("copyDiagnosticsBtn") as HTMLButtonElement;
+const copyLogsBtn = document.getElementById("copyLogsBtn") as HTMLButtonElement;
+const clearLogsBtn = document.getElementById("clearLogsBtn") as HTMLButtonElement;
+const logsEl = document.getElementById("logs") as HTMLDivElement;
 const collapsibleSections = Array.from(document.querySelectorAll<HTMLElement>("[data-collapsible]"));
-const profilesSection = must<HTMLElement>("profilesSection");
-const encodedImportInput = must<HTMLTextAreaElement>("encodedImportInput");
-const importEncodedProfileBtn = must<HTMLButtonElement>("importEncodedProfileBtn");
-const manualBuilderSection = must<HTMLElement>("manualBuilderSection");
-const manualBuilderForm = must<HTMLFormElement>("manualBuilderForm");
-const exportEncodedProfileBtn = must<HTMLButtonElement>("exportEncodedProfileBtn");
-const copyEncodedExportBtn = must<HTMLButtonElement>("copyEncodedExportBtn");
-const deleteManualProfileBtn = must<HTMLButtonElement>("deleteManualProfileBtn");
-const encodedExportOutput = must<HTMLTextAreaElement>("encodedExportOutput");
-const manualName = must<HTMLInputElement>("manualName");
-const manualId = must<HTMLInputElement>("manualId");
-const manualTunnelName = must<HTMLInputElement>("manualTunnelName");
-const manualRemoteHost = must<HTMLInputElement>("manualRemoteHost");
-const manualUid = must<HTMLInputElement>("manualUid");
-const manualPublicKey = must<HTMLInputElement>("manualPublicKey");
-const manualWgConfigText = must<HTMLTextAreaElement>("manualWgConfigText");
+const logsSection = document.getElementById("logsSection") as HTMLElement;
 
 const daemonApi = window.daemonApi;
 const pangeaApi = window.pangeaApi;
 
-const loginBtn = must<HTMLButtonElement>("loginBtn");
-const authBar = must<HTMLElement>("authBar");
-const authUserLabel = must<HTMLSpanElement>("authUserLabel");
-const logoutBtn = must<HTMLButtonElement>("logoutBtn");
-const serverPanel = must<HTMLElement>("serverPanel");
-const serverSelect = must<HTMLSelectElement>("serverSelect");
-const serverConnectBtn = must<HTMLButtonElement>("serverConnectBtn");
-const serverDisconnectBtn = must<HTMLButtonElement>("serverDisconnectBtn");
-const serverRefreshBtn = must<HTMLButtonElement>("serverRefreshBtn");
-const serverIndicator = must<HTMLSpanElement>("serverIndicator");
-const serverIndicatorLabel = must<HTMLSpanElement>("serverIndicatorLabel");
-const directIpToggle = must<HTMLInputElement>("directIpToggle");
-const directIpOnlyToggle = must<HTMLInputElement>("directIpOnlyToggle");
-const allowLanToggle = must<HTMLInputElement>("allowLanToggle");
-const launchAtStartupToggle = must<HTMLInputElement>("launchAtStartupToggle");
-const alwaysConnectedToggle = must<HTMLInputElement>("alwaysConnectedToggle");
-const loginScreen = must<HTMLElement>("loginScreen");
-const loginScreenBtn = must<HTMLButtonElement>("loginScreenBtn");
-const loginScreenMessage = must<HTMLParagraphElement>("loginScreenMessage");
-const heroCard = must<HTMLElement>("heroCard");
-const menuBtn = must<HTMLButtonElement>("menuBtn");
-const menuDropdown = must<HTMLElement>("menuDropdown");
-const manageSubLink = must<HTMLAnchorElement>("manageSubLink");
-const serverPickerBtn = must<HTMLButtonElement>("serverPickerBtn");
-const serverPickerLabel = must<HTMLElement>("serverPickerLabel");
-const serverPickerOverlay = must<HTMLElement>("serverPickerOverlay");
-const serverPickerOverlayList = must<HTMLElement>("serverPickerOverlayList");
-const serverPickerOverlayCloseBtn = must<HTMLButtonElement>("serverPickerOverlayCloseBtn");
-const heroMeta = must<HTMLElement>("heroMeta");
-const cloakDot = must<HTMLElement>("cloakDot");
-const wgDot = must<HTMLElement>("wgDot");
+const loginBtn = document.getElementById("loginBtn") as HTMLButtonElement;
+const logoutBtn = document.getElementById("logoutBtn") as HTMLButtonElement;
+const serverPanel = document.getElementById("serverPanel") as HTMLElement;
+const serverSelect = document.getElementById("serverSelect") as HTMLSelectElement;
+const serverConnectBtn = document.getElementById("serverConnectBtn") as HTMLButtonElement;
+const serverDisconnectBtn = document.getElementById("serverDisconnectBtn") as HTMLButtonElement;
+const serverRefreshBtn = document.getElementById("serverRefreshBtn") as HTMLButtonElement;
+const serverIndicator = document.getElementById("serverIndicator") as HTMLSpanElement;
+const serverIndicatorLabel = document.getElementById("serverIndicatorLabel") as HTMLSpanElement;
+const directIpToggle = document.getElementById("directIpToggle") as HTMLInputElement;
+const directIpOnlyToggle = document.getElementById("directIpOnlyToggle") as HTMLInputElement;
+const allowLanToggle = document.getElementById("allowLanToggle") as HTMLInputElement;
+const launchAtStartupToggle = document.getElementById("launchAtStartupToggle") as HTMLInputElement;
+const alwaysConnectedToggle = document.getElementById("alwaysConnectedToggle") as HTMLInputElement;
+const loginScreen = document.getElementById("loginScreen") as HTMLElement;
+const loginScreenBtn = document.getElementById("loginScreenBtn") as HTMLButtonElement;
+const loginScreenMessage = document.getElementById("loginScreenMessage") as HTMLParagraphElement;
+const heroCard = document.getElementById("heroCard") as HTMLElement;
+const menuBtn = document.getElementById("menuBtn") as HTMLButtonElement;
+const menuDropdown = document.getElementById("menuDropdown") as HTMLElement;
+const manageSubLink = document.getElementById("manageSubLink") as HTMLAnchorElement;
+const menuSettingsBtn = document.getElementById("menuSettingsBtn") as HTMLButtonElement;
+const settingsOverlay = document.getElementById("settingsOverlay") as HTMLElement;
+const settingsOverlayCloseBtn = document.getElementById("settingsOverlayCloseBtn") as HTMLButtonElement;
+const accountUserLabel = document.getElementById("accountUserLabel") as HTMLSpanElement;
+const accountTokenValue = document.getElementById("accountTokenValue") as HTMLElement;
+const accountTokenToggleBtn = document.getElementById("accountTokenToggleBtn") as HTMLButtonElement;
+const accountTokenCopyBtn = document.getElementById("accountTokenCopyBtn") as HTMLButtonElement;
+const checkUpdatesBtn = document.getElementById("checkUpdatesBtn") as HTMLButtonElement;
+const settingsVersionEl = document.getElementById("settingsVersion") as HTMLSpanElement;
+const serverPickerBtn = document.getElementById("serverPickerBtn") as HTMLButtonElement;
+const serverPickerLabel = document.getElementById("serverPickerLabel") as HTMLElement;
+const serverPickerOverlay = document.getElementById("serverPickerOverlay") as HTMLElement;
+const serverPickerOverlayList = document.getElementById("serverPickerOverlayList") as HTMLElement;
+const serverPickerOverlayCloseBtn = document.getElementById("serverPickerOverlayCloseBtn") as HTMLButtonElement;
+const cloakDot = document.getElementById("cloakDot") as HTMLElement;
+const wgDot = document.getElementById("wgDot") as HTMLElement;
 
 type ThemeMode = "light" | "dark";
 const THEME_STORAGE_KEY = "pangea-vpn-theme";
-const LAST_PROFILE_KEY = "pangea-vpn-last-profile";
 const COLLAPSE_STATE_KEY = "pangea-vpn-collapse-state";
 
-type ImportedProfilePayload = {
-  profilename: string;
-  remotehost: string;
-  cloakuid: string;
-  cloakpubkey: string;
-  wgconfig: string;
-};
-
-let profiles: Profile[] = [];
 let currentDaemonState: StatusResponse["state"] = "DISCONNECTED";
 let latestStatus: StatusResponse | null = null;
 let uiRefreshing = false;
@@ -133,14 +107,6 @@ let serverWorking = false;
 let connectCancelAllowed = false;
 let connectCancelTimer: ReturnType<typeof setTimeout> | null = null;
 const CONNECT_CANCEL_DELAY_MS = 1000;
-
-profileSelect.addEventListener("change", () => {
-  const selected = profiles.find((profile) => profile.id === profileSelect.value);
-  if (selected) {
-    fillManualProfileForm(selected);
-    localStorage.setItem(LAST_PROFILE_KEY, selected.id);
-  }
-});
 
 themeToggleBtn.addEventListener("click", () => {
   const nextTheme: ThemeMode = document.body.dataset.theme === "dark" ? "light" : "dark";
@@ -162,9 +128,113 @@ document.addEventListener("click", (e) => {
 
 manageSubLink.addEventListener("click", (e) => {
   e.preventDefault();
+  window.openExternal?.("https://pangeavpn.org");
+});
+
+// ── Fullscreen settings overlay ───────────────────────────────
+
+const LAST_TOKEN_KEY = "pangea:lastToken";
+let accountTokenRevealed = false;
+
+function maskToken(token: string): string {
+  return "•".repeat(Math.min(Math.max(token.length, 8), 16));
+}
+
+function refreshAccountToken(): void {
+  const token = localStorage.getItem(LAST_TOKEN_KEY);
+  const hasToken = Boolean(token);
+  accountTokenToggleBtn.disabled = !hasToken;
+  accountTokenCopyBtn.disabled = !hasToken;
+  if (!token) {
+    accountTokenRevealed = false;
+    accountTokenValue.textContent = "—";
+    accountTokenToggleBtn.textContent = "Show";
+    return;
+  }
+  accountTokenValue.textContent = accountTokenRevealed ? token : maskToken(token);
+  accountTokenToggleBtn.textContent = accountTokenRevealed ? "Hide" : "Show";
+}
+
+// ── Overlay focus management ──────────────────────────────────
+// Full-screen overlays cover the shell but leave it in the tab order, so a
+// keyboard/screen-reader user could otherwise reach controls hidden behind
+// them. On open we make the shell `inert` (non-interactive + hidden from AT)
+// and move focus into the overlay; on close we release it and restore focus.
+const overlayReturnFocus: Array<HTMLElement | null> = [];
+
+function activateOverlay(overlay: HTMLElement): void {
+  overlayReturnFocus.push(document.activeElement as HTMLElement | null);
+  shell.setAttribute("inert", "");
+  const focusTarget = overlay.querySelector<HTMLElement>("button:not([hidden]), [href], input, select, textarea");
+  window.setTimeout(() => (focusTarget ?? overlay).focus(), 0);
+}
+
+function deactivateOverlay(): void {
+  // Only re-enable the shell once no full-screen overlay remains open.
+  if (!settingsOverlay.classList.contains("visible") && !serverPickerOverlay.classList.contains("visible")) {
+    shell.removeAttribute("inert");
+  }
+  const prev = overlayReturnFocus.pop();
+  prev?.focus?.();
+}
+
+// True while a modal is stacked above the full-screen overlays, so their Escape
+// handlers can defer to the top layer instead of closing the layer beneath it.
+function isSubModalOpen(): boolean {
+  return devicesModal.classList.contains("visible") || updateOverlay.classList.contains("visible");
+}
+
+function openSettings(): void {
+  settingsOverlay.classList.add("visible");
+  settingsOverlay.setAttribute("aria-hidden", "false");
+  settingsVersionEl.textContent = appVersionEl.textContent || "—";
+  refreshAccountToken();
+  activateOverlay(settingsOverlay);
+}
+
+function closeSettings(): void {
+  settingsOverlay.classList.remove("visible");
+  settingsOverlay.setAttribute("aria-hidden", "true");
+  // Re-mask the token so it isn't revealed the next time settings opens.
+  accountTokenRevealed = false;
+  refreshAccountToken();
+  deactivateOverlay();
+}
+
+menuSettingsBtn.addEventListener("click", () => {
   menuDropdown.classList.remove("open");
   menuBtn.setAttribute("aria-expanded", "false");
-  window.openExternal?.("https://pangeavpn.org");
+  openSettings();
+});
+
+settingsOverlayCloseBtn.addEventListener("click", closeSettings);
+
+document.addEventListener("keydown", (e) => {
+  // Defer to a stacked modal (Devices / Update) so Escape backs out one layer.
+  if (e.key === "Escape" && settingsOverlay.classList.contains("visible") && !isSubModalOpen()) {
+    e.preventDefault();
+    e.stopPropagation();
+    closeSettings();
+  }
+});
+
+accountTokenToggleBtn.addEventListener("click", () => {
+  accountTokenRevealed = !accountTokenRevealed;
+  refreshAccountToken();
+});
+
+accountTokenCopyBtn.addEventListener("click", async () => {
+  const token = localStorage.getItem(LAST_TOKEN_KEY);
+  if (!token) {
+    showToast("No token to copy.");
+    return;
+  }
+  try {
+    await copyTextToClipboard(token);
+    showToast("Token copied to clipboard.", 3000, true);
+  } catch (error) {
+    showToast(reportError("copyToken", error));
+  }
 });
 
 function openServerPicker(): void {
@@ -172,12 +242,14 @@ function openServerPicker(): void {
   serverPickerOverlay.classList.add("visible");
   serverPickerOverlay.setAttribute("aria-hidden", "false");
   serverPickerBtn.setAttribute("aria-expanded", "true");
+  activateOverlay(serverPickerOverlay);
 }
 
 function closeServerPicker(): void {
   serverPickerOverlay.classList.remove("visible");
   serverPickerOverlay.setAttribute("aria-hidden", "true");
   serverPickerBtn.setAttribute("aria-expanded", "false");
+  deactivateOverlay();
 }
 
 serverPickerBtn.addEventListener("click", openServerPicker);
@@ -191,87 +263,19 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
-connectBtn.addEventListener("click", async () => {
-  if (!daemonApi) {
-    setUiMessage("daemonApi bridge unavailable.");
-    return;
+// Escape closes the stacked Devices / Update modals (checked before the
+// full-screen overlays above, which defer via isSubModalOpen()).
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  if (devicesModal.classList.contains("visible")) {
+    e.preventDefault();
+    e.stopPropagation();
+    devicesModal.classList.remove("visible");
+  } else if (updateOverlay.classList.contains("visible")) {
+    e.preventDefault();
+    e.stopPropagation();
+    hideUpdateModal();
   }
-
-  const selectedId = profileSelect.value;
-  if (!selectedId) {
-    setUiMessage("No profile selected.");
-    return;
-  }
-
-  uiWorking = true;
-  updateBusyIndicator();
-  try {
-    setUiMessage("Connecting...");
-    const result = await daemonApi.connect(selectedId);
-    if (!result.ok) {
-      const status = await refreshStatus();
-      const detail = status?.detail ?? "";
-      setUiMessage(detail ? `Connect failed: ${detail}` : "Connect failed. Check logs for details.");
-      return;
-    }
-
-    notifyUserConnected();
-    void refreshLastServer();
-    const status = await refreshStatus();
-    if (status?.state === "CONNECTED") {
-      setUiMessage("Connected.");
-    } else if (status?.state === "ERROR") {
-      setUiMessage(`Connect failed: ${status.detail}`);
-    } else {
-      setUiMessage(`Connect requested. Current state: ${status?.state ?? "unknown"}.`);
-    }
-  } catch (error) {
-    const msg = String(error);
-    if (msg.includes("timeout") || msg.includes("ETIMEDOUT")) {
-      console.error("[connect]", error);
-      setUiMessage("Connect failed: connection timed out. Check your network.");
-    } else {
-      setUiMessage(reportError("connect", error));
-    }
-  } finally {
-    uiWorking = false;
-    updateBusyIndicator();
-  }
-});
-
-disconnectBtn.addEventListener("click", async () => {
-  if (!daemonApi) {
-    setUiMessage("daemonApi bridge unavailable.");
-    return;
-  }
-
-  notifyUserDisconnected();
-  uiWorking = true;
-  updateBusyIndicator();
-  try {
-    setUiMessage("Disconnecting...");
-    const result = await daemonApi.disconnect();
-    if (result.ok) {
-      setUiMessage("Disconnected.");
-    } else {
-      const status = await refreshStatus();
-      const detail = status?.detail ?? "";
-      setUiMessage(detail ? `Disconnect failed: ${detail}` : "Disconnect failed. Check logs for details.");
-      return;
-    }
-    await refreshStatus();
-  } catch (error) {
-    setUiMessage(reportError("disconnect", error));
-  } finally {
-    uiWorking = false;
-    updateBusyIndicator();
-  }
-});
-
-refreshBtn.addEventListener("click", async () => {
-  refreshBtn.disabled = true;
-  await refreshAll(true);
-  setTimeout(() => { refreshBtn.disabled = false; }, 2000);
 });
 
 copyLogsBtn.addEventListener("click", async () => {
@@ -317,120 +321,6 @@ clearLogsBtn.addEventListener("click", () => {
   setUiMessage("Logs cleared.");
 });
 
-toggleManualBuilderBtn.addEventListener("click", () => {
-  setManualBuilderVisibility(Boolean(manualBuilderSection.hidden));
-});
-
-manualBuilderForm.addEventListener("submit", async (event) => {
-  event.preventDefault();
-
-  if (!daemonApi) {
-    setUiMessage("daemonApi bridge unavailable.");
-    return;
-  }
-
-  try {
-    const nextProfile = profileFromManualForm();
-    const result = await daemonApi.setConfig(upsertProfile(profiles, nextProfile));
-    if (!result.ok) {
-      setUiMessage("Failed to save manual profile.");
-      return;
-    }
-
-    await refreshConfig(nextProfile.id);
-    setUiMessage(`Saved manual profile "${nextProfile.name}".`);
-  } catch (error) {
-    setUiMessage(reportError("manualProfileSave", error));
-  }
-});
-
-exportEncodedProfileBtn.addEventListener("click", () => {
-  try {
-    const manualProfile = profileFromManualForm();
-    const payload = importedPayloadFromProfile(manualProfile);
-    encodedExportOutput.value = encodeUtf8ToBase64(JSON.stringify(payload));
-    encodedExportOutput.focus();
-    encodedExportOutput.select();
-    setUiMessage(`Exported encoded profile for "${manualProfile.name}".`);
-  } catch (error) {
-    setUiMessage(reportError("encodedExport", error));
-  }
-});
-
-copyEncodedExportBtn.addEventListener("click", async () => {
-  const encodedPayload = encodedExportOutput.value.trim();
-  if (!encodedPayload) {
-    setUiMessage("No encoded payload to copy.");
-    return;
-  }
-
-  try {
-    await navigator.clipboard.writeText(encodedPayload);
-    setUiMessage("Encoded payload copied to clipboard.");
-  } catch (error) {
-    setUiMessage(reportError("copyEncodedPayload", error));
-  }
-});
-
-deleteManualProfileBtn.addEventListener("click", async () => {
-  if (!daemonApi) {
-    setUiMessage("daemonApi bridge unavailable.");
-    return;
-  }
-
-  const selectedId = profileSelect.value;
-  if (!selectedId) {
-    setUiMessage("No profile selected to delete.");
-    return;
-  }
-
-  const result = await daemonApi.setConfig(profiles.filter((profile) => profile.id !== selectedId));
-  if (!result.ok) {
-    setUiMessage("Failed to delete profile.");
-    return;
-  }
-
-  await refreshConfig();
-  if (profiles.length === 0) {
-    clearManualProfileForm();
-  }
-  setUiMessage(`Deleted profile "${selectedId}".`);
-});
-
-importEncodedProfileBtn.addEventListener("click", async () => {
-  if (!daemonApi) {
-    setUiMessage("daemonApi bridge unavailable.");
-    return;
-  }
-
-  const encodedPayload = encodedImportInput.value.trim();
-  if (!encodedPayload) {
-    setUiMessage("Encoded profile payload is required.");
-    return;
-  }
-
-  uiWorking = true;
-  updateBusyIndicator();
-  try {
-    const importedPayload = parseImportedProfilePayload(decodeBase64ToUtf8(encodedPayload));
-    const importedProfile = profileFromImportedPayload(importedPayload);
-    const result = await daemonApi.setConfig(upsertProfile(profiles, importedProfile));
-    if (!result.ok) {
-      setUiMessage("Failed to import profile.");
-      return;
-    }
-
-    await refreshConfig(importedProfile.id);
-    encodedImportInput.value = "";
-    setUiMessage(`Imported profile "${importedProfile.name}".`);
-  } catch (error) {
-    setUiMessage(reportError("import", error));
-  } finally {
-    uiWorking = false;
-    updateBusyIndicator();
-  }
-});
-
 loginBtn.addEventListener("click", () => {
   // Show the login screen so the user can enter their VPN token
   authState = { authenticated: false, user: null };
@@ -449,7 +339,6 @@ logoutBtn.addEventListener("click", async () => {
     updateAuthUI();
     renderServers();
     await refreshStatus();
-    await refreshConfig();
     setUiMessage("Signed out.");
   } catch (error) {
     setUiMessage(reportError("signOut", error));
@@ -458,14 +347,19 @@ logoutBtn.addEventListener("click", async () => {
   }
 });
 
-const loginTokenInput = must<HTMLInputElement>("loginTokenInput");
-const cachedTokenBtn = must<HTMLButtonElement>("cachedTokenBtn");
+const loginTokenInput = document.getElementById("loginTokenInput") as HTMLInputElement;
+const cachedTokenBtn = document.getElementById("cachedTokenBtn") as HTMLButtonElement;
 
-// Show cached token button if a previous token exists
+// Show cached token button if a previous token exists. The token is masked (the
+// click handler reads the real value from storage) to match the Settings viewer.
 function refreshCachedTokenBtn(): void {
   const cached = localStorage.getItem("pangea:lastToken");
   if (cached) {
-    cachedTokenBtn.textContent = cached;
+    const masked = cached.length > 4
+      ? cached.slice(0, 4) + "•".repeat(Math.min(cached.length - 4, 12))
+      : "•".repeat(cached.length);
+    cachedTokenBtn.textContent = masked;
+    cachedTokenBtn.setAttribute("aria-label", "Sign in with saved token");
     cachedTokenBtn.hidden = false;
   } else {
     cachedTokenBtn.hidden = true;
@@ -506,7 +400,7 @@ loginTokenInput.addEventListener("paste", () => {
   }, 0);
 });
 
-const loginDashboardLink = must<HTMLAnchorElement>("loginDashboardLink");
+const loginDashboardLink = document.getElementById("loginDashboardLink") as HTMLAnchorElement;
 loginDashboardLink.addEventListener("click", (e) => {
   e.preventDefault();
   window.openExternal?.("https://pangeavpn.org/");
@@ -514,21 +408,21 @@ loginDashboardLink.addEventListener("click", (e) => {
 
 // ── Device management screen (login-flow: device limit reached) ──
 
-const deviceLimitScreen = must<HTMLElement>("deviceLimitScreen");
-const deviceLimitTitle = must<HTMLElement>("deviceLimitTitle");
-const deviceLimitSubtitle = must<HTMLElement>("deviceLimitSubtitle");
-const deviceList = must<HTMLElement>("deviceList");
-const deviceLimitContinueBtn = must<HTMLButtonElement>("deviceLimitContinueBtn");
-const deviceLimitLogoutBtn = must<HTMLButtonElement>("deviceLimitLogoutBtn");
-const deviceLimitMessage = must<HTMLParagraphElement>("deviceLimitMessage");
+const deviceLimitScreen = document.getElementById("deviceLimitScreen") as HTMLElement;
+const deviceLimitTitle = document.getElementById("deviceLimitTitle") as HTMLElement;
+const deviceLimitSubtitle = document.getElementById("deviceLimitSubtitle") as HTMLElement;
+const deviceList = document.getElementById("deviceList") as HTMLElement;
+const deviceLimitContinueBtn = document.getElementById("deviceLimitContinueBtn") as HTMLButtonElement;
+const deviceLimitLogoutBtn = document.getElementById("deviceLimitLogoutBtn") as HTMLButtonElement;
+const deviceLimitMessage = document.getElementById("deviceLimitMessage") as HTMLParagraphElement;
 
 // ── Devices modal (menu, logged-in) ──────────────────────────
 
-const devicesModal = must<HTMLElement>("devicesModal");
-const devicesModalList = must<HTMLElement>("devicesModalList");
-const devicesModalCloseBtn = must<HTMLButtonElement>("devicesModalCloseBtn");
-const devicesModalMessage = must<HTMLParagraphElement>("devicesModalMessage");
-const menuDevicesBtn = must<HTMLButtonElement>("menuDevicesBtn");
+const devicesModal = document.getElementById("devicesModal") as HTMLElement;
+const devicesModalList = document.getElementById("devicesModalList") as HTMLElement;
+const devicesModalCloseBtn = document.getElementById("devicesModalCloseBtn") as HTMLButtonElement;
+const devicesModalMessage = document.getElementById("devicesModalMessage") as HTMLParagraphElement;
+const menuDevicesBtn = document.getElementById("menuDevicesBtn") as HTMLButtonElement;
 
 let pendingLoginToken: string | null = null;
 let deviceRemovedCount = 0;
@@ -629,7 +523,7 @@ function renderDevicesModalList(devices: DeviceInfo[]): void {
     const removeBtn = document.createElement("button");
     removeBtn.className = "device-remove-btn";
     if (isMine) {
-      removeBtn.textContent = "This device";
+      removeBtn.textContent = "Current";
       removeBtn.disabled = true;
       removeBtn.title = "Sign out to remove this device";
     } else {
@@ -709,7 +603,7 @@ async function handleDeviceRemove(deviceId: string, itemEl: HTMLElement, btn: HT
     itemEl.remove();
     deviceRemovedCount++;
     deviceLimitContinueBtn.hidden = false;
-    showToast("Device removed successfully.", 4000, true);
+    showToast("Device removed.", 4000, true);
   } catch (err) {
     btn.disabled = false;
     btn.textContent = "Remove";
@@ -852,10 +746,9 @@ serverConnectBtn.addEventListener("click", async () => {
       notifyUserConnected();
       void refreshLastServer();
     } else {
-      setUiMessage("Connection failed.");
+      setUiMessage("Couldn't connect. Try again, or choose another server.");
     }
     await refreshStatus();
-    await refreshConfig();
   } catch (error) {
     // If auth was invalidated, the onAuthInvalidated listener handles the UI
     if (pangeaApi) {
@@ -866,7 +759,7 @@ serverConnectBtn.addEventListener("click", async () => {
           servers = [];
           updateAuthUI();
           renderServers();
-          showToast("You have been signed out. Please log in again.");
+          showToast("You've been signed out. Please sign in again.");
           return;
         }
       } catch {
@@ -909,10 +802,9 @@ async function switchToServer(serverId: string): Promise<void> {
       notifyUserConnected();
       void refreshLastServer();
     } else {
-      setUiMessage("Switch failed.");
+      setUiMessage("Couldn't switch servers. Try again, or pick another server.");
     }
     await refreshStatus();
-    await refreshConfig();
   } catch (error) {
     if (pangeaApi) {
       try {
@@ -922,7 +814,7 @@ async function switchToServer(serverId: string): Promise<void> {
           servers = [];
           updateAuthUI();
           renderServers();
-          showToast("You have been signed out. Please log in again.");
+          showToast("You've been signed out. Please sign in again.");
           return;
         }
       } catch {
@@ -952,7 +844,7 @@ serverDisconnectBtn.addEventListener("click", async () => {
   try {
     setUiMessage("Disconnecting...");
     const result = await daemonApi.disconnect();
-    setUiMessage(result.ok ? "Disconnected." : "Disconnect failed.");
+    setUiMessage(result.ok ? "Disconnected." : "Couldn't disconnect. Please try again.");
     await refreshStatus();
   } catch (error) {
     setUiMessage(reportError("serverDisconnect", error));
@@ -967,42 +859,68 @@ serverRefreshBtn.addEventListener("click", async () => {
   await refreshServers();
 });
 
+// Settings toggles live inside the fullscreen overlay, which covers #uiMessage,
+// so feedback is shown via showToast (renders above the overlay). Each toggle
+// reverts its checkbox and surfaces the error if the backend call fails.
 directIpToggle.addEventListener("change", async () => {
   if (!pangeaApi) return;
-  await pangeaApi.setDirectIp(directIpToggle.checked);
-  setUiMessage(directIpToggle.checked ? "Direct IP enabled." : "Direct IP disabled.");
+  try {
+    await pangeaApi.setDirectIp(directIpToggle.checked);
+    showToast(directIpToggle.checked ? "Direct IP enabled." : "Direct IP disabled.", 3000, true);
+  } catch (err) {
+    directIpToggle.checked = !directIpToggle.checked;
+    showToast(reportError("directIp", err, "Failed to update setting."));
+  }
 });
 
 directIpOnlyToggle.addEventListener("change", async () => {
   if (!pangeaApi) return;
-  await pangeaApi.setDirectIpOnly(directIpOnlyToggle.checked);
-  if (directIpOnlyToggle.checked) {
+  const enabled = directIpOnlyToggle.checked;
+  try {
+    await pangeaApi.setDirectIpOnly(enabled);
+  } catch (err) {
+    directIpOnlyToggle.checked = !enabled;
+    showToast(reportError("directIpOnly", err, "Failed to update setting."));
+    return;
+  }
+  if (enabled) {
     directIpToggle.checked = true;
     directIpToggle.disabled = true;
   } else {
     directIpToggle.disabled = false;
+    // Forcing Direct IP on above was visual only; restore its real persisted value.
+    try {
+      directIpToggle.checked = await pangeaApi.getDirectIp();
+    } catch {
+      // keep current
+    }
   }
-  setUiMessage(directIpOnlyToggle.checked ? "Direct IP only mode enabled." : "Direct IP only mode disabled.");
+  showToast(enabled ? "Direct IP only mode enabled." : "Direct IP only mode disabled.", 3000, true);
 });
 
 allowLanToggle.addEventListener("change", async () => {
   if (!pangeaApi) return;
-  await pangeaApi.setAllowLan(allowLanToggle.checked);
-  setUiMessage(allowLanToggle.checked
-    ? "Allow LAN enabled. Reconnect for it to take effect."
-    : "Allow LAN disabled. Reconnect for it to take effect.");
+  try {
+    await pangeaApi.setAllowLan(allowLanToggle.checked);
+    showToast(allowLanToggle.checked
+      ? "Allow LAN enabled. Reconnect for it to take effect."
+      : "Allow LAN disabled. Reconnect for it to take effect.", 4000, true);
+  } catch (err) {
+    allowLanToggle.checked = !allowLanToggle.checked;
+    showToast(reportError("allowLan", err, "Failed to update setting."));
+  }
 });
 
 launchAtStartupToggle.addEventListener("change", async () => {
   if (!pangeaApi) return;
   try {
     await pangeaApi.setLaunchAtStartup(launchAtStartupToggle.checked);
-    setUiMessage(launchAtStartupToggle.checked
+    showToast(launchAtStartupToggle.checked
       ? "PangeaVPN will launch at startup."
-      : "Launch at startup disabled.");
+      : "Launch at startup disabled.", 3000, true);
   } catch (err) {
     launchAtStartupToggle.checked = !launchAtStartupToggle.checked;
-    setUiMessage(reportError("launchAtStartup", err, "Failed to update startup setting."));
+    showToast(reportError("launchAtStartup", err, "Failed to update startup setting."));
   }
 });
 
@@ -1014,17 +932,17 @@ alwaysConnectedToggle.addEventListener("change", async () => {
   } catch (err) {
     alwaysConnectedLocal = !alwaysConnectedLocal;
     alwaysConnectedToggle.checked = alwaysConnectedLocal;
-    setUiMessage(reportError("alwaysConnected", err, "Failed to update setting."));
+    showToast(reportError("lockdown", err, "Failed to update Lockdown."));
     return;
   }
   notifyToggleChanged(alwaysConnectedLocal);
   if (alwaysConnectedLocal) {
-    setUiMessage("Always connected enabled. Will auto-connect and reconnect.");
+    showToast("Lockdown on — auto-connect enabled and the kill switch stays on until you turn it off.", 5000, true);
     if (lastServerIdLocal) {
       void attemptInitialAutoConnect();
     }
   } else {
-    setUiMessage("Always connected disabled.");
+    showToast("Lockdown off — normal internet restored.", 4000, true);
   }
 });
 
@@ -1040,8 +958,8 @@ async function refreshLastServer(): Promise<void> {
 
 
 
-const loadingScreen = must<HTMLElement>("loadingScreen");
-const loadingMessage = must<HTMLParagraphElement>("loadingMessage");
+const loadingScreen = document.getElementById("loadingScreen") as HTMLElement;
+const loadingMessage = document.getElementById("loadingMessage") as HTMLParagraphElement;
 const shell = document.querySelector<HTMLElement>(".shell")!;
 
 function animateOut(el: HTMLElement): Promise<void> {
@@ -1095,7 +1013,7 @@ async function init(): Promise<void> {
   initTheme();
 
   if (!daemonApi) {
-    loadingMessage.textContent = "Bridge unavailable.";
+    loadingMessage.textContent = "PangeaVPN couldn't start. Please restart the app.";
     return;
   }
 
@@ -1103,7 +1021,7 @@ async function init(): Promise<void> {
   const maxAttempts = 60;
   for (let i = 0; i < maxAttempts; i++) {
     const remaining = Math.ceil((maxAttempts - i) * 0.5);
-    loadingMessage.textContent = `Waiting for daemon... (${remaining}s)`;
+    loadingMessage.textContent = `Getting things ready... (${remaining}s)`;
     try {
       const status = await daemonApi.getStatus();
       if (status) break;
@@ -1111,7 +1029,7 @@ async function init(): Promise<void> {
       // not ready
     }
     if (i === maxAttempts - 1) {
-      loadingMessage.textContent = "Daemon did not respond. Try restarting the app.";
+      loadingMessage.textContent = "PangeaVPN didn't start. Please restart the app.";
       return;
     }
     await new Promise((r) => setTimeout(r, 500));
@@ -1135,11 +1053,10 @@ async function init(): Promise<void> {
     servers = [];
     updateAuthUI();
     renderServers();
-    showToast("You have been signed out. Please log in again.");
+    showToast("You've been signed out. Please sign in again.");
   });
 
   initCollapsibleSections();
-  setManualBuilderVisibility(false, false);
   await renderAppVersion();
   updateBusyIndicator();
   await refreshAll(true);
@@ -1215,16 +1132,16 @@ async function init(): Promise<void> {
   schedulePoll();
 }
 
-const updateOverlay = must<HTMLElement>("updateOverlay");
-const updateCloseBtn = must<HTMLButtonElement>("updateCloseBtn");
-const updateCurrentVersionEl = must<HTMLSpanElement>("updateCurrentVersion");
-const updateLatestVersionEl = must<HTMLSpanElement>("updateLatestVersion");
-const updateDownloadBtn = must<HTMLButtonElement>("updateDownloadBtn");
-const updateMessageEl = must<HTMLParagraphElement>("updateMessage");
-const updateMacInstall = must<HTMLElement>("updateMacInstall");
-const updateMacCommand = must<HTMLElement>("updateMacCommand");
-const menuBadge = must<HTMLSpanElement>("menuBadge");
-const menuUpdateBtn = must<HTMLButtonElement>("menuUpdateBtn");
+const updateOverlay = document.getElementById("updateOverlay") as HTMLElement;
+const updateCloseBtn = document.getElementById("updateCloseBtn") as HTMLButtonElement;
+const updateCurrentVersionEl = document.getElementById("updateCurrentVersion") as HTMLSpanElement;
+const updateLatestVersionEl = document.getElementById("updateLatestVersion") as HTMLSpanElement;
+const updateDownloadBtn = document.getElementById("updateDownloadBtn") as HTMLButtonElement;
+const updateMessageEl = document.getElementById("updateMessage") as HTMLParagraphElement;
+const updateMacInstall = document.getElementById("updateMacInstall") as HTMLElement;
+const updateMacCommand = document.getElementById("updateMacCommand") as HTMLElement;
+const menuBadge = document.getElementById("menuBadge") as HTMLSpanElement;
+const menuUpdateBtn = document.getElementById("menuUpdateBtn") as HTMLButtonElement;
 
 const MAC_INSTALL_COMMAND = "curl -fsSL https://pangeavpn.org/install-mac.sh | bash";
 const isMacPlatform = window.appPlatform === "darwin";
@@ -1259,7 +1176,7 @@ function showUpdateModal(): void {
       updateDownloadBtn.textContent = "Restart to Update";
       updateMessageEl.textContent = "Update downloaded and ready to install.";
     } else {
-      updateDownloadBtn.textContent = "View Download";
+      updateDownloadBtn.textContent = "Download Update";
       updateMessageEl.textContent = "";
     }
   }
@@ -1308,6 +1225,50 @@ menuUpdateBtn.addEventListener("click", () => {
   menuBtn.setAttribute("aria-expanded", "false");
   if (pendingUpdate) localStorage.removeItem(UPDATE_DISMISSED_KEY);
   showUpdateModal();
+});
+
+// checkForUpdates() resolves with the latest release regardless of whether it's
+// newer, so compare against the running version to decide the message. When it
+// IS newer the onUpdateAvailable event also fires and surfaces the full modal.
+function isNewerVersion(candidate: string, current: string): boolean {
+  const parse = (v: string): number[] => v.replace(/^v/, "").split(".").map((n) => parseInt(n, 10) || 0);
+  const a = parse(candidate);
+  const b = parse(current);
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    const x = a[i] ?? 0;
+    const y = b[i] ?? 0;
+    if (x !== y) return x > y;
+  }
+  return false;
+}
+
+checkUpdatesBtn.addEventListener("click", async () => {
+  if (!updater) {
+    showToast("Updates aren't available in this build.");
+    return;
+  }
+  checkUpdatesBtn.disabled = true;
+  const label = checkUpdatesBtn.textContent;
+  checkUpdatesBtn.textContent = "Checking...";
+  try {
+    const info = await updater.checkForUpdates();
+    if (info && isNewerVersion(info.version, currentAppVersion)) {
+      // Open the update modal directly so it's actionable from Settings, even if
+      // this version was dismissed earlier (which would otherwise suppress it).
+      pendingUpdate = pendingUpdate ?? { version: info.version };
+      localStorage.removeItem(UPDATE_DISMISSED_KEY);
+      showUpdateModal();
+    } else if (info) {
+      showToast("You're on the latest version.", 4000, true);
+    } else {
+      showToast("Couldn't check for updates. Try again later.");
+    }
+  } catch {
+    showToast("Couldn't check for updates. Try again later.");
+  } finally {
+    checkUpdatesBtn.textContent = label;
+    checkUpdatesBtn.disabled = false;
+  }
 });
 
 async function copyMacInstallCommand(): Promise<void> {
@@ -1381,9 +1342,9 @@ async function renderAppVersion(): Promise<void> {
   }
 }
 
-// Profiles is a debug/advanced area; reveal it only when verbose errors are on.
+// Logs is a debug/advanced area; reveal it only when verbose errors are on.
 function applyVerboseErrorsUi(): void {
-  profilesSection.hidden = !verboseErrors;
+  logsSection.hidden = !verboseErrors;
 }
 applyVerboseErrorsUi();
 
@@ -1413,7 +1374,7 @@ async function refreshAll(showIndicator = false): Promise<void> {
   }
 
   try {
-    await Promise.all([refreshConfig(), refreshStatus(), refreshLogs()]);
+    await Promise.all([refreshStatus(), refreshLogs()]);
     setUiMessage("Ready.");
   } catch (error) {
     console.error("[daemonSync]", error);
@@ -1421,7 +1382,7 @@ async function refreshAll(showIndicator = false): Promise<void> {
     // Retry once after a short delay
     try {
       await new Promise((r) => setTimeout(r, 2000));
-      await Promise.all([refreshConfig(), refreshStatus(), refreshLogs()]);
+      await Promise.all([refreshStatus(), refreshLogs()]);
       setUiMessage("Ready.");
     } catch (retryError) {
       setUiMessage(reportError("daemonSyncRetry", retryError));
@@ -1450,7 +1411,6 @@ async function buildDiagnosticsReport(): Promise<string> {
     appVersion: appVersionResult,
     platform: navigator.platform,
     userAgent: navigator.userAgent,
-    selectedProfileId: profileSelect.value || null,
     daemonStatus: statusResult,
     daemonConfig: redactSensitiveConfig(configResult),
     daemonLogs: logsResult
@@ -1534,16 +1494,6 @@ async function copyTextToClipboard(text: string): Promise<void> {
   }
 }
 
-async function refreshConfig(preferredProfileId?: string): Promise<void> {
-  if (!daemonApi) {
-    return;
-  }
-
-  const config = await daemonApi.getConfig();
-  profiles = config.profiles;
-  renderProfiles(preferredProfileId);
-}
-
 async function refreshStatus(): Promise<StatusResponse | null> {
   if (!daemonApi) {
     return null;
@@ -1576,47 +1526,6 @@ async function refreshLogs(): Promise<void> {
   } catch (error) {
     setUiMessage(reportError("logFetch", error));
   }
-}
-
-function renderProfiles(preferredProfileId?: string): void {
-  const previousValue = profileSelect.value;
-  profileSelect.innerHTML = "";
-
-  if (profiles.length === 0) {
-    const option = document.createElement("option");
-    option.value = "";
-    option.textContent = "No profiles in daemon config";
-    profileSelect.append(option);
-    profileSelect.disabled = true;
-    connectBtn.disabled = true;
-    deleteManualProfileBtn.disabled = true;
-    clearManualProfileForm();
-    updateControlStates();
-    return;
-  }
-
-  for (const profile of profiles) {
-    const option = document.createElement("option");
-    option.value = profile.id;
-    option.textContent = `${profile.name} (${profile.id})`;
-    profileSelect.append(option);
-  }
-
-  profileSelect.disabled = false;
-  connectBtn.disabled = false;
-  deleteManualProfileBtn.disabled = false;
-
-  const savedProfile = localStorage.getItem(LAST_PROFILE_KEY);
-  const selectedId = preferredProfileId ?? previousValue ?? savedProfile ?? "";
-  const hasSelection = profiles.some((profile) => profile.id === selectedId);
-  profileSelect.value = hasSelection ? selectedId : profiles[0].id;
-
-  const selectedProfile = profiles.find((profile) => profile.id === profileSelect.value);
-  if (selectedProfile) {
-    fillManualProfileForm(selectedProfile);
-  }
-
-  updateControlStates();
 }
 
 function formatBytes(bytes: number): string {
@@ -1662,8 +1571,6 @@ function renderStatus(status: StatusResponse): void {
   }
   lastCloakWasDown = !status.cloak.running && connected;
 
-  heroMeta.hidden = !connected;
-
   // Show connect vs disconnect button.
   // Show disconnect in ERROR state too — kill switch may still be active.
   const showDisconnect = connected || status.state === "CONNECTING" || status.state === "ERROR";
@@ -1682,217 +1589,6 @@ function renderLogs(entries: LogEntry[]): void {
 
   logsEl.textContent = lines.join("\n");
   logsEl.scrollTop = logsEl.scrollHeight;
-}
-
-function fillManualProfileForm(profile: Profile): void {
-  manualName.value = profile.name;
-  manualId.value = profile.id;
-  manualTunnelName.value = profile.wireguard.tunnelName;
-  manualRemoteHost.value = profile.cloak.remoteHost;
-  manualUid.value = profile.cloak.uid;
-  manualPublicKey.value = profile.cloak.publicKey;
-  manualWgConfigText.value = profile.wireguard.configText;
-  encodedExportOutput.value = "";
-}
-
-function clearManualProfileForm(): void {
-  manualBuilderForm.reset();
-  encodedExportOutput.value = "";
-}
-
-function profileFromManualForm(): Profile {
-  const name = required(manualName.value, "Profile name");
-  const id = slugify(manualId.value.trim() || name);
-  const tunnelName = slugify(manualTunnelName.value.trim() || id);
-
-  return {
-    id,
-    name,
-    cloak: {
-      localPort: 51820,
-      remoteHost: required(manualRemoteHost.value, "Cloak remote host"),
-      remotePort: 443,
-      uid: required(manualUid.value, "Cloak UID"),
-      publicKey: required(manualPublicKey.value, "Cloak public key"),
-      encryptionMethod: "plain",
-      password: ""
-    },
-    wireguard: {
-      configText: requiredRawText(manualWgConfigText.value, "WireGuard config text"),
-      tunnelName,
-      dns: []
-    }
-  };
-}
-
-function profileFromImportedPayload(payload: ImportedProfilePayload): Profile {
-  const name = required(payload.profilename, "Profile name");
-  const id = generateProfileId(name);
-
-  return {
-    id,
-    name,
-    cloak: {
-      localPort: 51820,
-      remoteHost: required(payload.remotehost, "Cloak remote host"),
-      remotePort: 443,
-      uid: required(payload.cloakuid, "Cloak UID"),
-      publicKey: required(payload.cloakpubkey, "Cloak public key"),
-      encryptionMethod: "plain",
-      password: ""
-    },
-    wireguard: {
-      configText: requiredRawText(payload.wgconfig, "WireGuard config text"),
-      tunnelName: "pangeavpn",
-      dns: []
-    }
-  };
-}
-
-function importedPayloadFromProfile(profile: Profile): ImportedProfilePayload {
-  return {
-    profilename: profile.name,
-    remotehost: profile.cloak.remoteHost,
-    cloakuid: profile.cloak.uid,
-    cloakpubkey: profile.cloak.publicKey,
-    wgconfig: profile.wireguard.configText
-  };
-}
-
-function upsertProfile(list: Profile[], profile: Profile): Profile[] {
-  const index = list.findIndex((item) => item.id === profile.id);
-  if (index === -1) {
-    return [...list, profile];
-  }
-
-  const next = [...list];
-  next[index] = profile;
-  return next;
-}
-
-function parseImportedProfilePayload(jsonText: string): ImportedProfilePayload {
-  let payload: unknown;
-  try {
-    payload = JSON.parse(jsonText);
-  } catch {
-    throw new Error("Decoded payload is not valid JSON.");
-  }
-
-  if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
-    throw new Error("Decoded payload must be a JSON object.");
-  }
-
-  const record = payload as Record<string, unknown>;
-  return {
-    profilename: readPayloadField(record, "profilename"),
-    remotehost: readPayloadField(record, "remotehost"),
-    cloakuid: readPayloadField(record, "cloakuid"),
-    cloakpubkey: readPayloadField(record, "cloakpubkey"),
-    wgconfig: readPayloadField(record, "wgconfig")
-  };
-}
-
-function readPayloadField(record: Record<string, unknown>, key: string): string {
-  const value = record[key];
-  if (typeof value !== "string") {
-    throw new Error(`Import field "${key}" must be a string.`);
-  }
-  return value;
-}
-
-function decodeBase64ToUtf8(input: string): string {
-  const normalized = normalizeBase64(input);
-
-  let binary: string;
-  try {
-    binary = window.atob(normalized);
-  } catch {
-    throw new Error("Input is not valid base64.");
-  }
-
-  const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
-  return new TextDecoder().decode(bytes);
-}
-
-function encodeUtf8ToBase64(input: string): string {
-  const bytes = new TextEncoder().encode(input);
-  let binary = "";
-  for (const byte of bytes) {
-    binary += String.fromCharCode(byte);
-  }
-  return window.btoa(binary);
-}
-
-function normalizeBase64(input: string): string {
-  const compact = input.trim().replace(/\s+/g, "").replace(/-/g, "+").replace(/_/g, "/");
-  const paddingLength = (4 - (compact.length % 4)) % 4;
-  return compact + "=".repeat(paddingLength);
-}
-
-function generateProfileId(profileName: string): string {
-  const base = slugify(profileName);
-  let candidate = base;
-  let suffix = 1;
-
-  while (profiles.some((profile) => profile.id === candidate)) {
-    candidate = `${base}-${suffix}`;
-    suffix += 1;
-  }
-
-  return candidate;
-}
-
-function required(value: string, label: string): string {
-  const trimmed = value.trim();
-  if (!trimmed) {
-    throw new Error(`${label} is required.`);
-  }
-  return trimmed;
-}
-
-function requiredRawText(value: string, label: string): string {
-  if (!value.trim()) {
-    throw new Error(`${label} is required.`);
-  }
-  return value;
-}
-
-function slugify(input: string): string {
-  const slug = input
-    .toLowerCase()
-    .replace(/[^a-z0-9_-]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-  return slug || `profile-${Date.now()}`;
-}
-
-function setUiMessage(message: string): void {
-  uiMessageEl.textContent = message;
-}
-
-function showToast(message: string, durationMs = 5000, success = false): void {
-  const container = document.getElementById("toastContainer");
-  if (!container) return;
-
-  const toast = document.createElement("div");
-  toast.className = success ? "toast toast-success" : "toast";
-  toast.textContent = message;
-  container.appendChild(toast);
-
-  setTimeout(() => {
-    toast.classList.add("toast-out");
-    toast.addEventListener("animationend", () => toast.remove(), { once: true });
-  }, durationMs);
-}
-
-function setManualBuilderVisibility(visible: boolean, scrollToPanel = true): void {
-  manualBuilderSection.hidden = !visible;
-  toggleManualBuilderBtn.textContent = visible ? "Hide Manual Profile Editor" : "Show Manual Profile Editor";
-  toggleManualBuilderBtn.setAttribute("aria-pressed", String(visible));
-
-  if (visible && scrollToPanel) {
-    manualBuilderSection.scrollIntoView({ behavior: "smooth", block: "nearest" });
-    manualName.focus();
-  }
 }
 
 function initTheme(): void {
@@ -1920,25 +1616,26 @@ function applyTheme(theme: ThemeMode): void {
   }
 }
 
+function setUiMessage(message: string): void {
+  uiMessageEl.textContent = message;
+}
+
+function showToast(message: string, durationMs = 5000, success = false): void {
+  const container = document.getElementById("toastContainer");
+  if (!container) return;
+
+  const toast = document.createElement("div");
+  toast.className = success ? "toast toast-success" : "toast";
+  toast.textContent = message;
+  container.appendChild(toast);
+
+  setTimeout(() => {
+    toast.classList.add("toast-out");
+    toast.addEventListener("animationend", () => toast.remove(), { once: true });
+  }, durationMs);
+}
+
 function updateBusyIndicator(): void {
-  const daemonBusy = currentDaemonState === "CONNECTING" || currentDaemonState === "DISCONNECTING";
-  const active = uiRefreshing || uiWorking || daemonBusy;
-
-  refreshIndicator.classList.toggle("active", active);
-  refreshIndicator.setAttribute("aria-hidden", String(!active));
-
-  if (!active) {
-    refreshIndicatorLabel.textContent = "Working...";
-  } else if (currentDaemonState === "CONNECTING") {
-    refreshIndicatorLabel.textContent = "Connecting...";
-  } else if (currentDaemonState === "DISCONNECTING") {
-    refreshIndicatorLabel.textContent = "Disconnecting...";
-  } else if (uiRefreshing) {
-    refreshIndicatorLabel.textContent = "Refreshing...";
-  } else {
-    refreshIndicatorLabel.textContent = "Working...";
-  }
-
   updateControlStates();
 }
 
@@ -1947,18 +1644,15 @@ function updateAuthUI(): void {
     showAppShell();
     loginBtn.hidden = true;
     menuDevicesBtn.hidden = false;
-    if (authState.user) {
-      authBar.hidden = false;
-      authUserLabel.textContent = authState.user.email || authState.user.name;
-    } else {
-      authBar.hidden = true;
-    }
+    accountUserLabel.textContent = authState.user?.email || authState.user?.name || "—";
+    refreshAccountToken();
     serverPanel.hidden = false;
   } else {
     showLoginScreen();
     loginBtn.hidden = !pangeaApi;
     menuDevicesBtn.hidden = true;
-    authBar.hidden = true;
+    accountUserLabel.textContent = "—";
+    closeSettings();
     serverPanel.hidden = true;
   }
   updateServerControlStates();
@@ -2019,6 +1713,7 @@ function renderServers(): void {
     item.className = "server-picker-overlay-item";
     item.dataset.value = server.id;
     item.setAttribute("role", "option");
+    item.tabIndex = 0;
 
     const text = document.createElement("div");
     text.className = "server-picker-overlay-item-text";
@@ -2035,15 +1730,26 @@ function renderServers(): void {
     idSpan.textContent = server.id;
 
     item.append(text, idSpan);
-    item.addEventListener("click", () => {
-      serverSelect.value = server.id;
-      syncServerPicker();
+    const activate = (): void => {
       closeServerPicker();
       if (serverWorking) return;
+      // Only commit the selection when an action will actually run, so the
+      // picker label can't drift out of sync with the connected server.
       if (currentDaemonState === "CONNECTED") {
+        serverSelect.value = server.id;
+        syncServerPicker();
         void switchToServer(server.id);
       } else if (!serverConnectBtn.disabled) {
+        serverSelect.value = server.id;
+        syncServerPicker();
         serverConnectBtn.click();
+      }
+    };
+    item.addEventListener("click", activate);
+    item.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        activate();
       }
     });
     serverPickerOverlayList.append(item);
@@ -2074,7 +1780,9 @@ function syncServerPicker(): void {
   for (const opt of Array.from(serverPickerOverlayList.children)) {
     const el = opt as HTMLElement;
     if (el.dataset.value !== undefined) {
-      el.classList.toggle("selected", el.dataset.value === serverSelect.value);
+      const isSelected = el.dataset.value === serverSelect.value;
+      el.classList.toggle("selected", isSelected);
+      el.setAttribute("aria-selected", String(isSelected));
     }
   }
 }
@@ -2094,7 +1802,7 @@ function updateServerControlStates(): void {
     : true;
 
   serverConnectBtn.disabled = busy || !fullyDisconnected || !serverSelect.value;
-  // Allow cancel mid-connect once the 3s grace window has elapsed, so the
+  // Allow cancel mid-connect once the 1s grace window has elapsed, so the
   // user can bail before the 10s cloak timeout. Outside that window the
   // standard disabled-while-busy rule applies.
   const cancelAllowedNow = serverWorking && connectCancelAllowed;
@@ -2112,23 +1820,6 @@ function updateServerBusyIndicator(active: boolean, label?: string): void {
 }
 
 function updateControlStates(): void {
-  const daemonBusy = currentDaemonState === "CONNECTING" || currentDaemonState === "DISCONNECTING";
-  const spinnerActive = uiRefreshing || uiWorking || daemonBusy;
-
-  if (!latestStatus) {
-    connectBtn.disabled = profiles.length === 0 || spinnerActive;
-    disconnectBtn.disabled = true;
-    updateServerControlStates();
-    return;
-  }
-
-  const fullyDisconnected =
-    latestStatus.state === "DISCONNECTED" &&
-    !latestStatus.cloak.running &&
-    !latestStatus.wireguard.running;
-
-  connectBtn.disabled = profiles.length === 0 || spinnerActive || !fullyDisconnected;
-  disconnectBtn.disabled = latestStatus.state === "DISCONNECTED" || latestStatus.state === "DISCONNECTING";
   updateServerControlStates();
 }
 
@@ -2219,14 +1910,6 @@ function setCollapseState(
     void content.offsetHeight;
     content.style.transition = "";
   }
-}
-
-function must<T extends HTMLElement>(id: string): T {
-  const element = document.getElementById(id);
-  if (!element) {
-    throw new Error(`missing element: ${id}`);
-  }
-  return element as T;
 }
 
 void init();

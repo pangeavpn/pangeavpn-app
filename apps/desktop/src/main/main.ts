@@ -24,7 +24,7 @@ let lastConnectedProfileId: string | null = null;
 let trayDefaultImage: NativeImage | null = null;
 let trayConnectedImage: NativeImage | null = null;
 let lastDaemonRestartAttemptAtMs = 0;
-let setWidth = 610;
+let setWidth = 640;
 let setHeight = 440;
 const daemonRestartBackoffMs = 5000;
 

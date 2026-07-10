@@ -1,6 +1,7 @@
 /* ── PangeaVPN — Pangea theme ─────────────────────────────── */
 
-@import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap');
+/* Note: custom webfonts are not loaded — the page CSP (style-src 'self') blocks
+   remote font stylesheets, so the font-family stacks fall back to system fonts. */
 
 :root {
   color-scheme: dark;
@@ -73,10 +74,10 @@ body[data-theme="light"] {
   --border: #ddd8cf;
   --border-subtle: #eee9e0;
 
-  /* text — dark charcoal #1E1C1C, warm grays */
+  /* text — dark charcoal #1E1C1C, warm grays (darkened to meet AA contrast on the near-white surfaces) */
   --text-primary: #1e1c1c;
-  --text-secondary: #84847c;
-  --text-muted: #aea299;
+  --text-secondary: #5f5b53;
+  --text-muted: #6d685f;
 
   /* accent — same terra #C3562B */
   --accent: #c3562b;
@@ -110,6 +111,12 @@ body[data-theme="light"] {
 /* ── Reset ────────────────────────────────────────────────── */
 
 * { box-sizing: border-box; }
+
+/* Visible keyboard focus indicator (mouse clicks don't trigger :focus-visible). */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 
 ::selection {
   background: rgba(195, 86, 43, 0.4);
@@ -286,7 +293,7 @@ body {
   border: 1px solid var(--border);
   border-radius: 8px;
   color: var(--text-secondary);
-  background: var(--surface);
+  background: var(--bg-surface);
   cursor: pointer;
   transition: background 0.15s ease, border-color 0.15s ease;
   max-width: 100%;
@@ -296,7 +303,7 @@ body {
 .cached-token-btn:hover {
   background: var(--surface-hover, var(--border));
   border-color: var(--accent);
-  color: var(--text);
+  color: var(--text-primary);
 }
 
 .login-link {
@@ -327,6 +334,7 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
+  gap: 6px;
   pointer-events: none;
   padding: 16px;
 }
@@ -431,7 +439,7 @@ body {
   gap: 12px;
   padding: 10px 14px;
   border-radius: 10px;
-  background: var(--bg-secondary);
+  background: var(--bg-surface);
   border: 1px solid var(--border);
   text-align: left;
 }
@@ -614,23 +622,17 @@ body {
   right: 8px;
   width: 32px;
   height: 32px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: none;
   border: none;
   border-radius: 999px;
-  color: var(--text-muted);
-  font-size: 1.4rem;
+  background: var(--accent);
+  font-size: 0;
   cursor: pointer;
   padding: 0;
-  line-height: 1;
-  transition: color 0.15s ease, background 0.15s ease;
+  transition: background 0.15s ease;
 }
 
 .update-close:hover {
-  color: var(--text-primary);
-  background: var(--btn-ghost-bg);
+  background: var(--accent-hover);
 }
 
 .update-title {
@@ -687,7 +689,7 @@ body {
 }
 
 .update-mac-step strong {
-  color: var(--text);
+  color: var(--text-primary);
 }
 
 .update-mac-command {
@@ -695,7 +697,7 @@ body {
   font-family: "SF Mono", "Fira Code", monospace;
   font-size: 0.78rem;
   background: var(--border);
-  color: var(--text);
+  color: var(--text-primary);
   padding: 10px 12px;
   border-radius: 8px;
   user-select: all;
@@ -737,16 +739,16 @@ body {
 }
 
 .menu-update-item {
-  background: #e2725b;
-  color: #ffffff;
+  background: var(--accent);
+  color: var(--accent-text);
   font-weight: 700;
   border-radius: 8px;
   margin: 2px 0;
-  box-shadow: 0 2px 6px rgba(226, 114, 91, 0.35);
+  box-shadow: 0 2px 6px var(--accent-glow);
 }
 
 .menu-update-item:hover {
-  background: #c95f4b;
+  background: var(--accent-hover);
 }
 
 .menu-update-item[hidden] {
@@ -775,25 +777,36 @@ body {
   color: var(--text-secondary);
 }
 
+/* Brand mark: Africa silhouette masked and tinted per theme
+   (orange website mark in dark, grey Linux mark in light). */
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.brand-logo {
+  display: block;
+  width: 31px;
+  height: 31px;
+  flex-shrink: 0;
+  background-color: var(--accent);
+  -webkit-mask: url("./logo-africa.png") no-repeat center / contain;
+  mask: url("./logo-africa.png") no-repeat center / contain;
+}
+
+body[data-theme="light"] .brand-logo {
+  background-color: #84847c;
+}
+
+.brand .app-version {
+  margin-left: 0;
+}
+
 .header-menu {
   display: flex;
   align-items: center;
   gap: 4px;
-}
-
-.auth-bar {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.auth-user-label {
-  font-size: 0.8rem;
-  color: var(--text-muted);
-  max-width: 180px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /* ── Menu dropdown ─────────────────────────────────────────── */
@@ -962,22 +975,6 @@ body[data-theme="light"] .menu-dropdown {
   color: var(--text-muted);
 }
 
-/* ── Hero meta (IP, uptime) ───────────────────────────────── */
-
-.hero-meta {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 0.8rem;
-  color: var(--text-secondary);
-  font-variant-numeric: tabular-nums;
-}
-
-.hero-meta-sep {
-  color: var(--text-muted);
-  opacity: 0.5;
-}
-
 /* ── Hero server selector ─────────────────────────────────── */
 
 .hero-server {
@@ -1031,7 +1028,9 @@ body[data-theme="light"] .menu-dropdown {
 
 .server-picker-label-id {
   font-size: 0.72rem;
-  color: rgba(255, 255, 255, 0.6);
+  /* The picker button is always accent-orange, so use a dimmed accent-text
+     (light) rather than a theme grey, which would be low-contrast on orange. */
+  color: color-mix(in srgb, var(--accent-text) 70%, transparent);
 }
 
 .server-picker-arrow {
@@ -1087,24 +1086,19 @@ body[data-theme="light"] .menu-dropdown {
 }
 
 .server-picker-overlay-close {
+  position: relative;
   width: 36px;
   height: 36px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 10px;
-  color: var(--text-muted);
-  font-size: 1.4rem;
-  line-height: 1;
+  border: none;
+  border-radius: 999px;
+  background: var(--accent);
+  font-size: 0;
   cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
+  transition: background 0.15s ease;
 }
 
 .server-picker-overlay-close:hover {
-  background: var(--btn-ghost-bg);
-  color: var(--text-primary);
+  background: var(--accent-hover);
 }
 
 .server-picker-overlay-list {
@@ -1126,8 +1120,8 @@ body[data-theme="light"] .menu-dropdown {
   background: linear-gradient(
     to right,
     transparent calc(50% - 0.5px),
-    rgba(255, 255, 255, 0.55) calc(50% - 0.5px),
-    rgba(255, 255, 255, 0.55) calc(50% + 0.5px),
+    var(--border) calc(50% - 0.5px),
+    var(--border) calc(50% + 0.5px),
     transparent calc(50% + 0.5px)
   );
 }
@@ -1215,6 +1209,195 @@ body[data-theme="light"] .menu-dropdown {
   text-align: center;
   color: var(--text-muted);
   font-size: 0.9rem;
+}
+
+/* ── Full-screen settings ─────────────────────────────────── */
+
+.settings-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1500;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-base);
+  opacity: 0;
+  transform: translateX(100%);
+  pointer-events: none;
+  visibility: hidden;
+  transition: opacity 250ms ease, transform 250ms ease, visibility 0s linear 250ms;
+}
+
+.settings-overlay.visible {
+  opacity: 1;
+  transform: translateX(0);
+  pointer-events: auto;
+  visibility: visible;
+  transition: opacity 250ms ease, transform 250ms ease, visibility 0s linear 0s;
+}
+
+.settings-overlay-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 20px 24px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.settings-overlay-title {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.settings-overlay-close {
+  position: relative;
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: 999px;
+  background: var(--accent);
+  font-size: 0;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.settings-overlay-close:hover {
+  background: var(--accent-hover);
+}
+
+/* Draw the × on every overlay close button from two centred bars so it can't
+   be nudged off-centre by the &times; glyph's font metrics. The buttons set
+   font-size:0 to hide the literal glyph; aria-label keeps the accessible name. */
+.settings-overlay-close::before,
+.settings-overlay-close::after,
+.server-picker-overlay-close::before,
+.server-picker-overlay-close::after,
+.update-close::before,
+.update-close::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 14px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--accent-text);
+}
+
+.settings-overlay-close::before,
+.server-picker-overlay-close::before,
+.update-close::before {
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+
+.settings-overlay-close::after,
+.server-picker-overlay-close::after,
+.update-close::after {
+  transform: translate(-50%, -50%) rotate(-45deg);
+}
+
+.settings-overlay-body {
+  flex: 1;
+  overflow-y: auto;
+  width: 100%;
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 20px 24px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--accent) transparent;
+}
+
+/* ── Account section ──────────────────────────────────────── */
+
+.account-identity {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 12px;
+  padding: 12px 14px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+}
+
+.account-identity-label,
+.account-token-label {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.account-identity-value {
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-token {
+  margin-bottom: 12px;
+}
+
+.account-token-label {
+  display: block;
+  margin-bottom: 6px;
+}
+
+.account-token-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.account-token-value {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 12px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85rem;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-token-btn {
+  flex-shrink: 0;
+}
+
+.account-token-hint {
+  margin: 8px 0 0;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+
+.account-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.account-actions .menu-item {
+  padding: 12px 14px;
+  border-radius: 10px;
+  font-size: 0.9rem;
+}
+
+.account-signout {
+  color: var(--danger);
 }
 
 /* ── Hero action buttons ──────────────────────────────────── */
@@ -1511,112 +1694,6 @@ button.ghost:hover:not(:disabled) {
   to { transform: rotate(360deg); }
 }
 
-/* ── Status panel (compact, inside hero) ──────────────────── */
-
-.status-panel {
-  display: none;
-}
-
-/* ── Controls panel (inside profiles collapsible) ─────────── */
-
-.controls-panel {
-  display: grid;
-  gap: 10px;
-}
-
-.ui-message {
-  min-height: 18px;
-  margin: 0;
-  color: var(--text-muted);
-  font-size: 0.8rem;
-}
-
-/* ── Server panel ─────────────────────────────────────────── */
-
-.server-panel {
-  display: grid;
-  gap: 10px;
-}
-
-/* ── Profile import ───────────────────────────────────────── */
-
-.profile-import-panel { gap: 0; }
-
-.profile-import-panel .collapse-content {
-  display: grid;
-  gap: 10px;
-}
-
-.profile-import-panel label {
-  font-size: 0.82rem;
-  color: var(--text-secondary);
-}
-
-.profile-import-panel textarea {
-  resize: vertical;
-  min-height: 100px;
-}
-
-/* ── Manual builder ───────────────────────────────────────── */
-
-.manual-builder-panel h2,
-.logs-panel h2 {
-  margin-top: 0;
-  margin-bottom: 6px;
-  font-size: 0.95rem;
-}
-
-.profile-help {
-  margin-top: 0;
-  margin-bottom: 12px;
-  color: var(--text-muted);
-  font-size: 0.82rem;
-}
-
-.profile-form {
-  display: grid;
-  gap: 10px;
-}
-
-.form-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.form-grid label {
-  display: grid;
-  gap: 4px;
-  font-size: 0.82rem;
-  color: var(--text-secondary);
-}
-
-.form-grid .wide {
-  grid-column: 1 / -1;
-}
-
-.manual-builder-panel textarea {
-  resize: vertical;
-  min-height: 120px;
-}
-
-.manual-export {
-  display: grid;
-  gap: 6px;
-}
-
-.manual-export label {
-  font-size: 0.82rem;
-  color: var(--text-secondary);
-}
-
-.manual-export textarea {
-  resize: vertical;
-  min-height: 80px;
-  font-family: "Consolas", "Menlo", monospace;
-  font-size: 0.8rem;
-}
-
 /* ── Settings ─────────────────────────────────────────────── */
 
 .settings-section {
@@ -1673,6 +1750,21 @@ button.ghost:hover:not(:disabled) {
   line-height: 1.4;
 }
 
+/* ── Reduced motion ───────────────────────────────────────── */
+/* Honor the OS "reduce motion" setting: near-instant transitions and stop the
+   looping animations (pulsing status dot, spinners, toast slides). The animated
+   background canvas checks the same media query in bg.js. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
 /* ── Logs ──────────────────────────────────────────────────── */
 
 .logs-actions {
@@ -1717,10 +1809,6 @@ button.ghost:hover:not(:disabled) {
 @media (max-width: 720px) {
   .shell {
     padding: 14px;
-  }
-
-  .form-grid {
-    grid-template-columns: 1fr;
   }
 }
 

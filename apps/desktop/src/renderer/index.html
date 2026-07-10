@@ -17,11 +17,11 @@
       <div class="loading-content">
         <h1>Pangea VPN</h1>
         <span class="spinner loading-spinner"></span>
-        <p id="loadingMessage">Starting daemon...</p>
+        <p id="loadingMessage">Starting PangeaVPN...</p>
       </div>
     </div>
 
-    <div id="toastContainer" class="toast-container"></div>
+    <div id="toastContainer" class="toast-container" role="status" aria-live="polite"></div>
 
     <div id="loginScreen" class="login-screen" hidden>
       <div class="login-content">
@@ -33,7 +33,7 @@
           </svg>
         </div>
         <h1>Pangea VPN</h1>
-        <p class="login-subtitle">Enter your VPN token to connect. <a class="login-link" id="loginDashboardLink" href="#">Get your token</a></p>
+        <p class="login-subtitle">Enter your sign-in token to continue. <a class="login-link" id="loginDashboardLink" href="#">Get your token</a></p>
         <input
           id="loginTokenInput"
           class="login-token-input"
@@ -43,10 +43,11 @@
           placeholder="0000000000000000"
           autocomplete="off"
           spellcheck="false"
+          aria-label="Sign-in token"
         />
         <button id="cachedTokenBtn" class="cached-token-btn" type="button" hidden></button>
         <button id="loginScreenBtn" class="login-button" type="button">Sign In</button>
-        <p id="loginScreenMessage" class="login-message"></p>
+        <p id="loginScreenMessage" class="login-message" role="alert" aria-live="assertive"></p>
       </div>
     </div>
 
@@ -77,20 +78,18 @@
     <main class="shell" hidden>
       <header class="header">
         <div class="header-row">
-          <h1>Pangea VPN <span id="appVersion" class="app-version">v-</span></h1>
-          <nav class="header-menu" aria-label="View options">
-            <span id="authBar" class="auth-bar" hidden>
-              <span id="authUserLabel" class="auth-user-label"></span>
-            </span>
+          <h1 class="brand">
+            <span class="brand-logo" role="img" aria-label="Pangea VPN"></span>
+            <span id="appVersion" class="app-version">v-</span>
+          </h1>
+          <nav class="header-menu" aria-label="Account and settings">
             <button id="loginBtn" class="btn-ghost" type="button" hidden>Sign In</button>
-            <button id="themeToggleBtn" class="btn-icon" type="button" aria-pressed="false" title="Toggle theme">&#9789;</button>
+            <button id="themeToggleBtn" class="btn-icon" type="button" aria-pressed="false" aria-label="Toggle theme" title="Toggle theme">&#9789;</button>
             <div class="menu-wrapper">
-              <button id="menuBtn" class="btn-icon menu-btn-wrapper" type="button" title="Menu" aria-expanded="false">&#9776;<span id="menuBadge" class="menu-badge" hidden>!</span></button>
+              <button id="menuBtn" class="btn-icon menu-btn-wrapper" type="button" title="Menu" aria-label="Menu" aria-haspopup="true" aria-expanded="false">&#9776;<span id="menuBadge" class="menu-badge" aria-hidden="true" hidden>!</span></button>
               <div id="menuDropdown" class="menu-dropdown">
+                <button id="menuSettingsBtn" class="menu-item" type="button">Settings</button>
                 <button id="menuUpdateBtn" class="menu-item menu-update-item" type="button" hidden>Update Available</button>
-                <a id="manageSubLink" class="menu-item" href="#">Manage Subscription</a>
-                <button id="menuDevicesBtn" class="menu-item" type="button" hidden>Devices</button>
-                <button id="logoutBtn" class="menu-item" type="button">Sign Out</button>
               </div>
             </div>
           </nav>
@@ -103,22 +102,18 @@
           <div class="hero-dot"></div>
         </div>
 
-        <div class="hero-state">
+        <div class="hero-state" aria-live="polite">
           <strong id="state" class="hero-state-label">DISCONNECTED</strong>
           <span id="detail" class="hero-detail"></span>
         </div>
 
-        <div id="heroMeta" class="hero-meta" hidden>
-          <span id="heroServer" class="hero-meta-item"></span>
-        </div>
-
         <div id="serverPanel" class="hero-server" hidden>
           <select id="serverSelect" hidden></select>
-          <button id="serverPickerBtn" class="server-picker" type="button">
+          <button id="serverPickerBtn" class="server-picker" type="button" aria-haspopup="dialog" aria-expanded="false">
             <span id="serverPickerLabel" class="server-picker-label">Select server</span>
             <span class="server-picker-arrow">&#9662;</span>
           </button>
-          <button id="serverRefreshBtn" class="btn-ghost" type="button" title="Refresh servers">&#8635;</button>
+          <button id="serverRefreshBtn" class="btn-ghost" type="button" aria-label="Refresh servers" title="Refresh servers">&#8635;</button>
         </div>
 
         <div class="hero-actions">
@@ -147,7 +142,7 @@
           </span>
         </div>
 
-        <p id="uiMessage" class="hero-message"></p>
+        <p id="uiMessage" class="hero-message" aria-live="polite"></p>
       </section>
 
       <div id="throughputPanel" class="throughput-panel" hidden>
@@ -156,174 +151,15 @@
         <span class="throughput-item">↓ <span id="rxBytes">0 B</span></span>
       </div>
 
-      <!-- Profiles (collapsible) — gated behind the verbose-errors debug toggle -->
-      <section id="profilesSection" class="panel collapsible" data-collapsible hidden>
-        <button class="collapse-toggle" type="button" aria-expanded="false" aria-controls="profilesContent">
-          <span>Profiles</span>
-          <span class="collapse-arrow" aria-hidden="true">&#9662;</span>
-        </button>
-        <div id="profilesContent" class="collapse-content" aria-hidden="true">
-          <div class="controls-panel">
-            <label for="profileSelect">Profile</label>
-            <select id="profileSelect"></select>
-
-            <div class="button-row">
-              <button id="connectBtn">Connect</button>
-              <button id="disconnectBtn" class="secondary">Disconnect</button>
-              <button id="refreshBtn" class="btn-ghost">Refresh</button>
-              <span id="refreshIndicator" class="refresh-indicator" aria-live="polite" aria-hidden="true">
-                <span class="spinner" aria-hidden="true"></span>
-                <span id="refreshIndicatorLabel">Working...</span>
-              </span>
-            </div>
-          </div>
-
-          <!-- Encoded import -->
-          <div id="encodedImportSection" style="margin-top: 12px;">
-            <label for="encodedImportInput" style="font-size: 0.82rem; color: var(--text-secondary); display: block; margin-bottom: 4px;">Base64 profile payload</label>
-            <textarea
-              id="encodedImportInput"
-              rows="4"
-              placeholder="eyJwcm9maWxlbmFtZSI6Ii4uLiIsInJlbW90ZWhvc3QiOiIuLi4ifQ=="
-              style="resize: vertical; min-height: 80px;"
-            ></textarea>
-            <div class="button-row" style="margin-top: 6px;">
-              <button id="importEncodedProfileBtn" type="button">Import</button>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <!-- Manual profile editor (hidden by default) -->
-      <section id="manualBuilderSection" class="panel manual-builder-panel" hidden>
-        <h2>Manual Profile Editor</h2>
-        <p class="profile-help">Create or update a profile manually, then choose it in Profiles and press Connect.</p>
-        <form id="manualBuilderForm" class="profile-form">
-          <div class="form-grid">
-            <label>
-              Profile name
-              <input id="manualName" required placeholder="My Cloak Tunnel" />
-            </label>
-            <label>
-              Profile ID (optional)
-              <input id="manualId" placeholder="auto-from-name" />
-            </label>
-            <label>
-              Tunnel name (optional)
-              <input id="manualTunnelName" placeholder="auto-from-id" />
-            </label>
-            <label>
-              Cloak remote host
-              <input id="manualRemoteHost" required placeholder="example.com" />
-            </label>
-            <label>
-              Cloak UID
-              <input id="manualUid" required />
-            </label>
-            <label>
-              Cloak public key
-              <input id="manualPublicKey" required />
-            </label>
-            <label class="wide">
-              WireGuard config text
-              <textarea id="manualWgConfigText" required rows="6" placeholder="[Interface]&#10;PrivateKey = ...&#10;Address = ...&#10;&#10;[Peer]&#10;PublicKey = ...&#10;Endpoint = ..."></textarea>
-            </label>
-          </div>
-
-          <div class="button-row">
-            <button id="saveManualProfileBtn" type="submit">Save</button>
-            <button id="exportEncodedProfileBtn" type="button" class="btn-ghost">Export</button>
-            <button id="deleteManualProfileBtn" type="button" class="btn-ghost">Delete Selected</button>
-          </div>
-
-          <div class="manual-export">
-            <label for="encodedExportOutput">Encoded profile payload</label>
-            <textarea
-              id="encodedExportOutput"
-              rows="4"
-              readonly
-              placeholder="Press &quot;Export&quot; to generate a base64 payload."
-            ></textarea>
-            <div class="button-row">
-              <button id="copyEncodedExportBtn" type="button" class="btn-ghost">Copy</button>
-            </div>
-          </div>
-        </form>
-      </section>
-
-      <!-- Settings -->
-      <section class="panel settings-panel collapsible" data-collapsible>
-        <button class="collapse-toggle" type="button" aria-expanded="false" aria-controls="settingsContent">
-          <span>Settings</span>
-          <span class="collapse-arrow" aria-hidden="true">&#9662;</span>
-        </button>
-        <div id="settingsContent" class="collapse-content" aria-hidden="true">
-          <div class="settings-section">
-            <h3 class="settings-heading">Censorship Bypass</h3>
-            <p class="settings-description">Enable if your network blocks access to VPN services.</p>
-            <div class="settings-toggles">
-              <label class="toggle-label">
-                <input id="directIpToggle" type="checkbox" />
-                <div>
-                  <span class="toggle-title">Direct IP</span>
-                  <span class="toggle-hint">Connect to the API server by IP address, bypassing DNS entirely.</span>
-                </div>
-              </label>
-              <label class="toggle-label">
-                <input id="directIpOnlyToggle" type="checkbox" />
-                <div>
-                  <span class="toggle-title">Direct IP Only</span>
-                  <span class="toggle-hint">Always use direct IP connections. Skips normal API calls entirely — use if your network blocks HTTPS to our servers.</span>
-                </div>
-              </label>
-            </div>
-          </div>
-          <div class="settings-section">
-            <h3 class="settings-heading">Network</h3>
-            <p class="settings-description">Fixes for restrictive WiFi networks.</p>
-            <div class="settings-toggles">
-              <label class="toggle-label">
-                <input id="allowLanToggle" type="checkbox" />
-                <div>
-                  <span class="toggle-title">Allow LAN</span>
-                  <span class="toggle-hint">Let local-network traffic (router, printers, captive portals) bypass the tunnel. Turn on if your WiFi intermittently drops to "No internet" while connected. Takes effect on next connect.</span>
-                </div>
-              </label>
-            </div>
-          </div>
-          <div class="settings-section">
-            <h3 class="settings-heading">Startup</h3>
-            <p class="settings-description">Background launch and automatic reconnection.</p>
-            <div class="settings-toggles">
-              <label class="toggle-label">
-                <input id="launchAtStartupToggle" type="checkbox" />
-                <div>
-                  <span class="toggle-title">Launch at startup</span>
-                  <span class="toggle-hint">Start PangeaVPN automatically when you sign in. Opens hidden — use the tray icon to access it.</span>
-                </div>
-              </label>
-              <label class="toggle-label">
-                <input id="alwaysConnectedToggle" type="checkbox" />
-                <div>
-                  <span class="toggle-title">Lockdown</span>
-                  <span class="toggle-hint">Launch PangeaVPN at startup (hidden in the tray), auto-connect to the last server, and keep the kill switch on after you disconnect — only VPN traffic is allowed. Turn off Lockdown to regain unprotected internet.</span>
-                </div>
-              </label>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <!-- Logs -->
-      <section class="panel logs-panel collapsible" data-collapsible>
+      <!-- Logs (gated behind the verbose-errors debug toggle) -->
+      <section id="logsSection" class="panel logs-panel collapsible" data-collapsible hidden>
         <button class="collapse-toggle" type="button" aria-expanded="false" aria-controls="logsSectionContent">
           <span>Logs</span>
           <span class="collapse-arrow" aria-hidden="true">&#9662;</span>
         </button>
         <div id="logsSectionContent" class="collapse-content" aria-hidden="true">
           <div class="logs-actions">
-            <button id="toggleManualBuilderBtn" type="button" class="btn-ghost">Manual Editor</button>
-            <button id="copyDiagnosticsBtn" type="button" class="btn-ghost">Diagnostics</button>
+            <button id="copyDiagnosticsBtn" type="button" class="btn-ghost">Copy Diagnostics</button>
             <button id="copyLogsBtn" type="button" class="btn-ghost">Copy Logs</button>
             <button id="clearLogsBtn" type="button" class="btn-ghost">Clear</button>
           </div>
@@ -336,7 +172,7 @@
     <!-- Devices modal (accessed from menu when signed in) -->
     <div id="devicesModal" class="update-overlay" role="dialog" aria-modal="true" aria-label="Devices">
       <div class="update-modal devices-modal-card">
-        <button id="devicesModalCloseBtn" class="update-close" type="button">&times;</button>
+        <button id="devicesModalCloseBtn" class="update-close" type="button" aria-label="Close">&times;</button>
         <h2 class="update-title" style="margin-bottom:0">Devices</h2>
         <p class="devices-modal-subtitle">Devices signed in to your account.</p>
         <div id="devicesModalList" class="device-list">
@@ -347,10 +183,10 @@
     </div>
 
     <!-- Update modal -->
-    <div id="updateOverlay" class="update-overlay">
+    <div id="updateOverlay" class="update-overlay" role="dialog" aria-modal="true" aria-labelledby="updateTitle">
       <div class="update-modal">
-        <button id="updateCloseBtn" class="update-close" type="button">&times;</button>
-        <h2 class="update-title">Update Available</h2>
+        <button id="updateCloseBtn" class="update-close" type="button" aria-label="Close">&times;</button>
+        <h2 id="updateTitle" class="update-title">Update Available</h2>
         <p class="update-versions">
           <span class="update-version-label">Current</span>
           <span id="updateCurrentVersion" class="update-version-value">-</span>
@@ -359,11 +195,109 @@
           <span id="updateLatestVersion" class="update-version-value">-</span>
         </p>
         <div id="updateMacInstall" class="update-mac-install" hidden>
-          <p class="update-mac-step">Open <strong>Terminal</strong> (press ⌘ + Space, type <em>Terminal</em>, hit Enter), then paste this command and press Enter:</p>
+          <p class="update-mac-step">Open <strong>Terminal</strong> (press ⌘ + Space, type <em>Terminal</em>, press Enter), then paste this command and press Enter:</p>
           <code id="updateMacCommand" class="update-mac-command">curl -fsSL https://pangeavpn.org/install-mac.sh | bash</code>
         </div>
         <button id="updateDownloadBtn" class="login-button update-download-btn" type="button">Download Update</button>
         <p id="updateMessage" class="update-message"></p>
+      </div>
+    </div>
+
+    <!-- Full-screen settings (accessed from the top-right menu) -->
+    <div id="settingsOverlay" class="settings-overlay" role="dialog" aria-modal="true" aria-label="Settings" aria-hidden="true">
+      <header class="settings-overlay-header">
+        <h2 class="settings-overlay-title">Settings</h2>
+        <button id="settingsOverlayCloseBtn" class="settings-overlay-close" type="button" aria-label="Close">&times;</button>
+      </header>
+      <div class="settings-overlay-body">
+        <!-- Account -->
+        <section class="settings-section">
+          <h3 class="settings-heading">Account</h3>
+          <div class="account-identity">
+            <span class="account-identity-label">Signed in as</span>
+            <span id="accountUserLabel" class="account-identity-value">&mdash;</span>
+          </div>
+          <div class="account-token">
+            <span class="account-token-label">Sign-in token</span>
+            <div class="account-token-row">
+              <code id="accountTokenValue" class="account-token-value">&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;</code>
+              <button id="accountTokenToggleBtn" class="btn-ghost account-token-btn" type="button">Show</button>
+              <button id="accountTokenCopyBtn" class="btn-ghost account-token-btn" type="button">Copy</button>
+            </div>
+            <p class="account-token-hint">This is the token you signed in with. Keep it private — anyone with it can access your account.</p>
+          </div>
+          <div class="account-actions">
+            <a id="manageSubLink" class="menu-item" href="#">Manage Subscription</a>
+            <button id="menuDevicesBtn" class="menu-item" type="button" hidden>Devices</button>
+            <button id="logoutBtn" class="menu-item account-signout" type="button">Sign Out</button>
+          </div>
+        </section>
+
+        <!-- Censorship Bypass -->
+        <section class="settings-section">
+          <h3 class="settings-heading">Censorship Bypass</h3>
+          <p class="settings-description">Enable if your network blocks access to VPN services.</p>
+          <div class="settings-toggles">
+            <label class="toggle-label">
+              <input id="directIpToggle" type="checkbox" />
+              <div>
+                <span class="toggle-title">Direct IP</span>
+                <span class="toggle-hint">Connect to our servers by IP address, skipping DNS entirely.</span>
+              </div>
+            </label>
+            <label class="toggle-label">
+              <input id="directIpOnlyToggle" type="checkbox" />
+              <div>
+                <span class="toggle-title">Direct IP Only</span>
+                <span class="toggle-hint">Always use direct IP connections. Skips normal API calls entirely — use if your network blocks HTTPS to our servers.</span>
+              </div>
+            </label>
+          </div>
+        </section>
+
+        <!-- Network -->
+        <section class="settings-section">
+          <h3 class="settings-heading">Network</h3>
+          <p class="settings-description">Fixes for restrictive Wi-Fi networks.</p>
+          <div class="settings-toggles">
+            <label class="toggle-label">
+              <input id="allowLanToggle" type="checkbox" />
+              <div>
+                <span class="toggle-title">Allow LAN</span>
+                <span class="toggle-hint">Let local-network traffic (router, printers, captive portals) bypass the tunnel. Turn on if your Wi-Fi intermittently drops to "No internet" while connected. Takes effect on next connect.</span>
+              </div>
+            </label>
+          </div>
+        </section>
+
+        <!-- Startup -->
+        <section class="settings-section">
+          <h3 class="settings-heading">Startup</h3>
+          <p class="settings-description">Background launch and automatic reconnection.</p>
+          <div class="settings-toggles">
+            <label class="toggle-label">
+              <input id="launchAtStartupToggle" type="checkbox" />
+              <div>
+                <span class="toggle-title">Launch at startup</span>
+                <span class="toggle-hint">Start PangeaVPN automatically when you sign in. Opens hidden — use the tray icon to access it.</span>
+              </div>
+            </label>
+            <label class="toggle-label">
+              <input id="alwaysConnectedToggle" type="checkbox" />
+              <div>
+                <span class="toggle-title">Lockdown</span>
+                <span class="toggle-hint">Launch PangeaVPN at startup (hidden in the tray), auto-connect to the last server, and keep the kill switch on after you disconnect — only VPN traffic is allowed. Turn off Lockdown to regain unprotected internet.</span>
+              </div>
+            </label>
+          </div>
+        </section>
+
+        <!-- Software update -->
+        <section class="settings-section">
+          <h3 class="settings-heading">Software Update</h3>
+          <p class="settings-description">Current version: <span id="settingsVersion">&mdash;</span></p>
+          <button id="checkUpdatesBtn" class="btn-ghost" type="button">Check for Updates</button>
+        </section>
       </div>
     </div>
 
