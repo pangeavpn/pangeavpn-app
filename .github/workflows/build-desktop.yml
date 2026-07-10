@@ -135,3 +135,17 @@ jobs:
           draft: false
           generate_release_notes: true
           files: release/*
+
+  # The release above is published by GITHUB_TOKEN, so its `release: published`
+  # event cannot start the AI Release Notes workflow (GitHub's recursion guard).
+  # Call it directly instead — same run graph, deterministic ordering, no PAT.
+  release-notes:
+    name: AI Release Notes
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: release
+    permissions:
+      contents: write
+    uses: ./.github/workflows/ai-release-notes.yml
+    with:
+      tag: ${{ github.ref_name }}
+    secrets: inherit

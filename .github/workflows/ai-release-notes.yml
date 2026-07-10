@@ -9,6 +9,18 @@ on:
         description: 'Release tag to (re)generate notes for'
         required: true
         type: string
+  # Called by build-desktop.yml after it publishes the release. The `release`
+  # trigger above never fires for bot-published releases because GitHub does not
+  # start workflows from events created with the default GITHUB_TOKEN.
+  workflow_call:
+    inputs:
+      tag:
+        description: 'Release tag to (re)generate notes for'
+        required: true
+        type: string
+    secrets:
+      ANTHROPIC_API_KEY:
+        required: true
 
 permissions:
   contents: write
