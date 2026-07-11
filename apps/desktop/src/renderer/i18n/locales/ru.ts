@@ -1,0 +1,213 @@
+// Russian (ru) — machine translation, pending native review.
+import type { Messages } from "../messages";
+
+export const ru = {
+  // ── App shell / loading ───────────────────────────────
+  "app.brand": "Pangea VPN",
+  "app.loading.starting": "Запуск PangeaVPN...",
+  "app.loading.progress": "Идёт подготовка... ({remaining} с)",
+  "app.loading.cantStart": "Не удалось запустить PangeaVPN. Перезапустите приложение.",
+  "app.loading.didntStart": "PangeaVPN не запустился. Перезапустите приложение.",
+
+  // ── Login screen ──────────────────────────────────────
+  "login.subtitle": "Введите токен для входа, чтобы продолжить.",
+  "login.getToken": "Получить токен",
+  "login.tokenPlaceholder": "0000000000000000",
+  "login.tokenAriaLabel": "Токен для входа",
+  "login.signIn": "Войти",
+  "login.cachedTokenAriaLabel": "Войти с сохранённым токеном",
+  "login.enterToken": "Введите ваш VPN-токен.",
+  "login.signingIn": "Вход...",
+  "login.invalidToken": "Неверный VPN-токен.",
+  "login.signInFailed": "Не удалось войти.",
+
+  // ── Device-limit screen ───────────────────────────────
+  "deviceLimit.title": "Достигнут лимит устройств",
+  "deviceLimit.subtitle": "На вашем аккаунте достигнуто максимальное число устройств. Удалите одно, чтобы продолжить вход.",
+  "deviceLimit.continue": "Продолжить вход",
+  "deviceLimit.cancel": "Отменить и выйти",
+  "deviceLimit.loadFailed": "Не удалось загрузить устройства. Попробуйте ещё раз.",
+  "deviceLimit.noneCanContinue": "Устройства не найдены. Теперь можно продолжить вход.",
+  "deviceLimit.stillAtLimit": "Лимит устройств всё ещё превышен. Удалите ещё одно устройство.",
+
+  // ── Devices (modal + shared rows) ─────────────────────
+  "devices.title": "Устройства",
+  "devices.subtitle": "Устройства, вошедшие в ваш аккаунт.",
+  "devices.thisDevice": "Это устройство",
+  "devices.added": "Добавлено {date}",
+  "devices.current": "Текущее",
+  "devices.currentTitle": "Выйдите, чтобы удалить это устройство",
+  "devices.remove": "Удалить",
+  "devices.removing": "Удаление...",
+  "devices.removed": "Устройство удалено.",
+  "devices.removeFailed": "Не удалось удалить устройство. Попробуйте ещё раз.",
+  "devices.none": "Устройства не найдены.",
+  "devices.noneRemaining": "Устройств не осталось.",
+
+  // ── Header / menu ─────────────────────────────────────
+  "header.brandAriaLabel": "Pangea VPN",
+  "header.signIn": "Войти",
+  "header.toggleTheme": "Переключить тему",
+  "header.menu": "Меню",
+  "menu.settings": "Настройки",
+  "menu.updateAvailable": "Доступно обновление",
+
+  // ── Hero connection card ──────────────────────────────
+  "hero.selectServer": "Выбрать сервер",
+  "hero.refreshServers": "Обновить серверы",
+  "hero.connect": "Подключить",
+  "hero.disconnect": "Отключить",
+  "hero.provisioning": "Подготовка...",
+  "hero.disconnecting": "Отключение...",
+  "hero.noServers": "Нет доступных серверов",
+
+  // ── Status pills ──────────────────────────────────────
+  "pill.killSwitch": "Kill Switch",
+  "pill.cloak": "Cloak",
+  "pill.wireguard": "WireGuard",
+
+  // ── Connection state labels (hero + tray) ─────────────
+  "state.DISCONNECTED": "ОТКЛЮЧЕНО",
+  "state.CONNECTING": "ПОДКЛЮЧЕНИЕ",
+  "state.CONNECTED": "ПОДКЛЮЧЕНО",
+  "state.DISCONNECTING": "ОТКЛЮЧЕНИЕ",
+  "state.ERROR": "ОШИБКА",
+
+  // ── Logs panel ────────────────────────────────────────
+  "logs.title": "Журнал",
+  "logs.copyDiagnostics": "Копировать диагностику",
+  "logs.copyLogs": "Копировать журнал",
+  "logs.clear": "Очистить",
+  "logs.noneToCopy": "Нет записей для копирования.",
+  "logs.copied": "Журнал скопирован в буфер обмена.",
+  "logs.cleared": "Журнал очищен.",
+  "logs.diagnosticsCopied": "Диагностика скопирована в буфер обмена.",
+  "logs.bridgeUnavailable": "Мост daemonApi недоступен.",
+
+  // ── Settings overlay ──────────────────────────────────
+  "settings.title": "Настройки",
+  "settings.close": "Закрыть",
+  "settings.account.heading": "Аккаунт",
+  "settings.account.signedInAs": "Вы вошли как",
+  "settings.account.subscription": "Подписка",
+  "settings.account.token": "Токен для входа",
+  "settings.account.show": "Показать",
+  "settings.account.hide": "Скрыть",
+  "settings.account.copy": "Копировать",
+  "settings.account.tokenHint": "Это токен, с которым вы вошли. Держите его в секрете — любой, у кого он есть, может получить доступ к вашему аккаунту.",
+  "settings.account.manageSub": "Управление подпиской",
+  "settings.account.devices": "Устройства",
+  "settings.account.signOut": "Выйти",
+  "settings.censorship.heading": "Обход цензуры",
+  "settings.censorship.description": "Включите, если ваша сеть блокирует доступ к VPN-сервисам.",
+  "settings.censorship.directIp.title": "Direct IP",
+  "settings.censorship.directIp.hint": "Подключение к нашим серверам по IP-адресу, полностью минуя DNS.",
+  "settings.censorship.directIpOnly.title": "Только Direct IP",
+  "settings.censorship.directIpOnly.hint": "Всегда использовать прямые подключения по IP. Полностью пропускает обычные вызовы API — используйте, если ваша сеть блокирует HTTPS к нашим серверам.",
+  "settings.network.heading": "Сеть",
+  "settings.network.description": "Исправления для сетей Wi-Fi с ограничениями.",
+  "settings.network.allowLan.title": "Разрешить LAN",
+  "settings.network.allowLan.hint": "Позволяет трафику локальной сети (роутер, принтеры, captive-порталы) обходить туннель. Включите, если ваш Wi-Fi при подключении периодически переходит в состояние \"Нет интернета\". Вступает в силу при следующем подключении.",
+  "settings.startup.heading": "Автозапуск",
+  "settings.startup.description": "Фоновый запуск и автоматическое переподключение.",
+  "settings.startup.launch.title": "Запускать при старте системы",
+  "settings.startup.launch.hint": "Автоматически запускать PangeaVPN при входе в систему. Открывается скрыто — используйте значок в трее для доступа.",
+  "settings.startup.lockdown.title": "Lockdown",
+  "settings.startup.lockdown.hint": "Запускать PangeaVPN при старте системы (скрыто в трее), автоматически подключаться к последнему серверу и держать Kill Switch включённым после отключения — разрешён только VPN-трафик. Выключите Lockdown, чтобы вернуть незащищённый интернет.",
+  "settings.language.heading": "Язык",
+  "settings.language.description": "Выберите язык интерфейса приложения.",
+  "settings.language.system": "Как в системе",
+  "settings.language.restartHint": "Перезапустите PangeaVPN, чтобы применить новый язык.",
+  "settings.update.heading": "Обновление ПО",
+  "settings.update.currentVersion": "Текущая версия:",
+  "settings.update.check": "Проверить обновления",
+
+  // ── Server picker overlay ─────────────────────────────
+  "serverPicker.title": "Выбрать сервер",
+  "serverPicker.serversAriaLabel": "Серверы",
+  "serverPicker.noServers": "Нет доступных серверов",
+  "serverPicker.load": "Загрузка сервера {pct}%",
+  "serverPicker.loadPct": "{pct}%",
+
+  // ── Update modal ──────────────────────────────────────
+  "update.title": "Доступно обновление",
+  "update.current": "Текущая",
+  "update.latest": "Последняя",
+  "update.macStep": "Откройте Terminal (нажмите ⌘ + Space, введите Terminal, нажмите Enter), затем вставьте эту команду и нажмите Enter:",
+  "update.download": "Скачать обновление",
+  "update.copyCommand": "Копировать команду установки",
+  "update.copied": "Скопировано!",
+  "update.macPasteHint": "Теперь вставьте команду в Terminal и нажмите Enter.",
+  "update.restartToUpdate": "Перезапустить для обновления",
+  "update.readyToInstall": "Обновление загружено и готово к установке.",
+  "update.opening": "Открытие...",
+  "update.viewDownload": "Открыть загрузку",
+  "update.retry": "Повторить",
+  "update.retryDownload": "Повторить загрузку",
+  "update.checking": "Проверка...",
+  "update.onLatest": "У вас установлена последняя версия.",
+  "update.checkFailed": "Не удалось проверить обновления. Повторите позже.",
+  "update.unavailable": "Обновления недоступны в этой сборке.",
+
+  // ── Account / subscription ────────────────────────────
+  "sub.none": "Нет активной подписки",
+  "sub.trialPrefix": "Пробный период · ",
+  "sub.renews": "Продление",
+  "sub.expires": "Истекает",
+  "sub.pastDue": "Просрочен платёж",
+  "account.noToken": "Нет токена для копирования.",
+  "account.tokenCopied": "Токен скопирован в буфер обмена.",
+
+  // ── Session / auth toasts ─────────────────────────────
+  "auth.signedOutRetry": "Вы вышли из системы. Войдите снова.",
+  "auth.signingOut": "Выход...",
+  "auth.signedOut": "Вы вышли.",
+  "auth.deviceNamed": "Ваше устройство называется \"{name}\".",
+
+  // ── Connect / disconnect flow ─────────────────────────
+  "connect.noServer": "Сервер не выбран.",
+  "connect.provisioning": "Подготовка и подключение...",
+  "connect.connected": "Подключено.",
+  "connect.failed": "Не удалось подключиться. Попробуйте ещё раз или выберите другой сервер.",
+  "connect.switching": "Подготовка нового сервера...",
+  "connect.switchFailed": "Не удалось сменить сервер. Попробуйте ещё раз или выберите другой сервер.",
+  "connect.disconnecting": "Отключение...",
+  "connect.disconnected": "Отключено.",
+  "connect.disconnectFailed": "Не удалось отключиться. Попробуйте ещё раз.",
+  "connect.recovered": "Соединение восстановлено.",
+  "connect.refreshServersFailed": "Не удалось обновить список серверов. Попытка повторится автоматически.",
+
+  // ── Settings toggles ──────────────────────────────────
+  "toggle.updateFailed": "Не удалось обновить настройку.",
+  "toggle.directIp.on": "Direct IP включён.",
+  "toggle.directIp.off": "Direct IP выключен.",
+  "toggle.directIpOnly.on": "Режим «Только Direct IP» включён.",
+  "toggle.directIpOnly.off": "Режим «Только Direct IP» выключен.",
+  "toggle.allowLan.on": "«Разрешить LAN» включено. Переподключитесь, чтобы изменение вступило в силу.",
+  "toggle.allowLan.off": "«Разрешить LAN» выключено. Переподключитесь, чтобы изменение вступило в силу.",
+  "toggle.launch.on": "PangeaVPN будет запускаться при старте системы.",
+  "toggle.launch.off": "Запуск при старте системы выключен.",
+  "toggle.launch.failed": "Не удалось обновить настройку автозапуска.",
+  "toggle.launch.packagedOnly": "Доступно только в упакованных сборках",
+  "toggle.lockdown.failed": "Не удалось обновить Lockdown.",
+  "toggle.lockdown.on": "Lockdown включён — автоподключение активно, а Kill Switch остаётся включённым, пока вы его не выключите.",
+  "toggle.lockdown.off": "Lockdown выключен — обычный интернет восстановлен.",
+
+  // ── Verbose errors (hidden debug toggle) ──────────────
+  "verbose.on": "Подробные ошибки включены",
+  "verbose.off": "Подробные ошибки выключены",
+
+  // ── Daemon sync / generic ─────────────────────────────
+  "common.loading": "Загрузка...",
+  "common.ready": "Готово.",
+  "common.retrying": "Что-то пошло не так. Повторная попытка...",
+  "common.dash": "—",
+
+  // ── Daemon status values (technical, kept short) ──────
+  "status.running": "работает",
+  "status.stopped": "остановлен",
+
+  // ── Generic error fallbacks ───────────────────────────
+  "error.network": "Проверьте подключение к интернету и попробуйте ещё раз.",
+  "error.generic": "Что-то пошло не так. Повторите попытку позже."
+} satisfies Messages;

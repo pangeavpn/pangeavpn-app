@@ -34,6 +34,8 @@ export const IPC_CHANNELS = {
   getAlwaysConnected: "settings:getAlwaysConnected",
   getLastServer: "settings:getLastServer",
   clearLastServer: "settings:clearLastServer",
+  getLocale: "settings:getLocale",
+  setLocale: "settings:setLocale",
   getIsPackaged: "app:getIsPackaged",
   getCachedServers: "pangea:getCachedServers",
   cacheServers: "pangea:cacheServers",
@@ -124,6 +126,9 @@ export interface PangeaApi {
   getAlwaysConnected: () => Promise<boolean>;
   getLastServer: () => Promise<{ lastServerId: string | null; lastProfileId: string | null }>;
   clearLastServer: () => Promise<void>;
+  /** Stored language preference: a locale code, or "system" when unset. */
+  getLocale: () => Promise<string>;
+  setLocale: (locale: string) => Promise<void>;
   getIsPackaged: () => Promise<boolean>;
   getCachedServers: () => Promise<ServerInfo[]>;
   cacheServers: (servers: ServerInfo[]) => Promise<void>;

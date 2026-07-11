@@ -1,0 +1,214 @@
+// English — source catalogue. This file defines the full set of translatable
+// keys; every other locale must satisfy the `Messages` shape derived from it.
+// Placeholders use `{name}` syntax and are interpolated by `t()`.
+
+export const en = {
+  // ── App shell / loading ───────────────────────────────
+  "app.brand": "Pangea VPN",
+  "app.loading.starting": "Starting PangeaVPN...",
+  "app.loading.progress": "Getting things ready... ({remaining}s)",
+  "app.loading.cantStart": "PangeaVPN couldn't start. Please restart the app.",
+  "app.loading.didntStart": "PangeaVPN didn't start. Please restart the app.",
+
+  // ── Login screen ──────────────────────────────────────
+  "login.subtitle": "Enter your sign-in token to continue.",
+  "login.getToken": "Get your token",
+  "login.tokenPlaceholder": "0000000000000000",
+  "login.tokenAriaLabel": "Sign-in token",
+  "login.signIn": "Sign In",
+  "login.cachedTokenAriaLabel": "Sign in with saved token",
+  "login.enterToken": "Please enter your VPN token.",
+  "login.signingIn": "Signing in...",
+  "login.invalidToken": "Invalid VPN token.",
+  "login.signInFailed": "Sign in failed.",
+
+  // ── Device-limit screen ───────────────────────────────
+  "deviceLimit.title": "Device Limit Reached",
+  "deviceLimit.subtitle": "Your account has reached the maximum number of devices. Remove one to continue signing in.",
+  "deviceLimit.continue": "Continue Sign In",
+  "deviceLimit.cancel": "Cancel & Sign Out",
+  "deviceLimit.loadFailed": "Could not load devices. Please try again.",
+  "deviceLimit.noneCanContinue": "No devices found. You can continue signing in now.",
+  "deviceLimit.stillAtLimit": "Still at device limit. Please remove another device.",
+
+  // ── Devices (modal + shared rows) ─────────────────────
+  "devices.title": "Devices",
+  "devices.subtitle": "Devices signed in to your account.",
+  "devices.thisDevice": "This device",
+  "devices.added": "Added {date}",
+  "devices.current": "Current",
+  "devices.currentTitle": "Sign out to remove this device",
+  "devices.remove": "Remove",
+  "devices.removing": "Removing...",
+  "devices.removed": "Device removed.",
+  "devices.removeFailed": "Failed to remove device. Please try again.",
+  "devices.none": "No devices found.",
+  "devices.noneRemaining": "No devices remaining.",
+
+  // ── Header / menu ─────────────────────────────────────
+  "header.brandAriaLabel": "Pangea VPN",
+  "header.signIn": "Sign In",
+  "header.toggleTheme": "Toggle theme",
+  "header.menu": "Menu",
+  "menu.settings": "Settings",
+  "menu.updateAvailable": "Update Available",
+
+  // ── Hero connection card ──────────────────────────────
+  "hero.selectServer": "Select server",
+  "hero.refreshServers": "Refresh servers",
+  "hero.connect": "Connect",
+  "hero.disconnect": "Disconnect",
+  "hero.provisioning": "Provisioning...",
+  "hero.disconnecting": "Disconnecting...",
+  "hero.noServers": "No servers available",
+
+  // ── Status pills ──────────────────────────────────────
+  "pill.killSwitch": "Kill Switch",
+  "pill.cloak": "Cloak",
+  "pill.wireguard": "WireGuard",
+
+  // ── Connection state labels (hero + tray) ─────────────
+  "state.DISCONNECTED": "DISCONNECTED",
+  "state.CONNECTING": "CONNECTING",
+  "state.CONNECTED": "CONNECTED",
+  "state.DISCONNECTING": "DISCONNECTING",
+  "state.ERROR": "ERROR",
+
+  // ── Logs panel ────────────────────────────────────────
+  "logs.title": "Logs",
+  "logs.copyDiagnostics": "Copy Diagnostics",
+  "logs.copyLogs": "Copy Logs",
+  "logs.clear": "Clear",
+  "logs.noneToCopy": "No logs to copy.",
+  "logs.copied": "Logs copied to clipboard.",
+  "logs.cleared": "Logs cleared.",
+  "logs.diagnosticsCopied": "Diagnostics copied to clipboard.",
+  "logs.bridgeUnavailable": "daemonApi bridge unavailable.",
+
+  // ── Settings overlay ──────────────────────────────────
+  "settings.title": "Settings",
+  "settings.close": "Close",
+  "settings.account.heading": "Account",
+  "settings.account.signedInAs": "Signed in as",
+  "settings.account.subscription": "Subscription",
+  "settings.account.token": "Sign-in token",
+  "settings.account.show": "Show",
+  "settings.account.hide": "Hide",
+  "settings.account.copy": "Copy",
+  "settings.account.tokenHint": "This is the token you signed in with. Keep it private — anyone with it can access your account.",
+  "settings.account.manageSub": "Manage Subscription",
+  "settings.account.devices": "Devices",
+  "settings.account.signOut": "Sign Out",
+  "settings.censorship.heading": "Censorship Bypass",
+  "settings.censorship.description": "Enable if your network blocks access to VPN services.",
+  "settings.censorship.directIp.title": "Direct IP",
+  "settings.censorship.directIp.hint": "Connect to our servers by IP address, skipping DNS entirely.",
+  "settings.censorship.directIpOnly.title": "Direct IP Only",
+  "settings.censorship.directIpOnly.hint": "Always use direct IP connections. Skips normal API calls entirely — use if your network blocks HTTPS to our servers.",
+  "settings.network.heading": "Network",
+  "settings.network.description": "Fixes for restrictive Wi-Fi networks.",
+  "settings.network.allowLan.title": "Allow LAN",
+  "settings.network.allowLan.hint": "Let local-network traffic (router, printers, captive portals) bypass the tunnel. Turn on if your Wi-Fi intermittently drops to \"No internet\" while connected. Takes effect on next connect.",
+  "settings.startup.heading": "Startup",
+  "settings.startup.description": "Background launch and automatic reconnection.",
+  "settings.startup.launch.title": "Launch at startup",
+  "settings.startup.launch.hint": "Start PangeaVPN automatically when you sign in. Opens hidden — use the tray icon to access it.",
+  "settings.startup.lockdown.title": "Lockdown",
+  "settings.startup.lockdown.hint": "Launch PangeaVPN at startup (hidden in the tray), auto-connect to the last server, and keep the kill switch on after you disconnect — only VPN traffic is allowed. Turn off Lockdown to regain unprotected internet.",
+  "settings.language.heading": "Language",
+  "settings.language.description": "Choose the app's display language.",
+  "settings.language.system": "System default",
+  "settings.language.restartHint": "Restart PangeaVPN to apply the new language.",
+  "settings.update.heading": "Software Update",
+  "settings.update.currentVersion": "Current version:",
+  "settings.update.check": "Check for Updates",
+
+  // ── Server picker overlay ─────────────────────────────
+  "serverPicker.title": "Select server",
+  "serverPicker.serversAriaLabel": "Servers",
+  "serverPicker.noServers": "No servers available",
+  "serverPicker.load": "Server load {pct}%",
+  "serverPicker.loadPct": "{pct}%",
+
+  // ── Update modal ──────────────────────────────────────
+  "update.title": "Update Available",
+  "update.current": "Current",
+  "update.latest": "Latest",
+  "update.macStep": "Open Terminal (press ⌘ + Space, type Terminal, press Enter), then paste this command and press Enter:",
+  "update.download": "Download Update",
+  "update.copyCommand": "Copy Install Command",
+  "update.copied": "Copied!",
+  "update.macPasteHint": "Now paste the command into Terminal and press Enter.",
+  "update.restartToUpdate": "Restart to Update",
+  "update.readyToInstall": "Update downloaded and ready to install.",
+  "update.opening": "Opening...",
+  "update.viewDownload": "View Download",
+  "update.retry": "Retry",
+  "update.retryDownload": "Retry Download",
+  "update.checking": "Checking...",
+  "update.onLatest": "You're on the latest version.",
+  "update.checkFailed": "Couldn't check for updates. Try again later.",
+  "update.unavailable": "Updates aren't available in this build.",
+
+  // ── Account / subscription ────────────────────────────
+  "sub.none": "No active subscription",
+  "sub.trialPrefix": "Free trial · ",
+  "sub.renews": "Renews",
+  "sub.expires": "Expires",
+  "sub.pastDue": "Payment past due",
+  "account.noToken": "No token to copy.",
+  "account.tokenCopied": "Token copied to clipboard.",
+
+  // ── Session / auth toasts ─────────────────────────────
+  "auth.signedOutRetry": "You've been signed out. Please sign in again.",
+  "auth.signingOut": "Signing out...",
+  "auth.signedOut": "Signed out.",
+  "auth.deviceNamed": "Your device is called \"{name}\".",
+
+  // ── Connect / disconnect flow ─────────────────────────
+  "connect.noServer": "No server selected.",
+  "connect.provisioning": "Provisioning and connecting...",
+  "connect.connected": "Connected.",
+  "connect.failed": "Couldn't connect. Try again, or choose another server.",
+  "connect.switching": "Provisioning new server...",
+  "connect.switchFailed": "Couldn't switch servers. Try again, or pick another server.",
+  "connect.disconnecting": "Disconnecting...",
+  "connect.disconnected": "Disconnected.",
+  "connect.disconnectFailed": "Couldn't disconnect. Please try again.",
+  "connect.recovered": "Connection recovered.",
+  "connect.refreshServersFailed": "Couldn't refresh the server list. It will retry automatically.",
+
+  // ── Settings toggles ──────────────────────────────────
+  "toggle.updateFailed": "Failed to update setting.",
+  "toggle.directIp.on": "Direct IP enabled.",
+  "toggle.directIp.off": "Direct IP disabled.",
+  "toggle.directIpOnly.on": "Direct IP only mode enabled.",
+  "toggle.directIpOnly.off": "Direct IP only mode disabled.",
+  "toggle.allowLan.on": "Allow LAN enabled. Reconnect for it to take effect.",
+  "toggle.allowLan.off": "Allow LAN disabled. Reconnect for it to take effect.",
+  "toggle.launch.on": "PangeaVPN will launch at startup.",
+  "toggle.launch.off": "Launch at startup disabled.",
+  "toggle.launch.failed": "Failed to update startup setting.",
+  "toggle.launch.packagedOnly": "Available in packaged builds only",
+  "toggle.lockdown.failed": "Failed to update Lockdown.",
+  "toggle.lockdown.on": "Lockdown on — auto-connect enabled and the kill switch stays on until you turn it off.",
+  "toggle.lockdown.off": "Lockdown off — normal internet restored.",
+
+  // ── Verbose errors (hidden debug toggle) ──────────────
+  "verbose.on": "Verbose errors enabled",
+  "verbose.off": "Verbose errors disabled",
+
+  // ── Daemon sync / generic ─────────────────────────────
+  "common.loading": "Loading...",
+  "common.ready": "Ready.",
+  "common.retrying": "Something went wrong. Retrying...",
+  "common.dash": "—",
+
+  // ── Daemon status values (technical, kept short) ──────
+  "status.running": "running",
+  "status.stopped": "stopped",
+
+  // ── Generic error fallbacks ───────────────────────────
+  "error.network": "Please check your internet connection and try again.",
+  "error.generic": "Something went wrong. Please try again later."
+} as const;

@@ -76,6 +76,8 @@ declare global {
     getAlwaysConnected: () => Promise<boolean>;
     getLastServer: () => Promise<{ lastServerId: string | null; lastProfileId: string | null }>;
     clearLastServer: () => Promise<void>;
+    getLocale: () => Promise<string>;
+    setLocale: (locale: string) => Promise<void>;
     getIsPackaged: () => Promise<boolean>;
     getCachedServers: () => Promise<ServerInfo[]>;
     cacheServers: (servers: ServerInfo[]) => Promise<void>;

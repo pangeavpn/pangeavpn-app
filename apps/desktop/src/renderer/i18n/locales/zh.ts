@@ -1,0 +1,213 @@
+// Chinese, Simplified (zh) — machine translation, pending native review.
+import type { Messages } from "../messages";
+
+export const zh = {
+  // ── App shell / loading ───────────────────────────────
+  "app.brand": "Pangea VPN",
+  "app.loading.starting": "正在启动 PangeaVPN...",
+  "app.loading.progress": "正在准备中... （{remaining} 秒）",
+  "app.loading.cantStart": "PangeaVPN 无法启动，请重新启动应用。",
+  "app.loading.didntStart": "PangeaVPN 未能启动，请重新启动应用。",
+
+  // ── Login screen ──────────────────────────────────────
+  "login.subtitle": "输入登录令牌以继续。",
+  "login.getToken": "获取您的令牌",
+  "login.tokenPlaceholder": "0000000000000000",
+  "login.tokenAriaLabel": "登录令牌",
+  "login.signIn": "登录",
+  "login.cachedTokenAriaLabel": "使用已保存的令牌登录",
+  "login.enterToken": "请输入您的 VPN 令牌。",
+  "login.signingIn": "正在登录...",
+  "login.invalidToken": "VPN 令牌无效。",
+  "login.signInFailed": "登录失败。",
+
+  // ── Device-limit screen ───────────────────────────────
+  "deviceLimit.title": "已达设备上限",
+  "deviceLimit.subtitle": "您的账户已达到设备数量上限。请移除一台设备后继续登录。",
+  "deviceLimit.continue": "继续登录",
+  "deviceLimit.cancel": "取消并退出登录",
+  "deviceLimit.loadFailed": "无法加载设备，请重试。",
+  "deviceLimit.noneCanContinue": "未找到设备。您现在可以继续登录。",
+  "deviceLimit.stillAtLimit": "仍处于设备上限。请再移除一台设备。",
+
+  // ── Devices (modal + shared rows) ─────────────────────
+  "devices.title": "设备",
+  "devices.subtitle": "已登录您账户的设备。",
+  "devices.thisDevice": "此设备",
+  "devices.added": "添加于 {date}",
+  "devices.current": "当前",
+  "devices.currentTitle": "退出登录以移除此设备",
+  "devices.remove": "移除",
+  "devices.removing": "正在移除...",
+  "devices.removed": "设备已移除。",
+  "devices.removeFailed": "移除设备失败，请重试。",
+  "devices.none": "未找到设备。",
+  "devices.noneRemaining": "没有剩余设备。",
+
+  // ── Header / menu ─────────────────────────────────────
+  "header.brandAriaLabel": "Pangea VPN",
+  "header.signIn": "登录",
+  "header.toggleTheme": "切换主题",
+  "header.menu": "菜单",
+  "menu.settings": "设置",
+  "menu.updateAvailable": "有可用更新",
+
+  // ── Hero connection card ──────────────────────────────
+  "hero.selectServer": "选择服务器",
+  "hero.refreshServers": "刷新服务器",
+  "hero.connect": "连接",
+  "hero.disconnect": "断开连接",
+  "hero.provisioning": "正在配置...",
+  "hero.disconnecting": "正在断开...",
+  "hero.noServers": "没有可用的服务器",
+
+  // ── Status pills ──────────────────────────────────────
+  "pill.killSwitch": "断网保护",
+  "pill.cloak": "伪装",
+  "pill.wireguard": "WireGuard",
+
+  // ── Connection state labels (hero + tray) ─────────────
+  "state.DISCONNECTED": "已断开",
+  "state.CONNECTING": "连接中",
+  "state.CONNECTED": "已连接",
+  "state.DISCONNECTING": "断开中",
+  "state.ERROR": "错误",
+
+  // ── Logs panel ────────────────────────────────────────
+  "logs.title": "日志",
+  "logs.copyDiagnostics": "复制诊断信息",
+  "logs.copyLogs": "复制日志",
+  "logs.clear": "清除",
+  "logs.noneToCopy": "没有可复制的日志。",
+  "logs.copied": "日志已复制到剪贴板。",
+  "logs.cleared": "日志已清除。",
+  "logs.diagnosticsCopied": "诊断信息已复制到剪贴板。",
+  "logs.bridgeUnavailable": "daemonApi 桥接不可用。",
+
+  // ── Settings overlay ──────────────────────────────────
+  "settings.title": "设置",
+  "settings.close": "关闭",
+  "settings.account.heading": "账户",
+  "settings.account.signedInAs": "登录身份",
+  "settings.account.subscription": "订阅",
+  "settings.account.token": "登录令牌",
+  "settings.account.show": "显示",
+  "settings.account.hide": "隐藏",
+  "settings.account.copy": "复制",
+  "settings.account.tokenHint": "这是您登录时使用的令牌。请妥善保管——任何持有它的人都能访问您的账户。",
+  "settings.account.manageSub": "管理订阅",
+  "settings.account.devices": "设备",
+  "settings.account.signOut": "退出登录",
+  "settings.censorship.heading": "绕过审查",
+  "settings.censorship.description": "如果您的网络屏蔽了 VPN 服务，请启用此项。",
+  "settings.censorship.directIp.title": "直连 IP",
+  "settings.censorship.directIp.hint": "通过 IP 地址连接我们的服务器，完全跳过 DNS。",
+  "settings.censorship.directIpOnly.title": "仅直连 IP",
+  "settings.censorship.directIpOnly.hint": "始终使用直连 IP。完全跳过常规 API 调用——如果您的网络屏蔽了对我们服务器的 HTTPS 访问，请使用此项。",
+  "settings.network.heading": "网络",
+  "settings.network.description": "针对受限 Wi-Fi 网络的修复。",
+  "settings.network.allowLan.title": "允许 LAN",
+  "settings.network.allowLan.hint": "让本地网络流量（路由器、打印机、强制门户）绕过隧道。如果连接时 Wi-Fi 间歇性显示\"无网络连接\"，请开启此项。将在下次连接时生效。",
+  "settings.startup.heading": "启动",
+  "settings.startup.description": "后台启动与自动重连。",
+  "settings.startup.launch.title": "开机启动",
+  "settings.startup.launch.hint": "登录系统时自动启动 PangeaVPN。以隐藏方式打开——通过托盘图标访问它。",
+  "settings.startup.lockdown.title": "锁定模式",
+  "settings.startup.lockdown.hint": "开机启动 PangeaVPN（隐藏在托盘中），自动连接到上次的服务器，并在断开后保持断网保护开启——仅允许 VPN 流量。关闭锁定模式以恢复无保护的互联网访问。",
+  "settings.language.heading": "语言",
+  "settings.language.description": "选择应用的显示语言。",
+  "settings.language.system": "系统默认",
+  "settings.language.restartHint": "重新启动 PangeaVPN 以应用新语言。",
+  "settings.update.heading": "软件更新",
+  "settings.update.currentVersion": "当前版本：",
+  "settings.update.check": "检查更新",
+
+  // ── Server picker overlay ─────────────────────────────
+  "serverPicker.title": "选择服务器",
+  "serverPicker.serversAriaLabel": "服务器",
+  "serverPicker.noServers": "没有可用的服务器",
+  "serverPicker.load": "服务器负载 {pct}%",
+  "serverPicker.loadPct": "{pct}%",
+
+  // ── Update modal ──────────────────────────────────────
+  "update.title": "有可用更新",
+  "update.current": "当前",
+  "update.latest": "最新",
+  "update.macStep": "打开 Terminal（按 ⌘ + 空格键，输入 Terminal，按回车键），然后粘贴此命令并按回车键：",
+  "update.download": "下载更新",
+  "update.copyCommand": "复制安装命令",
+  "update.copied": "已复制！",
+  "update.macPasteHint": "现在将命令粘贴到 Terminal 中并按回车键。",
+  "update.restartToUpdate": "重启以更新",
+  "update.readyToInstall": "更新已下载，可以安装。",
+  "update.opening": "正在打开...",
+  "update.viewDownload": "查看下载",
+  "update.retry": "重试",
+  "update.retryDownload": "重新下载",
+  "update.checking": "正在检查...",
+  "update.onLatest": "您已是最新版本。",
+  "update.checkFailed": "无法检查更新，请稍后再试。",
+  "update.unavailable": "此版本中无法使用更新功能。",
+
+  // ── Account / subscription ────────────────────────────
+  "sub.none": "无有效订阅",
+  "sub.trialPrefix": "免费试用 · ",
+  "sub.renews": "续订",
+  "sub.expires": "到期",
+  "sub.pastDue": "付款逾期",
+  "account.noToken": "没有可复制的令牌。",
+  "account.tokenCopied": "令牌已复制到剪贴板。",
+
+  // ── Session / auth toasts ─────────────────────────────
+  "auth.signedOutRetry": "您已退出登录，请重新登录。",
+  "auth.signingOut": "正在退出登录...",
+  "auth.signedOut": "已退出登录。",
+  "auth.deviceNamed": "您的设备名为 \"{name}\"。",
+
+  // ── Connect / disconnect flow ─────────────────────────
+  "connect.noServer": "未选择服务器。",
+  "connect.provisioning": "正在配置并连接...",
+  "connect.connected": "已连接。",
+  "connect.failed": "无法连接。请重试，或选择其他服务器。",
+  "connect.switching": "正在配置新服务器...",
+  "connect.switchFailed": "无法切换服务器。请重试，或选择其他服务器。",
+  "connect.disconnecting": "正在断开...",
+  "connect.disconnected": "已断开。",
+  "connect.disconnectFailed": "无法断开连接，请重试。",
+  "connect.recovered": "连接已恢复。",
+  "connect.refreshServersFailed": "无法刷新服务器列表，将自动重试。",
+
+  // ── Settings toggles ──────────────────────────────────
+  "toggle.updateFailed": "更新设置失败。",
+  "toggle.directIp.on": "已启用直连 IP。",
+  "toggle.directIp.off": "已禁用直连 IP。",
+  "toggle.directIpOnly.on": "已启用仅直连 IP 模式。",
+  "toggle.directIpOnly.off": "已禁用仅直连 IP 模式。",
+  "toggle.allowLan.on": "已启用允许 LAN。请重新连接以生效。",
+  "toggle.allowLan.off": "已禁用允许 LAN。请重新连接以生效。",
+  "toggle.launch.on": "PangeaVPN 将在开机时启动。",
+  "toggle.launch.off": "已禁用开机启动。",
+  "toggle.launch.failed": "更新启动设置失败。",
+  "toggle.launch.packagedOnly": "仅在打包版本中可用",
+  "toggle.lockdown.failed": "更新锁定模式失败。",
+  "toggle.lockdown.on": "锁定模式已开启——已启用自动连接，断网保护将保持开启，直到您手动关闭。",
+  "toggle.lockdown.off": "锁定模式已关闭——已恢复正常互联网访问。",
+
+  // ── Verbose errors (hidden debug toggle) ──────────────
+  "verbose.on": "已启用详细错误信息",
+  "verbose.off": "已禁用详细错误信息",
+
+  // ── Daemon sync / generic ─────────────────────────────
+  "common.loading": "正在加载...",
+  "common.ready": "就绪。",
+  "common.retrying": "出了点问题，正在重试...",
+  "common.dash": "—",
+
+  // ── Daemon status values (technical, kept short) ──────
+  "status.running": "运行中",
+  "status.stopped": "已停止",
+
+  // ── Generic error fallbacks ───────────────────────────
+  "error.network": "请检查您的互联网连接后重试。",
+  "error.generic": "出了点问题，请稍后再试。"
+} satisfies Messages;

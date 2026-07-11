@@ -1,0 +1,213 @@
+// French (fr) — machine translation, pending native review.
+import type { Messages } from "../messages";
+
+export const fr = {
+  // ── App shell / loading ───────────────────────────────
+  "app.brand": "Pangea VPN",
+  "app.loading.starting": "Démarrage de PangeaVPN...",
+  "app.loading.progress": "Préparation en cours... ({remaining} s)",
+  "app.loading.cantStart": "PangeaVPN n'a pas pu démarrer. Veuillez redémarrer l'application.",
+  "app.loading.didntStart": "PangeaVPN n'a pas démarré. Veuillez redémarrer l'application.",
+
+  // ── Login screen ──────────────────────────────────────
+  "login.subtitle": "Saisissez votre jeton de connexion pour continuer.",
+  "login.getToken": "Obtenir votre jeton",
+  "login.tokenPlaceholder": "0000000000000000",
+  "login.tokenAriaLabel": "Jeton de connexion",
+  "login.signIn": "Se connecter",
+  "login.cachedTokenAriaLabel": "Se connecter avec le jeton enregistré",
+  "login.enterToken": "Veuillez saisir votre jeton VPN.",
+  "login.signingIn": "Connexion...",
+  "login.invalidToken": "Jeton VPN invalide.",
+  "login.signInFailed": "Échec de la connexion.",
+
+  // ── Device-limit screen ───────────────────────────────
+  "deviceLimit.title": "Limite d'appareils atteinte",
+  "deviceLimit.subtitle": "Votre compte a atteint le nombre maximal d'appareils. Supprimez-en un pour poursuivre la connexion.",
+  "deviceLimit.continue": "Poursuivre la connexion",
+  "deviceLimit.cancel": "Annuler et se déconnecter",
+  "deviceLimit.loadFailed": "Impossible de charger les appareils. Veuillez réessayer.",
+  "deviceLimit.noneCanContinue": "Aucun appareil trouvé. Vous pouvez poursuivre la connexion maintenant.",
+  "deviceLimit.stillAtLimit": "Limite d'appareils toujours atteinte. Veuillez supprimer un autre appareil.",
+
+  // ── Devices (modal + shared rows) ─────────────────────
+  "devices.title": "Appareils",
+  "devices.subtitle": "Appareils connectés à votre compte.",
+  "devices.thisDevice": "Cet appareil",
+  "devices.added": "Ajouté le {date}",
+  "devices.current": "Actuel",
+  "devices.currentTitle": "Déconnectez-vous pour supprimer cet appareil",
+  "devices.remove": "Supprimer",
+  "devices.removing": "Suppression...",
+  "devices.removed": "Appareil supprimé.",
+  "devices.removeFailed": "Échec de la suppression de l'appareil. Veuillez réessayer.",
+  "devices.none": "Aucun appareil trouvé.",
+  "devices.noneRemaining": "Aucun appareil restant.",
+
+  // ── Header / menu ─────────────────────────────────────
+  "header.brandAriaLabel": "Pangea VPN",
+  "header.signIn": "Se connecter",
+  "header.toggleTheme": "Changer de thème",
+  "header.menu": "Menu",
+  "menu.settings": "Paramètres",
+  "menu.updateAvailable": "Mise à jour disponible",
+
+  // ── Hero connection card ──────────────────────────────
+  "hero.selectServer": "Sélectionner un serveur",
+  "hero.refreshServers": "Actualiser les serveurs",
+  "hero.connect": "Se connecter",
+  "hero.disconnect": "Se déconnecter",
+  "hero.provisioning": "Provisionnement...",
+  "hero.disconnecting": "Déconnexion...",
+  "hero.noServers": "Aucun serveur disponible",
+
+  // ── Status pills ──────────────────────────────────────
+  "pill.killSwitch": "Kill Switch",
+  "pill.cloak": "Camouflage",
+  "pill.wireguard": "WireGuard",
+
+  // ── Connection state labels (hero + tray) ─────────────
+  "state.DISCONNECTED": "DÉCONNECTÉ",
+  "state.CONNECTING": "CONNEXION",
+  "state.CONNECTED": "CONNECTÉ",
+  "state.DISCONNECTING": "DÉCONNEXION",
+  "state.ERROR": "ERREUR",
+
+  // ── Logs panel ────────────────────────────────────────
+  "logs.title": "Journaux",
+  "logs.copyDiagnostics": "Copier les diagnostics",
+  "logs.copyLogs": "Copier les journaux",
+  "logs.clear": "Effacer",
+  "logs.noneToCopy": "Aucun journal à copier.",
+  "logs.copied": "Journaux copiés dans le presse-papiers.",
+  "logs.cleared": "Journaux effacés.",
+  "logs.diagnosticsCopied": "Diagnostics copiés dans le presse-papiers.",
+  "logs.bridgeUnavailable": "Pont daemonApi indisponible.",
+
+  // ── Settings overlay ──────────────────────────────────
+  "settings.title": "Paramètres",
+  "settings.close": "Fermer",
+  "settings.account.heading": "Compte",
+  "settings.account.signedInAs": "Connecté en tant que",
+  "settings.account.subscription": "Abonnement",
+  "settings.account.token": "Jeton de connexion",
+  "settings.account.show": "Afficher",
+  "settings.account.hide": "Masquer",
+  "settings.account.copy": "Copier",
+  "settings.account.tokenHint": "Il s'agit du jeton avec lequel vous vous êtes connecté. Gardez-le privé — quiconque le possède peut accéder à votre compte.",
+  "settings.account.manageSub": "Gérer l'abonnement",
+  "settings.account.devices": "Appareils",
+  "settings.account.signOut": "Se déconnecter",
+  "settings.censorship.heading": "Contournement de la censure",
+  "settings.censorship.description": "Activez si votre réseau bloque l'accès aux services VPN.",
+  "settings.censorship.directIp.title": "IP directe",
+  "settings.censorship.directIp.hint": "Connectez-vous à nos serveurs par adresse IP, en contournant entièrement le DNS.",
+  "settings.censorship.directIpOnly.title": "IP directe uniquement",
+  "settings.censorship.directIpOnly.hint": "Utilisez toujours des connexions IP directes. Contourne entièrement les appels API normaux — à utiliser si votre réseau bloque le HTTPS vers nos serveurs.",
+  "settings.network.heading": "Réseau",
+  "settings.network.description": "Correctifs pour les réseaux Wi-Fi restrictifs.",
+  "settings.network.allowLan.title": "Autoriser le LAN",
+  "settings.network.allowLan.hint": "Laissez le trafic du réseau local (routeur, imprimantes, portails captifs) contourner le tunnel. Activez si votre Wi-Fi bascule par intermittence sur \"Pas d'Internet\" pendant la connexion. Prend effet à la prochaine connexion.",
+  "settings.startup.heading": "Démarrage",
+  "settings.startup.description": "Lancement en arrière-plan et reconnexion automatique.",
+  "settings.startup.launch.title": "Lancer au démarrage",
+  "settings.startup.launch.hint": "Démarre PangeaVPN automatiquement à l'ouverture de votre session. S'ouvre masqué — utilisez l'icône de la barre d'état système pour y accéder.",
+  "settings.startup.lockdown.title": "Verrouillage",
+  "settings.startup.lockdown.hint": "Lance PangeaVPN au démarrage (masqué dans la barre d'état système), se connecte automatiquement au dernier serveur et maintient le kill switch actif après la déconnexion — seul le trafic VPN est autorisé. Désactivez le Verrouillage pour retrouver un accès Internet non protégé.",
+  "settings.language.heading": "Langue",
+  "settings.language.description": "Choisissez la langue d'affichage de l'application.",
+  "settings.language.system": "Par défaut du système",
+  "settings.language.restartHint": "Redémarrez PangeaVPN pour appliquer la nouvelle langue.",
+  "settings.update.heading": "Mise à jour du logiciel",
+  "settings.update.currentVersion": "Version actuelle :",
+  "settings.update.check": "Rechercher des mises à jour",
+
+  // ── Server picker overlay ─────────────────────────────
+  "serverPicker.title": "Sélectionner un serveur",
+  "serverPicker.serversAriaLabel": "Serveurs",
+  "serverPicker.noServers": "Aucun serveur disponible",
+  "serverPicker.load": "Charge du serveur {pct} %",
+  "serverPicker.loadPct": "{pct} %",
+
+  // ── Update modal ──────────────────────────────────────
+  "update.title": "Mise à jour disponible",
+  "update.current": "Actuelle",
+  "update.latest": "Dernière",
+  "update.macStep": "Ouvrez Terminal (appuyez sur ⌘ + Espace, tapez Terminal, appuyez sur Entrée), puis collez cette commande et appuyez sur Entrée :",
+  "update.download": "Télécharger la mise à jour",
+  "update.copyCommand": "Copier la commande d'installation",
+  "update.copied": "Copié !",
+  "update.macPasteHint": "Collez maintenant la commande dans Terminal et appuyez sur Entrée.",
+  "update.restartToUpdate": "Redémarrer pour mettre à jour",
+  "update.readyToInstall": "Mise à jour téléchargée et prête à installer.",
+  "update.opening": "Ouverture...",
+  "update.viewDownload": "Voir le téléchargement",
+  "update.retry": "Réessayer",
+  "update.retryDownload": "Réessayer le téléchargement",
+  "update.checking": "Vérification...",
+  "update.onLatest": "Vous disposez de la dernière version.",
+  "update.checkFailed": "Impossible de rechercher des mises à jour. Réessayez plus tard.",
+  "update.unavailable": "Les mises à jour ne sont pas disponibles dans cette version.",
+
+  // ── Account / subscription ────────────────────────────
+  "sub.none": "Aucun abonnement actif",
+  "sub.trialPrefix": "Essai gratuit · ",
+  "sub.renews": "Renouvellement",
+  "sub.expires": "Expiration",
+  "sub.pastDue": "Paiement en retard",
+  "account.noToken": "Aucun jeton à copier.",
+  "account.tokenCopied": "Jeton copié dans le presse-papiers.",
+
+  // ── Session / auth toasts ─────────────────────────────
+  "auth.signedOutRetry": "Vous avez été déconnecté. Veuillez vous reconnecter.",
+  "auth.signingOut": "Déconnexion...",
+  "auth.signedOut": "Déconnecté.",
+  "auth.deviceNamed": "Votre appareil s'appelle \"{name}\".",
+
+  // ── Connect / disconnect flow ─────────────────────────
+  "connect.noServer": "Aucun serveur sélectionné.",
+  "connect.provisioning": "Provisionnement et connexion...",
+  "connect.connected": "Connecté.",
+  "connect.failed": "Connexion impossible. Réessayez ou choisissez un autre serveur.",
+  "connect.switching": "Provisionnement du nouveau serveur...",
+  "connect.switchFailed": "Impossible de changer de serveur. Réessayez ou choisissez un autre serveur.",
+  "connect.disconnecting": "Déconnexion...",
+  "connect.disconnected": "Déconnecté.",
+  "connect.disconnectFailed": "Déconnexion impossible. Veuillez réessayer.",
+  "connect.recovered": "Connexion rétablie.",
+  "connect.refreshServersFailed": "Impossible d'actualiser la liste des serveurs. Une nouvelle tentative sera effectuée automatiquement.",
+
+  // ── Settings toggles ──────────────────────────────────
+  "toggle.updateFailed": "Échec de la mise à jour du paramètre.",
+  "toggle.directIp.on": "IP directe activée.",
+  "toggle.directIp.off": "IP directe désactivée.",
+  "toggle.directIpOnly.on": "Mode IP directe uniquement activé.",
+  "toggle.directIpOnly.off": "Mode IP directe uniquement désactivé.",
+  "toggle.allowLan.on": "Autorisation du LAN activée. Reconnectez-vous pour qu'elle prenne effet.",
+  "toggle.allowLan.off": "Autorisation du LAN désactivée. Reconnectez-vous pour qu'elle prenne effet.",
+  "toggle.launch.on": "PangeaVPN se lancera au démarrage.",
+  "toggle.launch.off": "Lancement au démarrage désactivé.",
+  "toggle.launch.failed": "Échec de la mise à jour du paramètre de démarrage.",
+  "toggle.launch.packagedOnly": "Disponible uniquement dans les versions empaquetées",
+  "toggle.lockdown.failed": "Échec de la mise à jour du Verrouillage.",
+  "toggle.lockdown.on": "Verrouillage activé — connexion automatique activée et le kill switch reste actif jusqu'à ce que vous le désactiviez.",
+  "toggle.lockdown.off": "Verrouillage désactivé — accès Internet normal rétabli.",
+
+  // ── Verbose errors (hidden debug toggle) ──────────────
+  "verbose.on": "Erreurs détaillées activées",
+  "verbose.off": "Erreurs détaillées désactivées",
+
+  // ── Daemon sync / generic ─────────────────────────────
+  "common.loading": "Chargement...",
+  "common.ready": "Prêt.",
+  "common.retrying": "Une erreur s'est produite. Nouvelle tentative...",
+  "common.dash": "—",
+
+  // ── Daemon status values (technical, kept short) ──────
+  "status.running": "en cours d'exécution",
+  "status.stopped": "arrêté",
+
+  // ── Generic error fallbacks ───────────────────────────
+  "error.network": "Veuillez vérifier votre connexion Internet et réessayer.",
+  "error.generic": "Une erreur s'est produite. Veuillez réessayer plus tard."
+} satisfies Messages;

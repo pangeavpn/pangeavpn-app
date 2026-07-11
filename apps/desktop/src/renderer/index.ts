@@ -8,6 +8,14 @@ import {
   attemptInitialAutoConnect,
   getUserIntent
 } from "./autoConnect.js";
+import {
+  t,
+  initLocale,
+  resolveLocale,
+  localeTag,
+  LOCALES,
+  type MessageKey
+} from "./i18n/index.js";
 
 let verboseErrors = localStorage.getItem("pangea:verboseErrors") === "1";
 
@@ -22,9 +30,9 @@ function reportError(context: string, error: unknown, friendly?: string): string
   if (friendly) return friendly;
   const msg = String(error).toLowerCase();
   if (msg.includes("timeout") || msg.includes("etimedout") || msg.includes("network") || msg.includes("fetch") || msg.includes("econn")) {
-    return "Please check your internet connection and try again.";
+    return t("error.network");
   }
-  return "Something went wrong. Please try again later.";
+  return t("error.generic");
 }
 
 const stateEl = document.getElementById("state") as HTMLSpanElement;
@@ -148,44 +156,44 @@ function refreshAccountToken(): void {
   accountTokenCopyBtn.disabled = !hasToken;
   if (!token) {
     accountTokenRevealed = false;
-    accountTokenValue.textContent = "—";
-    accountTokenToggleBtn.textContent = "Show";
+    accountTokenValue.textContent = t("common.dash");
+    accountTokenToggleBtn.textContent = t("settings.account.show");
     return;
   }
   accountTokenValue.textContent = accountTokenRevealed ? token : maskToken(token);
-  accountTokenToggleBtn.textContent = accountTokenRevealed ? "Hide" : "Show";
+  accountTokenToggleBtn.textContent = t(accountTokenRevealed ? "settings.account.hide" : "settings.account.show");
 }
 
 function formatSubscriptionDate(iso: string | null): string {
   if (!iso) return "";
   try {
-    return ` ${new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })}`;
+    return ` ${new Date(iso).toLocaleDateString(localeTag(), { year: "numeric", month: "short", day: "numeric" })}`;
   } catch {
     return "";
   }
 }
 
 function subscriptionText(sub: SubscriptionInfo | null): { text: string; warn: boolean } {
-  if (!sub) return { text: "No active subscription", warn: false };
+  if (!sub) return { text: t("sub.none"), warn: false };
   const when = formatSubscriptionDate(sub.expiresAt);
   if (sub.status === "active" || sub.status === "trialing") {
-    const trial = sub.status === "trialing" ? "Free trial · " : "";
-    return { text: `${trial}${sub.renews ? "Renews" : "Expires"}${when}`, warn: false };
+    const trial = sub.status === "trialing" ? t("sub.trialPrefix") : "";
+    return { text: `${trial}${sub.renews ? t("sub.renews") : t("sub.expires")}${when}`, warn: false };
   }
   if (sub.status === "past_due") {
-    return { text: `Payment past due${when ? " —" + when : ""}`, warn: true };
+    return { text: `${t("sub.pastDue")}${when ? " —" + when : ""}`, warn: true };
   }
-  return { text: "No active subscription", warn: false };
+  return { text: t("sub.none"), warn: false };
 }
 
 // Fetched fresh each time Settings opens so expiry/renewal is always current.
 async function refreshSubscription(): Promise<void> {
   accountSubscription.classList.remove("account-subscription-warn");
   if (!pangeaApi) {
-    accountSubscription.textContent = "—";
+    accountSubscription.textContent = t("common.dash");
     return;
   }
-  accountSubscription.textContent = "Loading...";
+  accountSubscription.textContent = t("common.loading");
   let sub: SubscriptionInfo | null = null;
   try {
     sub = await pangeaApi.getSubscription();
@@ -229,7 +237,7 @@ function isSubModalOpen(): boolean {
 function openSettings(): void {
   settingsOverlay.classList.add("visible");
   settingsOverlay.setAttribute("aria-hidden", "false");
-  settingsVersionEl.textContent = appVersionEl.textContent || "—";
+  settingsVersionEl.textContent = appVersionEl.textContent || t("common.dash");
   refreshAccountToken();
   void refreshSubscription();
   activateOverlay(settingsOverlay);
@@ -269,12 +277,12 @@ accountTokenToggleBtn.addEventListener("click", () => {
 accountTokenCopyBtn.addEventListener("click", async () => {
   const token = localStorage.getItem(LAST_TOKEN_KEY);
   if (!token) {
-    showToast("No token to copy.");
+    showToast(t("account.noToken"));
     return;
   }
   try {
     await copyTextToClipboard(token);
-    showToast("Token copied to clipboard.", 3000, true);
+    showToast(t("account.tokenCopied"), 3000, true);
   } catch (error) {
     showToast(reportError("copyToken", error));
   }
@@ -332,13 +340,13 @@ document.addEventListener("keydown", (e) => {
 copyLogsBtn.addEventListener("click", async () => {
   const text = logsEl.textContent ?? "";
   if (!text.trim()) {
-    setUiMessage("No logs to copy.");
+    setUiMessage(t("logs.noneToCopy"));
     return;
   }
 
   try {
     await copyTextToClipboard(text);
-    setUiMessage("Logs copied to clipboard.");
+    setUiMessage(t("logs.copied"));
   } catch (error) {
     setUiMessage(reportError("copyLogs", error));
   }
@@ -346,7 +354,7 @@ copyLogsBtn.addEventListener("click", async () => {
 
 copyDiagnosticsBtn.addEventListener("click", async () => {
   if (!daemonApi) {
-    setUiMessage("daemonApi bridge unavailable.");
+    setUiMessage(t("logs.bridgeUnavailable"));
     return;
   }
 
@@ -355,7 +363,7 @@ copyDiagnosticsBtn.addEventListener("click", async () => {
   try {
     const report = await buildDiagnosticsReport();
     await copyTextToClipboard(report);
-    setUiMessage("Diagnostics copied to clipboard.");
+    setUiMessage(t("logs.diagnosticsCopied"));
   } catch (error) {
     setUiMessage(reportError("copyDiagnostics", error));
   } finally {
@@ -369,7 +377,7 @@ clearLogsBtn.addEventListener("click", () => {
   logsCursor = Math.max(logsCursor, lastSeenTs);
   logEntries = [];
   renderLogs(logEntries);
-  setUiMessage("Logs cleared.");
+  setUiMessage(t("logs.cleared"));
 });
 
 loginBtn.addEventListener("click", () => {
@@ -381,7 +389,7 @@ loginBtn.addEventListener("click", () => {
 logoutBtn.addEventListener("click", async () => {
   if (!pangeaApi) return;
   logoutBtn.disabled = true;
-  setUiMessage("Signing out...");
+  setUiMessage(t("auth.signingOut"));
   try {
     await pangeaApi.logout();
     localStorage.removeItem(MY_DEVICE_NAME_KEY);
@@ -390,7 +398,7 @@ logoutBtn.addEventListener("click", async () => {
     updateAuthUI();
     renderServers();
     await refreshStatus();
-    setUiMessage("Signed out.");
+    setUiMessage(t("auth.signedOut"));
   } catch (error) {
     setUiMessage(reportError("signOut", error));
   } finally {
@@ -410,7 +418,7 @@ function refreshCachedTokenBtn(): void {
       ? cached.slice(0, 4) + "•".repeat(Math.min(cached.length - 4, 12))
       : "•".repeat(cached.length);
     cachedTokenBtn.textContent = masked;
-    cachedTokenBtn.setAttribute("aria-label", "Sign in with saved token");
+    cachedTokenBtn.setAttribute("aria-label", t("login.cachedTokenAriaLabel"));
     cachedTokenBtn.hidden = false;
   } else {
     cachedTokenBtn.hidden = true;
@@ -480,7 +488,7 @@ let deviceRemovedCount = 0;
 
 function formatDeviceDate(iso: string): string {
   try {
-    return new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+    return new Date(iso).toLocaleDateString(localeTag(), { year: "numeric", month: "short", day: "numeric" });
   } catch {
     return iso;
   }
@@ -496,10 +504,10 @@ async function showDeviceLimitScreen(token: string): Promise<void> {
   if (!pangeaApi) return;
   pendingLoginToken = token;
   deviceRemovedCount = 0;
-  deviceLimitTitle.textContent = "Device Limit Reached";
-  deviceLimitSubtitle.textContent = "Your account has reached the maximum number of devices. Remove one to continue signing in.";
+  deviceLimitTitle.textContent = t("deviceLimit.title");
+  deviceLimitSubtitle.textContent = t("deviceLimit.subtitle");
   deviceLimitContinueBtn.hidden = true;
-  deviceLimitLogoutBtn.textContent = "Cancel & Sign Out";
+  deviceLimitLogoutBtn.textContent = t("deviceLimit.cancel");
   deviceLimitMessage.textContent = "";
   loginScreen.hidden = true;
   deviceLimitScreen.hidden = false;
@@ -510,7 +518,7 @@ async function showDeviceLimitScreen(token: string): Promise<void> {
     renderDeviceList(devices);
   } catch (err) {
     deviceList.innerHTML = "";
-    deviceLimitMessage.textContent = reportError("listDevices", err, "Could not load devices. Please try again.");
+    deviceLimitMessage.textContent = reportError("listDevices", err, t("deviceLimit.loadFailed"));
   }
 }
 
@@ -525,14 +533,14 @@ async function showDevicesModal(): Promise<void> {
     renderDevicesModalList(devices);
   } catch (err) {
     devicesModalList.innerHTML = "";
-    devicesModalMessage.textContent = reportError("listDevices", err, "Could not load devices. Please try again.");
+    devicesModalMessage.textContent = reportError("listDevices", err, t("deviceLimit.loadFailed"));
   }
 }
 
 function renderDevicesModalList(devices: DeviceInfo[]): void {
   devicesModalList.innerHTML = "";
   if (devices.length === 0) {
-    devicesModalMessage.textContent = "No devices found.";
+    devicesModalMessage.textContent = t("devices.none");
     return;
   }
   devicesModalMessage.textContent = "";
@@ -563,22 +571,22 @@ function renderDevicesModalList(devices: DeviceInfo[]): void {
       nameSpan.appendChild(document.createTextNode(" "));
       const badge = document.createElement("span");
       badge.className = "device-current-badge";
-      badge.textContent = "This device";
+      badge.textContent = t("devices.thisDevice");
       nameSpan.appendChild(badge);
     }
     const dateSpan = document.createElement("span");
     dateSpan.className = "device-date";
-    dateSpan.textContent = `Added ${dateStr}`;
+    dateSpan.textContent = t("devices.added", { date: dateStr });
     info.appendChild(nameSpan);
     info.appendChild(dateSpan);
     const removeBtn = document.createElement("button");
     removeBtn.className = "device-remove-btn";
     if (isMine) {
-      removeBtn.textContent = "Current";
+      removeBtn.textContent = t("devices.current");
       removeBtn.disabled = true;
-      removeBtn.title = "Sign out to remove this device";
+      removeBtn.title = t("devices.currentTitle");
     } else {
-      removeBtn.textContent = "Remove";
+      removeBtn.textContent = t("devices.remove");
       removeBtn.addEventListener("click", () => void handleDevicesModalRemove(device.id, item, removeBtn));
     }
     item.appendChild(info);
@@ -590,26 +598,26 @@ function renderDevicesModalList(devices: DeviceInfo[]): void {
 async function handleDevicesModalRemove(deviceId: string, itemEl: HTMLElement, btn: HTMLButtonElement): Promise<void> {
   if (!pangeaApi) return;
   btn.disabled = true;
-  btn.textContent = "Removing...";
+  btn.textContent = t("devices.removing");
   devicesModalMessage.textContent = "";
   try {
     await pangeaApi.removeDevice(deviceId);
     itemEl.remove();
-    showToast("Device removed.", 4000, true);
+    showToast(t("devices.removed"), 4000, true);
     if (devicesModalList.children.length === 0) {
-      devicesModalMessage.textContent = "No devices remaining.";
+      devicesModalMessage.textContent = t("devices.noneRemaining");
     }
   } catch (err) {
     btn.disabled = false;
-    btn.textContent = "Remove";
-    devicesModalMessage.textContent = reportError("removeDevice", err, "Failed to remove device. Please try again.");
+    btn.textContent = t("devices.remove");
+    devicesModalMessage.textContent = reportError("removeDevice", err, t("devices.removeFailed"));
   }
 }
 
 function renderDeviceList(devices: DeviceInfo[]): void {
   deviceList.innerHTML = "";
   if (devices.length === 0) {
-    deviceLimitMessage.textContent = "No devices found. You can continue signing in now.";
+    deviceLimitMessage.textContent = t("deviceLimit.noneCanContinue");
     deviceLimitContinueBtn.hidden = false;
     return;
   }
@@ -629,13 +637,13 @@ function renderDeviceList(devices: DeviceInfo[]): void {
     nameSpan.textContent = name;
     const dateSpan = document.createElement("span");
     dateSpan.className = "device-date";
-    dateSpan.textContent = `Added ${dateStr}`;
+    dateSpan.textContent = t("devices.added", { date: dateStr });
     info.appendChild(nameSpan);
     info.appendChild(dateSpan);
 
     const removeBtn = document.createElement("button");
     removeBtn.className = "device-remove-btn";
-    removeBtn.textContent = "Remove";
+    removeBtn.textContent = t("devices.remove");
     removeBtn.addEventListener("click", () => void handleDeviceRemove(device.id, item, removeBtn));
 
     item.appendChild(info);
@@ -647,25 +655,25 @@ function renderDeviceList(devices: DeviceInfo[]): void {
 async function handleDeviceRemove(deviceId: string, itemEl: HTMLElement, btn: HTMLButtonElement): Promise<void> {
   if (!pangeaApi) return;
   btn.disabled = true;
-  btn.textContent = "Removing...";
+  btn.textContent = t("devices.removing");
   deviceLimitMessage.textContent = "";
   try {
     await pangeaApi.removeDevice(deviceId);
     itemEl.remove();
     deviceRemovedCount++;
     deviceLimitContinueBtn.hidden = false;
-    showToast("Device removed.", 4000, true);
+    showToast(t("devices.removed"), 4000, true);
   } catch (err) {
     btn.disabled = false;
-    btn.textContent = "Remove";
-    deviceLimitMessage.textContent = reportError("removeDevice", err, "Failed to remove device. Please try again.");
+    btn.textContent = t("devices.remove");
+    deviceLimitMessage.textContent = reportError("removeDevice", err, t("devices.removeFailed"));
   }
 }
 
 deviceLimitContinueBtn.addEventListener("click", async () => {
   if (!pangeaApi || !pendingLoginToken) return;
   deviceLimitContinueBtn.disabled = true;
-  deviceLimitMessage.textContent = "Signing in...";
+  deviceLimitMessage.textContent = t("login.signingIn");
   try {
     authState = await pangeaApi.login(pendingLoginToken);
     if (authState.authenticated) {
@@ -677,11 +685,11 @@ deviceLimitContinueBtn.addEventListener("click", async () => {
       updateAuthUI();
       if (authState.friendlyName) {
         localStorage.setItem(MY_DEVICE_NAME_KEY, authState.friendlyName);
-        showToast(`Your device is called "${authState.friendlyName}".`, 6000, true);
+        showToast(t("auth.deviceNamed", { name: authState.friendlyName }), 6000, true);
       }
       await refreshServers();
     } else if (authState.error === "DEVICE_LIMIT_REACHED") {
-      deviceLimitMessage.textContent = "Still at device limit. Please remove another device.";
+      deviceLimitMessage.textContent = t("deviceLimit.stillAtLimit");
       // Reload the updated device list
       try {
         const devices = await pangeaApi.listDevices();
@@ -690,7 +698,7 @@ deviceLimitContinueBtn.addEventListener("click", async () => {
         // best-effort
       }
     } else {
-      deviceLimitMessage.textContent = authState.error || "Sign in failed.";
+      deviceLimitMessage.textContent = authState.error || t("login.signInFailed");
     }
   } catch (err) {
     deviceLimitMessage.textContent = reportError("deviceLimitSignIn", err);
@@ -733,12 +741,12 @@ loginScreenBtn.addEventListener("click", async () => {
   if (!pangeaApi) return;
   const token = loginTokenInput.value.trim();
   if (!token) {
-    loginScreenMessage.textContent = "Please enter your VPN token.";
+    loginScreenMessage.textContent = t("login.enterToken");
     return;
   }
   loginScreenBtn.disabled = true;
   loginTokenInput.disabled = true;
-  loginScreenMessage.textContent = "Signing in...";
+  loginScreenMessage.textContent = t("login.signingIn");
   try {
     authState = await pangeaApi.login(token);
     if (authState.authenticated) {
@@ -748,7 +756,7 @@ loginScreenBtn.addEventListener("click", async () => {
       updateAuthUI();
       if (authState.friendlyName) {
         localStorage.setItem(MY_DEVICE_NAME_KEY, authState.friendlyName);
-        showToast(`Your device is called "${authState.friendlyName}".`, 6000, true);
+        showToast(t("auth.deviceNamed", { name: authState.friendlyName }), 6000, true);
       }
       await refreshServers();
     } else if (authState.error === "DEVICE_LIMIT_REACHED") {
@@ -759,7 +767,7 @@ loginScreenBtn.addEventListener("click", async () => {
     } else if (authState.error) {
       loginScreenMessage.textContent = authState.error;
     } else {
-      loginScreenMessage.textContent = "Invalid VPN token.";
+      loginScreenMessage.textContent = t("login.invalidToken");
     }
   } catch (error) {
     loginScreenMessage.textContent = reportError("signIn", error);
@@ -775,7 +783,7 @@ serverConnectBtn.addEventListener("click", async () => {
   if (!pangeaApi || !daemonApi) return;
   const serverId = serverSelect.value;
   if (!serverId) {
-    setUiMessage("No server selected.");
+    setUiMessage(t("connect.noServer"));
     return;
   }
 
@@ -787,17 +795,17 @@ serverConnectBtn.addEventListener("click", async () => {
     connectCancelTimer = null;
     updateServerControlStates();
   }, CONNECT_CANCEL_DELAY_MS);
-  updateServerBusyIndicator(true, "Provisioning...");
+  updateServerBusyIndicator(true, t("hero.provisioning"));
   updateServerControlStates();
   try {
-    setUiMessage("Provisioning and connecting...");
+    setUiMessage(t("connect.provisioning"));
     const result = await pangeaApi.provisionAndConnect(serverId);
     if (result.ok) {
-      setUiMessage("Connected.");
+      setUiMessage(t("connect.connected"));
       notifyUserConnected();
       void refreshLastServer();
     } else {
-      setUiMessage("Couldn't connect. Try again, or choose another server.");
+      setUiMessage(t("connect.failed"));
     }
     await refreshStatus();
   } catch (error) {
@@ -810,7 +818,7 @@ serverConnectBtn.addEventListener("click", async () => {
           servers = [];
           updateAuthUI();
           renderServers();
-          showToast("You've been signed out. Please sign in again.");
+          showToast(t("auth.signedOutRetry"));
           return;
         }
       } catch {
@@ -843,17 +851,17 @@ async function switchToServer(serverId: string): Promise<void> {
     connectCancelTimer = null;
     updateServerControlStates();
   }, CONNECT_CANCEL_DELAY_MS);
-  updateServerBusyIndicator(true, "Provisioning...");
+  updateServerBusyIndicator(true, t("hero.provisioning"));
   updateServerControlStates();
   try {
-    setUiMessage("Provisioning new server...");
+    setUiMessage(t("connect.switching"));
     const result = await pangeaApi.provisionAndSwitch(serverId);
     if (result.ok) {
-      setUiMessage("Connected.");
+      setUiMessage(t("connect.connected"));
       notifyUserConnected();
       void refreshLastServer();
     } else {
-      setUiMessage("Couldn't switch servers. Try again, or pick another server.");
+      setUiMessage(t("connect.switchFailed"));
     }
     await refreshStatus();
   } catch (error) {
@@ -865,7 +873,7 @@ async function switchToServer(serverId: string): Promise<void> {
           servers = [];
           updateAuthUI();
           renderServers();
-          showToast("You've been signed out. Please sign in again.");
+          showToast(t("auth.signedOutRetry"));
           return;
         }
       } catch {
@@ -890,12 +898,12 @@ serverDisconnectBtn.addEventListener("click", async () => {
   if (!daemonApi) return;
   notifyUserDisconnected();
   serverWorking = true;
-  updateServerBusyIndicator(true, "Disconnecting...");
+  updateServerBusyIndicator(true, t("hero.disconnecting"));
   updateServerControlStates();
   try {
-    setUiMessage("Disconnecting...");
+    setUiMessage(t("connect.disconnecting"));
     const result = await daemonApi.disconnect();
-    setUiMessage(result.ok ? "Disconnected." : "Couldn't disconnect. Please try again.");
+    setUiMessage(result.ok ? t("connect.disconnected") : t("connect.disconnectFailed"));
     await refreshStatus();
   } catch (error) {
     setUiMessage(reportError("serverDisconnect", error));
@@ -917,10 +925,10 @@ directIpToggle.addEventListener("change", async () => {
   if (!pangeaApi) return;
   try {
     await pangeaApi.setDirectIp(directIpToggle.checked);
-    showToast(directIpToggle.checked ? "Direct IP enabled." : "Direct IP disabled.", 3000, true);
+    showToast(directIpToggle.checked ? t("toggle.directIp.on") : t("toggle.directIp.off"), 3000, true);
   } catch (err) {
     directIpToggle.checked = !directIpToggle.checked;
-    showToast(reportError("directIp", err, "Failed to update setting."));
+    showToast(reportError("directIp", err, t("toggle.updateFailed")));
   }
 });
 
@@ -931,7 +939,7 @@ directIpOnlyToggle.addEventListener("change", async () => {
     await pangeaApi.setDirectIpOnly(enabled);
   } catch (err) {
     directIpOnlyToggle.checked = !enabled;
-    showToast(reportError("directIpOnly", err, "Failed to update setting."));
+    showToast(reportError("directIpOnly", err, t("toggle.updateFailed")));
     return;
   }
   if (enabled) {
@@ -946,7 +954,7 @@ directIpOnlyToggle.addEventListener("change", async () => {
       // keep current
     }
   }
-  showToast(enabled ? "Direct IP only mode enabled." : "Direct IP only mode disabled.", 3000, true);
+  showToast(enabled ? t("toggle.directIpOnly.on") : t("toggle.directIpOnly.off"), 3000, true);
 });
 
 allowLanToggle.addEventListener("change", async () => {
@@ -954,11 +962,11 @@ allowLanToggle.addEventListener("change", async () => {
   try {
     await pangeaApi.setAllowLan(allowLanToggle.checked);
     showToast(allowLanToggle.checked
-      ? "Allow LAN enabled. Reconnect for it to take effect."
-      : "Allow LAN disabled. Reconnect for it to take effect.", 4000, true);
+      ? t("toggle.allowLan.on")
+      : t("toggle.allowLan.off"), 4000, true);
   } catch (err) {
     allowLanToggle.checked = !allowLanToggle.checked;
-    showToast(reportError("allowLan", err, "Failed to update setting."));
+    showToast(reportError("allowLan", err, t("toggle.updateFailed")));
   }
 });
 
@@ -967,11 +975,11 @@ launchAtStartupToggle.addEventListener("change", async () => {
   try {
     await pangeaApi.setLaunchAtStartup(launchAtStartupToggle.checked);
     showToast(launchAtStartupToggle.checked
-      ? "PangeaVPN will launch at startup."
-      : "Launch at startup disabled.", 3000, true);
+      ? t("toggle.launch.on")
+      : t("toggle.launch.off"), 3000, true);
   } catch (err) {
     launchAtStartupToggle.checked = !launchAtStartupToggle.checked;
-    showToast(reportError("launchAtStartup", err, "Failed to update startup setting."));
+    showToast(reportError("launchAtStartup", err, t("toggle.launch.failed")));
   }
 });
 
@@ -983,17 +991,17 @@ alwaysConnectedToggle.addEventListener("change", async () => {
   } catch (err) {
     alwaysConnectedLocal = !alwaysConnectedLocal;
     alwaysConnectedToggle.checked = alwaysConnectedLocal;
-    showToast(reportError("lockdown", err, "Failed to update Lockdown."));
+    showToast(reportError("lockdown", err, t("toggle.lockdown.failed")));
     return;
   }
   notifyToggleChanged(alwaysConnectedLocal);
   if (alwaysConnectedLocal) {
-    showToast("Lockdown on — auto-connect enabled and the kill switch stays on until you turn it off.", 5000, true);
+    showToast(t("toggle.lockdown.on"), 5000, true);
     if (lastServerIdLocal) {
       void attemptInitialAutoConnect();
     }
   } else {
-    showToast("Lockdown off — normal internet restored.", 4000, true);
+    showToast(t("toggle.lockdown.off"), 4000, true);
   }
 });
 
@@ -1060,11 +1068,59 @@ function showLoginScreen(): void {
   loginTokenInput.focus();
 }
 
+// ── Language selection ────────────────────────────────
+// The locale is resolved once at startup and applied before the shell shows.
+// Changing it persists the choice; it takes effect on the next launch.
+const LANGUAGE_SYSTEM = "system";
+const languageSelect = document.getElementById("languageSelect") as HTMLSelectElement | null;
+const languageRestartHint = document.getElementById("languageRestartHint") as HTMLElement | null;
+
+async function readStoredLocale(): Promise<string | null> {
+  try {
+    return (await pangeaApi?.getLocale?.()) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function applyStoredLocale(): Promise<void> {
+  initLocale(resolveLocale(await readStoredLocale()));
+}
+
+function initLanguagePicker(): void {
+  if (!languageSelect) return;
+  languageSelect.innerHTML = "";
+  const systemOption = document.createElement("option");
+  systemOption.value = LANGUAGE_SYSTEM;
+  systemOption.textContent = t("settings.language.system");
+  languageSelect.append(systemOption);
+  for (const meta of LOCALES) {
+    const option = document.createElement("option");
+    option.value = meta.code;
+    option.textContent = meta.nativeName;
+    languageSelect.append(option);
+  }
+
+  // Reflect the stored preference (System default vs. a pinned language).
+  void readStoredLocale().then((stored) => {
+    languageSelect.value = stored && stored.length > 0 ? stored : LANGUAGE_SYSTEM;
+  });
+
+  languageSelect.addEventListener("change", () => {
+    const choice = languageSelect.value;
+    void pangeaApi?.setLocale?.(choice).catch(() => {});
+    if (languageRestartHint) languageRestartHint.hidden = false;
+    showToast(t("settings.language.restartHint"), 5000, true);
+  });
+}
+
 async function init(): Promise<void> {
   initTheme();
+  await applyStoredLocale();
+  initLanguagePicker();
 
   if (!daemonApi) {
-    loadingMessage.textContent = "PangeaVPN couldn't start. Please restart the app.";
+    loadingMessage.textContent = t("app.loading.cantStart");
     return;
   }
 
@@ -1072,7 +1128,7 @@ async function init(): Promise<void> {
   const maxAttempts = 60;
   for (let i = 0; i < maxAttempts; i++) {
     const remaining = Math.ceil((maxAttempts - i) * 0.5);
-    loadingMessage.textContent = `Getting things ready... (${remaining}s)`;
+    loadingMessage.textContent = t("app.loading.progress", { remaining });
     try {
       const status = await daemonApi.getStatus();
       if (status) break;
@@ -1080,7 +1136,7 @@ async function init(): Promise<void> {
       // not ready
     }
     if (i === maxAttempts - 1) {
-      loadingMessage.textContent = "PangeaVPN didn't start. Please restart the app.";
+      loadingMessage.textContent = t("app.loading.didntStart");
       return;
     }
     await new Promise((r) => setTimeout(r, 500));
@@ -1104,7 +1160,7 @@ async function init(): Promise<void> {
     servers = [];
     updateAuthUI();
     renderServers();
-    showToast("You've been signed out. Please sign in again.");
+    showToast(t("auth.signedOutRetry"));
   });
 
   initCollapsibleSections();
@@ -1129,7 +1185,7 @@ async function init(): Promise<void> {
       const isPackaged = await pangeaApi.getIsPackaged();
       if (!isPackaged) {
         launchAtStartupToggle.disabled = true;
-        launchAtStartupToggle.title = "Available in packaged builds only";
+        launchAtStartupToggle.title = t("toggle.launch.packagedOnly");
       } else {
         launchAtStartupToggle.checked = await pangeaApi.getLaunchAtStartup();
       }
@@ -1219,15 +1275,15 @@ function showUpdateModal(): void {
   if (isMacPlatform) {
     updateMacCommand.textContent = MAC_INSTALL_COMMAND;
     updateMacInstall.hidden = false;
-    updateDownloadBtn.textContent = "Copy Install Command";
+    updateDownloadBtn.textContent = t("update.copyCommand");
     updateMessageEl.textContent = "";
   } else {
     updateMacInstall.hidden = true;
     if (updateDownloaded) {
-      updateDownloadBtn.textContent = "Restart to Update";
-      updateMessageEl.textContent = "Update downloaded and ready to install.";
+      updateDownloadBtn.textContent = t("update.restartToUpdate");
+      updateMessageEl.textContent = t("update.readyToInstall");
     } else {
-      updateDownloadBtn.textContent = "Download Update";
+      updateDownloadBtn.textContent = t("update.download");
       updateMessageEl.textContent = "";
     }
   }
@@ -1251,13 +1307,13 @@ if (updater) {
   updater.onUpdateDownloaded(() => {
     updateDownloaded = true;
     updateDownloadBtn.disabled = false;
-    updateDownloadBtn.textContent = "Restart to Update";
-    updateMessageEl.textContent = "Update downloaded and ready to install.";
+    updateDownloadBtn.textContent = t("update.restartToUpdate");
+    updateMessageEl.textContent = t("update.readyToInstall");
   });
 
   updater.onUpdateError((message) => {
     updateDownloadBtn.disabled = false;
-    updateDownloadBtn.textContent = "Retry Download";
+    updateDownloadBtn.textContent = t("update.retryDownload");
     updateMessageEl.textContent = message;
   });
 }
@@ -1295,12 +1351,12 @@ function isNewerVersion(candidate: string, current: string): boolean {
 
 checkUpdatesBtn.addEventListener("click", async () => {
   if (!updater) {
-    showToast("Updates aren't available in this build.");
+    showToast(t("update.unavailable"));
     return;
   }
   checkUpdatesBtn.disabled = true;
   const label = checkUpdatesBtn.textContent;
-  checkUpdatesBtn.textContent = "Checking...";
+  checkUpdatesBtn.textContent = t("update.checking");
   try {
     const info = await updater.checkForUpdates();
     if (info && isNewerVersion(info.version, currentAppVersion)) {
@@ -1310,12 +1366,12 @@ checkUpdatesBtn.addEventListener("click", async () => {
       localStorage.removeItem(UPDATE_DISMISSED_KEY);
       showUpdateModal();
     } else if (info) {
-      showToast("You're on the latest version.", 4000, true);
+      showToast(t("update.onLatest"), 4000, true);
     } else {
-      showToast("Couldn't check for updates. Try again later.");
+      showToast(t("update.checkFailed"));
     }
   } catch {
-    showToast("Couldn't check for updates. Try again later.");
+    showToast(t("update.checkFailed"));
   } finally {
     checkUpdatesBtn.textContent = label;
     checkUpdatesBtn.disabled = false;
@@ -1325,10 +1381,10 @@ checkUpdatesBtn.addEventListener("click", async () => {
 async function copyMacInstallCommand(): Promise<void> {
   try {
     await navigator.clipboard.writeText(MAC_INSTALL_COMMAND);
-    updateDownloadBtn.textContent = "Copied!";
-    updateMessageEl.textContent = "Now paste the command into Terminal and press Enter.";
+    updateDownloadBtn.textContent = t("update.copied");
+    updateMessageEl.textContent = t("update.macPasteHint");
     setTimeout(() => {
-      updateDownloadBtn.textContent = "Copy Install Command";
+      updateDownloadBtn.textContent = t("update.copyCommand");
     }, 2000);
   } catch (error) {
     updateMessageEl.textContent = reportError("updateCopyCommand", error);
@@ -1355,16 +1411,16 @@ updateDownloadBtn.addEventListener("click", async () => {
   }
 
   updateDownloadBtn.disabled = true;
-  updateDownloadBtn.textContent = "Opening...";
+  updateDownloadBtn.textContent = t("update.opening");
   updateMessageEl.textContent = "";
 
   try {
     await updater.downloadUpdate();
     updateDownloadBtn.disabled = false;
-    updateDownloadBtn.textContent = "View Download";
+    updateDownloadBtn.textContent = t("update.viewDownload");
   } catch (error) {
     updateDownloadBtn.disabled = false;
-    updateDownloadBtn.textContent = "Retry";
+    updateDownloadBtn.textContent = t("update.retry");
     updateMessageEl.textContent = reportError("updateDownload", error);
   }
 });
@@ -1413,7 +1469,7 @@ applyVerboseErrorsUi();
       verboseErrors = !verboseErrors;
       localStorage.setItem("pangea:verboseErrors", verboseErrors ? "1" : "0");
       applyVerboseErrorsUi();
-      showToast(verboseErrors ? "Verbose errors enabled" : "Verbose errors disabled");
+      showToast(verboseErrors ? t("verbose.on") : t("verbose.off"));
     }
   });
 }
@@ -1426,15 +1482,15 @@ async function refreshAll(showIndicator = false): Promise<void> {
 
   try {
     await Promise.all([refreshStatus(), refreshLogs()]);
-    setUiMessage("Ready.");
+    setUiMessage(t("common.ready"));
   } catch (error) {
     console.error("[daemonSync]", error);
-    setUiMessage("Something went wrong. Retrying...");
+    setUiMessage(t("common.retrying"));
     // Retry once after a short delay
     try {
       await new Promise((r) => setTimeout(r, 2000));
       await Promise.all([refreshStatus(), refreshLogs()]);
-      setUiMessage("Ready.");
+      setUiMessage(t("common.ready"));
     } catch (retryError) {
       setUiMessage(reportError("daemonSyncRetry", retryError));
     }
@@ -1591,12 +1647,12 @@ let lastCloakWasDown = false;
 function renderStatus(status: StatusResponse): void {
   latestStatus = status;
   currentDaemonState = status.state;
-  stateEl.textContent = status.state;
+  stateEl.textContent = t(("state." + status.state) as MessageKey);
   detailEl.textContent = status.detail;
 
   const cloakPid = status.cloak.pid ?? "none";
-  cloakEl.textContent = `${status.cloak.running ? "running" : "stopped"} (pid: ${cloakPid})`;
-  wireguardEl.textContent = `${status.wireguard.running ? "running" : "stopped"} (${status.wireguard.detail})`;
+  cloakEl.textContent = `${status.cloak.running ? t("status.running") : t("status.stopped")} (pid: ${cloakPid})`;
+  wireguardEl.textContent = `${status.wireguard.running ? t("status.running") : t("status.stopped")} (${status.wireguard.detail})`;
 
   // Drive hero card state
   heroCard.dataset.state = status.state;
@@ -1618,7 +1674,7 @@ function renderStatus(status: StatusResponse): void {
 
   // Recovery toast — cloak was down last poll, now it's back
   if (lastCloakWasDown && status.cloak.running && connected) {
-    showToast("Connection recovered.");
+    showToast(t("connect.recovered"));
   }
   lastCloakWasDown = !status.cloak.running && connected;
 
@@ -1634,7 +1690,7 @@ function renderStatus(status: StatusResponse): void {
 
 function renderLogs(entries: LogEntry[]): void {
   const lines = entries.slice(-300).map((entry) => {
-    const date = new Date(entry.ts).toLocaleTimeString();
+    const date = new Date(entry.ts).toLocaleTimeString(localeTag());
     return `[${date}] ${entry.level.toUpperCase()} ${entry.source}: ${entry.msg}`;
   });
 
@@ -1695,14 +1751,14 @@ function updateAuthUI(): void {
     showAppShell();
     loginBtn.hidden = true;
     menuDevicesBtn.hidden = false;
-    accountUserLabel.textContent = authState.user?.email || authState.user?.name || "—";
+    accountUserLabel.textContent = authState.user?.email || authState.user?.name || t("common.dash");
     refreshAccountToken();
     serverPanel.hidden = false;
   } else {
     showLoginScreen();
     loginBtn.hidden = !pangeaApi;
     menuDevicesBtn.hidden = true;
-    accountUserLabel.textContent = "—";
+    accountUserLabel.textContent = t("common.dash");
     closeSettings();
     serverPanel.hidden = true;
   }
@@ -1738,7 +1794,7 @@ async function fetchServers(): Promise<boolean> {
 
 async function refreshServers(): Promise<void> {
   if (!(await fetchServers())) {
-    setUiMessage("Couldn't refresh the server list. It will retry automatically.");
+    setUiMessage(t("connect.refreshServersFailed"));
   }
 }
 
@@ -1765,7 +1821,7 @@ function buildLoadIndicator(load: number | null | undefined): HTMLElement | null
   const level = pct < 40 ? "low" : pct < 75 ? "mid" : "high";
   const el = document.createElement("div");
   el.className = `server-picker-overlay-item-load load-${level}`;
-  el.title = `Server load ${pct}%`;
+  el.title = t("serverPicker.load", { pct });
   const bar = document.createElement("span");
   bar.className = "load-bar";
   const fill = document.createElement("span");
@@ -1774,7 +1830,7 @@ function buildLoadIndicator(load: number | null | undefined): HTMLElement | null
   bar.append(fill);
   const label = document.createElement("span");
   label.className = "load-pct";
-  label.textContent = `${pct}%`;
+  label.textContent = t("serverPicker.loadPct", { pct });
   el.append(bar, label);
   return el;
 }
@@ -1787,15 +1843,15 @@ function renderServers(): void {
   if (servers.length === 0) {
     const option = document.createElement("option");
     option.value = "";
-    option.textContent = "No servers available";
+    option.textContent = t("hero.noServers");
     serverSelect.append(option);
     serverSelect.disabled = true;
     serverPickerBtn.disabled = true;
-    serverPickerLabel.textContent = "No servers available";
+    serverPickerLabel.textContent = t("hero.noServers");
     serverConnectBtn.disabled = true;
     const empty = document.createElement("div");
     empty.className = "server-picker-overlay-empty";
-    empty.textContent = "No servers available";
+    empty.textContent = t("serverPicker.noServers");
     serverPickerOverlayList.append(empty);
     return;
   }
@@ -1877,7 +1933,7 @@ function syncServerPicker(): void {
     idSpan.textContent = selected.id;
     serverPickerLabel.append(nameText, idSpan);
   } else {
-    serverPickerLabel.textContent = "Select server";
+    serverPickerLabel.textContent = t("hero.selectServer");
   }
 
   for (const opt of Array.from(serverPickerOverlayList.children)) {

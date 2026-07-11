@@ -1857,3 +1857,77 @@ button.ghost:hover:not(:disabled) {
   }
 }
 
+/* ── Language picker (Settings) ───────────────────────────── */
+
+.settings-language {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.language-select {
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.language-select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.language-restart-hint {
+  margin: 0;
+  color: var(--accent);
+}
+
+/* ── Right-to-left (Arabic, Persian) ──────────────────────── */
+/* The layout is mostly flexbox/grid + shorthands, which mirror automatically
+   under dir="rtl". These override the handful of physical-direction rules. */
+
+[dir="rtl"] .settings-overlay,
+[dir="rtl"] .server-picker-overlay {
+  transform: translateX(-100%);
+}
+
+[dir="rtl"] .settings-overlay.visible,
+[dir="rtl"] .server-picker-overlay.visible {
+  transform: translateX(0);
+}
+
+[dir="rtl"] .update-close {
+  right: auto;
+  left: 8px;
+}
+
+[dir="rtl"] .menu-badge {
+  right: auto;
+  left: -2px;
+}
+
+[dir="rtl"] .menu-dropdown {
+  right: auto;
+  left: 0;
+}
+
+[dir="rtl"] .device-item,
+[dir="rtl"] .menu-item,
+[dir="rtl"] .server-picker,
+[dir="rtl"] .collapse-toggle {
+  text-align: right;
+}
+
+[dir="rtl"] .device-current-badge,
+[dir="rtl"] .app-version {
+  margin-left: 0;
+  margin-right: 6px;
+}
+
+/* Slide toasts in from the same edge regardless of direction (top-centre). */
+

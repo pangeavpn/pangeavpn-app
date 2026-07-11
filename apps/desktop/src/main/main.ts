@@ -11,6 +11,7 @@ import { PangeaApiClient, AuthError } from "./pangeaApiClient";
 import { setupAutoUpdater, notifyConnectionStateChange } from "./autoUpdater";
 import { setLoginItemEnabled, isLoginItemEnabled, isHiddenLaunchArg } from "./loginItem";
 import { startNetworkWatcher, onNetworkChange } from "./networkWatcher";
+import { mt, mtState, setMainLocale, resolveMainLocale } from "./i18n";
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -44,6 +45,8 @@ let lastServerId: string | null = null;
 let allowLanEnabled = true;
 let launchAtStartupEnabled = false;
 let alwaysConnectedEnabled = false;
+// Stored language preference: a locale code, or "system" to follow the OS.
+let localePref = "system";
 const hiddenLaunch = process.argv.some(isHiddenLaunchArg);
 
 // Login item on if launch-at-startup or Lockdown is enabled — Lockdown needs the tray app on boot to reconnect.
@@ -306,7 +309,7 @@ function updateTrayMenu(): void {
 
   updateTrayImage();
 
-  const stateLabel = trayStatusState;
+  const stateLabel = mtState(trayStatusState);
   tray.setToolTip(`PangeaVPN (${stateLabel})`);
 
   // On macOS, don't set a context menu — clicking the icon opens the window directly.
@@ -322,23 +325,23 @@ function updateTrayMenu(): void {
   tray.setContextMenu(
     Menu.buildFromTemplate([
       {
-        label: `Status: ${stateLabel}`,
+        label: mt("tray.status", { state: stateLabel }),
         enabled: false
       },
       {
-        label: `Detail: ${detailLabel}`,
+        label: mt("tray.detail", { detail: detailLabel }),
         enabled: false
       },
       { type: "separator" },
       {
-        label: "Connect",
+        label: mt("tray.connect"),
         enabled: canConnect,
         click: () => {
           void connectFromTray();
         }
       },
       {
-        label: "Disconnect",
+        label: mt("tray.disconnect"),
         enabled: canDisconnect,
         click: () => {
           void disconnectFromTray();
@@ -348,7 +351,7 @@ function updateTrayMenu(): void {
         type: "separator"
       },
       {
-        label: windowVisible ? "Hide PangeaVPN" : "Show PangeaVPN",
+        label: windowVisible ? mt("tray.hide") : mt("tray.show"),
         click: () => {
           if (windowVisible) {
             hideMainWindow();
@@ -359,7 +362,7 @@ function updateTrayMenu(): void {
       },
       { type: "separator" },
       {
-        label: "Quit",
+        label: mt("tray.quit"),
         click: () => {
           isQuitting = true;
           app.quit();
@@ -954,6 +957,21 @@ function registerIpcHandlers(): void {
     await persistLastConnection();
   });
 
+  ipcMain.handle(IPC_CHANNELS.getLocale, async () => localePref);
+
+  ipcMain.handle(IPC_CHANNELS.setLocale, async (_event, locale: string) => {
+    // Persist only — the change is applied on next launch (both the renderer
+    // and the tray/menu read the locale once at startup).
+    localePref = typeof locale === "string" && locale.length > 0 ? locale : "system";
+    try {
+      const settings = await readSettingsFile();
+      settings.locale = localePref;
+      await writeSettingsFile(settings);
+    } catch (err) {
+      console.warn("Failed to persist locale setting:", err);
+    }
+  });
+
   ipcMain.handle(IPC_CHANNELS.getIsPackaged, async () => app.isPackaged);
 
   ipcMain.handle(IPC_CHANNELS.getCachedServers, async () => {
@@ -1181,9 +1199,16 @@ async function boot(): Promise<void> {
     if (typeof settings.lastProfileId === "string") {
       lastConnectedProfileId = settings.lastProfileId;
     }
+    if (typeof settings.locale === "string") {
+      localePref = settings.locale;
+    }
   } catch {
     // no settings file yet
   }
+
+  // Resolve the display locale for the tray/menu (built below). The language
+  // is fixed for this run; changing it applies on the next launch.
+  setMainLocale(resolveMainLocale(localePref, app.getLocale()));
 
   // Reconcile OS login-item state with our persisted preference (handles reinstalls).
   try {
@@ -1210,13 +1235,13 @@ async function boot(): Promise<void> {
         { role: "about" },
         { type: "separator" },
         {
-          label: "Hide Window",
+          label: mt("menu.hideWindow"),
           accelerator: "CmdOrCtrl+H",
           click: () => hideMainWindow()
         },
         { type: "separator" },
         {
-          label: "Quit",
+          label: mt("menu.quit"),
           accelerator: "CmdOrCtrl+Q",
           click: () => {
             isQuitting = true;
@@ -1226,7 +1251,7 @@ async function boot(): Promise<void> {
       ]
     },
     {
-      label: "Edit",
+      label: mt("menu.edit"),
       submenu: [
         { role: "undo" },
         { role: "redo" },
