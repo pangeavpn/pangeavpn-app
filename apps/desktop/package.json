@@ -11,7 +11,7 @@
   "scripts": {
     "dev": "node ./scripts/dev.mjs",
     "build": "tsc -p tsconfig.main.json && tsc -p tsconfig.renderer.json && node ./scripts/copy-static.mjs",
-    "pack": "npm run build && node ./scripts/build-daemon.mjs && node ./scripts/verify-pack-resources.mjs && electron-builder && node ./scripts/stage-mac-installer.mjs"
+    "pack": "npm run build && node ./scripts/build-daemon.mjs && node ./scripts/build-installer-art.mjs && node ./scripts/verify-pack-resources.mjs && electron-builder && node ./scripts/stage-mac-installer.mjs"
   },
   "dependencies": {
     "@pangeavpn/shared-types": "file:../../packages/shared-types",
@@ -95,11 +95,30 @@
     "nsis": {
       "perMachine": true,
       "allowElevation": true,
-      "oneClick": true,
+      "oneClick": false,
       "include": "build/installer.nsh",
       "installerIcon": "built/pangeavpn.ico",
       "uninstallerIcon": "built/pangeavpn.ico",
       "installerHeaderIcon": "built/pangeavpn.ico",
+      "installerSidebar": "build/installerSidebar.bmp",
+      "uninstallerSidebar": "build/installerSidebar.bmp",
+      "installerHeader": "build/installerHeader.bmp",
+      "runAfterFinish": true,
+      "createDesktopShortcut": false,
+      "createStartMenuShortcut": true,
+      "menuCategory": false,
+      "allowToChangeInstallationDirectory": false,
+      "multiLanguageInstaller": true,
+      "displayLanguageSelector": false,
+      "installerLanguages": [
+        "en_US",
+        "es_ES",
+        "fr_FR",
+        "ru_RU",
+        "uk_UA",
+        "zh_CN",
+        "ar_SA"
+      ],
       "artifactName": "PangeaVPN-Setup-${version}-${arch}.${ext}"
     },
     "portable": {

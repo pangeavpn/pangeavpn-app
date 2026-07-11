@@ -26,6 +26,11 @@ if (process.platform === "win32") {
     path.join(rootDir, "daemon", "bin", "wintun.dll"),
     `Missing Windows daemon dependency at ${path.join(rootDir, "daemon", "bin", "wintun.dll")}.`
   );
+
+  // Branded NSIS wizard artwork — must be present at the exact sizes MUI needs.
+  const buildDir = path.join(desktopDir, "build");
+  assertBmp(path.join(buildDir, "installerSidebar.bmp"), 164, 314);
+  assertBmp(path.join(buildDir, "installerHeader.bmp"), 150, 57);
 }
 
 console.log("Packaging resource check passed.");
@@ -33,6 +38,28 @@ console.log("Packaging resource check passed.");
 function assertFile(filePath, errorMessage) {
   if (!fs.existsSync(filePath)) {
     throw new Error(errorMessage);
+  }
+}
+
+// Validate a BMP by parsing its header (BITMAPINFOHEADER): "BM" magic at 0,
+// biWidth int32 LE at offset 18, biHeight int32 LE at offset 22. Avoids any
+// image-library dependency. Run `node ./scripts/build-installer-art.mjs` to
+// (re)generate these from build/art-src/*.png.
+function assertBmp(filePath, expectedWidth, expectedHeight) {
+  assertFile(
+    filePath,
+    `Missing installer artwork at ${filePath}. Run: node ./scripts/build-installer-art.mjs`
+  );
+  const buf = fs.readFileSync(filePath);
+  if (buf.length < 26 || buf[0] !== 0x42 || buf[1] !== 0x4d) {
+    throw new Error(`Installer artwork is not a valid BMP: ${filePath}`);
+  }
+  const width = buf.readInt32LE(18);
+  const height = buf.readInt32LE(22);
+  if (width !== expectedWidth || height !== expectedHeight) {
+    throw new Error(
+      `Installer artwork ${filePath} is ${width}x${height}, expected ${expectedWidth}x${expectedHeight}.`
+    );
   }
 }
 
