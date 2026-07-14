@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">PangeaVPN</string>
+    <string name="devicelimit_subtitle">Ваш обліковий запис досяг максимальної кількості пристроїв. Видаліть один, щоб продовжити вхід.</string>
+    <string name="devicelimit_title">Досягнуто ліміту пристроїв</string>
+    <string name="devices_remove">Видалити</string>
+    <string name="devices_title">Пристрої</string>
+    <string name="hero_connect">Підключитися</string>
+    <string name="hero_disconnect">Відключитися</string>
+    <string name="hero_no_servers">Немає доступних серверів</string>
+    <string name="hero_provisioning">Підготовка...</string>
+    <string name="hero_select_server">Вибрати сервер</string>
+    <string name="killswitch_body">Дозволено лише трафік VPN, доки ви не підключитеся знову або не вимкнете аварійне вимкнення.</string>
+    <string name="killswitch_open_settings">Відкрити налаштування VPN</string>
+    <string name="killswitch_title">Аварійне вимкнення активне</string>
+    <string name="login_signin">Увійти</string>
+    <string name="login_subtitle">Введіть токен для входу, щоб продовжити.</string>
+    <string name="login_title">Увійти</string>
+    <string name="login_token_placeholder">0000000000000000</string>
+    <string name="notification_connected">Підключено</string>
+    <string name="notification_connecting">Підключення…</string>
+    <string name="notification_disconnect">Відключитися</string>
+    <string name="pill_cloak">Маскування</string>
+    <string name="pill_killswitch">Аварійне вимкнення</string>
+    <string name="pill_wireguard">WireGuard</string>
+    <string name="servers_title">Сервери</string>
+    <string name="settings_signout">Вийти</string>
+    <string name="settings_title">Налаштування</string>
+    <string name="state_connected">ПІДКЛЮЧЕНО</string>
+    <string name="state_connecting">ПІДКЛЮЧЕННЯ</string>
+    <string name="state_disconnected">ВІДКЛЮЧЕНО</string>
+    <string name="state_disconnecting">ВІДКЛЮЧЕННЯ</string>
+    <string name="state_error">ПОМИЛКА</string>
+    <string name="subscription_expires">Закінчується %1$s</string>
+    <string name="subscription_none">Немає активної підписки</string>
+    <string name="tv_login_hint">Отримайте токен на pangeavpn.org/account</string>
+</resources>

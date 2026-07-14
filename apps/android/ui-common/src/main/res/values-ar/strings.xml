@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">PangeaVPN</string>
+    <string name="devicelimit_subtitle">وصل حسابك إلى الحد الأقصى لعدد الأجهزة. أزل جهازًا لمتابعة تسجيل الدخول.</string>
+    <string name="devicelimit_title">تم بلوغ حد الأجهزة</string>
+    <string name="devices_remove">إزالة</string>
+    <string name="devices_title">الأجهزة</string>
+    <string name="hero_connect">اتصال</string>
+    <string name="hero_disconnect">قطع الاتصال</string>
+    <string name="hero_no_servers">لا توجد خوادم متاحة</string>
+    <string name="hero_provisioning">جارٍ التجهيز...</string>
+    <string name="hero_select_server">اختر خادمًا</string>
+    <string name="killswitch_body">يُسمح بحركة VPN فقط حتى تعيد الاتصال أو توقف مفتاح الإيقاف.</string>
+    <string name="killswitch_open_settings">فتح إعدادات VPN</string>
+    <string name="killswitch_title">مفتاح الإيقاف مفعّل</string>
+    <string name="login_signin">تسجيل الدخول</string>
+    <string name="login_subtitle">أدخل رمز الدخول للمتابعة.</string>
+    <string name="login_title">تسجيل الدخول</string>
+    <string name="login_token_placeholder">0000000000000000</string>
+    <string name="notification_connected">متصل</string>
+    <string name="notification_connecting">جارٍ الاتصال...</string>
+    <string name="notification_disconnect">قطع الاتصال</string>
+    <string name="pill_cloak">التخفّي</string>
+    <string name="pill_killswitch">مفتاح الإيقاف</string>
+    <string name="pill_wireguard">WireGuard</string>
+    <string name="servers_title">الخوادم</string>
+    <string name="settings_signout">تسجيل الخروج</string>
+    <string name="settings_title">الإعدادات</string>
+    <string name="state_connected">متصل</string>
+    <string name="state_connecting">جارٍ الاتصال</string>
+    <string name="state_disconnected">غير متصل</string>
+    <string name="state_disconnecting">جارٍ قطع الاتصال</string>
+    <string name="state_error">خطأ</string>
+    <string name="subscription_expires">ينتهي في %1$s</string>
+    <string name="subscription_none">لا يوجد اشتراك نشط</string>
+    <string name="tv_login_hint">احصل على رمزك من pangeavpn.org/account</string>
+</resources>

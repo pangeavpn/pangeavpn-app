@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">PangeaVPN</string>
+    <string name="devicelimit_subtitle">Your account has reached the maximum number of devices. Remove one to continue signing in.</string>
+    <string name="devicelimit_title">Device Limit Reached</string>
+    <string name="devices_remove">Remove</string>
+    <string name="devices_title">Devices</string>
+    <string name="hero_connect">Connect</string>
+    <string name="hero_disconnect">Disconnect</string>
+    <string name="hero_no_servers">No servers available</string>
+    <string name="hero_provisioning">Provisioning...</string>
+    <string name="hero_select_server">Select server</string>
+    <string name="killswitch_body">Only VPN traffic is allowed until you reconnect or turn off the kill switch.</string>
+    <string name="killswitch_open_settings">Open VPN Settings</string>
+    <string name="killswitch_title">Kill Switch Active</string>
+    <string name="login_signin">Sign In</string>
+    <string name="login_subtitle">Enter your sign-in token to continue.</string>
+    <string name="login_title">Sign In</string>
+    <string name="login_token_placeholder">0000000000000000</string>
+    <string name="notification_connected">Connected</string>
+    <string name="notification_connecting">Connecting…</string>
+    <string name="notification_disconnect">Disconnect</string>
+    <string name="pill_cloak">Cloak</string>
+    <string name="pill_killswitch">Kill Switch</string>
+    <string name="pill_wireguard">WireGuard</string>
+    <string name="servers_title">Servers</string>
+    <string name="settings_signout">Sign Out</string>
+    <string name="settings_title">Settings</string>
+    <string name="state_connected">CONNECTED</string>
+    <string name="state_connecting">CONNECTING</string>
+    <string name="state_disconnected">DISCONNECTED</string>
+    <string name="state_disconnecting">DISCONNECTING</string>
+    <string name="state_error">ERROR</string>
+    <string name="subscription_expires">Expires %1$s</string>
+    <string name="subscription_none">No active subscription</string>
+    <string name="tv_login_hint">Get your token at pangeavpn.org/account</string>
+</resources>

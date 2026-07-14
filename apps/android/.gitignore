@@ -1,0 +1,5 @@
+.gradle/
+build/
+local.properties
+core/libs/*.aar
+!core/libs/.gitkeep

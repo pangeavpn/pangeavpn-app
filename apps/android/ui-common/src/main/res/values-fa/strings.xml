@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">PangeaVPN</string>
+    <string name="devicelimit_subtitle">حساب شما به حداکثر تعداد دستگاه‌ها رسیده است. برای ادامه ورود، یکی را حذف کنید.</string>
+    <string name="devicelimit_title">به سقف تعداد دستگاه‌ها رسیدید</string>
+    <string name="devices_remove">حذف</string>
+    <string name="devices_title">دستگاه‌ها</string>
+    <string name="hero_connect">اتصال</string>
+    <string name="hero_disconnect">قطع اتصال</string>
+    <string name="hero_no_servers">سروری در دسترس نیست</string>
+    <string name="hero_provisioning">در حال آماده‌سازی...</string>
+    <string name="hero_select_server">انتخاب سرور</string>
+    <string name="killswitch_body">تا زمانی که دوباره متصل شوید یا کلید قطع اضطراری را خاموش کنید، فقط ترافیک VPN مجاز است.</string>
+    <string name="killswitch_open_settings">باز کردن تنظیمات VPN</string>
+    <string name="killswitch_title">کلید قطع اضطراری فعال است</string>
+    <string name="login_signin">ورود</string>
+    <string name="login_subtitle">برای ادامه، توکن ورود خود را وارد کنید.</string>
+    <string name="login_title">ورود</string>
+    <string name="login_token_placeholder">0000000000000000</string>
+    <string name="notification_connected">متصل</string>
+    <string name="notification_connecting">در حال اتصال...</string>
+    <string name="notification_disconnect">قطع اتصال</string>
+    <string name="pill_cloak">استتار</string>
+    <string name="pill_killswitch">کلید قطع اضطراری</string>
+    <string name="pill_wireguard">WireGuard</string>
+    <string name="servers_title">سرورها</string>
+    <string name="settings_signout">خروج</string>
+    <string name="settings_title">تنظیمات</string>
+    <string name="state_connected">متصل</string>
+    <string name="state_connecting">در حال اتصال</string>
+    <string name="state_disconnected">قطع شده</string>
+    <string name="state_disconnecting">در حال قطع اتصال</string>
+    <string name="state_error">خطا</string>
+    <string name="subscription_expires">در %1$s منقضی می‌شود</string>
+    <string name="subscription_none">اشتراک فعالی وجود ندارد</string>
+    <string name="tv_login_hint">توکن خود را در pangeavpn.org/account دریافت کنید</string>
+</resources>

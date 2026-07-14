@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">PangeaVPN</string>
+    <string name="devicelimit_subtitle">Votre compte a atteint le nombre maximal d\'appareils. Supprimez-en un pour poursuivre la connexion.</string>
+    <string name="devicelimit_title">Limite d\'appareils atteinte</string>
+    <string name="devices_remove">Supprimer</string>
+    <string name="devices_title">Appareils</string>
+    <string name="hero_connect">Se connecter</string>
+    <string name="hero_disconnect">Se déconnecter</string>
+    <string name="hero_no_servers">Aucun serveur disponible</string>
+    <string name="hero_provisioning">Provisionnement...</string>
+    <string name="hero_select_server">Sélectionner un serveur</string>
+    <string name="killswitch_body">Seul le trafic VPN est autorisé jusqu\'à ce que vous vous reconnectiez ou désactiviez le kill switch.</string>
+    <string name="killswitch_open_settings">Ouvrir les paramètres VPN</string>
+    <string name="killswitch_title">Kill Switch actif</string>
+    <string name="login_signin">Se connecter</string>
+    <string name="login_subtitle">Saisissez votre jeton de connexion pour continuer.</string>
+    <string name="login_title">Se connecter</string>
+    <string name="login_token_placeholder">0000000000000000</string>
+    <string name="notification_connected">Connecté</string>
+    <string name="notification_connecting">Connexion…</string>
+    <string name="notification_disconnect">Se déconnecter</string>
+    <string name="pill_cloak">Camouflage</string>
+    <string name="pill_killswitch">Kill Switch</string>
+    <string name="pill_wireguard">WireGuard</string>
+    <string name="servers_title">Serveurs</string>
+    <string name="settings_signout">Se déconnecter</string>
+    <string name="settings_title">Paramètres</string>
+    <string name="state_connected">CONNECTÉ</string>
+    <string name="state_connecting">CONNEXION</string>
+    <string name="state_disconnected">DÉCONNECTÉ</string>
+    <string name="state_disconnecting">DÉCONNEXION</string>
+    <string name="state_error">ERREUR</string>
+    <string name="subscription_expires">Expire le %1$s</string>
+    <string name="subscription_none">Aucun abonnement actif</string>
+    <string name="tv_login_hint">Obtenez votre jeton sur pangeavpn.org/account</string>
+</resources>

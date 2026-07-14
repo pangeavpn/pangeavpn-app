@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">PangeaVPN</string>
+    <string name="devicelimit_subtitle">На вашем аккаунте достигнуто максимальное число устройств. Удалите одно, чтобы продолжить вход.</string>
+    <string name="devicelimit_title">Достигнут лимит устройств</string>
+    <string name="devices_remove">Удалить</string>
+    <string name="devices_title">Устройства</string>
+    <string name="hero_connect">Подключить</string>
+    <string name="hero_disconnect">Отключить</string>
+    <string name="hero_no_servers">Нет доступных серверов</string>
+    <string name="hero_provisioning">Подготовка...</string>
+    <string name="hero_select_server">Выбрать сервер</string>
+    <string name="killswitch_body">Разрешён только VPN-трафик, пока вы не переподключитесь или не отключите Kill Switch.</string>
+    <string name="killswitch_open_settings">Открыть настройки VPN</string>
+    <string name="killswitch_title">Kill Switch включён</string>
+    <string name="login_signin">Войти</string>
+    <string name="login_subtitle">Введите токен для входа, чтобы продолжить.</string>
+    <string name="login_title">Войти</string>
+    <string name="login_token_placeholder">0000000000000000</string>
+    <string name="notification_connected">Подключено</string>
+    <string name="notification_connecting">Подключение…</string>
+    <string name="notification_disconnect">Отключить</string>
+    <string name="pill_cloak">Cloak</string>
+    <string name="pill_killswitch">Kill Switch</string>
+    <string name="pill_wireguard">WireGuard</string>
+    <string name="servers_title">Серверы</string>
+    <string name="settings_signout">Выйти</string>
+    <string name="settings_title">Настройки</string>
+    <string name="state_connected">ПОДКЛЮЧЕНО</string>
+    <string name="state_connecting">ПОДКЛЮЧЕНИЕ</string>
+    <string name="state_disconnected">ОТКЛЮЧЕНО</string>
+    <string name="state_disconnecting">ОТКЛЮЧЕНИЕ</string>
+    <string name="state_error">ОШИБКА</string>
+    <string name="subscription_expires">Истекает %1$s</string>
+    <string name="subscription_none">Нет активной подписки</string>
+    <string name="tv_login_hint">Получите токен на pangeavpn.org/account</string>
+</resources>

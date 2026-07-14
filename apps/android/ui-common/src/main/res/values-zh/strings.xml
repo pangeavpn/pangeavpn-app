@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">PangeaVPN</string>
+    <string name="devicelimit_subtitle">您的账户已达到设备数量上限。请移除一台设备后继续登录。</string>
+    <string name="devicelimit_title">已达设备上限</string>
+    <string name="devices_remove">移除</string>
+    <string name="devices_title">设备</string>
+    <string name="hero_connect">连接</string>
+    <string name="hero_disconnect">断开连接</string>
+    <string name="hero_no_servers">没有可用的服务器</string>
+    <string name="hero_provisioning">正在配置...</string>
+    <string name="hero_select_server">选择服务器</string>
+    <string name="killswitch_body">在重新连接或关闭断网保护之前，仅允许 VPN 流量通过。</string>
+    <string name="killswitch_open_settings">打开 VPN 设置</string>
+    <string name="killswitch_title">断网保护已启用</string>
+    <string name="login_signin">登录</string>
+    <string name="login_subtitle">输入登录令牌以继续。</string>
+    <string name="login_title">登录</string>
+    <string name="login_token_placeholder">0000000000000000</string>
+    <string name="notification_connected">已连接</string>
+    <string name="notification_connecting">连接中…</string>
+    <string name="notification_disconnect">断开连接</string>
+    <string name="pill_cloak">伪装</string>
+    <string name="pill_killswitch">断网保护</string>
+    <string name="pill_wireguard">WireGuard</string>
+    <string name="servers_title">服务器</string>
+    <string name="settings_signout">退出登录</string>
+    <string name="settings_title">设置</string>
+    <string name="state_connected">已连接</string>
+    <string name="state_connecting">连接中</string>
+    <string name="state_disconnected">已断开</string>
+    <string name="state_disconnecting">断开中</string>
+    <string name="state_error">错误</string>
+    <string name="subscription_expires">有效期至 %1$s</string>
+    <string name="subscription_none">无有效订阅</string>
+    <string name="tv_login_hint">在 pangeavpn.org/account 获取您的令牌</string>
+</resources>
