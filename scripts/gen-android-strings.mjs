@@ -242,6 +242,7 @@ function convertPlaceholders(value) {
 
 function escapeXml(value) {
   return value
+    .replace(/\\/g, "\\\\")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/'/g, "\\'")
