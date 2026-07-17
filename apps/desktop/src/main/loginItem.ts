@@ -65,7 +65,10 @@ export async function isLoginItemEnabled(): Promise<boolean> {
 
   if (process.platform === "darwin" || process.platform === "win32") {
     try {
-      return app.getLoginItemSettings().openAtLogin === true;
+      // Windows matches the registry command line against execPath + args, so
+      // the args used in setLoginItemSettings must be passed here too — without
+      // them openAtLogin always reads false once the entry carries --hidden.
+      return app.getLoginItemSettings({ args: [HIDDEN_ARG] }).openAtLogin === true;
     } catch {
       return false;
     }
