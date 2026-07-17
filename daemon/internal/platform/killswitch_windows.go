@@ -172,6 +172,30 @@ func (ks *windowsKillSwitch) Enable(ctx context.Context, endpointHosts []string,
 		return fmt.Errorf("kill switch enable: %w", err)
 	}
 
+	// localhost resolves to ::1 first on Windows, so IPv6 loopback needs the
+	// same treatment as IPv4: ::1 address permits alongside the IS_LOOPBACK
+	// flag (unreliable for fresh connects), and permits at the inbound layer —
+	// the inbound V6 block otherwise drops the server side of every [::1]
+	// connection, making localhost websites unreachable while connected.
+	if _, err := engine.addPermitLoopbackSubnetV6(fwpmLayerAleAuthConnectV6, "PangeaVPN Allow Loopback Subnet IPv6"); err != nil {
+		engine.abortTransaction()
+		engine.close()
+		_ = removeKillSwitchState()
+		return fmt.Errorf("kill switch enable: %w", err)
+	}
+	if _, err := engine.addPermitLoopbackInboundV6(); err != nil {
+		engine.abortTransaction()
+		engine.close()
+		_ = removeKillSwitchState()
+		return fmt.Errorf("kill switch enable: %w", err)
+	}
+	if _, err := engine.addPermitLoopbackSubnetV6(fwpmLayerAleAuthRecvAcceptV6, "PangeaVPN Allow Loopback Subnet Inbound IPv6"); err != nil {
+		engine.abortTransaction()
+		engine.close()
+		_ = removeKillSwitchState()
+		return fmt.Errorf("kill switch enable: %w", err)
+	}
+
 	if err := engine.commitTransaction(); err != nil {
 		engine.close()
 		_ = removeKillSwitchState()

@@ -38,6 +38,7 @@ const (
 	fwpUint32     uint32 = 3
 	fwpUint64     uint32 = 4
 	fwpV4AddrMask uint32 = 0x100
+	fwpV6AddrMask uint32 = 0x101
 
 	fwpMatchEqual       uint32 = 0
 	fwpMatchFlagsAllSet uint32 = 6
@@ -158,6 +159,11 @@ type fwpV4AddrAndMask struct {
 	addr uint32 // IPv4 in host byte order: (a<<24)|(b<<16)|(c<<8)|d
 	mask uint32
 } // 8 bytes
+
+type fwpV6AddrAndMask struct {
+	addr         [16]byte // IPv6 in network byte order
+	prefixLength uint8
+} // 17 bytes — all UINT8 fields, no padding
 
 // ---------------------------------------------------------------------------
 // wfpEngine wraps a WFP engine handle
@@ -482,4 +488,46 @@ func (e *wfpEngine) addPermitLoopbackV6() (uint64, error) {
 		},
 	}
 	return e.addFilter(fwpmLayerAleAuthConnectV6, "PangeaVPN Allow Loopback IPv6", 10, fwpActionPermit, conditions)
+}
+
+// addPermitLoopbackInboundV6 permits IPv6 traffic carrying the IS_LOOPBACK
+// flag at the recv/accept layer. The inbound V6 block otherwise drops the
+// server side of every [::1] connection — localhost resolves to ::1 first on
+// Windows, so local web servers become unreachable while the kill switch is
+// active.
+func (e *wfpEngine) addPermitLoopbackInboundV6() (uint64, error) {
+	conditions := []fwpmFilterCondition0{
+		{
+			fieldKey:  fwpmConditionFlags,
+			matchType: fwpMatchFlagsAllSet,
+			conditionValue: fwpValue0{
+				valueType: fwpUint32,
+				value:     uintptr(fwpConditionFlagIsLoopback),
+			},
+		},
+	}
+	return e.addFilter(fwpmLayerAleAuthRecvAcceptV6, "PangeaVPN Allow Loopback Inbound IPv6", 10, fwpActionPermit, conditions)
+}
+
+// addPermitLoopbackSubnetV6 permits ::1/128 by remote address on the given
+// layer. Complements the IS_LOOPBACK flag permits, which are not reliably set
+// for fresh inter-process TCP connects — the same quirk that required
+// addPermitLoopbackSubnet on IPv4. Loopback is non-routable, so there is no
+// leak risk.
+func (e *wfpEngine) addPermitLoopbackSubnetV6(layer windows.GUID, filterName string) (uint64, error) {
+	addrMask := fwpV6AddrAndMask{prefixLength: 128}
+	addrMask.addr[15] = 1 // ::1
+	conditions := []fwpmFilterCondition0{
+		{
+			fieldKey:  fwpmConditionIpRemoteAddress,
+			matchType: fwpMatchEqual,
+			conditionValue: fwpValue0{
+				valueType: fwpV6AddrMask,
+				value:     uintptr(unsafe.Pointer(&addrMask)),
+			},
+		},
+	}
+	id, err := e.addFilter(layer, filterName, 10, fwpActionPermit, conditions)
+	runtime.KeepAlive(&addrMask)
+	return id, err
 }
