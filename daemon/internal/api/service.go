@@ -413,10 +413,6 @@ func (s *Service) fallbackToNaive(ctx context.Context, profile *state.Profile, w
 		return "", fmt.Errorf("cloak failed and no naive fallback configured: %w", cloakErr)
 	}
 
-	if err := s.naive.Start(ctx, *profile.Naive); err != nil {
-		return "", fmt.Errorf("both transports failed: cloak: %v; naive: %w", cloakErr, err)
-	}
-
 	// profile.Naive is the same *state.NaiveProfile the config store holds
 	// internally — state.ConfigStore's clone-on-read (cloneProfile in
 	// config_store.go) only deep-copies WireGuard.DNS/BypassHosts, not Naive.
@@ -425,6 +421,14 @@ func (s *Service) fallbackToNaive(ctx context.Context, profile *state.Profile, w
 	// and never without the config store's own lock.
 	naiveCopy := *profile.Naive
 	profile.Naive = &naiveCopy
+
+	// Bind ephemeral loopback port to avoid Windows Hyper-V UDP exclusions,
+	// same reasoning and same bug class as Cloak's identical override above.
+	naiveStartProfile := *profile.Naive
+	naiveStartProfile.LocalPort = 0
+	if err := s.naive.Start(ctx, naiveStartProfile); err != nil {
+		return "", fmt.Errorf("both transports failed: cloak: %v; naive: %w", cloakErr, err)
+	}
 
 	profile.Naive.LocalPort = s.rebindWireGuardEndpoint(s.naive, profile.Naive.LocalPort, wireGuardProfile)
 	naiveRunning := func() bool { return s.naive.Status().Running }

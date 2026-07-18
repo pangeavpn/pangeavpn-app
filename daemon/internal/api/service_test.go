@@ -74,11 +74,12 @@ func (f *fakeCloakManager) WaitForSession(_ context.Context, _ time.Duration) er
 }
 
 type fakeNaiveManager struct {
-	mu          sync.Mutex
-	startCalled bool
-	startErr    error
-	stopCalled  bool
-	running     bool
+	mu             sync.Mutex
+	startCalled    bool
+	startLocalPort int
+	startErr       error
+	stopCalled     bool
+	running        bool
 
 	// stayDown makes Start succeed (no startErr) without ever flipping
 	// running to true, simulating a transport process that exits
@@ -100,6 +101,7 @@ func (f *fakeNaiveManager) Start(ctx context.Context, profile state.NaiveProfile
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.startCalled = true
+	f.startLocalPort = profile.LocalPort
 	if f.startErr != nil {
 		return f.startErr
 	}
@@ -664,6 +666,36 @@ func TestWithTransportBypassHosts_IncludesNaiveHostWhenPresent(t *testing.T) {
 	}
 }
 
+func TestWithTransportBypassHosts_CloakOnlyProfileUnaffected(t *testing.T) {
+	profile := testProfile()
+
+	wgProfile := withTransportBypassHosts(profile)
+
+	if len(wgProfile.BypassHosts) != 1 || wgProfile.BypassHosts[0] != "vpn.example.com" {
+		t.Errorf("BypassHosts = %v, want exactly [vpn.example.com] for a Cloak-only profile", wgProfile.BypassHosts)
+	}
+}
+
+func TestKillSwitchPermitsAndBypassHosts_SkipEmptyNaiveRemoteHost(t *testing.T) {
+	profile := testProfile()
+	profile.Naive = &state.NaiveProfile{
+		RemoteHost: "   ", // whitespace-only, same as "unset" per strings.TrimSpace
+		RemotePort: 8443,
+		Username:   "u",
+		Password:   "p",
+	}
+
+	permits := killSwitchPermits(profile)
+	if len(permits) != 1 || permits[0] != "vpn.example.com" {
+		t.Errorf("killSwitchPermits() = %v, want exactly [vpn.example.com] when Naive.RemoteHost is blank", permits)
+	}
+
+	wgProfile := withTransportBypassHosts(profile)
+	if len(wgProfile.BypassHosts) != 1 || wgProfile.BypassHosts[0] != "vpn.example.com" {
+		t.Errorf("BypassHosts = %v, want exactly [vpn.example.com] when Naive.RemoteHost is blank", wgProfile.BypassHosts)
+	}
+}
+
 func TestConnect_UsesEphemeralCloakPortAndRewritesEndpoint(t *testing.T) {
 	profile := testProfile()
 	profile.WireGuard.ConfigText = "[Interface]\nPrivateKey = YWJjZGVmZw==\n\n[Peer]\nPublicKey = eHl6MTIzNDU=\nEndpoint = 127.0.0.1:51820\nAllowedIPs = 0.0.0.0/0\n"
@@ -689,6 +721,45 @@ func TestConnect_UsesEphemeralCloakPortAndRewritesEndpoint(t *testing.T) {
 	}
 	if stored.Cloak.LocalPort != 61234 {
 		t.Errorf("stored profile Cloak.LocalPort = %d, want 61234 (bound port)", stored.Cloak.LocalPort)
+	}
+}
+
+func TestConnect_UsesEphemeralNaivePortAndRewritesEndpoint(t *testing.T) {
+	profile := testProfile()
+	profile.Naive = &state.NaiveProfile{
+		RemoteHost: "naive.example.com",
+		RemotePort: 8443,
+		LocalPort:  51823,
+		Username:   "u",
+		Password:   "p",
+	}
+	profile.WireGuard.ConfigText = "[Interface]\nPrivateKey = YWJjZGVmZw==\n\n[Peer]\nPublicKey = eHl6MTIzNDU=\nEndpoint = 127.0.0.1:51823\nAllowedIPs = 0.0.0.0/0\n"
+
+	cloak := &fakeCloakManager{startErr: errors.New("cloak boom")}
+	naive := &fakeNaiveManager{boundLocalPort: 61235}
+	wgMgr := &fakeWGManager{}
+	ks := &fakeKillSwitch{}
+	svc := newTestService(t, cloak, naive, wgMgr, ks, profile)
+
+	if err := svc.Connect(context.Background(), profile.ID, ConnectOptions{}); err != nil {
+		t.Fatalf("connect failed: %v", err)
+	}
+
+	naive.mu.Lock()
+	if naive.startLocalPort != 0 {
+		t.Errorf("naive.Start should receive LocalPort=0 to request ephemeral (same Windows Hyper-V exclusion-range reasoning as Cloak); got %d", naive.startLocalPort)
+	}
+	naive.mu.Unlock()
+
+	stored, ok := svc.getCurrentProfile()
+	if !ok {
+		t.Fatal("expected current profile to be set after connect")
+	}
+	if stored.Naive == nil {
+		t.Fatal("expected stored profile to carry Naive config")
+	}
+	if stored.Naive.LocalPort != 61235 {
+		t.Errorf("stored profile Naive.LocalPort = %d, want 61235 (bound port)", stored.Naive.LocalPort)
 	}
 }
 
