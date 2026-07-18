@@ -73,7 +73,8 @@ export const StatusResponseSchema = z.object({
 });
 
 export const ConnectRequestSchema = z.object({
-  profileId: z.string().min(1)
+  profileId: z.string().min(1),
+  preferredTransport: z.enum(["cloak", "naive"]).optional()
 });
 
 export const OkResponseSchema = z.object({

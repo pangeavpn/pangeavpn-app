@@ -70,6 +70,8 @@ declare global {
     getDirectIpOnly: () => Promise<boolean>;
     setAllowLan: (enabled: boolean) => Promise<void>;
     getAllowLan: () => Promise<boolean>;
+    setPreferredTransport: (value: "auto" | "cloak" | "naive") => Promise<void>;
+    getPreferredTransport: () => Promise<"auto" | "cloak" | "naive">;
     setLaunchAtStartup: (enabled: boolean) => Promise<void>;
     getLaunchAtStartup: () => Promise<boolean>;
     setAlwaysConnected: (enabled: boolean) => Promise<void>;

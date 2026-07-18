@@ -25,13 +25,19 @@ export class DaemonClient {
     return this.request<StatusResponse>("GET", "/status");
   }
 
-  async connect(profileId: string, opts?: { allowLAN?: boolean; lockdown?: boolean }): Promise<OkResponse> {
+  async connect(
+    profileId: string,
+    opts?: { allowLAN?: boolean; lockdown?: boolean; preferredTransport?: "cloak" | "naive" }
+  ): Promise<OkResponse> {
     const body: Record<string, unknown> = { profileId };
     if (opts?.allowLAN) {
       body.allowLAN = true;
     }
     if (opts?.lockdown) {
       body.lockdown = true;
+    }
+    if (opts?.preferredTransport) {
+      body.preferredTransport = opts.preferredTransport;
     }
     return this.request<OkResponse>("POST", "/connect", body, this.connectTimeoutMs);
   }
@@ -59,13 +65,19 @@ export class DaemonClient {
     );
   }
 
-  async switch(profileId: string, opts?: { allowLAN?: boolean; lockdown?: boolean }): Promise<OkResponse> {
+  async switch(
+    profileId: string,
+    opts?: { allowLAN?: boolean; lockdown?: boolean; preferredTransport?: "cloak" | "naive" }
+  ): Promise<OkResponse> {
     const body: Record<string, unknown> = { profileId };
     if (opts?.allowLAN) {
       body.allowLAN = true;
     }
     if (opts?.lockdown) {
       body.lockdown = true;
+    }
+    if (opts?.preferredTransport) {
+      body.preferredTransport = opts.preferredTransport;
     }
     return this.request<OkResponse>("POST", "/switch", body, this.connectTimeoutMs);
   }

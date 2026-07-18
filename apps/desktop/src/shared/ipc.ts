@@ -28,6 +28,8 @@ export const IPC_CHANNELS = {
   getDirectIpOnly: "pangea:getDirectIpOnly",
   setAllowLan: "pangea:setAllowLan",
   getAllowLan: "pangea:getAllowLan",
+  setPreferredTransport: "settings:setPreferredTransport",
+  getPreferredTransport: "settings:getPreferredTransport",
   setLaunchAtStartup: "settings:setLaunchAtStartup",
   getLaunchAtStartup: "settings:getLaunchAtStartup",
   setAlwaysConnected: "settings:setAlwaysConnected",
@@ -134,6 +136,8 @@ export interface PangeaApi {
   getDirectIpOnly: () => Promise<boolean>;
   setAllowLan: (enabled: boolean) => Promise<void>;
   getAllowLan: () => Promise<boolean>;
+  setPreferredTransport: (value: "auto" | "cloak" | "naive") => Promise<void>;
+  getPreferredTransport: () => Promise<"auto" | "cloak" | "naive">;
   setLaunchAtStartup: (enabled: boolean) => Promise<void>;
   getLaunchAtStartup: () => Promise<boolean>;
   setAlwaysConnected: (enabled: boolean) => Promise<void>;

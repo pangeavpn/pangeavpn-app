@@ -45,6 +45,8 @@ let lastServerId: string | null = null;
 let allowLanEnabled = true;
 let launchAtStartupEnabled = false;
 let alwaysConnectedEnabled = false;
+// "auto" (cloak, fall back to naive), "cloak" (cloak only), or "naive" (naive only).
+let preferredTransport: "auto" | "cloak" | "naive" = "auto";
 // Stored language preference: a locale code, or "system" to follow the OS.
 let localePref = "system";
 const hiddenLaunch = process.argv.some(isHiddenLaunchArg);
@@ -578,7 +580,11 @@ async function provisionAndSwitch(serverId: string): Promise<import("@pangeavpn/
     throw new Error(`provision: ${msg}`);
   }
 
-  const opts = { allowLAN: allowLanEnabled, lockdown: alwaysConnectedEnabled };
+  const opts = {
+    allowLAN: allowLanEnabled,
+    lockdown: alwaysConnectedEnabled,
+    ...(preferredTransport !== "auto" && { preferredTransport })
+  };
   let result: import("@pangeavpn/shared-types").OkResponse;
   try {
     result = await withDaemonRestartOnUnavailable(() => daemonClient.switch(profile.id, opts), "switch");
@@ -873,6 +879,19 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.getAllowLan, async () => allowLanEnabled);
 
+  ipcMain.handle(IPC_CHANNELS.setPreferredTransport, async (_event, value: "auto" | "cloak" | "naive") => {
+    preferredTransport = value === "cloak" || value === "naive" ? value : "auto";
+    try {
+      const settings = await readSettingsFile();
+      settings.preferredTransport = preferredTransport;
+      await writeSettingsFile(settings);
+    } catch (err) {
+      console.warn("Failed to persist preferredTransport setting:", err);
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.getPreferredTransport, async () => preferredTransport);
+
   ipcMain.handle(IPC_CHANNELS.setLaunchAtStartup, async (_event, enabled: boolean) => {
     launchAtStartupEnabled = !!enabled;
     try {
@@ -1122,7 +1141,11 @@ function isUnauthorizedError(error: unknown): boolean {
 }
 
 async function connectWithRecovery(profileId: string): Promise<OkResponse> {
-  const opts = { allowLAN: allowLanEnabled, lockdown: alwaysConnectedEnabled };
+  const opts = {
+    allowLAN: allowLanEnabled,
+    lockdown: alwaysConnectedEnabled,
+    ...(preferredTransport !== "auto" && { preferredTransport })
+  };
   const firstAttempt = await withDaemonRestartOnUnavailable(() => daemonClient.connect(profileId, opts), "connect");
   if (firstAttempt.ok) {
     return firstAttempt;
@@ -1186,6 +1209,9 @@ async function boot(): Promise<void> {
     }
     if (settings.allowLan === false) {
       allowLanEnabled = false;
+    }
+    if (settings.preferredTransport === "cloak" || settings.preferredTransport === "naive") {
+      preferredTransport = settings.preferredTransport;
     }
     if (typeof settings.launchAtStartup === "boolean") {
       launchAtStartupEnabled = settings.launchAtStartup;

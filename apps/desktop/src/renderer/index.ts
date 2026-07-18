@@ -69,6 +69,7 @@ const serverIndicatorLabel = document.getElementById("serverIndicatorLabel") as 
 const directIpToggle = document.getElementById("directIpToggle") as HTMLInputElement;
 const directIpOnlyToggle = document.getElementById("directIpOnlyToggle") as HTMLInputElement;
 const allowLanToggle = document.getElementById("allowLanToggle") as HTMLInputElement;
+const preferredTransportSelect = document.getElementById("preferredTransportSelect") as HTMLSelectElement;
 const launchAtStartupToggle = document.getElementById("launchAtStartupToggle") as HTMLInputElement;
 const alwaysConnectedToggle = document.getElementById("alwaysConnectedToggle") as HTMLInputElement;
 const loginScreen = document.getElementById("loginScreen") as HTMLElement;
@@ -971,6 +972,20 @@ allowLanToggle.addEventListener("change", async () => {
   }
 });
 
+preferredTransportSelect.addEventListener("change", async () => {
+  if (!pangeaApi) return;
+  const previous = preferredTransportSelect.dataset.previousValue ?? "auto";
+  const choice = preferredTransportSelect.value as "auto" | "cloak" | "naive";
+  try {
+    await pangeaApi.setPreferredTransport(choice);
+    preferredTransportSelect.dataset.previousValue = choice;
+    showToast(t("toggle.preferredTransport.updated"), 4000, true);
+  } catch (err) {
+    preferredTransportSelect.value = previous;
+    showToast(reportError("preferredTransport", err, t("toggle.updateFailed")));
+  }
+});
+
 launchAtStartupToggle.addEventListener("change", async () => {
   if (!pangeaApi) return;
   try {
@@ -1174,6 +1189,9 @@ async function init(): Promise<void> {
       directIpToggle.checked = await pangeaApi.getDirectIp();
       directIpOnlyToggle.checked = await pangeaApi.getDirectIpOnly();
       allowLanToggle.checked = await pangeaApi.getAllowLan();
+      const preferredTransport = await pangeaApi.getPreferredTransport();
+      preferredTransportSelect.value = preferredTransport;
+      preferredTransportSelect.dataset.previousValue = preferredTransport;
       if (directIpOnlyToggle.checked) {
         directIpToggle.checked = true;
         directIpToggle.disabled = true;
