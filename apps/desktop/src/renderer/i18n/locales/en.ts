@@ -207,6 +207,9 @@ export const en = {
   // ── Daemon status values (technical, kept short) ──────
   "status.running": "running",
   "status.stopped": "stopped",
+  "status.transport.cloak": "Obfuscation: Cloak",
+  "status.transport.naive": "Obfuscation: NaiveProxy",
+  "status.transport.none": "",
 
   // ── Generic error fallbacks ───────────────────────────
   "error.network": "Please check your internet connection and try again.",

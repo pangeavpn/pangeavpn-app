@@ -206,6 +206,9 @@ export const ru = {
   // ── Daemon status values (technical, kept short) ──────
   "status.running": "работает",
   "status.stopped": "остановлен",
+  "status.transport.cloak": "Obfuscation: Cloak",
+  "status.transport.naive": "Obfuscation: NaiveProxy",
+  "status.transport.none": "",
 
   // ── Generic error fallbacks ───────────────────────────
   "error.network": "Проверьте подключение к интернету и попробуйте ещё раз.",

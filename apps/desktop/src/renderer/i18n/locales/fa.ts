@@ -206,6 +206,9 @@ export const fa = {
   // ── Daemon status values (technical, kept short) ──────
   "status.running": "در حال اجرا",
   "status.stopped": "متوقف",
+  "status.transport.cloak": "Obfuscation: Cloak",
+  "status.transport.naive": "Obfuscation: NaiveProxy",
+  "status.transport.none": "",
 
   // ── Generic error fallbacks ───────────────────────────
   "error.network": "لطفاً اتصال اینترنت خود را بررسی کنید و دوباره تلاش کنید.",

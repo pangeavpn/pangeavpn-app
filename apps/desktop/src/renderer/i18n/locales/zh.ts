@@ -206,6 +206,9 @@ export const zh = {
   // ── Daemon status values (technical, kept short) ──────
   "status.running": "运行中",
   "status.stopped": "已停止",
+  "status.transport.cloak": "Obfuscation: Cloak",
+  "status.transport.naive": "Obfuscation: NaiveProxy",
+  "status.transport.none": "",
 
   // ── Generic error fallbacks ───────────────────────────
   "error.network": "请检查您的互联网连接后重试。",

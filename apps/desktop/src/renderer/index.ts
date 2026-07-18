@@ -38,6 +38,7 @@ function reportError(context: string, error: unknown, friendly?: string): string
 const stateEl = document.getElementById("state") as HTMLSpanElement;
 const detailEl = document.getElementById("detail") as HTMLSpanElement;
 const cloakEl = document.getElementById("cloak") as HTMLSpanElement;
+const activeTransportLabel = document.getElementById("activeTransportLabel") as HTMLSpanElement;
 const wireguardEl = document.getElementById("wireguard") as HTMLSpanElement;
 const ksDot = document.getElementById("ksDot") as HTMLElement;
 const throughputPanel = document.getElementById("throughputPanel") as HTMLElement;
@@ -1653,6 +1654,14 @@ function renderStatus(status: StatusResponse): void {
   const cloakPid = status.cloak.pid ?? "none";
   cloakEl.textContent = `${status.cloak.running ? t("status.running") : t("status.stopped")} (pid: ${cloakPid})`;
   wireguardEl.textContent = `${status.wireguard.running ? t("status.running") : t("status.stopped")} (${status.wireguard.detail})`;
+
+  if (status.activeTransport === "naive") {
+    activeTransportLabel.textContent = t("status.transport.naive");
+  } else if (status.activeTransport === "cloak") {
+    activeTransportLabel.textContent = t("status.transport.cloak");
+  } else {
+    activeTransportLabel.textContent = t("status.transport.none");
+  }
 
   // Drive hero card state
   heroCard.dataset.state = status.state;

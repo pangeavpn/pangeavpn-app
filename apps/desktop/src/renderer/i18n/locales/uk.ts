@@ -206,6 +206,9 @@ export const uk = {
   // ── Daemon status values (technical, kept short) ──────
   "status.running": "працює",
   "status.stopped": "зупинено",
+  "status.transport.cloak": "Obfuscation: Cloak",
+  "status.transport.naive": "Obfuscation: NaiveProxy",
+  "status.transport.none": "",
 
   // ── Generic error fallbacks ───────────────────────────
   "error.network": "Перевірте підключення до інтернету та спробуйте ще раз.",
