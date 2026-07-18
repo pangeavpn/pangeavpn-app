@@ -195,7 +195,7 @@ func (s *Service) Connect(ctx context.Context, profileID string, opts ConnectOpt
 		return nil
 	}
 
-	wireGuardProfile := withCloakBypassHost(profile)
+	wireGuardProfile := withTransportBypassHosts(profile)
 	if opts.AllowLAN {
 		rewritten, err := wg.TransformWGConfigExcludeLAN(wireGuardProfile.ConfigText)
 		if err != nil {
@@ -492,7 +492,7 @@ func (s *Service) Switch(ctx context.Context, newProfileID string, opts ConnectO
 	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("switch requested: %s -> %s (kill switch stays active)", oldProfile.ID, newProfile.ID))
 
 	s.machine.Set(state.StateConnecting, fmt.Sprintf("switching to %s: stopping wireguard", newProfile.ID))
-	if err := s.wg.Stop(ctx, withCloakBypassHost(oldProfile)); err != nil {
+	if err := s.wg.Stop(ctx, withTransportBypassHosts(oldProfile)); err != nil {
 		s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("switch: wg stop warning: %v", err))
 	}
 
@@ -508,7 +508,7 @@ func (s *Service) Switch(ctx context.Context, newProfileID string, opts ConnectO
 
 	s.clearCurrentProfile()
 
-	wireGuardProfile := withCloakBypassHost(newProfile)
+	wireGuardProfile := withTransportBypassHosts(newProfile)
 	if opts.AllowLAN {
 		rewritten, err := wg.TransformWGConfigExcludeLAN(wireGuardProfile.ConfigText)
 		if err != nil {
@@ -636,7 +636,7 @@ func (s *Service) Disconnect(ctx context.Context, keepKillSwitch bool) error {
 	}
 
 	for _, runningProfile := range profilesToStop {
-		if err := s.wg.Stop(ctx, withCloakBypassHost(runningProfile)); err != nil {
+		if err := s.wg.Stop(ctx, withTransportBypassHosts(runningProfile)); err != nil {
 			cleanupErrors = append(cleanupErrors, fmt.Sprintf("wireguard stop failed for %s: %v", runningProfile.WireGuard.TunnelName, err))
 			s.logs.Add(state.LogWarn, state.SourceDaemon, cleanupErrors[len(cleanupErrors)-1])
 		}
@@ -644,7 +644,7 @@ func (s *Service) Disconnect(ctx context.Context, keepKillSwitch bool) error {
 
 	s.machine.Set(state.StateDisconnecting, "verifying wireguard")
 	for _, runningProfile := range profilesToStop {
-		status, err := s.wg.Status(ctx, withCloakBypassHost(runningProfile))
+		status, err := s.wg.Status(ctx, withTransportBypassHosts(runningProfile))
 		if err != nil {
 			cleanupErrors = append(cleanupErrors, fmt.Sprintf("wireguard status check failed for %s: %v", runningProfile.WireGuard.TunnelName, err))
 			s.logs.Add(state.LogWarn, state.SourceDaemon, cleanupErrors[len(cleanupErrors)-1])
@@ -1154,12 +1154,25 @@ func rewriteLoopbackEndpointPort(configText string, newPort int) (string, bool) 
 	return wgLoopbackEndpointPattern.ReplaceAllString(configText, replacement), true
 }
 
-// killSwitchPermits is the cloak endpoint plus any bypassHosts that need
-// direct reachability (e.g. Pangea hub for re-provisioning during a switch).
+// killSwitchPermits is the cloak and naive endpoints (whichever are
+// configured) plus any bypassHosts that need direct reachability (e.g.
+// Pangea hub for re-provisioning during a switch). Both transport endpoints
+// must be permitted here — the kill switch arms once, before Connect knows
+// whether Cloak or the Naive fallback will actually succeed
+// (bringUpAfterKillSwitch / startTransport runs after this), so permitting
+// only Cloak's host would have the kill switch itself block the Naive
+// fallback's very first connection attempt whenever the two transports use
+// different remote hosts (the normal case — see hub/config/nodes.json,
+// where naive.remoteHost is a distinct domain from cloak.remoteHost).
 func killSwitchPermits(profile state.Profile) []string {
-	out := make([]string, 0, 1+len(profile.WireGuard.BypassHosts))
+	out := make([]string, 0, 2+len(profile.WireGuard.BypassHosts))
 	if host := strings.TrimSpace(profile.Cloak.RemoteHost); host != "" {
 		out = append(out, host)
+	}
+	if profile.Naive != nil {
+		if host := strings.TrimSpace(profile.Naive.RemoteHost); host != "" {
+			out = append(out, host)
+		}
 	}
 	for _, h := range profile.WireGuard.BypassHosts {
 		if h = strings.TrimSpace(h); h != "" {
@@ -1169,12 +1182,22 @@ func killSwitchPermits(profile state.Profile) []string {
 	return out
 }
 
-func withCloakBypassHost(profile state.Profile) state.WireGuardProfile {
+// withTransportBypassHosts adds both the cloak and naive (when configured)
+// remote hosts to the WireGuard bypass list, so neither transport's own
+// connection to its remote endpoint gets routed back through the tunnel
+// it's establishing — same "arm before the transport is chosen" reasoning
+// as killSwitchPermits above.
+func withTransportBypassHosts(profile state.Profile) state.WireGuardProfile {
 	copyProfile := profile.WireGuard
 	copyProfile.DNS = append([]string(nil), profile.WireGuard.DNS...)
 	copyProfile.BypassHosts = append([]string(nil), profile.WireGuard.BypassHosts...)
 	if host := strings.TrimSpace(profile.Cloak.RemoteHost); host != "" {
 		copyProfile.BypassHosts = append(copyProfile.BypassHosts, host)
+	}
+	if profile.Naive != nil {
+		if host := strings.TrimSpace(profile.Naive.RemoteHost); host != "" {
+			copyProfile.BypassHosts = append(copyProfile.BypassHosts, host)
+		}
 	}
 	return copyProfile
 }

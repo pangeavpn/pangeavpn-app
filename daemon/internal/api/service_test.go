@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -612,6 +613,54 @@ func TestRewriteLoopbackEndpointPort(t *testing.T) {
 				t.Errorf("output should not contain %q:\n%s", tc.mustNotSub, got)
 			}
 		})
+	}
+}
+
+func TestKillSwitchPermits_IncludesNaiveHostWhenPresent(t *testing.T) {
+	profile := testProfile()
+	profile.Naive = &state.NaiveProfile{
+		RemoteHost: "naive.example.com",
+		RemotePort: 8443,
+		Username:   "u",
+		Password:   "p",
+	}
+
+	permits := killSwitchPermits(profile)
+
+	if !slices.Contains(permits, "vpn.example.com") {
+		t.Errorf("killSwitchPermits() = %v, want to contain cloak host vpn.example.com", permits)
+	}
+	if !slices.Contains(permits, "naive.example.com") {
+		t.Errorf("killSwitchPermits() = %v, want to contain naive host naive.example.com — otherwise the kill switch (armed before Connect knows which transport will succeed) blocks the Naive fallback's own connection attempt", permits)
+	}
+}
+
+func TestKillSwitchPermits_CloakOnlyProfileUnaffected(t *testing.T) {
+	profile := testProfile()
+
+	permits := killSwitchPermits(profile)
+
+	if len(permits) != 1 || permits[0] != "vpn.example.com" {
+		t.Errorf("killSwitchPermits() = %v, want exactly [vpn.example.com] for a Cloak-only profile", permits)
+	}
+}
+
+func TestWithTransportBypassHosts_IncludesNaiveHostWhenPresent(t *testing.T) {
+	profile := testProfile()
+	profile.Naive = &state.NaiveProfile{
+		RemoteHost: "naive.example.com",
+		RemotePort: 8443,
+		Username:   "u",
+		Password:   "p",
+	}
+
+	wgProfile := withTransportBypassHosts(profile)
+
+	if !slices.Contains(wgProfile.BypassHosts, "vpn.example.com") {
+		t.Errorf("BypassHosts = %v, want to contain cloak host vpn.example.com", wgProfile.BypassHosts)
+	}
+	if !slices.Contains(wgProfile.BypassHosts, "naive.example.com") {
+		t.Errorf("BypassHosts = %v, want to contain naive host naive.example.com", wgProfile.BypassHosts)
 	}
 }
 
