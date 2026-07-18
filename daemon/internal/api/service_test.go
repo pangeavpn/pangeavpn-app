@@ -17,20 +17,22 @@ import (
 // ---------------------------------------------------------------------------
 
 type fakeCloakManager struct {
-	mu              sync.Mutex
-	running         bool
-	startErr        error
-	stopErr         error
-	waitErr         error
-	startCount      int
-	stopCount       int
-	startLocalPort  int
-	boundLocalPort  int
+	mu             sync.Mutex
+	running        bool
+	startErr       error
+	stopErr        error
+	waitErr        error
+	startCalled    bool
+	startCount     int
+	stopCount      int
+	startLocalPort int
+	boundLocalPort int
 }
 
 func (f *fakeCloakManager) Start(_ context.Context, profile state.CloakProfile) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.startCalled = true
 	f.startCount++
 	f.startLocalPort = profile.LocalPort
 	if f.startErr != nil {
@@ -68,6 +70,45 @@ func (f *fakeCloakManager) WaitForSession(_ context.Context, _ time.Duration) er
 	defer f.mu.Unlock()
 	return f.waitErr
 }
+
+type fakeNaiveManager struct {
+	mu          sync.Mutex
+	startCalled bool
+	startErr    error
+	stopCalled  bool
+	running     bool
+}
+
+func (f *fakeNaiveManager) Start(ctx context.Context, profile state.NaiveProfile) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.startCalled = true
+	if f.startErr != nil {
+		return f.startErr
+	}
+	f.running = true
+	return nil
+}
+
+func (f *fakeNaiveManager) Stop(ctx context.Context) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.stopCalled = true
+	f.running = false
+	return nil
+}
+
+func (f *fakeNaiveManager) Status() state.TransportStatus {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return state.TransportStatus{Running: f.running}
+}
+
+func (f *fakeNaiveManager) WaitForSession(ctx context.Context, timeout time.Duration) error {
+	return nil
+}
+
+func (f *fakeNaiveManager) BoundLocalPort() int { return 51822 }
 
 type fakeWGManager struct {
 	mu             sync.Mutex
@@ -230,6 +271,7 @@ func testConfigStore(t *testing.T, profiles ...state.Profile) *state.ConfigStore
 func newTestService(
 	t *testing.T,
 	cloak *fakeCloakManager,
+	naive *fakeNaiveManager,
 	wgMgr *fakeWGManager,
 	ks *fakeKillSwitch,
 	profiles ...state.Profile,
@@ -238,7 +280,7 @@ func newTestService(
 	machine := state.NewMachine()
 	logs := state.NewLogStore(100)
 	config := testConfigStore(t, profiles...)
-	return NewService(machine, logs, config, cloak, wgMgr, ks)
+	return NewService(machine, logs, config, cloak, naive, wgMgr, ks)
 }
 
 // ---------------------------------------------------------------------------
@@ -250,7 +292,7 @@ func TestConnect_KillSwitchEnabledBeforeCloakAndWG(t *testing.T) {
 	cloak := &fakeCloakManager{}
 	wgMgr := &fakeWGManager{}
 	ks := &fakeKillSwitch{}
-	svc := newTestService(t, cloak, wgMgr, ks, profile)
+	svc := newTestService(t, cloak, &fakeNaiveManager{}, wgMgr, ks, profile)
 
 	err := svc.Connect(context.Background(), profile.ID, ConnectOptions{})
 	if err != nil {
@@ -276,7 +318,7 @@ func TestConnect_UpdateCalledAfterWGSuccess(t *testing.T) {
 	cloak := &fakeCloakManager{}
 	wgMgr := &fakeWGManager{}
 	ks := &fakeKillSwitch{}
-	svc := newTestService(t, cloak, wgMgr, ks, profile)
+	svc := newTestService(t, cloak, &fakeNaiveManager{}, wgMgr, ks, profile)
 
 	err := svc.Connect(context.Background(), profile.ID, ConnectOptions{})
 	if err != nil {
@@ -299,7 +341,7 @@ func TestConnect_UsesReportedWireGuardInterfaceForKillSwitch(t *testing.T) {
 	cloak := &fakeCloakManager{}
 	wgMgr := &fakeWGManager{interfaceName: "PangeaVPN Tunnel"}
 	ks := &fakeKillSwitch{}
-	svc := newTestService(t, cloak, wgMgr, ks, profile)
+	svc := newTestService(t, cloak, &fakeNaiveManager{}, wgMgr, ks, profile)
 
 	err := svc.Connect(context.Background(), profile.ID, ConnectOptions{})
 	if err != nil {
@@ -322,7 +364,7 @@ func TestConnect_WGFailure_KillSwitchStaysActive(t *testing.T) {
 	cloak := &fakeCloakManager{}
 	wgMgr := &fakeWGManager{startErr: errors.New("wg failed")}
 	ks := &fakeKillSwitch{}
-	svc := newTestService(t, cloak, wgMgr, ks, profile)
+	svc := newTestService(t, cloak, &fakeNaiveManager{}, wgMgr, ks, profile)
 
 	err := svc.Connect(context.Background(), profile.ID, ConnectOptions{})
 	if err == nil {
@@ -348,7 +390,7 @@ func TestConnect_CloakSessionFailure_KillSwitchStaysActive(t *testing.T) {
 	cloak := &fakeCloakManager{waitErr: errors.New("session timeout")}
 	wgMgr := &fakeWGManager{}
 	ks := &fakeKillSwitch{}
-	svc := newTestService(t, cloak, wgMgr, ks, profile)
+	svc := newTestService(t, cloak, &fakeNaiveManager{}, wgMgr, ks, profile)
 
 	err := svc.Connect(context.Background(), profile.ID, ConnectOptions{})
 	if err == nil {
@@ -368,7 +410,7 @@ func TestConnect_CloakFailure_KillSwitchStaysActive(t *testing.T) {
 	cloak := &fakeCloakManager{startErr: errors.New("cloak failed")}
 	wgMgr := &fakeWGManager{}
 	ks := &fakeKillSwitch{}
-	svc := newTestService(t, cloak, wgMgr, ks, profile)
+	svc := newTestService(t, cloak, &fakeNaiveManager{}, wgMgr, ks, profile)
 
 	err := svc.Connect(context.Background(), profile.ID, ConnectOptions{})
 	if err == nil {
@@ -391,7 +433,7 @@ func TestDisconnect_ClearsKillSwitch(t *testing.T) {
 	cloak := &fakeCloakManager{}
 	wgMgr := &fakeWGManager{}
 	ks := &fakeKillSwitch{}
-	svc := newTestService(t, cloak, wgMgr, ks, profile)
+	svc := newTestService(t, cloak, &fakeNaiveManager{}, wgMgr, ks, profile)
 
 	// Connect first.
 	if err := svc.Connect(context.Background(), profile.ID, ConnectOptions{}); err != nil {
@@ -419,7 +461,7 @@ func TestDisconnect_ClearsKillSwitchAfterFailedConnect(t *testing.T) {
 	cloak := &fakeCloakManager{}
 	wgMgr := &fakeWGManager{startErr: errors.New("wg failed")}
 	ks := &fakeKillSwitch{}
-	svc := newTestService(t, cloak, wgMgr, ks, profile)
+	svc := newTestService(t, cloak, &fakeNaiveManager{}, wgMgr, ks, profile)
 
 	// Connect fails — kill switch remains active.
 	_ = svc.Connect(context.Background(), profile.ID, ConnectOptions{})
@@ -447,7 +489,7 @@ func TestConnect_KillSwitchEnableError_ReturnsError(t *testing.T) {
 	cloak := &fakeCloakManager{}
 	wgMgr := &fakeWGManager{}
 	ks := &fakeKillSwitch{enableErr: errors.New("firewall error")}
-	svc := newTestService(t, cloak, wgMgr, ks, profile)
+	svc := newTestService(t, cloak, &fakeNaiveManager{}, wgMgr, ks, profile)
 
 	err := svc.Connect(context.Background(), profile.ID, ConnectOptions{})
 	if err == nil {
@@ -476,7 +518,7 @@ func TestConnect_WGPreflightFailure_DoesNotEnableKillSwitch(t *testing.T) {
 	cloak := &fakeCloakManager{}
 	wgMgr := &fakeWGManager{preflightErr: errors.New("wireguard runtime unavailable")}
 	ks := &fakeKillSwitch{}
-	svc := newTestService(t, cloak, wgMgr, ks, profile)
+	svc := newTestService(t, cloak, &fakeNaiveManager{}, wgMgr, ks, profile)
 
 	err := svc.Connect(context.Background(), profile.ID, ConnectOptions{})
 	if err == nil {
@@ -553,7 +595,7 @@ func TestConnect_UsesEphemeralCloakPortAndRewritesEndpoint(t *testing.T) {
 	cloak := &fakeCloakManager{boundLocalPort: 61234}
 	wgMgr := &fakeWGManager{}
 	ks := &fakeKillSwitch{}
-	svc := newTestService(t, cloak, wgMgr, ks, profile)
+	svc := newTestService(t, cloak, &fakeNaiveManager{}, wgMgr, ks, profile)
 
 	if err := svc.Connect(context.Background(), profile.ID, ConnectOptions{}); err != nil {
 		t.Fatalf("connect failed: %v", err)
@@ -571,5 +613,68 @@ func TestConnect_UsesEphemeralCloakPortAndRewritesEndpoint(t *testing.T) {
 	}
 	if stored.Cloak.LocalPort != 61234 {
 		t.Errorf("stored profile Cloak.LocalPort = %d, want 61234 (bound port)", stored.Cloak.LocalPort)
+	}
+}
+
+func TestConnect_CloakOnlyProfile_DoesNotAttemptNaive(t *testing.T) {
+	profile := state.Profile{
+		ID:    "p1",
+		Name:  "p1",
+		Cloak: state.CloakProfile{RemoteHost: "example.com", RemotePort: 443, LocalPort: 51821},
+		WireGuard: state.WireGuardProfile{
+			TunnelName: "pangea0",
+			ConfigText: "[Interface]\nPrivateKey=x\n[Peer]\nEndpoint=127.0.0.1:51821\nPublicKey=y\nAllowedIPs=0.0.0.0/0\n",
+		},
+	}
+	cloakMgr := &fakeCloakManager{}
+	naiveMgr := &fakeNaiveManager{}
+	wgMgr := &fakeWGManager{}
+	ks := &fakeKillSwitch{}
+	svc := newTestService(t, cloakMgr, naiveMgr, wgMgr, ks, profile)
+
+	if err := svc.Connect(context.Background(), "p1", ConnectOptions{}); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	if !cloakMgr.startCalled {
+		t.Fatalf("expected cloak.Start to be called")
+	}
+	if naiveMgr.startCalled {
+		t.Fatalf("naive.Start should not be called when profile.Naive is nil")
+	}
+	status := svc.Status(context.Background())
+	if status.ActiveTransport != "cloak" {
+		t.Fatalf("ActiveTransport = %q, want cloak", status.ActiveTransport)
+	}
+}
+
+func TestConnect_CloakFails_FallsBackToNaive(t *testing.T) {
+	profile := state.Profile{
+		ID:    "p1",
+		Name:  "p1",
+		Cloak: state.CloakProfile{RemoteHost: "example.com", RemotePort: 443, LocalPort: 51821},
+		Naive: &state.NaiveProfile{RemoteHost: "example.com", RemotePort: 443, Username: "u", Password: "p"},
+		WireGuard: state.WireGuardProfile{
+			TunnelName: "pangea0",
+			ConfigText: "[Interface]\nPrivateKey=x\n[Peer]\nEndpoint=127.0.0.1:51821\nPublicKey=y\nAllowedIPs=0.0.0.0/0\n",
+		},
+	}
+	cloakMgr := &fakeCloakManager{startErr: errors.New("cloak boom")}
+	naiveMgr := &fakeNaiveManager{}
+	wgMgr := &fakeWGManager{}
+	ks := &fakeKillSwitch{}
+	svc := newTestService(t, cloakMgr, naiveMgr, wgMgr, ks, profile)
+
+	if err := svc.Connect(context.Background(), "p1", ConnectOptions{}); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	if !cloakMgr.startCalled {
+		t.Fatalf("expected cloak.Start to be attempted first")
+	}
+	if !naiveMgr.startCalled {
+		t.Fatalf("expected naive.Start to be attempted after cloak failed")
+	}
+	status := svc.Status(context.Background())
+	if status.ActiveTransport != "naive" {
+		t.Fatalf("ActiveTransport = %q, want naive", status.ActiveTransport)
 	}
 }

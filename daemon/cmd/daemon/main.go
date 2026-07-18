@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -19,6 +20,19 @@ import (
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/state"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/wg"
 )
+
+// naiveStub satisfies transport.Manager with a permanent "not available"
+// failure, so profile.Naive fallback cleanly no-ops until the real cgo
+// manager replaces it.
+type naiveStub struct{}
+
+func (naiveStub) Start(ctx context.Context, profile state.NaiveProfile) error {
+	return errors.New("naive transport not available in this build")
+}
+
+func (naiveStub) Stop(ctx context.Context) error { return nil }
+
+func (naiveStub) Status() state.TransportStatus { return state.TransportStatus{} }
 
 const daemonAddr = "127.0.0.1:8787"
 
@@ -82,9 +96,13 @@ func startDaemonRuntime() (*daemonRuntime, error) {
 	}
 
 	cloakManager := cloak.NewManager(logs)
+	// TODO(naive_cgo): replace with naive.NewManager() once Task 1's cgo
+	// spike is confirmed and naive.Manager is built with the naive_cgo tag
+	// enabled in the release build.
+	naiveManager := &naiveStub{}
 	wgManager := wg.NewManager(logs)
 	killSwitch := platform.NewKillSwitch()
-	service := api.NewService(machine, logs, configStore, cloakManager, wgManager, killSwitch)
+	service := api.NewService(machine, logs, configStore, cloakManager, naiveManager, wgManager, killSwitch)
 
 	handler := api.NewHandler(token, service)
 	server := &http.Server{
