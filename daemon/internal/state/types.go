@@ -39,6 +39,13 @@ type CloakStatus struct {
 	PID     *int `json:"pid"`
 }
 
+// TransportStatus is a transport-agnostic status snapshot mirrored to the
+// client over the status API, parallel to CloakStatus/WireGuardStatus.
+type TransportStatus struct {
+	Running bool `json:"running"`
+	PID     *int `json:"pid"`
+}
+
 type WireGuardStatus struct {
 	Running  bool   `json:"running"`
 	Detail   string `json:"detail"`
@@ -47,9 +54,12 @@ type WireGuardStatus struct {
 }
 
 type StatusResponse struct {
-	State            DaemonState     `json:"state"`
-	Detail           string          `json:"detail"`
+	State  DaemonState `json:"state"`
+	Detail string      `json:"detail"`
+	// ActiveTransport is "cloak", "naive", or "" when disconnected.
+	ActiveTransport  string          `json:"activeTransport"`
 	Cloak            CloakStatus     `json:"cloak"`
+	Naive            TransportStatus `json:"naive"`
 	WireGuard        WireGuardStatus `json:"wireguard"`
 	KillSwitchActive bool            `json:"killSwitchActive"`
 }
@@ -66,6 +76,20 @@ type CloakProfile struct {
 	ServerName string `json:"serverName,omitempty"`
 }
 
+// NaiveProfile carries per-device NaiveProxy credentials, hub-provisioned
+// the same way CloakProfile is. Nil on a Profile means no NaiveProxy
+// fallback is configured for that profile.
+type NaiveProfile struct {
+	LocalPort  int    `json:"localPort"`
+	RemoteHost string `json:"remoteHost"`
+	RemotePort int    `json:"remotePort"`
+	Username   string `json:"username"`
+	Password   string `json:"password"`
+	// ServerName is the cover SNI presented during the TLS handshake
+	// (naive's --proxy host), analogous to CloakProfile.ServerName.
+	ServerName string `json:"serverName,omitempty"`
+}
+
 type WireGuardProfile struct {
 	ConfigText  string   `json:"configText"`
 	TunnelName  string   `json:"tunnelName"`
@@ -74,9 +98,12 @@ type WireGuardProfile struct {
 }
 
 type Profile struct {
-	ID        string           `json:"id"`
-	Name      string           `json:"name"`
-	Cloak     CloakProfile     `json:"cloak"`
+	ID    string       `json:"id"`
+	Name  string       `json:"name"`
+	Cloak CloakProfile `json:"cloak"`
+	// Naive is optional; nil means this profile has no NaiveProxy fallback
+	// configured and Connect only ever tries Cloak.
+	Naive     *NaiveProfile    `json:"naive,omitempty"`
 	WireGuard WireGuardProfile `json:"wireguard"`
 }
 
