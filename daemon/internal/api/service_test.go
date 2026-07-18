@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -77,6 +78,21 @@ type fakeNaiveManager struct {
 	startErr    error
 	stopCalled  bool
 	running     bool
+
+	// stayDown makes Start succeed (no startErr) without ever flipping
+	// running to true, simulating a transport process that exits
+	// immediately after a successful launch (waitForManagedTransportStable
+	// then times out).
+	stayDown bool
+
+	// waitErr, when set, is returned by WaitForSession — simulating a
+	// transport whose process/session came up (Start + stability check both
+	// succeeded) but never completed its handshake.
+	waitErr error
+
+	// boundLocalPort, when non-zero, overrides the default BoundLocalPort
+	// return value below.
+	boundLocalPort int
 }
 
 func (f *fakeNaiveManager) Start(ctx context.Context, profile state.NaiveProfile) error {
@@ -86,7 +102,9 @@ func (f *fakeNaiveManager) Start(ctx context.Context, profile state.NaiveProfile
 	if f.startErr != nil {
 		return f.startErr
 	}
-	f.running = true
+	if !f.stayDown {
+		f.running = true
+	}
 	return nil
 }
 
@@ -105,10 +123,19 @@ func (f *fakeNaiveManager) Status() state.TransportStatus {
 }
 
 func (f *fakeNaiveManager) WaitForSession(ctx context.Context, timeout time.Duration) error {
-	return nil
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.waitErr
 }
 
-func (f *fakeNaiveManager) BoundLocalPort() int { return 51822 }
+func (f *fakeNaiveManager) BoundLocalPort() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.boundLocalPort != 0 {
+		return f.boundLocalPort
+	}
+	return 51822
+}
 
 type fakeWGManager struct {
 	mu             sync.Mutex
@@ -676,5 +703,152 @@ func TestConnect_CloakFails_FallsBackToNaive(t *testing.T) {
 	status := svc.Status(context.Background())
 	if status.ActiveTransport != "naive" {
 		t.Fatalf("ActiveTransport = %q, want naive", status.ActiveTransport)
+	}
+}
+
+// naiveFallbackProfile builds a profile that falls back to naive (cloak
+// always fails to start) for the fallbackToNaive regression tests below.
+// Naive.LocalPort and the WireGuard config's loopback Endpoint line are
+// both set to origNaiveLocalPort so rebindWireGuardEndpoint has a matching
+// line to rewrite when the fake reports a different bound port.
+func naiveFallbackProfile(origNaiveLocalPort int) state.Profile {
+	return state.Profile{
+		ID:   "p1",
+		Name: "p1",
+		Cloak: state.CloakProfile{
+			RemoteHost: "example.com",
+			RemotePort: 443,
+			LocalPort:  51810,
+		},
+		Naive: &state.NaiveProfile{
+			RemoteHost: "example.com",
+			RemotePort: 443,
+			Username:   "u",
+			Password:   "p",
+			LocalPort:  origNaiveLocalPort,
+		},
+		WireGuard: state.WireGuardProfile{
+			TunnelName: "pangea0",
+			ConfigText: fmt.Sprintf("[Interface]\nPrivateKey=x\n[Peer]\nEndpoint=127.0.0.1:%d\nPublicKey=y\nAllowedIPs=0.0.0.0/0\n", origNaiveLocalPort),
+		},
+	}
+}
+
+// TestFallbackToNaive_DoesNotMutateConfigStoreProfile is the regression test
+// for the config-store aliasing bug: state.ConfigStore's clone-on-read
+// (cloneProfile in config_store.go) only deep-copies
+// WireGuard.DNS/BypassHosts, not the Naive pointer, so profile.Naive
+// returned by FindProfile aliases the config store's own internal
+// *state.NaiveProfile. Before the fix, fallbackToNaive's
+// `profile.Naive.LocalPort = s.rebindWireGuardEndpoint(...)` wrote straight
+// through that alias, mutating the config store's data without its lock.
+// This test proves that after a fallback-to-naive connect with a rebound
+// local port, re-fetching the profile from s.config still shows the
+// ORIGINAL LocalPort.
+func TestFallbackToNaive_DoesNotMutateConfigStoreProfile(t *testing.T) {
+	const origNaiveLocalPort = 51821
+	profile := naiveFallbackProfile(origNaiveLocalPort)
+
+	cloakMgr := &fakeCloakManager{startErr: errors.New("cloak boom")}
+	naiveMgr := &fakeNaiveManager{boundLocalPort: 61822} // different from origNaiveLocalPort
+	wgMgr := &fakeWGManager{}
+	ks := &fakeKillSwitch{}
+	svc := newTestService(t, cloakMgr, naiveMgr, wgMgr, ks, profile)
+
+	if err := svc.Connect(context.Background(), "p1", ConnectOptions{}); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+
+	status := svc.Status(context.Background())
+	if status.ActiveTransport != "naive" {
+		t.Fatalf("ActiveTransport = %q, want naive", status.ActiveTransport)
+	}
+
+	// Sanity check: the in-flight session's profile really did get rebound
+	// to the fake's bound port (otherwise this test wouldn't be exercising
+	// the aliasing path at all).
+	active, ok := svc.getCurrentProfile()
+	if !ok {
+		t.Fatal("expected an active profile after connect")
+	}
+	if active.Naive == nil || active.Naive.LocalPort != 61822 {
+		t.Fatalf("expected in-flight profile Naive.LocalPort rebound to 61822, got %+v", active.Naive)
+	}
+
+	// The regression check: the config store's own copy must be untouched.
+	stored, found := svc.config.FindProfile("p1")
+	if !found {
+		t.Fatal("expected profile p1 to still be found in config store")
+	}
+	if stored.Naive == nil {
+		t.Fatal("expected stored profile to still have a Naive config")
+	}
+	if stored.Naive.LocalPort != origNaiveLocalPort {
+		t.Errorf("config store's Naive.LocalPort was mutated by fallbackToNaive: got %d, want original %d",
+			stored.Naive.LocalPort, origNaiveLocalPort)
+	}
+}
+
+// TestFallbackToNaive_StopsNaiveWhenStabilityCheckFails is a regression test
+// for the leaked-naive-transport bug: when s.naive.Start succeeds but the
+// transport never reports Running (waitForManagedTransportStable times
+// out), fallbackToNaive must call s.naive.Stop before returning its error,
+// so a failed connect attempt doesn't leave an orphaned naive process
+// running in the background.
+func TestFallbackToNaive_StopsNaiveWhenStabilityCheckFails(t *testing.T) {
+	profile := naiveFallbackProfile(51821)
+
+	cloakMgr := &fakeCloakManager{startErr: errors.New("cloak boom")}
+	naiveMgr := &fakeNaiveManager{stayDown: true}
+	wgMgr := &fakeWGManager{}
+	ks := &fakeKillSwitch{}
+	svc := newTestService(t, cloakMgr, naiveMgr, wgMgr, ks, profile)
+
+	err := svc.Connect(context.Background(), "p1", ConnectOptions{})
+	if err == nil {
+		t.Fatal("expected connect to fail when naive never reports running after Start")
+	}
+
+	naiveMgr.mu.Lock()
+	startCalled := naiveMgr.startCalled
+	stopCalled := naiveMgr.stopCalled
+	naiveMgr.mu.Unlock()
+
+	if !startCalled {
+		t.Fatal("expected naive.Start to have been called")
+	}
+	if !stopCalled {
+		t.Error("expected naive.Stop to be called after naive failed to stabilize post-Start, to avoid leaking the naive transport")
+	}
+}
+
+// TestFallbackToNaive_StopsNaiveWhenSessionWaitFails is a regression test
+// for the same leaked-naive-transport bug, covering the other failure path:
+// Start and the stability check both succeed, but WaitForSession fails.
+// fallbackToNaive must still call s.naive.Stop before returning its error.
+func TestFallbackToNaive_StopsNaiveWhenSessionWaitFails(t *testing.T) {
+	profile := naiveFallbackProfile(51821)
+
+	cloakMgr := &fakeCloakManager{startErr: errors.New("cloak boom")}
+	naiveMgr := &fakeNaiveManager{waitErr: errors.New("session handshake timed out")}
+	wgMgr := &fakeWGManager{}
+	ks := &fakeKillSwitch{}
+	svc := newTestService(t, cloakMgr, naiveMgr, wgMgr, ks, profile)
+
+	err := svc.Connect(context.Background(), "p1", ConnectOptions{})
+	if err == nil {
+		t.Fatal("expected connect to fail when naive session wait fails")
+	}
+
+	naiveMgr.mu.Lock()
+	startCalled := naiveMgr.startCalled
+	stopCalled := naiveMgr.stopCalled
+	naiveMgr.mu.Unlock()
+
+	if !startCalled {
+		t.Fatal("expected naive.Start to have been called")
+	}
+	if !stopCalled {
+		t.Error("expected naive.Stop to be called after naive session wait failed, to avoid leaking the naive transport")
 	}
 }

@@ -416,9 +416,22 @@ func (s *Service) fallbackToNaive(ctx context.Context, profile *state.Profile, w
 	if err := s.naive.Start(ctx, *profile.Naive); err != nil {
 		return "", fmt.Errorf("both transports failed: cloak: %v; naive: %w", cloakErr, err)
 	}
+
+	// profile.Naive is the same *state.NaiveProfile the config store holds
+	// internally — state.ConfigStore's clone-on-read (cloneProfile in
+	// config_store.go) only deep-copies WireGuard.DNS/BypassHosts, not Naive.
+	// Replace it with a local copy before mutating LocalPort below so this
+	// call only ever touches its own copy, never the config store's data,
+	// and never without the config store's own lock.
+	naiveCopy := *profile.Naive
+	profile.Naive = &naiveCopy
+
 	profile.Naive.LocalPort = s.rebindWireGuardEndpoint(s.naive, profile.Naive.LocalPort, wireGuardProfile)
 	naiveRunning := func() bool { return s.naive.Status().Running }
 	if err := s.waitForManagedTransportStable(ctx, naiveRunning, profile.Naive.LocalPort, 200*time.Millisecond); err != nil {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		_ = s.naive.Stop(cleanupCtx)
+		cleanupCancel()
 		return "", fmt.Errorf("both transports failed: cloak: %v; naive: %w", cloakErr, err)
 	}
 	if waiter, ok := s.naive.(transport.SessionWaiter); ok {
@@ -426,6 +439,9 @@ func (s *Service) fallbackToNaive(ctx context.Context, profile *state.Profile, w
 		err := waiter.WaitForSession(waitCtx, 10*time.Second)
 		cancel()
 		if err != nil {
+			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 2*time.Second)
+			_ = s.naive.Stop(cleanupCtx)
+			cleanupCancel()
 			return "", fmt.Errorf("both transports failed: cloak: %v; naive session: %w", cloakErr, err)
 		}
 	}
