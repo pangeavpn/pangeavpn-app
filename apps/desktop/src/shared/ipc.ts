@@ -88,6 +88,20 @@ export interface ServerInfo {
     // Optional cover SNI advertised by the hub (daemon defaults to www.microsoft.com when absent).
     serverName?: string;
   };
+  /**
+   * NaiveProxy fallback connection info, present only when the hub node has
+   * NaiveProxy configured. Static per-node config (unlike cloak's per-device
+   * `uid`) — see NaiveProfileSchema in @pangeavpn/shared-types for the full
+   * daemon-facing shape; this omits `localPort`, which is daemon-assigned.
+   */
+  naive?: {
+    remoteHost: string;
+    remotePort: number;
+    username: string;
+    password: string;
+    // Cover SNI presented during the TLS handshake (naive's --proxy host).
+    serverName?: string;
+  };
 }
 
 export interface DeviceInfo {

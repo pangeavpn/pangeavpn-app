@@ -95,6 +95,25 @@ async function resolveViaDoH(hostname: string): Promise<string | null> {
 }
 
 /**
+ * Resolve NaiveProxy's remote host to an IP so it can be excluded from
+ * AllowedIPs (see allowedIPsExcludingAll). Unlike Cloak, whose remoteHost
+ * from the hub is already a raw IP, NaiveProxy's remoteHost is a real
+ * domain name (Caddy needs one to obtain a genuine ACME certificate — see
+ * hub/config/nodes.json in the hub repo, e.g. naive-eu-west-1.pangeavpn.org),
+ * so it must be resolved before it can be turned into a /32 exclusion.
+ *
+ * Reuses the same DoH infrastructure already used to resolve the hub's own
+ * hostname (see resolveViaDoH above / ensureHub), rather than falling back
+ * to plain system DNS, since this client otherwise avoids leaking DNS
+ * queries in cleartext. Returns null (never throws) on resolution failure
+ * so callers can degrade gracefully instead of failing provisioning.
+ */
+async function resolveNaiveRemoteIp(host: string): Promise<string | null> {
+  if (isIPv4Literal(host)) return host;
+  return resolveViaDoH(host);
+}
+
+/**
  * Make an HTTPS request to a DoH-resolved IP with correct SNI for Cloudflare.
  * Uses node:https so we can set servername (SNI) independently from the IP.
  * Uses an external setTimeout for a reliable connection timeout (node:https
@@ -179,26 +198,51 @@ function generateWireGuardKeyPair(): { privateKey: string; publicKey: string } {
   };
 }
 
-/** Calculate AllowedIPs CIDRs that cover 0.0.0.0/0 minus a single excluded IP */
-function allowedIPsExcluding(excludeIP: string): string[] {
-  const parts = excludeIP.split(".").map(Number);
-  const ip = ((parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3]) >>> 0;
+interface CidrBlock {
+  /** Network address as a 32-bit unsigned integer. */
+  base: number;
+  /** Prefix length, 0-32. */
+  prefixLen: number;
+}
 
-  const ranges: string[] = [];
-  let base = 0;
+function ipToInt(ip: string): number {
+  const parts = ip.split(".").map(Number);
+  return ((parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3]) >>> 0;
+}
 
-  for (let prefixLen = 1; prefixLen <= 32; prefixLen++) {
+function intToIp(n: number): string {
+  return [(n >>> 24) & 0xff, (n >>> 16) & 0xff, (n >>> 8) & 0xff, n & 0xff].join(".");
+}
+
+/** True if `ip` (as a 32-bit uint) falls inside `block`. */
+function cidrContains(block: CidrBlock, ip: number): boolean {
+  if (block.prefixLen === 0) return true;
+  const maskBits = 32 - block.prefixLen;
+  const mask = (0xffffffff << maskBits) >>> 0;
+  return (ip & mask) >>> 0 === (block.base & mask) >>> 0;
+}
+
+/**
+ * Split a CIDR block into the set of sibling sub-blocks that together cover
+ * `block` minus the single host `ip` (which must lie within `block`).
+ *
+ * Same bit-halving technique as the original single-IP implementation, but
+ * generalized to start from an arbitrary block instead of hardcoding
+ * 0.0.0.0/0 — this is what lets `allowedIPsExcludingAll` recurse into an
+ * already-split range when a second excluded IP lands inside it.
+ */
+function splitBlockExcluding(block: CidrBlock, ip: number): CidrBlock[] {
+  const ranges: CidrBlock[] = [];
+  let base = block.base;
+
+  for (let prefixLen = block.prefixLen + 1; prefixLen <= 32; prefixLen++) {
     const bit = 32 - prefixLen;
     const mask = (1 << bit) >>> 0;
     const ipBitSet = (ip & mask) !== 0;
 
     // Sibling subnet: the half that does NOT contain the excluded IP
     const sibling = ipBitSet ? base : (base | mask) >>> 0;
-    const a = (sibling >>> 24) & 0xff;
-    const b = (sibling >>> 16) & 0xff;
-    const c = (sibling >>> 8) & 0xff;
-    const d = sibling & 0xff;
-    ranges.push(`${a}.${b}.${c}.${d}/${prefixLen}`);
+    ranges.push({ base: sibling, prefixLen });
 
     if (ipBitSet) {
       base = (base | mask) >>> 0;
@@ -208,15 +252,67 @@ function allowedIPsExcluding(excludeIP: string): string[] {
   return ranges;
 }
 
+/**
+ * Calculate AllowedIPs CIDRs that cover 0.0.0.0/0 minus every IP in
+ * `excludeIPs`. Each transport (Cloak, and NaiveProxy when configured as a
+ * fallback) makes its own outbound connection to its own remote host
+ * *outside* the WireGuard tunnel (the tunnel's Endpoint is always
+ * 127.0.0.1:<local transport port>) — every one of those remote hosts must
+ * be excluded from AllowedIPs, or the OS routing table would try to route
+ * the transport's own connection attempt back through the tunnel it's still
+ * establishing (a fatal routing loop).
+ *
+ * Approach: start with the whole address space as a single range
+ * (0.0.0.0/0) and, for each IP to exclude, subtract it from every range
+ * currently in the list — a range that doesn't contain the IP passes
+ * through unchanged; a range that does gets replaced by its sibling
+ * sub-blocks via splitBlockExcluding. Duplicate excluded IPs are handled
+ * safely: the second occurrence finds its /32 already isolated and
+ * splitBlockExcluding returns no further sub-blocks for it (a /32 block has
+ * no room to halve further), which is exactly "no-op, stays excluded".
+ */
+function allowedIPsExcludingAll(excludeIPs: string[]): string[] {
+  let blocks: CidrBlock[] = [{ base: 0, prefixLen: 0 }];
+
+  for (const excludeIP of excludeIPs) {
+    const ip = ipToInt(excludeIP);
+    const nextBlocks: CidrBlock[] = [];
+    for (const block of blocks) {
+      if (cidrContains(block, ip)) {
+        nextBlocks.push(...splitBlockExcluding(block, ip));
+      } else {
+        nextBlocks.push(block);
+      }
+    }
+    blocks = nextBlocks;
+  }
+
+  return blocks.map((b) => `${intToIp(b.base)}/${b.prefixLen}`);
+}
+
+/** Calculate AllowedIPs CIDRs that cover 0.0.0.0/0 minus a single excluded IP */
+function allowedIPsExcluding(excludeIP: string): string[] {
+  return allowedIPsExcludingAll([excludeIP]);
+}
+
+/** Matches a literal dotted-quad IPv4 address (not a hostname). */
+const IPV4_LITERAL_PATTERN = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
+
+function isIPv4Literal(host: string): boolean {
+  const match = IPV4_LITERAL_PATTERN.exec(host);
+  if (!match) return false;
+  return match.slice(1, 5).every((octet) => Number(octet) <= 255);
+}
+
 function buildWireGuardConfig(
   privateKey: string,
   assignedIP: string,
   dns: string,
   serverPubkey: string,
   cloakLocalPort: number,
-  cloakRemoteHost: string
+  excludeIPs: string[]
 ): string {
-  const allowedIPs = allowedIPsExcluding(cloakRemoteHost).join(", ");
+  const allowedIPs = allowedIPsExcludingAll(excludeIPs).join(", ");
 
   return [
     "[Interface]",
@@ -682,6 +778,33 @@ export class PangeaApiClient {
       .map((s) => s.trim())
       .filter(Boolean);
 
+    // Every transport that might actually dial out (Cloak always; NaiveProxy
+    // when configured as a fallback) needs its remote host excluded from
+    // AllowedIPs, or the OS would try to route that connection attempt back
+    // through the tunnel it's still establishing. Cloak's remoteHost is
+    // always a raw IP from the hub. NaiveProxy's is a real domain name (so
+    // Caddy can hold a genuine ACME cert), so it must be resolved first.
+    const excludeIPs = [server.cloak.remoteHost];
+    if (server.naive) {
+      const naiveIp = await resolveNaiveRemoteIp(server.naive.remoteHost);
+      if (naiveIp) {
+        excludeIPs.push(naiveIp);
+      } else {
+        // Fail open, not closed: NaiveProxy is a fallback-of-last-resort —
+        // Cloak is expected to work in the overwhelming majority of
+        // connections, and Cloak's own exclusion above is unaffected by
+        // this failure. Losing the ability to fall back to NaiveProxy this
+        // session is far preferable to blocking provisioning (and therefore
+        // every connection, including plain Cloak ones) on a DoH lookup for
+        // a host that's only needed if Cloak later fails.
+        console.warn(
+          `[provision] Could not resolve NaiveProxy remote host "${server.naive.remoteHost}" to an IP; ` +
+          "AllowedIPs will not exclude it. If Cloak fails and the daemon falls back to NaiveProxy, " +
+          "its own connection attempt could be routed back through the tunnel (routing loop)."
+        );
+      }
+    }
+
     const cloakLocalPort = 51820;
     const configText = buildWireGuardConfig(
       keyPair.privateKey,
@@ -689,7 +812,7 @@ export class PangeaApiClient {
       reg.dns,
       reg.serverPubkey,
       cloakLocalPort,
-      server.cloak.remoteHost
+      excludeIPs
     );
 
     return {
@@ -705,6 +828,16 @@ export class PangeaApiClient {
         password: "",
         ...(server.cloak.serverName ? { serverName: server.cloak.serverName } : {})
       },
+      ...(server.naive ? {
+        naive: {
+          localPort: 0,
+          remoteHost: server.naive.remoteHost,
+          remotePort: server.naive.remotePort,
+          username: server.naive.username,
+          password: server.naive.password,
+          ...(server.naive.serverName ? { serverName: server.naive.serverName } : {})
+        }
+      } : {}),
       wireguard: {
         configText,
         tunnelName: "pangeavpn",
