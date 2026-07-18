@@ -23,6 +23,15 @@ export const CloakProfileSchema = z.object({
   serverName: z.string().optional()
 });
 
+export const NaiveProfileSchema = z.object({
+  localPort: z.number().int().nonnegative(),
+  remoteHost: z.string().min(1),
+  remotePort: z.number().int().positive(),
+  username: z.string().min(1),
+  password: z.string(),
+  serverName: z.string().optional()
+});
+
 export const WireGuardProfileSchema = z.object({
   configText: z.string(),
   tunnelName: z.string().min(1),
@@ -34,6 +43,7 @@ export const ProfileSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
   cloak: CloakProfileSchema,
+  naive: NaiveProfileSchema.optional(),
   wireguard: WireGuardProfileSchema
 });
 
@@ -44,7 +54,12 @@ export const AppConfigSchema = z.object({
 export const StatusResponseSchema = z.object({
   state: DaemonStateSchema,
   detail: z.string(),
+  activeTransport: z.enum(["cloak", "naive", ""]).default(""),
   cloak: z.object({
+    running: z.boolean(),
+    pid: z.number().nullable()
+  }),
+  naive: z.object({
     running: z.boolean(),
     pid: z.number().nullable()
   }),
@@ -87,6 +102,7 @@ export type LogLevel = z.infer<typeof LogLevelSchema>;
 export type LogSource = z.infer<typeof LogSourceSchema>;
 
 export type CloakProfile = z.infer<typeof CloakProfileSchema>;
+export type NaiveProfile = z.infer<typeof NaiveProfileSchema>;
 export type WireGuardProfile = z.infer<typeof WireGuardProfileSchema>;
 export type Profile = z.infer<typeof ProfileSchema>;
 export type AppConfig = z.infer<typeof AppConfigSchema>;
