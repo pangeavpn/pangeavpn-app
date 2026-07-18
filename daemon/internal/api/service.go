@@ -142,6 +142,9 @@ type ConnectOptions struct {
 	// Lockdown marks the kill switch as an intentional lock that survives
 	// daemon restarts (re-applied on startup rather than cleared as stale).
 	Lockdown bool
+
+	// "cloak", "naive", or "" (default: cloak first, fall back to naive).
+	PreferredTransport string
 }
 
 func (s *Service) Connect(ctx context.Context, profileID string, opts ConnectOptions) error {
@@ -231,29 +234,21 @@ func (s *Service) Connect(ctx context.Context, profileID string, opts ConnectOpt
 	}
 	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("kill switch enabled (%dms)", time.Since(stepStart).Milliseconds()))
 
-	if err := s.bringUpAfterKillSwitch(ctx, profile, wireGuardProfile); err != nil {
+	if err := s.bringUpAfterKillSwitch(ctx, profile, wireGuardProfile, opts.PreferredTransport); err != nil {
 		return err
 	}
 	s.logs.Add(state.LogInfo, state.SourceDaemon, "connect flow completed")
 	return nil
 }
 
-// bringUpAfterKillSwitch starts a transport (Cloak, falling back to
-// NaiveProxy on failure) + WireGuard and updates the kill switch with the
-// tunnel interface. Assumes opMu is held and the kill switch is already
-// Enable()d. Shared by Connect and Switch.
-//
-// profile is passed to startTransport by address (rather than the function's
-// own by-value parameter) so that a rebound Cloak/NaiveProxy LocalPort
-// (LocalPort=0 requests an ephemeral port; the transport reports back what
-// the kernel actually assigned) is visible to this function's own `profile`
-// variable afterwards — it's what gets persisted via setCurrentProfile below
-// and later reused for health-check restarts.
-func (s *Service) bringUpAfterKillSwitch(ctx context.Context, profile state.Profile, wireGuardProfile state.WireGuardProfile) error {
+// bringUpAfterKillSwitch starts the transport + WireGuard and updates the
+// kill switch. Assumes opMu held, kill switch already Enable()d. Shared by
+// Connect and Switch.
+func (s *Service) bringUpAfterKillSwitch(ctx context.Context, profile state.Profile, wireGuardProfile state.WireGuardProfile, preferredTransport string) error {
 	s.machine.Set(state.StateConnecting, "starting transport")
 	stepStart := time.Now()
 
-	kind, err := s.startTransport(ctx, &profile, &wireGuardProfile)
+	kind, err := s.startTransport(ctx, &profile, &wireGuardProfile, preferredTransport)
 	if err != nil {
 		s.setError(fmt.Sprintf("transport start failed: %v", err))
 		return err
@@ -370,39 +365,101 @@ func (s *Service) waitForManagedTransportStable(ctx context.Context, isRunning f
 	return errors.New("transport process exited during startup")
 }
 
-// startTransport tries Cloak first, falling back to NaiveProxy (when
-// configured) if Cloak fails to start, fails to stay running, or fails to
-// establish a session. profile and wireGuardProfile are passed by address so
-// mutations (rebound LocalPort, rewritten Endpoint) made here and in
-// fallbackToNaive are visible to the caller.
-func (s *Service) startTransport(ctx context.Context, profile *state.Profile, wireGuardProfile *state.WireGuardProfile) (string, error) {
+// startCloakTransport runs Cloak's start sequence. Caller owns cleanup on
+// failure (stop cloak).
+func (s *Service) startCloakTransport(ctx context.Context, profile *state.Profile, wireGuardProfile *state.WireGuardProfile) error {
 	if !s.cloak.Status().Running {
-		// Bind ephemeral loopback port to avoid Windows Hyper-V UDP exclusions on 51820.
 		cloakStartProfile := profile.Cloak
 		cloakStartProfile.LocalPort = 0
 		if err := s.cloak.Start(ctx, cloakStartProfile); err != nil {
-			return s.fallbackToNaive(ctx, profile, wireGuardProfile, fmt.Errorf("cloak start: %w", err))
+			return fmt.Errorf("start: %w", err)
 		}
 	}
 	profile.Cloak.LocalPort = s.rebindWireGuardEndpoint(s.cloak, profile.Cloak.LocalPort, wireGuardProfile)
 	cloakRunning := func() bool { return s.cloak.Status().Running }
 	if err := s.waitForManagedTransportStable(ctx, cloakRunning, profile.Cloak.LocalPort, 200*time.Millisecond); err != nil {
-		return s.fallbackToNaive(ctx, profile, wireGuardProfile, err)
+		return err
 	}
 	if waiter, ok := s.cloak.(transport.SessionWaiter); ok {
 		waitCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		err := waiter.WaitForSession(waitCtx, 10*time.Second)
 		cancel()
 		if err != nil {
-			return s.fallbackToNaive(ctx, profile, wireGuardProfile, err)
+			return err
 		}
 	}
-	return "cloak", nil
+	return nil
 }
 
-// fallbackToNaive is called once Cloak has failed at some stage of startup.
-// It stops whatever Cloak left behind, and — only if the profile has a
-// NaiveProxy fallback configured — starts NaiveProxy in its place.
+// startNaiveTransport runs NaiveProxy's start sequence, mirroring
+// startCloakTransport. Cleans up (stops naive) on its own failure, since
+// it's always the last transport tried.
+func (s *Service) startNaiveTransport(ctx context.Context, profile *state.Profile, wireGuardProfile *state.WireGuardProfile) error {
+	// De-alias from the config store's shared *NaiveProfile before mutating LocalPort.
+	naiveCopy := *profile.Naive
+	profile.Naive = &naiveCopy
+
+	naiveStartProfile := *profile.Naive
+	naiveStartProfile.LocalPort = 0
+	if err := s.naive.Start(ctx, naiveStartProfile); err != nil {
+		return fmt.Errorf("start: %w", err)
+	}
+
+	profile.Naive.LocalPort = s.rebindWireGuardEndpoint(s.naive, profile.Naive.LocalPort, wireGuardProfile)
+	naiveRunning := func() bool { return s.naive.Status().Running }
+	if err := s.waitForManagedTransportStable(ctx, naiveRunning, profile.Naive.LocalPort, 200*time.Millisecond); err != nil {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		_ = s.naive.Stop(cleanupCtx)
+		cleanupCancel()
+		return err
+	}
+	if waiter, ok := s.naive.(transport.SessionWaiter); ok {
+		waitCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		err := waiter.WaitForSession(waitCtx, 10*time.Second)
+		cancel()
+		if err != nil {
+			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 2*time.Second)
+			_ = s.naive.Stop(cleanupCtx)
+			cleanupCancel()
+			return fmt.Errorf("session: %w", err)
+		}
+	}
+	return nil
+}
+
+// startTransport: "cloak" = cloak only, no fallback. "naive" = naive only,
+// errors if profile has none configured. "" (default) = cloak first, fall
+// back to naive on failure.
+func (s *Service) startTransport(ctx context.Context, profile *state.Profile, wireGuardProfile *state.WireGuardProfile, preferredTransport string) (string, error) {
+	switch preferredTransport {
+	case "naive":
+		if profile.Naive == nil {
+			return "", errors.New("naive transport requested but this profile has no naive configuration")
+		}
+		if err := s.startNaiveTransport(ctx, profile, wireGuardProfile); err != nil {
+			return "", fmt.Errorf("naive: %w", err)
+		}
+		return "naive", nil
+	case "cloak":
+		if err := s.startCloakTransport(ctx, profile, wireGuardProfile); err != nil {
+			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 2*time.Second)
+			_ = s.cloak.Stop(cleanupCtx)
+			cleanupCancel()
+			return "", fmt.Errorf("cloak: %w", err)
+		}
+		return "cloak", nil
+	default:
+		if err := s.startCloakTransport(ctx, profile, wireGuardProfile); err != nil {
+			return s.fallbackToNaive(ctx, profile, wireGuardProfile, err)
+		}
+		return "cloak", nil
+	}
+}
+
+// fallbackToNaive is called once Cloak has failed at some stage of startup
+// during automatic ("" / "auto") mode. It stops whatever Cloak left
+// behind, and — only if the profile has a NaiveProxy fallback configured —
+// starts NaiveProxy in its place.
 func (s *Service) fallbackToNaive(ctx context.Context, profile *state.Profile, wireGuardProfile *state.WireGuardProfile, cloakErr error) (string, error) {
 	s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("cloak transport failed, checking naive fallback: %v", cloakErr))
 	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -413,42 +470,10 @@ func (s *Service) fallbackToNaive(ctx context.Context, profile *state.Profile, w
 		return "", fmt.Errorf("cloak failed and no naive fallback configured: %w", cloakErr)
 	}
 
-	// profile.Naive is the same *state.NaiveProfile the config store holds
-	// internally — state.ConfigStore's clone-on-read (cloneProfile in
-	// config_store.go) only deep-copies WireGuard.DNS/BypassHosts, not Naive.
-	// Replace it with a local copy before mutating LocalPort below so this
-	// call only ever touches its own copy, never the config store's data,
-	// and never without the config store's own lock.
-	naiveCopy := *profile.Naive
-	profile.Naive = &naiveCopy
-
-	// Bind ephemeral loopback port to avoid Windows Hyper-V UDP exclusions,
-	// same reasoning and same bug class as Cloak's identical override above.
-	naiveStartProfile := *profile.Naive
-	naiveStartProfile.LocalPort = 0
-	if err := s.naive.Start(ctx, naiveStartProfile); err != nil {
+	if err := s.startNaiveTransport(ctx, profile, wireGuardProfile); err != nil {
 		return "", fmt.Errorf("both transports failed: cloak: %v; naive: %w", cloakErr, err)
 	}
 
-	profile.Naive.LocalPort = s.rebindWireGuardEndpoint(s.naive, profile.Naive.LocalPort, wireGuardProfile)
-	naiveRunning := func() bool { return s.naive.Status().Running }
-	if err := s.waitForManagedTransportStable(ctx, naiveRunning, profile.Naive.LocalPort, 200*time.Millisecond); err != nil {
-		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 2*time.Second)
-		_ = s.naive.Stop(cleanupCtx)
-		cleanupCancel()
-		return "", fmt.Errorf("both transports failed: cloak: %v; naive: %w", cloakErr, err)
-	}
-	if waiter, ok := s.naive.(transport.SessionWaiter); ok {
-		waitCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		err := waiter.WaitForSession(waitCtx, 10*time.Second)
-		cancel()
-		if err != nil {
-			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 2*time.Second)
-			_ = s.naive.Stop(cleanupCtx)
-			cleanupCancel()
-			return "", fmt.Errorf("both transports failed: cloak: %v; naive session: %w", cloakErr, err)
-		}
-	}
 	s.logs.Add(state.LogInfo, state.SourceDaemon, "fell back to naive transport after cloak failure")
 	return "naive", nil
 }
@@ -536,7 +561,7 @@ func (s *Service) Switch(ctx context.Context, newProfileID string, opts ConnectO
 	}
 	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("kill switch re-enabled for %s (%dms)", newProfile.ID, time.Since(stepStart).Milliseconds()))
 
-	if err := s.bringUpAfterKillSwitch(ctx, newProfile, wireGuardProfile); err != nil {
+	if err := s.bringUpAfterKillSwitch(ctx, newProfile, wireGuardProfile, opts.PreferredTransport); err != nil {
 		return err
 	}
 	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("switch flow completed: %s -> %s", oldProfile.ID, newProfile.ID))

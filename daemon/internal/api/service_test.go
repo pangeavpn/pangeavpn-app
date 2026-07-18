@@ -826,6 +826,89 @@ func TestConnect_CloakFails_FallsBackToNaive(t *testing.T) {
 	}
 }
 
+func TestConnect_PreferredTransportCloak_DoesNotFallBackOnFailure(t *testing.T) {
+	profile := state.Profile{
+		ID:    "p1",
+		Name:  "p1",
+		Cloak: state.CloakProfile{RemoteHost: "example.com", RemotePort: 443, LocalPort: 51821},
+		Naive: &state.NaiveProfile{RemoteHost: "example.com", RemotePort: 443, Username: "u", Password: "p"},
+		WireGuard: state.WireGuardProfile{
+			TunnelName: "pangea0",
+			ConfigText: "[Interface]\nPrivateKey=x\n[Peer]\nEndpoint=127.0.0.1:51821\nPublicKey=y\nAllowedIPs=0.0.0.0/0\n",
+		},
+	}
+	cloakMgr := &fakeCloakManager{startErr: errors.New("cloak boom")}
+	naiveMgr := &fakeNaiveManager{}
+	wgMgr := &fakeWGManager{}
+	ks := &fakeKillSwitch{}
+	svc := newTestService(t, cloakMgr, naiveMgr, wgMgr, ks, profile)
+
+	err := svc.Connect(context.Background(), "p1", ConnectOptions{PreferredTransport: "cloak"})
+	if err == nil {
+		t.Fatal("expected Connect to fail — cloak failed and cloak-only mode should not fall back")
+	}
+	if naiveMgr.startCalled {
+		t.Fatal("naive.Start should not be called when PreferredTransport is cloak")
+	}
+}
+
+func TestConnect_PreferredTransportNaive_SkipsCloakEntirely(t *testing.T) {
+	profile := state.Profile{
+		ID:    "p1",
+		Name:  "p1",
+		Cloak: state.CloakProfile{RemoteHost: "example.com", RemotePort: 443, LocalPort: 51821},
+		Naive: &state.NaiveProfile{RemoteHost: "naive.example.com", RemotePort: 8443, Username: "u", Password: "p"},
+		WireGuard: state.WireGuardProfile{
+			TunnelName: "pangea0",
+			ConfigText: "[Interface]\nPrivateKey=x\n[Peer]\nEndpoint=127.0.0.1:51821\nPublicKey=y\nAllowedIPs=0.0.0.0/0\n",
+		},
+	}
+	cloakMgr := &fakeCloakManager{}
+	naiveMgr := &fakeNaiveManager{}
+	wgMgr := &fakeWGManager{}
+	ks := &fakeKillSwitch{}
+	svc := newTestService(t, cloakMgr, naiveMgr, wgMgr, ks, profile)
+
+	if err := svc.Connect(context.Background(), "p1", ConnectOptions{PreferredTransport: "naive"}); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	if cloakMgr.startCalled {
+		t.Fatal("cloak.Start should not be called when PreferredTransport is naive")
+	}
+	if !naiveMgr.startCalled {
+		t.Fatal("expected naive.Start to be called")
+	}
+	status := svc.Status(context.Background())
+	if status.ActiveTransport != "naive" {
+		t.Fatalf("ActiveTransport = %q, want naive", status.ActiveTransport)
+	}
+}
+
+func TestConnect_PreferredTransportNaive_ErrorsWhenProfileHasNoNaiveConfig(t *testing.T) {
+	profile := state.Profile{
+		ID:    "p1",
+		Name:  "p1",
+		Cloak: state.CloakProfile{RemoteHost: "example.com", RemotePort: 443, LocalPort: 51821},
+		WireGuard: state.WireGuardProfile{
+			TunnelName: "pangea0",
+			ConfigText: "[Interface]\nPrivateKey=x\n[Peer]\nEndpoint=127.0.0.1:51821\nPublicKey=y\nAllowedIPs=0.0.0.0/0\n",
+		},
+	}
+	cloakMgr := &fakeCloakManager{}
+	naiveMgr := &fakeNaiveManager{}
+	wgMgr := &fakeWGManager{}
+	ks := &fakeKillSwitch{}
+	svc := newTestService(t, cloakMgr, naiveMgr, wgMgr, ks, profile)
+
+	err := svc.Connect(context.Background(), "p1", ConnectOptions{PreferredTransport: "naive"})
+	if err == nil {
+		t.Fatal("expected Connect to fail — profile has no naive configuration")
+	}
+	if cloakMgr.startCalled || naiveMgr.startCalled {
+		t.Fatal("neither transport should be started when naive is requested but unconfigured")
+	}
+}
+
 // naiveFallbackProfile builds a profile that falls back to naive (cloak
 // always fails to start) for the fallbackToNaive regression tests below.
 // Naive.LocalPort and the WireGuard config's loopback Endpoint line are

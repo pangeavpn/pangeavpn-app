@@ -76,9 +76,10 @@ func rateLimitMiddleware(limiter *rateLimiter, next http.Handler) http.Handler {
 const maxBodySize = 1 << 20
 
 type connectRequest struct {
-	ProfileID string `json:"profileId"`
-	AllowLAN  bool   `json:"allowLAN,omitempty"`
-	Lockdown  bool   `json:"lockdown,omitempty"`
+	ProfileID          string `json:"profileId"`
+	AllowLAN           bool   `json:"allowLAN,omitempty"`
+	Lockdown           bool   `json:"lockdown,omitempty"`
+	PreferredTransport string `json:"preferredTransport,omitempty"`
 }
 
 type disconnectRequest struct {
@@ -131,7 +132,7 @@ func NewHandler(token string, service *Service) http.Handler {
 			return
 		}
 
-		err := service.Connect(r.Context(), req.ProfileID, ConnectOptions{AllowLAN: req.AllowLAN, Lockdown: req.Lockdown})
+		err := service.Connect(r.Context(), req.ProfileID, ConnectOptions{AllowLAN: req.AllowLAN, Lockdown: req.Lockdown, PreferredTransport: req.PreferredTransport})
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, okResponse{OK: false})
 			return
@@ -218,7 +219,7 @@ func NewHandler(token string, service *Service) http.Handler {
 			return
 		}
 
-		err := service.Switch(r.Context(), req.ProfileID, ConnectOptions{AllowLAN: req.AllowLAN, Lockdown: req.Lockdown})
+		err := service.Switch(r.Context(), req.ProfileID, ConnectOptions{AllowLAN: req.AllowLAN, Lockdown: req.Lockdown, PreferredTransport: req.PreferredTransport})
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, okResponse{OK: false})
 			return
