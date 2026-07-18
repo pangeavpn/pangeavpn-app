@@ -185,7 +185,22 @@ func cloneProfile(profile Profile) Profile {
 	copyProfile := profile
 	copyProfile.WireGuard.DNS = cloneStrings(profile.WireGuard.DNS)
 	copyProfile.WireGuard.BypassHosts = cloneStrings(profile.WireGuard.BypassHosts)
+	copyProfile.Naive = cloneNaiveProfile(profile.Naive)
 	return copyProfile
+}
+
+// cloneNaiveProfile returns an independent copy of profile behind a fresh
+// pointer, or nil if profile is nil. NaiveProfile is a flat struct (no
+// nested pointers/slices), so a plain value copy is sufficient — but without
+// this, cloneProfile would leave the returned Profile's Naive pointer
+// aliasing the config store's own internal *NaiveProfile, letting a caller
+// mutate the store's state without its lock.
+func cloneNaiveProfile(profile *NaiveProfile) *NaiveProfile {
+	if profile == nil {
+		return nil
+	}
+	copyProfile := *profile
+	return &copyProfile
 }
 
 func cloneStrings(values []string) []string {
