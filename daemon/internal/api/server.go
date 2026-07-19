@@ -79,9 +79,10 @@ type connectRequest struct {
 	ProfileID string `json:"profileId"`
 	AllowLAN  bool   `json:"allowLAN,omitempty"`
 	Lockdown  bool   `json:"lockdown,omitempty"`
-	// PreferredTransport: "cloak", "naive", "reality", "hysteria2", or ""
-	// (auto: cloak, then naive, then reality). Service.startTransport
-	// dispatches on this value; unrecognized values fall through to auto.
+	// PreferredTransport: "cloak", "naive", "reality", "hysteria2",
+	// "snowflake", or "" (auto: cloak, then naive, then reality, then
+	// hysteria2, then snowflake). Service.startTransport dispatches on this
+	// value; unrecognized values fall through to auto.
 	PreferredTransport string `json:"preferredTransport,omitempty"`
 }
 

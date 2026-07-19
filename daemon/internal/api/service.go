@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"regexp"
 	"strconv"
@@ -53,6 +55,14 @@ type hysteria2Manager interface {
 	Status() state.TransportStatus
 }
 
+// snowflakeManager is transport.Manager (Stop) plus Start/Status with
+// Snowflake's concrete types. snowflake.Manager satisfies this directly.
+type snowflakeManager interface {
+	transport.Manager
+	Start(ctx context.Context, profile state.SnowflakeProfile) error
+	Status() state.TransportStatus
+}
+
 type Service struct {
 	machine    *state.Machine
 	logs       *state.LogStore
@@ -61,6 +71,7 @@ type Service struct {
 	naive      naiveManager
 	reality    realityManager
 	hysteria2  hysteria2Manager
+	snowflake  snowflakeManager
 	wg         wg.Manager
 	killSwitch platform.KillSwitch
 
@@ -77,7 +88,8 @@ type Service struct {
 	currentProfile *state.Profile
 
 	// activeMu guards activeTransportKind, which of {cloak, naive, reality,
-	// hysteria2} is live for the current session. Empty string when disconnected.
+	// hysteria2, snowflake} is live for the current session. Empty string
+	// when disconnected.
 	activeMu            sync.RWMutex
 	activeTransportKind string
 }
@@ -105,6 +117,7 @@ func NewService(
 	naiveManager naiveManager,
 	realityManager realityManager,
 	hysteria2Manager hysteria2Manager,
+	snowflakeManager snowflakeManager,
 	wgManager wg.Manager,
 	killSwitch platform.KillSwitch,
 ) *Service {
@@ -116,6 +129,7 @@ func NewService(
 		naive:      naiveManager,
 		reality:    realityManager,
 		hysteria2:  hysteria2Manager,
+		snowflake:  snowflakeManager,
 		wg:         wgManager,
 		killSwitch: killSwitch,
 	}
@@ -136,6 +150,8 @@ func (s *Service) activeTransport() transport.Manager {
 		return s.reality
 	case "hysteria2":
 		return s.hysteria2
+	case "snowflake":
+		return s.snowflake
 	default:
 		return nil
 	}
@@ -169,8 +185,8 @@ type ConnectOptions struct {
 	// daemon restarts (re-applied on startup rather than cleared as stale).
 	Lockdown bool
 
-	// "cloak", "naive", "hysteria2", or "" (default: cloak first, fall back
-	// to naive).
+	// "cloak", "naive", "reality", "hysteria2", "snowflake", or "" (default:
+	// cloak first, fall back to naive, reality, hysteria2, then snowflake).
 	PreferredTransport string
 }
 
@@ -525,9 +541,48 @@ func (s *Service) startHysteria2Transport(ctx context.Context, profile *state.Pr
 	return nil
 }
 
-// startTransport: "cloak"/"naive"/"reality"/"hysteria2" = that transport
-// only, no fallback (errors if the profile has no config for it). ""
-// (default) = cloak first, then naive, then reality, then hysteria2.
+// startSnowflakeTransport runs Snowflake's start sequence, mirroring
+// startHysteria2Transport. Cleans up (stops snowflake) on its own failure.
+func (s *Service) startSnowflakeTransport(ctx context.Context, profile *state.Profile, wireGuardProfile *state.WireGuardProfile) error {
+	// De-alias from the config store's shared *SnowflakeProfile before mutating LocalPort.
+	snowflakeCopy := *profile.Snowflake
+	profile.Snowflake = &snowflakeCopy
+
+	snowflakeStartProfile := *profile.Snowflake
+	snowflakeStartProfile.LocalPort = 0
+	if err := s.snowflake.Start(ctx, snowflakeStartProfile); err != nil {
+		return fmt.Errorf("start: %w", err)
+	}
+
+	profile.Snowflake.LocalPort = s.rebindWireGuardEndpoint(s.snowflake, profile.Snowflake.LocalPort, wireGuardProfile)
+	snowflakeRunning := func() bool { return s.snowflake.Status().Running }
+	if err := s.waitForManagedTransportStable(ctx, snowflakeRunning, profile.Snowflake.LocalPort, 200*time.Millisecond); err != nil {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		_ = s.snowflake.Stop(cleanupCtx)
+		cleanupCancel()
+		return err
+	}
+	if waiter, ok := s.snowflake.(transport.SessionWaiter); ok {
+		// Snowflake rendezvous (broker polling, ICE gathering, DTLS/SCTP
+		// handshake) is noticeably slower than the other transports' TLS/QUIC
+		// handshakes, so it gets a longer session timeout.
+		waitCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		err := waiter.WaitForSession(waitCtx, 30*time.Second)
+		cancel()
+		if err != nil {
+			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 2*time.Second)
+			_ = s.snowflake.Stop(cleanupCtx)
+			cleanupCancel()
+			return fmt.Errorf("session: %w", err)
+		}
+	}
+	return nil
+}
+
+// startTransport: "cloak"/"naive"/"reality"/"hysteria2"/"snowflake" = that
+// transport only, no fallback (errors if the profile has no config for it).
+// "" (default) = cloak first, then naive, then reality, then hysteria2, then
+// snowflake.
 func (s *Service) startTransport(ctx context.Context, profile *state.Profile, wireGuardProfile *state.WireGuardProfile, preferredTransport string) (string, error) {
 	switch preferredTransport {
 	case "naive":
@@ -560,6 +615,17 @@ func (s *Service) startTransport(ctx context.Context, profile *state.Profile, wi
 			return "", fmt.Errorf("hysteria2: %w", err)
 		}
 		return "hysteria2", nil
+	case "snowflake":
+		if profile.Snowflake == nil {
+			return "", errors.New("snowflake transport requested but this profile has no snowflake configuration")
+		}
+		if err := s.startSnowflakeTransport(ctx, profile, wireGuardProfile); err != nil {
+			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 2*time.Second)
+			_ = s.snowflake.Stop(cleanupCtx)
+			cleanupCancel()
+			return "", fmt.Errorf("snowflake: %w", err)
+		}
+		return "snowflake", nil
 	case "cloak":
 		if err := s.startCloakTransport(ctx, profile, wireGuardProfile); err != nil {
 			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -620,12 +686,13 @@ func (s *Service) fallbackToReality(ctx context.Context, profile *state.Profile,
 	return "reality", nil
 }
 
-// fallbackToHysteria2 is the last-resort step in automatic mode, tried after
-// cloak, naive, and reality have failed. prevErr carries the accumulated
-// failure detail from earlier transports.
+// fallbackToHysteria2 is tried after cloak, naive, and reality have failed
+// in automatic mode. If hysteria2 isn't configured or also fails, it falls
+// through to fallbackToSnowflake. prevErr carries the accumulated failure
+// detail from earlier transports.
 func (s *Service) fallbackToHysteria2(ctx context.Context, profile *state.Profile, wireGuardProfile *state.WireGuardProfile, prevErr error) (string, error) {
 	if profile.Hysteria2 == nil {
-		return "", fmt.Errorf("all configured transports failed: %w", prevErr)
+		return s.fallbackToSnowflake(ctx, profile, wireGuardProfile, prevErr)
 	}
 
 	s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("checking hysteria2 fallback: %v", prevErr))
@@ -633,11 +700,31 @@ func (s *Service) fallbackToHysteria2(ctx context.Context, profile *state.Profil
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 2*time.Second)
 		_ = s.hysteria2.Stop(cleanupCtx)
 		cleanupCancel()
-		return "", fmt.Errorf("all transports failed: %v; hysteria2: %w", prevErr, err)
+		return s.fallbackToSnowflake(ctx, profile, wireGuardProfile, fmt.Errorf("%v; hysteria2: %w", prevErr, err))
 	}
 
 	s.logs.Add(state.LogInfo, state.SourceDaemon, "fell back to hysteria2 transport")
 	return "hysteria2", nil
+}
+
+// fallbackToSnowflake is the last-resort step in automatic mode, tried after
+// cloak, naive, reality, and hysteria2 have failed. prevErr carries the
+// accumulated failure detail from earlier transports.
+func (s *Service) fallbackToSnowflake(ctx context.Context, profile *state.Profile, wireGuardProfile *state.WireGuardProfile, prevErr error) (string, error) {
+	if profile.Snowflake == nil {
+		return "", fmt.Errorf("all configured transports failed: %w", prevErr)
+	}
+
+	s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("checking snowflake fallback: %v", prevErr))
+	if err := s.startSnowflakeTransport(ctx, profile, wireGuardProfile); err != nil {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		_ = s.snowflake.Stop(cleanupCtx)
+		cleanupCancel()
+		return "", fmt.Errorf("all transports failed: %v; snowflake: %w", prevErr, err)
+	}
+
+	s.logs.Add(state.LogInfo, state.SourceDaemon, "fell back to snowflake transport")
+	return "snowflake", nil
 }
 
 // Switch hot-swaps profile without dropping the kill switch. Interruptible
@@ -899,6 +986,7 @@ func (s *Service) Status(ctx context.Context) state.StatusResponse {
 	naiveStatus := s.naive.Status()
 	realityStatus := s.reality.Status()
 	hysteria2Status := s.hysteria2.Status()
+	snowflakeStatus := s.snowflake.Status()
 
 	wgStatus := state.WireGuardStatus{Running: false, Detail: "not connected"}
 	if profile, ok := s.getCurrentProfile(); ok {
@@ -922,6 +1010,7 @@ func (s *Service) Status(ctx context.Context) state.StatusResponse {
 		Naive:            naiveStatus,
 		Reality:          realityStatus,
 		Hysteria2:        hysteria2Status,
+		Snowflake:        snowflakeStatus,
 		WireGuard:        wgStatus,
 		KillSwitchActive: s.killSwitch.Active(),
 	}
@@ -983,6 +1072,8 @@ func (s *Service) runHealthCheck(ctx context.Context) {
 		transportRunning = s.reality.Status().Running
 	case "hysteria2":
 		transportRunning = s.hysteria2.Status().Running
+	case "snowflake":
+		transportRunning = s.snowflake.Status().Running
 	}
 
 	if !transportRunning {
@@ -1073,6 +1164,18 @@ func (s *Service) recoverActiveTransport(ctx context.Context, profile state.Prof
 			return err
 		}
 		return s.waitForManagedTransportStable(restartCtx, func() bool { return s.hysteria2.Status().Running }, profile.Hysteria2.LocalPort, 2*time.Second)
+	case "snowflake":
+		if s.snowflake.Status().Running {
+			return nil
+		}
+		if profile.Snowflake == nil {
+			return errors.New("active transport is snowflake but profile has no snowflake config")
+		}
+		s.logs.Add(state.LogWarn, state.SourceDaemon, "health check detected snowflake stopped; attempting restart")
+		if err := s.snowflake.Start(restartCtx, *profile.Snowflake); err != nil {
+			return err
+		}
+		return s.waitForManagedTransportStable(restartCtx, func() bool { return s.snowflake.Status().Running }, profile.Snowflake.LocalPort, 2*time.Second)
 	default:
 		return fmt.Errorf("unknown active transport kind: %q", activeKind)
 	}
@@ -1377,8 +1480,72 @@ func rewriteLoopbackEndpointPort(configText string, newPort int) (string, bool) 
 	return wgLoopbackEndpointPattern.ReplaceAllString(configText, replacement), true
 }
 
-// killSwitchPermits is the cloak, naive, reality, and hysteria2 endpoints
-// (whichever are configured) plus any bypassHosts that need direct
+// snowflakeHosts extracts the static hostnames Snowflake rendezvous touches
+// directly: the broker (or its front domains, when domain fronting is
+// configured), the AMP cache, and any STUN/TURN servers. Unlike the other
+// transports' single fixed RemoteHost, these are rendezvous-only endpoints —
+// once WebRTC negotiation completes, the actual data plane runs to a
+// volunteer proxy peer whose address is discovered dynamically per-session
+// and can't be known (or permitted by hostname) ahead of time. Kill-switch
+// coverage here is therefore best-effort for the rendezvous phase only.
+func snowflakeHosts(p *state.SnowflakeProfile) []string {
+	if p == nil {
+		return nil
+	}
+	out := make([]string, 0, 2+len(p.FrontDomains)+len(p.ICEServers))
+	if host := urlHost(p.BrokerURL); host != "" {
+		out = append(out, host)
+	}
+	if host := urlHost(p.AmpCacheURL); host != "" {
+		out = append(out, host)
+	}
+	for _, front := range p.FrontDomains {
+		if front = strings.TrimSpace(front); front != "" {
+			out = append(out, front)
+		}
+	}
+	for _, ice := range p.ICEServers {
+		if host := stunHost(ice); host != "" {
+			out = append(out, host)
+		}
+	}
+	return out
+}
+
+// urlHost extracts the hostname (no port) from a URL string, tolerating a
+// bare hostname with no scheme.
+func urlHost(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	if parsed, err := url.Parse(raw); err == nil && parsed.Hostname() != "" {
+		return parsed.Hostname()
+	}
+	if host, _, err := net.SplitHostPort(raw); err == nil {
+		return host
+	}
+	return raw
+}
+
+// stunHost extracts the hostname from a "stun:host:port" / "turn:host:port"
+// ICE server URL.
+func stunHost(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	if idx := strings.Index(raw, ":"); idx >= 0 {
+		raw = raw[idx+1:]
+	}
+	if host, _, err := net.SplitHostPort(raw); err == nil {
+		return host
+	}
+	return raw
+}
+
+// killSwitchPermits is the cloak, naive, reality, hysteria2, and snowflake
+// endpoints (whichever are configured) plus any bypassHosts that need direct
 // reachability (e.g. Pangea hub for re-provisioning during a switch). All
 // configured transport endpoints must be permitted here — the kill switch
 // arms once, before Connect knows which transport will actually succeed
@@ -1408,6 +1575,7 @@ func killSwitchPermits(profile state.Profile) []string {
 			out = append(out, host)
 		}
 	}
+	out = append(out, snowflakeHosts(profile.Snowflake)...)
 	for _, h := range profile.WireGuard.BypassHosts {
 		if h = strings.TrimSpace(h); h != "" {
 			out = append(out, h)
@@ -1416,11 +1584,11 @@ func killSwitchPermits(profile state.Profile) []string {
 	return out
 }
 
-// withTransportBypassHosts adds the cloak, naive, reality, and hysteria2
-// (whichever are configured) remote hosts to the WireGuard bypass list, so no
-// transport's own connection to its remote endpoint gets routed back through
-// the tunnel it's establishing — same "arm before the transport is chosen"
-// reasoning as killSwitchPermits above.
+// withTransportBypassHosts adds the cloak, naive, reality, hysteria2, and
+// snowflake (whichever are configured) remote hosts to the WireGuard bypass
+// list, so no transport's own connection to its remote endpoint gets routed
+// back through the tunnel it's establishing — same "arm before the transport
+// is chosen" reasoning as killSwitchPermits above.
 func withTransportBypassHosts(profile state.Profile) state.WireGuardProfile {
 	copyProfile := profile.WireGuard
 	copyProfile.DNS = append([]string(nil), profile.WireGuard.DNS...)
@@ -1443,5 +1611,6 @@ func withTransportBypassHosts(profile state.Profile) state.WireGuardProfile {
 			copyProfile.BypassHosts = append(copyProfile.BypassHosts, host)
 		}
 	}
+	copyProfile.BypassHosts = append(copyProfile.BypassHosts, snowflakeHosts(profile.Snowflake)...)
 	return copyProfile
 }

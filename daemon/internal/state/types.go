@@ -25,6 +25,7 @@ const (
 	SourceDaemon    LogSource = "daemon"
 	SourceCloak     LogSource = "cloak"
 	SourceNaive     LogSource = "naive"
+	SourceSnowflake LogSource = "snowflake"
 	SourceWireGuard LogSource = "wireguard"
 )
 
@@ -57,12 +58,13 @@ type WireGuardStatus struct {
 type StatusResponse struct {
 	State  DaemonState `json:"state"`
 	Detail string      `json:"detail"`
-	// ActiveTransport is "cloak", "naive", "reality", "hysteria2", or "" when disconnected.
+	// ActiveTransport is "cloak", "naive", "reality", "hysteria2", "snowflake", or "" when disconnected.
 	ActiveTransport  string          `json:"activeTransport"`
 	Cloak            CloakStatus     `json:"cloak"`
 	Naive            TransportStatus `json:"naive"`
 	Reality          TransportStatus `json:"reality"`
 	Hysteria2        TransportStatus `json:"hysteria2"`
+	Snowflake        TransportStatus `json:"snowflake"`
 	WireGuard        WireGuardStatus `json:"wireguard"`
 	KillSwitchActive bool            `json:"killSwitchActive"`
 }
@@ -142,6 +144,30 @@ type Hysteria2Profile struct {
 	PinSHA256 string `json:"pinSha256,omitempty"`
 }
 
+// SnowflakeProfile carries per-device Tor Snowflake (WebRTC rendezvous)
+// settings. Unlike Cloak/NaiveProxy/REALITY/Hysteria2, Snowflake has no
+// single fixed remote host: rendezvous happens against a broker (optionally
+// via domain fronting or an AMP cache), and the actual data-plane peer is a
+// volunteer WebRTC proxy discovered dynamically per-session. Nil on a
+// Profile means no Snowflake transport is configured for that profile.
+type SnowflakeProfile struct {
+	LocalPort int    `json:"localPort"`
+	BrokerURL string `json:"brokerURL"`
+	// FrontDomains are candidate domain-fronting SNI hosts tried during
+	// rendezvous; empty means no fronting (direct broker connection).
+	FrontDomains []string `json:"fronts,omitempty"`
+	// AmpCacheURL, when set, routes rendezvous through an AMP cache instead
+	// of a direct/fronted broker request.
+	AmpCacheURL string `json:"ampCacheUrl,omitempty"`
+	// ICEServers are STUN/TURN URLs used for WebRTC NAT traversal.
+	ICEServers []string `json:"iceServers,omitempty"`
+	// BridgeFingerprint identifies the Tor bridge the rendezvous connects to.
+	BridgeFingerprint string `json:"bridgeFingerprint"`
+	// KeepLocalAddresses retains local/loopback ICE candidates; only useful
+	// for local testing, never set in production profiles.
+	KeepLocalAddresses bool `json:"keepLocalAddresses,omitempty"`
+}
+
 type WireGuardProfile struct {
 	ConfigText  string   `json:"configText"`
 	TunnelName  string   `json:"tunnelName"`
@@ -162,6 +188,9 @@ type Profile struct {
 	// Hysteria2 is optional; nil means this profile has no Hysteria2
 	// transport configured.
 	Hysteria2 *Hysteria2Profile `json:"hysteria2,omitempty"`
+	// Snowflake is optional; nil means this profile has no Snowflake
+	// transport configured.
+	Snowflake *SnowflakeProfile `json:"snowflake,omitempty"`
 	WireGuard WireGuardProfile  `json:"wireguard"`
 }
 

@@ -18,6 +18,7 @@ import (
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/hysteria2"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/platform"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/reality"
+	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/snowflake"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/state"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/wg"
 )
@@ -90,9 +91,10 @@ func startDaemonRuntime() (*daemonRuntime, error) {
 	// Start rather than needing a stub here (see internal/reality's doc).
 	realityManager := reality.NewManager(logs)
 	hysteria2Manager := hysteria2.NewManager(logs)
+	snowflakeManager := snowflake.NewManager(logs)
 	wgManager := wg.NewManager(logs)
 	killSwitch := platform.NewKillSwitch()
-	service := api.NewService(machine, logs, configStore, cloakManager, naiveManager, realityManager, hysteria2Manager, wgManager, killSwitch)
+	service := api.NewService(machine, logs, configStore, cloakManager, naiveManager, realityManager, hysteria2Manager, snowflakeManager, wgManager, killSwitch)
 
 	handler := api.NewHandler(token, service)
 	server := &http.Server{
