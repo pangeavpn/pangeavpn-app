@@ -77,7 +77,7 @@ const pangeaApi = {
   getDirectIpOnly: () => ipcRenderer.invoke(CH.getDirectIpOnly),
   setAllowLan: (enabled: boolean) => ipcRenderer.invoke(CH.setAllowLan, enabled),
   getAllowLan: () => ipcRenderer.invoke(CH.getAllowLan),
-  setPreferredTransport: (value: "auto" | "cloak" | "naive" | "reality" | "hysteria2") =>
+  setPreferredTransport: (value: "auto" | "cloak" | "naive" | "reality" | "hysteria2" | "snowflake") =>
     ipcRenderer.invoke(CH.setPreferredTransport, value),
   getPreferredTransport: () => ipcRenderer.invoke(CH.getPreferredTransport),
   setLaunchAtStartup: (enabled: boolean) => ipcRenderer.invoke(CH.setLaunchAtStartup, enabled),

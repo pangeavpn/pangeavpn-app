@@ -252,6 +252,62 @@ func (f *fakeHysteria2Manager) BoundLocalPort() int {
 	return 51823
 }
 
+// fakeSnowflakeManager mirrors fakeNaiveManager; see its fields for docs.
+type fakeSnowflakeManager struct {
+	mu             sync.Mutex
+	startCalled    bool
+	startLocalPort int
+	startErr       error
+	stopCalled     bool
+	running        bool
+	stayDown       bool
+	waitErr        error
+	boundLocalPort int
+}
+
+func (f *fakeSnowflakeManager) Start(ctx context.Context, profile state.SnowflakeProfile) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.startCalled = true
+	f.startLocalPort = profile.LocalPort
+	if f.startErr != nil {
+		return f.startErr
+	}
+	if !f.stayDown {
+		f.running = true
+	}
+	return nil
+}
+
+func (f *fakeSnowflakeManager) Stop(ctx context.Context) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.stopCalled = true
+	f.running = false
+	return nil
+}
+
+func (f *fakeSnowflakeManager) Status() state.TransportStatus {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return state.TransportStatus{Running: f.running}
+}
+
+func (f *fakeSnowflakeManager) WaitForSession(ctx context.Context, timeout time.Duration) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.waitErr
+}
+
+func (f *fakeSnowflakeManager) BoundLocalPort() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.boundLocalPort != 0 {
+		return f.boundLocalPort
+	}
+	return 51824
+}
+
 type fakeWGManager struct {
 	mu             sync.Mutex
 	running        bool
@@ -436,7 +492,7 @@ func newTestServiceWithReality(
 	profiles ...state.Profile,
 ) *Service {
 	t.Helper()
-	return newTestServiceFull(t, cloak, naive, reality, &fakeHysteria2Manager{}, wgMgr, ks, profiles...)
+	return newTestServiceFull(t, cloak, naive, reality, &fakeHysteria2Manager{}, &fakeSnowflakeManager{}, wgMgr, ks, profiles...)
 }
 
 func newTestServiceFull(
@@ -445,6 +501,7 @@ func newTestServiceFull(
 	naive *fakeNaiveManager,
 	reality *fakeRealityManager,
 	hysteria2 *fakeHysteria2Manager,
+	snowflake *fakeSnowflakeManager,
 	wgMgr *fakeWGManager,
 	ks *fakeKillSwitch,
 	profiles ...state.Profile,
@@ -453,7 +510,7 @@ func newTestServiceFull(
 	machine := state.NewMachine()
 	logs := state.NewLogStore(100)
 	config := testConfigStore(t, profiles...)
-	return NewService(machine, logs, config, cloak, naive, reality, hysteria2, wgMgr, ks)
+	return NewService(machine, logs, config, cloak, naive, reality, hysteria2, snowflake, wgMgr, ks)
 }
 
 // ---------------------------------------------------------------------------
@@ -1325,9 +1382,10 @@ func TestConnect_CloakNaiveRealityFail_FallsBackToHysteria2(t *testing.T) {
 	naiveMgr := &fakeNaiveManager{startErr: errors.New("naive boom")}
 	realityMgr := &fakeRealityManager{startErr: errors.New("reality boom")}
 	hysteria2Mgr := &fakeHysteria2Manager{}
+	snowflakeMgr := &fakeSnowflakeManager{}
 	wgMgr := &fakeWGManager{}
 	ks := &fakeKillSwitch{}
-	svc := newTestServiceFull(t, cloakMgr, naiveMgr, realityMgr, hysteria2Mgr, wgMgr, ks, profile)
+	svc := newTestServiceFull(t, cloakMgr, naiveMgr, realityMgr, hysteria2Mgr, snowflakeMgr, wgMgr, ks, profile)
 
 	if err := svc.Connect(context.Background(), "p1", ConnectOptions{}); err != nil {
 		t.Fatalf("Connect: %v", err)
@@ -1345,6 +1403,108 @@ func TestConnect_CloakNaiveRealityFail_FallsBackToHysteria2(t *testing.T) {
 	}
 }
 
+func snowflakeProfile() state.Profile {
+	return state.Profile{
+		ID:    "p1",
+		Name:  "p1",
+		Cloak: state.CloakProfile{RemoteHost: "example.com", RemotePort: 443, LocalPort: 51821},
+		Snowflake: &state.SnowflakeProfile{
+			BrokerURL:         "https://broker.example.com/",
+			BridgeFingerprint: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+		},
+		WireGuard: state.WireGuardProfile{
+			TunnelName: "pangea0",
+			ConfigText: "[Interface]\nPrivateKey=x\n[Peer]\nEndpoint=127.0.0.1:51821\nPublicKey=y\nAllowedIPs=0.0.0.0/0\n",
+		},
+	}
+}
+
+func TestConnect_CloakNaiveRealityHysteria2Fail_FallsBackToSnowflake(t *testing.T) {
+	profile := snowflakeProfile()
+	profile.Naive = &state.NaiveProfile{RemoteHost: "naive.example.com", RemotePort: 8443, Username: "u", Password: "p"}
+	profile.Reality = &state.RealityProfile{RemoteHost: "reality.example.com", RemotePort: 8443, UUID: "u", PublicKey: "k", ShortID: "ab12"}
+	profile.Hysteria2 = &state.Hysteria2Profile{RemoteHost: "hysteria2.example.com", RemotePort: 8443, Password: "p", ObfsPassword: "o"}
+
+	cloakMgr := &fakeCloakManager{startErr: errors.New("cloak boom")}
+	naiveMgr := &fakeNaiveManager{startErr: errors.New("naive boom")}
+	realityMgr := &fakeRealityManager{startErr: errors.New("reality boom")}
+	hysteria2Mgr := &fakeHysteria2Manager{startErr: errors.New("hysteria2 boom")}
+	snowflakeMgr := &fakeSnowflakeManager{}
+	wgMgr := &fakeWGManager{}
+	ks := &fakeKillSwitch{}
+	svc := newTestServiceFull(t, cloakMgr, naiveMgr, realityMgr, hysteria2Mgr, snowflakeMgr, wgMgr, ks, profile)
+
+	if err := svc.Connect(context.Background(), "p1", ConnectOptions{}); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	snowflakeMgr.mu.Lock()
+	startCalled := snowflakeMgr.startCalled
+	snowflakeMgr.mu.Unlock()
+	if !startCalled {
+		t.Fatal("expected snowflake.Start to be attempted after cloak, naive, reality, and hysteria2 failed")
+	}
+
+	status := svc.Status(context.Background())
+	if status.ActiveTransport != "snowflake" {
+		t.Fatalf("ActiveTransport = %q, want snowflake", status.ActiveTransport)
+	}
+}
+
+func TestConnect_PreferredTransportSnowflake_SkipsOtherTransports(t *testing.T) {
+	profile := snowflakeProfile()
+
+	cloakMgr := &fakeCloakManager{}
+	naiveMgr := &fakeNaiveManager{}
+	realityMgr := &fakeRealityManager{}
+	hysteria2Mgr := &fakeHysteria2Manager{}
+	snowflakeMgr := &fakeSnowflakeManager{}
+	wgMgr := &fakeWGManager{}
+	ks := &fakeKillSwitch{}
+	svc := newTestServiceFull(t, cloakMgr, naiveMgr, realityMgr, hysteria2Mgr, snowflakeMgr, wgMgr, ks, profile)
+
+	if err := svc.Connect(context.Background(), "p1", ConnectOptions{PreferredTransport: "snowflake"}); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	if cloakMgr.startCalled || naiveMgr.startCalled {
+		t.Fatal("cloak/naive.Start should not be called when PreferredTransport is snowflake")
+	}
+	snowflakeMgr.mu.Lock()
+	startCalled := snowflakeMgr.startCalled
+	snowflakeMgr.mu.Unlock()
+	if !startCalled {
+		t.Fatal("expected snowflake.Start to be called")
+	}
+
+	status := svc.Status(context.Background())
+	if status.ActiveTransport != "snowflake" {
+		t.Fatalf("ActiveTransport = %q, want snowflake", status.ActiveTransport)
+	}
+}
+
+func TestConnect_PreferredTransportSnowflake_ErrorsWhenProfileHasNoSnowflakeConfig(t *testing.T) {
+	profile := testProfile() // no Snowflake configured
+
+	cloakMgr := &fakeCloakManager{}
+	naiveMgr := &fakeNaiveManager{}
+	realityMgr := &fakeRealityManager{}
+	hysteria2Mgr := &fakeHysteria2Manager{}
+	snowflakeMgr := &fakeSnowflakeManager{}
+	wgMgr := &fakeWGManager{}
+	ks := &fakeKillSwitch{}
+	svc := newTestServiceFull(t, cloakMgr, naiveMgr, realityMgr, hysteria2Mgr, snowflakeMgr, wgMgr, ks, profile)
+
+	err := svc.Connect(context.Background(), profile.ID, ConnectOptions{PreferredTransport: "snowflake"})
+	if err == nil {
+		t.Fatal("expected Connect to fail: profile has no snowflake configuration")
+	}
+	snowflakeMgr.mu.Lock()
+	startCalled := snowflakeMgr.startCalled
+	snowflakeMgr.mu.Unlock()
+	if startCalled {
+		t.Fatal("snowflake.Start should not be called when profile.Snowflake is nil")
+	}
+}
+
 func TestKillSwitchPermits_IncludesRealityHostWhenPresent(t *testing.T) {
 	profile := realityProfile()
 	permits := killSwitchPermits(profile)
@@ -1358,5 +1518,33 @@ func TestWithTransportBypassHosts_IncludesRealityHostWhenPresent(t *testing.T) {
 	wgProfile := withTransportBypassHosts(profile)
 	if !slices.Contains(wgProfile.BypassHosts, "reality.example.com") {
 		t.Errorf("withTransportBypassHosts().BypassHosts = %v, want to contain reality.example.com", wgProfile.BypassHosts)
+	}
+}
+
+func snowflakeProfileWithFronting() state.Profile {
+	profile := snowflakeProfile()
+	profile.Snowflake.FrontDomains = []string{"front.example.com"}
+	profile.Snowflake.AmpCacheURL = "https://amp.example.com/cache"
+	profile.Snowflake.ICEServers = []string{"stun:stun.example.com:3478"}
+	return profile
+}
+
+func TestKillSwitchPermits_IncludesSnowflakeHostsWhenPresent(t *testing.T) {
+	profile := snowflakeProfileWithFronting()
+	permits := killSwitchPermits(profile)
+	for _, want := range []string{"broker.example.com", "front.example.com", "amp.example.com", "stun.example.com"} {
+		if !slices.Contains(permits, want) {
+			t.Errorf("killSwitchPermits() = %v, want to contain %s", permits, want)
+		}
+	}
+}
+
+func TestWithTransportBypassHosts_IncludesSnowflakeHostsWhenPresent(t *testing.T) {
+	profile := snowflakeProfileWithFronting()
+	wgProfile := withTransportBypassHosts(profile)
+	for _, want := range []string{"broker.example.com", "front.example.com", "amp.example.com", "stun.example.com"} {
+		if !slices.Contains(wgProfile.BypassHosts, want) {
+			t.Errorf("withTransportBypassHosts().BypassHosts = %v, want to contain %s", wgProfile.BypassHosts, want)
+		}
 	}
 }
