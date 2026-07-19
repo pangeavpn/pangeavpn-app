@@ -104,6 +104,23 @@ export interface ServerInfo {
     // Cover SNI presented during the TLS handshake (naive's --proxy host).
     serverName?: string;
   };
+  /**
+   * VLESS+REALITY connection info, present only when the hub node has
+   * reality configured. Static per-node config, same shape as naive above —
+   * see RealityProfileSchema in @pangeavpn/shared-types for the full
+   * daemon-facing shape; this omits `localPort`/`targetPort`, which are
+   * daemon-assigned/defaulted.
+   */
+  reality?: {
+    remoteHost: string;
+    remotePort: number;
+    uuid: string;
+    publicKey: string;
+    shortId: string;
+    flow?: string;
+    // REALITY SNI / camouflage target hostname.
+    serverName?: string;
+  };
 }
 
 export interface DeviceInfo {
@@ -136,8 +153,8 @@ export interface PangeaApi {
   getDirectIpOnly: () => Promise<boolean>;
   setAllowLan: (enabled: boolean) => Promise<void>;
   getAllowLan: () => Promise<boolean>;
-  setPreferredTransport: (value: "auto" | "cloak" | "naive") => Promise<void>;
-  getPreferredTransport: () => Promise<"auto" | "cloak" | "naive">;
+  setPreferredTransport: (value: "auto" | "cloak" | "naive" | "reality") => Promise<void>;
+  getPreferredTransport: () => Promise<"auto" | "cloak" | "naive" | "reality">;
   setLaunchAtStartup: (enabled: boolean) => Promise<void>;
   getLaunchAtStartup: () => Promise<boolean>;
   setAlwaysConnected: (enabled: boolean) => Promise<void>;

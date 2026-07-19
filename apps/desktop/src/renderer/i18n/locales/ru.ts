@@ -109,6 +109,7 @@ export const ru = {
   "settings.transport.auto": "Automatic (recommended)",
   "settings.transport.cloak": "Cloak only",
   "settings.transport.naive": "NaiveProxy only",
+  "settings.transport.reality": "VLESS+REALITY only",
   "settings.network.heading": "Сеть",
   "settings.network.description": "Исправления для сетей Wi-Fi с ограничениями.",
   "settings.network.allowLan.title": "Разрешить LAN",

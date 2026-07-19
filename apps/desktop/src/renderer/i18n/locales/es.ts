@@ -109,6 +109,7 @@ export const es = {
   "settings.transport.auto": "Automatic (recommended)",
   "settings.transport.cloak": "Cloak only",
   "settings.transport.naive": "NaiveProxy only",
+  "settings.transport.reality": "VLESS+REALITY only",
   "settings.network.heading": "Red",
   "settings.network.description": "Soluciones para redes Wi-Fi restrictivas.",
   "settings.network.allowLan.title": "Permitir LAN",

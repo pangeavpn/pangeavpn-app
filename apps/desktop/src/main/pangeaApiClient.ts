@@ -95,12 +95,14 @@ async function resolveViaDoH(hostname: string): Promise<string | null> {
 }
 
 /**
- * Resolve NaiveProxy's remote host to an IP so it can be excluded from
- * AllowedIPs (see allowedIPsExcludingAll). Unlike Cloak, whose remoteHost
- * from the hub is already a raw IP, NaiveProxy's remoteHost is a real
- * domain name (Caddy needs one to obtain a genuine ACME certificate — see
- * hub/config/nodes.json in the hub repo, e.g. naive-eu-west-1.pangeavpn.org),
- * so it must be resolved before it can be turned into a /32 exclusion.
+ * Resolve a fallback transport's (NaiveProxy, Reality) remote host to an IP
+ * so it can be excluded from AllowedIPs (see allowedIPsExcludingAll). Unlike
+ * Cloak, whose remoteHost from the hub is already a raw IP, these
+ * transports' remoteHost is a real domain name (NaiveProxy needs one for
+ * Caddy's genuine ACME certificate; Reality needs one for its SNI
+ * camouflage — see hub/config/nodes.json in the hub repo, e.g.
+ * naive-eu-west-1.pangeavpn.org), so it must be resolved before it can be
+ * turned into a /32 exclusion.
  *
  * Reuses the same DoH infrastructure already used to resolve the hub's own
  * hostname (see resolveViaDoH above / ensureHub), rather than falling back
@@ -108,7 +110,7 @@ async function resolveViaDoH(hostname: string): Promise<string | null> {
  * queries in cleartext. Returns null (never throws) on resolution failure
  * so callers can degrade gracefully instead of failing provisioning.
  */
-async function resolveNaiveRemoteIp(host: string): Promise<string | null> {
+async function resolveTransportRemoteIp(host: string): Promise<string | null> {
   if (isIPv4Literal(host)) return host;
   return resolveViaDoH(host);
 }
@@ -779,14 +781,14 @@ export class PangeaApiClient {
       .filter(Boolean);
 
     // Every transport that might actually dial out (Cloak always; NaiveProxy
-    // when configured as a fallback) needs its remote host excluded from
-    // AllowedIPs, or the OS would try to route that connection attempt back
-    // through the tunnel it's still establishing. Cloak's remoteHost is
-    // always a raw IP from the hub. NaiveProxy's is a real domain name (so
-    // Caddy can hold a genuine ACME cert), so it must be resolved first.
+    // and Reality when configured as fallbacks) needs its remote host
+    // excluded from AllowedIPs, or the OS would try to route that connection
+    // attempt back through the tunnel it's still establishing. Cloak's
+    // remoteHost is always a raw IP from the hub. NaiveProxy's and Reality's
+    // are real domain names, so they must be resolved first.
     const excludeIPs = [server.cloak.remoteHost];
     if (server.naive) {
-      const naiveIp = await resolveNaiveRemoteIp(server.naive.remoteHost);
+      const naiveIp = await resolveTransportRemoteIp(server.naive.remoteHost);
       if (naiveIp) {
         excludeIPs.push(naiveIp);
       } else {
@@ -801,6 +803,20 @@ export class PangeaApiClient {
           `[provision] Could not resolve NaiveProxy remote host "${server.naive.remoteHost}" to an IP; ` +
           "AllowedIPs will not exclude it. If Cloak fails and the daemon falls back to NaiveProxy, " +
           "its own connection attempt could be routed back through the tunnel (routing loop)."
+        );
+      }
+    }
+    if (server.reality) {
+      const realityIp = await resolveTransportRemoteIp(server.reality.remoteHost);
+      if (realityIp) {
+        excludeIPs.push(realityIp);
+      } else {
+        // Same fail-open reasoning as NaiveProxy above: Reality is a
+        // last-resort fallback, tried only after Cloak and NaiveProxy fail.
+        console.warn(
+          `[provision] Could not resolve Reality remote host "${server.reality.remoteHost}" to an IP; ` +
+          "AllowedIPs will not exclude it. If earlier transports fail and the daemon falls back to " +
+          "reality, its own connection attempt could be routed back through the tunnel (routing loop)."
         );
       }
     }
@@ -836,6 +852,18 @@ export class PangeaApiClient {
           username: server.naive.username,
           password: server.naive.password,
           ...(server.naive.serverName ? { serverName: server.naive.serverName } : {})
+        }
+      } : {}),
+      ...(server.reality ? {
+        reality: {
+          localPort: 0,
+          remoteHost: server.reality.remoteHost,
+          remotePort: server.reality.remotePort,
+          uuid: server.reality.uuid,
+          publicKey: server.reality.publicKey,
+          shortId: server.reality.shortId,
+          ...(server.reality.flow ? { flow: server.reality.flow } : {}),
+          ...(server.reality.serverName ? { serverName: server.reality.serverName } : {})
         }
       } : {}),
       wireguard: {

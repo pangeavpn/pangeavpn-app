@@ -109,6 +109,7 @@ export const ar = {
   "settings.transport.auto": "Automatic (recommended)",
   "settings.transport.cloak": "Cloak only",
   "settings.transport.naive": "NaiveProxy only",
+  "settings.transport.reality": "VLESS+REALITY only",
   "settings.network.heading": "الشبكة",
   "settings.network.description": "إصلاحات لشبكات Wi-Fi المقيّدة.",
   "settings.network.allowLan.title": "السماح بشبكة LAN",

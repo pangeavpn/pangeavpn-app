@@ -45,8 +45,8 @@ let lastServerId: string | null = null;
 let allowLanEnabled = true;
 let launchAtStartupEnabled = false;
 let alwaysConnectedEnabled = false;
-// "auto" (cloak, fall back to naive), "cloak" (cloak only), or "naive" (naive only).
-let preferredTransport: "auto" | "cloak" | "naive" = "auto";
+// "auto" (cloak, fall back to naive, then reality), "cloak"/"naive"/"reality" (that transport only).
+let preferredTransport: "auto" | "cloak" | "naive" | "reality" = "auto";
 // Stored language preference: a locale code, or "system" to follow the OS.
 let localePref = "system";
 const hiddenLaunch = process.argv.some(isHiddenLaunchArg);
@@ -879,8 +879,8 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.getAllowLan, async () => allowLanEnabled);
 
-  ipcMain.handle(IPC_CHANNELS.setPreferredTransport, async (_event, value: "auto" | "cloak" | "naive") => {
-    preferredTransport = value === "cloak" || value === "naive" ? value : "auto";
+  ipcMain.handle(IPC_CHANNELS.setPreferredTransport, async (_event, value: "auto" | "cloak" | "naive" | "reality") => {
+    preferredTransport = value === "cloak" || value === "naive" || value === "reality" ? value : "auto";
     try {
       const settings = await readSettingsFile();
       settings.preferredTransport = preferredTransport;
@@ -1210,7 +1210,11 @@ async function boot(): Promise<void> {
     if (settings.allowLan === false) {
       allowLanEnabled = false;
     }
-    if (settings.preferredTransport === "cloak" || settings.preferredTransport === "naive") {
+    if (
+      settings.preferredTransport === "cloak" ||
+      settings.preferredTransport === "naive" ||
+      settings.preferredTransport === "reality"
+    ) {
       preferredTransport = settings.preferredTransport;
     }
     if (typeof settings.launchAtStartup === "boolean") {

@@ -109,6 +109,7 @@ export const fa = {
   "settings.transport.auto": "Automatic (recommended)",
   "settings.transport.cloak": "Cloak only",
   "settings.transport.naive": "NaiveProxy only",
+  "settings.transport.reality": "VLESS+REALITY only",
   "settings.network.heading": "شبکه",
   "settings.network.description": "رفع مشکل برای شبکه‌های Wi-Fi محدودکننده.",
   "settings.network.allowLan.title": "اجازه به LAN",

@@ -109,6 +109,7 @@ export const zh = {
   "settings.transport.auto": "Automatic (recommended)",
   "settings.transport.cloak": "Cloak only",
   "settings.transport.naive": "NaiveProxy only",
+  "settings.transport.reality": "VLESS+REALITY only",
   "settings.network.heading": "网络",
   "settings.network.description": "针对受限 Wi-Fi 网络的修复。",
   "settings.network.allowLan.title": "允许 LAN",

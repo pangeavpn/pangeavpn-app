@@ -32,6 +32,18 @@ export const NaiveProfileSchema = z.object({
   serverName: z.string().optional()
 });
 
+export const RealityProfileSchema = z.object({
+  localPort: z.number().int().nonnegative(),
+  remoteHost: z.string().min(1),
+  remotePort: z.number().int().positive(),
+  uuid: z.string().min(1),
+  publicKey: z.string().min(1),
+  shortId: z.string().min(1),
+  flow: z.string().optional(),
+  serverName: z.string().optional(),
+  targetPort: z.number().int().positive().optional()
+});
+
 export const WireGuardProfileSchema = z.object({
   configText: z.string(),
   tunnelName: z.string().min(1),
@@ -44,6 +56,7 @@ export const ProfileSchema = z.object({
   name: z.string().min(1),
   cloak: CloakProfileSchema,
   naive: NaiveProfileSchema.optional(),
+  reality: RealityProfileSchema.optional(),
   wireguard: WireGuardProfileSchema
 });
 
@@ -54,12 +67,16 @@ export const AppConfigSchema = z.object({
 export const StatusResponseSchema = z.object({
   state: DaemonStateSchema,
   detail: z.string(),
-  activeTransport: z.enum(["cloak", "naive", ""]).default(""),
+  activeTransport: z.enum(["cloak", "naive", "reality", ""]).default(""),
   cloak: z.object({
     running: z.boolean(),
     pid: z.number().nullable()
   }),
   naive: z.object({
+    running: z.boolean(),
+    pid: z.number().nullable()
+  }),
+  reality: z.object({
     running: z.boolean(),
     pid: z.number().nullable()
   }),
@@ -74,7 +91,7 @@ export const StatusResponseSchema = z.object({
 
 export const ConnectRequestSchema = z.object({
   profileId: z.string().min(1),
-  preferredTransport: z.enum(["cloak", "naive"]).optional()
+  preferredTransport: z.enum(["cloak", "naive", "reality"]).optional()
 });
 
 export const OkResponseSchema = z.object({
@@ -104,6 +121,7 @@ export type LogSource = z.infer<typeof LogSourceSchema>;
 
 export type CloakProfile = z.infer<typeof CloakProfileSchema>;
 export type NaiveProfile = z.infer<typeof NaiveProfileSchema>;
+export type RealityProfile = z.infer<typeof RealityProfileSchema>;
 export type WireGuardProfile = z.infer<typeof WireGuardProfileSchema>;
 export type Profile = z.infer<typeof ProfileSchema>;
 export type AppConfig = z.infer<typeof AppConfigSchema>;

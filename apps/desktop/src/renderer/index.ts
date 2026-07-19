@@ -975,7 +975,7 @@ allowLanToggle.addEventListener("change", async () => {
 preferredTransportSelect.addEventListener("change", async () => {
   if (!pangeaApi) return;
   const previous = preferredTransportSelect.dataset.previousValue ?? "auto";
-  const choice = preferredTransportSelect.value as "auto" | "cloak" | "naive";
+  const choice = preferredTransportSelect.value as "auto" | "cloak" | "naive" | "reality";
   try {
     await pangeaApi.setPreferredTransport(choice);
     preferredTransportSelect.dataset.previousValue = choice;
