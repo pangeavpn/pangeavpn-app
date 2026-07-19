@@ -76,9 +76,11 @@ func rateLimitMiddleware(limiter *rateLimiter, next http.Handler) http.Handler {
 const maxBodySize = 1 << 20
 
 type connectRequest struct {
-	ProfileID          string `json:"profileId"`
-	AllowLAN           bool   `json:"allowLAN,omitempty"`
-	Lockdown           bool   `json:"lockdown,omitempty"`
+	ProfileID string `json:"profileId"`
+	AllowLAN  bool   `json:"allowLAN,omitempty"`
+	Lockdown  bool   `json:"lockdown,omitempty"`
+	// PreferredTransport is "cloak", "naive", "hysteria2", or "" (auto).
+	// Passed straight through to Service.Connect/Switch, which validates it.
 	PreferredTransport string `json:"preferredTransport,omitempty"`
 }
 

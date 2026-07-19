@@ -37,12 +37,21 @@ type naiveManager interface {
 	Status() state.TransportStatus
 }
 
+// hysteria2Manager is transport.Manager (Stop) plus Start/Status with
+// Hysteria2's concrete types. hysteria2.Manager satisfies this directly.
+type hysteria2Manager interface {
+	transport.Manager
+	Start(ctx context.Context, profile state.Hysteria2Profile) error
+	Status() state.TransportStatus
+}
+
 type Service struct {
 	machine    *state.Machine
 	logs       *state.LogStore
 	config     *state.ConfigStore
 	cloak      cloakManager
 	naive      naiveManager
+	hysteria2  hysteria2Manager
 	wg         wg.Manager
 	killSwitch platform.KillSwitch
 
@@ -85,6 +94,7 @@ func NewService(
 	config *state.ConfigStore,
 	cloakManager cloakManager,
 	naiveManager naiveManager,
+	hysteria2Manager hysteria2Manager,
 	wgManager wg.Manager,
 	killSwitch platform.KillSwitch,
 ) *Service {
@@ -94,6 +104,7 @@ func NewService(
 		config:     config,
 		cloak:      cloakManager,
 		naive:      naiveManager,
+		hysteria2:  hysteria2Manager,
 		wg:         wgManager,
 		killSwitch: killSwitch,
 	}
@@ -110,6 +121,8 @@ func (s *Service) activeTransport() transport.Manager {
 		return s.cloak
 	case "naive":
 		return s.naive
+	case "hysteria2":
+		return s.hysteria2
 	default:
 		return nil
 	}
@@ -143,7 +156,8 @@ type ConnectOptions struct {
 	// daemon restarts (re-applied on startup rather than cleared as stale).
 	Lockdown bool
 
-	// "cloak", "naive", or "" (default: cloak first, fall back to naive).
+	// "cloak", "naive", "hysteria2", or "" (default: cloak first, fall back
+	// to naive).
 	PreferredTransport string
 }
 
@@ -427,7 +441,43 @@ func (s *Service) startNaiveTransport(ctx context.Context, profile *state.Profil
 	return nil
 }
 
+// startHysteria2Transport runs Hysteria2's start sequence, mirroring
+// startNaiveTransport. Cleans up (stops hysteria2) on its own failure.
+func (s *Service) startHysteria2Transport(ctx context.Context, profile *state.Profile, wireGuardProfile *state.WireGuardProfile) error {
+	// De-alias from the config store's shared *Hysteria2Profile before mutating LocalPort.
+	hysteria2Copy := *profile.Hysteria2
+	profile.Hysteria2 = &hysteria2Copy
+
+	hysteria2StartProfile := *profile.Hysteria2
+	hysteria2StartProfile.LocalPort = 0
+	if err := s.hysteria2.Start(ctx, hysteria2StartProfile); err != nil {
+		return fmt.Errorf("start: %w", err)
+	}
+
+	profile.Hysteria2.LocalPort = s.rebindWireGuardEndpoint(s.hysteria2, profile.Hysteria2.LocalPort, wireGuardProfile)
+	hysteria2Running := func() bool { return s.hysteria2.Status().Running }
+	if err := s.waitForManagedTransportStable(ctx, hysteria2Running, profile.Hysteria2.LocalPort, 200*time.Millisecond); err != nil {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		_ = s.hysteria2.Stop(cleanupCtx)
+		cleanupCancel()
+		return err
+	}
+	if waiter, ok := s.hysteria2.(transport.SessionWaiter); ok {
+		waitCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		err := waiter.WaitForSession(waitCtx, 10*time.Second)
+		cancel()
+		if err != nil {
+			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 2*time.Second)
+			_ = s.hysteria2.Stop(cleanupCtx)
+			cleanupCancel()
+			return fmt.Errorf("session: %w", err)
+		}
+	}
+	return nil
+}
+
 // startTransport: "cloak" = cloak only, no fallback. "naive" = naive only,
+// errors if profile has none configured. "hysteria2" = hysteria2 only,
 // errors if profile has none configured. "" (default) = cloak first, fall
 // back to naive on failure.
 func (s *Service) startTransport(ctx context.Context, profile *state.Profile, wireGuardProfile *state.WireGuardProfile, preferredTransport string) (string, error) {
@@ -440,6 +490,14 @@ func (s *Service) startTransport(ctx context.Context, profile *state.Profile, wi
 			return "", fmt.Errorf("naive: %w", err)
 		}
 		return "naive", nil
+	case "hysteria2":
+		if profile.Hysteria2 == nil {
+			return "", errors.New("hysteria2 transport requested but this profile has no hysteria2 configuration")
+		}
+		if err := s.startHysteria2Transport(ctx, profile, wireGuardProfile); err != nil {
+			return "", fmt.Errorf("hysteria2: %w", err)
+		}
+		return "hysteria2", nil
 	case "cloak":
 		if err := s.startCloakTransport(ctx, profile, wireGuardProfile); err != nil {
 			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -735,6 +793,7 @@ func (s *Service) Status(ctx context.Context) state.StatusResponse {
 
 	cloakStatus := s.cloak.Status()
 	naiveStatus := s.naive.Status()
+	hysteria2Status := s.hysteria2.Status()
 
 	wgStatus := state.WireGuardStatus{Running: false, Detail: "not connected"}
 	if profile, ok := s.getCurrentProfile(); ok {
@@ -756,6 +815,7 @@ func (s *Service) Status(ctx context.Context) state.StatusResponse {
 		ActiveTransport:  activeKind,
 		Cloak:            cloakStatus,
 		Naive:            naiveStatus,
+		Hysteria2:        hysteria2Status,
 		WireGuard:        wgStatus,
 		KillSwitchActive: s.killSwitch.Active(),
 	}
@@ -813,6 +873,8 @@ func (s *Service) runHealthCheck(ctx context.Context) {
 		transportRunning = s.cloakStatusForProfile(ctx, profile).Running
 	case "naive":
 		transportRunning = s.naive.Status().Running
+	case "hysteria2":
+		transportRunning = s.hysteria2.Status().Running
 	}
 
 	if !transportRunning {
@@ -879,6 +941,18 @@ func (s *Service) recoverActiveTransport(ctx context.Context, profile state.Prof
 			return err
 		}
 		return s.waitForManagedTransportStable(restartCtx, func() bool { return s.naive.Status().Running }, profile.Naive.LocalPort, 2*time.Second)
+	case "hysteria2":
+		if s.hysteria2.Status().Running {
+			return nil
+		}
+		if profile.Hysteria2 == nil {
+			return errors.New("active transport is hysteria2 but profile has no hysteria2 config")
+		}
+		s.logs.Add(state.LogWarn, state.SourceDaemon, "health check detected hysteria2 stopped; attempting restart")
+		if err := s.hysteria2.Start(restartCtx, *profile.Hysteria2); err != nil {
+			return err
+		}
+		return s.waitForManagedTransportStable(restartCtx, func() bool { return s.hysteria2.Status().Running }, profile.Hysteria2.LocalPort, 2*time.Second)
 	default:
 		return fmt.Errorf("unknown active transport kind: %q", activeKind)
 	}
@@ -1183,23 +1257,28 @@ func rewriteLoopbackEndpointPort(configText string, newPort int) (string, bool) 
 	return wgLoopbackEndpointPattern.ReplaceAllString(configText, replacement), true
 }
 
-// killSwitchPermits is the cloak and naive endpoints (whichever are
-// configured) plus any bypassHosts that need direct reachability (e.g.
-// Pangea hub for re-provisioning during a switch). Both transport endpoints
-// must be permitted here — the kill switch arms once, before Connect knows
-// whether Cloak or the Naive fallback will actually succeed
-// (bringUpAfterKillSwitch / startTransport runs after this), so permitting
-// only Cloak's host would have the kill switch itself block the Naive
-// fallback's very first connection attempt whenever the two transports use
+// killSwitchPermits is the cloak, naive, and hysteria2 endpoints (whichever
+// are configured) plus any bypassHosts that need direct reachability (e.g.
+// Pangea hub for re-provisioning during a switch). All configured transport
+// endpoints must be permitted here — the kill switch arms once, before
+// Connect knows which transport will actually succeed (bringUpAfterKillSwitch
+// / startTransport runs after this), so permitting only Cloak's host would
+// have the kill switch itself block a fallback or explicitly-selected
+// transport's very first connection attempt whenever transports use
 // different remote hosts (the normal case — see hub/config/nodes.json,
 // where naive.remoteHost is a distinct domain from cloak.remoteHost).
 func killSwitchPermits(profile state.Profile) []string {
-	out := make([]string, 0, 2+len(profile.WireGuard.BypassHosts))
+	out := make([]string, 0, 3+len(profile.WireGuard.BypassHosts))
 	if host := strings.TrimSpace(profile.Cloak.RemoteHost); host != "" {
 		out = append(out, host)
 	}
 	if profile.Naive != nil {
 		if host := strings.TrimSpace(profile.Naive.RemoteHost); host != "" {
+			out = append(out, host)
+		}
+	}
+	if profile.Hysteria2 != nil {
+		if host := strings.TrimSpace(profile.Hysteria2.RemoteHost); host != "" {
 			out = append(out, host)
 		}
 	}
@@ -1211,11 +1290,11 @@ func killSwitchPermits(profile state.Profile) []string {
 	return out
 }
 
-// withTransportBypassHosts adds both the cloak and naive (when configured)
-// remote hosts to the WireGuard bypass list, so neither transport's own
-// connection to its remote endpoint gets routed back through the tunnel
-// it's establishing — same "arm before the transport is chosen" reasoning
-// as killSwitchPermits above.
+// withTransportBypassHosts adds the cloak, naive, and hysteria2 (when
+// configured) remote hosts to the WireGuard bypass list, so no transport's
+// own connection to its remote endpoint gets routed back through the
+// tunnel it's establishing — same "arm before the transport is chosen"
+// reasoning as killSwitchPermits above.
 func withTransportBypassHosts(profile state.Profile) state.WireGuardProfile {
 	copyProfile := profile.WireGuard
 	copyProfile.DNS = append([]string(nil), profile.WireGuard.DNS...)
@@ -1225,6 +1304,11 @@ func withTransportBypassHosts(profile state.Profile) state.WireGuardProfile {
 	}
 	if profile.Naive != nil {
 		if host := strings.TrimSpace(profile.Naive.RemoteHost); host != "" {
+			copyProfile.BypassHosts = append(copyProfile.BypassHosts, host)
+		}
+	}
+	if profile.Hysteria2 != nil {
+		if host := strings.TrimSpace(profile.Hysteria2.RemoteHost); host != "" {
 			copyProfile.BypassHosts = append(copyProfile.BypassHosts, host)
 		}
 	}

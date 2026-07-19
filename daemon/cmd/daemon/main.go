@@ -16,6 +16,7 @@ import (
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/api"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/auth"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/cloak"
+	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/hysteria2"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/platform"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/state"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/wg"
@@ -100,9 +101,10 @@ func startDaemonRuntime() (*daemonRuntime, error) {
 	// spike is confirmed and naive.Manager is built with the naive_cgo tag
 	// enabled in the release build.
 	naiveManager := &naiveStub{}
+	hysteria2Manager := hysteria2.NewManager(logs)
 	wgManager := wg.NewManager(logs)
 	killSwitch := platform.NewKillSwitch()
-	service := api.NewService(machine, logs, configStore, cloakManager, naiveManager, wgManager, killSwitch)
+	service := api.NewService(machine, logs, configStore, cloakManager, naiveManager, hysteria2Manager, wgManager, killSwitch)
 
 	handler := api.NewHandler(token, service)
 	server := &http.Server{
