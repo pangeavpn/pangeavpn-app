@@ -32,6 +32,19 @@ export const NaiveProfileSchema = z.object({
   serverName: z.string().optional()
 });
 
+export const Hysteria2ProfileSchema = z.object({
+  localPort: z.number().int().nonnegative(),
+  remoteHost: z.string().min(1),
+  remotePort: z.number().int().positive(),
+  serverName: z.string().optional(),
+  password: z.string(),
+  obfsPassword: z.string(),
+  upMbps: z.number().int().nonnegative().optional(),
+  downMbps: z.number().int().nonnegative().optional(),
+  insecure: z.boolean().optional(),
+  pinSha256: z.string().optional()
+});
+
 export const WireGuardProfileSchema = z.object({
   configText: z.string(),
   tunnelName: z.string().min(1),
@@ -44,6 +57,7 @@ export const ProfileSchema = z.object({
   name: z.string().min(1),
   cloak: CloakProfileSchema,
   naive: NaiveProfileSchema.optional(),
+  hysteria2: Hysteria2ProfileSchema.optional(),
   wireguard: WireGuardProfileSchema
 });
 
@@ -54,12 +68,16 @@ export const AppConfigSchema = z.object({
 export const StatusResponseSchema = z.object({
   state: DaemonStateSchema,
   detail: z.string(),
-  activeTransport: z.enum(["cloak", "naive", ""]).default(""),
+  activeTransport: z.enum(["cloak", "naive", "hysteria2", ""]).default(""),
   cloak: z.object({
     running: z.boolean(),
     pid: z.number().nullable()
   }),
   naive: z.object({
+    running: z.boolean(),
+    pid: z.number().nullable()
+  }),
+  hysteria2: z.object({
     running: z.boolean(),
     pid: z.number().nullable()
   }),
@@ -74,7 +92,7 @@ export const StatusResponseSchema = z.object({
 
 export const ConnectRequestSchema = z.object({
   profileId: z.string().min(1),
-  preferredTransport: z.enum(["cloak", "naive"]).optional()
+  preferredTransport: z.enum(["cloak", "naive", "hysteria2"]).optional()
 });
 
 export const OkResponseSchema = z.object({
@@ -104,6 +122,7 @@ export type LogSource = z.infer<typeof LogSourceSchema>;
 
 export type CloakProfile = z.infer<typeof CloakProfileSchema>;
 export type NaiveProfile = z.infer<typeof NaiveProfileSchema>;
+export type Hysteria2Profile = z.infer<typeof Hysteria2ProfileSchema>;
 export type WireGuardProfile = z.infer<typeof WireGuardProfileSchema>;
 export type Profile = z.infer<typeof ProfileSchema>;
 export type AppConfig = z.infer<typeof AppConfigSchema>;
