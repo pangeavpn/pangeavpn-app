@@ -134,6 +134,9 @@ export interface ServerInfo {
     password: string;
     obfsPassword: string;
     serverName?: string;
+    // Base64 SPKI SHA-256 pin for the node's self-signed cert; the daemon
+    // verifies against this instead of a CA chain.
+    pinSha256?: string;
   };
   /**
    * Tor Snowflake (WebRTC rendezvous) connection info, present only when the

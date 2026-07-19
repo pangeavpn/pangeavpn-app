@@ -914,7 +914,8 @@ export class PangeaApiClient {
           remotePort: server.hysteria2.remotePort,
           password: server.hysteria2.password,
           obfsPassword: server.hysteria2.obfsPassword,
-          ...(server.hysteria2.serverName ? { serverName: server.hysteria2.serverName } : {})
+          ...(server.hysteria2.serverName ? { serverName: server.hysteria2.serverName } : {}),
+          ...(server.hysteria2.pinSha256 ? { pinSha256: server.hysteria2.pinSha256 } : {})
         }
       } : {}),
       ...(server.snowflake ? {

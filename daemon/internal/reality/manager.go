@@ -265,8 +265,11 @@ func (m *Manager) Start(ctx context.Context, profile state.RealityProfile) error
 func buildOutboundOptions(profile state.RealityProfile, remoteHost string, remotePort int, serverName string) *option.VLESSOutboundOptions {
 	return &option.VLESSOutboundOptions{
 		ServerOptions: option.ServerOptions{Server: remoteHost, ServerPort: uint16(remotePort)},
-		UUID:          profile.UUID,
-		Flow:          profile.Flow,
+		UUID: profile.UUID,
+		// This transport only relays WireGuard UDP. xtls-rprx-vision (and any
+		// XTLS flow) is TCP-only and makes the VLESS UDP relay handshake fail
+		// with EOF, so the flow is forced empty regardless of profile.Flow.
+		Flow: "",
 		OutboundTLSOptionsContainer: option.OutboundTLSOptionsContainer{
 			TLS: &option.OutboundTLSOptions{
 				Enabled:    true,
