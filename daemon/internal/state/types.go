@@ -24,6 +24,7 @@ type LogSource string
 const (
 	SourceDaemon    LogSource = "daemon"
 	SourceCloak     LogSource = "cloak"
+	SourceNaive     LogSource = "naive"
 	SourceWireGuard LogSource = "wireguard"
 )
 
