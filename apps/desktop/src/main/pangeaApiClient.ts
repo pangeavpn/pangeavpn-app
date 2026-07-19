@@ -95,12 +95,13 @@ async function resolveViaDoH(hostname: string): Promise<string | null> {
 }
 
 /**
- * Resolve NaiveProxy's remote host to an IP so it can be excluded from
- * AllowedIPs (see allowedIPsExcludingAll). Unlike Cloak, whose remoteHost
- * from the hub is already a raw IP, NaiveProxy's remoteHost is a real
- * domain name (Caddy needs one to obtain a genuine ACME certificate — see
- * hub/config/nodes.json in the hub repo, e.g. naive-eu-west-1.pangeavpn.org),
- * so it must be resolved before it can be turned into a /32 exclusion.
+ * Resolve a fallback transport's (NaiveProxy, Hysteria2) remote host to an
+ * IP so it can be excluded from AllowedIPs (see allowedIPsExcludingAll).
+ * Unlike Cloak, whose remoteHost from the hub is already a raw IP, these
+ * transports' remoteHost is a real domain name (their TLS front needs one
+ * to obtain a genuine ACME certificate — see hub/config/nodes.json in the
+ * hub repo, e.g. naive-eu-west-1.pangeavpn.org), so it must be resolved
+ * before it can be turned into a /32 exclusion.
  *
  * Reuses the same DoH infrastructure already used to resolve the hub's own
  * hostname (see resolveViaDoH above / ensureHub), rather than falling back
@@ -108,7 +109,7 @@ async function resolveViaDoH(hostname: string): Promise<string | null> {
  * queries in cleartext. Returns null (never throws) on resolution failure
  * so callers can degrade gracefully instead of failing provisioning.
  */
-async function resolveNaiveRemoteIp(host: string): Promise<string | null> {
+async function resolveTransportRemoteIp(host: string): Promise<string | null> {
   if (isIPv4Literal(host)) return host;
   return resolveViaDoH(host);
 }
@@ -254,8 +255,8 @@ function splitBlockExcluding(block: CidrBlock, ip: number): CidrBlock[] {
 
 /**
  * Calculate AllowedIPs CIDRs that cover 0.0.0.0/0 minus every IP in
- * `excludeIPs`. Each transport (Cloak, and NaiveProxy when configured as a
- * fallback) makes its own outbound connection to its own remote host
+ * `excludeIPs`. Each transport (Cloak always; NaiveProxy and Hysteria2 when
+ * configured) makes its own outbound connection to its own remote host
  * *outside* the WireGuard tunnel (the tunnel's Endpoint is always
  * 127.0.0.1:<local transport port>) — every one of those remote hosts must
  * be excluded from AllowedIPs, or the OS routing table would try to route
@@ -779,14 +780,15 @@ export class PangeaApiClient {
       .filter(Boolean);
 
     // Every transport that might actually dial out (Cloak always; NaiveProxy
-    // when configured as a fallback) needs its remote host excluded from
-    // AllowedIPs, or the OS would try to route that connection attempt back
-    // through the tunnel it's still establishing. Cloak's remoteHost is
-    // always a raw IP from the hub. NaiveProxy's is a real domain name (so
-    // Caddy can hold a genuine ACME cert), so it must be resolved first.
+    // and Hysteria2 when configured as a fallback/alternative) needs its
+    // remote host excluded from AllowedIPs, or the OS would try to route
+    // that connection attempt back through the tunnel it's still
+    // establishing. Cloak's remoteHost is always a raw IP from the hub. The
+    // others are real domain names (their TLS front needs a genuine ACME
+    // cert), so they must be resolved first.
     const excludeIPs = [server.cloak.remoteHost];
     if (server.naive) {
-      const naiveIp = await resolveNaiveRemoteIp(server.naive.remoteHost);
+      const naiveIp = await resolveTransportRemoteIp(server.naive.remoteHost);
       if (naiveIp) {
         excludeIPs.push(naiveIp);
       } else {
@@ -801,6 +803,18 @@ export class PangeaApiClient {
           `[provision] Could not resolve NaiveProxy remote host "${server.naive.remoteHost}" to an IP; ` +
           "AllowedIPs will not exclude it. If Cloak fails and the daemon falls back to NaiveProxy, " +
           "its own connection attempt could be routed back through the tunnel (routing loop)."
+        );
+      }
+    }
+    if (server.hysteria2) {
+      const hysteria2Ip = await resolveTransportRemoteIp(server.hysteria2.remoteHost);
+      if (hysteria2Ip) {
+        excludeIPs.push(hysteria2Ip);
+      } else {
+        console.warn(
+          `[provision] Could not resolve Hysteria2 remote host "${server.hysteria2.remoteHost}" to an IP; ` +
+          "AllowedIPs will not exclude it. If selected as the active transport, its own connection " +
+          "attempt could be routed back through the tunnel (routing loop)."
         );
       }
     }
@@ -836,6 +850,16 @@ export class PangeaApiClient {
           username: server.naive.username,
           password: server.naive.password,
           ...(server.naive.serverName ? { serverName: server.naive.serverName } : {})
+        }
+      } : {}),
+      ...(server.hysteria2 ? {
+        hysteria2: {
+          localPort: 0,
+          remoteHost: server.hysteria2.remoteHost,
+          remotePort: server.hysteria2.remotePort,
+          password: server.hysteria2.password,
+          obfsPassword: server.hysteria2.obfsPassword,
+          ...(server.hysteria2.serverName ? { serverName: server.hysteria2.serverName } : {})
         }
       } : {}),
       wireguard: {

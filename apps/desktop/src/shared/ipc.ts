@@ -104,6 +104,20 @@ export interface ServerInfo {
     // Cover SNI presented during the TLS handshake (naive's --proxy host).
     serverName?: string;
   };
+  /**
+   * Hysteria2 (QUIC + Salamander obfuscation) connection info, present
+   * only when the hub node has Hysteria2 configured. Static per-node
+   * config, same as NaiveProxy — see Hysteria2ProfileSchema in
+   * @pangeavpn/shared-types for the full daemon-facing shape; this omits
+   * `localPort`, which is daemon-assigned.
+   */
+  hysteria2?: {
+    remoteHost: string;
+    remotePort: number;
+    password: string;
+    obfsPassword: string;
+    serverName?: string;
+  };
 }
 
 export interface DeviceInfo {
@@ -136,8 +150,8 @@ export interface PangeaApi {
   getDirectIpOnly: () => Promise<boolean>;
   setAllowLan: (enabled: boolean) => Promise<void>;
   getAllowLan: () => Promise<boolean>;
-  setPreferredTransport: (value: "auto" | "cloak" | "naive") => Promise<void>;
-  getPreferredTransport: () => Promise<"auto" | "cloak" | "naive">;
+  setPreferredTransport: (value: "auto" | "cloak" | "naive" | "hysteria2") => Promise<void>;
+  getPreferredTransport: () => Promise<"auto" | "cloak" | "naive" | "hysteria2">;
   setLaunchAtStartup: (enabled: boolean) => Promise<void>;
   getLaunchAtStartup: () => Promise<boolean>;
   setAlwaysConnected: (enabled: boolean) => Promise<void>;

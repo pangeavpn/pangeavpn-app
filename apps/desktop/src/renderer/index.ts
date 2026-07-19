@@ -975,7 +975,7 @@ allowLanToggle.addEventListener("change", async () => {
 preferredTransportSelect.addEventListener("change", async () => {
   if (!pangeaApi) return;
   const previous = preferredTransportSelect.dataset.previousValue ?? "auto";
-  const choice = preferredTransportSelect.value as "auto" | "cloak" | "naive";
+  const choice = preferredTransportSelect.value as "auto" | "cloak" | "naive" | "hysteria2";
   try {
     await pangeaApi.setPreferredTransport(choice);
     preferredTransportSelect.dataset.previousValue = choice;
@@ -1677,6 +1677,8 @@ function renderStatus(status: StatusResponse): void {
     activeTransportLabel.textContent = t("status.transport.naive");
   } else if (status.activeTransport === "cloak") {
     activeTransportLabel.textContent = t("status.transport.cloak");
+  } else if (status.activeTransport === "hysteria2") {
+    activeTransportLabel.textContent = t("status.transport.hysteria2");
   } else {
     activeTransportLabel.textContent = t("status.transport.none");
   }

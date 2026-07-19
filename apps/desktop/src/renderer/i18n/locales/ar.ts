@@ -109,6 +109,7 @@ export const ar = {
   "settings.transport.auto": "Automatic (recommended)",
   "settings.transport.cloak": "Cloak only",
   "settings.transport.naive": "NaiveProxy only",
+  "settings.transport.hysteria2": "Hysteria2 only",
   "settings.network.heading": "الشبكة",
   "settings.network.description": "إصلاحات لشبكات Wi-Fi المقيّدة.",
   "settings.network.allowLan.title": "السماح بشبكة LAN",
@@ -214,6 +215,7 @@ export const ar = {
   "status.stopped": "متوقف",
   "status.transport.cloak": "Obfuscation: Cloak",
   "status.transport.naive": "Obfuscation: NaiveProxy",
+  "status.transport.hysteria2": "Obfuscation: Hysteria2",
   "status.transport.none": "",
 
   // ── Generic error fallbacks ───────────────────────────

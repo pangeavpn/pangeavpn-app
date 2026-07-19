@@ -109,6 +109,7 @@ export const uk = {
   "settings.transport.auto": "Automatic (recommended)",
   "settings.transport.cloak": "Cloak only",
   "settings.transport.naive": "NaiveProxy only",
+  "settings.transport.hysteria2": "Hysteria2 only",
   "settings.network.heading": "Мережа",
   "settings.network.description": "Виправлення для обмежувальних мереж Wi-Fi.",
   "settings.network.allowLan.title": "Дозволити LAN",
@@ -214,6 +215,7 @@ export const uk = {
   "status.stopped": "зупинено",
   "status.transport.cloak": "Obfuscation: Cloak",
   "status.transport.naive": "Obfuscation: NaiveProxy",
+  "status.transport.hysteria2": "Obfuscation: Hysteria2",
   "status.transport.none": "",
 
   // ── Generic error fallbacks ───────────────────────────
