@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
+import { resolveNaiveCgoConfig } from "./lib/naive-cgo.mjs";
 
 const rootDir = process.cwd();
 const daemonDir = path.join(rootDir, "daemon");
@@ -16,7 +17,15 @@ if (!goCmd) {
   process.exit(1);
 }
 
-const env = goEnv(rootDir);
+// GOARCH is set by scripts/build-bin/windows.mjs per target (amd64/arm64);
+// falls back to the host arch for local `node build-daemon.mjs` runs.
+const goArch = process.env.GOARCH || (process.arch === "arm64" ? "arm64" : "amd64");
+const naiveCgo = isWin ? resolveNaiveCgoConfig(goArch, rootDir) : null;
+if (naiveCgo) {
+  console.log(`naive_cgo: enabled for ${goArch} (pangea_naive.lib found and toolchain resolved)`);
+}
+
+const env = goEnv(rootDir, naiveCgo);
 
 if (isWin) {
   // Clean any pre-existing .syso that may have incompatible relocations.
@@ -46,8 +55,9 @@ if (isWin) {
   }
 }
 
+const tagsArgs = naiveCgo ? ["-tags", naiveCgo.tags.join(",")] : [];
 const buildArgs = isWin
-  ? ["build", "-ldflags", "-H=windowsgui", "-o", outPath, "./cmd/daemon"]
+  ? ["build", ...tagsArgs, "-ldflags", "-H=windowsgui", "-o", outPath, "./cmd/daemon"]
   : ["build", "-o", outPath, "./cmd/daemon"];
 
 const result = spawnSync(goCmd, buildArgs, {
@@ -103,7 +113,7 @@ function resolveGoCommand() {
   return null;
 }
 
-function goEnv(projectRoot) {
+function goEnv(projectRoot, naiveCgo) {
   const root = path.join(projectRoot, ".cache");
   const goCache = path.join(root, "go-build");
   const goModCache = path.join(root, "go-mod");
@@ -117,7 +127,8 @@ function goEnv(projectRoot) {
     ...process.env,
     GOMODCACHE: goModCache,
     GOCACHE: goCache,
-    GOTMPDIR: goTmp
+    GOTMPDIR: goTmp,
+    ...(naiveCgo ? naiveCgo.env : {})
   };
 }
 
