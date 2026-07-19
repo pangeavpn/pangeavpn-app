@@ -436,10 +436,24 @@ func newTestServiceWithReality(
 	profiles ...state.Profile,
 ) *Service {
 	t.Helper()
+	return newTestServiceFull(t, cloak, naive, reality, &fakeHysteria2Manager{}, wgMgr, ks, profiles...)
+}
+
+func newTestServiceFull(
+	t *testing.T,
+	cloak *fakeCloakManager,
+	naive *fakeNaiveManager,
+	reality *fakeRealityManager,
+	hysteria2 *fakeHysteria2Manager,
+	wgMgr *fakeWGManager,
+	ks *fakeKillSwitch,
+	profiles ...state.Profile,
+) *Service {
+	t.Helper()
 	machine := state.NewMachine()
 	logs := state.NewLogStore(100)
 	config := testConfigStore(t, profiles...)
-	return NewService(machine, logs, config, cloak, naive, reality, &fakeHysteria2Manager{}, wgMgr, ks)
+	return NewService(machine, logs, config, cloak, naive, reality, hysteria2, wgMgr, ks)
 }
 
 // ---------------------------------------------------------------------------
@@ -1286,6 +1300,48 @@ func TestConnect_CloakAndNaiveFail_FallsBackToReality(t *testing.T) {
 	status := svc.Status(context.Background())
 	if status.ActiveTransport != "reality" {
 		t.Fatalf("ActiveTransport = %q, want reality", status.ActiveTransport)
+	}
+}
+
+func hysteria2Profile() state.Profile {
+	return state.Profile{
+		ID:        "p1",
+		Name:      "p1",
+		Cloak:     state.CloakProfile{RemoteHost: "example.com", RemotePort: 443, LocalPort: 51821},
+		Hysteria2: &state.Hysteria2Profile{RemoteHost: "hysteria2.example.com", RemotePort: 8443, Password: "p", ObfsPassword: "o"},
+		WireGuard: state.WireGuardProfile{
+			TunnelName: "pangea0",
+			ConfigText: "[Interface]\nPrivateKey=x\n[Peer]\nEndpoint=127.0.0.1:51821\nPublicKey=y\nAllowedIPs=0.0.0.0/0\n",
+		},
+	}
+}
+
+func TestConnect_CloakNaiveRealityFail_FallsBackToHysteria2(t *testing.T) {
+	profile := hysteria2Profile()
+	profile.Naive = &state.NaiveProfile{RemoteHost: "naive.example.com", RemotePort: 8443, Username: "u", Password: "p"}
+	profile.Reality = &state.RealityProfile{RemoteHost: "reality.example.com", RemotePort: 8443, UUID: "u", PublicKey: "k", ShortID: "ab12"}
+
+	cloakMgr := &fakeCloakManager{startErr: errors.New("cloak boom")}
+	naiveMgr := &fakeNaiveManager{startErr: errors.New("naive boom")}
+	realityMgr := &fakeRealityManager{startErr: errors.New("reality boom")}
+	hysteria2Mgr := &fakeHysteria2Manager{}
+	wgMgr := &fakeWGManager{}
+	ks := &fakeKillSwitch{}
+	svc := newTestServiceFull(t, cloakMgr, naiveMgr, realityMgr, hysteria2Mgr, wgMgr, ks, profile)
+
+	if err := svc.Connect(context.Background(), "p1", ConnectOptions{}); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	hysteria2Mgr.mu.Lock()
+	startCalled := hysteria2Mgr.startCalled
+	hysteria2Mgr.mu.Unlock()
+	if !startCalled {
+		t.Fatal("expected hysteria2.Start to be attempted after cloak, naive, and reality failed")
+	}
+
+	status := svc.Status(context.Background())
+	if status.ActiveTransport != "hysteria2" {
+		t.Fatalf("ActiveTransport = %q, want hysteria2", status.ActiveTransport)
 	}
 }
 

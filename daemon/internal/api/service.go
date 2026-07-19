@@ -527,7 +527,7 @@ func (s *Service) startHysteria2Transport(ctx context.Context, profile *state.Pr
 
 // startTransport: "cloak"/"naive"/"reality"/"hysteria2" = that transport
 // only, no fallback (errors if the profile has no config for it). ""
-// (default) = cloak first, then naive, then reality.
+// (default) = cloak first, then naive, then reality, then hysteria2.
 func (s *Service) startTransport(ctx context.Context, profile *state.Profile, wireGuardProfile *state.WireGuardProfile, preferredTransport string) (string, error) {
 	switch preferredTransport {
 	case "naive":
@@ -599,12 +599,13 @@ func (s *Service) fallbackToNaive(ctx context.Context, profile *state.Profile, w
 	return "naive", nil
 }
 
-// fallbackToReality is the last-resort step in automatic mode, tried after
-// cloak (and naive, if configured) have failed. prevErr carries the
-// accumulated failure detail from earlier transports.
+// fallbackToReality is tried after cloak (and naive, if configured) have
+// failed in automatic mode. If reality isn't configured or also fails, it
+// falls through to fallbackToHysteria2. prevErr carries the accumulated
+// failure detail from earlier transports.
 func (s *Service) fallbackToReality(ctx context.Context, profile *state.Profile, wireGuardProfile *state.WireGuardProfile, prevErr error) (string, error) {
 	if profile.Reality == nil {
-		return "", fmt.Errorf("all configured transports failed: %w", prevErr)
+		return s.fallbackToHysteria2(ctx, profile, wireGuardProfile, prevErr)
 	}
 
 	s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("checking reality fallback: %v", prevErr))
@@ -612,11 +613,31 @@ func (s *Service) fallbackToReality(ctx context.Context, profile *state.Profile,
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 2*time.Second)
 		_ = s.reality.Stop(cleanupCtx)
 		cleanupCancel()
-		return "", fmt.Errorf("all transports failed: %v; reality: %w", prevErr, err)
+		return s.fallbackToHysteria2(ctx, profile, wireGuardProfile, fmt.Errorf("%v; reality: %w", prevErr, err))
 	}
 
 	s.logs.Add(state.LogInfo, state.SourceDaemon, "fell back to reality transport")
 	return "reality", nil
+}
+
+// fallbackToHysteria2 is the last-resort step in automatic mode, tried after
+// cloak, naive, and reality have failed. prevErr carries the accumulated
+// failure detail from earlier transports.
+func (s *Service) fallbackToHysteria2(ctx context.Context, profile *state.Profile, wireGuardProfile *state.WireGuardProfile, prevErr error) (string, error) {
+	if profile.Hysteria2 == nil {
+		return "", fmt.Errorf("all configured transports failed: %w", prevErr)
+	}
+
+	s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("checking hysteria2 fallback: %v", prevErr))
+	if err := s.startHysteria2Transport(ctx, profile, wireGuardProfile); err != nil {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		_ = s.hysteria2.Stop(cleanupCtx)
+		cleanupCancel()
+		return "", fmt.Errorf("all transports failed: %v; hysteria2: %w", prevErr, err)
+	}
+
+	s.logs.Add(state.LogInfo, state.SourceDaemon, "fell back to hysteria2 transport")
+	return "hysteria2", nil
 }
 
 // Switch hot-swaps profile without dropping the kill switch. Interruptible
