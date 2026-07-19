@@ -55,10 +55,14 @@ if (isWin) {
   }
 }
 
-const tagsArgs = naiveCgo ? ["-tags", naiveCgo.tags.join(",")] : [];
+// with_utls is required by the VLESS+REALITY transport — sing-box compiles
+// uTLS out by default, and REALITY's Start fails at runtime without it.
+// naive_cgo is added on top when the prebuilt static lib + toolchain resolve.
+const buildTags = ["with_utls", ...(naiveCgo ? naiveCgo.tags : [])];
+const tagsArgs = ["-tags", buildTags.join(",")];
 const buildArgs = isWin
   ? ["build", ...tagsArgs, "-ldflags", "-H=windowsgui", "-o", outPath, "./cmd/daemon"]
-  : ["build", "-o", outPath, "./cmd/daemon"];
+  : ["build", ...tagsArgs, "-o", outPath, "./cmd/daemon"];
 
 const result = spawnSync(goCmd, buildArgs, {
   cwd: daemonDir,
