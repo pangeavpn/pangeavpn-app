@@ -140,6 +140,62 @@ func (f *fakeNaiveManager) BoundLocalPort() int {
 	return 51822
 }
 
+// fakeRealityManager mirrors fakeNaiveManager's shape for VLESS+REALITY.
+type fakeRealityManager struct {
+	mu             sync.Mutex
+	startCalled    bool
+	startLocalPort int
+	startErr       error
+	stopCalled     bool
+	running        bool
+	stayDown       bool
+	waitErr        error
+	boundLocalPort int
+}
+
+func (f *fakeRealityManager) Start(ctx context.Context, profile state.RealityProfile) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.startCalled = true
+	f.startLocalPort = profile.LocalPort
+	if f.startErr != nil {
+		return f.startErr
+	}
+	if !f.stayDown {
+		f.running = true
+	}
+	return nil
+}
+
+func (f *fakeRealityManager) Stop(ctx context.Context) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.stopCalled = true
+	f.running = false
+	return nil
+}
+
+func (f *fakeRealityManager) Status() state.TransportStatus {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return state.TransportStatus{Running: f.running}
+}
+
+func (f *fakeRealityManager) WaitForSession(ctx context.Context, timeout time.Duration) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.waitErr
+}
+
+func (f *fakeRealityManager) BoundLocalPort() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.boundLocalPort != 0 {
+		return f.boundLocalPort
+	}
+	return 51823
+}
+
 type fakeWGManager struct {
 	mu             sync.Mutex
 	running        bool
@@ -298,6 +354,10 @@ func testConfigStore(t *testing.T, profiles ...state.Profile) *state.ConfigStore
 	return cs
 }
 
+// newTestService keeps its original signature (cloak + naive only) so the
+// existing call sites below don't need touching; it wires in a no-op
+// fakeRealityManager. Tests that specifically exercise reality behavior use
+// newTestServiceWithReality instead.
 func newTestService(
 	t *testing.T,
 	cloak *fakeCloakManager,
@@ -307,10 +367,23 @@ func newTestService(
 	profiles ...state.Profile,
 ) *Service {
 	t.Helper()
+	return newTestServiceWithReality(t, cloak, naive, &fakeRealityManager{}, wgMgr, ks, profiles...)
+}
+
+func newTestServiceWithReality(
+	t *testing.T,
+	cloak *fakeCloakManager,
+	naive *fakeNaiveManager,
+	reality *fakeRealityManager,
+	wgMgr *fakeWGManager,
+	ks *fakeKillSwitch,
+	profiles ...state.Profile,
+) *Service {
+	t.Helper()
 	machine := state.NewMachine()
 	logs := state.NewLogStore(100)
 	config := testConfigStore(t, profiles...)
-	return NewService(machine, logs, config, cloak, naive, wgMgr, ks)
+	return NewService(machine, logs, config, cloak, naive, reality, wgMgr, ks)
 }
 
 // ---------------------------------------------------------------------------
@@ -1053,5 +1126,125 @@ func TestFallbackToNaive_StopsNaiveWhenSessionWaitFails(t *testing.T) {
 	}
 	if !stopCalled {
 		t.Error("expected naive.Stop to be called after naive session wait failed, to avoid leaking the naive transport")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Reality tests
+// ---------------------------------------------------------------------------
+
+func realityProfile() state.Profile {
+	return state.Profile{
+		ID:      "p1",
+		Name:    "p1",
+		Cloak:   state.CloakProfile{RemoteHost: "example.com", RemotePort: 443, LocalPort: 51821},
+		Reality: &state.RealityProfile{RemoteHost: "reality.example.com", RemotePort: 8443, UUID: "u", PublicKey: "k", ShortID: "ab12"},
+		WireGuard: state.WireGuardProfile{
+			TunnelName: "pangea0",
+			ConfigText: "[Interface]\nPrivateKey=x\n[Peer]\nEndpoint=127.0.0.1:51821\nPublicKey=y\nAllowedIPs=0.0.0.0/0\n",
+		},
+	}
+}
+
+func TestConnect_PreferredTransportReality_SkipsCloakAndNaive(t *testing.T) {
+	profile := realityProfile()
+
+	cloakMgr := &fakeCloakManager{}
+	naiveMgr := &fakeNaiveManager{}
+	realityMgr := &fakeRealityManager{}
+	wgMgr := &fakeWGManager{}
+	ks := &fakeKillSwitch{}
+	svc := newTestServiceWithReality(t, cloakMgr, naiveMgr, realityMgr, wgMgr, ks, profile)
+
+	if err := svc.Connect(context.Background(), "p1", ConnectOptions{PreferredTransport: "reality"}); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	if cloakMgr.startCalled {
+		t.Fatal("cloak.Start should not be called when PreferredTransport is reality")
+	}
+	if naiveMgr.startCalled {
+		t.Fatal("naive.Start should not be called when PreferredTransport is reality")
+	}
+	realityMgr.mu.Lock()
+	startCalled := realityMgr.startCalled
+	realityMgr.mu.Unlock()
+	if !startCalled {
+		t.Fatal("expected reality.Start to be called")
+	}
+
+	status := svc.Status(context.Background())
+	if status.ActiveTransport != "reality" {
+		t.Fatalf("ActiveTransport = %q, want reality", status.ActiveTransport)
+	}
+}
+
+func TestConnect_PreferredTransportReality_ErrorsWhenProfileHasNoRealityConfig(t *testing.T) {
+	profile := testProfile() // no Reality configured
+
+	cloakMgr := &fakeCloakManager{}
+	naiveMgr := &fakeNaiveManager{}
+	realityMgr := &fakeRealityManager{}
+	wgMgr := &fakeWGManager{}
+	ks := &fakeKillSwitch{}
+	svc := newTestServiceWithReality(t, cloakMgr, naiveMgr, realityMgr, wgMgr, ks, profile)
+
+	err := svc.Connect(context.Background(), profile.ID, ConnectOptions{PreferredTransport: "reality"})
+	if err == nil {
+		t.Fatal("expected Connect to fail: profile has no reality configuration")
+	}
+	realityMgr.mu.Lock()
+	startCalled := realityMgr.startCalled
+	realityMgr.mu.Unlock()
+	if startCalled {
+		t.Fatal("reality.Start should not be called when profile.Reality is nil")
+	}
+}
+
+func TestConnect_CloakAndNaiveFail_FallsBackToReality(t *testing.T) {
+	profile := realityProfile()
+	profile.Naive = &state.NaiveProfile{RemoteHost: "naive.example.com", RemotePort: 8443, Username: "u", Password: "p"}
+
+	cloakMgr := &fakeCloakManager{startErr: errors.New("cloak boom")}
+	naiveMgr := &fakeNaiveManager{startErr: errors.New("naive boom")}
+	realityMgr := &fakeRealityManager{}
+	wgMgr := &fakeWGManager{}
+	ks := &fakeKillSwitch{}
+	svc := newTestServiceWithReality(t, cloakMgr, naiveMgr, realityMgr, wgMgr, ks, profile)
+
+	if err := svc.Connect(context.Background(), "p1", ConnectOptions{}); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	if !cloakMgr.startCalled {
+		t.Fatal("expected cloak.Start to be attempted first")
+	}
+	if !naiveMgr.startCalled {
+		t.Fatal("expected naive.Start to be attempted after cloak failed")
+	}
+	realityMgr.mu.Lock()
+	startCalled := realityMgr.startCalled
+	realityMgr.mu.Unlock()
+	if !startCalled {
+		t.Fatal("expected reality.Start to be attempted after both cloak and naive failed")
+	}
+
+	status := svc.Status(context.Background())
+	if status.ActiveTransport != "reality" {
+		t.Fatalf("ActiveTransport = %q, want reality", status.ActiveTransport)
+	}
+}
+
+func TestKillSwitchPermits_IncludesRealityHostWhenPresent(t *testing.T) {
+	profile := realityProfile()
+	permits := killSwitchPermits(profile)
+	if !slices.Contains(permits, "reality.example.com") {
+		t.Errorf("killSwitchPermits() = %v, want to contain reality host reality.example.com", permits)
+	}
+}
+
+func TestWithTransportBypassHosts_IncludesRealityHostWhenPresent(t *testing.T) {
+	profile := realityProfile()
+	wgProfile := withTransportBypassHosts(profile)
+	if !slices.Contains(wgProfile.BypassHosts, "reality.example.com") {
+		t.Errorf("withTransportBypassHosts().BypassHosts = %v, want to contain reality.example.com", wgProfile.BypassHosts)
 	}
 }

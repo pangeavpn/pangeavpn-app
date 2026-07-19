@@ -37,12 +37,21 @@ type naiveManager interface {
 	Status() state.TransportStatus
 }
 
+// realityManager is transport.Manager (Stop) plus Start/Status with
+// VLESS+REALITY's concrete types. reality.Manager satisfies this directly.
+type realityManager interface {
+	transport.Manager
+	Start(ctx context.Context, profile state.RealityProfile) error
+	Status() state.TransportStatus
+}
+
 type Service struct {
 	machine    *state.Machine
 	logs       *state.LogStore
 	config     *state.ConfigStore
 	cloak      cloakManager
 	naive      naiveManager
+	reality    realityManager
 	wg         wg.Manager
 	killSwitch platform.KillSwitch
 
@@ -58,8 +67,8 @@ type Service struct {
 	profileMu      sync.RWMutex
 	currentProfile *state.Profile
 
-	// activeMu guards activeTransportKind, which of {cloak, naive} is live for
-	// the current session. Empty string when disconnected.
+	// activeMu guards activeTransportKind, which of {cloak, naive, reality} is
+	// live for the current session. Empty string when disconnected.
 	activeMu            sync.RWMutex
 	activeTransportKind string
 }
@@ -85,6 +94,7 @@ func NewService(
 	config *state.ConfigStore,
 	cloakManager cloakManager,
 	naiveManager naiveManager,
+	realityManager realityManager,
 	wgManager wg.Manager,
 	killSwitch platform.KillSwitch,
 ) *Service {
@@ -94,6 +104,7 @@ func NewService(
 		config:     config,
 		cloak:      cloakManager,
 		naive:      naiveManager,
+		reality:    realityManager,
 		wg:         wgManager,
 		killSwitch: killSwitch,
 	}
@@ -110,6 +121,8 @@ func (s *Service) activeTransport() transport.Manager {
 		return s.cloak
 	case "naive":
 		return s.naive
+	case "reality":
+		return s.reality
 	default:
 		return nil
 	}
@@ -427,9 +440,44 @@ func (s *Service) startNaiveTransport(ctx context.Context, profile *state.Profil
 	return nil
 }
 
-// startTransport: "cloak" = cloak only, no fallback. "naive" = naive only,
-// errors if profile has none configured. "" (default) = cloak first, fall
-// back to naive on failure.
+// startRealityTransport runs VLESS+REALITY's start sequence, mirroring
+// startNaiveTransport. Cleans up (stops reality) on its own failure, since
+// it's always the last transport tried.
+func (s *Service) startRealityTransport(ctx context.Context, profile *state.Profile, wireGuardProfile *state.WireGuardProfile) error {
+	// De-alias from the config store's shared *RealityProfile before mutating LocalPort.
+	realityCopy := *profile.Reality
+	profile.Reality = &realityCopy
+
+	realityStartProfile := *profile.Reality
+	realityStartProfile.LocalPort = 0
+	if err := s.reality.Start(ctx, realityStartProfile); err != nil {
+		return fmt.Errorf("start: %w", err)
+	}
+
+	profile.Reality.LocalPort = s.rebindWireGuardEndpoint(s.reality, profile.Reality.LocalPort, wireGuardProfile)
+	realityRunning := func() bool { return s.reality.Status().Running }
+	if err := s.waitForManagedTransportStable(ctx, realityRunning, profile.Reality.LocalPort, 200*time.Millisecond); err != nil {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		_ = s.reality.Stop(cleanupCtx)
+		cleanupCancel()
+		return err
+	}
+	if waiter, ok := s.reality.(transport.SessionWaiter); ok {
+		waitCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		err := waiter.WaitForSession(waitCtx, 10*time.Second)
+		cancel()
+		if err != nil {
+			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 2*time.Second)
+			_ = s.reality.Stop(cleanupCtx)
+			cleanupCancel()
+			return fmt.Errorf("session: %w", err)
+		}
+	}
+	return nil
+}
+
+// startTransport: "cloak"/"naive"/"reality" = that transport only, no
+// fallback. "" (default) = cloak first, then naive, then reality.
 func (s *Service) startTransport(ctx context.Context, profile *state.Profile, wireGuardProfile *state.WireGuardProfile, preferredTransport string) (string, error) {
 	switch preferredTransport {
 	case "naive":
@@ -440,6 +488,17 @@ func (s *Service) startTransport(ctx context.Context, profile *state.Profile, wi
 			return "", fmt.Errorf("naive: %w", err)
 		}
 		return "naive", nil
+	case "reality":
+		if profile.Reality == nil {
+			return "", errors.New("reality transport requested but this profile has no reality configuration")
+		}
+		if err := s.startRealityTransport(ctx, profile, wireGuardProfile); err != nil {
+			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 2*time.Second)
+			_ = s.reality.Stop(cleanupCtx)
+			cleanupCancel()
+			return "", fmt.Errorf("reality: %w", err)
+		}
+		return "reality", nil
 	case "cloak":
 		if err := s.startCloakTransport(ctx, profile, wireGuardProfile); err != nil {
 			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -459,7 +518,8 @@ func (s *Service) startTransport(ctx context.Context, profile *state.Profile, wi
 // fallbackToNaive is called once Cloak has failed at some stage of startup
 // during automatic ("" / "auto") mode. It stops whatever Cloak left
 // behind, and — only if the profile has a NaiveProxy fallback configured —
-// starts NaiveProxy in its place.
+// starts NaiveProxy in its place. Falls through to fallbackToReality if
+// naive isn't configured or also fails.
 func (s *Service) fallbackToNaive(ctx context.Context, profile *state.Profile, wireGuardProfile *state.WireGuardProfile, cloakErr error) (string, error) {
 	s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("cloak transport failed, checking naive fallback: %v", cloakErr))
 	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -467,15 +527,35 @@ func (s *Service) fallbackToNaive(ctx context.Context, profile *state.Profile, w
 	cleanupCancel()
 
 	if profile.Naive == nil {
-		return "", fmt.Errorf("cloak failed and no naive fallback configured: %w", cloakErr)
+		return s.fallbackToReality(ctx, profile, wireGuardProfile, cloakErr)
 	}
 
 	if err := s.startNaiveTransport(ctx, profile, wireGuardProfile); err != nil {
-		return "", fmt.Errorf("both transports failed: cloak: %v; naive: %w", cloakErr, err)
+		return s.fallbackToReality(ctx, profile, wireGuardProfile, fmt.Errorf("cloak: %v; naive: %w", cloakErr, err))
 	}
 
 	s.logs.Add(state.LogInfo, state.SourceDaemon, "fell back to naive transport after cloak failure")
 	return "naive", nil
+}
+
+// fallbackToReality is the last-resort step in automatic mode, tried after
+// cloak (and naive, if configured) have failed. prevErr carries the
+// accumulated failure detail from earlier transports.
+func (s *Service) fallbackToReality(ctx context.Context, profile *state.Profile, wireGuardProfile *state.WireGuardProfile, prevErr error) (string, error) {
+	if profile.Reality == nil {
+		return "", fmt.Errorf("all configured transports failed: %w", prevErr)
+	}
+
+	s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("checking reality fallback: %v", prevErr))
+	if err := s.startRealityTransport(ctx, profile, wireGuardProfile); err != nil {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		_ = s.reality.Stop(cleanupCtx)
+		cleanupCancel()
+		return "", fmt.Errorf("all transports failed: %v; reality: %w", prevErr, err)
+	}
+
+	s.logs.Add(state.LogInfo, state.SourceDaemon, "fell back to reality transport")
+	return "reality", nil
 }
 
 // Switch hot-swaps profile without dropping the kill switch. Interruptible
@@ -735,6 +815,7 @@ func (s *Service) Status(ctx context.Context) state.StatusResponse {
 
 	cloakStatus := s.cloak.Status()
 	naiveStatus := s.naive.Status()
+	realityStatus := s.reality.Status()
 
 	wgStatus := state.WireGuardStatus{Running: false, Detail: "not connected"}
 	if profile, ok := s.getCurrentProfile(); ok {
@@ -756,6 +837,7 @@ func (s *Service) Status(ctx context.Context) state.StatusResponse {
 		ActiveTransport:  activeKind,
 		Cloak:            cloakStatus,
 		Naive:            naiveStatus,
+		Reality:          realityStatus,
 		WireGuard:        wgStatus,
 		KillSwitchActive: s.killSwitch.Active(),
 	}
@@ -813,6 +895,8 @@ func (s *Service) runHealthCheck(ctx context.Context) {
 		transportRunning = s.cloakStatusForProfile(ctx, profile).Running
 	case "naive":
 		transportRunning = s.naive.Status().Running
+	case "reality":
+		transportRunning = s.reality.Status().Running
 	}
 
 	if !transportRunning {
@@ -841,8 +925,8 @@ func (s *Service) runHealthCheck(ctx context.Context) {
 
 // recoverActiveTransport restarts whichever transport is active in-place —
 // v1 has no mid-session hot failover (design spec non-goal), so a dead
-// cloak session gets a fresh cloak restart, a dead naive session gets a
-// fresh naive restart; it never switches kind mid-session.
+// cloak session gets a fresh cloak restart, a dead naive/reality session
+// gets a fresh naive/reality restart; it never switches kind mid-session.
 func (s *Service) recoverActiveTransport(ctx context.Context, profile state.Profile, activeKind string) error {
 	if !s.opMu.TryLock() {
 		return errors.New("operation in progress")
@@ -879,6 +963,18 @@ func (s *Service) recoverActiveTransport(ctx context.Context, profile state.Prof
 			return err
 		}
 		return s.waitForManagedTransportStable(restartCtx, func() bool { return s.naive.Status().Running }, profile.Naive.LocalPort, 2*time.Second)
+	case "reality":
+		if s.reality.Status().Running {
+			return nil
+		}
+		if profile.Reality == nil {
+			return errors.New("active transport is reality but profile has no reality config")
+		}
+		s.logs.Add(state.LogWarn, state.SourceDaemon, "health check detected reality stopped; attempting restart")
+		if err := s.reality.Start(restartCtx, *profile.Reality); err != nil {
+			return err
+		}
+		return s.waitForManagedTransportStable(restartCtx, func() bool { return s.reality.Status().Running }, profile.Reality.LocalPort, 2*time.Second)
 	default:
 		return fmt.Errorf("unknown active transport kind: %q", activeKind)
 	}
@@ -1183,23 +1279,28 @@ func rewriteLoopbackEndpointPort(configText string, newPort int) (string, bool) 
 	return wgLoopbackEndpointPattern.ReplaceAllString(configText, replacement), true
 }
 
-// killSwitchPermits is the cloak and naive endpoints (whichever are
-// configured) plus any bypassHosts that need direct reachability (e.g.
-// Pangea hub for re-provisioning during a switch). Both transport endpoints
-// must be permitted here — the kill switch arms once, before Connect knows
-// whether Cloak or the Naive fallback will actually succeed
+// killSwitchPermits is the cloak, naive, and reality endpoints (whichever
+// are configured) plus any bypassHosts that need direct reachability (e.g.
+// Pangea hub for re-provisioning during a switch). All configured transport
+// endpoints must be permitted here — the kill switch arms once, before
+// Connect knows which transport will actually succeed
 // (bringUpAfterKillSwitch / startTransport runs after this), so permitting
-// only Cloak's host would have the kill switch itself block the Naive
-// fallback's very first connection attempt whenever the two transports use
-// different remote hosts (the normal case — see hub/config/nodes.json,
-// where naive.remoteHost is a distinct domain from cloak.remoteHost).
+// only Cloak's host would have the kill switch itself block a fallback
+// transport's very first connection attempt whenever it uses a different
+// remote host (the normal case — see hub/config/nodes.json, where each
+// transport's remoteHost is typically a distinct domain).
 func killSwitchPermits(profile state.Profile) []string {
-	out := make([]string, 0, 2+len(profile.WireGuard.BypassHosts))
+	out := make([]string, 0, 3+len(profile.WireGuard.BypassHosts))
 	if host := strings.TrimSpace(profile.Cloak.RemoteHost); host != "" {
 		out = append(out, host)
 	}
 	if profile.Naive != nil {
 		if host := strings.TrimSpace(profile.Naive.RemoteHost); host != "" {
+			out = append(out, host)
+		}
+	}
+	if profile.Reality != nil {
+		if host := strings.TrimSpace(profile.Reality.RemoteHost); host != "" {
 			out = append(out, host)
 		}
 	}
@@ -1211,11 +1312,11 @@ func killSwitchPermits(profile state.Profile) []string {
 	return out
 }
 
-// withTransportBypassHosts adds both the cloak and naive (when configured)
-// remote hosts to the WireGuard bypass list, so neither transport's own
-// connection to its remote endpoint gets routed back through the tunnel
-// it's establishing — same "arm before the transport is chosen" reasoning
-// as killSwitchPermits above.
+// withTransportBypassHosts adds the cloak, naive, and reality (whichever
+// are configured) remote hosts to the WireGuard bypass list, so no
+// transport's own connection to its remote endpoint gets routed back
+// through the tunnel it's establishing — same "arm before the transport is
+// chosen" reasoning as killSwitchPermits above.
 func withTransportBypassHosts(profile state.Profile) state.WireGuardProfile {
 	copyProfile := profile.WireGuard
 	copyProfile.DNS = append([]string(nil), profile.WireGuard.DNS...)
@@ -1225,6 +1326,11 @@ func withTransportBypassHosts(profile state.Profile) state.WireGuardProfile {
 	}
 	if profile.Naive != nil {
 		if host := strings.TrimSpace(profile.Naive.RemoteHost); host != "" {
+			copyProfile.BypassHosts = append(copyProfile.BypassHosts, host)
+		}
+	}
+	if profile.Reality != nil {
+		if host := strings.TrimSpace(profile.Reality.RemoteHost); host != "" {
 			copyProfile.BypassHosts = append(copyProfile.BypassHosts, host)
 		}
 	}
