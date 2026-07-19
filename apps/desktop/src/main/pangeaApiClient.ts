@@ -115,6 +115,15 @@ async function resolveTransportRemoteIp(host: string): Promise<string | null> {
   return resolveViaDoH(host);
 }
 
+/** Extract a hostname from a broker URL, or null if it doesn't parse. */
+function safeHostname(url: string): string | null {
+  try {
+    return new URL(url).hostname || null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Make an HTTPS request to a DoH-resolved IP with correct SNI for Cloudflare.
  * Uses node:https so we can set servername (SNI) independently from the IP.
@@ -781,12 +790,12 @@ export class PangeaApiClient {
       .filter(Boolean);
 
     // Every transport that might actually dial out (Cloak always; NaiveProxy
-    // and Reality/Hysteria2 when configured as fallbacks/alternatives) needs
-    // its remote host excluded from AllowedIPs, or the OS would try to route
-    // that connection attempt back through the tunnel it's still establishing.
-    // Cloak's remoteHost is always a raw IP from the hub. The others are real
-    // domain names (their TLS front needs a genuine ACME cert), so they must
-    // be resolved first.
+    // and Reality/Hysteria2/Snowflake when configured as fallbacks/alternatives)
+    // needs its remote host excluded from AllowedIPs, or the OS would try to
+    // route that connection attempt back through the tunnel it's still
+    // establishing. Cloak's remoteHost is always a raw IP from the hub. The
+    // others are real domain names (their TLS front needs a genuine ACME
+    // cert), so they must be resolved first.
     const excludeIPs = [server.cloak.remoteHost];
     if (server.naive) {
       const naiveIp = await resolveTransportRemoteIp(server.naive.remoteHost);
@@ -830,6 +839,25 @@ export class PangeaApiClient {
           `[provision] Could not resolve Hysteria2 remote host "${server.hysteria2.remoteHost}" to an IP; ` +
           "AllowedIPs will not exclude it. If selected as the active transport, its own connection " +
           "attempt could be routed back through the tunnel (routing loop)."
+        );
+      }
+    }
+    if (server.snowflake) {
+      // Snowflake has no single remoteHost like the others: only the broker
+      // (rendezvous) host is excluded here. The actual WebRTC data-plane peer
+      // is a volunteer proxy discovered dynamically per-session and can't be
+      // resolved ahead of time, so it isn't (and can't be) covered by this
+      // exclusion list — same limitation documented on the daemon side
+      // (see snowflakeHosts in internal/api/service.go).
+      const brokerHost = safeHostname(server.snowflake.brokerURL);
+      const brokerIp = brokerHost ? await resolveTransportRemoteIp(brokerHost) : null;
+      if (brokerIp) {
+        excludeIPs.push(brokerIp);
+      } else {
+        console.warn(
+          `[provision] Could not resolve Snowflake broker host "${server.snowflake.brokerURL}" to an IP; ` +
+          "AllowedIPs will not exclude it. If selected as the active transport, its own rendezvous " +
+          "connection could be routed back through the tunnel (routing loop)."
         );
       }
     }
@@ -887,6 +915,16 @@ export class PangeaApiClient {
           password: server.hysteria2.password,
           obfsPassword: server.hysteria2.obfsPassword,
           ...(server.hysteria2.serverName ? { serverName: server.hysteria2.serverName } : {})
+        }
+      } : {}),
+      ...(server.snowflake ? {
+        snowflake: {
+          localPort: 0,
+          brokerURL: server.snowflake.brokerURL,
+          bridgeFingerprint: server.snowflake.bridgeFingerprint,
+          ...(server.snowflake.frontDomains ? { fronts: server.snowflake.frontDomains } : {}),
+          ...(server.snowflake.ampCacheURL ? { ampCacheUrl: server.snowflake.ampCacheURL } : {}),
+          ...(server.snowflake.iceServers ? { iceServers: server.snowflake.iceServers } : {})
         }
       } : {}),
       wireguard: {

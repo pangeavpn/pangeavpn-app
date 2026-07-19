@@ -57,6 +57,16 @@ export const Hysteria2ProfileSchema = z.object({
   pinSha256: z.string().optional()
 });
 
+export const SnowflakeProfileSchema = z.object({
+  localPort: z.number().int().nonnegative(),
+  brokerURL: z.string().min(1),
+  fronts: z.array(z.string()).optional(),
+  ampCacheUrl: z.string().optional(),
+  iceServers: z.array(z.string()).optional(),
+  bridgeFingerprint: z.string().min(1),
+  keepLocalAddresses: z.boolean().optional()
+});
+
 export const WireGuardProfileSchema = z.object({
   configText: z.string(),
   tunnelName: z.string().min(1),
@@ -71,6 +81,7 @@ export const ProfileSchema = z.object({
   naive: NaiveProfileSchema.optional(),
   reality: RealityProfileSchema.optional(),
   hysteria2: Hysteria2ProfileSchema.optional(),
+  snowflake: SnowflakeProfileSchema.optional(),
   wireguard: WireGuardProfileSchema
 });
 
@@ -81,7 +92,7 @@ export const AppConfigSchema = z.object({
 export const StatusResponseSchema = z.object({
   state: DaemonStateSchema,
   detail: z.string(),
-  activeTransport: z.enum(["cloak", "naive", "reality", "hysteria2", ""]).default(""),
+  activeTransport: z.enum(["cloak", "naive", "reality", "hysteria2", "snowflake", ""]).default(""),
   cloak: z.object({
     running: z.boolean(),
     pid: z.number().nullable()
@@ -98,6 +109,10 @@ export const StatusResponseSchema = z.object({
     running: z.boolean(),
     pid: z.number().nullable()
   }),
+  snowflake: z.object({
+    running: z.boolean(),
+    pid: z.number().nullable()
+  }),
   wireguard: z.object({
     running: z.boolean(),
     detail: z.string(),
@@ -109,7 +124,7 @@ export const StatusResponseSchema = z.object({
 
 export const ConnectRequestSchema = z.object({
   profileId: z.string().min(1),
-  preferredTransport: z.enum(["cloak", "naive", "reality", "hysteria2"]).optional()
+  preferredTransport: z.enum(["cloak", "naive", "reality", "hysteria2", "snowflake"]).optional()
 });
 
 export const OkResponseSchema = z.object({
@@ -141,6 +156,7 @@ export type CloakProfile = z.infer<typeof CloakProfileSchema>;
 export type NaiveProfile = z.infer<typeof NaiveProfileSchema>;
 export type RealityProfile = z.infer<typeof RealityProfileSchema>;
 export type Hysteria2Profile = z.infer<typeof Hysteria2ProfileSchema>;
+export type SnowflakeProfile = z.infer<typeof SnowflakeProfileSchema>;
 export type WireGuardProfile = z.infer<typeof WireGuardProfileSchema>;
 export type Profile = z.infer<typeof ProfileSchema>;
 export type AppConfig = z.infer<typeof AppConfigSchema>;

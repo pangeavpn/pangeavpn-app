@@ -135,6 +135,23 @@ export interface ServerInfo {
     obfsPassword: string;
     serverName?: string;
   };
+  /**
+   * Tor Snowflake (WebRTC rendezvous) connection info, present only when the
+   * hub node has Snowflake configured. Static per-node config, same as
+   * Hysteria2 — see SnowflakeProfileSchema in @pangeavpn/shared-types for
+   * the full daemon-facing shape; this omits `localPort`, which is
+   * daemon-assigned. Unlike the other transports there is no single
+   * `remoteHost`: rendezvous happens against `brokerURL` (optionally via
+   * `frontDomains` or `ampCacheURL`), and the actual data-plane peer is a
+   * volunteer proxy discovered dynamically per-session.
+   */
+  snowflake?: {
+    brokerURL: string;
+    bridgeFingerprint: string;
+    frontDomains?: string[];
+    ampCacheURL?: string;
+    iceServers?: string[];
+  };
 }
 
 export interface DeviceInfo {
@@ -167,8 +184,8 @@ export interface PangeaApi {
   getDirectIpOnly: () => Promise<boolean>;
   setAllowLan: (enabled: boolean) => Promise<void>;
   getAllowLan: () => Promise<boolean>;
-  setPreferredTransport: (value: "auto" | "cloak" | "naive" | "reality" | "hysteria2") => Promise<void>;
-  getPreferredTransport: () => Promise<"auto" | "cloak" | "naive" | "reality" | "hysteria2">;
+  setPreferredTransport: (value: "auto" | "cloak" | "naive" | "reality" | "hysteria2" | "snowflake") => Promise<void>;
+  getPreferredTransport: () => Promise<"auto" | "cloak" | "naive" | "reality" | "hysteria2" | "snowflake">;
   setLaunchAtStartup: (enabled: boolean) => Promise<void>;
   getLaunchAtStartup: () => Promise<boolean>;
   setAlwaysConnected: (enabled: boolean) => Promise<void>;

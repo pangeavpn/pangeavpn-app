@@ -111,6 +111,7 @@ export const ru = {
   "settings.transport.naive": "NaiveProxy only",
   "settings.transport.reality": "VLESS+REALITY only",
   "settings.transport.hysteria2": "Hysteria2 only",
+  "settings.transport.snowflake": "Snowflake only",
   "settings.network.heading": "Сеть",
   "settings.network.description": "Исправления для сетей Wi-Fi с ограничениями.",
   "settings.network.allowLan.title": "Разрешить LAN",
@@ -217,6 +218,7 @@ export const ru = {
   "status.transport.cloak": "Obfuscation: Cloak",
   "status.transport.naive": "Obfuscation: NaiveProxy",
   "status.transport.hysteria2": "Obfuscation: Hysteria2",
+  "status.transport.snowflake": "Obfuscation: Snowflake",
   "status.transport.none": "",
 
   // ── Generic error fallbacks ───────────────────────────

@@ -27,7 +27,11 @@ export class DaemonClient {
 
   async connect(
     profileId: string,
-    opts?: { allowLAN?: boolean; lockdown?: boolean; preferredTransport?: "cloak" | "naive" | "reality" | "hysteria2" }
+    opts?: {
+      allowLAN?: boolean;
+      lockdown?: boolean;
+      preferredTransport?: "cloak" | "naive" | "reality" | "hysteria2" | "snowflake";
+    }
   ): Promise<OkResponse> {
     const body: Record<string, unknown> = { profileId };
     if (opts?.allowLAN) {
@@ -67,7 +71,11 @@ export class DaemonClient {
 
   async switch(
     profileId: string,
-    opts?: { allowLAN?: boolean; lockdown?: boolean; preferredTransport?: "cloak" | "naive" | "reality" | "hysteria2" }
+    opts?: {
+      allowLAN?: boolean;
+      lockdown?: boolean;
+      preferredTransport?: "cloak" | "naive" | "reality" | "hysteria2" | "snowflake";
+    }
   ): Promise<OkResponse> {
     const body: Record<string, unknown> = { profileId };
     if (opts?.allowLAN) {

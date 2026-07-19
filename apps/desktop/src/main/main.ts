@@ -45,8 +45,9 @@ let lastServerId: string | null = null;
 let allowLanEnabled = true;
 let launchAtStartupEnabled = false;
 let alwaysConnectedEnabled = false;
-// "auto" (cloak, fall back to naive, then reality), or "cloak"/"naive"/"reality"/"hysteria2" (that transport only).
-let preferredTransport: "auto" | "cloak" | "naive" | "reality" | "hysteria2" = "auto";
+// "auto" (cloak, fall back to naive, reality, hysteria2, then snowflake), or
+// "cloak"/"naive"/"reality"/"hysteria2"/"snowflake" (that transport only).
+let preferredTransport: "auto" | "cloak" | "naive" | "reality" | "hysteria2" | "snowflake" = "auto";
 // Stored language preference: a locale code, or "system" to follow the OS.
 let localePref = "system";
 const hiddenLaunch = process.argv.some(isHiddenLaunchArg);
@@ -879,8 +880,11 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.getAllowLan, async () => allowLanEnabled);
 
-  ipcMain.handle(IPC_CHANNELS.setPreferredTransport, async (_event, value: "auto" | "cloak" | "naive" | "reality" | "hysteria2") => {
-    preferredTransport = value === "cloak" || value === "naive" || value === "reality" || value === "hysteria2" ? value : "auto";
+  ipcMain.handle(IPC_CHANNELS.setPreferredTransport, async (_event, value: "auto" | "cloak" | "naive" | "reality" | "hysteria2" | "snowflake") => {
+    preferredTransport =
+      value === "cloak" || value === "naive" || value === "reality" || value === "hysteria2" || value === "snowflake"
+        ? value
+        : "auto";
     try {
       const settings = await readSettingsFile();
       settings.preferredTransport = preferredTransport;
@@ -1214,7 +1218,8 @@ async function boot(): Promise<void> {
       settings.preferredTransport === "cloak" ||
       settings.preferredTransport === "naive" ||
       settings.preferredTransport === "reality" ||
-      settings.preferredTransport === "hysteria2"
+      settings.preferredTransport === "hysteria2" ||
+      settings.preferredTransport === "snowflake"
     ) {
       preferredTransport = settings.preferredTransport;
     }
