@@ -423,14 +423,13 @@ func (s *Service) startCloakTransport(ctx context.Context, profile *state.Profil
 	if err := s.waitForManagedTransportStable(ctx, cloakRunning, profile.Cloak.LocalPort, 200*time.Millisecond); err != nil {
 		return err
 	}
-	if waiter, ok := s.cloak.(transport.SessionWaiter); ok {
-		waitCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		err := waiter.WaitForSession(waitCtx, 10*time.Second)
-		cancel()
-		if err != nil {
-			return err
-		}
-	}
+	// NOTE: deliberately do NOT wait for a Cloak session here. Cloak's RouteUDP
+	// only dials the server (MakeSession) after the first WireGuard packet
+	// reaches the local listener, and WireGuard starts *after* this returns.
+	// Blocking on WaitForSession would therefore always deadlock until timeout.
+	// Cloak is ready once its process is up; the session forms as soon as WG
+	// traffic flows, and a genuinely unreachable server surfaces as a failed
+	// WireGuard handshake, which the health check then recovers/reports.
 	return nil
 }
 

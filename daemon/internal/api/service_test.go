@@ -615,26 +615,6 @@ func TestConnect_WGFailure_KillSwitchStaysActive(t *testing.T) {
 	}
 }
 
-func TestConnect_CloakSessionFailure_KillSwitchStaysActive(t *testing.T) {
-	profile := testProfile()
-	cloak := &fakeCloakManager{waitErr: errors.New("session timeout")}
-	wgMgr := &fakeWGManager{}
-	ks := &fakeKillSwitch{}
-	svc := newTestService(t, cloak, &fakeNaiveManager{}, wgMgr, ks, profile)
-
-	err := svc.Connect(context.Background(), profile.ID, ConnectOptions{})
-	if err == nil {
-		t.Fatal("expected connect to fail when cloak session is not established")
-	}
-
-	ks.mu.Lock()
-	defer ks.mu.Unlock()
-
-	if !ks.active {
-		t.Error("expected kill switch to remain active after cloak session failure (fail-closed)")
-	}
-}
-
 func TestConnect_CloakFailure_KillSwitchStaysActive(t *testing.T) {
 	profile := testProfile()
 	cloak := &fakeCloakManager{startErr: errors.New("cloak failed")}
