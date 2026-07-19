@@ -16,6 +16,7 @@ import (
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/api"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/auth"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/cloak"
+	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/hysteria2"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/platform"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/reality"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/state"
@@ -105,9 +106,10 @@ func startDaemonRuntime() (*daemonRuntime, error) {
 	// TLS layer returns a clean "rebuild with -tags with_utls" error on
 	// Start rather than needing a stub here (see internal/reality's doc).
 	realityManager := reality.NewManager(logs)
+	hysteria2Manager := hysteria2.NewManager(logs)
 	wgManager := wg.NewManager(logs)
 	killSwitch := platform.NewKillSwitch()
-	service := api.NewService(machine, logs, configStore, cloakManager, naiveManager, realityManager, wgManager, killSwitch)
+	service := api.NewService(machine, logs, configStore, cloakManager, naiveManager, realityManager, hysteria2Manager, wgManager, killSwitch)
 
 	handler := api.NewHandler(token, service)
 	server := &http.Server{

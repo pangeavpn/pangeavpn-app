@@ -56,11 +56,12 @@ type WireGuardStatus struct {
 type StatusResponse struct {
 	State  DaemonState `json:"state"`
 	Detail string      `json:"detail"`
-	// ActiveTransport is "cloak", "naive", "reality", or "" when disconnected.
+	// ActiveTransport is "cloak", "naive", "reality", "hysteria2", or "" when disconnected.
 	ActiveTransport  string          `json:"activeTransport"`
 	Cloak            CloakStatus     `json:"cloak"`
 	Naive            TransportStatus `json:"naive"`
 	Reality          TransportStatus `json:"reality"`
+	Hysteria2        TransportStatus `json:"hysteria2"`
 	WireGuard        WireGuardStatus `json:"wireguard"`
 	KillSwitchActive bool            `json:"killSwitchActive"`
 }
@@ -113,6 +114,33 @@ type RealityProfile struct {
 	TargetPort int `json:"targetPort,omitempty"`
 }
 
+// Hysteria2Profile carries per-device Hysteria2 (QUIC transport, Salamander
+// obfuscation) credentials, hub-provisioned the same way NaiveProfile is.
+// Nil on a Profile means no Hysteria2 transport is configured for that
+// profile. The real destination this tunnel relays WireGuard traffic to
+// (the node's WireGuard listener) is not carried here — same convention as
+// Cloak/NaiveProxy: it is a fixed server-side detail, not client config.
+type Hysteria2Profile struct {
+	LocalPort  int    `json:"localPort"`
+	RemoteHost string `json:"remoteHost"`
+	RemotePort int    `json:"remotePort"`
+	// ServerName is the SNI presented during the TLS handshake.
+	ServerName string `json:"serverName,omitempty"`
+	// Password is the Hysteria2 client auth password.
+	Password string `json:"password"`
+	// ObfsPassword is the Salamander QUIC obfuscator password.
+	ObfsPassword string `json:"obfsPassword"`
+	// UpMbps/DownMbps cap Hysteria2's bandwidth-aware congestion control;
+	// 0 means unset (server default / no explicit cap).
+	UpMbps   int `json:"upMbps,omitempty"`
+	DownMbps int `json:"downMbps,omitempty"`
+	// Insecure skips server certificate verification.
+	Insecure bool `json:"insecure,omitempty"`
+	// PinSHA256 is a base64-encoded SHA-256 hash of the server certificate's
+	// public key; when set, the cert is pinned regardless of Insecure.
+	PinSHA256 string `json:"pinSha256,omitempty"`
+}
+
 type WireGuardProfile struct {
 	ConfigText  string   `json:"configText"`
 	TunnelName  string   `json:"tunnelName"`
@@ -129,8 +157,11 @@ type Profile struct {
 	Naive *NaiveProfile `json:"naive,omitempty"`
 	// Reality is optional; nil means this profile has no VLESS+REALITY
 	// transport configured.
-	Reality   *RealityProfile  `json:"reality,omitempty"`
-	WireGuard WireGuardProfile `json:"wireguard"`
+	Reality *RealityProfile `json:"reality,omitempty"`
+	// Hysteria2 is optional; nil means this profile has no Hysteria2
+	// transport configured.
+	Hysteria2 *Hysteria2Profile `json:"hysteria2,omitempty"`
+	WireGuard WireGuardProfile  `json:"wireguard"`
 }
 
 type Config struct {

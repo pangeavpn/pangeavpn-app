@@ -110,6 +110,7 @@ export const es = {
   "settings.transport.cloak": "Cloak only",
   "settings.transport.naive": "NaiveProxy only",
   "settings.transport.reality": "VLESS+REALITY only",
+  "settings.transport.hysteria2": "Hysteria2 only",
   "settings.network.heading": "Red",
   "settings.network.description": "Soluciones para redes Wi-Fi restrictivas.",
   "settings.network.allowLan.title": "Permitir LAN",
@@ -215,6 +216,7 @@ export const es = {
   "status.stopped": "detenido",
   "status.transport.cloak": "Obfuscation: Cloak",
   "status.transport.naive": "Obfuscation: NaiveProxy",
+  "status.transport.hysteria2": "Obfuscation: Hysteria2",
   "status.transport.none": "",
 
   // ── Generic error fallbacks ───────────────────────────

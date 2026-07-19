@@ -110,6 +110,7 @@ export const fa = {
   "settings.transport.cloak": "Cloak only",
   "settings.transport.naive": "NaiveProxy only",
   "settings.transport.reality": "VLESS+REALITY only",
+  "settings.transport.hysteria2": "Hysteria2 only",
   "settings.network.heading": "شبکه",
   "settings.network.description": "رفع مشکل برای شبکه‌های Wi-Fi محدودکننده.",
   "settings.network.allowLan.title": "اجازه به LAN",
@@ -215,6 +216,7 @@ export const fa = {
   "status.stopped": "متوقف",
   "status.transport.cloak": "Obfuscation: Cloak",
   "status.transport.naive": "Obfuscation: NaiveProxy",
+  "status.transport.hysteria2": "Obfuscation: Hysteria2",
   "status.transport.none": "",
 
   // ── Generic error fallbacks ───────────────────────────

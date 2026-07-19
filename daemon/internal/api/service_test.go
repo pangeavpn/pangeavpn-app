@@ -196,6 +196,62 @@ func (f *fakeRealityManager) BoundLocalPort() int {
 	return 51823
 }
 
+// fakeHysteria2Manager mirrors fakeNaiveManager; see its fields for docs.
+type fakeHysteria2Manager struct {
+	mu             sync.Mutex
+	startCalled    bool
+	startLocalPort int
+	startErr       error
+	stopCalled     bool
+	running        bool
+	stayDown       bool
+	waitErr        error
+	boundLocalPort int
+}
+
+func (f *fakeHysteria2Manager) Start(ctx context.Context, profile state.Hysteria2Profile) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.startCalled = true
+	f.startLocalPort = profile.LocalPort
+	if f.startErr != nil {
+		return f.startErr
+	}
+	if !f.stayDown {
+		f.running = true
+	}
+	return nil
+}
+
+func (f *fakeHysteria2Manager) Stop(ctx context.Context) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.stopCalled = true
+	f.running = false
+	return nil
+}
+
+func (f *fakeHysteria2Manager) Status() state.TransportStatus {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return state.TransportStatus{Running: f.running}
+}
+
+func (f *fakeHysteria2Manager) WaitForSession(ctx context.Context, timeout time.Duration) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.waitErr
+}
+
+func (f *fakeHysteria2Manager) BoundLocalPort() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.boundLocalPort != 0 {
+		return f.boundLocalPort
+	}
+	return 51823
+}
+
 type fakeWGManager struct {
 	mu             sync.Mutex
 	running        bool
@@ -383,7 +439,7 @@ func newTestServiceWithReality(
 	machine := state.NewMachine()
 	logs := state.NewLogStore(100)
 	config := testConfigStore(t, profiles...)
-	return NewService(machine, logs, config, cloak, naive, reality, wgMgr, ks)
+	return NewService(machine, logs, config, cloak, naive, reality, &fakeHysteria2Manager{}, wgMgr, ks)
 }
 
 // ---------------------------------------------------------------------------
