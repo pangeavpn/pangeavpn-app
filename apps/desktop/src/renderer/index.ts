@@ -1665,33 +1665,44 @@ function formatBytes(bytes: number): string {
 
 let lastCloakWasDown = false;
 
+// Display names for the active-transport pill — protocol/product proper nouns,
+// identical across locales, so they are not translated.
+const TRANSPORT_LABELS: Record<string, string> = {
+  cloak: "Cloak",
+  naive: "NaiveProxy",
+  reality: "VLESS+REALITY",
+  hysteria2: "Hysteria2",
+  snowflake: "Snowflake",
+};
+
+// The status block for whichever transport is currently active, so the pill
+// reflects the live transport rather than always Cloak.
+function activeTransportStatus(status: StatusResponse): { running: boolean; pid: number | null } {
+  switch (status.activeTransport) {
+    case "naive": return status.naive;
+    case "reality": return status.reality;
+    case "hysteria2": return status.hysteria2;
+    case "snowflake": return status.snowflake;
+    default: return status.cloak;
+  }
+}
+
 function renderStatus(status: StatusResponse): void {
   latestStatus = status;
   currentDaemonState = status.state;
   stateEl.textContent = t(("state." + status.state) as MessageKey);
   detailEl.textContent = status.detail;
 
-  const cloakPid = status.cloak.pid ?? "none";
-  cloakEl.textContent = `${status.cloak.running ? t("status.running") : t("status.stopped")} (pid: ${cloakPid})`;
+  const activeStatus = activeTransportStatus(status);
+  const activePid = activeStatus.pid ?? "none";
+  cloakEl.textContent = `${activeStatus.running ? t("status.running") : t("status.stopped")} (pid: ${activePid})`;
   wireguardEl.textContent = `${status.wireguard.running ? t("status.running") : t("status.stopped")} (${status.wireguard.detail})`;
 
-  if (status.activeTransport === "naive") {
-    activeTransportLabel.textContent = t("status.transport.naive");
-  } else if (status.activeTransport === "cloak") {
-    activeTransportLabel.textContent = t("status.transport.cloak");
-  } else if (status.activeTransport === "hysteria2") {
-    activeTransportLabel.textContent = t("status.transport.hysteria2");
-  } else if (status.activeTransport === "snowflake") {
-    activeTransportLabel.textContent = t("status.transport.snowflake");
-  } else if (status.activeTransport === "reality") {
-    activeTransportLabel.textContent = t("status.transport.reality");
-  } else {
-    activeTransportLabel.textContent = t("status.transport.none");
-  }
+  activeTransportLabel.textContent = TRANSPORT_LABELS[status.activeTransport] ?? "";
 
   // Drive hero card state
   heroCard.dataset.state = status.state;
-  cloakDot.classList.toggle("on", status.cloak.running);
+  cloakDot.classList.toggle("on", activeStatus.running);
   wgDot.classList.toggle("on", status.wireguard.running);
 
   // Kill switch pill
