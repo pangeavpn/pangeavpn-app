@@ -136,7 +136,9 @@ async function copyStandaloneMacTools() {
 }
 
 function buildDaemon(goArch, outPath) {
-  runOrThrow(goCmd, ["build", "-o", outPath, "./cmd/daemon"], {
+  // with_utls is required by the VLESS+REALITY transport (sing-box compiles
+  // uTLS out by default). naive_cgo is Windows-only, so macOS needs only this.
+  runOrThrow(goCmd, ["build", "-tags", "with_utls", "-o", outPath, "./cmd/daemon"], {
     cwd: daemonDir,
     shell: false,
     env: {
