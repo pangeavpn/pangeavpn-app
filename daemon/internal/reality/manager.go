@@ -14,6 +14,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"strconv"
@@ -62,6 +63,13 @@ const outboundTag = "reality-out"
 // utlsFingerprint is the uTLS ClientHello fingerprint REALITY presents.
 // "chrome" is the common default across VLESS+REALITY clients.
 const utlsFingerprint = "chrome"
+
+// defaultCoverSNI is the REALITY SNI presented when a profile carries none.
+// A REALITY SNI must name a real cover site the node borrows its TLS handshake
+// from (one of the server's server_names) — never the node's own host/IP, so
+// the previous remoteHost fallback guaranteed the server rejected the
+// handshake. Mirrors cloak.Manager's www.microsoft.com cover-SNI default.
+const defaultCoverSNI = "www.microsoft.com"
 
 var _ transport.Manager = (*Manager)(nil)
 
@@ -137,9 +145,10 @@ func (m *Manager) Start(ctx context.Context, profile state.RealityProfile) error
 	if targetPort <= 0 {
 		targetPort = defaultTargetPort
 	}
-	serverName := strings.TrimSpace(profile.ServerName)
-	if serverName == "" {
-		serverName = remoteHost
+	serverName, defaultedSNI := resolveServerName(profile.ServerName)
+	if defaultedSNI {
+		m.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf(
+			"reality profile has no serverName; presenting cover SNI %q. If the node's REALITY server_names differ, the handshake will be rejected.", serverName))
 	}
 
 	engineCtx, cancel := context.WithCancel(context.Background())
@@ -182,7 +191,7 @@ func (m *Manager) Start(ctx context.Context, profile state.RealityProfile) error
 		engine.Close()
 		cancel()
 		m.mu.Unlock()
-		return fmt.Errorf("reality: handshake: %w", err)
+		return fmt.Errorf("reality: handshake: %w", annotateHandshakeError(err))
 	}
 
 	localAddr, err := net.ResolveUDPAddr("udp", net.JoinHostPort("127.0.0.1", strconv.Itoa(profile.LocalPort)))
@@ -265,7 +274,7 @@ func (m *Manager) Start(ctx context.Context, profile state.RealityProfile) error
 func buildOutboundOptions(profile state.RealityProfile, remoteHost string, remotePort int, serverName string) *option.VLESSOutboundOptions {
 	return &option.VLESSOutboundOptions{
 		ServerOptions: option.ServerOptions{Server: remoteHost, ServerPort: uint16(remotePort)},
-		UUID: profile.UUID,
+		UUID:          profile.UUID,
 		// This transport only relays WireGuard UDP. xtls-rprx-vision (and any
 		// XTLS flow) is TCP-only and makes the VLESS UDP relay handshake fail
 		// with EOF, so the flow is forced empty regardless of profile.Flow.
@@ -283,6 +292,33 @@ func buildOutboundOptions(profile state.RealityProfile, remoteHost string, remot
 			},
 		},
 	}
+}
+
+// resolveServerName returns the REALITY SNI to present: the profile's own when
+// set, otherwise defaultCoverSNI. The second return reports whether the default
+// was used, so Start can warn — a cover SNI the node doesn't list still fails
+// the handshake, just less silently than the old remoteHost fallback did.
+func resolveServerName(profileServerName string) (name string, defaulted bool) {
+	if name = strings.TrimSpace(profileServerName); name != "" {
+		return name, false
+	}
+	return defaultCoverSNI, true
+}
+
+// annotateHandshakeError explains the opaque io.EOF a REALITY handshake returns
+// when the node rejects the client. A rejected REALITY client is transparently
+// proxied to the cover site (the server_names dest), so the VLESS association
+// that follows lands on a plain web server and is closed — surfacing as a bare
+// "EOF" that gives the operator nothing to act on. Point them at the actual
+// cause: a credential/config mismatch between the profile and the node.
+func annotateHandshakeError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, io.EOF) || strings.Contains(err.Error(), "EOF") {
+		return fmt.Errorf("%w (node rejected REALITY/VLESS auth and fell back to its cover site; verify the node's public key, short ID, UUID, and flow match the provisioned profile)", err)
+	}
+	return err
 }
 
 func (m *Manager) WaitForSession(ctx context.Context, timeout time.Duration) error {

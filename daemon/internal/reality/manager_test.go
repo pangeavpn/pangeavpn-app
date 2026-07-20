@@ -2,6 +2,9 @@ package reality
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -67,8 +70,12 @@ func TestBuildOutboundOptionsPropagatesProfileFields(t *testing.T) {
 	if opts.UUID != profile.UUID {
 		t.Fatalf("UUID = %q, want %q", opts.UUID, profile.UUID)
 	}
-	if opts.Flow != profile.Flow {
-		t.Fatalf("Flow = %q, want %q", opts.Flow, profile.Flow)
+	// Flow is always forced empty, even when the profile carries one: this
+	// transport relays only WireGuard UDP, and xtls-rprx-vision (any XTLS flow)
+	// is TCP-only, which makes the UDP-association handshake fail with EOF. See
+	// buildOutboundOptions.
+	if opts.Flow != "" {
+		t.Fatalf("Flow = %q, want \"\" (forced empty for the UDP relay)", opts.Flow)
 	}
 	if opts.TLS == nil || !opts.TLS.Enabled {
 		t.Fatal("expected TLS enabled")
@@ -87,6 +94,47 @@ func TestBuildOutboundOptionsPropagatesProfileFields(t *testing.T) {
 	}
 	if opts.TLS.Reality.ShortID != profile.ShortID {
 		t.Fatalf("Reality.ShortID = %q, want %q", opts.TLS.Reality.ShortID, profile.ShortID)
+	}
+}
+
+func TestResolveServerNameDefaultsToCoverSNI(t *testing.T) {
+	if name, defaulted := resolveServerName("reality.example.com"); name != "reality.example.com" || defaulted {
+		t.Fatalf("resolveServerName(set) = %q,%v; want reality.example.com,false", name, defaulted)
+	}
+	if name, defaulted := resolveServerName("   "); name != defaultCoverSNI || !defaulted {
+		t.Fatalf("resolveServerName(blank) = %q,%v; want %q,true", name, defaulted, defaultCoverSNI)
+	}
+	if name, defaulted := resolveServerName(""); name != defaultCoverSNI || !defaulted {
+		t.Fatalf("resolveServerName(empty) = %q,%v; want %q,true", name, defaulted, defaultCoverSNI)
+	}
+	// A REALITY SNI must never fall back to the node's own host/IP — that is
+	// what produced the "handshake: EOF" this default replaces.
+	if name, _ := resolveServerName(""); name == "108.61.188.241" {
+		t.Fatal("resolveServerName must not fall back to the node host/IP")
+	}
+}
+
+func TestAnnotateHandshakeErrorExplainsEOF(t *testing.T) {
+	annotated := annotateHandshakeError(io.EOF)
+	if !errors.Is(annotated, io.EOF) {
+		t.Fatal("annotated error must still unwrap to io.EOF")
+	}
+	if !strings.Contains(annotated.Error(), "public key") {
+		t.Fatalf("annotated EOF %q should name the credential mismatch to check", annotated.Error())
+	}
+
+	// A wrapped EOF (as surfaced from deep in the dialer) is also caught.
+	wrapped := annotateHandshakeError(fmt.Errorf("dial tcp: %w", io.EOF))
+	if !strings.Contains(wrapped.Error(), "REALITY/VLESS auth") {
+		t.Fatalf("wrapped EOF %q should be annotated", wrapped.Error())
+	}
+
+	// Non-EOF errors pass through untouched — don't mislabel a real cause.
+	if got := annotateHandshakeError(errors.New("connection refused")); got.Error() != "connection refused" {
+		t.Fatalf("non-EOF error changed: %q", got.Error())
+	}
+	if annotateHandshakeError(nil) != nil {
+		t.Fatal("nil must pass through as nil")
 	}
 }
 
