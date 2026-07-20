@@ -73,3 +73,110 @@ func TestFindProfile_ClonesNaiveProfile(t *testing.T) {
 			second.Naive.LocalPort, origLocalPort)
 	}
 }
+
+// TestGet_ClonesTransportProfiles is the regression test for cloneProfile
+// leaving the Reality/Hysteria2/Snowflake pointer fields (and Snowflake's
+// FrontDomains/ICEServers slices) shallow-copied and thus aliased to the
+// config store's internal state — the same aliasing bug cloneNaiveProfile
+// fixed for Naive. It stores a profile carrying all three transports, fetches
+// it via Get(), mutates the returned copy's transport pointers and Snowflake
+// slices, then Get()s again and asserts the store's snapshot is untouched.
+func TestGet_ClonesTransportProfiles(t *testing.T) {
+	dir := t.TempDir()
+	cs, err := state.NewConfigStore(dir + "/config.json")
+	if err != nil {
+		t.Fatalf("NewConfigStore: %v", err)
+	}
+
+	const (
+		origRealityPort   = 51822
+		origHysteria2Port = 51823
+		origSnowflakePort = 51824
+		origFront         = "front.example.com"
+		origICE           = "stun:stun.example.com:3478"
+	)
+	profile := state.Profile{
+		ID:   "p1",
+		Name: "Test",
+		Reality: &state.RealityProfile{
+			RemoteHost: "example.com",
+			RemotePort: 443,
+			LocalPort:  origRealityPort,
+			UUID:       "uuid",
+		},
+		Hysteria2: &state.Hysteria2Profile{
+			RemoteHost: "example.com",
+			RemotePort: 443,
+			LocalPort:  origHysteria2Port,
+			Password:   "pw",
+		},
+		Snowflake: &state.SnowflakeProfile{
+			LocalPort:    origSnowflakePort,
+			BrokerURL:    "https://broker.example.com",
+			FrontDomains: []string{origFront},
+			ICEServers:   []string{origICE},
+		},
+	}
+	if err := cs.Set(state.Config{Profiles: []state.Profile{profile}}); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+
+	first := cs.Get()
+	if len(first.Profiles) != 1 {
+		t.Fatalf("expected 1 profile, got %d", len(first.Profiles))
+	}
+	fp := first.Profiles[0]
+	if fp.Reality == nil || fp.Hysteria2 == nil || fp.Snowflake == nil {
+		t.Fatal("expected first copy to carry Reality, Hysteria2, and Snowflake")
+	}
+
+	// Mutate the returned copy's transport pointers and Snowflake slices, the
+	// way a caller that forgot to make its own local copy might.
+	fp.Reality.LocalPort = 61822
+	fp.Hysteria2.LocalPort = 61823
+	fp.Snowflake.LocalPort = 61824
+	fp.Snowflake.FrontDomains[0] = "leaked.example.com"
+	fp.Snowflake.ICEServers[0] = "stun:leaked.example.com:3478"
+
+	second := cs.Get()
+	if len(second.Profiles) != 1 {
+		t.Fatalf("expected 1 profile, got %d", len(second.Profiles))
+	}
+	sp := second.Profiles[0]
+	if sp.Reality == nil || sp.Hysteria2 == nil || sp.Snowflake == nil {
+		t.Fatal("expected second copy to carry Reality, Hysteria2, and Snowflake")
+	}
+
+	// Each Get() must hand back independent pointers; equal pointers mean the
+	// store's own *Profile is being aliased out.
+	if sp.Reality == fp.Reality {
+		t.Fatal("expected distinct *RealityProfile pointers across Get() calls")
+	}
+	if sp.Hysteria2 == fp.Hysteria2 {
+		t.Fatal("expected distinct *Hysteria2Profile pointers across Get() calls")
+	}
+	if sp.Snowflake == fp.Snowflake {
+		t.Fatal("expected distinct *SnowflakeProfile pointers across Get() calls")
+	}
+
+	if sp.Reality.LocalPort != origRealityPort {
+		t.Errorf("Reality.LocalPort = %d, want unchanged %d (mutation leaked into store)",
+			sp.Reality.LocalPort, origRealityPort)
+	}
+	if sp.Hysteria2.LocalPort != origHysteria2Port {
+		t.Errorf("Hysteria2.LocalPort = %d, want unchanged %d (mutation leaked into store)",
+			sp.Hysteria2.LocalPort, origHysteria2Port)
+	}
+	if sp.Snowflake.LocalPort != origSnowflakePort {
+		t.Errorf("Snowflake.LocalPort = %d, want unchanged %d (mutation leaked into store)",
+			sp.Snowflake.LocalPort, origSnowflakePort)
+	}
+	if sp.Snowflake.FrontDomains[0] != origFront {
+		t.Errorf("Snowflake.FrontDomains[0] = %q, want unchanged %q (slice aliased into store)",
+			sp.Snowflake.FrontDomains[0], origFront)
+	}
+	if sp.Snowflake.ICEServers[0] != origICE {
+		t.Errorf("Snowflake.ICEServers[0] = %q, want unchanged %q (slice aliased into store)",
+			sp.Snowflake.ICEServers[0], origICE)
+	}
+}

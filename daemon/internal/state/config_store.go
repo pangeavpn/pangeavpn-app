@@ -186,6 +186,9 @@ func cloneProfile(profile Profile) Profile {
 	copyProfile.WireGuard.DNS = cloneStrings(profile.WireGuard.DNS)
 	copyProfile.WireGuard.BypassHosts = cloneStrings(profile.WireGuard.BypassHosts)
 	copyProfile.Naive = cloneNaiveProfile(profile.Naive)
+	copyProfile.Reality = cloneRealityProfile(profile.Reality)
+	copyProfile.Hysteria2 = cloneHysteria2Profile(profile.Hysteria2)
+	copyProfile.Snowflake = cloneSnowflakeProfile(profile.Snowflake)
 	return copyProfile
 }
 
@@ -200,6 +203,39 @@ func cloneNaiveProfile(profile *NaiveProfile) *NaiveProfile {
 		return nil
 	}
 	copyProfile := *profile
+	return &copyProfile
+}
+
+// cloneRealityProfile mirrors cloneNaiveProfile: RealityProfile is flat
+// (scalar fields only), so a value copy behind a fresh pointer is enough.
+func cloneRealityProfile(profile *RealityProfile) *RealityProfile {
+	if profile == nil {
+		return nil
+	}
+	copyProfile := *profile
+	return &copyProfile
+}
+
+// cloneHysteria2Profile mirrors cloneNaiveProfile: Hysteria2Profile is flat
+// (scalar fields only), so a value copy behind a fresh pointer is enough.
+func cloneHysteria2Profile(profile *Hysteria2Profile) *Hysteria2Profile {
+	if profile == nil {
+		return nil
+	}
+	copyProfile := *profile
+	return &copyProfile
+}
+
+// cloneSnowflakeProfile mirrors cloneNaiveProfile but also copies the
+// FrontDomains and ICEServers slices into fresh slices so the returned
+// profile shares no backing array with the config store's state.
+func cloneSnowflakeProfile(profile *SnowflakeProfile) *SnowflakeProfile {
+	if profile == nil {
+		return nil
+	}
+	copyProfile := *profile
+	copyProfile.FrontDomains = cloneStrings(profile.FrontDomains)
+	copyProfile.ICEServers = cloneStrings(profile.ICEServers)
 	return &copyProfile
 }
 
