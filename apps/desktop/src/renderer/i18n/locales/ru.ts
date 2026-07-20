@@ -60,6 +60,7 @@ export const ru = {
   "hero.provisioning": "Подготовка...",
   "hero.disconnecting": "Отключение...",
   "hero.noServers": "Нет доступных серверов",
+  "hero.noServersForTransport": "Нет серверов с поддержкой этого транспорта",
 
   // ── Status pills ──────────────────────────────────────
   "pill.killSwitch": "Kill Switch",
@@ -134,6 +135,7 @@ export const ru = {
   "serverPicker.title": "Выбрать сервер",
   "serverPicker.serversAriaLabel": "Серверы",
   "serverPicker.noServers": "Нет доступных серверов",
+  "serverPicker.noServersForTransport": "Нет серверов с поддержкой этого транспорта",
   "serverPicker.load": "Загрузка сервера {pct}%",
   "serverPicker.loadPct": "{pct}%",
 

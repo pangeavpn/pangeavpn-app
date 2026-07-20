@@ -60,6 +60,7 @@ export const fr = {
   "hero.provisioning": "Provisionnement...",
   "hero.disconnecting": "Déconnexion...",
   "hero.noServers": "Aucun serveur disponible",
+  "hero.noServersForTransport": "Aucun serveur ne prend en charge ce transport",
 
   // ── Status pills ──────────────────────────────────────
   "pill.killSwitch": "Kill Switch",
@@ -134,6 +135,7 @@ export const fr = {
   "serverPicker.title": "Sélectionner un serveur",
   "serverPicker.serversAriaLabel": "Serveurs",
   "serverPicker.noServers": "Aucun serveur disponible",
+  "serverPicker.noServersForTransport": "Aucun serveur ne prend en charge ce transport",
   "serverPicker.load": "Charge du serveur {pct} %",
   "serverPicker.loadPct": "{pct} %",
 

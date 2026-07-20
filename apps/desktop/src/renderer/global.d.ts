@@ -30,6 +30,40 @@ declare global {
       uid: string;
       publicKey: string;
     };
+    // Optional per-node transport blocks — present only when the hub node has
+    // that transport configured. Mirrors ServerInfo in shared/ipc.ts; the
+    // renderer uses their presence to filter the server list per transport.
+    naive?: {
+      remoteHost: string;
+      remotePort: number;
+      username: string;
+      password: string;
+      serverName?: string;
+    };
+    reality?: {
+      remoteHost: string;
+      remotePort: number;
+      uuid: string;
+      publicKey: string;
+      shortId: string;
+      flow?: string;
+      serverName?: string;
+    };
+    hysteria2?: {
+      remoteHost: string;
+      remotePort: number;
+      password: string;
+      obfsPassword: string;
+      serverName?: string;
+      pinSha256?: string;
+    };
+    snowflake?: {
+      brokerURL: string;
+      bridgeFingerprint: string;
+      frontDomains?: string[];
+      ampCacheURL?: string;
+      iceServers?: string[];
+    };
   }
 
   interface DaemonApi {

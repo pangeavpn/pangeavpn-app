@@ -979,6 +979,8 @@ preferredTransportSelect.addEventListener("change", async () => {
   try {
     await pangeaApi.setPreferredTransport(choice);
     preferredTransportSelect.dataset.previousValue = choice;
+    // Re-filter the server list: hide servers that don't support the new choice.
+    renderServers();
     showToast(t("toggle.preferredTransport.updated"), 4000, true);
   } catch (err) {
     preferredTransportSelect.value = previous;
@@ -1866,28 +1868,58 @@ function buildLoadIndicator(load: number | null | undefined): HTMLElement | null
   return el;
 }
 
+type TransportChoice = "auto" | "cloak" | "naive" | "reality" | "hysteria2" | "snowflake";
+
+// A server "supports" a transport when the hub advertised that transport's
+// connection block for it. cloak is always present; "auto" matches every
+// server (it falls back across whatever transports the server actually offers).
+function serverSupportsTransport(server: ServerInfo, transport: TransportChoice): boolean {
+  switch (transport) {
+    case "naive":
+      return Boolean(server.naive);
+    case "reality":
+      return Boolean(server.reality);
+    case "hysteria2":
+      return Boolean(server.hysteria2);
+    case "snowflake":
+      return Boolean(server.snowflake);
+    default:
+      return true; // auto + cloak: every server qualifies
+  }
+}
+
+// Servers to show for the currently selected transport — hide any that can't
+// carry the chosen transport so the user can't pick an unsupported combination.
+function getVisibleServers(): ServerInfo[] {
+  const choice = (preferredTransportSelect.value as TransportChoice) || "auto";
+  return servers.filter((s) => serverSupportsTransport(s, choice));
+}
+
 function renderServers(): void {
   const previousValue = serverSelect.value;
+  const visible = getVisibleServers();
   serverSelect.innerHTML = "";
   serverPickerOverlayList.innerHTML = "";
 
-  if (servers.length === 0) {
+  if (visible.length === 0) {
+    const noneForTransport = servers.length > 0;
+    const emptyText = noneForTransport ? t("hero.noServersForTransport") : t("hero.noServers");
     const option = document.createElement("option");
     option.value = "";
-    option.textContent = t("hero.noServers");
+    option.textContent = emptyText;
     serverSelect.append(option);
     serverSelect.disabled = true;
     serverPickerBtn.disabled = true;
-    serverPickerLabel.textContent = t("hero.noServers");
+    serverPickerLabel.textContent = emptyText;
     serverConnectBtn.disabled = true;
     const empty = document.createElement("div");
     empty.className = "server-picker-overlay-empty";
-    empty.textContent = t("serverPicker.noServers");
+    empty.textContent = noneForTransport ? t("serverPicker.noServersForTransport") : t("serverPicker.noServers");
     serverPickerOverlayList.append(empty);
     return;
   }
 
-  for (const server of servers) {
+  for (const server of visible) {
     const option = document.createElement("option");
     option.value = server.id;
     option.textContent = `${server.name} (${server.id})`;
@@ -1947,8 +1979,8 @@ function renderServers(): void {
 
   serverSelect.disabled = false;
   serverPickerBtn.disabled = false;
-  const hasSelection = servers.some((s) => s.id === previousValue);
-  serverSelect.value = hasSelection ? previousValue : servers[0].id;
+  const hasSelection = visible.some((s) => s.id === previousValue);
+  serverSelect.value = hasSelection ? previousValue : visible[0].id;
   syncServerPicker();
 
   updateServerControlStates();

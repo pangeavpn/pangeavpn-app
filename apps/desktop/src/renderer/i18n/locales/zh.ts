@@ -60,6 +60,7 @@ export const zh = {
   "hero.provisioning": "正在配置...",
   "hero.disconnecting": "正在断开...",
   "hero.noServers": "没有可用的服务器",
+  "hero.noServersForTransport": "没有服务器支持此传输方式",
 
   // ── Status pills ──────────────────────────────────────
   "pill.killSwitch": "断网保护",
@@ -134,6 +135,7 @@ export const zh = {
   "serverPicker.title": "选择服务器",
   "serverPicker.serversAriaLabel": "服务器",
   "serverPicker.noServers": "没有可用的服务器",
+  "serverPicker.noServersForTransport": "没有服务器支持此传输方式",
   "serverPicker.load": "服务器负载 {pct}%",
   "serverPicker.loadPct": "{pct}%",
 

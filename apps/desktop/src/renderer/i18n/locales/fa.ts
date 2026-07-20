@@ -60,6 +60,7 @@ export const fa = {
   "hero.provisioning": "در حال آماده‌سازی...",
   "hero.disconnecting": "در حال قطع اتصال...",
   "hero.noServers": "سروری در دسترس نیست",
+  "hero.noServersForTransport": "هیچ سروری از این انتقال پشتیبانی نمی‌کند",
 
   // ── Status pills ──────────────────────────────────────
   "pill.killSwitch": "کلید قطع اضطراری",
@@ -134,6 +135,7 @@ export const fa = {
   "serverPicker.title": "انتخاب سرور",
   "serverPicker.serversAriaLabel": "سرورها",
   "serverPicker.noServers": "سروری در دسترس نیست",
+  "serverPicker.noServersForTransport": "هیچ سروری از این انتقال پشتیبانی نمی‌کند",
   "serverPicker.load": "بار سرور {pct}%",
   "serverPicker.loadPct": "{pct}%",
 

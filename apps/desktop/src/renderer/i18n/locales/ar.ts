@@ -60,6 +60,7 @@ export const ar = {
   "hero.provisioning": "جارٍ التجهيز...",
   "hero.disconnecting": "جارٍ قطع الاتصال...",
   "hero.noServers": "لا توجد خوادم متاحة",
+  "hero.noServersForTransport": "لا توجد خوادم تدعم هذا النقل",
 
   // ── Status pills ──────────────────────────────────────
   "pill.killSwitch": "مفتاح الإيقاف",
@@ -134,6 +135,7 @@ export const ar = {
   "serverPicker.title": "اختر خادمًا",
   "serverPicker.serversAriaLabel": "الخوادم",
   "serverPicker.noServers": "لا توجد خوادم متاحة",
+  "serverPicker.noServersForTransport": "لا توجد خوادم تدعم هذا النقل",
   "serverPicker.load": "حمل الخادم {pct}%",
   "serverPicker.loadPct": "{pct}%",
 

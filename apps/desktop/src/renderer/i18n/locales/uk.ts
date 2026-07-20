@@ -60,6 +60,7 @@ export const uk = {
   "hero.provisioning": "Підготовка...",
   "hero.disconnecting": "Відключення...",
   "hero.noServers": "Немає доступних серверів",
+  "hero.noServersForTransport": "Немає серверів із підтримкою цього транспорту",
 
   // ── Status pills ──────────────────────────────────────
   "pill.killSwitch": "Аварійне вимкнення",
@@ -134,6 +135,7 @@ export const uk = {
   "serverPicker.title": "Вибрати сервер",
   "serverPicker.serversAriaLabel": "Сервери",
   "serverPicker.noServers": "Немає доступних серверів",
+  "serverPicker.noServersForTransport": "Немає серверів із підтримкою цього транспорту",
   "serverPicker.load": "Завантаження сервера {pct}%",
   "serverPicker.loadPct": "{pct}%",
 
