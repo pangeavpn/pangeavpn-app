@@ -221,6 +221,7 @@ export const zh = {
   "status.transport.naive": "Obfuscation: NaiveProxy",
   "status.transport.hysteria2": "Obfuscation: Hysteria2",
   "status.transport.snowflake": "Obfuscation: Snowflake",
+  "status.transport.reality": "Obfuscation: VLESS+REALITY",
   "status.transport.none": "",
 
   // ── Generic error fallbacks ───────────────────────────

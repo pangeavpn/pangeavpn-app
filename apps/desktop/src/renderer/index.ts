@@ -1683,6 +1683,8 @@ function renderStatus(status: StatusResponse): void {
     activeTransportLabel.textContent = t("status.transport.hysteria2");
   } else if (status.activeTransport === "snowflake") {
     activeTransportLabel.textContent = t("status.transport.snowflake");
+  } else if (status.activeTransport === "reality") {
+    activeTransportLabel.textContent = t("status.transport.reality");
   } else {
     activeTransportLabel.textContent = t("status.transport.none");
   }
