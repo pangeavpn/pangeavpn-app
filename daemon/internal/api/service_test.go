@@ -1399,7 +1399,7 @@ func snowflakeProfile() state.Profile {
 	}
 }
 
-func TestConnect_CloakNaiveRealityHysteria2Fail_FallsBackToSnowflake(t *testing.T) {
+func TestConnect_CloakNaiveRealityHysteria2Fail_DoesNotFallBackToSnowflake_WhenGated(t *testing.T) {
 	profile := snowflakeProfile()
 	profile.Naive = &state.NaiveProfile{RemoteHost: "naive.example.com", RemotePort: 8443, Username: "u", Password: "p"}
 	profile.Reality = &state.RealityProfile{RemoteHost: "reality.example.com", RemotePort: 8443, UUID: "u", PublicKey: "k", ShortID: "ab12"}
@@ -1414,74 +1414,63 @@ func TestConnect_CloakNaiveRealityHysteria2Fail_FallsBackToSnowflake(t *testing.
 	ks := &fakeKillSwitch{}
 	svc := newTestServiceFull(t, cloakMgr, naiveMgr, realityMgr, hysteria2Mgr, snowflakeMgr, wgMgr, ks, profile)
 
-	if err := svc.Connect(context.Background(), "p1", ConnectOptions{}); err != nil {
-		t.Fatalf("Connect: %v", err)
-	}
-	snowflakeMgr.mu.Lock()
-	startCalled := snowflakeMgr.startCalled
-	snowflakeMgr.mu.Unlock()
-	if !startCalled {
-		t.Fatal("expected snowflake.Start to be attempted after cloak, naive, reality, and hysteria2 failed")
+	// Snowflake is gated off this release (see snowflakeReleaseGated in
+	// service.go): AUTO mode must fail once the other transports fail rather
+	// than fall back to snowflake.
+	if err := svc.Connect(context.Background(), "p1", ConnectOptions{}); err == nil {
+		t.Fatal("expected Connect to fail: all non-snowflake transports failed and snowflake is gated")
 	}
 
-	status := svc.Status(context.Background())
-	if status.ActiveTransport != "snowflake" {
-		t.Fatalf("ActiveTransport = %q, want snowflake", status.ActiveTransport)
-	}
-}
-
-func TestConnect_PreferredTransportSnowflake_SkipsOtherTransports(t *testing.T) {
-	profile := snowflakeProfile()
-
-	cloakMgr := &fakeCloakManager{}
-	naiveMgr := &fakeNaiveManager{}
-	realityMgr := &fakeRealityManager{}
-	hysteria2Mgr := &fakeHysteria2Manager{}
-	snowflakeMgr := &fakeSnowflakeManager{}
-	wgMgr := &fakeWGManager{}
-	ks := &fakeKillSwitch{}
-	svc := newTestServiceFull(t, cloakMgr, naiveMgr, realityMgr, hysteria2Mgr, snowflakeMgr, wgMgr, ks, profile)
-
-	if err := svc.Connect(context.Background(), "p1", ConnectOptions{PreferredTransport: "snowflake"}); err != nil {
-		t.Fatalf("Connect: %v", err)
-	}
-	if cloakMgr.startCalled || naiveMgr.startCalled {
-		t.Fatal("cloak/naive.Start should not be called when PreferredTransport is snowflake")
-	}
-	snowflakeMgr.mu.Lock()
-	startCalled := snowflakeMgr.startCalled
-	snowflakeMgr.mu.Unlock()
-	if !startCalled {
-		t.Fatal("expected snowflake.Start to be called")
-	}
-
-	status := svc.Status(context.Background())
-	if status.ActiveTransport != "snowflake" {
-		t.Fatalf("ActiveTransport = %q, want snowflake", status.ActiveTransport)
-	}
-}
-
-func TestConnect_PreferredTransportSnowflake_ErrorsWhenProfileHasNoSnowflakeConfig(t *testing.T) {
-	profile := testProfile() // no Snowflake configured
-
-	cloakMgr := &fakeCloakManager{}
-	naiveMgr := &fakeNaiveManager{}
-	realityMgr := &fakeRealityManager{}
-	hysteria2Mgr := &fakeHysteria2Manager{}
-	snowflakeMgr := &fakeSnowflakeManager{}
-	wgMgr := &fakeWGManager{}
-	ks := &fakeKillSwitch{}
-	svc := newTestServiceFull(t, cloakMgr, naiveMgr, realityMgr, hysteria2Mgr, snowflakeMgr, wgMgr, ks, profile)
-
-	err := svc.Connect(context.Background(), profile.ID, ConnectOptions{PreferredTransport: "snowflake"})
-	if err == nil {
-		t.Fatal("expected Connect to fail: profile has no snowflake configuration")
-	}
 	snowflakeMgr.mu.Lock()
 	startCalled := snowflakeMgr.startCalled
 	snowflakeMgr.mu.Unlock()
 	if startCalled {
-		t.Fatal("snowflake.Start should not be called when profile.Snowflake is nil")
+		t.Fatal("snowflake.Start must not be called while snowflake is gated off")
+	}
+
+	if status := svc.Status(context.Background()); status.ActiveTransport == "snowflake" {
+		t.Fatalf("ActiveTransport = %q, want anything but snowflake", status.ActiveTransport)
+	}
+}
+
+// TestConnect_PreferredTransportSnowflake_IsGated also covers the former
+// no-snowflake-config case: the gate precedes the config check, so an explicit
+// preferredTransport="snowflake" errors and starts no transport whether or not
+// the profile carries snowflake config.
+func TestConnect_PreferredTransportSnowflake_IsGated(t *testing.T) {
+	tests := []struct {
+		name    string
+		profile state.Profile
+	}{
+		{name: "with snowflake config", profile: snowflakeProfile()},
+		{name: "without snowflake config", profile: testProfile()},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cloakMgr := &fakeCloakManager{}
+			naiveMgr := &fakeNaiveManager{}
+			realityMgr := &fakeRealityManager{}
+			hysteria2Mgr := &fakeHysteria2Manager{}
+			snowflakeMgr := &fakeSnowflakeManager{}
+			wgMgr := &fakeWGManager{}
+			ks := &fakeKillSwitch{}
+			svc := newTestServiceFull(t, cloakMgr, naiveMgr, realityMgr, hysteria2Mgr, snowflakeMgr, wgMgr, ks, tt.profile)
+
+			if err := svc.Connect(context.Background(), tt.profile.ID, ConnectOptions{PreferredTransport: "snowflake"}); err == nil {
+				t.Fatal("expected Connect to fail: snowflake transport is gated off")
+			}
+
+			snowflakeMgr.mu.Lock()
+			snowflakeStarted := snowflakeMgr.startCalled
+			snowflakeMgr.mu.Unlock()
+			if cloakMgr.startCalled || naiveMgr.startCalled || realityMgr.startCalled || hysteria2Mgr.startCalled || snowflakeStarted {
+				t.Fatal("no transport should start when snowflake is gated and explicitly requested")
+			}
+
+			if status := svc.Status(context.Background()); status.ActiveTransport == "snowflake" {
+				t.Fatalf("ActiveTransport = %q, want anything but snowflake", status.ActiveTransport)
+			}
+		})
 	}
 }
 

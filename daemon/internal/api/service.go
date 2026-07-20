@@ -615,6 +615,11 @@ func (s *Service) startTransport(ctx context.Context, profile *state.Profile, wi
 		}
 		return "hysteria2", nil
 	case "snowflake":
+		// Gated off for this release (see snowflakeReleaseGated). Re-enable by
+		// removing this guard.
+		if snowflakeReleaseGated {
+			return "", errors.New("snowflake transport is temporarily unavailable")
+		}
 		if profile.Snowflake == nil {
 			return "", errors.New("snowflake transport requested but this profile has no snowflake configuration")
 		}
@@ -706,10 +711,25 @@ func (s *Service) fallbackToHysteria2(ctx context.Context, profile *state.Profil
 	return "hysteria2", nil
 }
 
+// snowflakeReleaseGated disables the Snowflake transport for this release. Its
+// WebRTC data plane is dropped by the always-on kill switch: the negotiated
+// volunteer-proxy peer IP is discovered dynamically and is never permitted, so
+// it cannot connect in production. All Snowflake code and wiring is retained;
+// re-enable by removing the guards that read this flag (or setting it false)
+// once the kill switch can permit the dynamic peer.
+const snowflakeReleaseGated = true
+
 // fallbackToSnowflake is the last-resort step in automatic mode, tried after
 // cloak, naive, reality, and hysteria2 have failed. prevErr carries the
 // accumulated failure detail from earlier transports.
 func (s *Service) fallbackToSnowflake(ctx context.Context, profile *state.Profile, wireGuardProfile *state.WireGuardProfile, prevErr error) (string, error) {
+	// Gated off for this release (see snowflakeReleaseGated): AUTO mode must
+	// never attempt snowflake. Return the same failure as the no-config path.
+	// Re-enable by removing this guard.
+	if snowflakeReleaseGated {
+		return "", fmt.Errorf("all configured transports failed: %w", prevErr)
+	}
+
 	if profile.Snowflake == nil {
 		return "", fmt.Errorf("all configured transports failed: %w", prevErr)
 	}
