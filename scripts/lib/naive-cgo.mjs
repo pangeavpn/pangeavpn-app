@@ -2,11 +2,12 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
+import { ensurePangeaNaiveLib } from "./naive-download.mjs";
 
 // The Windows default_libs list Chromium executables get automatically
 // (build/config/BUILD.gn:config("default_libs")) plus the pangea_naive
 // target's own transitive libs, read off a real GN executable link line.
-// See docs/superpowers/specs/2026-07-18-naiveproxy-transport-design.md's
+// See the naiveproxy transport design's
 // "Known risk" section for how this list was derived and why it can't be
 // discovered from pangea_naive.lib itself (static libraries don't carry
 // their consumer's required libs the way GN's complete_static_lib bundles
@@ -31,8 +32,8 @@ const VCVARS_ARCH = { amd64: "x64", arm64: "arm64" };
 // this machine — callers should fall back to building without the
 // naive_cgo tag (the stub transport) rather than failing the build, since
 // most dev machines and CI runners won't have this multi-GB toolchain set
-// up. See docs/superpowers/specs/2026-07-18-naiveproxy-transport-design.md
-// for the one-time machine setup this depends on.
+// up. See the naiveproxy transport design for the one-time machine setup
+// this depends on.
 export function resolveNaiveCgoConfig(goArch, rootDir) {
   if (process.platform !== "win32") {
     return null;
@@ -48,24 +49,14 @@ export function resolveNaiveCgoConfig(goArch, rootDir) {
   const naiveproxySrc =
     process.env.PANGEA_NAIVEPROXY_SRC || path.join(rootDir, "..", "naiveproxy", "src");
 
-  const libPath = path.join(naiveproxySrc, "out", gnArchDir, "obj", "net", "pangea_naive.lib");
-  const headerDir = path.join(naiveproxySrc, "pangea", "capi");
-  const headerPath = path.join(headerDir, "pangea_naive_capi.h");
+  let libPath = path.join(naiveproxySrc, "out", gnArchDir, "obj", "net", "pangea_naive.lib");
+  let headerDir = path.join(naiveproxySrc, "pangea", "capi");
+  let headerPath = path.join(headerDir, "pangea_naive_capi.h");
   const llvmBinDir = path.join(naiveproxySrc, "third_party", "llvm-build", "Release+Asserts", "bin");
   const clangClPath = path.join(llvmBinDir, "clang-cl.exe");
   const clangPath = path.join(llvmBinDir, "clang.exe");
 
-  if (!fs.existsSync(libPath)) {
-    console.warn(
-      `naive_cgo: ${libPath} not found; naive transport falls back to the stub for ${goArch}. ` +
-        `Build it per docs/superpowers/specs/2026-07-18-naiveproxy-transport-design.md.`
-    );
-    return null;
-  }
-  if (!fs.existsSync(headerPath)) {
-    console.warn(`naive_cgo: ${headerPath} not found; naive transport falls back to the stub for ${goArch}.`);
-    return null;
-  }
+  // No pinned clang = nothing to link the lib against; bail before downloading.
   if (!fs.existsSync(clangClPath)) {
     console.warn(
       `naive_cgo: pinned clang-cl.exe not found at ${clangClPath}; naive transport falls back to the stub for ${goArch}.`
@@ -73,11 +64,24 @@ export function resolveNaiveCgoConfig(goArch, rootDir) {
     return null;
   }
   if (!fs.existsSync(clangPath)) {
-    // Copying clang-cl.exe to clang.exe exploits clang's argv[0]-based
-    // driver-mode detection to get GCC-style flags from the exact pinned
-    // toolchain revision (needed for LTO bitcode version matching against
-    // pangea_naive.lib) — see the design spec for why.
+    // clang.exe (argv[0] driver detection) gives GCC-style flags from the
+    // pinned toolchain; LTO bitcode must match that exact revision.
     fs.copyFileSync(clangClPath, clangPath);
+  }
+
+  // Prefer a local build; else fetch the pinned prebuilt from the release.
+  if (!fs.existsSync(libPath) || !fs.existsSync(headerPath)) {
+    const prebuilt = ensurePangeaNaiveLib(goArch, rootDir);
+    if (!prebuilt) {
+      console.warn(
+        `naive_cgo: no local build at ${libPath} and no pinned prebuilt available; ` +
+          `naive transport falls back to the stub for ${goArch}.`
+      );
+      return null;
+    }
+    libPath = path.join(prebuilt.libDir, "pangea_naive.lib");
+    headerDir = prebuilt.headerDir;
+    headerPath = path.join(headerDir, "pangea_naive_capi.h");
   }
 
   const vcvars = findVcvarsEnv(vcvarsArch);

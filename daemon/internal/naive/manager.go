@@ -244,44 +244,92 @@ func (m *Manager) runSession(sessionCtx context.Context, generation uint64, udpC
 	}
 	m.mu.Unlock()
 
-	m.logs.Add(state.LogInfo, state.SourceNaive, "naive: session established with node bridge")
+	established := time.Now()
+	m.logs.Add(state.LogInfo, state.SourceNaive, "naive: engine SOCKS tunnel opened (upstream CONNECT is async)")
 
-	relayDone := make(chan struct{}, 2)
+	relayDone := make(chan relayStat, 2)
 	go m.relayFromWG(udpConn, stream, relayDone)
 	go m.relayToWG(udpConn, stream, relayDone)
 
+	// Relay exit = dead upstream tunnel (report it); ctx cancel = deliberate Stop.
+	var stats []relayStat
+	abnormal := true
 	select {
-	case <-relayDone:
+	case s := <-relayDone:
+		stats = append(stats, s)
 	case <-sessionCtx.Done():
+		abnormal = false
 	}
 	stream.Close()
-	<-relayDone // wait for the other relay goroutine to notice the closed stream/socket
+	for len(stats) < 2 {
+		stats = append(stats, <-relayDone) // both relays exit once the stream/socket closes
+	}
+
+	if abnormal {
+		m.logSessionEnded(established, stats)
+	}
 
 	m.teardown(generation)
 }
 
-func (m *Manager) relayFromWG(udpConn *net.UDPConn, stream net.Conn, relayDone chan<- struct{}) {
-	defer func() { relayDone <- struct{}{} }()
+// relayStat carries a relay's direction, throughput, and exit error.
+type relayStat struct {
+	dir    string
+	frames uint64
+	bytes  uint64
+	err    error
+}
+
+// logSessionEnded warns why a session ended; 0 inbound frames = dead upstream.
+func (m *Manager) logSessionEnded(established time.Time, stats []relayStat) {
+	var out, in relayStat
+	for _, s := range stats {
+		switch s.dir {
+		case "wg->bridge":
+			out = s
+		case "bridge->wg":
+			in = s
+		}
+	}
+	detail := ""
+	if in.frames == 0 {
+		detail = "; 0 received means the upstream proxy CONNECT tunnel never delivered a reply"
+	}
+	m.logs.Add(state.LogWarn, state.SourceNaive, fmt.Sprintf(
+		"naive session ended after %s: sent %d frame(s)/%d B to bridge (err=%v), received %d frame(s)/%d B back (err=%v)%s",
+		time.Since(established).Round(time.Millisecond),
+		out.frames, out.bytes, out.err, in.frames, in.bytes, in.err, detail))
+}
+
+func (m *Manager) relayFromWG(udpConn *net.UDPConn, stream net.Conn, relayDone chan<- relayStat) {
+	stat := relayStat{dir: "wg->bridge"}
+	defer func() { relayDone <- stat }()
 	buf := make([]byte, 65535)
 	for {
 		n, addr, err := udpConn.ReadFromUDP(buf)
 		if err != nil {
+			stat.err = err
 			return
 		}
 		m.mu.Lock()
 		m.wgAddr = addr
 		m.mu.Unlock()
 		if err := WriteFrame(stream, buf[:n]); err != nil {
+			stat.err = err
 			return
 		}
+		stat.frames++
+		stat.bytes += uint64(n)
 	}
 }
 
-func (m *Manager) relayToWG(udpConn *net.UDPConn, stream net.Conn, relayDone chan<- struct{}) {
-	defer func() { relayDone <- struct{}{} }()
+func (m *Manager) relayToWG(udpConn *net.UDPConn, stream net.Conn, relayDone chan<- relayStat) {
+	stat := relayStat{dir: "bridge->wg"}
+	defer func() { relayDone <- stat }()
 	for {
 		payload, err := ReadFrame(stream)
 		if err != nil {
+			stat.err = err
 			return
 		}
 		m.mu.RLock()
@@ -291,6 +339,8 @@ func (m *Manager) relayToWG(udpConn *net.UDPConn, stream net.Conn, relayDone cha
 			continue
 		}
 		_, _ = udpConn.WriteToUDP(payload, addr)
+		stat.frames++
+		stat.bytes += uint64(len(payload))
 	}
 }
 

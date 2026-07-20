@@ -1,6 +1,6 @@
 // naive-cc-wrapper adapts the naiveproxy fork's pinned clang (a Chromium
 // clang-cl build, copied to clang.exe to get GCC-style flags — see
-// docs/superpowers/specs/2026-07-18-naiveproxy-transport-design.md's
+// the naiveproxy transport design's
 // "Known risk" section for why this exact toolchain, not any clang on
 // PATH, is required) for use as Go's CGO CC on Windows:
 //

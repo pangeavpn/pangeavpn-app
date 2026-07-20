@@ -11,7 +11,7 @@ import (
 // already `Stop(ctx context.Context) error`); naive.Manager (Task 5) is
 // built to satisfy it directly. Start and Status are deliberately NOT part
 // of this interface — see the design note in this task's plan entry
-// (docs/superpowers/plans/2026-07-18-naiveproxy-transport.md, Task 2) for
+// (the naiveproxy transport plan, Task 2) for
 // why forcing common signatures for those isn't worth it here.
 type Manager interface {
 	Stop(ctx context.Context) error

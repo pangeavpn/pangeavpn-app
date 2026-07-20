@@ -8,7 +8,7 @@ import (
 
 // WriteFrame writes payload as a [2-byte big-endian length][payload] frame,
 // the wire contract this design shares with the node-side bridge (see
-// docs/superpowers/specs/2026-07-18-naiveproxy-transport-design.md, "Wire
+// the naiveproxy transport design, "Wire
 // contract"). Max payload is 65535 bytes, well above WireGuard's ~1420-byte
 // typical datagram size.
 func WriteFrame(w io.Writer, payload []byte) error {
