@@ -1,0 +1,634 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+<meta http-equiv="Pragma" content="no-cache" />
+<meta http-equiv="Expires" content="0" />
+<title>PangeaVPN — Android design preview</title>
+<link rel="icon" href="logo.png" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flag-icons@7.2.3/css/flag-icons.min.css" />
+<style>
+/* ═══ Earthen Instrument — PangeaVPN Android design language ═══ */
+:root{
+  --bg-base:#131110; --bg-surface:#1c1917; --bg-elevated:#26221f;
+  --border:#37312c; --border-soft:#272220;
+  --ink:#f6f0e6; --ink-2:#c3b6a6; --ink-3:#8a7f72;
+  --terra:#c3562b; --terra-hi:#e07a4a; --terra-lo:#a3441f; --terra-glow:rgba(195,86,43,.22);
+  --sand:#d9a066; --clay:#6b3a24;
+  --ok:#3fb984; --ok-glow:rgba(63,185,132,.22);
+  --warn:#e0a63a; --warn-glow:rgba(224,166,58,.22);
+  --bad:#e5556e; --bad-glow:rgba(229,85,110,.22);
+  --sheet:#1a1614;
+  --f-disp:"Fraunces",Georgia,serif;
+  --f-ui:"Hanken Grotesk",system-ui,sans-serif;
+  --f-mono:"JetBrains Mono",ui-monospace,monospace;
+  --grain:.05;
+}
+[data-theme="light"]{
+  --bg-base:#f4ecdf; --bg-surface:#fffaf1; --bg-elevated:#fffdf8;
+  --border:#e0d4c1; --border-soft:#ece2d1;
+  --ink:#221c17; --ink-2:#6a5d4d; --ink-3:#8f8171;
+  --terra-glow:rgba(195,86,43,.15); --ok-glow:rgba(63,185,132,.14); --warn-glow:rgba(224,166,58,.14); --bad-glow:rgba(229,85,110,.14);
+  --sheet:#fffaf1; --grain:.03;
+}
+
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0; height:100%; width:100%; overflow-x:hidden}
+body{
+  font-family:var(--f-ui); color:#d8cdbd;
+  background:
+    radial-gradient(1100px 760px at 16% -8%, #2a1c13 0%, transparent 52%),
+    radial-gradient(1000px 720px at 88% 112%, #10231b 0%, transparent 52%),
+    radial-gradient(700px 700px at 50% 50%, #16110d 0%, #0b0908 100%);
+  display:flex; flex-direction:column; align-items:center;
+  padding:30px 16px 56px; gap:22px; min-height:100%; width:100%; max-width:100vw;
+}
+.toolbar, .device, .hint{margin-left:auto; margin-right:auto}
+/* film grain over everything */
+body::after{
+  content:""; position:fixed; inset:0; z-index:9999; pointer-events:none; opacity:.35;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E");
+  mix-blend-mode:overlay;
+}
+
+/* ─── Dev toolbar ─── */
+.toolbar{
+  display:flex; flex-wrap:wrap; gap:7px; align-items:center; justify-content:center;
+  background:rgba(28,25,23,.72); border:1px solid #322c27; border-radius:18px;
+  padding:11px 13px; backdrop-filter:blur(10px); width:100%; max-width:392px;
+  box-shadow:0 20px 50px -24px #000;
+}
+.toolbar .g{display:flex; gap:6px; align-items:center; padding:0 8px; border-right:1px solid #322c27}
+.toolbar .g:last-child{border-right:none}
+.toolbar .tl{font-size:10px; letter-spacing:.14em; text-transform:uppercase; color:#6f665b; margin-right:2px; font-weight:600}
+.tbtn{
+  font:inherit; font-size:12px; font-weight:600; color:#c9bdad;
+  background:#242019; border:1px solid #37312c; border-radius:999px;
+  padding:7px 13px; cursor:pointer; transition:.15s; letter-spacing:.01em;
+}
+.tbtn:hover{background:#2d2820; color:#fff; border-color:#4a4238}
+.tbtn.active{background:var(--terra); border-color:transparent; color:#fff; box-shadow:0 4px 14px -4px var(--terra-glow)}
+
+/* ─── Phone ─── */
+.device{
+  width:392px; max-width:100%; border-radius:52px; padding:11px;
+  background:linear-gradient(155deg,#413a34 0%,#161311 46%,#0f0d0b 100%);
+  box-shadow:0 50px 100px -28px rgba(0,0,0,.78), 0 0 0 1px rgba(255,255,255,.04), inset 0 0 0 1px rgba(255,255,255,.05);
+}
+.screen{
+  position:relative; height:812px; border-radius:42px; overflow:hidden;
+  background:var(--bg-base); color:var(--ink); font-family:var(--f-ui);
+  display:flex; flex-direction:column;
+}
+/* ambient light field */
+.screen::before{
+  content:""; position:absolute; inset:0; z-index:0; pointer-events:none; transition:background .7s ease;
+  background:
+    radial-gradient(560px 460px at 76% 4%, var(--terra-glow) 0%, transparent 58%),
+    radial-gradient(560px 520px at 8% 98%, var(--ok-glow) 0%, transparent 60%);
+}
+.screen[data-state="CONNECTED"]::before{
+  background:
+    radial-gradient(640px 560px at 50% 26%, var(--ok-glow) 0%, transparent 58%),
+    radial-gradient(440px 400px at 86% 102%, var(--terra-glow) 0%, transparent 58%);
+}
+.screen[data-state="ERROR"]::before{ background:radial-gradient(600px 480px at 50% 20%, var(--bad-glow) 0%, transparent 58%); }
+/* dynamic-island */
+.island{position:absolute; top:12px; left:50%; transform:translateX(-50%); width:96px; height:26px; border-radius:16px; background:#000; z-index:6}
+
+.statusbar{
+  position:relative; z-index:5; flex-shrink:0; display:flex; align-items:center; justify-content:space-between;
+  padding:15px 30px 0; font-size:13px; font-weight:600; color:var(--ink); font-variant-numeric:tabular-nums;
+}
+.statusbar .ic{display:flex; gap:7px; align-items:center; opacity:.92}
+.statusbar svg{display:block}
+
+/* ─── Top bar ─── */
+.topbar{position:relative; z-index:4; flex-shrink:0; display:flex; align-items:center; justify-content:space-between; padding:16px 22px 4px}
+.brand{display:flex; align-items:center; gap:11px}
+.africa{-webkit-mask:url("logo.png") no-repeat center/contain; mask:url("logo.png") no-repeat center/contain; background-color:currentColor; display:inline-block}
+.brand .mark{width:32px; height:32px; color:var(--terra); filter:drop-shadow(0 3px 8px var(--terra-glow))}
+.brand .word{font-family:var(--f-disp); font-weight:600; font-size:21px; letter-spacing:-.01em; line-height:1}
+.brand .word .v{font-family:var(--f-ui); font-weight:700; font-size:15px; letter-spacing:.14em; color:var(--terra); margin-left:3px; vertical-align:2px}
+.iconbtn{
+  width:42px; height:42px; border-radius:14px; display:grid; place-items:center;
+  background:color-mix(in srgb,var(--bg-surface) 70%, transparent); border:1px solid var(--border); color:var(--ink-2);
+  cursor:pointer; transition:.16s; backdrop-filter:blur(6px);
+}
+.iconbtn:hover{color:var(--ink); border-color:var(--terra); transform:translateY(-1px)}
+
+.body{position:relative; z-index:2; flex:1; min-height:0; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:6px 22px 22px; gap:15px; overflow-y:auto; scrollbar-width:none}
+.body::-webkit-scrollbar{display:none}
+
+/* staggered reveal */
+.rise{opacity:0; transform:translateY(14px); animation:rise .6s cubic-bezier(.2,.7,.2,1) forwards}
+@keyframes rise{to{opacity:1; transform:none}}
+
+/* subscription banner */
+.banner{
+  width:100%; display:flex; align-items:center; gap:11px; padding:12px 15px; border-radius:16px;
+  background:linear-gradient(180deg, color-mix(in srgb,var(--warn) 12%, var(--bg-surface)), var(--bg-surface));
+  border:1px solid color-mix(in srgb,var(--warn) 34%, var(--border)); font-size:13px; color:var(--ink);
+}
+.banner svg{flex-shrink:0; color:var(--warn)}
+.banner .up{margin-left:auto; font-weight:700; color:var(--warn); font-size:12.5px; white-space:nowrap; letter-spacing:.02em}
+
+/* ═══ Hero dial ═══ */
+.hero{position:relative; margin-top:12px; width:264px; height:264px; display:grid; place-items:center}
+.hero .layer{position:absolute; inset:0; display:grid; place-items:center; pointer-events:none}
+.glow{width:78%; height:78%; border-radius:50%; filter:blur(30px); opacity:.6; transition:.55s;
+  background:radial-gradient(circle,var(--terra) 0%,transparent 66%)}
+.screen[data-state="CONNECTED"] .glow{background:radial-gradient(circle,var(--ok) 0%,transparent 66%); opacity:.78}
+.screen[data-state="CONNECTING"] .glow,.screen[data-state="DISCONNECTING"] .glow{background:radial-gradient(circle,var(--warn) 0%,transparent 66%); animation:breathe 1.9s ease-in-out infinite}
+.screen[data-state="ERROR"] .glow{background:radial-gradient(circle,var(--bad) 0%,transparent 66%)}
+@keyframes breathe{0%,100%{opacity:.38}50%{opacity:.8}}
+
+.globe{width:200px; height:200px; opacity:.5; color:var(--ink-3); transition:.5s}
+.screen[data-state="CONNECTED"] .globe{color:var(--ok); opacity:.55}
+.globe .grat{fill:none; stroke:currentColor; stroke-width:.7; opacity:.5}
+.globe .rim{fill:none; stroke:currentColor; stroke-width:.9; opacity:.7}
+.globe-land{position:absolute; width:96px; height:96px; color:var(--ink-3); opacity:.22; -webkit-mask:url("logo.png") no-repeat center/contain; mask:url("logo.png") no-repeat center/contain; background-color:currentColor; transition:.5s}
+.screen[data-state="CONNECTED"] .globe-land{color:var(--ok); opacity:.4}
+
+.bezel{width:264px; height:264px}
+.bezel line{stroke:var(--ink-3); opacity:.4}
+.bezel .maj{stroke:var(--ink-2); opacity:.7}
+
+.ring{width:236px; height:236px; transform:rotate(-90deg)}
+.ring circle{fill:none; stroke-width:5; stroke-linecap:round}
+.ring .tr{stroke:var(--border)}
+.ring .pr{stroke:var(--terra); stroke-dasharray:0 999; transition:stroke-dasharray .6s ease, stroke .4s ease; filter:drop-shadow(0 0 6px var(--terra-glow))}
+.screen[data-state="CONNECTED"] .ring .pr{stroke:var(--ok); stroke-dasharray:722 999}
+.screen[data-state="CONNECTING"] .ring .pr,.screen[data-state="DISCONNECTING"] .ring .pr{stroke:var(--warn); stroke-dasharray:180 999; animation:sweep 1.15s linear infinite; transform-origin:center}
+.screen[data-state="ERROR"] .ring .pr{stroke:var(--bad); stroke-dasharray:722 999}
+@keyframes sweep{to{transform:rotate(360deg)}}
+
+/* radar sweep */
+.radar{width:200px; height:200px; border-radius:50%; overflow:hidden; opacity:0; transition:opacity .4s}
+.radar i{position:absolute; inset:0; background:conic-gradient(from 0deg, transparent 0deg, var(--sweep,var(--terra)) 42deg, transparent 60deg); animation:spinr 2.6s linear infinite}
+.screen[data-state="CONNECTING"] .radar,.screen[data-state="DISCONNECTING"] .radar{opacity:.28; --sweep:var(--warn)}
+.screen[data-state="CONNECTED"] .radar{opacity:.14; --sweep:var(--ok)}
+@keyframes spinr{to{transform:rotate(360deg)}}
+
+.orb{
+  position:relative; z-index:3; width:186px; height:186px; border-radius:50%; border:none; cursor:pointer; font:inherit;
+  background:radial-gradient(circle at 50% 30%, var(--bg-elevated) 0%, var(--bg-surface) 62%, #14100e 100%);
+  box-shadow:inset 0 3px 12px rgba(0,0,0,.45), inset 0 -2px 10px rgba(0,0,0,.4), inset 0 0 0 1px rgba(255,255,255,.05), 0 16px 40px -12px rgba(0,0,0,.6);
+  display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; transition:transform .13s ease;
+}
+.orb::before{content:""; position:absolute; inset:7px; border-radius:50%; box-shadow:inset 0 1px 0 rgba(255,255,255,.08); background:radial-gradient(circle at 50% 20%, rgba(255,255,255,.07), transparent 52%); pointer-events:none}
+.orb::after{content:""; position:absolute; inset:0; border-radius:50%; background:linear-gradient(180deg, rgba(255,255,255,.07) 0%, transparent 26%); pointer-events:none}
+.orb:active{transform:scale(.972)}
+.orb .pw{color:var(--terra); transition:color .4s; filter:drop-shadow(0 0 10px var(--terra-glow))}
+.screen[data-state="CONNECTED"] .orb .pw{color:var(--ok)}
+.screen[data-state="CONNECTING"] .orb .pw,.screen[data-state="DISCONNECTING"] .orb .pw{color:var(--warn)}
+.screen[data-state="ERROR"] .orb .pw{color:var(--bad)}
+.orb .st{font-family:var(--f-ui); font-size:10.5px; font-weight:700; letter-spacing:.28em; text-transform:uppercase; color:var(--ink-3)}
+.screen[data-state="CONNECTED"] .orb .st{color:var(--ok)}
+.screen[data-state="CONNECTING"] .orb .st,.screen[data-state="DISCONNECTING"] .orb .st{color:var(--warn)}
+.screen[data-state="ERROR"] .orb .st{color:var(--bad)}
+.orb .ac{font-family:var(--f-disp); font-size:23px; font-weight:600; color:var(--ink); letter-spacing:-.01em; line-height:1}
+
+/* ─── Location card ─── */
+.loc{
+  width:100%; display:flex; align-items:center; gap:13px; padding:14px 16px; border-radius:19px;
+  background:linear-gradient(180deg, color-mix(in srgb,var(--bg-surface) 88%, transparent), var(--bg-surface));
+  border:1px solid var(--border); cursor:pointer; transition:.16s; text-align:left; backdrop-filter:blur(6px);
+}
+.loc:hover{border-color:var(--terra); transform:translateY(-1px)}
+.flag{width:30px; height:22px; border-radius:5px; background-size:cover; background-position:center; box-shadow:0 2px 5px rgba(0,0,0,.4), inset 0 0 0 1px rgba(255,255,255,.12); flex-shrink:0}
+.loc .m{display:flex; flex-direction:column; gap:3px; min-width:0; flex:1}
+.loc .nm{font-family:var(--f-disp); font-size:16px; font-weight:600; color:var(--ink)}
+.loc .sub{font-size:12px; color:var(--ink-3); display:flex; align-items:center; gap:6px}
+.loc .ping{font-family:var(--f-mono); font-size:11.5px; color:var(--ok); font-weight:500}
+.loc .dot{width:3px; height:3px; border-radius:50%; background:var(--ink-3)}
+.loc .chev{color:var(--ink-3)}
+
+/* ─── Protection pills ─── */
+.pills{display:flex; gap:8px; width:100%; justify-content:center}
+.pill{display:inline-flex; align-items:center; gap:7px; padding:8px 13px; border-radius:999px; background:color-mix(in srgb,var(--bg-surface) 80%, transparent); border:1px solid var(--border-soft); font-size:12px; color:var(--ink-2); font-weight:600; transition:.3s}
+.pill .d{width:6px; height:6px; border-radius:50%; background:var(--ink-3); transition:.3s}
+.pill.on{border-color:color-mix(in srgb,var(--ok) 40%, var(--border)); color:var(--ink)}
+.pill.on .d{background:var(--ok); box-shadow:0 0 9px var(--ok)}
+
+/* ─── Recent locations quick-switch ─── */
+.recents{width:100%; margin-top:2px}
+.rlabel{font-size:10px; letter-spacing:.15em; text-transform:uppercase; color:var(--ink-3); font-weight:700; margin:0 2px 9px}
+.rrow{display:flex; gap:8px; overflow-x:auto; scrollbar-width:none; padding-bottom:1px}
+.rrow::-webkit-scrollbar{display:none}
+.chip{display:inline-flex; align-items:center; gap:7px; padding:9px 14px; border-radius:13px; background:color-mix(in srgb,var(--bg-surface) 80%, transparent); border:1px solid var(--border); color:var(--ink-2); font:inherit; font-size:12.5px; font-weight:600; white-space:nowrap; cursor:pointer; transition:.15s; flex-shrink:0}
+.chip .fl{width:20px; height:14px; border-radius:3px; background-size:cover; background-position:center; box-shadow:inset 0 0 0 1px rgba(255,255,255,.14); flex-shrink:0}
+.chip:hover{border-color:var(--terra); color:var(--ink); transform:translateY(-1px)}
+.chip.on{background:var(--terra-glow); border-color:var(--terra); color:var(--ink)}
+
+/* ─── Connection status panel (exposed → protected) ─── */
+.status{width:100%; border-radius:20px; border:1px solid color-mix(in srgb,var(--warn) 26%, var(--border)); background:color-mix(in srgb,var(--bg-surface) 84%, transparent); overflow:hidden; transition:border-color .45s ease, background .45s ease; backdrop-filter:blur(6px)}
+.screen[data-state="CONNECTED"] .status{border-color:color-mix(in srgb,var(--ok) 32%, var(--border))}
+.screen[data-state="ERROR"] .status{border-color:color-mix(in srgb,var(--bad) 32%, var(--border))}
+.status .top{display:flex; align-items:center; gap:12px; padding:13px 15px}
+.status .b{width:38px; height:38px; border-radius:12px; display:grid; place-items:center; flex-shrink:0; background:var(--warn-glow); color:var(--warn); transition:.45s}
+.screen[data-state="CONNECTED"] .status .b{background:var(--ok-glow); color:var(--ok)}
+.screen[data-state="ERROR"] .status .b{background:var(--bad-glow); color:var(--bad)}
+.status .t{flex:1; min-width:0; display:flex; flex-direction:column; gap:2px}
+.status .lb{font-size:14px; font-weight:700; color:var(--warn); transition:.45s; letter-spacing:.01em}
+.screen[data-state="CONNECTED"] .status .lb{color:var(--ok)}
+.screen[data-state="ERROR"] .status .lb{color:var(--bad)}
+.status .mt{font-family:var(--f-mono); font-size:11.5px; color:var(--ink-3); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+.status .stats{display:none; border-top:1px solid var(--border-soft)}
+.screen[data-state="CONNECTED"] .status .stats{display:flex}
+.status .stats .c{flex:1; padding:9px 6px 11px; text-align:center; border-right:1px solid var(--border-soft)}
+.status .stats .c:last-child{border-right:none}
+.status .stats .k{font-size:8.5px; letter-spacing:.15em; text-transform:uppercase; color:var(--ink-3); font-weight:700; display:block; margin-bottom:3px}
+.status .stats .v{font-family:var(--f-mono); font-size:13.5px; color:var(--ink); font-weight:500; font-variant-numeric:tabular-nums}
+.status .stats .v small{font-size:9px; color:var(--ink-3); margin-left:1px}
+.status .spin{animation:sweep 1s linear infinite; transform-origin:center}
+
+/* ═══ Login ═══ */
+.login{position:relative; z-index:2; flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px; padding:0 36px; text-align:center}
+.login .halo{position:relative; margin-bottom:8px}
+.login .halo .g{position:absolute; inset:-40%; border-radius:50%; background:radial-gradient(circle,var(--terra-glow),transparent 62%); filter:blur(12px)}
+.login .mark{position:relative; width:80px; height:80px; color:var(--terra); filter:drop-shadow(0 8px 20px var(--terra-glow))}
+.login h1{font-family:var(--f-disp); font-size:30px; font-weight:600; margin:0; letter-spacing:-.02em}
+.login h1 .v{font-family:var(--f-ui); font-weight:700; font-size:19px; letter-spacing:.14em; color:var(--terra); vertical-align:3px; margin-left:3px}
+.login .sub{font-size:13.5px; color:var(--ink-3); margin:2px 0 0; line-height:1.5}
+.login .sub a{color:var(--terra); text-decoration:none; font-weight:600}
+.tokenwrap{position:relative; width:100%; margin-top:16px}
+.token{
+  width:100%; padding:16px 18px; border-radius:16px; background:var(--bg-base); border:1px solid var(--border); color:var(--ink);
+  font-family:var(--f-mono); font-size:19px; letter-spacing:.34em; text-align:center; outline:none; transition:.16s;
+  box-shadow:inset 0 2px 8px rgba(0,0,0,.35);
+}
+.token::placeholder{color:var(--ink-3); letter-spacing:.34em}
+.token:focus{border-color:var(--terra); box-shadow:inset 0 2px 8px rgba(0,0,0,.35), 0 0 0 3px var(--terra-glow)}
+
+/* buttons */
+.btn{font:inherit; font-family:var(--f-ui); font-weight:700; font-size:15px; border:none; border-radius:16px; padding:16px 24px; cursor:pointer; width:100%; transition:.16s; display:inline-flex; align-items:center; justify-content:center; gap:8px; letter-spacing:.01em}
+.btn-primary{color:#fff; background:linear-gradient(180deg,var(--terra-hi),var(--terra) 55%,var(--terra-lo)); box-shadow:0 10px 26px -10px var(--terra-glow), inset 0 1px 0 rgba(255,255,255,.18)}
+.btn-primary:hover{filter:brightness(1.05); transform:translateY(-1px)}
+.btn-primary:active{transform:translateY(0)}
+.btn-ghost{background:color-mix(in srgb,var(--bg-surface) 80%,transparent); color:var(--ink); border:1px solid var(--border)}
+.btn-ghost:hover{border-color:var(--terra)}
+.btn-out{background:transparent; border:1px solid var(--bad); color:var(--bad); font-size:12.5px; padding:8px 15px; width:auto; border-radius:11px}
+.btn-out:hover{background:var(--bad); color:#fff}
+.login .foot{margin-top:2px; font-size:11.5px; color:var(--ink-3); font-family:var(--f-mono)}
+
+/* ═══ Bottom sheet ═══ */
+.scrim{position:absolute; inset:0; z-index:20; background:rgba(8,6,5,.62); backdrop-filter:blur(3px); display:flex; align-items:flex-end; opacity:0; pointer-events:none; transition:opacity .3s ease}
+.scrim.open{opacity:1; pointer-events:auto}
+.sheet{width:100%; max-height:80%; background:var(--sheet); border-radius:30px 30px 0 0; border-top:1px solid var(--border); padding:9px 0 24px; transform:translateY(100%); transition:transform .34s cubic-bezier(.32,.72,0,1); display:flex; flex-direction:column; box-shadow:0 -24px 70px -24px rgba(0,0,0,.7)}
+.scrim.open .sheet{transform:none}
+.grip{width:40px; height:4px; border-radius:2px; background:var(--border); margin:6px auto 6px}
+.shead{display:flex; align-items:center; justify-content:space-between; padding:8px 24px 12px}
+.shead h2{font-family:var(--f-disp); font-size:20px; font-weight:600; margin:0; letter-spacing:-.01em}
+.shead .x{width:32px; height:32px; border-radius:10px; border:1px solid var(--border); background:transparent; color:var(--ink-2); cursor:pointer; display:grid; place-items:center}
+.shead .x:hover{color:var(--ink); border-color:var(--terra)}
+.sbody{overflow-y:auto; padding:0 16px; scrollbar-width:thin}
+
+/* search */
+.search{display:flex; align-items:center; gap:10px; margin:0 8px 8px; padding:11px 14px; border-radius:13px; background:var(--bg-base); border:1px solid var(--border)}
+.search svg{color:var(--ink-3); flex-shrink:0}
+.search input{flex:1; background:none; border:none; outline:none; color:var(--ink); font:inherit; font-size:14px}
+.search input::placeholder{color:var(--ink-3)}
+
+/* server rows */
+.srow{display:flex; align-items:center; gap:13px; padding:13px 15px; margin:5px 0; border-radius:16px; background:var(--bg-surface); border:1px solid var(--border); cursor:pointer; transition:.15s}
+.srow:hover{border-color:var(--terra); transform:translateX(2px)}
+.srow.sel{background:linear-gradient(180deg,color-mix(in srgb,var(--terra) 14%,var(--bg-surface)),var(--bg-surface)); border-color:var(--terra)}
+.srow.reco{background:linear-gradient(180deg,color-mix(in srgb,var(--terra) 10%,var(--bg-surface)),var(--bg-surface)); border-color:color-mix(in srgb,var(--terra) 38%,var(--border))}
+.srow .flag{width:30px; height:22px}
+.srow .bolt{width:38px; height:38px; border-radius:11px; display:grid; place-items:center; background:var(--terra-glow); color:var(--terra)}
+.srow .info{flex:1; min-width:0; display:flex; flex-direction:column; gap:5px}
+.srow .nm{font-size:15px; font-weight:600; color:var(--ink)}
+.srow .nm .tag{font-size:9.5px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--terra); background:var(--terra-glow); padding:2px 7px; border-radius:999px; margin-left:7px}
+.srow .r{display:flex; flex-direction:column; align-items:flex-end; gap:5px; flex-shrink:0}
+.srow .ms{font-family:var(--f-mono); font-size:11.5px; color:var(--ok)}
+.load{display:flex; align-items:center; gap:7px}
+.load .bar{width:50px; height:4px; border-radius:2px; background:var(--border); overflow:hidden}
+.load .fill{height:100%; border-radius:2px; background:var(--ok)}
+.load.mid .fill{background:var(--warn)} .load.high .fill{background:var(--bad)}
+.load .pct{font-family:var(--f-mono); font-size:10.5px; color:var(--ink-3); min-width:26px; text-align:right}
+.srow .chk{color:var(--terra)}
+
+/* settings */
+.sgrp{padding:6px 8px 2px}
+.stitle{font-size:10.5px; font-weight:700; letter-spacing:.14em; text-transform:uppercase; color:var(--ink-3); padding:10px 8px 8px}
+.scard{display:flex; align-items:flex-start; gap:13px; padding:15px; border-radius:16px; background:var(--bg-surface); border:1px solid var(--border); margin-bottom:8px}
+.scard .ico{width:36px; height:36px; border-radius:11px; display:grid; place-items:center; background:var(--terra-glow); color:var(--terra); flex-shrink:0}
+.scard .t h3{margin:0 0 3px; font-size:14.5px; font-weight:600; color:var(--ink)}
+.scard .t p{margin:0; font-size:12.5px; color:var(--ink-3); line-height:1.5}
+.srowset{display:flex; align-items:center; justify-content:space-between; gap:12px; padding:15px; border-radius:16px; background:var(--bg-surface); border:1px solid var(--border); margin-bottom:8px; cursor:pointer; transition:.14s; width:100%; font:inherit; text-align:left; color:var(--ink)}
+.srowset:hover{border-color:var(--terra)}
+.srowset .lbl{font-size:14px; font-weight:600}
+.srowset.danger .lbl{color:var(--bad)}
+.srowset .val{font-size:13px; color:var(--ink-3); display:flex; align-items:center; gap:6px}
+.ver{text-align:center; font-size:12px; color:var(--ink-3); padding:16px 0 4px; font-family:var(--f-mono)}
+.switch{width:46px; height:27px; border-radius:999px; background:var(--border); position:relative; transition:.22s; flex-shrink:0; cursor:pointer; border:none}
+.switch::after{content:""; position:absolute; top:3px; left:3px; width:21px; height:21px; border-radius:50%; background:#fff; transition:.22s; box-shadow:0 1px 3px rgba(0,0,0,.3)}
+.switch.on{background:var(--terra)}
+.switch.on::after{left:22px}
+
+/* device limit */
+.dl{position:relative; z-index:2; flex:1; padding:24px; display:flex; flex-direction:column}
+.dl h1{font-family:var(--f-disp); font-size:24px; font-weight:600; margin:0 0 8px; letter-spacing:-.01em}
+.dl p{font-size:13.5px; color:var(--ink-3); margin:0 0 20px; line-height:1.55}
+.dev{display:flex; align-items:center; gap:13px; padding:14px 15px; border-radius:16px; background:var(--bg-surface); border:1px solid var(--border); margin-bottom:9px}
+.dev .di{width:40px; height:40px; border-radius:12px; display:grid; place-items:center; background:var(--bg-elevated); color:var(--ink-2); flex-shrink:0}
+.dev .dm{flex:1; min-width:0}
+.dev .dn{font-size:14.5px; font-weight:600; color:var(--ink); display:flex; align-items:center; gap:7px}
+.dev .badge{font-size:9.5px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; color:var(--terra); background:var(--terra-glow); padding:2px 8px; border-radius:999px}
+.dev .dd{font-size:12px; color:var(--ink-3); margin-top:3px; font-family:var(--f-mono)}
+.dl .sp{flex:1}
+
+.hidden{display:none!important}
+.sr-only{position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0}
+.hint{font-size:12px; color:#736a5e; text-align:center; max-width:392px; line-height:1.6}
+.hint code{background:#242019; padding:2px 7px; border-radius:6px; font-family:var(--f-mono); color:#a89a88}
+@media (prefers-reduced-motion:reduce){*{animation-duration:.001ms!important; transition-duration:.001ms!important}}
+
+/* reusable africa symbol */
+</style>
+</head>
+<body>
+
+<div class="toolbar">
+  <div class="g"><span class="tl">Screen</span>
+    <button class="tbtn active" data-screen="connect">Connect</button>
+    <button class="tbtn" data-screen="login">Login</button>
+    <button class="tbtn" data-screen="devicelimit">Devices</button>
+  </div>
+  <div class="g"><span class="tl">Sheet</span>
+    <button class="tbtn" data-sheet="servers">Servers</button>
+    <button class="tbtn" data-sheet="settings">Settings</button>
+  </div>
+  <div class="g"><span class="tl">State</span>
+    <button class="tbtn" data-conn="DISCONNECTED">Off</button>
+    <button class="tbtn" data-conn="cycle">▶ Connect</button>
+  </div>
+  <div class="g">
+    <button class="tbtn" id="themeBtn">☾ Theme</button>
+    <button class="tbtn" id="subBtn">Banner</button>
+  </div>
+</div>
+
+<div class="device">
+  <div class="screen" id="screen" data-state="DISCONNECTED">
+    <div class="island"></div>
+    <div class="statusbar">
+      <span id="clock">9:41</span>
+      <span class="ic">
+        <svg width="17" height="11" viewBox="0 0 17 11" fill="currentColor"><rect x="0" y="7" width="3" height="4" rx="1"/><rect x="4.5" y="4.5" width="3" height="6.5" rx="1"/><rect x="9" y="2" width="3" height="9" rx="1"/><rect x="13.5" y="0" width="3" height="11" rx="1"/></svg>
+        <svg width="16" height="11" viewBox="0 0 16 11" fill="currentColor"><path d="M8 2.5c1.9 0 3.6.7 4.9 1.9l1.1-1.1C12.4 1.7 10.3.9 8 .9S3.6 1.7 2 3.3l1.1 1.1C4.4 3.2 6.1 2.5 8 2.5zm0 3.2c1 0 2 .4 2.7 1.1l1.1-1.1C10.8 4.8 9.5 4.2 8 4.2s-2.8.6-3.8 1.5l1.1 1.1C6 6.1 7 5.7 8 5.7zm0 3.1L9.5 10 8 11l-1.5-1z"/></svg>
+        <svg width="25" height="12" viewBox="0 0 25 12" fill="none"><rect x="1" y="1" width="21" height="10" rx="3" stroke="currentColor" stroke-opacity=".5"/><rect x="3" y="3" width="16" height="6" rx="1.5" fill="currentColor"/><rect x="23" y="4" width="2" height="4" rx="1" fill="currentColor" fill-opacity=".5"/></svg>
+      </span>
+    </div>
+
+    <!-- ══ Connect ══ -->
+    <div id="view-connect" style="flex:1; display:flex; flex-direction:column; min-height:0">
+      <div class="topbar rise" style="animation-delay:.02s">
+        <div class="brand"><span class="mark africa"></span><span class="word">Pangea<span class="v">VPN</span></span></div>
+        <button class="iconbtn" data-sheet="settings" aria-label="Settings">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        </button>
+      </div>
+
+      <div class="body">
+        <div class="banner rise hidden" id="subBanner" style="animation-delay:.06s">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>
+          <span>No active subscription</span><span class="up">Upgrade →</span>
+        </div>
+
+        <div class="hero rise" style="animation-delay:.1s">
+          <div class="layer"><div class="glow"></div></div>
+          <div class="layer"><svg class="globe" viewBox="0 0 200 200">
+            <circle class="rim" cx="100" cy="100" r="86"/>
+            <ellipse class="grat" cx="100" cy="100" rx="86" ry="30"/>
+            <ellipse class="grat" cx="100" cy="100" rx="86" ry="60"/>
+            <line class="grat" x1="14" y1="100" x2="186" y2="100"/>
+            <ellipse class="grat" cx="100" cy="100" rx="30" ry="86"/>
+            <ellipse class="grat" cx="100" cy="100" rx="60" ry="86"/>
+            <line class="grat" x1="100" y1="14" x2="100" y2="186"/>
+          </svg><span class="globe-land"></span></div>
+          <div class="layer radar"><i></i></div>
+          <svg class="bezel layer" viewBox="0 0 264 264" id="bezel"></svg>
+          <svg class="ring layer" viewBox="0 0 236 236"><circle class="tr" cx="118" cy="118" r="115"/><circle class="pr" cx="118" cy="118" r="115"/></svg>
+          <button class="orb" id="orb">
+            <svg class="pw" width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.5v9"/><path d="M18.4 6.6a9 9 0 1 1-12.8 0"/></svg>
+            <span class="st" id="dState">DISCONNECTED</span>
+            <span class="ac" id="dAction">Connect</span>
+          </button>
+        </div>
+
+        <div class="status rise" id="status" style="animation-delay:.16s">
+          <div class="top">
+            <span class="b" id="stBadge"></span>
+            <span class="t"><span class="lb" id="stLabel">Unprotected</span><span class="mt" id="stMeta">Real IP · 84.12.44.9 · London, UK</span></span>
+          </div>
+          <div class="stats">
+            <div class="c"><span class="k">Download</span><span class="v" id="stDown">4.2<small>MB/s</small></span></div>
+            <div class="c"><span class="k">Upload</span><span class="v" id="stUp">820<small>KB/s</small></span></div>
+            <div class="c"><span class="k">Session</span><span class="v" id="stSess">00:14:32</span></div>
+          </div>
+        </div>
+
+        <button class="loc rise" data-sheet="servers" style="animation-delay:.22s">
+          <span class="fi fi-nl flag"></span>
+          <span class="m"><span class="nm">Amsterdam</span>
+            <span class="sub">Netherlands <span class="dot"></span> <span class="ping">28 ms</span> <span class="dot"></span> 21% load</span></span>
+          <svg class="chev" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+        </button>
+
+        <div class="pills rise" id="pills" style="animation-delay:.28s">
+          <span class="pill"><span class="d"></span>Cloak</span>
+          <span class="pill"><span class="d"></span>WireGuard</span>
+          <span class="pill"><span class="d"></span>Kill Switch</span>
+        </div>
+
+        <div class="recents rise" style="animation-delay:.34s">
+          <div class="rlabel">Recent</div>
+          <div class="rrow" id="recents">
+            <button class="chip on"><span class="fi fi-nl fl"></span>Amsterdam</button>
+            <button class="chip"><span class="fi fi-de fl"></span>Frankfurt</button>
+            <button class="chip"><span class="fi fi-gb fl"></span>London</button>
+            <button class="chip"><span class="fi fi-us fl"></span>New York</button>
+            <button class="chip"><span class="fi fi-jp fl"></span>Tokyo</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ Login ══ -->
+    <div id="view-login" class="hidden" style="flex:1;display:flex">
+      <div class="login">
+        <div class="halo rise"><div class="g"></div><span class="mark africa"></span></div>
+        <h1 class="rise" style="animation-delay:.06s">Pangea<span class="v">VPN</span></h1>
+        <p class="sub rise" style="animation-delay:.1s">One earth, one secure tunnel.<br><a href="#">Get your token →</a></p>
+        <div class="tokenwrap rise" style="animation-delay:.16s"><label for="token" class="sr-only">Sign-in token</label><input id="token" name="token" class="token" placeholder="0000000000000000" maxlength="16" inputmode="numeric" aria-label="Sign-in token" /></div>
+        <button class="btn btn-primary rise" style="animation-delay:.22s;margin-top:14px">Sign In</button>
+        <p class="foot rise" style="animation-delay:.28s">pangeavpn.org/account</p>
+      </div>
+    </div>
+
+    <!-- ══ Device limit ══ -->
+    <div id="view-devicelimit" class="hidden" style="flex:1;display:flex">
+      <div class="dl">
+        <h1 class="rise">Device limit reached</h1>
+        <p class="rise" style="animation-delay:.05s">Your account has reached the maximum number of devices. Remove one to continue signing in.</p>
+        <div class="dev rise" style="animation-delay:.1s">
+          <div class="di"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="7" y="2" width="10" height="20" rx="2.5"/><path d="M11 18h2"/></svg></div>
+          <div class="dm"><div class="dn">Pixel 8 Pro <span class="badge">This device</span></div><div class="dd">added 2026-07-02</div></div>
+        </div>
+        <div class="dev rise" style="animation-delay:.15s">
+          <div class="di"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="7" y="2" width="10" height="20" rx="2.5"/><path d="M11 18h2"/></svg></div>
+          <div class="dm"><div class="dn">iPhone 15</div><div class="dd">added 2026-06-18</div></div>
+          <button class="btn btn-out">Remove</button>
+        </div>
+        <div class="dev rise" style="animation-delay:.2s">
+          <div class="di"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M2 20h20"/></svg></div>
+          <div class="dm"><div class="dn">MacBook Air</div><div class="dd">added 2026-05-30</div></div>
+          <button class="btn btn-out">Remove</button>
+        </div>
+        <div class="sp"></div>
+        <button class="btn btn-primary rise" style="animation-delay:.26s">Sign In</button>
+      </div>
+    </div>
+
+    <!-- ══ Sheet ══ -->
+    <div class="scrim" id="scrim">
+      <div class="sheet">
+        <div class="grip"></div>
+        <div id="sheet-servers">
+          <div class="shead"><h2>Choose a location</h2><button class="x" data-close aria-label="Close"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
+          <div class="search"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m21 21-4-4"/></svg><label for="serverSearch" class="sr-only">Search country or city</label><input id="serverSearch" name="serverSearch" placeholder="Search country or city" aria-label="Search country or city" /></div>
+          <div class="sbody" id="serverList"></div>
+        </div>
+        <div id="sheet-settings" class="hidden">
+          <div class="shead"><h2>Settings</h2><button class="x" data-close aria-label="Close"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
+          <div class="sbody">
+            <div class="sgrp">
+              <div class="scard"><div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></div>
+                <div class="t"><h3>Kill switch</h3><p>Only VPN traffic is allowed until you reconnect or turn off the kill switch.</p></div></div>
+              <button class="srowset"><span class="lbl">Open VPN settings</span><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7M8 7h9v9"/></svg></button>
+            </div>
+            <div class="sgrp"><div class="stitle">Network</div>
+              <div class="srowset"><span class="lbl">Allow LAN</span><button class="switch on" data-toggle></button></div>
+              <div class="srowset"><span class="lbl">Auto-connect on launch</span><button class="switch" data-toggle></button></div>
+              <button class="srowset"><span class="lbl">Language</span><span class="val">English <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg></span></button>
+            </div>
+            <div class="sgrp"><button class="srowset danger"><span class="lbl">Sign out</span><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg></button></div>
+            <div class="ver">PangeaVPN · v0.3.8</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<p class="hint">Live design preview of the Android app — <b>Earthen Instrument</b> direction. Edit <code>apps/android/preview/index.html</code> and refresh.<br>Deep-links: <code>?screen=login</code> · <code>?state=CONNECTED</code> · <code>?sheet=servers</code> · <code>?theme=light</code></p>
+
+<script>
+const screen=document.getElementById('screen');
+const views=['connect','login','devicelimit'];
+
+// bezel ticks (72, major every 6th)
+(function(){
+  const svg=document.getElementById('bezel'); let s='';
+  for(let i=0;i<72;i++){const a=i*5*Math.PI/180,maj=i%6===0,r1=maj?122:125,r2=132,cx=132,cy=132;
+    const x1=cx+Math.cos(a)*r1,y1=cy+Math.sin(a)*r1,x2=cx+Math.cos(a)*r2,y2=cy+Math.sin(a)*r2;
+    s+=`<line class="${maj?'maj':''}" x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}"/>`;}
+  svg.innerHTML=s;
+})();
+
+const SERVERS=[
+  ['nl','Amsterdam','Netherlands',21,28,true],
+  ['us','New York','United States',54,84,false],
+  ['gb','London','United Kingdom',38,41,false],
+  ['de','Frankfurt','Germany',12,33,false],
+  ['jp','Tokyo','Japan',77,142,false],
+  ['sg','Singapore','Singapore',63,121,false],
+  ['ae','Dubai','UAE',29,96,false],
+  ['za','Johannesburg','South Africa',44,110,false],
+  ['br','São Paulo','Brazil',51,118,false],
+  ['au','Sydney','Australia',33,165,false],
+];
+const lc=p=>p<40?'':p<75?'mid':'high';
+const msc=m=>m<60?'var(--ok)':m<120?'var(--warn)':'var(--bad)';
+document.getElementById('serverList').innerHTML=
+  `<div class="srow reco"><span class="bolt"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M13 2 4.5 13.5H11l-1 8.5L19.5 10H13z"/></svg></span>
+    <div class="info"><span class="nm">Fastest available<span class="tag">Auto</span></span></div>
+    <div class="r"><span class="ms">18 ms</span></div></div>`+
+  SERVERS.map(([f,n,c,l,m,sel])=>`
+  <div class="srow ${sel?'sel':''}"><span class="fi fi-${f} flag"></span>
+    <div class="info"><span class="nm">${n}</span>
+      <div class="load ${lc(l)}"><span class="bar"><span class="fill" style="width:${l}%"></span></span><span class="pct">${l}%</span></div></div>
+    <div class="r"><span class="ms" style="color:${msc(m)}">${m} ms</span>
+      ${sel?'<span class="chk"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span>':''}</div>
+  </div>`).join('');
+
+function showView(v){views.forEach(x=>document.getElementById('view-'+x).classList.toggle('hidden',x!==v));
+  document.querySelectorAll('[data-screen]').forEach(b=>b.classList.toggle('active',b.dataset.screen===v));}
+function openSheet(w){document.getElementById('sheet-servers').classList.toggle('hidden',w!=='servers');
+  document.getElementById('sheet-settings').classList.toggle('hidden',w!=='settings');
+  document.getElementById('scrim').classList.add('open');}
+function closeSheet(){document.getElementById('scrim').classList.remove('open');}
+
+const LABELS={DISCONNECTED:['DISCONNECTED','Connect'],CONNECTING:['CONNECTING','Securing…'],CONNECTED:['CONNECTED','Disconnect'],DISCONNECTING:['DISCONNECTING','Closing…'],ERROR:['ERROR','Retry']};
+const ICON={
+  off:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m4.5 4.5 15 15"/></svg>',
+  on:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg>',
+  spin:'<svg class="spin" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-6.2-8.6"/></svg>',
+  alert:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>',
+};
+const ST={
+  DISCONNECTED:{icon:ICON.off,lb:'Unprotected',mt:'Real IP · 84.12.44.9 · London, UK'},
+  CONNECTING:{icon:ICON.spin,lb:'Securing…',mt:'Resolving endpoint…'},
+  CONNECTED:{icon:ICON.on,lb:'Protected',mt:'185.65.22.7 · Amsterdam, NL'},
+  DISCONNECTING:{icon:ICON.spin,lb:'Closing…',mt:'Tearing down tunnel…'},
+  ERROR:{icon:ICON.alert,lb:'Connection failed',mt:'Tap the dial to try again'},
+};
+const STEPS=['Resolving endpoint…','Cloak TLS handshake…','Bringing up WireGuard…','Securing tunnel…'];
+let teleTimer,stepTimer;
+function setState(s){
+  screen.dataset.state=s;
+  document.getElementById('dState').textContent=LABELS[s][0];
+  document.getElementById('dAction').textContent=LABELS[s][1];
+  document.getElementById('stBadge').innerHTML=ST[s].icon;
+  document.getElementById('stLabel').textContent=ST[s].lb;
+  document.getElementById('stMeta').textContent=ST[s].mt;
+  const on=s==='CONNECTED';
+  document.querySelectorAll('#pills .pill').forEach((p,i)=>setTimeout(()=>p.classList.toggle('on',on),on?i*140:0));
+  clearInterval(teleTimer); clearInterval(stepTimer);
+  if(s==='CONNECTING'){let i=0; stepTimer=setInterval(()=>{i=(i+1)%STEPS.length; document.getElementById('stMeta').textContent=STEPS[i];},650);}
+  if(on){let sec=872; const sess=document.getElementById('stSess');
+    teleTimer=setInterval(()=>{sec++;const h=String(Math.floor(sec/3600)).padStart(2,'0'),m=String(Math.floor(sec%3600/60)).padStart(2,'0'),x=String(sec%60).padStart(2,'0');sess.textContent=`${h}:${m}:${x}`;
+      document.getElementById('stDown').innerHTML=(3.6+Math.random()*1.4).toFixed(1)+'<small>MB/s</small>';
+      document.getElementById('stUp').innerHTML=(680+Math.floor(Math.random()*260))+'<small>KB/s</small>';},1000);}
+}
+let ct=[];
+function cycle(){ct.forEach(clearTimeout);ct=[];setState('CONNECTING');ct.push(setTimeout(()=>setState('CONNECTED'),2600));}
+
+document.querySelectorAll('[data-screen]').forEach(b=>b.onclick=()=>{closeSheet();showView(b.dataset.screen);});
+document.querySelectorAll('[data-sheet]').forEach(b=>b.onclick=()=>openSheet(b.dataset.sheet));
+document.querySelectorAll('[data-conn]').forEach(b=>b.onclick=()=>b.dataset.conn==='cycle'?cycle():setState(b.dataset.conn));
+document.querySelectorAll('[data-close]').forEach(b=>b.onclick=closeSheet);
+document.getElementById('scrim').onclick=e=>{if(e.target.id==='scrim')closeSheet();};
+document.getElementById('orb').onclick=()=>{const s=screen.dataset.state;if(s==='CONNECTED')setState('DISCONNECTED');else if(s==='DISCONNECTED'||s==='ERROR')cycle();};
+document.getElementById('serverList').onclick=e=>{if(e.target.closest('.srow'))closeSheet();};
+document.getElementById('subBtn').onclick=()=>document.getElementById('subBanner').classList.toggle('hidden');
+document.querySelectorAll('[data-toggle]').forEach(t=>t.onclick=()=>t.classList.toggle('on'));
+document.getElementById('recents').onclick=e=>{const c=e.target.closest('.chip'); if(c){document.querySelectorAll('#recents .chip').forEach(x=>x.classList.remove('on')); c.classList.add('on');}};
+document.getElementById('themeBtn').onclick=()=>{const c=document.documentElement.dataset.theme;document.documentElement.dataset.theme=c==='dark'?'light':'dark';};
+
+const q=new URLSearchParams(location.search);
+if(q.get('theme'))document.documentElement.dataset.theme=q.get('theme');
+if(q.get('screen'))showView(q.get('screen'));
+setState(q.get('state')||'DISCONNECTED');
+if(q.get('sub')==='1')document.getElementById('subBanner').classList.remove('hidden');
+if(q.get('sheet'))openSheet(q.get('sheet'));
+</script>
+</body>
+</html>
