@@ -96,6 +96,16 @@ func startDaemonRuntime() (*daemonRuntime, error) {
 	killSwitch := platform.NewKillSwitch()
 	service := api.NewService(machine, logs, configStore, cloakManager, naiveManager, realityManager, hysteria2Manager, snowflakeManager, wgManager, killSwitch)
 
+	// Per-network last-good-transport cache is a best-effort optimization; a
+	// failure to open it just leaves auto-connect walking the full cascade.
+	if memPath, pathErr := platform.TransportMemoryPath(); pathErr != nil {
+		logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("transport memory disabled: %v", pathErr))
+	} else if memStore, storeErr := state.NewTransportMemoryStore(memPath); storeErr != nil {
+		logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("transport memory disabled: %v", storeErr))
+	} else {
+		service.SetTransportMemory(memStore)
+	}
+
 	handler := api.NewHandler(token, service)
 	server := &http.Server{
 		Addr:    daemonAddr,

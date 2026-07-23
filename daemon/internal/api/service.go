@@ -63,6 +63,14 @@ type snowflakeManager interface {
 	Status() state.TransportStatus
 }
 
+// transportMemory records and recalls the transport that last established a
+// tunnel on a given network, so auto-connect can try it first. Satisfied by
+// *state.TransportMemoryStore; a nil field disables the optimization.
+type transportMemory interface {
+	Lookup(networkKey string) (string, bool)
+	Record(networkKey, transport string) error
+}
+
 type Service struct {
 	machine    *state.Machine
 	logs       *state.LogStore
@@ -74,6 +82,12 @@ type Service struct {
 	snowflake  snowflakeManager
 	wg         wg.Manager
 	killSwitch platform.KillSwitch
+
+	// transportMemory remembers the last-good transport per network; nil
+	// disables the reorder/record optimization. networkKey fingerprints the
+	// current network. Both are set once and read-only thereafter.
+	transportMemory transportMemory
+	networkKey      func() string
 
 	opMu sync.Mutex
 
@@ -92,6 +106,11 @@ type Service struct {
 	// when disconnected.
 	activeMu            sync.RWMutex
 	activeTransportKind string
+
+	// handshakeTimeout bounds how long a single transport is given to carry a
+	// first WireGuard handshake during bring-up. Defaults to
+	// defaultWireGuardHandshakeTimeout; tests set it small.
+	handshakeTimeout time.Duration
 }
 
 type wgPreflightChecker interface {
@@ -122,17 +141,26 @@ func NewService(
 	killSwitch platform.KillSwitch,
 ) *Service {
 	return &Service{
-		machine:    machine,
-		logs:       logs,
-		config:     config,
-		cloak:      cloakManager,
-		naive:      naiveManager,
-		reality:    realityManager,
-		hysteria2:  hysteria2Manager,
-		snowflake:  snowflakeManager,
-		wg:         wgManager,
-		killSwitch: killSwitch,
+		machine:          machine,
+		logs:             logs,
+		config:           config,
+		cloak:            cloakManager,
+		naive:            naiveManager,
+		reality:          realityManager,
+		hysteria2:        hysteria2Manager,
+		snowflake:        snowflakeManager,
+		wg:               wgManager,
+		killSwitch:       killSwitch,
+		handshakeTimeout: defaultWireGuardHandshakeTimeout,
+		networkKey:       currentNetworkKey,
 	}
+}
+
+// SetTransportMemory wires in the per-network last-good-transport cache. Called
+// once at startup; a nil store (or never calling this) leaves the optimization
+// off, in which case connects always walk the full cascade.
+func (s *Service) SetTransportMemory(store transportMemory) {
+	s.transportMemory = store
 }
 
 // activeTransport returns whichever manager is live for the current session,
@@ -140,8 +168,15 @@ func NewService(
 // use this instead of branching on transport kind.
 func (s *Service) activeTransport() transport.Manager {
 	s.activeMu.RLock()
-	defer s.activeMu.RUnlock()
-	switch s.activeTransportKind {
+	kind := s.activeTransportKind
+	s.activeMu.RUnlock()
+	return s.managerForKind(kind)
+}
+
+// managerForKind maps a transport kind to its manager, or nil for an unknown
+// or empty kind. Managers are fixed at construction, so this needs no lock.
+func (s *Service) managerForKind(kind string) transport.Manager {
+	switch kind {
 	case "cloak":
 		return s.cloak
 	case "naive":
@@ -286,51 +321,22 @@ func (s *Service) Connect(ctx context.Context, profileID string, opts ConnectOpt
 
 // bringUpAfterKillSwitch starts the transport + WireGuard and updates the
 // kill switch. Assumes opMu held, kill switch already Enable()d. Shared by
-// Connect and Switch.
+// Connect and Switch. StateConnected is reached only after a real WireGuard
+// handshake (proven per transport inside startTransportWithHandshake), so a
+// started-but-dead tunnel never reports connected.
 func (s *Service) bringUpAfterKillSwitch(ctx context.Context, profile state.Profile, wireGuardProfile state.WireGuardProfile, preferredTransport string) error {
 	s.machine.Set(state.StateConnecting, "starting transport")
 	stepStart := time.Now()
 
-	kind, err := s.startTransport(ctx, &profile, &wireGuardProfile, preferredTransport)
+	networkKey := s.currentNetworkKey()
+	kind, err := s.startTransportWithHandshake(ctx, &profile, &wireGuardProfile, preferredTransport, networkKey)
 	if err != nil {
 		s.setError(fmt.Sprintf("transport start failed: %v", err))
 		return err
 	}
 	s.setActiveTransportKind(kind)
-	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("%s transport started (%dms)", kind, time.Since(stepStart).Milliseconds()))
-
-	s.machine.Set(state.StateConnecting, "starting wireguard")
-	stepStart = time.Now()
-	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("starting wireguard tunnel=%s", wireGuardProfile.TunnelName))
-	if err := s.wg.Start(ctx, wireGuardProfile); err != nil {
-		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cleanupCancel()
-		_ = s.activeTransport().Stop(cleanupCtx)
-		s.setActiveTransportKind("")
-		s.setError(fmt.Sprintf("wireguard start failed: %v", err))
-		return err
-	}
-
-	wgStatus, err := s.wg.Status(ctx, wireGuardProfile)
-	if err != nil {
-		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cleanupCancel()
-		_ = s.wg.Stop(cleanupCtx, wireGuardProfile)
-		_ = s.activeTransport().Stop(cleanupCtx)
-		s.setActiveTransportKind("")
-		s.setError(fmt.Sprintf("wireguard status failed: %v", err))
-		return err
-	}
-	if !wgStatus.Running {
-		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cleanupCancel()
-		_ = s.wg.Stop(cleanupCtx, wireGuardProfile)
-		_ = s.activeTransport().Stop(cleanupCtx)
-		s.setActiveTransportKind("")
-		s.setError(fmt.Sprintf("wireguard failed to reach running state: %s", wgStatus.Detail))
-		return errors.New("wireguard not running")
-	}
-	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("wireguard started (%dms)", time.Since(stepStart).Milliseconds()))
+	s.rememberTransport(networkKey, kind)
+	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("%s tunnel established with wireguard handshake (%dms)", kind, time.Since(stepStart).Milliseconds()))
 
 	stepStart = time.Now()
 	tunnelInterface := s.resolveWireGuardInterfaceName(ctx, wireGuardProfile)
@@ -578,139 +584,6 @@ func (s *Service) startSnowflakeTransport(ctx context.Context, profile *state.Pr
 	return nil
 }
 
-// startTransport: "cloak"/"naive"/"reality"/"hysteria2"/"snowflake" = that
-// transport only, no fallback (errors if the profile has no config for it).
-// "" (default) = cloak first, then naive, then reality, then hysteria2, then
-// snowflake.
-func (s *Service) startTransport(ctx context.Context, profile *state.Profile, wireGuardProfile *state.WireGuardProfile, preferredTransport string) (string, error) {
-	switch preferredTransport {
-	case "naive":
-		if profile.Naive == nil {
-			return "", errors.New("naive transport requested but this profile has no naive configuration")
-		}
-		if err := s.startNaiveTransport(ctx, profile, wireGuardProfile); err != nil {
-			return "", fmt.Errorf("naive: %w", err)
-		}
-		return "naive", nil
-	case "reality":
-		if profile.Reality == nil {
-			return "", errors.New("reality transport requested but this profile has no reality configuration")
-		}
-		if err := s.startRealityTransport(ctx, profile, wireGuardProfile); err != nil {
-			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 2*time.Second)
-			_ = s.reality.Stop(cleanupCtx)
-			cleanupCancel()
-			return "", fmt.Errorf("reality: %w", err)
-		}
-		return "reality", nil
-	case "hysteria2":
-		if profile.Hysteria2 == nil {
-			return "", errors.New("hysteria2 transport requested but this profile has no hysteria2 configuration")
-		}
-		if err := s.startHysteria2Transport(ctx, profile, wireGuardProfile); err != nil {
-			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 2*time.Second)
-			_ = s.hysteria2.Stop(cleanupCtx)
-			cleanupCancel()
-			return "", fmt.Errorf("hysteria2: %w", err)
-		}
-		return "hysteria2", nil
-	case "snowflake":
-		// Gated off for this release (see snowflakeReleaseGated). Re-enable by
-		// removing this guard.
-		if snowflakeReleaseGated {
-			return "", errors.New("snowflake transport is temporarily unavailable")
-		}
-		if profile.Snowflake == nil {
-			return "", errors.New("snowflake transport requested but this profile has no snowflake configuration")
-		}
-		if err := s.startSnowflakeTransport(ctx, profile, wireGuardProfile); err != nil {
-			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 2*time.Second)
-			_ = s.snowflake.Stop(cleanupCtx)
-			cleanupCancel()
-			return "", fmt.Errorf("snowflake: %w", err)
-		}
-		return "snowflake", nil
-	case "cloak":
-		if err := s.startCloakTransport(ctx, profile, wireGuardProfile); err != nil {
-			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 2*time.Second)
-			_ = s.cloak.Stop(cleanupCtx)
-			cleanupCancel()
-			return "", fmt.Errorf("cloak: %w", err)
-		}
-		return "cloak", nil
-	default:
-		if err := s.startCloakTransport(ctx, profile, wireGuardProfile); err != nil {
-			return s.fallbackToNaive(ctx, profile, wireGuardProfile, err)
-		}
-		return "cloak", nil
-	}
-}
-
-// fallbackToNaive is called once Cloak has failed at some stage of startup
-// during automatic ("" / "auto") mode. It stops whatever Cloak left
-// behind, and — only if the profile has a NaiveProxy fallback configured —
-// starts NaiveProxy in its place. Falls through to fallbackToReality if
-// naive isn't configured or also fails.
-func (s *Service) fallbackToNaive(ctx context.Context, profile *state.Profile, wireGuardProfile *state.WireGuardProfile, cloakErr error) (string, error) {
-	s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("cloak transport failed, checking naive fallback: %v", cloakErr))
-	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 2*time.Second)
-	_ = s.cloak.Stop(cleanupCtx)
-	cleanupCancel()
-
-	if profile.Naive == nil {
-		return s.fallbackToReality(ctx, profile, wireGuardProfile, cloakErr)
-	}
-
-	if err := s.startNaiveTransport(ctx, profile, wireGuardProfile); err != nil {
-		return s.fallbackToReality(ctx, profile, wireGuardProfile, fmt.Errorf("cloak: %v; naive: %w", cloakErr, err))
-	}
-
-	s.logs.Add(state.LogInfo, state.SourceDaemon, "fell back to naive transport after cloak failure")
-	return "naive", nil
-}
-
-// fallbackToReality is tried after cloak (and naive, if configured) have
-// failed in automatic mode. If reality isn't configured or also fails, it
-// falls through to fallbackToHysteria2. prevErr carries the accumulated
-// failure detail from earlier transports.
-func (s *Service) fallbackToReality(ctx context.Context, profile *state.Profile, wireGuardProfile *state.WireGuardProfile, prevErr error) (string, error) {
-	if profile.Reality == nil {
-		return s.fallbackToHysteria2(ctx, profile, wireGuardProfile, prevErr)
-	}
-
-	s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("checking reality fallback: %v", prevErr))
-	if err := s.startRealityTransport(ctx, profile, wireGuardProfile); err != nil {
-		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 2*time.Second)
-		_ = s.reality.Stop(cleanupCtx)
-		cleanupCancel()
-		return s.fallbackToHysteria2(ctx, profile, wireGuardProfile, fmt.Errorf("%v; reality: %w", prevErr, err))
-	}
-
-	s.logs.Add(state.LogInfo, state.SourceDaemon, "fell back to reality transport")
-	return "reality", nil
-}
-
-// fallbackToHysteria2 is tried after cloak, naive, and reality have failed
-// in automatic mode. If hysteria2 isn't configured or also fails, it falls
-// through to fallbackToSnowflake. prevErr carries the accumulated failure
-// detail from earlier transports.
-func (s *Service) fallbackToHysteria2(ctx context.Context, profile *state.Profile, wireGuardProfile *state.WireGuardProfile, prevErr error) (string, error) {
-	if profile.Hysteria2 == nil {
-		return s.fallbackToSnowflake(ctx, profile, wireGuardProfile, prevErr)
-	}
-
-	s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("checking hysteria2 fallback: %v", prevErr))
-	if err := s.startHysteria2Transport(ctx, profile, wireGuardProfile); err != nil {
-		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 2*time.Second)
-		_ = s.hysteria2.Stop(cleanupCtx)
-		cleanupCancel()
-		return s.fallbackToSnowflake(ctx, profile, wireGuardProfile, fmt.Errorf("%v; hysteria2: %w", prevErr, err))
-	}
-
-	s.logs.Add(state.LogInfo, state.SourceDaemon, "fell back to hysteria2 transport")
-	return "hysteria2", nil
-}
-
 // snowflakeReleaseGated disables the Snowflake transport for this release. Its
 // WebRTC data plane is dropped by the always-on kill switch: the negotiated
 // volunteer-proxy peer IP is discovered dynamically and is never permitted, so
@@ -719,31 +592,299 @@ func (s *Service) fallbackToHysteria2(ctx context.Context, profile *state.Profil
 // once the kill switch can permit the dynamic peer.
 const snowflakeReleaseGated = true
 
-// fallbackToSnowflake is the last-resort step in automatic mode, tried after
-// cloak, naive, reality, and hysteria2 have failed. prevErr carries the
-// accumulated failure detail from earlier transports.
-func (s *Service) fallbackToSnowflake(ctx context.Context, profile *state.Profile, wireGuardProfile *state.WireGuardProfile, prevErr error) (string, error) {
-	// Gated off for this release (see snowflakeReleaseGated): AUTO mode must
-	// never attempt snowflake. Return the same failure as the no-config path.
-	// Re-enable by removing this guard.
-	if snowflakeReleaseGated {
-		return "", fmt.Errorf("all configured transports failed: %w", prevErr)
+// transportStartFn starts one transport's process/session and rebinds the
+// WireGuard endpoint to its loopback port. It is the transport-level half of a
+// bring-up; the WireGuard handshake in bringUpTransport is the tunnel-level
+// half. Matches the signature of startCloakTransport and friends.
+type transportStartFn func(ctx context.Context, profile *state.Profile, wireGuardProfile *state.WireGuardProfile) error
+
+type transportCandidate struct {
+	kind  string
+	start transportStartFn
+}
+
+// transportCandidates returns the ordered transports to attempt for the given
+// selection. "" / "auto" = the censorship-resistance cascade (see autoCascade).
+// A specific selection = just that transport, with an error if the profile has
+// no configuration for it.
+func (s *Service) transportCandidates(profile *state.Profile, preferredTransport string) ([]transportCandidate, error) {
+	switch preferredTransport {
+	case "", "auto":
+		return s.autoCascade(profile), nil
+	case "cloak":
+		return []transportCandidate{{"cloak", s.startCloakTransport}}, nil
+	case "naive":
+		if profile.Naive == nil {
+			return nil, errors.New("naive transport requested but this profile has no naive configuration")
+		}
+		return []transportCandidate{{"naive", s.startNaiveTransport}}, nil
+	case "reality":
+		if profile.Reality == nil {
+			return nil, errors.New("reality transport requested but this profile has no reality configuration")
+		}
+		return []transportCandidate{{"reality", s.startRealityTransport}}, nil
+	case "hysteria2":
+		if profile.Hysteria2 == nil {
+			return nil, errors.New("hysteria2 transport requested but this profile has no hysteria2 configuration")
+		}
+		return []transportCandidate{{"hysteria2", s.startHysteria2Transport}}, nil
+	case "snowflake":
+		// Gated off for this release (see snowflakeReleaseGated). Re-enable by
+		// removing this guard.
+		if snowflakeReleaseGated {
+			return nil, errors.New("snowflake transport is temporarily unavailable")
+		}
+		if profile.Snowflake == nil {
+			return nil, errors.New("snowflake transport requested but this profile has no snowflake configuration")
+		}
+		return []transportCandidate{{"snowflake", s.startSnowflakeTransport}}, nil
+	default:
+		return nil, fmt.Errorf("unknown transport %q", preferredTransport)
+	}
+}
+
+// autoCascadeOrder is the auto-mode fallback order, chosen for censorship
+// resistance rather than build history — because the transports hide in
+// different ways, a block that stops one often stops others that hide the same
+// way, so consecutive attempts favor a different mechanism:
+//
+//   - cloak: the reliable default (TLS obfuscation to a decoy cover site).
+//   - reality: the strongest TLS disguise — borrows a real site's TLS
+//     handshake, so active probing and SNI blocking see a genuine site.
+//   - hysteria2: a different wire protocol (UDP/QUIC + Salamander), so a block
+//     that kills the TCP/TLS transports does not kill every attempt.
+//   - naive: real Chromium TLS+HTTP/2 — a different TLS fingerprint than
+//     reality, for when UDP is blocked and reality's approach was the problem.
+//   - snowflake: heavy-artillery last resort (WebRTC rendezvous, no fixed
+//     endpoint); currently gated off (see snowflakeReleaseGated).
+//
+// Per-network memory can still promote whatever last worked here ahead of this
+// default (see reorderByMemory).
+var autoCascadeOrder = []string{"cloak", "reality", "hysteria2", "naive", "snowflake"}
+
+// autoCascade builds the auto-mode candidate list in autoCascadeOrder, keeping
+// only the transports this profile actually configures.
+func (s *Service) autoCascade(profile *state.Profile) []transportCandidate {
+	candidates := make([]transportCandidate, 0, len(autoCascadeOrder))
+	for _, kind := range autoCascadeOrder {
+		if start, ok := s.transportStarter(profile, kind); ok {
+			candidates = append(candidates, transportCandidate{kind, start})
+		}
+	}
+	return candidates
+}
+
+// transportStarter returns the start func for kind if the profile can attempt
+// it: Cloak is always available; the others require their optional profile
+// block, and Snowflake is additionally gated off for this release.
+func (s *Service) transportStarter(profile *state.Profile, kind string) (transportStartFn, bool) {
+	switch kind {
+	case "cloak":
+		return s.startCloakTransport, true
+	case "reality":
+		if profile.Reality == nil {
+			return nil, false
+		}
+		return s.startRealityTransport, true
+	case "hysteria2":
+		if profile.Hysteria2 == nil {
+			return nil, false
+		}
+		return s.startHysteria2Transport, true
+	case "naive":
+		if profile.Naive == nil {
+			return nil, false
+		}
+		return s.startNaiveTransport, true
+	case "snowflake":
+		if snowflakeReleaseGated || profile.Snowflake == nil {
+			return nil, false
+		}
+		return s.startSnowflakeTransport, true
+	default:
+		return nil, false
+	}
+}
+
+// startTransportWithHandshake brings up the first candidate transport that
+// carries a real WireGuard handshake, and returns its kind. Because a mere
+// started transport process is no longer accepted as "connected" (a dead or
+// blocked server can start the process and never carry traffic), each
+// candidate is proven end-to-end by bringUpTransport; a candidate that starts
+// but never handshakes is torn down and the next is tried. In auto mode this
+// is the fallback chain; with a specific transport there is a single candidate
+// and no fallback.
+func (s *Service) startTransportWithHandshake(ctx context.Context, profile *state.Profile, wireGuardProfile *state.WireGuardProfile, preferredTransport, networkKey string) (string, error) {
+	candidates, err := s.transportCandidates(profile, preferredTransport)
+	if err != nil {
+		return "", err
+	}
+	candidates = s.reorderByMemory(candidates, preferredTransport, networkKey)
+
+	var failures []string
+	for i, candidate := range candidates {
+		if err := s.bringUpTransport(ctx, profile, wireGuardProfile, candidate.kind, candidate.start); err != nil {
+			// A cancelled context means Disconnect interrupted us; stop trying.
+			if ctx.Err() != nil {
+				return "", ctx.Err()
+			}
+			failures = append(failures, err.Error())
+			s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("%s transport did not establish a tunnel: %v", candidate.kind, err))
+			continue
+		}
+		if i > 0 {
+			s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("fell back to %s transport", candidate.kind))
+		}
+		return candidate.kind, nil
 	}
 
-	if profile.Snowflake == nil {
-		return "", fmt.Errorf("all configured transports failed: %w", prevErr)
+	if len(failures) == 1 {
+		return "", errors.New(failures[0])
+	}
+	return "", fmt.Errorf("all configured transports failed: %s", strings.Join(failures, "; "))
+}
+
+// currentNetworkKey returns the fingerprint of the network the host is on, or
+// "" when it can't be determined. Nil-safe wrapper around the injectable
+// networkKey func.
+func (s *Service) currentNetworkKey() string {
+	if s.networkKey == nil {
+		return ""
+	}
+	return s.networkKey()
+}
+
+// reorderByMemory moves the transport last known to work on this network to the
+// front of the auto-mode candidate list, so a repeat connect on a familiar
+// network tries the winner first instead of walking the whole cascade. Only
+// applies in auto mode; a specific-transport request is left untouched.
+func (s *Service) reorderByMemory(candidates []transportCandidate, preferredTransport, networkKey string) []transportCandidate {
+	if s.transportMemory == nil || len(candidates) < 2 {
+		return candidates
+	}
+	if preferredTransport != "" && preferredTransport != "auto" {
+		return candidates
+	}
+	remembered, ok := s.transportMemory.Lookup(networkKey)
+	if !ok {
+		return candidates
+	}
+	idx := -1
+	for i, candidate := range candidates {
+		if candidate.kind == remembered {
+			idx = i
+			break
+		}
+	}
+	if idx <= 0 {
+		// Not configured for this profile, or already first — nothing to do.
+		return candidates
+	}
+	reordered := make([]transportCandidate, 0, len(candidates))
+	reordered = append(reordered, candidates[idx])
+	reordered = append(reordered, candidates[:idx]...)
+	reordered = append(reordered, candidates[idx+1:]...)
+	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("trying %s first (last worked on this network)", remembered))
+	return reordered
+}
+
+// rememberTransport records kind as the last-good transport for networkKey so
+// the next auto-connect on this network tries it first. Best-effort: a nil
+// store, empty key, or persist error only forfeits the optimization.
+func (s *Service) rememberTransport(networkKey, kind string) {
+	if s.transportMemory == nil || networkKey == "" || kind == "" {
+		return
+	}
+	if err := s.transportMemory.Record(networkKey, kind); err != nil {
+		s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("failed to record last-good transport for network: %v", err))
+	}
+}
+
+// bringUpTransport starts one transport, brings WireGuard up over it, and waits
+// for a real WireGuard handshake — the proof the tunnel reaches the server
+// through this transport. On any failure it tears WireGuard and the transport
+// back down so the caller can try the next candidate. Making the handshake
+// (not a merely started process) the success criterion is what lets a dead
+// server fall through to the next transport, and what lets Cloak — which
+// cannot prove its own session at start time — be validated here instead.
+func (s *Service) bringUpTransport(ctx context.Context, profile *state.Profile, wireGuardProfile *state.WireGuardProfile, kind string, start transportStartFn) (err error) {
+	defer func() {
+		if err != nil {
+			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 2*time.Second)
+			_ = s.wg.Stop(cleanupCtx, *wireGuardProfile)
+			if mgr := s.managerForKind(kind); mgr != nil {
+				_ = mgr.Stop(cleanupCtx)
+			}
+			cleanupCancel()
+		}
+	}()
+
+	if err = start(ctx, profile, wireGuardProfile); err != nil {
+		return fmt.Errorf("%s: %w", kind, err)
 	}
 
-	s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("checking snowflake fallback: %v", prevErr))
-	if err := s.startSnowflakeTransport(ctx, profile, wireGuardProfile); err != nil {
-		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 2*time.Second)
-		_ = s.snowflake.Stop(cleanupCtx)
-		cleanupCancel()
-		return "", fmt.Errorf("all transports failed: %v; snowflake: %w", prevErr, err)
+	s.machine.Set(state.StateConnecting, fmt.Sprintf("starting wireguard over %s", kind))
+	if err = s.wg.Start(ctx, *wireGuardProfile); err != nil {
+		return fmt.Errorf("%s: wireguard start: %w", kind, err)
 	}
 
-	s.logs.Add(state.LogInfo, state.SourceDaemon, "fell back to snowflake transport")
-	return "snowflake", nil
+	var wgStatus state.WireGuardStatus
+	if wgStatus, err = s.wg.Status(ctx, *wireGuardProfile); err != nil {
+		return fmt.Errorf("%s: wireguard status: %w", kind, err)
+	}
+	if !wgStatus.Running {
+		err = fmt.Errorf("%s: wireguard failed to reach running state: %s", kind, wgStatus.Detail)
+		return err
+	}
+
+	s.machine.Set(state.StateConnecting, fmt.Sprintf("waiting for %s handshake", kind))
+	if err = s.waitForWireGuardHandshake(ctx, *wireGuardProfile); err != nil {
+		return fmt.Errorf("%s: %w", kind, err)
+	}
+	return nil
+}
+
+// defaultWireGuardHandshakeTimeout bounds how long a single transport is given
+// to carry a first WireGuard handshake before it is abandoned for the next
+// candidate. Matches the per-transport session timeouts (Cloak dials its server
+// on the first WireGuard packet, so the handshake also covers Cloak's session).
+const defaultWireGuardHandshakeTimeout = 10 * time.Second
+
+// wireGuardHandshakePollInterval is how often waitForWireGuardHandshake
+// re-reads WireGuard status while waiting for the first handshake.
+const wireGuardHandshakePollInterval = 200 * time.Millisecond
+
+// waitForWireGuardHandshake blocks until WireGuard completes a peer handshake
+// (LastHandshakeUnix becomes non-zero) or the timeout elapses. A freshly
+// started device has no prior handshake, so any non-zero value belongs to this
+// session. Returns an error if the interface drops, the deadline passes, or ctx
+// is cancelled (Disconnect).
+func (s *Service) waitForWireGuardHandshake(ctx context.Context, wireGuardProfile state.WireGuardProfile) error {
+	timeout := s.handshakeTimeout
+	if timeout <= 0 {
+		timeout = defaultWireGuardHandshakeTimeout
+	}
+	deadline := time.Now().Add(timeout)
+	for {
+		status, err := s.wg.Status(ctx, wireGuardProfile)
+		if err != nil {
+			return fmt.Errorf("wireguard status during handshake wait: %w", err)
+		}
+		if !status.Running {
+			return errors.New("wireguard interface went down before handshake")
+		}
+		if status.LastHandshakeUnix > 0 {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("no wireguard handshake within %s", timeout)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(wireGuardHandshakePollInterval):
+		}
+	}
 }
 
 // Switch hot-swaps profile without dropping the kill switch. Interruptible
@@ -1112,11 +1253,34 @@ func (s *Service) runHealthCheck(ctx context.Context) {
 		s.setError(fmt.Sprintf("health check failed: wireguard tunnel is down (%s)", wgStatus.Detail))
 		return
 	}
+	if s.wireGuardHandshakeStale(wgStatus) {
+		age := time.Since(time.Unix(wgStatus.LastHandshakeUnix, 0)).Round(time.Second)
+		s.setError(fmt.Sprintf("health check failed: wireguard tunnel is silent (no handshake for %s)", age))
+		return
+	}
 
 	if !s.killSwitch.Active() {
 		s.setError("health check failed: kill switch was cleared unexpectedly")
 		return
 	}
+}
+
+// wireGuardHandshakeStaleAfter is how long a Connected tunnel may go without a
+// completed handshake before it is treated as dead. WireGuard rekeys well
+// inside this on a live link — REKEY_AFTER_TIME is 120s and a session is
+// unusable after REJECT_AFTER_TIME (180s), so with keepalive traffic a fresh
+// handshake always lands sooner. An older one means the peer is unreachable.
+const wireGuardHandshakeStaleAfter = 180 * time.Second
+
+// wireGuardHandshakeStale reports whether a Connected tunnel has gone silent:
+// it handshaked at least once (so this isn't a still-connecting tunnel — that
+// case is gated at connect time) but the newest handshake is older than
+// wireGuardHandshakeStaleAfter.
+func (s *Service) wireGuardHandshakeStale(status state.WireGuardStatus) bool {
+	if status.LastHandshakeUnix <= 0 {
+		return false
+	}
+	return time.Since(time.Unix(status.LastHandshakeUnix, 0)) > wireGuardHandshakeStaleAfter
 }
 
 // recoverActiveTransport restarts whichever transport is active in-place —

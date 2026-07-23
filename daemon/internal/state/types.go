@@ -53,6 +53,11 @@ type WireGuardStatus struct {
 	Detail   string `json:"detail"`
 	BytesIn  int64  `json:"bytesIn"`
 	BytesOut int64  `json:"bytesOut"`
+	// LastHandshakeUnix is the most recent successful WireGuard handshake with
+	// any peer, in Unix seconds; 0 means no handshake has completed yet. The
+	// interface can be Running with no handshake (device up, peer unreached),
+	// which is why connection readiness gates on this, not on Running alone.
+	LastHandshakeUnix int64 `json:"lastHandshakeUnix"`
 }
 
 type StatusResponse struct {

@@ -320,6 +320,16 @@ type fakeWGManager struct {
 	startCount     int
 	stopCount      int
 	preflightCount int
+
+	// Handshake modeling for the connection-readiness gate. Default (all zero,
+	// noHandshake false) = a live tunnel that handshakes as soon as it is
+	// running. noHandshake = a dead tunnel that never handshakes. handshakeOnStart
+	// = only handshake once startCount reaches it (to model a transport whose
+	// server is dead so an earlier candidate fails and a later one succeeds).
+	// handshakeUnix overrides the reported handshake time (e.g. a stale one).
+	noHandshake      bool
+	handshakeOnStart int
+	handshakeUnix    int64
 }
 
 func (f *fakeWGManager) Start(_ context.Context, _ state.WireGuardProfile) error {
@@ -350,7 +360,22 @@ func (f *fakeWGManager) Status(_ context.Context, _ state.WireGuardProfile) (sta
 	if f.statusErr != nil {
 		return state.WireGuardStatus{}, f.statusErr
 	}
-	return state.WireGuardStatus{Running: f.running, Detail: "fake"}, nil
+	return state.WireGuardStatus{Running: f.running, Detail: "fake", LastHandshakeUnix: f.lastHandshakeLocked()}, nil
+}
+
+// lastHandshakeLocked returns the handshake time the fake should report; caller
+// holds f.mu.
+func (f *fakeWGManager) lastHandshakeLocked() int64 {
+	if f.handshakeUnix != 0 {
+		return f.handshakeUnix
+	}
+	if !f.running || f.noHandshake {
+		return 0
+	}
+	if f.handshakeOnStart > 0 && f.startCount < f.handshakeOnStart {
+		return 0
+	}
+	return time.Now().Unix()
 }
 
 func (f *fakeWGManager) Preflight(_ context.Context, _ state.WireGuardProfile) error {
@@ -371,6 +396,29 @@ func (f *fakeWGManager) ActiveInterfaceName(_ context.Context, _ state.WireGuard
 
 func (f *fakeWGManager) ActiveLUIDs() map[uint64]struct{} {
 	return map[uint64]struct{}{}
+}
+
+// fakeTransportMemory is an in-memory transportMemory for tests.
+type fakeTransportMemory struct {
+	mu      sync.Mutex
+	entries map[string]string
+}
+
+func (f *fakeTransportMemory) Lookup(networkKey string) (string, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	transport, ok := f.entries[networkKey]
+	return transport, ok && transport != ""
+}
+
+func (f *fakeTransportMemory) Record(networkKey, transport string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.entries == nil {
+		f.entries = map[string]string{}
+	}
+	f.entries[networkKey] = transport
+	return nil
 }
 
 type fakeKillSwitch struct {
@@ -510,7 +558,11 @@ func newTestServiceFull(
 	machine := state.NewMachine()
 	logs := state.NewLogStore(100)
 	config := testConfigStore(t, profiles...)
-	return NewService(machine, logs, config, cloak, naive, reality, hysteria2, snowflake, wgMgr, ks)
+	svc := NewService(machine, logs, config, cloak, naive, reality, hysteria2, snowflake, wgMgr, ks)
+	// Keep handshake-gated failure paths fast in tests; a live fake tunnel
+	// handshakes on the first status poll, so success paths are unaffected.
+	svc.handshakeTimeout = 200 * time.Millisecond
+	return svc
 }
 
 // ---------------------------------------------------------------------------
@@ -1089,6 +1141,242 @@ func TestConnect_PreferredTransportNaive_ErrorsWhenProfileHasNoNaiveConfig(t *te
 	}
 }
 
+// TestConnect_NoWireGuardHandshake_DoesNotConnect proves the readiness gate:
+// a transport whose process starts but whose tunnel never handshakes does not
+// count as connected, and WireGuard is torn back down.
+func TestConnect_NoWireGuardHandshake_DoesNotConnect(t *testing.T) {
+	profile := testProfile()
+	cloak := &fakeCloakManager{}
+	wgMgr := &fakeWGManager{noHandshake: true}
+	ks := &fakeKillSwitch{}
+	svc := newTestService(t, cloak, &fakeNaiveManager{}, wgMgr, ks, profile)
+
+	err := svc.Connect(context.Background(), profile.ID, ConnectOptions{PreferredTransport: "cloak"})
+	if err == nil {
+		t.Fatal("expected connect to fail when WireGuard never handshakes")
+	}
+	if st := svc.Status(context.Background()).State; st == state.StateConnected {
+		t.Fatalf("state = %q, want not CONNECTED", st)
+	}
+	wgMgr.mu.Lock()
+	running := wgMgr.running
+	wgMgr.mu.Unlock()
+	if running {
+		t.Error("expected WireGuard to be stopped after handshake failure")
+	}
+}
+
+// TestConnect_FallsBackWhenTransportStartsButHandshakeNeverCompletes proves the
+// handshake is the fallback trigger: cloak starts cleanly but no handshake ever
+// lands through it, so the daemon advances to naive, which does handshake.
+func TestConnect_FallsBackWhenTransportStartsButHandshakeNeverCompletes(t *testing.T) {
+	profile := state.Profile{
+		ID:    "p1",
+		Name:  "p1",
+		Cloak: state.CloakProfile{RemoteHost: "example.com", RemotePort: 443, LocalPort: 51821},
+		Naive: &state.NaiveProfile{RemoteHost: "example.com", RemotePort: 443, Username: "u", Password: "p"},
+		WireGuard: state.WireGuardProfile{
+			TunnelName: "pangea0",
+			ConfigText: "[Interface]\nPrivateKey=x\n[Peer]\nEndpoint=127.0.0.1:51821\nPublicKey=y\nAllowedIPs=0.0.0.0/0\n",
+		},
+	}
+	cloak := &fakeCloakManager{}
+	naive := &fakeNaiveManager{}
+	// Handshake only completes once the second transport (naive) brings WG up.
+	wgMgr := &fakeWGManager{handshakeOnStart: 2}
+	ks := &fakeKillSwitch{}
+	svc := newTestService(t, cloak, naive, wgMgr, ks, profile)
+
+	if err := svc.Connect(context.Background(), "p1", ConnectOptions{}); err != nil {
+		t.Fatalf("connect failed: %v", err)
+	}
+	status := svc.Status(context.Background())
+	if status.State != state.StateConnected {
+		t.Fatalf("state = %q, want CONNECTED", status.State)
+	}
+	if status.ActiveTransport != "naive" {
+		t.Fatalf("ActiveTransport = %q, want naive (cloak started but carried no handshake)", status.ActiveTransport)
+	}
+	if cloak.stopCount == 0 {
+		t.Error("expected cloak to be stopped after its tunnel failed to handshake")
+	}
+	if !naive.startCalled {
+		t.Error("expected naive to be attempted after cloak")
+	}
+}
+
+// TestConnect_ConnectedReportsWireGuardHandshake proves the successful path
+// surfaces the handshake time in status.
+func TestConnect_ConnectedReportsWireGuardHandshake(t *testing.T) {
+	profile := testProfile()
+	cloak := &fakeCloakManager{}
+	wgMgr := &fakeWGManager{}
+	ks := &fakeKillSwitch{}
+	svc := newTestService(t, cloak, &fakeNaiveManager{}, wgMgr, ks, profile)
+
+	if err := svc.Connect(context.Background(), profile.ID, ConnectOptions{}); err != nil {
+		t.Fatalf("connect failed: %v", err)
+	}
+	status := svc.Status(context.Background())
+	if status.State != state.StateConnected {
+		t.Fatalf("state = %q, want CONNECTED", status.State)
+	}
+	if status.WireGuard.LastHandshakeUnix <= 0 {
+		t.Fatal("expected a non-zero WireGuard handshake time once connected")
+	}
+}
+
+// TestHealthCheck_StaleWireGuardHandshakeMarksError proves the ongoing health
+// check flags a tunnel that goes silent mid-session (no handshake within the
+// stale window) even though the interface and transport still report running.
+func TestHealthCheck_StaleWireGuardHandshakeMarksError(t *testing.T) {
+	profile := state.Profile{
+		ID:    "p1",
+		Name:  "p1",
+		Cloak: state.CloakProfile{RemoteHost: "example.com", RemotePort: 443, LocalPort: 51821},
+		Naive: &state.NaiveProfile{RemoteHost: "example.com", RemotePort: 443, Username: "u", Password: "p"},
+		WireGuard: state.WireGuardProfile{
+			TunnelName: "pangea0",
+			ConfigText: "[Interface]\nPrivateKey=x\n[Peer]\nEndpoint=127.0.0.1:51821\nPublicKey=y\nAllowedIPs=0.0.0.0/0\n",
+		},
+	}
+	cloak := &fakeCloakManager{}
+	naive := &fakeNaiveManager{}
+	wgMgr := &fakeWGManager{}
+	ks := &fakeKillSwitch{}
+	svc := newTestService(t, cloak, naive, wgMgr, ks, profile)
+
+	if err := svc.Connect(context.Background(), "p1", ConnectOptions{PreferredTransport: "naive"}); err != nil {
+		t.Fatalf("connect failed: %v", err)
+	}
+
+	// Tunnel goes silent: the newest handshake is well past the stale window.
+	wgMgr.mu.Lock()
+	wgMgr.handshakeUnix = time.Now().Add(-(wireGuardHandshakeStaleAfter + time.Minute)).Unix()
+	wgMgr.mu.Unlock()
+
+	svc.runHealthCheck(context.Background())
+
+	if st := svc.Status(context.Background()).State; st != state.StateError {
+		t.Fatalf("state = %q, want ERROR after stale handshake", st)
+	}
+}
+
+// transportMemoryProfile builds a profile with cloak + naive + reality all
+// configured, for the per-network transport-memory tests.
+func transportMemoryProfile() state.Profile {
+	return state.Profile{
+		ID:      "p1",
+		Name:    "p1",
+		Cloak:   state.CloakProfile{RemoteHost: "example.com", RemotePort: 443, LocalPort: 51821},
+		Naive:   &state.NaiveProfile{RemoteHost: "example.com", RemotePort: 443, Username: "u", Password: "p"},
+		Reality: &state.RealityProfile{RemoteHost: "reality.example.com", RemotePort: 8443, UUID: "u", PublicKey: "k", ShortID: "ab12"},
+		WireGuard: state.WireGuardProfile{
+			TunnelName: "pangea0",
+			ConfigText: "[Interface]\nPrivateKey=x\n[Peer]\nEndpoint=127.0.0.1:51821\nPublicKey=y\nAllowedIPs=0.0.0.0/0\n",
+		},
+	}
+}
+
+// TestConnect_RecordsLastGoodTransportForNetwork proves the daemon remembers
+// which transport actually established a tunnel, keyed by network: cloak fails
+// to handshake, naive succeeds, so naive is recorded for this network.
+func TestConnect_RecordsLastGoodTransportForNetwork(t *testing.T) {
+	// cloak + naive only, so the second transport attempted is deterministically
+	// naive regardless of the wider cascade order.
+	profile := state.Profile{
+		ID:    "p1",
+		Name:  "p1",
+		Cloak: state.CloakProfile{RemoteHost: "example.com", RemotePort: 443, LocalPort: 51821},
+		Naive: &state.NaiveProfile{RemoteHost: "example.com", RemotePort: 443, Username: "u", Password: "p"},
+		WireGuard: state.WireGuardProfile{
+			TunnelName: "pangea0",
+			ConfigText: "[Interface]\nPrivateKey=x\n[Peer]\nEndpoint=127.0.0.1:51821\nPublicKey=y\nAllowedIPs=0.0.0.0/0\n",
+		},
+	}
+	cloak := &fakeCloakManager{}
+	naive := &fakeNaiveManager{}
+	// Handshake only completes on the second transport's WG bring-up (naive).
+	wgMgr := &fakeWGManager{handshakeOnStart: 2}
+	ks := &fakeKillSwitch{}
+	mem := &fakeTransportMemory{}
+	svc := newTestService(t, cloak, naive, wgMgr, ks, profile)
+	svc.transportMemory = mem
+	svc.networkKey = func() string { return "wifi-home" }
+
+	if err := svc.Connect(context.Background(), "p1", ConnectOptions{}); err != nil {
+		t.Fatalf("connect failed: %v", err)
+	}
+	if got := svc.Status(context.Background()).ActiveTransport; got != "naive" {
+		t.Fatalf("ActiveTransport = %q, want naive", got)
+	}
+	if got, _ := mem.Lookup("wifi-home"); got != "naive" {
+		t.Fatalf("remembered transport = %q, want naive", got)
+	}
+}
+
+// TestConnect_TriesRememberedTransportFirst proves the remembered transport is
+// attempted before the rest of the cascade: reality is remembered and works, so
+// cloak (normally first) is never even started.
+func TestConnect_TriesRememberedTransportFirst(t *testing.T) {
+	profile := transportMemoryProfile()
+	cloak := &fakeCloakManager{}
+	naive := &fakeNaiveManager{}
+	reality := &fakeRealityManager{}
+	wgMgr := &fakeWGManager{} // live tunnel: whichever transport is tried first handshakes
+	ks := &fakeKillSwitch{}
+	mem := &fakeTransportMemory{entries: map[string]string{"wifi-home": "reality"}}
+	svc := newTestServiceWithReality(t, cloak, naive, reality, wgMgr, ks, profile)
+	svc.transportMemory = mem
+	svc.networkKey = func() string { return "wifi-home" }
+
+	if err := svc.Connect(context.Background(), "p1", ConnectOptions{}); err != nil {
+		t.Fatalf("connect failed: %v", err)
+	}
+	if svc.Status(context.Background()).ActiveTransport != "reality" {
+		t.Fatalf("ActiveTransport = %q, want reality (remembered)", svc.Status(context.Background()).ActiveTransport)
+	}
+	if cloak.startCalled {
+		t.Error("cloak should not be started when the remembered transport works first")
+	}
+	if !reality.startCalled {
+		t.Error("reality (remembered) should have been tried first")
+	}
+}
+
+// TestConnect_RememberedTransportFailsNow_FallsBackAndRerecords proves a stale
+// memory doesn't strand the connection: reality is remembered but no longer
+// handshakes, so the daemon falls through the rest of the cascade and updates
+// the memory to the new winner.
+func TestConnect_RememberedTransportFailsNow_FallsBackAndRerecords(t *testing.T) {
+	profile := transportMemoryProfile()
+	cloak := &fakeCloakManager{}
+	naive := &fakeNaiveManager{}
+	reality := &fakeRealityManager{}
+	// Reordered cascade is [reality, cloak, naive]; only the 2nd WG bring-up
+	// (cloak) handshakes, so reality fails and cloak becomes the new winner.
+	wgMgr := &fakeWGManager{handshakeOnStart: 2}
+	ks := &fakeKillSwitch{}
+	mem := &fakeTransportMemory{entries: map[string]string{"wifi-home": "reality"}}
+	svc := newTestServiceWithReality(t, cloak, naive, reality, wgMgr, ks, profile)
+	svc.transportMemory = mem
+	svc.networkKey = func() string { return "wifi-home" }
+
+	if err := svc.Connect(context.Background(), "p1", ConnectOptions{}); err != nil {
+		t.Fatalf("connect failed: %v", err)
+	}
+	active := svc.Status(context.Background()).ActiveTransport
+	if active == "reality" {
+		t.Fatal("expected to fall back off the stale remembered transport")
+	}
+	if active != "cloak" {
+		t.Fatalf("ActiveTransport = %q, want cloak (next in reordered cascade)", active)
+	}
+	if got, _ := mem.Lookup("wifi-home"); got != "cloak" {
+		t.Fatalf("remembered transport = %q, want cloak after re-record", got)
+	}
+}
+
 // naiveFallbackProfile builds a profile that falls back to naive (cloak
 // always fails to start) for the fallbackToNaive regression tests below.
 // Naive.LocalPort and the WireGuard config's loopback Endpoint line are
@@ -1307,12 +1595,14 @@ func TestConnect_PreferredTransportReality_ErrorsWhenProfileHasNoRealityConfig(t
 	}
 }
 
-func TestConnect_CloakAndNaiveFail_FallsBackToReality(t *testing.T) {
+func TestConnect_CloakFails_FallsBackToRealityBeforeNaive(t *testing.T) {
+	// In the censorship-resistance cascade REALITY precedes NaiveProxy, so a
+	// cloak failure falls through to reality and naive is never reached.
 	profile := realityProfile()
 	profile.Naive = &state.NaiveProfile{RemoteHost: "naive.example.com", RemotePort: 8443, Username: "u", Password: "p"}
 
 	cloakMgr := &fakeCloakManager{startErr: errors.New("cloak boom")}
-	naiveMgr := &fakeNaiveManager{startErr: errors.New("naive boom")}
+	naiveMgr := &fakeNaiveManager{}
 	realityMgr := &fakeRealityManager{}
 	wgMgr := &fakeWGManager{}
 	ks := &fakeKillSwitch{}
@@ -1324,19 +1614,63 @@ func TestConnect_CloakAndNaiveFail_FallsBackToReality(t *testing.T) {
 	if !cloakMgr.startCalled {
 		t.Fatal("expected cloak.Start to be attempted first")
 	}
-	if !naiveMgr.startCalled {
-		t.Fatal("expected naive.Start to be attempted after cloak failed")
-	}
-	realityMgr.mu.Lock()
-	startCalled := realityMgr.startCalled
-	realityMgr.mu.Unlock()
-	if !startCalled {
-		t.Fatal("expected reality.Start to be attempted after both cloak and naive failed")
-	}
-
 	status := svc.Status(context.Background())
 	if status.ActiveTransport != "reality" {
 		t.Fatalf("ActiveTransport = %q, want reality", status.ActiveTransport)
+	}
+	realityMgr.mu.Lock()
+	realityStarted := realityMgr.startCalled
+	realityMgr.mu.Unlock()
+	if !realityStarted {
+		t.Fatal("expected reality.Start to be attempted after cloak failed")
+	}
+	naiveMgr.mu.Lock()
+	naiveStarted := naiveMgr.startCalled
+	naiveMgr.mu.Unlock()
+	if naiveStarted {
+		t.Fatal("naive should not be reached — reality precedes it in the cascade")
+	}
+}
+
+// TestConnect_AutoCascadeAttemptsTransportsInCensorshipOrder pins the auto-mode
+// order: cloak, then reality, then hysteria2, then naive (snowflake is gated
+// off). With every transport configured but none able to handshake, the
+// aggregated failure records the order they were attempted in.
+func TestConnect_AutoCascadeAttemptsTransportsInCensorshipOrder(t *testing.T) {
+	profile := state.Profile{
+		ID:        "p1",
+		Name:      "p1",
+		Cloak:     state.CloakProfile{RemoteHost: "example.com", RemotePort: 443, LocalPort: 51821},
+		Naive:     &state.NaiveProfile{RemoteHost: "n.example.com", RemotePort: 443, Username: "u", Password: "p"},
+		Reality:   &state.RealityProfile{RemoteHost: "r.example.com", RemotePort: 8443, UUID: "u", PublicKey: "k", ShortID: "ab12"},
+		Hysteria2: &state.Hysteria2Profile{RemoteHost: "h.example.com", RemotePort: 8443, Password: "p", ObfsPassword: "o"},
+		WireGuard: state.WireGuardProfile{
+			TunnelName: "pangea0",
+			ConfigText: "[Interface]\nPrivateKey=x\n[Peer]\nEndpoint=127.0.0.1:51821\nPublicKey=y\nAllowedIPs=0.0.0.0/0\n",
+		},
+	}
+	wgMgr := &fakeWGManager{noHandshake: true} // every transport starts but no tunnel handshakes
+	ks := &fakeKillSwitch{}
+	svc := newTestServiceFull(t, &fakeCloakManager{}, &fakeNaiveManager{}, &fakeRealityManager{}, &fakeHysteria2Manager{}, &fakeSnowflakeManager{}, wgMgr, ks, profile)
+
+	err := svc.Connect(context.Background(), "p1", ConnectOptions{})
+	if err == nil {
+		t.Fatal("expected connect to fail when nothing handshakes")
+	}
+	msg := err.Error()
+	lastIdx := -1
+	for _, kind := range []string{"cloak", "reality", "hysteria2", "naive"} {
+		idx := strings.Index(msg, kind+":")
+		if idx < 0 {
+			t.Fatalf("error missing %s attempt: %v", kind, msg)
+		}
+		if idx < lastIdx {
+			t.Fatalf("%s attempted out of cascade order in: %v", kind, msg)
+		}
+		lastIdx = idx
+	}
+	if strings.Contains(msg, "snowflake:") {
+		t.Fatalf("snowflake is gated and must not be attempted in auto mode: %v", msg)
 	}
 }
 
