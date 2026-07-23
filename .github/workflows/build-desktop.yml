@@ -48,6 +48,16 @@ jobs:
       - name: Install goversioninfo
         run: go install github.com/josephspurrier/goversioninfo/cmd/goversioninfo@latest
 
+      # cgo-links the prebuilt pangea_naive.lib (native COFF) for the naive
+      # transport. windows-latest ships LLVM; install it only if missing.
+      - name: Ensure LLVM (clang-cl) for naive_cgo
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "C:\Program Files\LLVM\bin\clang-cl.exe")) {
+            choco install llvm --no-progress -y
+          }
+          & "C:\Program Files\LLVM\bin\clang-cl.exe" --version
+
       - name: Install workspace dependencies
         run: npm ci
 
