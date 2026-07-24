@@ -25,10 +25,9 @@ const ASSET_SHA256 = {
     x64: "cc932c0d19cb95fa6deb85765d087ecf89db3821bf34c9af1f0b6df8bd525591",
     arm64: "8fc336d4e845c58d7ed9e5cfe500fadb936cde2e329d593e1762d6aebd52ab2f"
   },
-  // Fill once the fork's mac jobs publish pangea-naive-mac-<arch>.zip.
   darwin: {
-    x64: "",
-    arm64: ""
+    x64: "634b4f1d4efbf64a4c5b214bfe2dc5db44a5dc8ab21f52c69a7cb3bc7c2af27f",
+    arm64: "d9975a124dfc60b627060817ee3e70bcd7a8e0fd282e42ebf6a988713aef0c2a"
   }
 };
 
