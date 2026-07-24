@@ -14,8 +14,10 @@ const MAC_FRAMEWORKS = [
   "Security", "SystemConfiguration", "UniformTypeIdentifiers"
 ];
 
-// net's is_mac block additionally links libresolv.
-const MAC_LIBS = ["-lresolv"];
+// System libraries the archive's objects need beyond the frameworks: net's
+// is_mac block links libresolv, and base's Mach port-rendezvous code
+// (audit_token_to_pid) links libbsm.
+const MAC_LIBS = ["-lresolv", "-lbsm"];
 
 // Matches mac_deployment_target in the fork's build/config/mac/mac_sdk.gni.
 const MAC_DEPLOYMENT_TARGET = "12.0";
