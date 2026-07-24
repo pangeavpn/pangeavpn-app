@@ -1,19 +1,16 @@
-// naive-cc-wrapper adapts the naiveproxy fork's pinned clang (a Chromium
-// clang-cl build, copied to clang.exe to get GCC-style flags — see
-// the naiveproxy transport design's
-// "Known risk" section for why this exact toolchain, not any clang on
-// PATH, is required) for use as Go's CGO CC on Windows:
+// naive-cc-wrapper adapts a clang-cl build (copied to clang.exe to get
+// GCC-style flags) for use as Go's CGO CC on Windows:
 //
 //   - strips -mthreads, which Go's cgo unconditionally injects for
 //     GOOS=windows builds and which this MSVC-target clang rejects.
-//   - adds --target=<NAIVE_CC_TARGET> and -fuse-ld=lld so the linker
-//     matches the clang revision that built pangea_naive.lib (mismatched
-//     LTO bitcode versions fail to link).
+//   - adds --target=<NAIVE_CC_TARGET> and -fuse-ld=lld to link with lld.
 //
-// Configured entirely via environment variables so one compiled binary
-// works for either Windows target architecture:
+// pangea_naive.lib is native COFF (built with use_thin_lto=false), so any
+// recent clang links it — either the pinned Chromium toolchain from a local
+// checkout or a stock system LLVM. Configured entirely via environment
+// variables so one compiled binary works for either Windows target arch:
 //
-//	NAIVE_CC_REAL_CC     path to the pinned toolchain's clang.exe
+//	NAIVE_CC_REAL_CC     path to a clang.exe (pinned toolchain or system LLVM)
 //	NAIVE_CC_TARGET      e.g. aarch64-pc-windows-msvc or x86_64-pc-windows-msvc
 package main
 

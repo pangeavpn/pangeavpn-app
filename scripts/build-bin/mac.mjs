@@ -4,6 +4,7 @@ import path from "node:path";
 import process from "node:process";
 import { spawnSync } from "node:child_process";
 import { npmCmd, relPath, rootDir, runOrThrow, sha256File, writeJson } from "./shared.mjs";
+import { resolveNaiveCgoConfig } from "../lib/naive-cgo.mjs";
 
 const platformName = "mac";
 const daemonDir = path.join(rootDir, "daemon");
@@ -137,14 +138,21 @@ async function copyStandaloneMacTools() {
 
 function buildDaemon(goArch, outPath) {
   // with_utls is required by the VLESS+REALITY transport (sing-box compiles
-  // uTLS out by default). naive_cgo is Windows-only, so macOS needs only this.
-  runOrThrow(goCmd, ["build", "-tags", "with_utls", "-o", outPath, "./cmd/daemon"], {
+  // uTLS out by default). naive_cgo is added on top when the pangea_naive
+  // archive + toolchain resolve; otherwise the stub transport builds.
+  const naiveCgo = resolveNaiveCgoConfig(goArch, rootDir);
+  if (naiveCgo) {
+    console.log(`naive_cgo: enabled for ${goArch} (pangea_naive lib found and toolchain resolved)`);
+  }
+  const buildTags = ["with_utls", ...(naiveCgo ? naiveCgo.tags : [])];
+  runOrThrow(goCmd, ["build", "-tags", buildTags.join(","), "-o", outPath, "./cmd/daemon"], {
     cwd: daemonDir,
     shell: false,
     env: {
       ...goEnv(),
       GOOS: "darwin",
-      GOARCH: goArch
+      GOARCH: goArch,
+      ...(naiveCgo ? naiveCgo.env : {})
     }
   });
 }

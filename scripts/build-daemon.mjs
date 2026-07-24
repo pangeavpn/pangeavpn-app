@@ -20,9 +20,9 @@ if (!goCmd) {
 // GOARCH is set by scripts/build-bin/windows.mjs per target (amd64/arm64);
 // falls back to the host arch for local `node build-daemon.mjs` runs.
 const goArch = process.env.GOARCH || (process.arch === "arm64" ? "arm64" : "amd64");
-const naiveCgo = isWin ? resolveNaiveCgoConfig(goArch, rootDir) : null;
+const naiveCgo = resolveNaiveCgoConfig(goArch, rootDir);
 if (naiveCgo) {
-  console.log(`naive_cgo: enabled for ${goArch} (pangea_naive.lib found and toolchain resolved)`);
+  console.log(`naive_cgo: enabled for ${goArch} (pangea_naive lib found and toolchain resolved)`);
 }
 
 const env = goEnv(rootDir, naiveCgo);

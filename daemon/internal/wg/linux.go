@@ -172,12 +172,13 @@ func (m *wireGuardGoManager) statusLinux(_ context.Context, profile state.WireGu
 	tunnelKey := sanitizeTunnelName(profile.TunnelName)
 	if m.hasActiveDevice(tunnelKey) {
 		session, _ := m.session(tunnelKey)
-		rxBytes, txBytes := peerTransferStats(session.device)
+		rxBytes, txBytes, lastHandshake := peerStats(session.device)
 		return state.WireGuardStatus{
-			Running:  true,
-			Detail:   fmt.Sprintf("interface %s running (in-process)", session.interfaceName),
-			BytesIn:  rxBytes,
-			BytesOut: txBytes,
+			Running:           true,
+			Detail:            fmt.Sprintf("interface %s running (in-process)", session.interfaceName),
+			BytesIn:           rxBytes,
+			BytesOut:          txBytes,
+			LastHandshakeUnix: lastHandshake,
 		}, nil
 	}
 

@@ -40,9 +40,9 @@ type tunnelSession struct {
 	// Networking state for cleanup.
 	endpointRoutes   []routeSpec
 	dnsOverrides     []darwinDNSOverride // macOS
-	linuxDNSOverride *linuxDNSOverride // Linux
-	linuxAllowedIPs  []string          // Linux: for policy routing cleanup
-	windowsLUID      uint64            // Windows
+	linuxDNSOverride *linuxDNSOverride   // Linux
+	linuxAllowedIPs  []string            // Linux: for policy routing cleanup
+	windowsLUID      uint64              // Windows
 	windowsRoutes    []windowsRouteSpec  // Windows endpoint bypass routes
 }
 
@@ -185,27 +185,35 @@ func (m *wireGuardGoManager) session(tunnelKey string) (*tunnelSession, bool) {
 	return s, ok
 }
 
-// peerTransferStats reads aggregate rx/tx bytes from all peers via UAPI.
-func peerTransferStats(dev *device.Device) (rxBytes, txBytes int64) {
+// peerStats reads aggregate rx/tx bytes and the most recent peer handshake
+// time (Unix seconds; 0 if no peer has ever handshaked) from all peers via
+// UAPI. WireGuard's UAPI dump reports these per peer; we sum the byte counters
+// and take the newest handshake across peers.
+func peerStats(dev *device.Device) (rxBytes, txBytes, lastHandshakeUnix int64) {
 	if dev == nil {
-		return 0, 0
+		return 0, 0, 0
 	}
 	ipcData, err := dev.IpcGet()
 	if err != nil {
-		return 0, 0
+		return 0, 0, 0
 	}
 	for _, line := range strings.Split(ipcData, "\n") {
-		if strings.HasPrefix(line, "rx_bytes=") {
-			if v, err := strconv.ParseInt(line[9:], 10, 64); err == nil {
+		switch {
+		case strings.HasPrefix(line, "rx_bytes="):
+			if v, err := strconv.ParseInt(line[len("rx_bytes="):], 10, 64); err == nil {
 				rxBytes += v
 			}
-		} else if strings.HasPrefix(line, "tx_bytes=") {
-			if v, err := strconv.ParseInt(line[9:], 10, 64); err == nil {
+		case strings.HasPrefix(line, "tx_bytes="):
+			if v, err := strconv.ParseInt(line[len("tx_bytes="):], 10, 64); err == nil {
 				txBytes += v
+			}
+		case strings.HasPrefix(line, "last_handshake_time_sec="):
+			if v, err := strconv.ParseInt(line[len("last_handshake_time_sec="):], 10, 64); err == nil && v > lastHandshakeUnix {
+				lastHandshakeUnix = v
 			}
 		}
 	}
-	return rxBytes, txBytes
+	return rxBytes, txBytes, lastHandshakeUnix
 }
 
 func (m *wireGuardGoManager) storeSession(tunnelKey string, s *tunnelSession) {
@@ -579,4 +587,3 @@ func resolveHostIPs(ctx context.Context, host string) []net.IP {
 	}
 	return ips
 }
-
