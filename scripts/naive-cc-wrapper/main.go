@@ -3,6 +3,9 @@
 //
 //   - strips -mthreads, which Go's cgo unconditionally injects for
 //     GOOS=windows builds and which this MSVC-target clang rejects.
+//   - strips -lmingwex/-lmingw32, the mingw runtime libs cgo appends for a
+//     Windows external link; we target MSVC and link with lld-link, where
+//     those .libs do not exist (the MSVC CRT via libcpmt.lib covers them).
 //   - adds --target=<NAIVE_CC_TARGET> and -fuse-ld=lld to link with lld.
 //
 // pangea_naive.lib is native COFF (built with use_thin_lto=false), so any
@@ -31,7 +34,15 @@ func main() {
 	args := make([]string, 0, len(os.Args)+2)
 	args = append(args, "--target="+target, "-fuse-ld=lld")
 	for _, a := range os.Args[1:] {
-		if a == "-mthreads" {
+		switch a {
+		case "-mthreads":
+			// cgo injects this for GOOS=windows; this MSVC-target clang rejects it.
+			continue
+		case "-lmingwex", "-lmingw32":
+			// cgo appends the mingw runtime libs for a Windows external link, but
+			// we target MSVC and link with lld-link, where these .libs are absent
+			// (the MSVC CRT covers them). Leaving them causes lld-link to fail
+			// with "could not open 'mingwex.lib'".
 			continue
 		}
 		args = append(args, a)
