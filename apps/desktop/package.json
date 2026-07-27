@@ -10,6 +10,7 @@
   "main": "dist/main/main.js",
   "scripts": {
     "dev": "node ./scripts/dev.mjs",
+    "test": "tsc -p tsconfig.test.json && node --test --disable-warning=MODULE_TYPELESS_PACKAGE_JSON \"src/**/*.test.ts\"",
     "build": "tsc -p tsconfig.main.json && tsc -p tsconfig.renderer.json && node ./scripts/copy-static.mjs",
     "pack": "npm run build && node ./scripts/build-daemon.mjs && node ./scripts/build-installer-art.mjs && node ./scripts/verify-pack-resources.mjs && electron-builder && node ./scripts/stage-mac-installer.mjs"
   },

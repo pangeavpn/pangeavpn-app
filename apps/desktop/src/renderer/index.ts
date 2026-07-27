@@ -8,6 +8,7 @@ import {
   attemptInitialAutoConnect,
   getUserIntent
 } from "./autoConnect.js";
+import { pickRandomServer, resolveSelection } from "./serverPick.js";
 import {
   t,
   initLocale,
@@ -69,6 +70,7 @@ const serverIndicatorLabel = document.getElementById("serverIndicatorLabel") as 
 const directIpToggle = document.getElementById("directIpToggle") as HTMLInputElement;
 const directIpOnlyToggle = document.getElementById("directIpOnlyToggle") as HTMLInputElement;
 const allowLanToggle = document.getElementById("allowLanToggle") as HTMLInputElement;
+const wireguardMtuInput = document.getElementById("wireguardMtuInput") as HTMLInputElement;
 const preferredTransportSelect = document.getElementById("preferredTransportSelect") as HTMLSelectElement;
 const launchAtStartupToggle = document.getElementById("launchAtStartupToggle") as HTMLInputElement;
 const alwaysConnectedToggle = document.getElementById("alwaysConnectedToggle") as HTMLInputElement;
@@ -118,6 +120,15 @@ let serverWorking = false;
 let connectCancelAllowed = false;
 let connectCancelTimer: ReturnType<typeof setTimeout> | null = null;
 const CONNECT_CANCEL_DELAY_MS = 1000;
+
+// Mirrors src/shared/mtu.ts, which the renderer can't import: both tsconfigs
+// emit to dist/ from rootDir src, so a renderer (ESM) copy of dist/shared/mtu.js
+// would clobber main's CommonJS one. Same duplication as global.d.ts ↔ ipc.ts.
+// Main remains the authority — these are only for display. Keep in sync with
+// the min/max on #wireguardMtuInput.
+const MTU_MIN = 1280;
+const MTU_MAX = 1420;
+const MTU_DEFAULT = 1380;
 
 themeToggleBtn.addEventListener("click", () => {
   const nextTheme: ThemeMode = document.body.dataset.theme === "dark" ? "light" : "dark";
@@ -783,10 +794,17 @@ loginScreenBtn.addEventListener("click", async () => {
 
 serverConnectBtn.addEventListener("click", async () => {
   if (!pangeaApi || !daemonApi) return;
-  const serverId = serverSelect.value;
+  let serverId = serverSelect.value;
   if (!serverId) {
-    setUiMessage(t("connect.noServer"));
-    return;
+    // Nothing picked — choose for them, and show which one before connecting.
+    const picked = pickRandomServer(getVisibleServers());
+    if (!picked) {
+      setUiMessage(t("connect.noServer"));
+      return;
+    }
+    serverId = picked.id;
+    serverSelect.value = serverId;
+    syncServerPicker();
   }
 
   serverWorking = true;
@@ -972,6 +990,28 @@ allowLanToggle.addEventListener("change", async () => {
   }
 });
 
+// Commits on blur/Enter. Main owns validation and returns what it actually
+// stored, so the field always ends up showing the truth rather than the typo.
+wireguardMtuInput.addEventListener("change", async () => {
+  if (!pangeaApi) return;
+  const requested = wireguardMtuInput.value.trim();
+  try {
+    const stored = await pangeaApi.setWireguardMtu(Number(requested));
+    // Always show what was actually stored; the field self-corrects, so there's
+    // no invalid state to style — the toast explains why it changed.
+    wireguardMtuInput.value = String(stored);
+    const rejected = requested === "" || Number(requested) !== stored;
+    if (rejected) {
+      showToast(t("settings.network.mtu.invalid", { min: MTU_MIN, max: MTU_MAX }));
+    } else {
+      showToast(t("settings.network.mtu.saved", { mtu: stored }), 4000, true);
+    }
+  } catch (err) {
+    wireguardMtuInput.value = String(await pangeaApi.getWireguardMtu().catch(() => MTU_DEFAULT));
+    showToast(reportError("wireguardMtu", err, t("toggle.updateFailed")));
+  }
+});
+
 preferredTransportSelect.addEventListener("change", async () => {
   if (!pangeaApi) return;
   const previous = preferredTransportSelect.dataset.previousValue ?? "auto";
@@ -1015,9 +1055,7 @@ alwaysConnectedToggle.addEventListener("change", async () => {
   notifyToggleChanged(alwaysConnectedLocal);
   if (alwaysConnectedLocal) {
     showToast(t("toggle.lockdown.on"), 5000, true);
-    if (lastServerIdLocal) {
-      void attemptInitialAutoConnect();
-    }
+    void attemptInitialAutoConnect();
   } else {
     showToast(t("toggle.lockdown.off"), 4000, true);
   }
@@ -1191,6 +1229,7 @@ async function init(): Promise<void> {
       directIpToggle.checked = await pangeaApi.getDirectIp();
       directIpOnlyToggle.checked = await pangeaApi.getDirectIpOnly();
       allowLanToggle.checked = await pangeaApi.getAllowLan();
+      wireguardMtuInput.value = String(await pangeaApi.getWireguardMtu());
       const preferredTransport = await pangeaApi.getPreferredTransport();
       preferredTransportSelect.value = preferredTransport;
       preferredTransportSelect.dataset.previousValue = preferredTransport;
@@ -1224,7 +1263,11 @@ async function init(): Promise<void> {
       getDaemonState: () => currentDaemonState,
       getUserIntent,
       getLastServerId: () => lastServerIdLocal,
-      provisionAndSwitch: (serverId: string) => pangeaApi.provisionAndSwitch(serverId)
+      getFallbackServerId: () => pickRandomServer(getVisibleServers())?.id ?? null,
+      provisionAndSwitch: (serverId: string) => pangeaApi.provisionAndSwitch(serverId),
+      // Pull the server auto-connect settled on into the picker, so it can't sit
+      // on "Select server" while we're actually connected.
+      onConnected: () => void refreshLastServer().then(renderServers)
     });
 
     await loadCachedServers();
@@ -1232,7 +1275,7 @@ async function init(): Promise<void> {
       await refreshServers();
     }
 
-    if (alwaysConnectedLocal && lastServerIdLocal && authState.authenticated) {
+    if (alwaysConnectedLocal && authState.authenticated) {
       void attemptInitialAutoConnect();
     }
   }
@@ -1992,8 +2035,17 @@ function renderServers(): void {
 
   serverSelect.disabled = false;
   serverPickerBtn.disabled = false;
-  const hasSelection = visible.some((s) => s.id === previousValue);
-  serverSelect.value = hasSelection ? previousValue : visible[0].id;
+  const resolved = resolveSelection(visible, previousValue, lastServerIdLocal);
+  if (!resolved) {
+    // A <select> snaps to index 0 when set to a value with no matching option,
+    // so an empty selection needs a real placeholder to sit on. #serverSelect is
+    // hidden, so this is never seen — the visible UI is the overlay.
+    const placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = t("hero.selectServer");
+    serverSelect.prepend(placeholder);
+  }
+  serverSelect.value = resolved;
   syncServerPicker();
 
   updateServerControlStates();
@@ -2036,7 +2088,11 @@ function updateServerControlStates(): void {
     ? latestStatus.state === "DISCONNECTED" && !latestStatus.cloak.running && !latestStatus.wireguard.running
     : true;
 
-  serverConnectBtn.disabled = busy || !fullyDisconnected || !serverSelect.value;
+  // No selection is fine — Connect rolls a random one — but there has to be at
+  // least one server the current transport can actually use. Deliberately not
+  // hoisted into the guard above: that would also disable Disconnect and strand
+  // a connected user who switched to a transport no server supports.
+  serverConnectBtn.disabled = busy || !fullyDisconnected || getVisibleServers().length === 0;
   // Allow cancel mid-connect once the 1s grace window has elapsed, so the
   // user can bail before the 10s cloak timeout. Outside that window the
   // standard disabled-while-busy rule applies.

@@ -290,6 +290,21 @@
               </div>
             </label>
           </div>
+          <div class="settings-field">
+            <label class="settings-field-label" for="wireguardMtuInput" data-i18n="settings.network.mtu.title">Tunnel MTU</label>
+            <input
+              id="wireguardMtuInput"
+              class="settings-field-input"
+              type="number"
+              min="1280"
+              max="1420"
+              step="1"
+              value="1380"
+              inputmode="numeric"
+              data-i18n-aria-label="settings.network.mtu.title"
+            />
+            <span class="settings-field-hint" data-i18n="settings.network.mtu.hint">Size of packets sent through the tunnel. Lower this if pages hang or large downloads stall on a network that otherwise connects fine. Default 1380. Takes effect on next connect.</span>
+          </div>
         </section>
 
         <!-- Startup -->

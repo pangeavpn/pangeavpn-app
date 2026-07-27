@@ -880,6 +880,22 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.getAllowLan, async () => allowLanEnabled);
 
+  // Returns the stored MTU, which differs from the requested one when it was
+  // rejected — the renderer uses that mismatch to flag invalid input.
+  ipcMain.handle(IPC_CHANNELS.setWireguardMtu, async (_event, mtu: unknown) => {
+    const stored = pangeaApiClient.setWireguardMtu(mtu);
+    try {
+      const settings = await readSettingsFile();
+      settings.wireguardMtu = stored;
+      await writeSettingsFile(settings);
+    } catch (err) {
+      console.warn("Failed to persist wireguardMtu setting:", err);
+    }
+    return stored;
+  });
+
+  ipcMain.handle(IPC_CHANNELS.getWireguardMtu, async () => pangeaApiClient.getWireguardMtu());
+
   ipcMain.handle(IPC_CHANNELS.setPreferredTransport, async (_event, value: "auto" | "cloak" | "naive" | "reality" | "hysteria2" | "snowflake") => {
     preferredTransport =
       value === "cloak" || value === "naive" || value === "reality" || value === "hysteria2" || value === "snowflake"
@@ -1214,6 +1230,9 @@ async function boot(): Promise<void> {
     if (settings.allowLan === false) {
       allowLanEnabled = false;
     }
+    // settings.json is hand-editable, so this goes through the same normalizer
+    // as IPC input — anything unusable falls back to the default.
+    pangeaApiClient.setWireguardMtu(settings.wireguardMtu);
     if (
       settings.preferredTransport === "cloak" ||
       settings.preferredTransport === "naive" ||

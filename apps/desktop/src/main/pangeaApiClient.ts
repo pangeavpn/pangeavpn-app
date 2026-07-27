@@ -4,6 +4,7 @@ import { URL } from "node:url";
 import { net } from "electron";
 import type { Profile } from "@pangeavpn/shared-types";
 import type { ServerInfo, SubscriptionInfo } from "../shared/ipc";
+import { MTU_DEFAULT, normalizeMtu, normalizeMtuOrDefault } from "../shared/mtu";
 import { encryptRequest, decryptResponse, type EncryptedResponse } from "./secureChannel";
 
 export class AuthError extends Error {
@@ -321,7 +322,8 @@ function buildWireGuardConfig(
   dns: string,
   serverPubkey: string,
   cloakLocalPort: number,
-  excludeIPs: string[]
+  excludeIPs: string[],
+  mtu: number
 ): string {
   const allowedIPs = allowedIPsExcludingAll(excludeIPs).join(", ");
 
@@ -330,7 +332,7 @@ function buildWireGuardConfig(
     `PrivateKey = ${privateKey}`,
     `Address = ${assignedIP}/32`,
     `DNS = ${dns}`,
-    "MTU = 1380",
+    `MTU = ${normalizeMtuOrDefault(mtu)}`,
     "",
     "[Peer]",
     `PublicKey = ${serverPubkey}`,
@@ -360,6 +362,7 @@ export class PangeaApiClient {
   private dohEnabled = true;
   private directIpEnabled = true;
   private directIpOnly = true;
+  private wireguardMtu = MTU_DEFAULT;
   identityPubkey: string | null = null;
 
   // When DoH resolves an IP, we store it here and use fetchDohResolved()
@@ -400,6 +403,21 @@ export class PangeaApiClient {
 
   isDirectIpOnly(): boolean {
     return this.directIpOnly;
+  }
+
+  /**
+   * Returns the value actually stored, which differs from the requested one when
+   * that was rejected. Invalid input leaves the current value alone rather than
+   * snapping back to the default — a typo shouldn't discard a deliberate choice.
+   */
+  setWireguardMtu(mtu: unknown): number {
+    const normalized = normalizeMtu(mtu);
+    if (normalized !== null) this.wireguardMtu = normalized;
+    return this.wireguardMtu;
+  }
+
+  getWireguardMtu(): number {
+    return this.wireguardMtu;
   }
 
   setLicenseKey(key: string): void {
@@ -869,7 +887,8 @@ export class PangeaApiClient {
       reg.dns,
       reg.serverPubkey,
       cloakLocalPort,
-      excludeIPs
+      excludeIPs,
+      this.wireguardMtu
     );
 
     return {

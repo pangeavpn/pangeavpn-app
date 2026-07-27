@@ -24,6 +24,8 @@ const CH = {
   getDirectIpOnly: "pangea:getDirectIpOnly",
   setAllowLan: "pangea:setAllowLan",
   getAllowLan: "pangea:getAllowLan",
+  setWireguardMtu: "settings:setWireguardMtu",
+  getWireguardMtu: "settings:getWireguardMtu",
   setPreferredTransport: "settings:setPreferredTransport",
   getPreferredTransport: "settings:getPreferredTransport",
   setLaunchAtStartup: "settings:setLaunchAtStartup",
@@ -77,6 +79,8 @@ const pangeaApi = {
   getDirectIpOnly: () => ipcRenderer.invoke(CH.getDirectIpOnly),
   setAllowLan: (enabled: boolean) => ipcRenderer.invoke(CH.setAllowLan, enabled),
   getAllowLan: () => ipcRenderer.invoke(CH.getAllowLan),
+  setWireguardMtu: (mtu: number) => ipcRenderer.invoke(CH.setWireguardMtu, mtu),
+  getWireguardMtu: () => ipcRenderer.invoke(CH.getWireguardMtu),
   setPreferredTransport: (value: "auto" | "cloak" | "naive" | "reality" | "hysteria2" | "snowflake") =>
     ipcRenderer.invoke(CH.setPreferredTransport, value),
   getPreferredTransport: () => ipcRenderer.invoke(CH.getPreferredTransport),

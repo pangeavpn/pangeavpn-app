@@ -6,7 +6,11 @@ export type AutoConnectDeps = {
   getDaemonState: () => StatusResponse["state"];
   getUserIntent: () => "connected" | "disconnected";
   getLastServerId: () => string | null;
+  /** Server to use when nothing has been connected to yet. Re-rolled per attempt. */
+  getFallbackServerId: () => string | null;
   provisionAndSwitch: (serverId: string) => Promise<OkResponse>;
+  /** Lets the UI catch up with a server auto-connect chose on the user's behalf. */
+  onConnected?: () => void;
 };
 
 // Backoff between retries. Caps at 60s and never gives up — the user asked for "always connected".
@@ -46,6 +50,14 @@ export function notifyToggleChanged(enabled: boolean): void {
   }
 }
 
+// Last connected server, or a fresh random one when there isn't one yet. Each
+// call re-rolls the fallback, so a fresh install that hits a dead node moves on
+// instead of retrying it forever.
+function resolveServerId(): string | null {
+  if (!deps) return null;
+  return deps.getLastServerId() ?? deps.getFallbackServerId();
+}
+
 function shouldAttempt(): boolean {
   if (!deps) return false;
   if (!deps.getEnabled()) return false;
@@ -54,14 +66,14 @@ function shouldAttempt(): boolean {
   if (inFlight) return false;
   const state = deps.getDaemonState();
   if (state !== "DISCONNECTED" && state !== "ERROR") return false;
-  if (!deps.getLastServerId()) return false;
+  if (!resolveServerId()) return false;
   if (Date.now() < nextAttemptAtMs) return false;
   return true;
 }
 
 async function runAttempt(): Promise<void> {
   if (!deps) return;
-  const serverId = deps.getLastServerId();
+  const serverId = resolveServerId();
   if (!serverId) return;
   inFlight = true;
   try {
@@ -69,6 +81,7 @@ async function runAttempt(): Promise<void> {
     if (result && result.ok) {
       consecutiveFailures = 0;
       nextAttemptAtMs = 0;
+      deps.onConnected?.();
     } else {
       bumpBackoff();
     }

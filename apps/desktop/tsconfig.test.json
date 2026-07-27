@@ -3,9 +3,9 @@
     "target": "ES2022",
     "module": "ES2022",
     "moduleResolution": "Bundler",
-    "outDir": "dist",
-    "rootDir": "src",
     "strict": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
     "lib": [
       "ES2022",
       "DOM"
@@ -16,10 +16,7 @@
     ]
   },
   "include": [
-    "src/renderer/**/*.ts",
+    "src/**/*.test.ts",
     "src/renderer/**/*.d.ts"
-  ],
-  "exclude": [
-    "src/renderer/**/*.test.ts"
   ]
 }

@@ -104,6 +104,9 @@ declare global {
     getDirectIpOnly: () => Promise<boolean>;
     setAllowLan: (enabled: boolean) => Promise<void>;
     getAllowLan: () => Promise<boolean>;
+    /** Resolves to the MTU actually stored — differs from `mtu` when it was rejected. */
+    setWireguardMtu: (mtu: number) => Promise<number>;
+    getWireguardMtu: () => Promise<number>;
     setPreferredTransport: (value: "auto" | "cloak" | "naive" | "reality" | "hysteria2" | "snowflake") => Promise<void>;
     getPreferredTransport: () => Promise<"auto" | "cloak" | "naive" | "reality" | "hysteria2" | "snowflake">;
     setLaunchAtStartup: (enabled: boolean) => Promise<void>;

@@ -28,6 +28,8 @@ export const IPC_CHANNELS = {
   getDirectIpOnly: "pangea:getDirectIpOnly",
   setAllowLan: "pangea:setAllowLan",
   getAllowLan: "pangea:getAllowLan",
+  setWireguardMtu: "settings:setWireguardMtu",
+  getWireguardMtu: "settings:getWireguardMtu",
   setPreferredTransport: "settings:setPreferredTransport",
   getPreferredTransport: "settings:getPreferredTransport",
   setLaunchAtStartup: "settings:setLaunchAtStartup",
@@ -187,6 +189,9 @@ export interface PangeaApi {
   getDirectIpOnly: () => Promise<boolean>;
   setAllowLan: (enabled: boolean) => Promise<void>;
   getAllowLan: () => Promise<boolean>;
+  /** Resolves to the MTU actually stored — differs from `mtu` when it was rejected. */
+  setWireguardMtu: (mtu: number) => Promise<number>;
+  getWireguardMtu: () => Promise<number>;
   setPreferredTransport: (value: "auto" | "cloak" | "naive" | "reality" | "hysteria2" | "snowflake") => Promise<void>;
   getPreferredTransport: () => Promise<"auto" | "cloak" | "naive" | "reality" | "hysteria2" | "snowflake">;
   setLaunchAtStartup: (enabled: boolean) => Promise<void>;

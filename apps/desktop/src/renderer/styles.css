@@ -1795,6 +1795,40 @@ button.ghost:hover:not(:disabled) {
   line-height: 1.4;
 }
 
+/* Labelled value field in a settings section (e.g. tunnel MTU). */
+.settings-field {
+  display: grid;
+  gap: 4px;
+  margin-top: 12px;
+}
+
+.settings-field-label {
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+
+.settings-field-input {
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 0.9rem;
+}
+
+.settings-field-input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.settings-field-hint {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
 /* ── Reduced motion ───────────────────────────────────────── */
 /* Honor the OS "reduce motion" setting: near-instant transitions and stop the
    looping animations (pulsing status dot, spinners, toast slides). The animated
@@ -1904,6 +1938,12 @@ button.ghost:hover:not(:disabled) {
 [dir="rtl"] .update-close {
   right: auto;
   left: 8px;
+}
+
+/* Numerals stay logically LTR in Arabic/Persian; only the alignment flips. */
+[dir="rtl"] .settings-field-input {
+  direction: ltr;
+  text-align: right;
 }
 
 [dir="rtl"] .menu-badge {
