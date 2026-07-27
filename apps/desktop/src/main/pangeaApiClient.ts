@@ -6,6 +6,7 @@ import type { Profile } from "@pangeavpn/shared-types";
 import type { ServerInfo, SubscriptionInfo } from "../shared/ipc";
 import { MTU_DEFAULT, normalizeMtu, normalizeMtuOrDefault } from "../shared/mtu";
 import { encryptRequest, decryptResponse, type EncryptedResponse } from "./secureChannel";
+import { sanitizeLog } from "./logSanitize";
 
 export class AuthError extends Error {
   status: number;
@@ -71,13 +72,13 @@ async function tryDoHProvider(providerUrl: string, accept: string, hostname: str
     const data = (await response.json()) as DohResponse;
     const answers = data.Answer?.filter((a) => a.data) ?? [];
     if (answers.length > 0) {
-      console.log(`[DoH] ${providerUrl} resolved ${hostname} → ${answers[0].data}`);
+      console.log(`[DoH] ${providerUrl} resolved ${hostname} → ${sanitizeLog(answers[0].data)}`);
       return answers[0].data;
     }
     console.log(`[DoH] ${providerUrl} returned no answers for ${hostname}`);
     return null;
   } catch (err) {
-    console.log(`[DoH] ${providerUrl} failed: ${err instanceof Error ? err.message : err}`);
+    console.log(`[DoH] ${providerUrl} failed: ${sanitizeLog(err)}`);
     return null;
   } finally {
     clearTimeout(timer);
@@ -300,11 +301,6 @@ function allowedIPsExcludingAll(excludeIPs: string[]): string[] {
   }
 
   return blocks.map((b) => `${intToIp(b.base)}/${b.prefixLen}`);
-}
-
-/** Calculate AllowedIPs CIDRs that cover 0.0.0.0/0 minus a single excluded IP */
-function allowedIPsExcluding(excludeIP: string): string[] {
-  return allowedIPsExcludingAll([excludeIP]);
 }
 
 /** Matches a literal dotted-quad IPv4 address (not a hostname). */
@@ -774,7 +770,7 @@ export class PangeaApiClient {
       const data = await this.hubRequest<{ subscription: SubscriptionInfo | null }>("GET", "/api/client/subscription");
       return data.subscription ?? null;
     } catch (err) {
-      console.warn("[getSubscription]", err instanceof Error ? err.message : err);
+      console.warn("[getSubscription]", sanitizeLog(err));
       return null;
     }
   }

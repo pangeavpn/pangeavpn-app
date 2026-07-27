@@ -43,7 +43,7 @@ export function resolveNaiveCgoConfigDarwin(goArch, rootDir) {
 
   let libDir = path.join(naiveproxySrc, "out", localOutDir, "obj", "net");
   let headerDir = path.join(naiveproxySrc, "pangea", "capi");
-  let libName = "libpangea_naive.a";
+  const libName = "libpangea_naive.a";
   const headerName = "pangea_naive_capi.h";
   if (!fs.existsSync(path.join(libDir, libName)) || !fs.existsSync(path.join(headerDir, headerName))) {
     const prebuilt = ensurePangeaNaiveLib(goArch, rootDir);
@@ -56,7 +56,6 @@ export function resolveNaiveCgoConfigDarwin(goArch, rootDir) {
     }
     libDir = prebuilt.libDir;
     headerDir = prebuilt.headerDir;
-    libName = prebuilt.libName;
   }
 
   const archFlags = `-arch ${clangArch} -mmacosx-version-min=${MAC_DEPLOYMENT_TARGET}`;

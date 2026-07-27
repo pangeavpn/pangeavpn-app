@@ -57,7 +57,7 @@ export function resolveNaiveCgoConfig(goArch, rootDir) {
   // clang-cl — no longer only the exact pinned Chromium toolchain.
   let libPath = path.join(naiveproxySrc, "out", gnArchDir, "obj", "net", "pangea_naive.lib");
   let headerDir = path.join(naiveproxySrc, "pangea", "capi");
-  let headerPath = path.join(headerDir, "pangea_naive_capi.h");
+  const headerPath = path.join(headerDir, "pangea_naive_capi.h");
   if (!fs.existsSync(libPath) || !fs.existsSync(headerPath)) {
     const prebuilt = ensurePangeaNaiveLib(goArch, rootDir);
     if (!prebuilt) {
@@ -69,7 +69,6 @@ export function resolveNaiveCgoConfig(goArch, rootDir) {
     }
     libPath = path.join(prebuilt.libDir, prebuilt.libName);
     headerDir = prebuilt.headerDir;
-    headerPath = path.join(headerDir, "pangea_naive_capi.h");
   }
 
   // Resolve a clang for cgo's compile+link: the pinned Chromium clang from a

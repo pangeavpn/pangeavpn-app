@@ -12,6 +12,7 @@ import { setupAutoUpdater, notifyConnectionStateChange } from "./autoUpdater";
 import { setLoginItemEnabled, isLoginItemEnabled, isHiddenLaunchArg } from "./loginItem";
 import { startNetworkWatcher, onNetworkChange } from "./networkWatcher";
 import { mt, mtState, setMainLocale, resolveMainLocale } from "./i18n";
+import { sanitizeLog } from "./logSanitize";
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -33,13 +34,6 @@ const daemonClient = new DaemonClient("http://127.0.0.1:8787", readDaemonTokens)
 const daemonProcess = new DaemonProcessManager(daemonClient);
 const pangeaApiClient = new PangeaApiClient();
 
-// Strip CR/LF and control chars from values that may originate from
-// user- or server-controlled input before they reach the log stream.
-function sanitizeLog(value: unknown): string {
-  const text = value instanceof Error ? value.message : String(value);
-  // eslint-disable-next-line no-control-regex
-  return text.replace(/[\x00-\x1f\x7f]/g, " ");
-}
 let managedProfileId: string | null = null;
 let lastServerId: string | null = null;
 let allowLanEnabled = true;
