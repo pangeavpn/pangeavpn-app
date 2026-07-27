@@ -196,7 +196,13 @@ type Profile struct {
 	// Snowflake is optional; nil means this profile has no Snowflake
 	// transport configured.
 	Snowflake *SnowflakeProfile `json:"snowflake,omitempty"`
-	WireGuard WireGuardProfile  `json:"wireguard"`
+	// TransportEndpointIPs are this node's transport endpoints as raw IPs, as
+	// the hub reported them. The kill switch permits these and WireGuard routes
+	// them outside the tunnel with no DNS lookup — a lookup is impossible
+	// behind an engaged Lockdown lock, which blocks DNS, so without these only
+	// Cloak (whose remote host is already an IP) could get out.
+	TransportEndpointIPs []string         `json:"transportEndpointIPs,omitempty"`
+	WireGuard            WireGuardProfile `json:"wireguard"`
 }
 
 type Config struct {

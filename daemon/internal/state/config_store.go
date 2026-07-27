@@ -185,6 +185,7 @@ func cloneProfile(profile Profile) Profile {
 	copyProfile := profile
 	copyProfile.WireGuard.DNS = cloneStrings(profile.WireGuard.DNS)
 	copyProfile.WireGuard.BypassHosts = cloneStrings(profile.WireGuard.BypassHosts)
+	copyProfile.TransportEndpointIPs = cloneStrings(profile.TransportEndpointIPs)
 	copyProfile.Naive = cloneNaiveProfile(profile.Naive)
 	copyProfile.Reality = cloneRealityProfile(profile.Reality)
 	copyProfile.Hysteria2 = cloneHysteria2Profile(profile.Hysteria2)

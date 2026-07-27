@@ -533,7 +533,28 @@ async function resolveTrayServerId(): Promise<string | null> {
   return null;
 }
 
+/**
+ * Under Lockdown the daemon's lock blocks everything — including the hub we
+ * have to reach to provision a profile, which is why provisioning fails with
+ * `connect EACCES <hub ip>:443` behind a lock that permits nothing. Open the
+ * hub (and only the hub) as the connection attempt starts; the server's own
+ * endpoints stay blocked until the daemon's Connect permits them.
+ *
+ * Best-effort: if the daemon can't do it we still try to provision, so a
+ * failure here shows up as the underlying network error rather than masking it.
+ */
+async function permitHubThroughLockdown(): Promise<void> {
+  if (!alwaysConnectedEnabled) return;
+  const hubIp = pangeaApiClient.getHubIp();
+  try {
+    await daemonClient.permitHosts(hubIp ? [hubIp] : []);
+  } catch (err) {
+    console.warn("lockdown: hub permit failed", sanitizeLog(err));
+  }
+}
+
 async function provisionProfileForServer(serverId: string): Promise<Profile> {
+  await permitHubThroughLockdown();
   const profile = await pangeaApiClient.provision(serverId);
 
   const config = await withDaemonRestartOnUnavailable(
@@ -614,6 +635,16 @@ async function writeSettingsFile(settings: Record<string, unknown>): Promise<voi
   );
   const fs = (await import("node:fs/promises")).default;
   await fs.writeFile(filePath, JSON.stringify(settings, null, 2));
+}
+
+async function persistHubIp(ip: string): Promise<void> {
+  try {
+    const settings = await readSettingsFile();
+    settings.hubIp = ip;
+    await writeSettingsFile(settings);
+  } catch (err) {
+    console.warn("Failed to persist hub IP:", err);
+  }
 }
 
 async function persistLastConnection(): Promise<void> {
@@ -1204,6 +1235,10 @@ async function boot(): Promise<void> {
     cb(false);
   });
 
+  // Registered before the restore below so a first run with no settings file
+  // still persists the hub IP once it is learned.
+  pangeaApiClient.onHubIp((ip) => void persistHubIp(ip));
+
   // Restore persisted settings
   try {
     const settingsPath = (await import("node:path")).join(
@@ -1242,6 +1277,9 @@ async function boot(): Promise<void> {
     if (typeof settings.alwaysConnected === "boolean") {
       alwaysConnectedEnabled = settings.alwaysConnected;
     }
+    // Last known good hub IP: the only way to reach the hub once a Lockdown
+    // lock is engaged, since the lock permits that IP but blocks DNS and DoH.
+    pangeaApiClient.setCachedHubIp(settings.hubIp);
     if (typeof settings.lastServerId === "string") {
       lastServerId = settings.lastServerId;
     }

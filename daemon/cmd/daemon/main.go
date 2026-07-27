@@ -94,6 +94,12 @@ func startDaemonRuntime() (*daemonRuntime, error) {
 	snowflakeManager := snowflake.NewManager(logs)
 	wgManager := wg.NewManager(logs)
 	killSwitch := platform.NewKillSwitch()
+	// A permit host that won't resolve is skipped rather than failing the whole
+	// Enable (see resolveEndpointHosts); surface it so a transport quietly
+	// losing its permit is visible in support logs.
+	platform.EndpointResolveWarn = func(host string, err error) {
+		logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("kill switch could not resolve permit host %s, skipping: %v", host, err))
+	}
 	service := api.NewService(machine, logs, configStore, cloakManager, naiveManager, realityManager, hysteria2Manager, snowflakeManager, wgManager, killSwitch)
 
 	// Per-network last-good-transport cache is a best-effort optimization; a

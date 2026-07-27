@@ -100,6 +100,14 @@ export interface ServerInfo {
    */
   naive?: {
     remoteHost: string;
+    /**
+     * The endpoint's address, when the hub names one for this transport
+     * specifically. Absent means it terminates on the node `cloak.remoteHost`
+     * already names. Either way the client never resolves `remoteHost` itself:
+     * that would leak our node domains to a third-party resolver, and it cannot
+     * work behind an engaged Lockdown lock, which blocks DNS.
+     */
+    remoteIp?: string;
     remotePort: number;
     username: string;
     password: string;
@@ -115,6 +123,8 @@ export interface ServerInfo {
    */
   reality?: {
     remoteHost: string;
+    /** Per-transport endpoint address; see naive.remoteIp above. */
+    remoteIp?: string;
     remotePort: number;
     uuid: string;
     publicKey: string;
@@ -132,6 +142,8 @@ export interface ServerInfo {
    */
   hysteria2?: {
     remoteHost: string;
+    /** Per-transport endpoint address; see naive.remoteIp above. */
+    remoteIp?: string;
     remotePort: number;
     password: string;
     obfsPassword: string;

@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -995,12 +996,125 @@ func (s *Service) ClearKillSwitch(ctx context.Context) error {
 	return nil
 }
 
+// loadKillSwitchState reads the persisted kill-switch state. Indirected for
+// tests.
+var loadKillSwitchState = platform.LoadKillSwitchStatePublic
+
+// PermitHosts opens a control-plane hole in an already-engaged kill switch.
+//
+// A Lockdown lock engaged while disconnected blocks everything, including the
+// Pangea hub — but the app must reach the hub to provision a profile before it
+// has anything to connect to, so without this the lock is a trap: no
+// provisioning, therefore no connection, therefore no way out but turning
+// Lockdown off. The app calls this just before it provisions, so the hole opens
+// on a connection attempt rather than sitting open the whole time the device is
+// locked. The chosen server's own endpoints stay blocked until Connect permits
+// them.
+//
+// Only IP literals are accepted: the lock blocks DNS, so a hostname could not
+// be resolved while it is engaged, and the lock must never depend on a lookup.
+// hosts is what the app knows (its resolved hub IP); when it has none — a cold
+// start under lockdown, before it has reached the hub — the hub IP carried by
+// the last provisioned profile's WireGuard bypass hosts is used instead.
+// No-op when no lock is engaged.
+func (s *Service) PermitHosts(ctx context.Context, hosts []string) error {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+
+	if !s.killSwitch.Active() {
+		return nil
+	}
+
+	permits := ipLiterals(hosts)
+	if len(permits) == 0 {
+		permits = ipLiterals(s.storedControlPlaneHosts())
+	}
+	if len(permits) == 0 {
+		return errors.New("no control-plane IP to permit: none supplied and no provisioned profile carries one")
+	}
+
+	// Reuse the persisted AllowLAN/Locked flags: widening the permit set must
+	// not change what kind of lock is engaged (dropping Locked would make a
+	// deliberate lockdown lock look like crash leftover to the next startup).
+	persisted, err := loadKillSwitchState()
+	if err != nil {
+		return fmt.Errorf("read kill switch state: %w", err)
+	}
+	if !persisted.Active {
+		return errors.New("kill switch is active but no persisted state describes it; refusing to re-apply")
+	}
+
+	merged := mergeUniqueSorted(persisted.EndpointIPs, permits)
+	if slices.Equal(merged, sortedCopy(persisted.EndpointIPs)) {
+		return nil
+	}
+
+	ksCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if err := s.killSwitch.Enable(ksCtx, merged, persisted.AllowLAN, persisted.Locked); err != nil {
+		s.logs.Add(state.LogError, state.SourceDaemon, fmt.Sprintf("kill switch control-plane permit failed: %v", err))
+		return err
+	}
+	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("kill switch permitted control-plane endpoints %v", permits))
+	return nil
+}
+
+// storedControlPlaneHosts is the bypass hosts of every stored profile — where
+// the app records the hub IP it provisioned through (see the desktop client's
+// provision()). Transport endpoints are deliberately excluded: those are the
+// server's own IPs and are only unblocked once Connect picks that server.
+func (s *Service) storedControlPlaneHosts() []string {
+	var out []string
+	for _, profile := range s.config.Get().Profiles {
+		out = append(out, profile.WireGuard.BypassHosts...)
+	}
+	return out
+}
+
+// ipLiterals keeps only entries that are already IPv4 addresses, so no caller
+// can make the kill switch depend on a DNS lookup it is itself blocking.
+func ipLiterals(hosts []string) []string {
+	out := make([]string, 0, len(hosts))
+	for _, host := range hosts {
+		host = strings.TrimSpace(host)
+		if ip := net.ParseIP(host); ip != nil && ip.To4() != nil {
+			out = append(out, ip.To4().String())
+		}
+	}
+	return out
+}
+
+func sortedCopy(in []string) []string {
+	out := slices.Clone(in)
+	slices.Sort(out)
+	return out
+}
+
+func mergeUniqueSorted(a, b []string) []string {
+	merged := slices.Clone(a)
+	for _, s := range b {
+		if !slices.Contains(merged, s) {
+			merged = append(merged, s)
+		}
+	}
+	slices.Sort(merged)
+	return slices.Compact(merged)
+}
+
 // EngageKillSwitch turns on the kill switch without starting a VPN session,
 // giving the device a fail-closed network lock. Used when Lockdown is enabled
 // while disconnected: internet is blocked immediately even though nothing is
-// connected yet. When profileID names a known profile, that profile's transport
-// endpoints are permitted so a later Connect is seamless; otherwise the lock
-// blocks all outbound except loopback/DHCP.
+// connected yet. Only the Pangea hub is reachable through it — the app talks to
+// nothing else while disconnected, and cutting that off would leave it unable to
+// list servers or provision, with no way to re-resolve anything since the lock
+// blocks DNS too. VPN endpoints stay blocked: a server's IP is unblocked by
+// Connect, once that server is the one being connected to.
+//
+// The hub IP comes from the stored profiles (see storedControlPlaneHosts) and
+// is used as an IP literal, so the lock still lands with no DNS lookup to wait
+// on — a lookup would delay the block and leak traffic until it landed. Before
+// anything has ever been provisioned there is no hub IP to permit and this is a
+// pure block-all; the app tops the permit up via PermitHosts when it provisions.
 func (s *Service) EngageKillSwitch(ctx context.Context, profileID string, allowLAN bool) error {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
@@ -1009,18 +1123,20 @@ func (s *Service) EngageKillSwitch(ctx context.Context, profileID string, allowL
 		return nil
 	}
 
-	// Pure block-all lock: no endpoint permits, so this lands instantly with no
-	// DNS resolution — which would otherwise delay the block (leaking until it
-	// lands) and can hang the request. The VPN endpoint is permitted later by
+	// IP literals only, so the lock lands instantly with no DNS resolution —
+	// which would otherwise delay the block (leaking until it lands) and can
+	// hang the request. profileID is unused: every profile records the same hub,
+	// and the VPN endpoints this profile would use are permitted later by
 	// Connect, which re-enters Enable.
 	_ = profileID
+	hubPermits := ipLiterals(s.storedControlPlaneHosts())
 	ksCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	if err := s.killSwitch.Enable(ksCtx, nil, allowLAN, true); err != nil {
+	if err := s.killSwitch.Enable(ksCtx, hubPermits, allowLAN, true); err != nil {
 		s.logs.Add(state.LogError, state.SourceDaemon, fmt.Sprintf("kill switch engage failed: %v", err))
 		return err
 	}
-	s.logs.Add(state.LogInfo, state.SourceDaemon, "kill switch engaged (lockdown, no connection)")
+	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("kill switch engaged (lockdown, no connection), hub permits %v", hubPermits))
 	return nil
 }
 
@@ -1409,15 +1525,19 @@ func (s *Service) reconcileStartup(ctx context.Context) {
 	// restarts, so re-apply it when there's no tunnel. Anything else with no
 	// tunnel is stale (e.g. a crash) and is cleared to restore networking.
 	if len(runningProfiles) == 0 {
-		persisted, _ := platform.LoadKillSwitchStatePublic()
+		persisted, _ := loadKillSwitchState()
 		switch {
 		case persisted.Active && persisted.Locked:
 			if !s.killSwitch.Active() {
 				// On Windows the dynamic WFP session was torn down on the prior
 				// exit; on pf/nftables the rules may persist. Re-Enable is
 				// idempotent and reuses the persisted endpoint IPs (no DNS).
+				// The hub is topped up so a lock persisted without it (an older
+				// daemon, or one engaged before anything was provisioned) comes
+				// back reachable rather than leaving the app unable to bootstrap.
+				endpoints := mergeUniqueSorted(persisted.EndpointIPs, ipLiterals(s.storedControlPlaneHosts()))
 				s.logs.Add(state.LogInfo, state.SourceDaemon, "re-applying lockdown kill switch (no tunnel)")
-				if err := s.killSwitch.Enable(startupCtx, persisted.EndpointIPs, persisted.AllowLAN, true); err != nil {
+				if err := s.killSwitch.Enable(startupCtx, endpoints, persisted.AllowLAN, true); err != nil {
 					s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("lockdown kill switch re-apply failed: %v", err))
 				}
 			}
@@ -1743,6 +1863,35 @@ func killSwitchPermits(profile state.Profile) []string {
 	if host := strings.TrimSpace(profile.Cloak.RemoteHost); host != "" {
 		out = append(out, host)
 	}
+	out = append(out, transportPermitHosts(profile)...)
+	for _, h := range profile.WireGuard.BypassHosts {
+		if h = strings.TrimSpace(h); h != "" {
+			out = append(out, h)
+		}
+	}
+	return out
+}
+
+// transportPermitHosts is where each non-Cloak transport can be reached.
+//
+// The hub's own addresses (TransportEndpointIPs) are used whenever it sent
+// any, and then the node hostnames are left out entirely: resolving one costs
+// a cleartext DNS query that tells the user's ISP exactly which node they are
+// about to use, and behind an engaged Lockdown lock it cannot be answered at
+// all — leaving every transport but Cloak blocked by our own kill switch.
+//
+// Hostnames remain the fallback for a profile the hub gave no addresses for
+// (one provisioned by an older build, or hand-written).
+func transportPermitHosts(profile state.Profile) []string {
+	out := make([]string, 0, 4)
+	for _, ip := range profile.TransportEndpointIPs {
+		if ip = strings.TrimSpace(ip); ip != "" {
+			out = append(out, ip)
+		}
+	}
+	if len(out) > 0 {
+		return out
+	}
 	if profile.Naive != nil {
 		if host := strings.TrimSpace(profile.Naive.RemoteHost); host != "" {
 			out = append(out, host)
@@ -1758,13 +1907,7 @@ func killSwitchPermits(profile state.Profile) []string {
 			out = append(out, host)
 		}
 	}
-	out = append(out, snowflakeHosts(profile.Snowflake)...)
-	for _, h := range profile.WireGuard.BypassHosts {
-		if h = strings.TrimSpace(h); h != "" {
-			out = append(out, h)
-		}
-	}
-	return out
+	return append(out, snowflakeHosts(profile.Snowflake)...)
 }
 
 // withTransportBypassHosts adds the cloak, naive, reality, hysteria2, and
@@ -1779,21 +1922,9 @@ func withTransportBypassHosts(profile state.Profile) state.WireGuardProfile {
 	if host := strings.TrimSpace(profile.Cloak.RemoteHost); host != "" {
 		copyProfile.BypassHosts = append(copyProfile.BypassHosts, host)
 	}
-	if profile.Naive != nil {
-		if host := strings.TrimSpace(profile.Naive.RemoteHost); host != "" {
-			copyProfile.BypassHosts = append(copyProfile.BypassHosts, host)
-		}
-	}
-	if profile.Reality != nil {
-		if host := strings.TrimSpace(profile.Reality.RemoteHost); host != "" {
-			copyProfile.BypassHosts = append(copyProfile.BypassHosts, host)
-		}
-	}
-	if profile.Hysteria2 != nil {
-		if host := strings.TrimSpace(profile.Hysteria2.RemoteHost); host != "" {
-			copyProfile.BypassHosts = append(copyProfile.BypassHosts, host)
-		}
-	}
-	copyProfile.BypassHosts = append(copyProfile.BypassHosts, snowflakeHosts(profile.Snowflake)...)
+	// Same source as the kill-switch permits, and for the same reason: the
+	// hub's addresses when it sent any, never a node hostname we would have to
+	// look up (see transportPermitHosts).
+	copyProfile.BypassHosts = append(copyProfile.BypassHosts, transportPermitHosts(profile)...)
 	return copyProfile
 }

@@ -2,6 +2,7 @@ package platform
 
 import (
 	"context"
+	"errors"
 	"net"
 	"strings"
 	"testing"
@@ -100,6 +101,56 @@ func TestResolveEndpointIPs_Deduplication(t *testing.T) {
 	}
 	if len(ips) != 1 {
 		t.Errorf("expected 1 IP, got %d", len(ips))
+	}
+}
+
+// A transport whose remote host can't be resolved must not take the whole
+// Enable down with it: under an active lockdown lock the kill switch blocks
+// DNS itself, so every hostname permit (naive/reality/hysteria2/snowflake)
+// fails to resolve and Connect could never re-arm the switch.
+func TestResolveEndpointHosts_SkipsUnresolvableHostname(t *testing.T) {
+	originalLookup := lookupResolverIP
+	lookupResolverIP = func(_ context.Context, _, host string) ([]net.IP, error) {
+		if host == "reachable.test" {
+			return []net.IP{net.ParseIP("203.0.113.30")}, nil
+		}
+		return nil, errors.New("dns blocked by kill switch")
+	}
+	originalWarn := EndpointResolveWarn
+	var skipped []string
+	EndpointResolveWarn = func(host string, _ error) {
+		skipped = append(skipped, host)
+	}
+	defer func() {
+		lookupResolverIP = originalLookup
+		EndpointResolveWarn = originalWarn
+	}()
+
+	ips, err := resolveEndpointHosts(
+		context.Background(),
+		[]string{"198.51.100.4", "blocked.test", "reachable.test"},
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := []string{"198.51.100.4", "203.0.113.30"}
+	if !stringSlicesEqual(ips, want) {
+		t.Fatalf("resolveEndpointHosts() = %v, want %v", ips, want)
+	}
+	if len(skipped) != 1 || skipped[0] != "blocked.test" {
+		t.Fatalf("expected blocked.test reported as skipped, got %v", skipped)
+	}
+}
+
+func TestResolveEndpointHosts_ErrorsWhenNothingResolves(t *testing.T) {
+	originalLookup := lookupResolverIP
+	lookupResolverIP = func(_ context.Context, _, _ string) ([]net.IP, error) {
+		return nil, errors.New("dns blocked by kill switch")
+	}
+	defer func() { lookupResolverIP = originalLookup }()
+
+	if _, err := resolveEndpointHosts(context.Background(), []string{"blocked.test"}); err == nil {
+		t.Fatal("expected an error when no endpoint host resolves")
 	}
 }
 

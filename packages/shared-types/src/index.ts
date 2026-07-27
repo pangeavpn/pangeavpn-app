@@ -78,6 +78,14 @@ export const ProfileSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
   cloak: CloakProfileSchema,
+  /**
+   * Every transport endpoint of this profile's node as a raw IP, straight from
+   * the hub. The daemon permits these through the kill switch and routes them
+   * outside the tunnel without a DNS lookup — which matters because an engaged
+   * Lockdown lock blocks DNS, so a hostname permit can never be resolved behind
+   * it and every transport but Cloak would be blocked by our own kill switch.
+   */
+  transportEndpointIPs: z.array(z.string()).optional(),
   naive: NaiveProfileSchema.optional(),
   reality: RealityProfileSchema.optional(),
   hysteria2: Hysteria2ProfileSchema.optional(),
