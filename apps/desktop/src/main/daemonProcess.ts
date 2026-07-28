@@ -412,6 +412,10 @@ function startProcessElevatedWindows(filePath: string, args: string[]): { ok: bo
     : `Start-Process -FilePath '${escapedPath}' -WorkingDirectory '${escapedWorkingDir}' -WindowStyle Hidden`;
   const innerCommand = [
     "$ErrorActionPreference = 'SilentlyContinue'",
+    // The elevated daemon inherits this process's environment, so clear the
+    // state-dir override — otherwise user-level code could redirect the
+    // elevated daemon's token/config/kill-switch state to a directory it owns.
+    "Remove-Item Env:PANGEA_APP_SUPPORT_DIR -ErrorAction SilentlyContinue",
     "$daemonPids = @()",
     "$daemonPids += (Get-Process -Name daemon,PangeaDaemon -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id)",
     "$daemonPids += (Get-NetTCPConnection -LocalAddress '127.0.0.1' -LocalPort 8787 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess)",

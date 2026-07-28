@@ -100,6 +100,12 @@ func startDaemonRuntime() (*daemonRuntime, error) {
 	platform.EndpointResolveWarn = func(host string, err error) {
 		logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("kill switch could not resolve permit host %s, skipping: %v", host, err))
 	}
+	// Degraded-but-closed conditions: the lock still holds, but something is off
+	// (a stale permit that outlived its server, an incomplete teardown). These
+	// are the states that become leaks later, so they must not stay silent.
+	platform.KillSwitchWarnf = func(format string, args ...any) {
+		logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf(format, args...))
+	}
 	service := api.NewService(machine, logs, configStore, cloakManager, naiveManager, realityManager, hysteria2Manager, snowflakeManager, wgManager, killSwitch)
 
 	// Per-network last-good-transport cache is a best-effort optimization; a
@@ -146,7 +152,14 @@ func (r *daemonRuntime) Stop(ctx context.Context) error {
 		r.cancel()
 	}
 
-	_ = r.service.Disconnect(ctx, false)
+	// A graceful stop happens on every clean reboot, so a Lockdown lock must
+	// survive it — clearing here deletes the state file too and the device boots
+	// open.
+	keepKillSwitch := false
+	if persisted, err := platform.LoadKillSwitchStatePublic(); err == nil {
+		keepKillSwitch = persisted.Active && persisted.Locked
+	}
+	_ = r.service.Disconnect(ctx, keepKillSwitch)
 	if r.server == nil {
 		return nil
 	}

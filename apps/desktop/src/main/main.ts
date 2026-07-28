@@ -985,14 +985,14 @@ function registerIpcHandlers(): void {
     }
     if (!previouslyEnabled && alwaysConnectedEnabled) {
       // Lockdown on: block internet immediately (fail-closed) without connecting.
+      // Sent unconditionally — while connected the daemon only records the lock
+      // as a Lockdown lock, and skipping that left it Locked:false on disk, so a
+      // reboot cleared it as stale and the device came back open.
       try {
-        const status = await daemonClient.getStatus();
-        if (status.state !== "CONNECTED" && status.state !== "CONNECTING") {
-          await daemonClient.engageKillSwitch({
-            profileId: lastConnectedProfileId ?? undefined,
-            allowLAN: allowLanEnabled
-          });
-        }
+        await daemonClient.engageKillSwitch({
+          profileId: lastConnectedProfileId ?? undefined,
+          allowLAN: allowLanEnabled
+        });
       } catch (err) {
         console.warn("Failed to engage kill switch on lockdown on:", err);
       }

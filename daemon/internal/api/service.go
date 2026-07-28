@@ -930,6 +930,39 @@ func (s *Service) Switch(ctx context.Context, newProfileID string, opts ConnectO
 
 	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("switch requested: %s -> %s (kill switch stays active)", oldProfile.ID, newProfile.ID))
 
+	// Anything that can refuse the new server runs before the teardown, so a
+	// failure costs nothing. Re-arming while the old tunnel is up is safe: every
+	// backend applies the new set atomically, so the lock is never down.
+	// Rejected before any teardown, so the old session is still live: go back to
+	// Connected. StateError would stop healthLoop watching a working tunnel and
+	// make the gate at the top of Switch reject the retry.
+	refuse := func(err error, detail string) error {
+		s.logs.Add(state.LogError, state.SourceDaemon, fmt.Sprintf("switch: %s", detail))
+		s.machine.Set(state.StateConnected, fmt.Sprintf("staying on %s: %s", oldProfile.ID, detail))
+		return err
+	}
+
+	wireGuardProfile := withTransportBypassHosts(newProfile)
+	if opts.AllowLAN {
+		rewritten, err := wg.TransformWGConfigExcludeLAN(wireGuardProfile.ConfigText)
+		if err != nil {
+			return refuse(err, fmt.Sprintf("allow-lan config transform failed: %v", err))
+		}
+		wireGuardProfile.ConfigText = rewritten
+	}
+	if checker, ok := s.wg.(wgPreflightChecker); ok {
+		if err := checker.Preflight(ctx, wireGuardProfile); err != nil {
+			return refuse(err, fmt.Sprintf("wireguard preflight failed: %v", err))
+		}
+	}
+
+	s.machine.Set(state.StateConnecting, fmt.Sprintf("switching to %s: updating kill switch", newProfile.ID))
+	stepStart := time.Now()
+	if err := s.killSwitch.Enable(ctx, killSwitchPermits(newProfile), opts.AllowLAN, opts.Lockdown); err != nil {
+		return refuse(err, fmt.Sprintf("kill switch re-enable failed: %v", err))
+	}
+	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("kill switch re-enabled for %s (%dms)", newProfile.ID, time.Since(stepStart).Milliseconds()))
+
 	s.machine.Set(state.StateConnecting, fmt.Sprintf("switching to %s: stopping wireguard", newProfile.ID))
 	if err := s.wg.Stop(ctx, withTransportBypassHosts(oldProfile)); err != nil {
 		s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("switch: wg stop warning: %v", err))
@@ -946,30 +979,6 @@ func (s *Service) Switch(ctx context.Context, newProfileID string, opts ConnectO
 	s.setActiveTransportKind("")
 
 	s.clearCurrentProfile()
-
-	wireGuardProfile := withTransportBypassHosts(newProfile)
-	if opts.AllowLAN {
-		rewritten, err := wg.TransformWGConfigExcludeLAN(wireGuardProfile.ConfigText)
-		if err != nil {
-			s.setError(fmt.Sprintf("switch: allow-lan config transform failed: %v", err))
-			return err
-		}
-		wireGuardProfile.ConfigText = rewritten
-	}
-	if checker, ok := s.wg.(wgPreflightChecker); ok {
-		if err := checker.Preflight(ctx, wireGuardProfile); err != nil {
-			s.setError(fmt.Sprintf("switch: wireguard preflight failed: %v", err))
-			return err
-		}
-	}
-
-	s.machine.Set(state.StateConnecting, fmt.Sprintf("switching to %s: updating kill switch", newProfile.ID))
-	stepStart := time.Now()
-	if err := s.killSwitch.Enable(ctx, killSwitchPermits(newProfile), opts.AllowLAN, opts.Lockdown); err != nil {
-		s.setError(fmt.Sprintf("switch: kill switch re-enable failed: %v", err))
-		return err
-	}
-	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("kill switch re-enabled for %s (%dms)", newProfile.ID, time.Since(stepStart).Milliseconds()))
 
 	if err := s.bringUpAfterKillSwitch(ctx, newProfile, wireGuardProfile, opts.PreferredTransport); err != nil {
 		return err
@@ -1120,7 +1129,8 @@ func (s *Service) EngageKillSwitch(ctx context.Context, profileID string, allowL
 	defer s.opMu.Unlock()
 
 	if s.killSwitch.Active() {
-		return nil
+		// Already armed, but it may only now be becoming a Lockdown lock.
+		return s.markKillSwitchLocked(ctx, allowLAN)
 	}
 
 	// IP literals only, so the lock lands instantly with no DNS resolution —
@@ -1137,6 +1147,28 @@ func (s *Service) EngageKillSwitch(ctx context.Context, profileID string, allowL
 		return err
 	}
 	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("kill switch engaged (lockdown, no connection), hub permits %v", hubPermits))
+	return nil
+}
+
+// Records an already-engaged lock as a Lockdown lock so reconcileStartup
+// re-applies it instead of clearing it as stale. Re-arms with the persisted
+// endpoints, which the backends see as unchanged (flag-only write).
+func (s *Service) markKillSwitchLocked(ctx context.Context, allowLAN bool) error {
+	persisted, err := loadKillSwitchState()
+	if err != nil || !persisted.Active {
+		s.logs.Add(state.LogWarn, state.SourceDaemon, "lockdown not recorded: kill switch state unreadable or inactive")
+		return nil
+	}
+	if persisted.Locked {
+		return nil
+	}
+	ksCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if err := s.killSwitch.Enable(ksCtx, persisted.EndpointIPs, allowLAN || persisted.AllowLAN, true); err != nil {
+		s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("could not record lockdown on the engaged kill switch: %v", err))
+		return nil
+	}
+	s.logs.Add(state.LogInfo, state.SourceDaemon, "engaged kill switch marked as a lockdown lock")
 	return nil
 }
 
@@ -1227,6 +1259,9 @@ func (s *Service) Disconnect(ctx context.Context, keepKillSwitch bool) error {
 
 	if s.killSwitch.Active() {
 		if keepKillSwitch {
+			// Retaining the lock past the session is what Lockdown means; record it
+			// or the next startup clears it as stale.
+			_ = s.markKillSwitchLocked(ctx, false)
 			s.logs.Add(state.LogInfo, state.SourceDaemon, "kill switch retained (lockdown mode)")
 		} else {
 			s.machine.Set(state.StateDisconnecting, "clearing kill switch")
