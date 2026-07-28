@@ -39,7 +39,7 @@ jobs:
           cache: 'npm'
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version-file: daemon/go.mod
           cache: true
@@ -67,7 +67,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload Windows NSIS installers
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: pangeavpn-windows-installers
           path: dist/bin/windows/installer/**/*.exe
@@ -89,7 +89,7 @@ jobs:
           cache: 'npm'
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version-file: daemon/go.mod
           cache: true
@@ -105,7 +105,7 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
 
       - name: Upload macOS installer DMGs
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: pangeavpn-mac-installers
           path: dist/bin/mac/installer/**/*-installer.dmg
@@ -121,13 +121,13 @@ jobs:
       contents: write
     steps:
       - name: Download Windows installers
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: pangeavpn-windows-installers
           path: artifacts/windows
 
       - name: Download macOS installers
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: pangeavpn-mac-installers
           path: artifacts/mac
@@ -140,7 +140,7 @@ jobs:
           ls -la release/
 
       - name: Publish release
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           draft: false
           generate_release_notes: true
