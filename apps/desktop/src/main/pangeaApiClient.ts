@@ -4,6 +4,7 @@ import { net } from "electron";
 import type { Profile } from "@pangeavpn/shared-types";
 import type { ServerInfo, SubscriptionInfo } from "../shared/ipc";
 import { MTU_DEFAULT, normalizeMtu, normalizeMtuOrDefault } from "../shared/mtu";
+import { resolveNaiveEndpoint } from "../shared/naiveEndpoint";
 import { encryptRequest, decryptResponse, type EncryptedResponse } from "./secureChannel";
 import { sanitizeLog } from "./logSanitize";
 
@@ -836,24 +837,21 @@ export class PangeaApiClient {
       .map((s) => s.trim())
       .filter(Boolean);
 
-    // Every transport that might dial out needs its endpoint excluded from
-    // AllowedIPs, or the OS would route that connection attempt back through
-    // the tunnel it is still establishing — and the daemon needs the same
-    // addresses to permit them through the kill switch.
+    // Transport endpoints must be excluded from AllowedIPs (or the dial routes
+    // into the tunnel it is establishing) and permitted through the kill switch.
+    // All from the hub — we never resolve a node domain ourselves: that leaks it
+    // to a third-party resolver and cannot work behind a Lockdown lock.
     //
-    // All of it comes from the hub, which already tells us where the node is:
-    // cloak.remoteHost is a raw IP, and every other transport terminates on
-    // that same node unless the hub says otherwise with its own remoteIp. We
-    // deliberately never resolve a node's domain ourselves — that would hand
-    // our node domains to a third-party resolver, and it cannot work at all
-    // behind an engaged Lockdown lock, which blocks DNS.
+    // IPv4 literals only: the AllowedIPs split does integer arithmetic on these,
+    // so an unvalidated hub hostname produced garbage CIDRs. A domain-only node
+    // still gets its bypass route from the daemon at WireGuard start.
     const nodeIp = server.cloak.remoteHost;
     const excludeIPs = uniqueNonEmpty([
       nodeIp,
       server.naive?.remoteIp,
       server.reality?.remoteIp,
       server.hysteria2?.remoteIp
-    ]);
+    ]).filter(isIPv4Literal);
     // Snowflake is the exception and is left out: its broker is a third-party
     // Tor host, not one of our nodes, and its data-plane peer is a volunteer
     // proxy discovered per-session — neither address is ours to know up front.
@@ -884,20 +882,15 @@ export class PangeaApiClient {
         password: "",
         ...(server.cloak.serverName ? { serverName: server.cloak.serverName } : {})
       },
-      // NaiveProxy keeps dialing its domain unless the hub names an IP: its
-      // engine is a C++ fork whose certificate handling we can't inspect from
-      // here, so which name it validates against is unverified. Its endpoint is
-      // still permitted through the kill switch below — only the lookup it
-      // needs to dial is missing, which costs it the last cascade rung under
-      // lockdown until the hub sends naive.remoteIp.
+      // Naive dials the node, not its domain — the engine validates against
+      // serverName and maps it onto remoteHost. See resolveNaiveEndpoint.
       ...(server.naive ? {
         naive: {
           localPort: 0,
-          remoteHost: server.naive.remoteIp ?? server.naive.remoteHost,
+          ...resolveNaiveEndpoint(server.naive, nodeIp),
           remotePort: server.naive.remotePort,
           username: server.naive.username,
-          password: server.naive.password,
-          ...(server.naive.serverName ? { serverName: server.naive.serverName } : {})
+          password: server.naive.password
         }
       } : {}),
       // Reality and Hysteria2 dial the node's IP rather than its domain, so no
