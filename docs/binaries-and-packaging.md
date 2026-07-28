@@ -98,11 +98,16 @@ All targets:
 `npm run build-bin:windows` produces:
 
 - `dist/bin/windows/installer/*.exe` (NSIS installer)
-- `dist/bin/windows/portable/*.exe` (portable app)
 - `dist/bin/windows/daemon/PangeaDaemon.exe` (standalone daemon binary)
 - `dist/bin/windows/daemon/wireguard.dll` (standalone daemon runtime dependency)
 - `dist/bin/windows/daemon/wintun.dll` (standalone daemon runtime dependency)
 - `dist/bin/windows/manifest.json` (artifact manifest with hashes)
+
+Both arches are built by default. `npm run build-bin:windows:x64` (or
+`--arch x64` / `PANGEA_BUILD_ARCHES=x64`) builds x64 only, which roughly halves
+a local build. `build-bin:mac` takes the same `--arch` flag
+(`npm run build-bin:mac:arm64`). Releases must keep the default so every arch
+still ships.
 
 `npm run build-bin` also writes:
 
@@ -113,9 +118,7 @@ All targets:
 `npm run build-bin:mac` produces:
 
 - `dist/bin/mac/installer/x64/*.pkg`
-- `dist/bin/mac/portable/x64/*.zip`
 - `dist/bin/mac/installer/arm64/*.pkg`
-- `dist/bin/mac/portable/arm64/*.zip`
 - `dist/bin/mac/daemon/daemon-x64`
 - `dist/bin/mac/daemon/daemon-arm64`
 - `dist/bin/mac/manifest.json`

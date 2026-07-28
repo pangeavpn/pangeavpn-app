@@ -128,8 +128,7 @@
     "mac": {
       "icon": "PangeaVPN.icns",
       "target": [
-        "pkg",
-        "zip"
+        "pkg"
       ],
       "category": "public.app-category.utilities",
       "extraResources": [
