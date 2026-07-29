@@ -331,15 +331,23 @@ type fakeWGManager struct {
 	noHandshake      bool
 	handshakeOnStart int
 	handshakeUnix    int64
+
+	// lastStartConfig is the config text of the most recent Start, for
+	// asserting the peer Endpoint the tunnel was actually brought up against.
+	lastStartConfig string
 }
 
-func (f *fakeWGManager) Start(_ context.Context, _ state.WireGuardProfile) error {
+func (f *fakeWGManager) Start(_ context.Context, profile state.WireGuardProfile) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.startCount++
+	f.lastStartConfig = profile.ConfigText
 	if f.startErr != nil {
 		return f.startErr
 	}
+	// A freshly created device has no prior handshake, so a stale one set by a
+	// test does not survive a restart.
+	f.handshakeUnix = 0
 	f.running = true
 	return nil
 }
@@ -1459,11 +1467,10 @@ func TestConnect_ConnectedReportsWireGuardHandshake(t *testing.T) {
 	}
 }
 
-// TestHealthCheck_StaleWireGuardHandshakeMarksError proves the ongoing health
-// check flags a tunnel that goes silent mid-session (no handshake within the
-// stale window) even though the interface and transport still report running.
-func TestHealthCheck_StaleWireGuardHandshakeMarksError(t *testing.T) {
-	profile := state.Profile{
+// silentTunnelProfile builds a cloak + naive profile for the silent-tunnel
+// health-check tests.
+func silentTunnelProfile() state.Profile {
+	return state.Profile{
 		ID:    "p1",
 		Name:  "p1",
 		Cloak: state.CloakProfile{RemoteHost: "example.com", RemotePort: 443, LocalPort: 51821},
@@ -1473,6 +1480,70 @@ func TestHealthCheck_StaleWireGuardHandshakeMarksError(t *testing.T) {
 			ConfigText: "[Interface]\nPrivateKey=x\n[Peer]\nEndpoint=127.0.0.1:51821\nPublicKey=y\nAllowedIPs=0.0.0.0/0\n",
 		},
 	}
+}
+
+// goSilent makes the tunnel look silent: the newest handshake is well past the
+// stale window, as after a suspend/resume that killed the transport's session.
+func goSilent(wgMgr *fakeWGManager) {
+	wgMgr.mu.Lock()
+	defer wgMgr.mu.Unlock()
+	wgMgr.handshakeUnix = time.Now().Add(-(wireGuardHandshakeStaleAfter + time.Minute)).Unix()
+}
+
+// TestHealthCheck_SilentTunnelRebuildsSession proves the ongoing health check
+// recovers a tunnel that goes silent mid-session: the transport's session is
+// dead even though the transport and interface both still report running, so
+// only a full transport restart brings traffic back.
+func TestHealthCheck_SilentTunnelRebuildsSession(t *testing.T) {
+	profile := silentTunnelProfile()
+	cloak := &fakeCloakManager{}
+	naive := &fakeNaiveManager{}
+	wgMgr := &fakeWGManager{}
+	ks := &fakeKillSwitch{}
+	svc := newTestService(t, cloak, naive, wgMgr, ks, profile)
+
+	if err := svc.Connect(context.Background(), "p1", ConnectOptions{PreferredTransport: "naive"}); err != nil {
+		t.Fatalf("connect failed: %v", err)
+	}
+	wgMgr.mu.Lock()
+	startsAfterConnect := wgMgr.startCount
+	wgMgr.mu.Unlock()
+
+	goSilent(wgMgr)
+	svc.runHealthCheck(context.Background())
+
+	status := svc.Status(context.Background())
+	if status.State != state.StateConnected {
+		t.Fatalf("state = %q, want CONNECTED after the silent tunnel was rebuilt", status.State)
+	}
+	if status.ActiveTransport != "naive" {
+		t.Errorf("ActiveTransport = %q, want naive (the rebuild reuses the session's transport)", status.ActiveTransport)
+	}
+	naive.mu.Lock()
+	naiveStopped := naive.stopCalled
+	naive.mu.Unlock()
+	if !naiveStopped {
+		t.Error("expected the transport to be stopped during the rebuild; a restart is the only thing that re-dials its session")
+	}
+	wgMgr.mu.Lock()
+	restarts := wgMgr.startCount - startsAfterConnect
+	wgMgr.mu.Unlock()
+	if restarts != 1 {
+		t.Errorf("wireguard restarts during rebuild = %d, want 1", restarts)
+	}
+	if !ks.Active() {
+		t.Error("expected the kill switch to stay armed across the rebuild — the device must be fail-closed while the tunnel is down")
+	}
+	if ks.clearCount != 0 {
+		t.Errorf("kill switch clear count = %d, want 0 across a rebuild", ks.clearCount)
+	}
+}
+
+// TestHealthCheck_SilentTunnelRebuildFailureMarksError proves a silent tunnel
+// that cannot be rebuilt still surfaces as an error rather than sitting there
+// reporting connected.
+func TestHealthCheck_SilentTunnelRebuildFailureMarksError(t *testing.T) {
+	profile := silentTunnelProfile()
 	cloak := &fakeCloakManager{}
 	naive := &fakeNaiveManager{}
 	wgMgr := &fakeWGManager{}
@@ -1483,15 +1554,82 @@ func TestHealthCheck_StaleWireGuardHandshakeMarksError(t *testing.T) {
 		t.Fatalf("connect failed: %v", err)
 	}
 
-	// Tunnel goes silent: the newest handshake is well past the stale window.
-	wgMgr.mu.Lock()
-	wgMgr.handshakeUnix = time.Now().Add(-(wireGuardHandshakeStaleAfter + time.Minute)).Unix()
-	wgMgr.mu.Unlock()
+	// The transport now refuses to come back — e.g. its server is unreachable
+	// on the network the host woke up on.
+	naive.mu.Lock()
+	naive.startErr = errors.New("boom")
+	naive.mu.Unlock()
 
+	goSilent(wgMgr)
 	svc.runHealthCheck(context.Background())
 
 	if st := svc.Status(context.Background()).State; st != state.StateError {
-		t.Fatalf("state = %q, want ERROR after stale handshake", st)
+		t.Fatalf("state = %q, want ERROR after a failed rebuild", st)
+	}
+	if !ks.Active() {
+		t.Error("expected the kill switch to stay armed after a failed rebuild")
+	}
+}
+
+// TestHealthCheck_SilentTunnelRebuildRepointsEndpoint proves the rebuilt tunnel
+// is aimed at the port the *new* bridge bound. The live profile's LocalPort was
+// mutated to the previous session's bound port, so rebuilding from it would
+// leave WireGuard talking to a port nothing listens on any more.
+func TestHealthCheck_SilentTunnelRebuildRepointsEndpoint(t *testing.T) {
+	profile := silentTunnelProfile()
+	profile.Naive.LocalPort = 51821
+	cloak := &fakeCloakManager{}
+	naive := &fakeNaiveManager{boundLocalPort: 61235}
+	wgMgr := &fakeWGManager{}
+	ks := &fakeKillSwitch{}
+	svc := newTestService(t, cloak, naive, wgMgr, ks, profile)
+
+	if err := svc.Connect(context.Background(), "p1", ConnectOptions{PreferredTransport: "naive"}); err != nil {
+		t.Fatalf("connect failed: %v", err)
+	}
+
+	// The second bridge binds the same ephemeral port as the first — the case
+	// that catches a rebuild seeded from the mutated live profile, because then
+	// bound == configured and the rebind sees nothing to rewrite.
+	goSilent(wgMgr)
+	svc.runHealthCheck(context.Background())
+
+	if st := svc.Status(context.Background()).State; st != state.StateConnected {
+		t.Fatalf("state = %q, want CONNECTED after rebuild", st)
+	}
+	wgMgr.mu.Lock()
+	config := wgMgr.lastStartConfig
+	wgMgr.mu.Unlock()
+	if !strings.Contains(config, "Endpoint=127.0.0.1:61235") {
+		t.Errorf("rebuilt wireguard config = %q, want the bridge port 61235", config)
+	}
+}
+
+// TestHealthCheck_SilentTunnelRebuildKeepsAllowLAN proves the rebuild restores
+// the session the user asked for: AllowLAN shapes both the WireGuard
+// AllowedIPs and the kill switch, so losing it would silently tighten the
+// tunnel on recovery.
+func TestHealthCheck_SilentTunnelRebuildKeepsAllowLAN(t *testing.T) {
+	profile := silentTunnelProfile()
+	cloak := &fakeCloakManager{}
+	naive := &fakeNaiveManager{}
+	wgMgr := &fakeWGManager{}
+	ks := &fakeKillSwitch{}
+	svc := newTestService(t, cloak, naive, wgMgr, ks, profile)
+
+	opts := ConnectOptions{PreferredTransport: "naive", AllowLAN: true, Lockdown: true}
+	if err := svc.Connect(context.Background(), "p1", opts); err != nil {
+		t.Fatalf("connect failed: %v", err)
+	}
+
+	goSilent(wgMgr)
+	svc.runHealthCheck(context.Background())
+
+	if st := svc.Status(context.Background()).State; st != state.StateConnected {
+		t.Fatalf("state = %q, want CONNECTED after rebuild", st)
+	}
+	if got := svc.getSessionOpts(); got != opts {
+		t.Errorf("session options after rebuild = %+v, want %+v", got, opts)
 	}
 }
 

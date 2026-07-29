@@ -102,6 +102,11 @@ type Service struct {
 	profileMu      sync.RWMutex
 	currentProfile *state.Profile
 
+	// sessionOpts are the options the live session was brought up with, so a
+	// health-check rebuild can reproduce it rather than guess (AllowLAN shapes
+	// both the kill switch and the WireGuard AllowedIPs). Guarded by profileMu.
+	sessionOpts ConnectOptions
+
 	// activeMu guards activeTransportKind, which of {cloak, naive, reality,
 	// hysteria2, snowflake} is live for the current session. Empty string
 	// when disconnected.
@@ -268,6 +273,8 @@ func (s *Service) Connect(ctx context.Context, profileID string, opts ConnectOpt
 		}
 	}
 
+	s.setSessionOpts(opts)
+
 	adopted, err := s.attachToRunningSession(ctx, profile)
 	if err != nil {
 		s.setError(err.Error())
@@ -277,14 +284,10 @@ func (s *Service) Connect(ctx context.Context, profileID string, opts ConnectOpt
 		return nil
 	}
 
-	wireGuardProfile := withTransportBypassHosts(profile)
-	if opts.AllowLAN {
-		rewritten, err := wg.TransformWGConfigExcludeLAN(wireGuardProfile.ConfigText)
-		if err != nil {
-			s.setError(fmt.Sprintf("allow-lan config transform failed: %v", err))
-			return err
-		}
-		wireGuardProfile.ConfigText = rewritten
+	wireGuardProfile, err := wireGuardProfileFor(profile, opts.AllowLAN)
+	if err != nil {
+		s.setError(fmt.Sprintf("allow-lan config transform failed: %v", err))
+		return err
 	}
 	if checker, ok := s.wg.(wgPreflightChecker); ok {
 		if err := checker.Preflight(ctx, wireGuardProfile); err != nil {
@@ -313,11 +316,27 @@ func (s *Service) Connect(ctx context.Context, profileID string, opts ConnectOpt
 	}
 	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("kill switch enabled (%dms)", time.Since(stepStart).Milliseconds()))
 
-	if err := s.bringUpAfterKillSwitch(ctx, profile, wireGuardProfile, opts.PreferredTransport); err != nil {
+	if err := s.bringUpAfterKillSwitch(ctx, profile, wireGuardProfile, opts); err != nil {
 		return err
 	}
 	s.logs.Add(state.LogInfo, state.SourceDaemon, "connect flow completed")
 	return nil
+}
+
+// wireGuardProfileFor builds the WireGuard profile a session runs with: the
+// transport's own endpoints bypass the tunnel, and AllowLAN carves local
+// ranges out of AllowedIPs.
+func wireGuardProfileFor(profile state.Profile, allowLAN bool) (state.WireGuardProfile, error) {
+	wireGuardProfile := withTransportBypassHosts(profile)
+	if !allowLAN {
+		return wireGuardProfile, nil
+	}
+	rewritten, err := wg.TransformWGConfigExcludeLAN(wireGuardProfile.ConfigText)
+	if err != nil {
+		return state.WireGuardProfile{}, err
+	}
+	wireGuardProfile.ConfigText = rewritten
+	return wireGuardProfile, nil
 }
 
 // bringUpAfterKillSwitch starts the transport + WireGuard and updates the
@@ -325,12 +344,12 @@ func (s *Service) Connect(ctx context.Context, profileID string, opts ConnectOpt
 // Connect and Switch. StateConnected is reached only after a real WireGuard
 // handshake (proven per transport inside startTransportWithHandshake), so a
 // started-but-dead tunnel never reports connected.
-func (s *Service) bringUpAfterKillSwitch(ctx context.Context, profile state.Profile, wireGuardProfile state.WireGuardProfile, preferredTransport string) error {
+func (s *Service) bringUpAfterKillSwitch(ctx context.Context, profile state.Profile, wireGuardProfile state.WireGuardProfile, opts ConnectOptions) error {
 	s.machine.Set(state.StateConnecting, "starting transport")
 	stepStart := time.Now()
 
 	networkKey := s.currentNetworkKey()
-	kind, err := s.startTransportWithHandshake(ctx, &profile, &wireGuardProfile, preferredTransport, networkKey)
+	kind, err := s.startTransportWithHandshake(ctx, &profile, &wireGuardProfile, opts.PreferredTransport, networkKey)
 	if err != nil {
 		s.setError(fmt.Sprintf("transport start failed: %v", err))
 		return err
@@ -352,6 +371,7 @@ func (s *Service) bringUpAfterKillSwitch(ctx context.Context, profile state.Prof
 	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("kill switch updated (%dms)", time.Since(stepStart).Milliseconds()))
 
 	s.setCurrentProfile(profile)
+	s.setSessionOpts(opts)
 	s.machine.Set(state.StateConnected, "tunnel active")
 	return nil
 }
@@ -942,13 +962,9 @@ func (s *Service) Switch(ctx context.Context, newProfileID string, opts ConnectO
 		return err
 	}
 
-	wireGuardProfile := withTransportBypassHosts(newProfile)
-	if opts.AllowLAN {
-		rewritten, err := wg.TransformWGConfigExcludeLAN(wireGuardProfile.ConfigText)
-		if err != nil {
-			return refuse(err, fmt.Sprintf("allow-lan config transform failed: %v", err))
-		}
-		wireGuardProfile.ConfigText = rewritten
+	wireGuardProfile, err := wireGuardProfileFor(newProfile, opts.AllowLAN)
+	if err != nil {
+		return refuse(err, fmt.Sprintf("allow-lan config transform failed: %v", err))
 	}
 	if checker, ok := s.wg.(wgPreflightChecker); ok {
 		if err := checker.Preflight(ctx, wireGuardProfile); err != nil {
@@ -980,7 +996,7 @@ func (s *Service) Switch(ctx context.Context, newProfileID string, opts ConnectO
 
 	s.clearCurrentProfile()
 
-	if err := s.bringUpAfterKillSwitch(ctx, newProfile, wireGuardProfile, opts.PreferredTransport); err != nil {
+	if err := s.bringUpAfterKillSwitch(ctx, newProfile, wireGuardProfile, opts); err != nil {
 		return err
 	}
 	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("switch flow completed: %s -> %s", oldProfile.ID, newProfile.ID))
@@ -1406,7 +1422,14 @@ func (s *Service) runHealthCheck(ctx context.Context) {
 	}
 	if s.wireGuardHandshakeStale(wgStatus) {
 		age := time.Since(time.Unix(wgStatus.LastHandshakeUnix, 0)).Round(time.Second)
-		s.setError(fmt.Sprintf("health check failed: wireguard tunnel is silent (no handshake for %s)", age))
+		s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("wireguard tunnel is silent (no handshake for %s); rebuilding session", age))
+		if err := s.rebuildSilentSession(ctx, profile); err != nil {
+			// A Disconnect can land mid-rebuild and interrupt it; that's the
+			// user getting what they asked for, not a session to mark failed.
+			if st, _ := s.machine.Get(); st != state.StateDisconnecting && st != state.StateDisconnected {
+				s.setError(fmt.Sprintf("health check failed: wireguard tunnel is silent (no handshake for %s) and rebuild failed: %v", age, err))
+			}
+		}
 		return
 	}
 
@@ -1432,6 +1455,79 @@ func (s *Service) wireGuardHandshakeStale(status state.WireGuardStatus) bool {
 		return false
 	}
 	return time.Since(time.Unix(status.LastHandshakeUnix, 0)) > wireGuardHandshakeStaleAfter
+}
+
+// rebuildSilentSession restarts the transport and WireGuard in place after the
+// tunnel has gone silent. The usual cause is a suspend/resume: the transport's
+// session dies with the host's network (a Hysteria2 QUIC connection especially,
+// which the server times out while the machine sleeps) while the transport
+// itself stays up, so WireGuard keeps handshaking into a loopback socket whose
+// far side leads nowhere. Only a fresh transport session recovers that, and no
+// transport can see the breakage from the inside — its local writes still
+// succeed — so a silent WireGuard is the signal to act on.
+//
+// The kill switch is deliberately left armed for the whole rebuild, so the
+// device stays fail-closed while the tunnel is down. Same profile and same
+// options as the live session: this restores what the user asked for, it does
+// not renegotiate it.
+func (s *Service) rebuildSilentSession(ctx context.Context, profile state.Profile) error {
+	if !s.opMu.TryLock() {
+		return errors.New("operation in progress")
+	}
+	defer s.opMu.Unlock()
+
+	if currentState, _ := s.machine.Get(); currentState != state.StateConnected {
+		return errors.New("state changed")
+	}
+
+	// Make the rebuild interruptible by Disconnect, like Connect and Switch —
+	// the transport cascade can otherwise hold opMu for tens of seconds.
+	rebuildCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	s.cancelMu.Lock()
+	s.cancelConnect = cancel
+	s.cancelMu.Unlock()
+	defer func() {
+		s.cancelMu.Lock()
+		s.cancelConnect = nil
+		s.cancelMu.Unlock()
+	}()
+	ctx = rebuildCtx
+
+	// Bring up from the stored profile, not the live copy: bring-up mutates the
+	// live copy's transport LocalPort to whatever port the bridge bound, which
+	// no longer agrees with its own Endpoint line and would make the next
+	// rebind think there is nothing to rewrite. The teardown below still uses
+	// the live copy, since that's what names the tunnel actually running.
+	live := profile
+	if stored, found := s.config.FindProfile(profile.ID); found {
+		profile = stored
+	}
+
+	opts := s.getSessionOpts()
+	wireGuardProfile, err := wireGuardProfileFor(profile, opts.AllowLAN)
+	if err != nil {
+		return fmt.Errorf("allow-lan config transform failed: %w", err)
+	}
+
+	s.machine.Set(state.StateConnecting, "rebuilding silent tunnel")
+	if err := s.wg.Stop(ctx, withTransportBypassHosts(live)); err != nil {
+		s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("rebuild: wireguard stop warning: %v", err))
+	}
+	if active := s.activeTransport(); active != nil {
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), 4*time.Second)
+		if err := active.Stop(stopCtx); err != nil {
+			s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("rebuild: transport stop warning: %v", err))
+		}
+		stopCancel()
+	}
+	s.setActiveTransportKind("")
+
+	if err := s.bringUpAfterKillSwitch(ctx, profile, wireGuardProfile, opts); err != nil {
+		return err
+	}
+	s.logs.Add(state.LogInfo, state.SourceDaemon, "silent tunnel rebuilt")
+	return nil
 }
 
 // recoverActiveTransport restarts whichever transport is active in-place —
@@ -1751,6 +1847,18 @@ func (s *Service) clearCurrentProfile() {
 	s.profileMu.Lock()
 	defer s.profileMu.Unlock()
 	s.currentProfile = nil
+}
+
+func (s *Service) setSessionOpts(opts ConnectOptions) {
+	s.profileMu.Lock()
+	defer s.profileMu.Unlock()
+	s.sessionOpts = opts
+}
+
+func (s *Service) getSessionOpts() ConnectOptions {
+	s.profileMu.RLock()
+	defer s.profileMu.RUnlock()
+	return s.sessionOpts
 }
 
 func (s *Service) getCurrentProfile() (state.Profile, bool) {
