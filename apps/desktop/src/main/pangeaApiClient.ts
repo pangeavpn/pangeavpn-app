@@ -17,6 +17,23 @@ export class AuthError extends Error {
   }
 }
 
+/**
+ * The account is fine, the subscription ran out.
+ *
+ * Deliberately NOT an AuthError: the handlers treat those as "this identity is
+ * no longer valid" and call auth.logout(), which clears the saved token AND the
+ * identity keypair. A new keypair registers as a NEW device, so treating an
+ * expiry that way would burn one of the account's device slots every time a
+ * prepaid customer lapsed and topped up — and crypto accounts lapse by design.
+ * The user stays signed in and simply cannot connect until they pay.
+ */
+export class SubscriptionExpiredError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "SubscriptionExpiredError";
+  }
+}
+
 const HUB_HOSTNAME = "api.pangeavpn.org";
 const HUB_API_BASE = `https://${HUB_HOSTNAME}`;
 
@@ -715,6 +732,11 @@ export class PangeaApiClient {
 
       if (!response.ok) {
         const text = await response.text();
+        if (text.includes("SUBSCRIPTION_EXPIRED")) {
+          throw new SubscriptionExpiredError(
+            "This account's subscription has expired. Top up or resubscribe, then sign in again."
+          );
+        }
         throw new Error(`Token login failed (${response.status}): ${text}`);
       }
 
@@ -981,6 +1003,13 @@ export class PangeaApiClient {
 
       if (!response.ok) {
         const text = await response.text();
+        // Check this before the auth branch: an expired subscription is a 403,
+        // but it must not log the user out (see SubscriptionExpiredError).
+        if (text.includes("SUBSCRIPTION_EXPIRED")) {
+          throw new SubscriptionExpiredError(
+            "Your subscription has expired. Top up or resubscribe to reconnect."
+          );
+        }
         if (response.status === 401 || response.status === 403 || text.includes("DEVICE_NOT_REGISTERED")) {
           throw new AuthError(`Hub API auth error (${response.status}): ${text}`, response.status);
         }
