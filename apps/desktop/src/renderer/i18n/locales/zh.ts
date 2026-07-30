@@ -59,6 +59,8 @@ export const zh = {
   "hero.disconnect": "断开连接",
   "hero.provisioning": "正在配置...",
   "hero.disconnecting": "正在断开...",
+  "hero.stop": "停止",
+  "hero.stopping": "正在停止…",
   "hero.noServers": "没有可用的服务器",
   "hero.noServersForTransport": "没有服务器支持此传输方式",
 
@@ -169,6 +171,7 @@ export const zh = {
   "sub.renews": "续订",
   "sub.expires": "到期",
   "sub.pastDue": "付款逾期",
+  "sub.expired": "订阅已到期",
   "account.noToken": "没有可复制的令牌。",
   "account.tokenCopied": "令牌已复制到剪贴板。",
 
@@ -188,6 +191,8 @@ export const zh = {
   "connect.disconnecting": "正在断开...",
   "connect.disconnected": "已断开。",
   "connect.disconnectFailed": "无法断开连接，请重试。",
+  "connect.cancelled": "已取消连接。",
+  "connect.expired": "您的时长已用完 — 充值后即可重新连接。",
   "connect.recovered": "连接已恢复。",
   "connect.refreshServersFailed": "无法刷新服务器列表，将自动重试。",
 

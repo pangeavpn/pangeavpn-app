@@ -12,6 +12,13 @@ declare global {
     name: string;
   }
 
+  /** Mirrors ConnectResult in src/shared/ipc.ts — the renderer can't import it
+   *  (separate tsconfigs), so keep the two in step. */
+  interface ConnectResult {
+    ok: boolean;
+    error?: string;
+  }
+
   interface AuthState {
     authenticated: boolean;
     user: AuthUser | null;
@@ -85,6 +92,10 @@ declare global {
 
   interface SubscriptionInfo {
     status: "trialing" | "active" | "past_due" | "canceled" | "unpaid" | "incomplete" | "none";
+    /** Hub's verdict on whether this account may connect. Never re-derive from
+     *  status: prepaid plans stay "active" after they lapse. Absent on older
+     *  hubs — treat that as entitled. */
+    entitled?: boolean;
     renews: boolean;
     expiresAt: string | null;
   }
@@ -94,7 +105,8 @@ declare global {
     logout: () => Promise<void>;
     getAuthState: () => Promise<AuthState>;
     getServers: () => Promise<ServerInfo[]>;
-    provisionAndConnect: (serverId: string) => Promise<OkResponse>;
+    provisionAndConnect: (serverId: string) => Promise<ConnectResult>;
+    cancelConnect: () => Promise<void>;
     provisionAndSwitch: (serverId: string) => Promise<OkResponse>;
     setDoh: (enabled: boolean) => Promise<void>;
     getDoh: () => Promise<boolean>;

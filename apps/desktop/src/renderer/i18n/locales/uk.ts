@@ -59,6 +59,8 @@ export const uk = {
   "hero.disconnect": "Відключитися",
   "hero.provisioning": "Підготовка...",
   "hero.disconnecting": "Відключення...",
+  "hero.stop": "Зупинити",
+  "hero.stopping": "Зупинення...",
   "hero.noServers": "Немає доступних серверів",
   "hero.noServersForTransport": "Немає серверів із підтримкою цього транспорту",
 
@@ -169,6 +171,7 @@ export const uk = {
   "sub.renews": "Поновлюється",
   "sub.expires": "Закінчується",
   "sub.pastDue": "Прострочений платіж",
+  "sub.expired": "Підписку завершено",
   "account.noToken": "Немає токена для копіювання.",
   "account.tokenCopied": "Токен скопійовано до буфера обміну.",
 
@@ -188,6 +191,8 @@ export const uk = {
   "connect.disconnecting": "Відключення...",
   "connect.disconnected": "Відключено.",
   "connect.disconnectFailed": "Не вдалося відключитися. Спробуйте ще раз.",
+  "connect.cancelled": "Підключення скасовано.",
+  "connect.expired": "Ваш час вичерпано — поповніть рахунок, щоб підключитися.",
   "connect.recovered": "З'єднання відновлено.",
   "connect.refreshServersFailed": "Не вдалося оновити список серверів. Спробу буде повторено автоматично.",
 

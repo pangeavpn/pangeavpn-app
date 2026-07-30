@@ -5,9 +5,10 @@ import { DaemonClient } from "./daemonClient";
 import { DaemonProcessManager } from "./daemonProcess";
 import { readDaemonTokens } from "./platformPaths";
 import { getConnectedTrayIconPath, getTrayIconPath, getWindowsAppIconPath } from "./resourcePaths";
-import { IPC_CHANNELS } from "../shared/ipc";
+import { IPC_CHANNELS, type ConnectResult } from "../shared/ipc";
 import * as auth from "./auth";
-import { PangeaApiClient, AuthError } from "./pangeaApiClient";
+import { PangeaApiClient, AuthError, ConnectCancelledError } from "./pangeaApiClient";
+import { beginAttempt, cancelAttempt, endAttempt, isCancelled } from "./connectAttempt";
 import { setupAutoUpdater, notifyConnectionStateChange } from "./autoUpdater";
 import { setLoginItemEnabled, isLoginItemEnabled, isHiddenLaunchArg } from "./loginItem";
 import { startNetworkWatcher, onNetworkChange } from "./networkWatcher";
@@ -553,9 +554,9 @@ async function permitHubThroughLockdown(): Promise<void> {
   }
 }
 
-async function provisionProfileForServer(serverId: string): Promise<Profile> {
+async function provisionProfileForServer(serverId: string, signal?: AbortSignal): Promise<Profile> {
   await permitHubThroughLockdown();
-  const profile = await pangeaApiClient.provision(serverId);
+  const profile = await pangeaApiClient.provision(serverId, signal);
 
   const config = await withDaemonRestartOnUnavailable(
     () => daemonClient.getConfig(),
@@ -576,14 +577,70 @@ async function provisionProfileForServer(serverId: string): Promise<Profile> {
   return profile;
 }
 
-async function provisionAndConnect(serverId: string): Promise<import("@pangeavpn/shared-types").OkResponse> {
-  const profile = await provisionProfileForServer(serverId);
-  const result = await connectWithRecovery(profile.id);
-  if (result.ok) {
-    lastConnectedProfileId = profile.id;
-    void persistLastConnection();
+async function provisionAndConnect(serverId: string): Promise<ConnectResult> {
+  const attempt = beginAttempt();
+  try {
+    const profile = await provisionProfileForServer(serverId, attempt.controller.signal);
+
+    // THE guard. Provisioning is several network round trips; if the user
+    // pressed Stop during them we must not bring the tunnel up now. Without
+    // this, cancelling only told the daemon to disconnect and the connect
+    // below fired anyway, so the tunnel came up moments after they cancelled.
+    if (isCancelled(attempt)) {
+      return { ok: false, error: "cancelled" };
+    }
+
+    const result = await connectWithRecovery(profile.id);
+
+    // The daemon connect can't be un-sent: if Stop landed while it was in
+    // flight, tear the tunnel back down rather than leaving the user connected
+    // after asking not to be. keepKillSwitch preserves lockdown — the whole
+    // point of always-connected is that traffic never leaks, including here.
+    if (isCancelled(attempt)) {
+      if (result.ok) {
+        await daemonClient
+          .disconnect({ keepKillSwitch: alwaysConnectedEnabled })
+          .catch((err) => console.warn("cancel: disconnect failed", sanitizeLog(err)));
+      }
+      return { ok: false, error: "cancelled" };
+    }
+
+    if (result.ok) {
+      lastConnectedProfileId = profile.id;
+      void persistLastConnection();
+    }
+    return result;
+  } catch (err) {
+    // A cancelled attempt aborts its in-flight request, which surfaces here.
+    // Report it as a non-error so the UI goes idle instead of showing a toast.
+    if (err instanceof ConnectCancelledError || isCancelled(attempt)) {
+      return { ok: false, error: "cancelled" };
+    }
+    throw err;
+  } finally {
+    endAttempt(attempt);
   }
-  return result;
+}
+
+/**
+ * Stop the in-flight connect attempt. Safe to call when nothing is running —
+ * it must never tear down a connection the user wants to keep.
+ */
+async function cancelConnectAttempt(): Promise<void> {
+  const cancelled = cancelAttempt();
+  if (!cancelled) return;
+
+  // The attempt may already have handed the daemon a connect. Ask it to stand
+  // down; the attempt's own guards handle the rest.
+  try {
+    const status = await daemonClient.getStatus();
+    if (status.state !== "DISCONNECTED") {
+      await daemonClient.disconnect({ keepKillSwitch: alwaysConnectedEnabled });
+    }
+  } catch (err) {
+    console.warn("cancel: daemon teardown failed", sanitizeLog(err));
+  }
+  await refreshTrayStatus();
 }
 
 async function provisionAndSwitch(serverId: string): Promise<import("@pangeavpn/shared-types").OkResponse> {
@@ -1103,6 +1160,10 @@ function registerIpcHandlers(): void {
       }
       throw err;
     }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.cancelConnect, async () => {
+    await cancelConnectAttempt();
   });
 
   ipcMain.handle(IPC_CHANNELS.provisionAndSwitch, async (_event, serverId: string) => {

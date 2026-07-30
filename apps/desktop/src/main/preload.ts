@@ -15,6 +15,7 @@ const CH = {
   authGetState: "auth:getState",
   getServers: "pangea:getServers",
   provisionAndConnect: "pangea:provisionAndConnect",
+  cancelConnect: "pangea:cancelConnect",
   provisionAndSwitch: "pangea:provisionAndSwitch",
   setDoh: "pangea:setDoh",
   getDoh: "pangea:getDoh",
@@ -69,6 +70,7 @@ const pangeaApi = {
   getServers: () => ipcRenderer.invoke(CH.getServers),
   provisionAndConnect: (serverId: string) =>
     ipcRenderer.invoke(CH.provisionAndConnect, serverId),
+  cancelConnect: () => ipcRenderer.invoke(CH.cancelConnect),
   provisionAndSwitch: (serverId: string) =>
     ipcRenderer.invoke(CH.provisionAndSwitch, serverId),
   setDoh: (enabled: boolean) => ipcRenderer.invoke(CH.setDoh, enabled),

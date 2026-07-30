@@ -59,6 +59,8 @@ export const ru = {
   "hero.disconnect": "Отключить",
   "hero.provisioning": "Подготовка...",
   "hero.disconnecting": "Отключение...",
+  "hero.stop": "Остановить",
+  "hero.stopping": "Остановка...",
   "hero.noServers": "Нет доступных серверов",
   "hero.noServersForTransport": "Нет серверов с поддержкой этого транспорта",
 
@@ -169,6 +171,7 @@ export const ru = {
   "sub.renews": "Продление",
   "sub.expires": "Истекает",
   "sub.pastDue": "Просрочен платёж",
+  "sub.expired": "Подписка истекла",
   "account.noToken": "Нет токена для копирования.",
   "account.tokenCopied": "Токен скопирован в буфер обмена.",
 
@@ -188,6 +191,8 @@ export const ru = {
   "connect.disconnecting": "Отключение...",
   "connect.disconnected": "Отключено.",
   "connect.disconnectFailed": "Не удалось отключиться. Попробуйте ещё раз.",
+  "connect.cancelled": "Подключение отменено.",
+  "connect.expired": "Ваше время вышло — пополните счёт, чтобы подключиться.",
   "connect.recovered": "Соединение восстановлено.",
   "connect.refreshServersFailed": "Не удалось обновить список серверов. Попытка повторится автоматически.",
 

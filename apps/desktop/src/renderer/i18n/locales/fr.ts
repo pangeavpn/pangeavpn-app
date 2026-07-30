@@ -59,6 +59,8 @@ export const fr = {
   "hero.disconnect": "Se déconnecter",
   "hero.provisioning": "Provisionnement...",
   "hero.disconnecting": "Déconnexion...",
+  "hero.stop": "Arrêter",
+  "hero.stopping": "Arrêt...",
   "hero.noServers": "Aucun serveur disponible",
   "hero.noServersForTransport": "Aucun serveur ne prend en charge ce transport",
 
@@ -169,6 +171,7 @@ export const fr = {
   "sub.renews": "Renouvellement",
   "sub.expires": "Expiration",
   "sub.pastDue": "Paiement en retard",
+  "sub.expired": "Abonnement expiré",
   "account.noToken": "Aucun jeton à copier.",
   "account.tokenCopied": "Jeton copié dans le presse-papiers.",
 
@@ -188,6 +191,8 @@ export const fr = {
   "connect.disconnecting": "Déconnexion...",
   "connect.disconnected": "Déconnecté.",
   "connect.disconnectFailed": "Déconnexion impossible. Veuillez réessayer.",
+  "connect.cancelled": "Connexion annulée.",
+  "connect.expired": "Votre temps est écoulé — rechargez pour vous reconnecter.",
   "connect.recovered": "Connexion rétablie.",
   "connect.refreshServersFailed": "Impossible d'actualiser la liste des serveurs. Une nouvelle tentative sera effectuée automatiquement.",
 

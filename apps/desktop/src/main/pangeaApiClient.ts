@@ -34,6 +34,17 @@ export class SubscriptionExpiredError extends Error {
   }
 }
 
+/**
+ * The user pressed Stop while this request was in flight. Not a failure — the
+ * caller unwinds to an idle UI with no error toast.
+ */
+export class ConnectCancelledError extends Error {
+  constructor() {
+    super("Connect cancelled");
+    this.name = "ConnectCancelledError";
+  }
+}
+
 const HUB_HOSTNAME = "api.pangeavpn.org";
 const HUB_API_BASE = `https://${HUB_HOSTNAME}`;
 
@@ -831,7 +842,7 @@ export class PangeaApiClient {
     }
   }
 
-  async provision(serverId: string): Promise<Profile> {
+  async provision(serverId: string, signal?: AbortSignal): Promise<Profile> {
     if (!this.licenseKey) throw new Error("Not authenticated");
 
     const server = this.cachedServers.find((s) => s.id === serverId);
@@ -840,12 +851,17 @@ export class PangeaApiClient {
     // Ephemeral WG keypair — generated fresh per connection, never stored
     const keyPair = generateWireGuardKeyPair();
 
-    const reg = await this.hubRequest<RegisterResponse>("POST", "/api/register", {
-      licenseKey: this.licenseKey,
-      identityPubkey: this.identityPubkey,
-      wgPubkey: keyPair.publicKey,
-      region: serverId
-    });
+    const reg = await this.hubRequest<RegisterResponse>(
+      "POST",
+      "/api/register",
+      {
+        licenseKey: this.licenseKey,
+        identityPubkey: this.identityPubkey,
+        wgPubkey: keyPair.publicKey,
+        region: serverId
+      },
+      signal
+    );
 
     if (!reg.serverPubkey || !reg.assignedIP || !reg.dns) {
       throw new AuthError(
@@ -982,9 +998,25 @@ export class PangeaApiClient {
     this.identityPubkey = null;
   }
 
-  private async hubRequest<T>(method: string, route: string, body?: unknown): Promise<T> {
+  /**
+   * @param externalSignal Aborts this request when the caller's work is
+   *   cancelled — e.g. the user pressing Stop mid-connect. Composed with the
+   *   timeout controller so either can abort, and requests without one behave
+   *   exactly as before.
+   */
+  private async hubRequest<T>(
+    method: string,
+    route: string,
+    body?: unknown,
+    externalSignal?: AbortSignal
+  ): Promise<T> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    const abortFromCaller = () => controller.abort();
+    if (externalSignal) {
+      if (externalSignal.aborted) controller.abort();
+      else externalSignal.addEventListener("abort", abortFromCaller, { once: true });
+    }
 
     try {
       const headers: Record<string, string> = {
@@ -1019,11 +1051,17 @@ export class PangeaApiClient {
       return (await response.json()) as T;
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") {
+        // Distinguish "the user stopped this" from "the hub is slow": the
+        // caller turns a cancellation into an idle UI, not an error toast.
+        if (externalSignal?.aborted) {
+          throw new ConnectCancelledError();
+        }
         throw new Error(`Hub API timeout (${method} ${route})`);
       }
       throw error;
     } finally {
       clearTimeout(timer);
+      externalSignal?.removeEventListener("abort", abortFromCaller);
     }
   }
 }

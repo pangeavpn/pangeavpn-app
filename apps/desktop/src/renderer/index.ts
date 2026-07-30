@@ -114,12 +114,15 @@ let logEntries: LogEntry[] = [];
 let authState: AuthState = { authenticated: false, user: null };
 let servers: ServerInfo[] = [];
 let serverWorking = false;
-// True once a connect attempt has been in-flight for >= 1s, signaling the UI
-// to enable the disconnect button so the user can bail out before the 10s
-// cloak timeout fires.
-let connectCancelAllowed = false;
-let connectCancelTimer: ReturnType<typeof setTimeout> | null = null;
-const CONNECT_CANCEL_DELAY_MS = 1000;
+// True while a connect attempt is in flight. Stop is live for the whole of it
+// with no grace delay: cancelling is a hard cancel in the main process (it
+// aborts the hub calls and refuses to start the tunnel), so there is nothing
+// left to protect the user from by making them wait a second first.
+let connectInFlight = false;
+// The hub's verdict on whether this account may connect. Null until asked.
+// Never derived from subscription.status here — prepaid plans stay "active"
+// after they lapse, so only the hub's flag is trustworthy.
+let entitled: boolean | null = null;
 
 // Mirrors src/shared/mtu.ts, which the renderer can't import: both tsconfigs
 // emit to dist/ from rootDir src, so a renderer (ESM) copy of dist/shared/mtu.js
@@ -189,6 +192,12 @@ function formatSubscriptionDate(iso: string | null): string {
 function subscriptionText(sub: SubscriptionInfo | null): { text: string; warn: boolean } {
   if (!sub) return { text: t("sub.none"), warn: false };
   const when = formatSubscriptionDate(sub.expiresAt);
+  // Checked before the status branch: a lapsed prepaid plan is still "active",
+  // so reading status first would tell the customer they expire on a date that
+  // has already passed, with no warning styling.
+  if (sub.entitled === false) {
+    return { text: `${t("sub.expired")}${when ? " —" + when : ""}`, warn: true };
+  }
   if (sub.status === "active" || sub.status === "trialing") {
     const trial = sub.status === "trialing" ? t("sub.trialPrefix") : "";
     return { text: `${trial}${sub.renews ? t("sub.renews") : t("sub.expires")}${when}`, warn: false };
@@ -197,6 +206,32 @@ function subscriptionText(sub: SubscriptionInfo | null): { text: string; warn: b
     return { text: `${t("sub.pastDue")}${when ? " —" + when : ""}`, warn: true };
   }
   return { text: t("sub.none"), warn: false };
+}
+
+/**
+ * Ask the hub whether this account may connect, and say so once if it can't.
+ *
+ * The toast is the only notice a prepaid customer gets that their time ran
+ * out — nothing else in the app would tell them, since a lapsed prepaid
+ * subscription still reads as "active". Announced once per transition into the
+ * expired state so it can't nag on every poll.
+ */
+async function refreshEntitlement(): Promise<void> {
+  if (!pangeaApi) return;
+  let sub: SubscriptionInfo | null = null;
+  try {
+    sub = await pangeaApi.getSubscription();
+  } catch {
+    return; // offline or hub down — leave the previous verdict alone
+  }
+  // Absent on older hubs: assume entitled rather than locking someone out.
+  const next = sub === null ? null : sub.entitled !== false;
+  const wasEntitled = entitled;
+  entitled = next;
+  if (next === false && wasEntitled !== false) {
+    showToast(t("connect.expired"), 8000);
+  }
+  updateServerControlStates();
 }
 
 // Fetched fresh each time Settings opens so expiry/renewal is always current.
@@ -216,6 +251,11 @@ async function refreshSubscription(): Promise<void> {
   const { text, warn } = subscriptionText(sub);
   accountSubscription.textContent = text;
   accountSubscription.classList.toggle("account-subscription-warn", warn);
+  // Settings just told us the truth — keep the connect gate in step with it.
+  if (sub) {
+    entitled = sub.entitled !== false;
+    updateServerControlStates();
+  }
 }
 
 // ── Overlay focus management ──────────────────────────────────
@@ -807,14 +847,17 @@ serverConnectBtn.addEventListener("click", async () => {
     syncServerPicker();
   }
 
+  // Refuse locally when the hub has told us this account is out of time. The
+  // register call would 403 anyway; catching it here means a clear message
+  // instead of a failed connect, and no pointless round trip.
+  if (entitled === false) {
+    showToast(t("connect.expired"));
+    setUiMessage(t("sub.expired"));
+    return;
+  }
+
   serverWorking = true;
-  connectCancelAllowed = false;
-  if (connectCancelTimer) clearTimeout(connectCancelTimer);
-  connectCancelTimer = setTimeout(() => {
-    connectCancelAllowed = true;
-    connectCancelTimer = null;
-    updateServerControlStates();
-  }, CONNECT_CANCEL_DELAY_MS);
+  connectInFlight = true;
   updateServerBusyIndicator(true, t("hero.provisioning"));
   updateServerControlStates();
   try {
@@ -824,8 +867,14 @@ serverConnectBtn.addEventListener("click", async () => {
       setUiMessage(t("connect.connected"));
       notifyUserConnected();
       void refreshLastServer();
+    } else if ((result as { error?: string }).error === "cancelled") {
+      // The user stopped it — not a failure, so no error styling.
+      setUiMessage(t("connect.cancelled"));
     } else {
       setUiMessage(t("connect.failed"));
+      // The most likely reason a connect is refused outright: re-check so the
+      // UI settles into the expired state rather than inviting another try.
+      void refreshEntitlement();
     }
     await refreshStatus();
   } catch (error) {
@@ -849,11 +898,7 @@ serverConnectBtn.addEventListener("click", async () => {
     await refreshStatus();
   } finally {
     serverWorking = false;
-    if (connectCancelTimer) {
-      clearTimeout(connectCancelTimer);
-      connectCancelTimer = null;
-    }
-    connectCancelAllowed = false;
+    connectInFlight = false;
     updateServerBusyIndicator(false);
     updateServerControlStates();
   }
@@ -864,13 +909,7 @@ async function switchToServer(serverId: string): Promise<void> {
   if (!serverId) return;
 
   serverWorking = true;
-  connectCancelAllowed = false;
-  if (connectCancelTimer) clearTimeout(connectCancelTimer);
-  connectCancelTimer = setTimeout(() => {
-    connectCancelAllowed = true;
-    connectCancelTimer = null;
-    updateServerControlStates();
-  }, CONNECT_CANCEL_DELAY_MS);
+  connectInFlight = true;
   updateServerBusyIndicator(true, t("hero.provisioning"));
   updateServerControlStates();
   try {
@@ -904,11 +943,7 @@ async function switchToServer(serverId: string): Promise<void> {
     await refreshStatus();
   } finally {
     serverWorking = false;
-    if (connectCancelTimer) {
-      clearTimeout(connectCancelTimer);
-      connectCancelTimer = null;
-    }
-    connectCancelAllowed = false;
+    connectInFlight = false;
     updateServerBusyIndicator(false);
     updateServerControlStates();
   }
@@ -916,6 +951,24 @@ async function switchToServer(serverId: string): Promise<void> {
 
 serverDisconnectBtn.addEventListener("click", async () => {
   if (!daemonApi) return;
+
+  // Mid-connect this button is Stop, not Disconnect. Cancel the attempt in the
+  // main process rather than only telling the daemon to disconnect: the attempt
+  // is what would otherwise go on to bring the tunnel up a moment later. The
+  // in-flight provisionAndConnect resolves as cancelled and its own finally
+  // clears the busy state, so don't fight it over serverWorking here.
+  if (connectInFlight && pangeaApi) {
+    updateServerBusyIndicator(true, t("hero.stopping"));
+    setUiMessage(t("connect.cancelled"));
+    try {
+      await pangeaApi.cancelConnect();
+    } catch (error) {
+      setUiMessage(reportError("cancelConnect", error));
+    }
+    await refreshStatus();
+    return;
+  }
+
   notifyUserDisconnected();
   serverWorking = true;
   updateServerBusyIndicator(true, t("hero.disconnecting"));
@@ -1885,6 +1938,9 @@ async function refreshServers(): Promise<void> {
   if (!(await fetchServers())) {
     setUiMessage(t("connect.refreshServersFailed"));
   }
+  // Piggyback on every server refresh (login, picker open, app shown) so the
+  // expired state is discovered without its own polling loop.
+  void refreshEntitlement();
 }
 
 // Refresh with backoff until it succeeds, so the list (and its load values) is
@@ -2092,14 +2148,15 @@ function updateServerControlStates(): void {
   // least one server the current transport can actually use. Deliberately not
   // hoisted into the guard above: that would also disable Disconnect and strand
   // a connected user who switched to a transport no server supports.
-  serverConnectBtn.disabled = busy || !fullyDisconnected || getVisibleServers().length === 0;
-  // Allow cancel mid-connect once the 1s grace window has elapsed, so the
-  // user can bail before the 10s cloak timeout. Outside that window the
-  // standard disabled-while-busy rule applies.
-  const cancelAllowedNow = serverWorking && connectCancelAllowed;
-  serverDisconnectBtn.disabled = cancelAllowedNow
+  serverConnectBtn.disabled =
+    busy || !fullyDisconnected || getVisibleServers().length === 0 || entitled === false;
+  // Stop is live for the entire connect attempt, from the first millisecond:
+  // cancelling is a hard cancel, so there is no unsafe window to guard.
+  // Outside an attempt the standard disabled-while-busy rule applies.
+  serverDisconnectBtn.disabled = connectInFlight
     ? false
     : !latestStatus || latestStatus.state === "DISCONNECTED" || latestStatus.state === "DISCONNECTING" || busy;
+  serverDisconnectBtn.textContent = connectInFlight ? t("hero.stop") : t("hero.disconnect");
 }
 
 function updateServerBusyIndicator(active: boolean, label?: string): void {

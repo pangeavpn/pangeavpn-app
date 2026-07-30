@@ -60,6 +60,8 @@ export const en = {
   "hero.disconnect": "Disconnect",
   "hero.provisioning": "Provisioning...",
   "hero.disconnecting": "Disconnecting...",
+  "hero.stop": "Stop",
+  "hero.stopping": "Stopping...",
   "hero.noServers": "No servers available",
   "hero.noServersForTransport": "No servers support this transport",
 
@@ -170,6 +172,7 @@ export const en = {
   "sub.renews": "Renews",
   "sub.expires": "Expires",
   "sub.pastDue": "Payment past due",
+  "sub.expired": "Subscription expired",
   "account.noToken": "No token to copy.",
   "account.tokenCopied": "Token copied to clipboard.",
 
@@ -189,6 +192,8 @@ export const en = {
   "connect.disconnecting": "Disconnecting...",
   "connect.disconnected": "Disconnected.",
   "connect.disconnectFailed": "Couldn't disconnect. Please try again.",
+  "connect.cancelled": "Connection cancelled.",
+  "connect.expired": "Your time is up — top up to reconnect.",
   "connect.recovered": "Connection recovered.",
   "connect.refreshServersFailed": "Couldn't refresh the server list. It will retry automatically.",
 
