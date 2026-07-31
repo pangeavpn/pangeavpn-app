@@ -19,6 +19,7 @@ export const IPC_CHANNELS = {
   authGetState: "auth:getState",
   getServers: "pangea:getServers",
   provisionAndConnect: "pangea:provisionAndConnect",
+  cancelConnect: "pangea:cancelConnect",
   provisionAndSwitch: "pangea:provisionAndSwitch",
   setDoh: "pangea:setDoh",
   getDoh: "pangea:getDoh",
@@ -100,6 +101,14 @@ export interface ServerInfo {
    */
   naive?: {
     remoteHost: string;
+    /**
+     * The endpoint's address, when the hub names one for this transport
+     * specifically. Absent means it terminates on the node `cloak.remoteHost`
+     * already names. Either way the client never resolves `remoteHost` itself:
+     * that would leak our node domains to a third-party resolver, and it cannot
+     * work behind an engaged Lockdown lock, which blocks DNS.
+     */
+    remoteIp?: string;
     remotePort: number;
     username: string;
     password: string;
@@ -115,6 +124,8 @@ export interface ServerInfo {
    */
   reality?: {
     remoteHost: string;
+    /** Per-transport endpoint address; see naive.remoteIp above. */
+    remoteIp?: string;
     remotePort: number;
     uuid: string;
     publicKey: string;
@@ -132,6 +143,8 @@ export interface ServerInfo {
    */
   hysteria2?: {
     remoteHost: string;
+    /** Per-transport endpoint address; see naive.remoteIp above. */
+    remoteIp?: string;
     remotePort: number;
     password: string;
     obfsPassword: string;
@@ -166,8 +179,26 @@ export interface DeviceInfo {
   status: string;
 }
 
+/**
+ * Result of a connect attempt. `error: "cancelled"` means the user stopped it —
+ * the caller should return to idle, not report a failure. Kept separate from
+ * the daemon's bare OkResponse, which the zod schema pins to `{ ok }` alone.
+ */
+export interface ConnectResult {
+  ok: boolean;
+  error?: string;
+}
+
 export interface SubscriptionInfo {
   status: "trialing" | "active" | "past_due" | "canceled" | "unpaid" | "incomplete" | "none";
+  /**
+   * May this account connect right now? Computed by the hub with the same rule
+   * its register routes enforce — never re-derive it from `status`, which stays
+   * "active" forever on prepaid (crypto/guest) plans even after they lapse.
+   * Older hubs omit it; treat a missing value as entitled so the app doesn't
+   * lock out a paying customer talking to one.
+   */
+  entitled?: boolean;
   /** True only for auto-renewing Stripe subs not set to cancel. Crypto/guest (prepaid) plans are always false. */
   renews: boolean;
   /** End of the current period — the renewal date if it renews, otherwise the expiry date. ISO string or null. */
@@ -179,7 +210,9 @@ export interface PangeaApi {
   logout: () => Promise<void>;
   getAuthState: () => Promise<AuthState>;
   getServers: () => Promise<ServerInfo[]>;
-  provisionAndConnect: (serverId: string) => Promise<OkResponse>;
+  provisionAndConnect: (serverId: string) => Promise<ConnectResult>;
+  /** Stop the in-flight connect attempt. No-op when nothing is connecting. */
+  cancelConnect: () => Promise<void>;
   provisionAndSwitch: (serverId: string) => Promise<OkResponse>;
   setDoh: (enabled: boolean) => Promise<void>;
   getDoh: () => Promise<boolean>;

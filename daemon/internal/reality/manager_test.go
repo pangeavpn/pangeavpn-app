@@ -109,7 +109,7 @@ func TestResolveServerNameDefaultsToCoverSNI(t *testing.T) {
 	}
 	// A REALITY SNI must never fall back to the node's own host/IP — that is
 	// what produced the "handshake: EOF" this default replaces.
-	if name, _ := resolveServerName(""); name == "108.61.188.241" {
+	if name, _ := resolveServerName(""); name == "203.0.113.10" {
 		t.Fatal("resolveServerName must not fall back to the node host/IP")
 	}
 }

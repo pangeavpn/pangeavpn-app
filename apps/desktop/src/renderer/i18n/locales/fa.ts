@@ -59,6 +59,8 @@ export const fa = {
   "hero.disconnect": "قطع اتصال",
   "hero.provisioning": "در حال آماده‌سازی...",
   "hero.disconnecting": "در حال قطع اتصال...",
+  "hero.stop": "توقف",
+  "hero.stopping": "در حال توقف...",
   "hero.noServers": "سروری در دسترس نیست",
   "hero.noServersForTransport": "هیچ سروری از این انتقال پشتیبانی نمی‌کند",
 
@@ -169,6 +171,7 @@ export const fa = {
   "sub.renews": "تمدید می‌شود",
   "sub.expires": "منقضی می‌شود",
   "sub.pastDue": "پرداخت معوق",
+  "sub.expired": "اشتراک منقضی شد",
   "account.noToken": "توکنی برای کپی وجود ندارد.",
   "account.tokenCopied": "توکن در کلیپ‌بورد کپی شد.",
 
@@ -188,6 +191,8 @@ export const fa = {
   "connect.disconnecting": "در حال قطع اتصال...",
   "connect.disconnected": "اتصال قطع شد.",
   "connect.disconnectFailed": "قطع اتصال ممکن نشد. لطفاً دوباره تلاش کنید.",
+  "connect.cancelled": "اتصال لغو شد.",
+  "connect.expired": "زمان شما تمام شد — برای اتصال مجدد شارژ کنید.",
   "connect.recovered": "اتصال بازیابی شد.",
   "connect.refreshServersFailed": "به‌روزرسانی فهرست سرورها ممکن نشد. به‌طور خودکار دوباره تلاش می‌شود.",
 

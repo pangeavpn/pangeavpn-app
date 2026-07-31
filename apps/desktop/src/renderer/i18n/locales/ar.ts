@@ -59,6 +59,8 @@ export const ar = {
   "hero.disconnect": "قطع الاتصال",
   "hero.provisioning": "جارٍ التجهيز...",
   "hero.disconnecting": "جارٍ قطع الاتصال...",
+  "hero.stop": "إيقاف",
+  "hero.stopping": "جارٍ الإيقاف...",
   "hero.noServers": "لا توجد خوادم متاحة",
   "hero.noServersForTransport": "لا توجد خوادم تدعم هذا النقل",
 
@@ -169,6 +171,7 @@ export const ar = {
   "sub.renews": "يتجدّد",
   "sub.expires": "ينتهي",
   "sub.pastDue": "الدفع متأخر",
+  "sub.expired": "انتهى الاشتراك",
   "account.noToken": "لا يوجد رمز لنسخه.",
   "account.tokenCopied": "تم نسخ الرمز إلى الحافظة.",
 
@@ -188,6 +191,8 @@ export const ar = {
   "connect.disconnecting": "جارٍ قطع الاتصال...",
   "connect.disconnected": "تم قطع الاتصال.",
   "connect.disconnectFailed": "تعذّر قطع الاتصال. يرجى المحاولة مرة أخرى.",
+  "connect.cancelled": "تم إلغاء الاتصال.",
+  "connect.expired": "انتهى وقتك — اشحن رصيدك لإعادة الاتصال.",
   "connect.recovered": "تمت استعادة الاتصال.",
   "connect.refreshServersFailed": "تعذّر تحديث قائمة الخوادم. ستتم إعادة المحاولة تلقائيًا.",
 

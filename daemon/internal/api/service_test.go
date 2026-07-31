@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"slices"
 	"strings"
 	"sync"
@@ -330,15 +331,23 @@ type fakeWGManager struct {
 	noHandshake      bool
 	handshakeOnStart int
 	handshakeUnix    int64
+
+	// lastStartConfig is the config text of the most recent Start, for
+	// asserting the peer Endpoint the tunnel was actually brought up against.
+	lastStartConfig string
 }
 
-func (f *fakeWGManager) Start(_ context.Context, _ state.WireGuardProfile) error {
+func (f *fakeWGManager) Start(_ context.Context, profile state.WireGuardProfile) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.startCount++
+	f.lastStartConfig = profile.ConfigText
 	if f.startErr != nil {
 		return f.startErr
 	}
+	// A freshly created device has no prior handshake, so a stale one set by a
+	// test does not survive a restart.
+	f.handshakeUnix = 0
 	f.running = true
 	return nil
 }
@@ -426,6 +435,7 @@ type fakeKillSwitch struct {
 	active          bool
 	enableEndpoints []string
 	enableAllowLAN  bool
+	enableLocked    bool
 	updateInterface string
 	enableCount     int
 	updateCount     int
@@ -435,12 +445,13 @@ type fakeKillSwitch struct {
 	clearErr        error
 }
 
-func (f *fakeKillSwitch) Enable(_ context.Context, endpoints []string, allowLAN bool, _ bool) error {
+func (f *fakeKillSwitch) Enable(_ context.Context, endpoints []string, allowLAN bool, locked bool) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.enableCount++
 	f.enableEndpoints = append(f.enableEndpoints[:0], endpoints...)
 	f.enableAllowLAN = allowLAN
+	f.enableLocked = locked
 	if f.enableErr != nil {
 		return f.enableErr
 	}
@@ -869,6 +880,68 @@ func TestKillSwitchPermits_IncludesNaiveHostWhenPresent(t *testing.T) {
 	}
 }
 
+// Under a lockdown lock the daemon cannot resolve a transport's remote host —
+// the lock blocks DNS — so the client hands over the IPs it resolved while the
+// network was open. Without them, only Cloak (whose endpoint is a raw IP) can
+// be permitted and every DPI fallback is blocked by our own kill switch.
+func TestKillSwitchPermits_IncludesResolvedTransportIPs(t *testing.T) {
+	profile := testProfile()
+	profile.Naive = &state.NaiveProfile{RemoteHost: "naive.example.com", RemotePort: 8443, Username: "u", Password: "p"}
+	profile.TransportEndpointIPs = []string{"203.0.113.40", "203.0.113.41"}
+
+	permits := killSwitchPermits(profile)
+
+	for _, want := range []string{"203.0.113.40", "203.0.113.41"} {
+		if !slices.Contains(permits, want) {
+			t.Errorf("killSwitchPermits() = %v, want to contain resolved transport IP %s — a hostname permit can't be resolved behind an engaged lock", permits, want)
+		}
+	}
+}
+
+// With the hub's addresses in hand the daemon must not ask a resolver where a
+// node is: a system lookup goes out in cleartext and hands our node domains to
+// the user's ISP.
+func TestKillSwitchPermits_HubIPsReplaceNodeHostnames(t *testing.T) {
+	profile := testProfile()
+	profile.Cloak.RemoteHost = "192.0.2.50"
+	profile.Naive = &state.NaiveProfile{RemoteHost: "naive.example.com", RemotePort: 8443, Username: "u", Password: "p"}
+	profile.Reality = &state.RealityProfile{RemoteHost: "reality.example.com", RemotePort: 443, UUID: "u", PublicKey: "k", ShortID: "s"}
+	profile.TransportEndpointIPs = []string{"192.0.2.50"}
+
+	permits := killSwitchPermits(profile)
+
+	for _, host := range permits {
+		if net.ParseIP(host) == nil {
+			t.Errorf("killSwitchPermits() = %v, want IP literals only; %q would need a cleartext DNS lookup", permits, host)
+		}
+	}
+}
+
+func TestWithTransportBypassHosts_HubIPsReplaceNodeHostnames(t *testing.T) {
+	profile := testProfile()
+	profile.Cloak.RemoteHost = "192.0.2.50"
+	profile.Hysteria2 = &state.Hysteria2Profile{RemoteHost: "hy2.example.com", RemotePort: 443, Password: "p", ObfsPassword: "o"}
+	profile.TransportEndpointIPs = []string{"192.0.2.50"}
+
+	bypass := withTransportBypassHosts(profile)
+
+	if slices.Contains(bypass.BypassHosts, "hy2.example.com") {
+		t.Errorf("withTransportBypassHosts().BypassHosts = %v, want no node hostname — routing it would need a cleartext lookup", bypass.BypassHosts)
+	}
+}
+
+func TestWithTransportBypassHosts_IncludesResolvedTransportIPs(t *testing.T) {
+	profile := testProfile()
+	profile.Reality = &state.RealityProfile{RemoteHost: "reality.example.com", RemotePort: 443, UUID: "u", PublicKey: "k", ShortID: "s"}
+	profile.TransportEndpointIPs = []string{"203.0.113.40"}
+
+	bypass := withTransportBypassHosts(profile)
+
+	if !slices.Contains(bypass.BypassHosts, "203.0.113.40") {
+		t.Errorf("withTransportBypassHosts().BypassHosts = %v, want the resolved transport IP so its route is installed without a lookup", bypass.BypassHosts)
+	}
+}
+
 func TestKillSwitchPermits_CloakOnlyProfileUnaffected(t *testing.T) {
 	profile := testProfile()
 
@@ -876,6 +949,174 @@ func TestKillSwitchPermits_CloakOnlyProfileUnaffected(t *testing.T) {
 
 	if len(permits) != 1 || permits[0] != "vpn.example.com" {
 		t.Errorf("killSwitchPermits() = %v, want exactly [vpn.example.com] for a Cloak-only profile", permits)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// PermitHosts — control-plane hole in an engaged lockdown lock
+// ---------------------------------------------------------------------------
+
+// stubKillSwitchState points the persisted-state reader at a fixed value for
+// the duration of the test. PermitHosts reuses the persisted AllowLAN/Locked
+// flags so opening a hole never silently changes what kind of lock is engaged.
+func stubKillSwitchState(t *testing.T, st platform.KillSwitchState) {
+	t.Helper()
+	original := loadKillSwitchState
+	loadKillSwitchState = func() (platform.KillSwitchState, error) { return st, nil }
+	t.Cleanup(func() { loadKillSwitchState = original })
+}
+
+func TestPermitHosts_AddsControlPlaneIPToEngagedLock(t *testing.T) {
+	ks := &fakeKillSwitch{active: true}
+	svc := newTestService(t, &fakeCloakManager{}, &fakeNaiveManager{}, &fakeWGManager{}, ks, testProfile())
+	stubKillSwitchState(t, platform.KillSwitchState{
+		Active:      true,
+		AllowLAN:    true,
+		EndpointIPs: []string{"198.51.100.9"},
+		Locked:      true,
+	})
+
+	if err := svc.PermitHosts(context.Background(), []string{"203.0.113.7"}); err != nil {
+		t.Fatalf("PermitHosts() error = %v", err)
+	}
+
+	want := []string{"198.51.100.9", "203.0.113.7"}
+	if !slices.Equal(ks.enableEndpoints, want) {
+		t.Errorf("Enable() endpoints = %v, want %v — the hub must be reachable through a lockdown lock or the app can never provision a profile", ks.enableEndpoints, want)
+	}
+	if !ks.enableAllowLAN {
+		t.Error("Enable() allowLAN = false, want the persisted value (true) preserved")
+	}
+	if !ks.enableLocked {
+		t.Error("Enable() locked = false, want the persisted lockdown flag preserved — otherwise the lock stops surviving daemon restarts")
+	}
+}
+
+// Only IP literals: the lock blocks DNS, so a hostname could not be resolved
+// while it is engaged, and resolving one is exactly what the lock prevents.
+func TestPermitHosts_IgnoresHostnames(t *testing.T) {
+	ks := &fakeKillSwitch{active: true}
+	svc := newTestService(t, &fakeCloakManager{}, &fakeNaiveManager{}, &fakeWGManager{}, ks, testProfile())
+	stubKillSwitchState(t, platform.KillSwitchState{Active: true, EndpointIPs: []string{"198.51.100.9"}, Locked: true})
+
+	err := svc.PermitHosts(context.Background(), []string{"hub.example.com"})
+
+	if err == nil {
+		t.Fatal("PermitHosts() error = nil, want an error when no permittable IP literal is known")
+	}
+	if ks.enableCount != 0 {
+		t.Errorf("Enable() called %d times, want 0 — a hostname must never widen the lock", ks.enableCount)
+	}
+}
+
+// The app only learns the hub's IP after it has talked to the hub, so on a cold
+// start under lockdown it has none to send. The daemon falls back to the hub IP
+// the last provisioned profile already carries in its WireGuard bypass hosts.
+func TestPermitHosts_FallsBackToStoredBypassHosts(t *testing.T) {
+	profile := testProfile()
+	profile.Cloak.RemoteHost = "192.0.2.50"
+	profile.WireGuard.BypassHosts = []string{"203.0.113.7"}
+	ks := &fakeKillSwitch{active: true}
+	svc := newTestService(t, &fakeCloakManager{}, &fakeNaiveManager{}, &fakeWGManager{}, ks, profile)
+	stubKillSwitchState(t, platform.KillSwitchState{Active: true, Locked: true})
+
+	if err := svc.PermitHosts(context.Background(), nil); err != nil {
+		t.Fatalf("PermitHosts() error = %v", err)
+	}
+
+	if !slices.Equal(ks.enableEndpoints, []string{"203.0.113.7"}) {
+		t.Errorf("Enable() endpoints = %v, want [203.0.113.7] from the stored profile's bypass hosts", ks.enableEndpoints)
+	}
+	if slices.Contains(ks.enableEndpoints, "192.0.2.50") {
+		t.Error("Enable() permitted the VPN endpoint; the server's IP is only unblocked by Connect, not by a control-plane permit")
+	}
+}
+
+func TestPermitHosts_NoopWhenNoLockEngaged(t *testing.T) {
+	ks := &fakeKillSwitch{}
+	svc := newTestService(t, &fakeCloakManager{}, &fakeNaiveManager{}, &fakeWGManager{}, ks, testProfile())
+
+	if err := svc.PermitHosts(context.Background(), []string{"203.0.113.7"}); err != nil {
+		t.Fatalf("PermitHosts() error = %v", err)
+	}
+	if ks.enableCount != 0 {
+		t.Errorf("Enable() called %d times, want 0 — with no lock engaged there is nothing to open", ks.enableCount)
+	}
+}
+
+func TestPermitHosts_SkipsWhenAlreadyPermitted(t *testing.T) {
+	ks := &fakeKillSwitch{active: true}
+	svc := newTestService(t, &fakeCloakManager{}, &fakeNaiveManager{}, &fakeWGManager{}, ks, testProfile())
+	stubKillSwitchState(t, platform.KillSwitchState{Active: true, EndpointIPs: []string{"203.0.113.7"}, Locked: true})
+
+	if err := svc.PermitHosts(context.Background(), []string{"203.0.113.7"}); err != nil {
+		t.Fatalf("PermitHosts() error = %v", err)
+	}
+	if ks.enableCount != 0 {
+		t.Errorf("Enable() called %d times, want 0 — the IP is already permitted", ks.enableCount)
+	}
+}
+
+// Engaging a lock must not cut the app off from the hub: the server list, the
+// subscription state and provisioning all run through it, and none of them can
+// re-resolve anything while the lock blocks DNS.
+func TestEngageKillSwitch_PermitsStoredHubIPOnly(t *testing.T) {
+	profile := testProfile()
+	profile.Cloak.RemoteHost = "192.0.2.50"
+	profile.WireGuard.BypassHosts = []string{"203.0.113.7"}
+	ks := &fakeKillSwitch{}
+	svc := newTestService(t, &fakeCloakManager{}, &fakeNaiveManager{}, &fakeWGManager{}, ks, profile)
+
+	if err := svc.EngageKillSwitch(context.Background(), profile.ID, false); err != nil {
+		t.Fatalf("EngageKillSwitch() error = %v", err)
+	}
+
+	if !slices.Equal(ks.enableEndpoints, []string{"203.0.113.7"}) {
+		t.Errorf("Enable() endpoints = %v, want just the hub IP [203.0.113.7]", ks.enableEndpoints)
+	}
+	if slices.Contains(ks.enableEndpoints, "192.0.2.50") {
+		t.Error("Enable() permitted the VPN endpoint at engage time; a server's IP is only unblocked once that server is selected to connect")
+	}
+	if !ks.enableLocked {
+		t.Error("Enable() locked = false, want a lock that survives daemon restarts")
+	}
+}
+
+// Nothing provisioned yet means no hub IP is known — the lock still has to
+// engage, as a pure block-all.
+func TestEngageKillSwitch_BlocksAllWhenNoHubIPKnown(t *testing.T) {
+	ks := &fakeKillSwitch{}
+	svc := newTestService(t, &fakeCloakManager{}, &fakeNaiveManager{}, &fakeWGManager{}, ks)
+
+	if err := svc.EngageKillSwitch(context.Background(), "", false); err != nil {
+		t.Fatalf("EngageKillSwitch() error = %v", err)
+	}
+
+	if ks.enableCount != 1 {
+		t.Fatalf("Enable() called %d times, want 1", ks.enableCount)
+	}
+	if len(ks.enableEndpoints) != 0 {
+		t.Errorf("Enable() endpoints = %v, want none", ks.enableEndpoints)
+	}
+}
+
+// A lock persisted by an older daemon carries no hub permit. Restarting into it
+// must not leave the app unable to reach the hub — that is the state a stuck
+// user upgrades from.
+func TestReconcileStartup_ReAppliedLockdownLockRegainsHubPermit(t *testing.T) {
+	profile := testProfile()
+	profile.WireGuard.BypassHosts = []string{"203.0.113.7"}
+	ks := &fakeKillSwitch{}
+	svc := newTestService(t, &fakeCloakManager{}, &fakeNaiveManager{}, &fakeWGManager{}, ks, profile)
+	stubKillSwitchState(t, platform.KillSwitchState{Active: true, Locked: true, EndpointIPs: nil})
+
+	svc.reconcileStartup(context.Background())
+
+	if !slices.Contains(ks.enableEndpoints, "203.0.113.7") {
+		t.Errorf("Enable() endpoints = %v, want the hub IP re-permitted on restart", ks.enableEndpoints)
+	}
+	if !ks.enableLocked {
+		t.Error("Enable() locked = false, want the lockdown lock re-applied as an intentional lock")
 	}
 }
 
@@ -1226,11 +1467,10 @@ func TestConnect_ConnectedReportsWireGuardHandshake(t *testing.T) {
 	}
 }
 
-// TestHealthCheck_StaleWireGuardHandshakeMarksError proves the ongoing health
-// check flags a tunnel that goes silent mid-session (no handshake within the
-// stale window) even though the interface and transport still report running.
-func TestHealthCheck_StaleWireGuardHandshakeMarksError(t *testing.T) {
-	profile := state.Profile{
+// silentTunnelProfile builds a cloak + naive profile for the silent-tunnel
+// health-check tests.
+func silentTunnelProfile() state.Profile {
+	return state.Profile{
 		ID:    "p1",
 		Name:  "p1",
 		Cloak: state.CloakProfile{RemoteHost: "example.com", RemotePort: 443, LocalPort: 51821},
@@ -1240,6 +1480,70 @@ func TestHealthCheck_StaleWireGuardHandshakeMarksError(t *testing.T) {
 			ConfigText: "[Interface]\nPrivateKey=x\n[Peer]\nEndpoint=127.0.0.1:51821\nPublicKey=y\nAllowedIPs=0.0.0.0/0\n",
 		},
 	}
+}
+
+// goSilent makes the tunnel look silent: the newest handshake is well past the
+// stale window, as after a suspend/resume that killed the transport's session.
+func goSilent(wgMgr *fakeWGManager) {
+	wgMgr.mu.Lock()
+	defer wgMgr.mu.Unlock()
+	wgMgr.handshakeUnix = time.Now().Add(-(wireGuardHandshakeStaleAfter + time.Minute)).Unix()
+}
+
+// TestHealthCheck_SilentTunnelRebuildsSession proves the ongoing health check
+// recovers a tunnel that goes silent mid-session: the transport's session is
+// dead even though the transport and interface both still report running, so
+// only a full transport restart brings traffic back.
+func TestHealthCheck_SilentTunnelRebuildsSession(t *testing.T) {
+	profile := silentTunnelProfile()
+	cloak := &fakeCloakManager{}
+	naive := &fakeNaiveManager{}
+	wgMgr := &fakeWGManager{}
+	ks := &fakeKillSwitch{}
+	svc := newTestService(t, cloak, naive, wgMgr, ks, profile)
+
+	if err := svc.Connect(context.Background(), "p1", ConnectOptions{PreferredTransport: "naive"}); err != nil {
+		t.Fatalf("connect failed: %v", err)
+	}
+	wgMgr.mu.Lock()
+	startsAfterConnect := wgMgr.startCount
+	wgMgr.mu.Unlock()
+
+	goSilent(wgMgr)
+	svc.runHealthCheck(context.Background())
+
+	status := svc.Status(context.Background())
+	if status.State != state.StateConnected {
+		t.Fatalf("state = %q, want CONNECTED after the silent tunnel was rebuilt", status.State)
+	}
+	if status.ActiveTransport != "naive" {
+		t.Errorf("ActiveTransport = %q, want naive (the rebuild reuses the session's transport)", status.ActiveTransport)
+	}
+	naive.mu.Lock()
+	naiveStopped := naive.stopCalled
+	naive.mu.Unlock()
+	if !naiveStopped {
+		t.Error("expected the transport to be stopped during the rebuild; a restart is the only thing that re-dials its session")
+	}
+	wgMgr.mu.Lock()
+	restarts := wgMgr.startCount - startsAfterConnect
+	wgMgr.mu.Unlock()
+	if restarts != 1 {
+		t.Errorf("wireguard restarts during rebuild = %d, want 1", restarts)
+	}
+	if !ks.Active() {
+		t.Error("expected the kill switch to stay armed across the rebuild — the device must be fail-closed while the tunnel is down")
+	}
+	if ks.clearCount != 0 {
+		t.Errorf("kill switch clear count = %d, want 0 across a rebuild", ks.clearCount)
+	}
+}
+
+// TestHealthCheck_SilentTunnelRebuildFailureMarksError proves a silent tunnel
+// that cannot be rebuilt still surfaces as an error rather than sitting there
+// reporting connected.
+func TestHealthCheck_SilentTunnelRebuildFailureMarksError(t *testing.T) {
+	profile := silentTunnelProfile()
 	cloak := &fakeCloakManager{}
 	naive := &fakeNaiveManager{}
 	wgMgr := &fakeWGManager{}
@@ -1250,15 +1554,82 @@ func TestHealthCheck_StaleWireGuardHandshakeMarksError(t *testing.T) {
 		t.Fatalf("connect failed: %v", err)
 	}
 
-	// Tunnel goes silent: the newest handshake is well past the stale window.
-	wgMgr.mu.Lock()
-	wgMgr.handshakeUnix = time.Now().Add(-(wireGuardHandshakeStaleAfter + time.Minute)).Unix()
-	wgMgr.mu.Unlock()
+	// The transport now refuses to come back — e.g. its server is unreachable
+	// on the network the host woke up on.
+	naive.mu.Lock()
+	naive.startErr = errors.New("boom")
+	naive.mu.Unlock()
 
+	goSilent(wgMgr)
 	svc.runHealthCheck(context.Background())
 
 	if st := svc.Status(context.Background()).State; st != state.StateError {
-		t.Fatalf("state = %q, want ERROR after stale handshake", st)
+		t.Fatalf("state = %q, want ERROR after a failed rebuild", st)
+	}
+	if !ks.Active() {
+		t.Error("expected the kill switch to stay armed after a failed rebuild")
+	}
+}
+
+// TestHealthCheck_SilentTunnelRebuildRepointsEndpoint proves the rebuilt tunnel
+// is aimed at the port the *new* bridge bound. The live profile's LocalPort was
+// mutated to the previous session's bound port, so rebuilding from it would
+// leave WireGuard talking to a port nothing listens on any more.
+func TestHealthCheck_SilentTunnelRebuildRepointsEndpoint(t *testing.T) {
+	profile := silentTunnelProfile()
+	profile.Naive.LocalPort = 51821
+	cloak := &fakeCloakManager{}
+	naive := &fakeNaiveManager{boundLocalPort: 61235}
+	wgMgr := &fakeWGManager{}
+	ks := &fakeKillSwitch{}
+	svc := newTestService(t, cloak, naive, wgMgr, ks, profile)
+
+	if err := svc.Connect(context.Background(), "p1", ConnectOptions{PreferredTransport: "naive"}); err != nil {
+		t.Fatalf("connect failed: %v", err)
+	}
+
+	// The second bridge binds the same ephemeral port as the first — the case
+	// that catches a rebuild seeded from the mutated live profile, because then
+	// bound == configured and the rebind sees nothing to rewrite.
+	goSilent(wgMgr)
+	svc.runHealthCheck(context.Background())
+
+	if st := svc.Status(context.Background()).State; st != state.StateConnected {
+		t.Fatalf("state = %q, want CONNECTED after rebuild", st)
+	}
+	wgMgr.mu.Lock()
+	config := wgMgr.lastStartConfig
+	wgMgr.mu.Unlock()
+	if !strings.Contains(config, "Endpoint=127.0.0.1:61235") {
+		t.Errorf("rebuilt wireguard config = %q, want the bridge port 61235", config)
+	}
+}
+
+// TestHealthCheck_SilentTunnelRebuildKeepsAllowLAN proves the rebuild restores
+// the session the user asked for: AllowLAN shapes both the WireGuard
+// AllowedIPs and the kill switch, so losing it would silently tighten the
+// tunnel on recovery.
+func TestHealthCheck_SilentTunnelRebuildKeepsAllowLAN(t *testing.T) {
+	profile := silentTunnelProfile()
+	cloak := &fakeCloakManager{}
+	naive := &fakeNaiveManager{}
+	wgMgr := &fakeWGManager{}
+	ks := &fakeKillSwitch{}
+	svc := newTestService(t, cloak, naive, wgMgr, ks, profile)
+
+	opts := ConnectOptions{PreferredTransport: "naive", AllowLAN: true, Lockdown: true}
+	if err := svc.Connect(context.Background(), "p1", opts); err != nil {
+		t.Fatalf("connect failed: %v", err)
+	}
+
+	goSilent(wgMgr)
+	svc.runHealthCheck(context.Background())
+
+	if st := svc.Status(context.Background()).State; st != state.StateConnected {
+		t.Fatalf("state = %q, want CONNECTED after rebuild", st)
+	}
+	if got := svc.getSessionOpts(); got != opts {
+		t.Errorf("session options after rebuild = %+v, want %+v", got, opts)
 	}
 }
 

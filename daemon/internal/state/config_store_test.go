@@ -94,10 +94,12 @@ func TestGet_ClonesTransportProfiles(t *testing.T) {
 		origSnowflakePort = 51824
 		origFront         = "front.example.com"
 		origICE           = "stun:stun.example.com:3478"
+		origEndpointIP    = "203.0.113.40"
 	)
 	profile := state.Profile{
-		ID:   "p1",
-		Name: "Test",
+		ID:                   "p1",
+		Name:                 "Test",
+		TransportEndpointIPs: []string{origEndpointIP},
 		Reality: &state.RealityProfile{
 			RemoteHost: "example.com",
 			RemotePort: 443,
@@ -137,6 +139,7 @@ func TestGet_ClonesTransportProfiles(t *testing.T) {
 	fp.Snowflake.LocalPort = 61824
 	fp.Snowflake.FrontDomains[0] = "leaked.example.com"
 	fp.Snowflake.ICEServers[0] = "stun:leaked.example.com:3478"
+	fp.TransportEndpointIPs[0] = "198.51.100.99"
 
 	second := cs.Get()
 	if len(second.Profiles) != 1 {
@@ -178,5 +181,9 @@ func TestGet_ClonesTransportProfiles(t *testing.T) {
 	if sp.Snowflake.ICEServers[0] != origICE {
 		t.Errorf("Snowflake.ICEServers[0] = %q, want unchanged %q (slice aliased into store)",
 			sp.Snowflake.ICEServers[0], origICE)
+	}
+	if sp.TransportEndpointIPs[0] != origEndpointIP {
+		t.Errorf("TransportEndpointIPs[0] = %q, want unchanged %q (slice aliased into store) — these drive kill-switch permits",
+			sp.TransportEndpointIPs[0], origEndpointIP)
 	}
 }

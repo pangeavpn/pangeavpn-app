@@ -1,11 +1,12 @@
 import { generateKeyPairSync } from "node:crypto";
 import https from "node:https";
-import { URL } from "node:url";
 import { net } from "electron";
 import type { Profile } from "@pangeavpn/shared-types";
 import type { ServerInfo, SubscriptionInfo } from "../shared/ipc";
 import { MTU_DEFAULT, normalizeMtu, normalizeMtuOrDefault } from "../shared/mtu";
+import { resolveNaiveEndpoint } from "../shared/naiveEndpoint";
 import { encryptRequest, decryptResponse, type EncryptedResponse } from "./secureChannel";
+import { sanitizeLog } from "./logSanitize";
 
 export class AuthError extends Error {
   status: number;
@@ -13,6 +14,34 @@ export class AuthError extends Error {
     super(message);
     this.name = "AuthError";
     this.status = status;
+  }
+}
+
+/**
+ * The account is fine, the subscription ran out.
+ *
+ * Deliberately NOT an AuthError: the handlers treat those as "this identity is
+ * no longer valid" and call auth.logout(), which clears the saved token AND the
+ * identity keypair. A new keypair registers as a NEW device, so treating an
+ * expiry that way would burn one of the account's device slots every time a
+ * prepaid customer lapsed and topped up — and crypto accounts lapse by design.
+ * The user stays signed in and simply cannot connect until they pay.
+ */
+export class SubscriptionExpiredError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "SubscriptionExpiredError";
+  }
+}
+
+/**
+ * The user pressed Stop while this request was in flight. Not a failure — the
+ * caller unwinds to an idle UI with no error toast.
+ */
+export class ConnectCancelledError extends Error {
+  constructor() {
+    super("Connect cancelled");
+    this.name = "ConnectCancelledError";
   }
 }
 
@@ -71,13 +100,13 @@ async function tryDoHProvider(providerUrl: string, accept: string, hostname: str
     const data = (await response.json()) as DohResponse;
     const answers = data.Answer?.filter((a) => a.data) ?? [];
     if (answers.length > 0) {
-      console.log(`[DoH] ${providerUrl} resolved ${hostname} → ${answers[0].data}`);
+      console.log(`[DoH] ${providerUrl} resolved ${hostname} → ${sanitizeLog(answers[0].data)}`);
       return answers[0].data;
     }
     console.log(`[DoH] ${providerUrl} returned no answers for ${hostname}`);
     return null;
   } catch (err) {
-    console.log(`[DoH] ${providerUrl} failed: ${err instanceof Error ? err.message : err}`);
+    console.log(`[DoH] ${providerUrl} failed: ${sanitizeLog(err)}`);
     return null;
   } finally {
     clearTimeout(timer);
@@ -96,33 +125,17 @@ async function resolveViaDoH(hostname: string): Promise<string | null> {
 }
 
 /**
- * Resolve a fallback/alternative transport's (NaiveProxy, Reality, Hysteria2)
- * remote host to an IP so it can be excluded from AllowedIPs (see
- * allowedIPsExcludingAll). Unlike Cloak, whose remoteHost from the hub is
- * already a raw IP, these transports' remoteHost is a real domain name (their
- * TLS front needs one to obtain a genuine ACME certificate; Reality needs one
- * for its SNI camouflage — see hub/config/nodes.json in the hub repo, e.g.
- * naive-eu-west-1.pangeavpn.org), so it must be resolved before it can be
- * turned into a /32 exclusion.
- *
- * Reuses the same DoH infrastructure already used to resolve the hub's own
- * hostname (see resolveViaDoH above / ensureHub), rather than falling back
- * to plain system DNS, since this client otherwise avoids leaking DNS
- * queries in cleartext. Returns null (never throws) on resolution failure
- * so callers can degrade gracefully instead of failing provisioning.
+ * Deduplicated, non-empty entries, order preserved. Used for the node endpoint
+ * addresses handed to the daemon, which come from the hub and can repeat when
+ * several transports share the node's IP.
  */
-async function resolveTransportRemoteIp(host: string): Promise<string | null> {
-  if (isIPv4Literal(host)) return host;
-  return resolveViaDoH(host);
-}
-
-/** Extract a hostname from a broker URL, or null if it doesn't parse. */
-function safeHostname(url: string): string | null {
-  try {
-    return new URL(url).hostname || null;
-  } catch {
-    return null;
+function uniqueNonEmpty(values: (string | undefined | null)[]): string[] {
+  const out: string[] = [];
+  for (const value of values) {
+    const trimmed = value?.trim();
+    if (trimmed && !out.includes(trimmed)) out.push(trimmed);
   }
+  return out;
 }
 
 /**
@@ -302,11 +315,6 @@ function allowedIPsExcludingAll(excludeIPs: string[]): string[] {
   return blocks.map((b) => `${intToIp(b.base)}/${b.prefixLen}`);
 }
 
-/** Calculate AllowedIPs CIDRs that cover 0.0.0.0/0 minus a single excluded IP */
-function allowedIPsExcluding(excludeIP: string): string[] {
-  return allowedIPsExcludingAll([excludeIP]);
-}
-
 /** Matches a literal dotted-quad IPv4 address (not a hostname). */
 const IPV4_LITERAL_PATTERN = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
 
@@ -370,6 +378,14 @@ export class PangeaApiClient {
   private dohResolvedIp: string | null = null;
   private hubReady = false;
 
+  // Last hub IP that worked, restored from settings at startup. It is the only
+  // path to the hub while a Lockdown kill switch is engaged: the lock permits
+  // this IP (the daemon is told to) but blocks DNS and DoH, so without it the
+  // client could never re-learn where the hub is and provisioning would fail
+  // with EACCES. Survives resetHubResolution() — it is a cache, not a result.
+  private cachedHubIp: string | null = null;
+  private onHubIpResolved: ((ip: string) => void) | null = null;
+
   constructor() {
     this.timeoutMs = 15000;
   }
@@ -418,6 +434,30 @@ export class PangeaApiClient {
 
   getWireguardMtu(): number {
     return this.wireguardMtu;
+  }
+
+  /** Seed the last known good hub IP (from settings) at startup. */
+  setCachedHubIp(ip: unknown): void {
+    this.cachedHubIp = typeof ip === "string" && isIPv4Literal(ip.trim()) ? ip.trim() : null;
+  }
+
+  /**
+   * The hub's IP on the current path, or the last known good one. The daemon
+   * needs it to punch a control-plane hole in an engaged Lockdown lock.
+   */
+  getHubIp(): string | null {
+    return this.dohResolvedIp ?? this.cachedHubIp;
+  }
+
+  /** Called whenever a new hub IP proves to work, so it can be persisted. */
+  onHubIp(listener: (ip: string) => void): void {
+    this.onHubIpResolved = listener;
+  }
+
+  private rememberHubIp(ip: string): void {
+    if (this.cachedHubIp === ip) return;
+    this.cachedHubIp = ip;
+    this.onHubIpResolved?.(ip);
   }
 
   setLicenseKey(key: string): void {
@@ -492,6 +532,8 @@ export class PangeaApiClient {
   /**
    * Ensure we have a working connection strategy to the hub API.
    * Tries in order:
+   *   0. Last known good IP (no lookup at all — the only path that survives an
+   *      engaged Lockdown lock, which blocks DNS and DoH alike)
    *   1. Direct domain (normal DNS works)
    *   2. DoH + no SNI (DNS blocked / DPI — resolve via encrypted DNS,
    *      connect to resolved IP with no SNI so DPI can't see the domain)
@@ -502,6 +544,19 @@ export class PangeaApiClient {
     }
 
     console.log(`[HubURL] Finding working API connection...`);
+
+    // 0. Last known good IP — no lookup, so it works under a lockdown lock.
+    if (this.cachedHubIp && this.directIpEnabled) {
+      console.log(`[HubURL] Trying cached hub IP ${this.cachedHubIp}`);
+      this.dohResolvedIp = this.cachedHubIp;
+      if (await this.trySecureProbeCurrentPath()) {
+        console.log(`[HubURL] Cached hub IP works`);
+        this.hubReady = true;
+        return;
+      }
+      console.log(`[HubURL] Cached hub IP failed`);
+      this.dohResolvedIp = null;
+    }
 
     // 1. Try direct domain (normal DNS) — skip if direct IP only mode
     if (!this.directIpOnly) {
@@ -525,6 +580,7 @@ export class PangeaApiClient {
         this.dohResolvedIp = resolvedIp;
         if (await this.trySecureProbeCurrentPath()) {
           console.log(`[HubURL] DoH secure probe works`);
+          this.rememberHubIp(resolvedIp);
           this.hubReady = true;
           return;
         }
@@ -600,6 +656,7 @@ export class PangeaApiClient {
             const resolvedIp = await resolveViaDoH(HUB_HOSTNAME);
             if (resolvedIp) {
               this.dohResolvedIp = resolvedIp;
+              this.rememberHubIp(resolvedIp);
               rawResponse = await fetchDohResolved(resolvedIp, HUB_HOSTNAME, "/v1/secure", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -647,6 +704,7 @@ export class PangeaApiClient {
           if (retryText.trimStart().startsWith("<")) {
             throw new Error("Response intercepted even via DoH");
           }
+          this.rememberHubIp(resolvedIp);
           const retryEncrypted = JSON.parse(retryText) as EncryptedResponse;
           const retryInner = decryptResponse(aesKey, retryEncrypted);
           return new Response(JSON.stringify(retryInner.body), {
@@ -685,6 +743,11 @@ export class PangeaApiClient {
 
       if (!response.ok) {
         const text = await response.text();
+        if (text.includes("SUBSCRIPTION_EXPIRED")) {
+          throw new SubscriptionExpiredError(
+            "This account's subscription has expired. Top up or resubscribe, then sign in again."
+          );
+        }
         throw new Error(`Token login failed (${response.status}): ${text}`);
       }
 
@@ -774,12 +837,12 @@ export class PangeaApiClient {
       const data = await this.hubRequest<{ subscription: SubscriptionInfo | null }>("GET", "/api/client/subscription");
       return data.subscription ?? null;
     } catch (err) {
-      console.warn("[getSubscription]", err instanceof Error ? err.message : err);
+      console.warn("[getSubscription]", sanitizeLog(err));
       return null;
     }
   }
 
-  async provision(serverId: string): Promise<Profile> {
+  async provision(serverId: string, signal?: AbortSignal): Promise<Profile> {
     if (!this.licenseKey) throw new Error("Not authenticated");
 
     const server = this.cachedServers.find((s) => s.id === serverId);
@@ -788,12 +851,17 @@ export class PangeaApiClient {
     // Ephemeral WG keypair — generated fresh per connection, never stored
     const keyPair = generateWireGuardKeyPair();
 
-    const reg = await this.hubRequest<RegisterResponse>("POST", "/api/register", {
-      licenseKey: this.licenseKey,
-      identityPubkey: this.identityPubkey,
-      wgPubkey: keyPair.publicKey,
-      region: serverId
-    });
+    const reg = await this.hubRequest<RegisterResponse>(
+      "POST",
+      "/api/register",
+      {
+        licenseKey: this.licenseKey,
+        identityPubkey: this.identityPubkey,
+        wgPubkey: keyPair.publicKey,
+        region: serverId
+      },
+      signal
+    );
 
     if (!reg.serverPubkey || !reg.assignedIP || !reg.dns) {
       throw new AuthError(
@@ -807,78 +875,26 @@ export class PangeaApiClient {
       .map((s) => s.trim())
       .filter(Boolean);
 
-    // Every transport that might actually dial out (Cloak always; NaiveProxy
-    // and Reality/Hysteria2/Snowflake when configured as fallbacks/alternatives)
-    // needs its remote host excluded from AllowedIPs, or the OS would try to
-    // route that connection attempt back through the tunnel it's still
-    // establishing. Cloak's remoteHost is always a raw IP from the hub. The
-    // others are real domain names (their TLS front needs a genuine ACME
-    // cert), so they must be resolved first.
-    const excludeIPs = [server.cloak.remoteHost];
-    if (server.naive) {
-      const naiveIp = await resolveTransportRemoteIp(server.naive.remoteHost);
-      if (naiveIp) {
-        excludeIPs.push(naiveIp);
-      } else {
-        // Fail open, not closed: NaiveProxy is a fallback-of-last-resort —
-        // Cloak is expected to work in the overwhelming majority of
-        // connections, and Cloak's own exclusion above is unaffected by
-        // this failure. Losing the ability to fall back to NaiveProxy this
-        // session is far preferable to blocking provisioning (and therefore
-        // every connection, including plain Cloak ones) on a DoH lookup for
-        // a host that's only needed if Cloak later fails.
-        console.warn(
-          `[provision] Could not resolve NaiveProxy remote host "${server.naive.remoteHost}" to an IP; ` +
-          "AllowedIPs will not exclude it. If Cloak fails and the daemon falls back to NaiveProxy, " +
-          "its own connection attempt could be routed back through the tunnel (routing loop)."
-        );
-      }
-    }
-    if (server.reality) {
-      const realityIp = await resolveTransportRemoteIp(server.reality.remoteHost);
-      if (realityIp) {
-        excludeIPs.push(realityIp);
-      } else {
-        // Same fail-open reasoning as NaiveProxy above: Reality is a
-        // last-resort fallback, tried only after Cloak and NaiveProxy fail.
-        console.warn(
-          `[provision] Could not resolve Reality remote host "${server.reality.remoteHost}" to an IP; ` +
-          "AllowedIPs will not exclude it. If earlier transports fail and the daemon falls back to " +
-          "reality, its own connection attempt could be routed back through the tunnel (routing loop)."
-        );
-      }
-    }
-    if (server.hysteria2) {
-      const hysteria2Ip = await resolveTransportRemoteIp(server.hysteria2.remoteHost);
-      if (hysteria2Ip) {
-        excludeIPs.push(hysteria2Ip);
-      } else {
-        console.warn(
-          `[provision] Could not resolve Hysteria2 remote host "${server.hysteria2.remoteHost}" to an IP; ` +
-          "AllowedIPs will not exclude it. If selected as the active transport, its own connection " +
-          "attempt could be routed back through the tunnel (routing loop)."
-        );
-      }
-    }
-    if (server.snowflake) {
-      // Snowflake has no single remoteHost like the others: only the broker
-      // (rendezvous) host is excluded here. The actual WebRTC data-plane peer
-      // is a volunteer proxy discovered dynamically per-session and can't be
-      // resolved ahead of time, so it isn't (and can't be) covered by this
-      // exclusion list — same limitation documented on the daemon side
-      // (see snowflakeHosts in internal/api/service.go).
-      const brokerHost = safeHostname(server.snowflake.brokerURL);
-      const brokerIp = brokerHost ? await resolveTransportRemoteIp(brokerHost) : null;
-      if (brokerIp) {
-        excludeIPs.push(brokerIp);
-      } else {
-        console.warn(
-          `[provision] Could not resolve Snowflake broker host "${server.snowflake.brokerURL}" to an IP; ` +
-          "AllowedIPs will not exclude it. If selected as the active transport, its own rendezvous " +
-          "connection could be routed back through the tunnel (routing loop)."
-        );
-      }
-    }
+    // Transport endpoints must be excluded from AllowedIPs (or the dial routes
+    // into the tunnel it is establishing) and permitted through the kill switch.
+    // All from the hub — we never resolve a node domain ourselves: that leaks it
+    // to a third-party resolver and cannot work behind a Lockdown lock.
+    //
+    // IPv4 literals only: the AllowedIPs split does integer arithmetic on these,
+    // so an unvalidated hub hostname produced garbage CIDRs. A domain-only node
+    // still gets its bypass route from the daemon at WireGuard start.
+    const nodeIp = server.cloak.remoteHost;
+    const excludeIPs = uniqueNonEmpty([
+      nodeIp,
+      server.naive?.remoteIp,
+      server.reality?.remoteIp,
+      server.hysteria2?.remoteIp
+    ]).filter(isIPv4Literal);
+    // Snowflake is the exception and is left out: its broker is a third-party
+    // Tor host, not one of our nodes, and its data-plane peer is a volunteer
+    // proxy discovered per-session — neither address is ours to know up front.
+    // It stays release-gated in the daemon (see snowflakeReleaseGated), and
+    // ungating it needs its rendezvous addresses to come from the hub too.
 
     const cloakLocalPort = 51820;
     const configText = buildWireGuardConfig(
@@ -904,36 +920,45 @@ export class PangeaApiClient {
         password: "",
         ...(server.cloak.serverName ? { serverName: server.cloak.serverName } : {})
       },
+      // Naive dials the node, not its domain — the engine validates against
+      // serverName and maps it onto remoteHost. See resolveNaiveEndpoint.
       ...(server.naive ? {
         naive: {
           localPort: 0,
-          remoteHost: server.naive.remoteHost,
+          ...resolveNaiveEndpoint(server.naive, nodeIp),
           remotePort: server.naive.remotePort,
           username: server.naive.username,
-          password: server.naive.password,
-          ...(server.naive.serverName ? { serverName: server.naive.serverName } : {})
+          password: server.naive.password
         }
       } : {}),
+      // Reality and Hysteria2 dial the node's IP rather than its domain, so no
+      // lookup stands between them and the node — the difference between
+      // working and not working behind a Lockdown lock. The TLS ClientHello is
+      // unchanged: both carry their SNI in a field of their own, and where the
+      // hub sends none the domain is passed through as the SNI it would have
+      // been used for anyway.
       ...(server.reality ? {
         reality: {
           localPort: 0,
-          remoteHost: server.reality.remoteHost,
+          remoteHost: server.reality.remoteIp ?? nodeIp,
           remotePort: server.reality.remotePort,
           uuid: server.reality.uuid,
           publicKey: server.reality.publicKey,
           shortId: server.reality.shortId,
           ...(server.reality.flow ? { flow: server.reality.flow } : {}),
+          // Reality falls back to its own cover SNI when this is absent, so the
+          // domain is only passed through when the hub named one.
           ...(server.reality.serverName ? { serverName: server.reality.serverName } : {})
         }
       } : {}),
       ...(server.hysteria2 ? {
         hysteria2: {
           localPort: 0,
-          remoteHost: server.hysteria2.remoteHost,
+          remoteHost: server.hysteria2.remoteIp ?? nodeIp,
           remotePort: server.hysteria2.remotePort,
           password: server.hysteria2.password,
           obfsPassword: server.hysteria2.obfsPassword,
-          ...(server.hysteria2.serverName ? { serverName: server.hysteria2.serverName } : {}),
+          serverName: server.hysteria2.serverName ?? server.hysteria2.remoteHost,
           ...(server.hysteria2.pinSha256 ? { pinSha256: server.hysteria2.pinSha256 } : {})
         }
       } : {}),
@@ -947,11 +972,21 @@ export class PangeaApiClient {
           ...(server.snowflake.iceServers ? { iceServers: server.snowflake.iceServers } : {})
         }
       } : {}),
+      // What the daemon permits through the kill switch without a lookup.
+      transportEndpointIPs: excludeIPs,
       wireguard: {
         configText,
         tunnelName: "pangeavpn",
         dns: dnsServers,
-        bypassHosts: this.dohResolvedIp ? [this.dohResolvedIp] : []
+        // The hub's IP, so the daemon keeps it reachable: outside the tunnel for
+        // routing, and through the kill switch so re-provisioning during a
+        // switch — and provisioning under a Lockdown lock — still works. Falls
+        // back to the last known good IP when this session reached the hub by
+        // domain instead of resolving it.
+        bypassHosts: (() => {
+          const hubIp = this.getHubIp();
+          return hubIp ? [hubIp] : [];
+        })()
       }
     };
   }
@@ -963,9 +998,25 @@ export class PangeaApiClient {
     this.identityPubkey = null;
   }
 
-  private async hubRequest<T>(method: string, route: string, body?: unknown): Promise<T> {
+  /**
+   * @param externalSignal Aborts this request when the caller's work is
+   *   cancelled — e.g. the user pressing Stop mid-connect. Composed with the
+   *   timeout controller so either can abort, and requests without one behave
+   *   exactly as before.
+   */
+  private async hubRequest<T>(
+    method: string,
+    route: string,
+    body?: unknown,
+    externalSignal?: AbortSignal
+  ): Promise<T> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    const abortFromCaller = () => controller.abort();
+    if (externalSignal) {
+      if (externalSignal.aborted) controller.abort();
+      else externalSignal.addEventListener("abort", abortFromCaller, { once: true });
+    }
 
     try {
       const headers: Record<string, string> = {
@@ -984,6 +1035,13 @@ export class PangeaApiClient {
 
       if (!response.ok) {
         const text = await response.text();
+        // Check this before the auth branch: an expired subscription is a 403,
+        // but it must not log the user out (see SubscriptionExpiredError).
+        if (text.includes("SUBSCRIPTION_EXPIRED")) {
+          throw new SubscriptionExpiredError(
+            "Your subscription has expired. Top up or resubscribe to reconnect."
+          );
+        }
         if (response.status === 401 || response.status === 403 || text.includes("DEVICE_NOT_REGISTERED")) {
           throw new AuthError(`Hub API auth error (${response.status}): ${text}`, response.status);
         }
@@ -993,11 +1051,17 @@ export class PangeaApiClient {
       return (await response.json()) as T;
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") {
+        // Distinguish "the user stopped this" from "the hub is slow": the
+        // caller turns a cancellation into an idle UI, not an error toast.
+        if (externalSignal?.aborted) {
+          throw new ConnectCancelledError();
+        }
         throw new Error(`Hub API timeout (${method} ${route})`);
       }
       throw error;
     } finally {
       clearTimeout(timer);
+      externalSignal?.removeEventListener("abort", abortFromCaller);
     }
   }
 }

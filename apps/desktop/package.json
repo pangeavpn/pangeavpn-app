@@ -1,6 +1,6 @@
 {
   "name": "@pangeavpn/desktop",
-  "version": "0.4.4",
+  "version": "0.4.5",
   "private": true,
   "author": {
     "name": "Pangea",
@@ -16,12 +16,12 @@
   },
   "dependencies": {
     "@pangeavpn/shared-types": "file:../../packages/shared-types",
-    "electron-updater": "^6.8.3"
+    "electron-updater": "^6.8.9"
   },
   "devDependencies": {
     "@types/node": "^24.12.2",
     "electron": "^41.5.0",
-    "electron-builder": "^26.8.1",
+    "electron-builder": "^26.15.3",
     "typescript": "^6.0.3"
   },
   "build": {
@@ -128,8 +128,7 @@
     "mac": {
       "icon": "PangeaVPN.icns",
       "target": [
-        "pkg",
-        "zip"
+        "pkg"
       ],
       "category": "public.app-category.utilities",
       "extraResources": [

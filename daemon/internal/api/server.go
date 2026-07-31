@@ -95,6 +95,13 @@ type engageKillSwitchRequest struct {
 	AllowLAN  bool   `json:"allowLAN,omitempty"`
 }
 
+// permitHostsRequest carries control-plane IPs (the Pangea hub) that must stay
+// reachable through an engaged lockdown lock. IP literals only — see
+// Service.PermitHosts.
+type permitHostsRequest struct {
+	Hosts []string `json:"hosts,omitempty"`
+}
+
 type okResponse struct {
 	OK bool `json:"ok"`
 }
@@ -199,6 +206,29 @@ func NewHandler(token string, service *Service) http.Handler {
 		}
 
 		if err := service.EngageKillSwitch(r.Context(), req.ProfileID, req.AllowLAN); err != nil {
+			writeJSON(w, http.StatusInternalServerError, okResponse{OK: false})
+			return
+		}
+
+		writeJSON(w, http.StatusOK, okResponse{OK: true})
+	})))
+
+	mux.Handle("/killswitch/permit", auth.RequireBearer(token, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+
+		var req permitHostsRequest
+		if r.ContentLength > 0 {
+			r.Body = http.MaxBytesReader(w, r.Body, maxBodySize)
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid json")
+				return
+			}
+		}
+
+		if err := service.PermitHosts(r.Context(), req.Hosts); err != nil {
 			writeJSON(w, http.StatusInternalServerError, okResponse{OK: false})
 			return
 		}

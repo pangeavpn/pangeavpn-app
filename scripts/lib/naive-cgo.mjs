@@ -5,14 +5,8 @@ import process from "node:process";
 import { resolveNaiveCgoConfigDarwin } from "./naive-cgo-darwin.mjs";
 import { ensurePangeaNaiveLib } from "./naive-download.mjs";
 
-// The Windows default_libs list Chromium executables get automatically
-// (build/config/BUILD.gn:config("default_libs")) plus the pangea_naive
-// target's own transitive libs, read off a real GN executable link line.
-// See the naiveproxy transport design's
-// "Known risk" section for how this list was derived and why it can't be
-// discovered from pangea_naive.lib itself (static libraries don't carry
-// their consumer's required libs the way GN's complete_static_lib bundles
-// object code).
+// Chromium's default_libs plus pangea_naive's transitive libs, read off a real
+// GN link line — a static lib can't carry its consumer's required libs.
 const WINDOWS_SYSTEM_LIBS = [
   "-ladvapi32", "-lcomdlg32", "-ldbghelp", "-ldnsapi", "-lgdi32", "-lmsimg32",
   "-lodbc32", "-lodbccp32", "-loleaut32", "-lshell32", "-lshlwapi", "-luser32",
@@ -27,13 +21,25 @@ const GN_ARCH_DIR = { amd64: "pangea-x64", arm64: "pangea-arm64" };
 const CLANG_TARGET = { amd64: "x86_64-pc-windows-msvc", arm64: "aarch64-pc-windows-msvc" };
 const VCVARS_ARCH = { amd64: "x64", arm64: "arm64" };
 
-// Resolves the naive_cgo build config for the given Go arch ("amd64" |
-// "arm64") on the current platform (Windows here, darwin via
-// naive-cgo-darwin.mjs). Returns null (after logging why) if the naiveproxy
-// fork's build artifacts or a usable toolchain aren't available on this
-// machine — callers should fall back to building without the naive_cgo tag
-// (the stub transport) rather than failing the build.
+// Returns null when the lib or toolchain is missing so callers fall back to
+// the stub; PANGEA_REQUIRE_NAIVE turns that silent fallback into a failure.
 export function resolveNaiveCgoConfig(goArch, rootDir) {
+  const config = resolveConfig(goArch, rootDir);
+  if (!config && naiveIsRequired()) {
+    throw new Error(
+      `naive_cgo did not resolve for ${goArch} and PANGEA_REQUIRE_NAIVE is set; ` +
+        `see the naive_cgo warning above for the reason. Refusing to build the stub transport.`
+    );
+  }
+  return config;
+}
+
+function naiveIsRequired() {
+  const raw = String(process.env.PANGEA_REQUIRE_NAIVE ?? "").trim().toLowerCase();
+  return raw !== "" && raw !== "0" && raw !== "false";
+}
+
+function resolveConfig(goArch, rootDir) {
   if (process.platform === "darwin") {
     return resolveNaiveCgoConfigDarwin(goArch, rootDir);
   }
@@ -51,13 +57,11 @@ export function resolveNaiveCgoConfig(goArch, rootDir) {
   const naiveproxySrc =
     process.env.PANGEA_NAIVEPROXY_SRC || path.join(rootDir, "..", "naiveproxy", "src");
 
-  // Resolve the lib + header: a local Chromium build tree if present, else the
-  // pinned prebuilt fetched from the fork's release. The prebuilt is native
-  // COFF (built with use_thin_lto=false), so it links against any recent
-  // clang-cl — no longer only the exact pinned Chromium toolchain.
+  // A local Chromium build tree if present, else the pinned prebuilt. The
+  // prebuilt is native COFF, so it links against any recent clang-cl.
   let libPath = path.join(naiveproxySrc, "out", gnArchDir, "obj", "net", "pangea_naive.lib");
   let headerDir = path.join(naiveproxySrc, "pangea", "capi");
-  let headerPath = path.join(headerDir, "pangea_naive_capi.h");
+  const headerPath = path.join(headerDir, "pangea_naive_capi.h");
   if (!fs.existsSync(libPath) || !fs.existsSync(headerPath)) {
     const prebuilt = ensurePangeaNaiveLib(goArch, rootDir);
     if (!prebuilt) {
@@ -69,12 +73,10 @@ export function resolveNaiveCgoConfig(goArch, rootDir) {
     }
     libPath = path.join(prebuilt.libDir, prebuilt.libName);
     headerDir = prebuilt.headerDir;
-    headerPath = path.join(headerDir, "pangea_naive_capi.h");
   }
 
-  // Resolve a clang for cgo's compile+link: the pinned Chromium clang from a
-  // local checkout if present, else a system clang-cl (LLVM is preinstalled on
-  // CI runners). Native-COFF pangea_naive.lib links against either.
+  // Pinned Chromium clang from a local checkout if present, else system
+  // clang-cl (preinstalled on CI runners); the COFF lib links against either.
   const clangPath = resolveClang(naiveproxySrc);
   if (!clangPath) {
     console.warn(
@@ -122,11 +124,8 @@ function toForwardSlash(p) {
   return p.replaceAll("\\", "/");
 }
 
-// Resolves a clang.exe (the GCC-style driver name cgo invokes) for the CC
-// wrapper. Prefers the pinned Chromium toolchain from a local naiveproxy
-// checkout; else falls back to a system clang-cl via PANGEA_CLANG_CL, the
-// default LLVM install dir, or PATH. Returns the clang.exe path, or null when
-// none is found. Native-COFF pangea_naive.lib links against any recent clang.
+// Finds the clang.exe cgo invokes: pinned Chromium toolchain first, else a
+// system clang-cl via PANGEA_CLANG_CL, the LLVM install dir, or PATH.
 function resolveClang(naiveproxySrc) {
   const pinnedBin = path.join(naiveproxySrc, "third_party", "llvm-build", "Release+Asserts", "bin");
   const candidates = [
@@ -143,10 +142,8 @@ function resolveClang(naiveproxySrc) {
   return null;
 }
 
-// clang.exe and clang-cl.exe are the same binary; cgo invokes it as clang.exe
-// (argv[0] selects the GCC-style driver). Returns an existing sibling
-// clang.exe, else copies clang-cl.exe to one (the pinned toolchain dir is
-// writable; the system LLVM dir already ships clang.exe, so no copy needed).
+// Same binary, but argv[0] picks the driver and cgo invokes it as clang.exe,
+// so hand back a sibling clang.exe, copying one when it's absent.
 function ensureClangDriver(binDir, clangClPath) {
   const clangPath = path.join(binDir, "clang.exe");
   if (!fs.existsSync(clangPath)) {
@@ -164,10 +161,8 @@ function whichExe(exe) {
   return result.stdout.split(/\r?\n/).map((s) => s.trim()).find(Boolean) || null;
 }
 
-// Builds (or reuses a cached) naive-cc-wrapper.exe — see
-// scripts/naive-cc-wrapper/main.go for what it does and why it must be a
-// real compiled executable rather than a .bat/.cmd file (Go's os/exec
-// cannot invoke those directly as CC).
+// Builds (or reuses) naive-cc-wrapper.exe; it must be a real executable
+// because Go's os/exec cannot invoke a .bat/.cmd as CC.
 function buildCcWrapper(rootDir) {
   const wrapperDir = path.join(rootDir, "scripts", "naive-cc-wrapper");
   const cacheDir = path.join(rootDir, ".cache", "naive-cc-wrapper");
@@ -191,9 +186,8 @@ function buildCcWrapper(rootDir) {
   return outPath;
 }
 
-// Locates vcvarsall.bat and runs it to capture INCLUDE/LIB for the given
-// architecture ("x64" | "arm64"). Does not rely on any prior interactive
-// setup.
+// Runs vcvarsall.bat to capture INCLUDE/LIB for the arch, so no prior
+// interactive setup is needed.
 function findVcvarsEnv(arch) {
   const vcvarsallPath = findVcvarsall();
   if (!vcvarsallPath) {
@@ -223,8 +217,7 @@ function findVcvarsEnv(arch) {
   return env;
 }
 
-// Finds vcvarsall.bat via vswhere (any VS version/edition — VS 2026 installs
-// under a major-version root like "...\Microsoft Visual Studio\18\Enterprise",
+// vswhere finds any VS version/edition (VS 2026 roots are a major version,
 // not a year), with a static probe of known install dirs as fallback.
 function findVcvarsall() {
   const pf86 = process.env["ProgramFiles(x86)"] ?? "C:\\Program Files (x86)";

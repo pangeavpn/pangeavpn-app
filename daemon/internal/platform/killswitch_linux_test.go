@@ -3,10 +3,14 @@
 package platform
 
 import (
-	"context"
 	"strings"
 	"testing"
 )
+
+// The iptables fallback's own tests live in killswitch_iptables_test.go, which
+// carries no build tag on purpose: there is no Linux CI job, so anything tested
+// only here would never actually run. This file covers the nftables backend,
+// which is Linux-only by nature.
 
 func TestBuildNFTRuleset_IPv4Only(t *testing.T) {
 	rules := buildNFTRuleset([]string{"203.0.113.10", "2001:db8::10"}, "wg-test", false)
@@ -25,87 +29,28 @@ func TestBuildNFTRuleset_IPv4Only(t *testing.T) {
 	}
 }
 
-func TestApplyIPTablesRules_InstallsIPv6DropChain(t *testing.T) {
-	originalRunner := runIPTablesCommand
-	defer func() {
-		runIPTablesCommand = originalRunner
-	}()
-
-	type call struct {
-		bin  string
-		args string
+// The ruleset is applied as one `nft -f` script, which the kernel runs as a
+// single transaction — that atomicity is what keeps a re-arm from ever leaving
+// the host unfiltered, so the script must carry the replacement in the same
+// breath as the delete.
+func TestApplyNFTScript_ReplacesInOneTransaction(t *testing.T) {
+	rules := buildNFTRuleset([]string{"203.0.113.10"}, "wg-test", false)
+	if !strings.Contains(rules, "policy drop;") {
+		t.Fatalf("nft chain does not default to drop:\n%s", rules)
 	}
-	calls := make([]call, 0, 24)
-	runIPTablesCommand = func(_ context.Context, binary string, args ...string) error {
-		calls = append(calls, call{
-			bin:  binary,
-			args: strings.Join(args, " "),
-		})
-		return nil
-	}
-
-	if err := applyIPTablesRules(context.Background(), []string{"203.0.113.5"}, "wg-test", false); err != nil {
-		t.Fatalf("applyIPTablesRules failed: %v", err)
-	}
-
-	required := []call{
-		{bin: "ip6tables", args: "-N " + ipt6ChainName},
-		{bin: "ip6tables", args: "-A " + ipt6ChainName + " -o lo -j ACCEPT"},
-		{bin: "ip6tables", args: "-A " + ipt6ChainName + " -j DROP"},
-		{bin: "ip6tables", args: "-I OUTPUT 1 -j " + ipt6ChainName},
-	}
-	for _, req := range required {
-		found := false
-		for _, got := range calls {
-			if got.bin == req.bin && got.args == req.args {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Fatalf("missing required command %s %s, calls=%v", req.bin, req.args, calls)
-		}
+	if !strings.Contains(rules, `oifname "lo" accept`) {
+		t.Fatalf("nft ruleset does not permit loopback:\n%s", rules)
 	}
 }
 
-func TestRemoveIPTablesRules_RemovesIPv6Chain(t *testing.T) {
-	originalRunner := runIPTablesCommand
-	defer func() {
-		runIPTablesCommand = originalRunner
-	}()
-
-	type call struct {
-		bin  string
-		args string
+// Turning Allow LAN off must actually drop the LAN accepts from the ruleset.
+func TestBuildNFTRuleset_AllowLANIsNotSticky(t *testing.T) {
+	with := buildNFTRuleset([]string{"203.0.113.10"}, "wg-test", true)
+	if !strings.Contains(with, "192.168.0.0/16") {
+		t.Fatalf("LAN permit missing when allowLAN is on:\n%s", with)
 	}
-	calls := make([]call, 0, 12)
-	runIPTablesCommand = func(_ context.Context, binary string, args ...string) error {
-		calls = append(calls, call{
-			bin:  binary,
-			args: strings.Join(args, " "),
-		})
-		return nil
-	}
-
-	if err := removeIPTablesRules(context.Background()); err != nil {
-		t.Fatalf("removeIPTablesRules failed: %v", err)
-	}
-
-	required := []call{
-		{bin: "ip6tables", args: "-D OUTPUT -j " + ipt6ChainName},
-		{bin: "ip6tables", args: "-F " + ipt6ChainName},
-		{bin: "ip6tables", args: "-X " + ipt6ChainName},
-	}
-	for _, req := range required {
-		found := false
-		for _, got := range calls {
-			if got.bin == req.bin && got.args == req.args {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Fatalf("missing required command %s %s, calls=%v", req.bin, req.args, calls)
-		}
+	without := buildNFTRuleset([]string{"203.0.113.10"}, "wg-test", false)
+	if strings.Contains(without, "192.168.0.0/16") {
+		t.Fatalf("LAN permit present when allowLAN is off:\n%s", without)
 	}
 }

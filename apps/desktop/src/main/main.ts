@@ -5,13 +5,15 @@ import { DaemonClient } from "./daemonClient";
 import { DaemonProcessManager } from "./daemonProcess";
 import { readDaemonTokens } from "./platformPaths";
 import { getConnectedTrayIconPath, getTrayIconPath, getWindowsAppIconPath } from "./resourcePaths";
-import { IPC_CHANNELS } from "../shared/ipc";
+import { IPC_CHANNELS, type ConnectResult } from "../shared/ipc";
 import * as auth from "./auth";
-import { PangeaApiClient, AuthError } from "./pangeaApiClient";
+import { PangeaApiClient, AuthError, ConnectCancelledError } from "./pangeaApiClient";
+import { beginAttempt, cancelAttempt, endAttempt, isCancelled } from "./connectAttempt";
 import { setupAutoUpdater, notifyConnectionStateChange } from "./autoUpdater";
 import { setLoginItemEnabled, isLoginItemEnabled, isHiddenLaunchArg } from "./loginItem";
 import { startNetworkWatcher, onNetworkChange } from "./networkWatcher";
 import { mt, mtState, setMainLocale, resolveMainLocale } from "./i18n";
+import { sanitizeLog } from "./logSanitize";
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -33,13 +35,6 @@ const daemonClient = new DaemonClient("http://127.0.0.1:8787", readDaemonTokens)
 const daemonProcess = new DaemonProcessManager(daemonClient);
 const pangeaApiClient = new PangeaApiClient();
 
-// Strip CR/LF and control chars from values that may originate from
-// user- or server-controlled input before they reach the log stream.
-function sanitizeLog(value: unknown): string {
-  const text = value instanceof Error ? value.message : String(value);
-  // eslint-disable-next-line no-control-regex
-  return text.replace(/[\x00-\x1f\x7f]/g, " ");
-}
 let managedProfileId: string | null = null;
 let lastServerId: string | null = null;
 let allowLanEnabled = true;
@@ -539,8 +534,29 @@ async function resolveTrayServerId(): Promise<string | null> {
   return null;
 }
 
-async function provisionProfileForServer(serverId: string): Promise<Profile> {
-  const profile = await pangeaApiClient.provision(serverId);
+/**
+ * Under Lockdown the daemon's lock blocks everything — including the hub we
+ * have to reach to provision a profile, which is why provisioning fails with
+ * `connect EACCES <hub ip>:443` behind a lock that permits nothing. Open the
+ * hub (and only the hub) as the connection attempt starts; the server's own
+ * endpoints stay blocked until the daemon's Connect permits them.
+ *
+ * Best-effort: if the daemon can't do it we still try to provision, so a
+ * failure here shows up as the underlying network error rather than masking it.
+ */
+async function permitHubThroughLockdown(): Promise<void> {
+  if (!alwaysConnectedEnabled) return;
+  const hubIp = pangeaApiClient.getHubIp();
+  try {
+    await daemonClient.permitHosts(hubIp ? [hubIp] : []);
+  } catch (err) {
+    console.warn("lockdown: hub permit failed", sanitizeLog(err));
+  }
+}
+
+async function provisionProfileForServer(serverId: string, signal?: AbortSignal): Promise<Profile> {
+  await permitHubThroughLockdown();
+  const profile = await pangeaApiClient.provision(serverId, signal);
 
   const config = await withDaemonRestartOnUnavailable(
     () => daemonClient.getConfig(),
@@ -561,14 +577,70 @@ async function provisionProfileForServer(serverId: string): Promise<Profile> {
   return profile;
 }
 
-async function provisionAndConnect(serverId: string): Promise<import("@pangeavpn/shared-types").OkResponse> {
-  const profile = await provisionProfileForServer(serverId);
-  const result = await connectWithRecovery(profile.id);
-  if (result.ok) {
-    lastConnectedProfileId = profile.id;
-    void persistLastConnection();
+async function provisionAndConnect(serverId: string): Promise<ConnectResult> {
+  const attempt = beginAttempt();
+  try {
+    const profile = await provisionProfileForServer(serverId, attempt.controller.signal);
+
+    // THE guard. Provisioning is several network round trips; if the user
+    // pressed Stop during them we must not bring the tunnel up now. Without
+    // this, cancelling only told the daemon to disconnect and the connect
+    // below fired anyway, so the tunnel came up moments after they cancelled.
+    if (isCancelled(attempt)) {
+      return { ok: false, error: "cancelled" };
+    }
+
+    const result = await connectWithRecovery(profile.id);
+
+    // The daemon connect can't be un-sent: if Stop landed while it was in
+    // flight, tear the tunnel back down rather than leaving the user connected
+    // after asking not to be. keepKillSwitch preserves lockdown — the whole
+    // point of always-connected is that traffic never leaks, including here.
+    if (isCancelled(attempt)) {
+      if (result.ok) {
+        await daemonClient
+          .disconnect({ keepKillSwitch: alwaysConnectedEnabled })
+          .catch((err) => console.warn("cancel: disconnect failed", sanitizeLog(err)));
+      }
+      return { ok: false, error: "cancelled" };
+    }
+
+    if (result.ok) {
+      lastConnectedProfileId = profile.id;
+      void persistLastConnection();
+    }
+    return result;
+  } catch (err) {
+    // A cancelled attempt aborts its in-flight request, which surfaces here.
+    // Report it as a non-error so the UI goes idle instead of showing a toast.
+    if (err instanceof ConnectCancelledError || isCancelled(attempt)) {
+      return { ok: false, error: "cancelled" };
+    }
+    throw err;
+  } finally {
+    endAttempt(attempt);
   }
-  return result;
+}
+
+/**
+ * Stop the in-flight connect attempt. Safe to call when nothing is running —
+ * it must never tear down a connection the user wants to keep.
+ */
+async function cancelConnectAttempt(): Promise<void> {
+  const cancelled = cancelAttempt();
+  if (!cancelled) return;
+
+  // The attempt may already have handed the daemon a connect. Ask it to stand
+  // down; the attempt's own guards handle the rest.
+  try {
+    const status = await daemonClient.getStatus();
+    if (status.state !== "DISCONNECTED") {
+      await daemonClient.disconnect({ keepKillSwitch: alwaysConnectedEnabled });
+    }
+  } catch (err) {
+    console.warn("cancel: daemon teardown failed", sanitizeLog(err));
+  }
+  await refreshTrayStatus();
 }
 
 async function provisionAndSwitch(serverId: string): Promise<import("@pangeavpn/shared-types").OkResponse> {
@@ -620,6 +692,16 @@ async function writeSettingsFile(settings: Record<string, unknown>): Promise<voi
   );
   const fs = (await import("node:fs/promises")).default;
   await fs.writeFile(filePath, JSON.stringify(settings, null, 2));
+}
+
+async function persistHubIp(ip: string): Promise<void> {
+  try {
+    const settings = await readSettingsFile();
+    settings.hubIp = ip;
+    await writeSettingsFile(settings);
+  } catch (err) {
+    console.warn("Failed to persist hub IP:", err);
+  }
 }
 
 async function persistLastConnection(): Promise<void> {
@@ -960,14 +1042,14 @@ function registerIpcHandlers(): void {
     }
     if (!previouslyEnabled && alwaysConnectedEnabled) {
       // Lockdown on: block internet immediately (fail-closed) without connecting.
+      // Sent unconditionally — while connected the daemon only records the lock
+      // as a Lockdown lock, and skipping that left it Locked:false on disk, so a
+      // reboot cleared it as stale and the device came back open.
       try {
-        const status = await daemonClient.getStatus();
-        if (status.state !== "CONNECTED" && status.state !== "CONNECTING") {
-          await daemonClient.engageKillSwitch({
-            profileId: lastConnectedProfileId ?? undefined,
-            allowLAN: allowLanEnabled
-          });
-        }
+        await daemonClient.engageKillSwitch({
+          profileId: lastConnectedProfileId ?? undefined,
+          allowLAN: allowLanEnabled
+        });
       } catch (err) {
         console.warn("Failed to engage kill switch on lockdown on:", err);
       }
@@ -1078,6 +1160,10 @@ function registerIpcHandlers(): void {
       }
       throw err;
     }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.cancelConnect, async () => {
+    await cancelConnectAttempt();
   });
 
   ipcMain.handle(IPC_CHANNELS.provisionAndSwitch, async (_event, serverId: string) => {
@@ -1210,6 +1296,10 @@ async function boot(): Promise<void> {
     cb(false);
   });
 
+  // Registered before the restore below so a first run with no settings file
+  // still persists the hub IP once it is learned.
+  pangeaApiClient.onHubIp((ip) => void persistHubIp(ip));
+
   // Restore persisted settings
   try {
     const settingsPath = (await import("node:path")).join(
@@ -1248,6 +1338,9 @@ async function boot(): Promise<void> {
     if (typeof settings.alwaysConnected === "boolean") {
       alwaysConnectedEnabled = settings.alwaysConnected;
     }
+    // Last known good hub IP: the only way to reach the hub once a Lockdown
+    // lock is engaged, since the lock permits that IP but blocks DNS and DoH.
+    pangeaApiClient.setCachedHubIp(settings.hubIp);
     if (typeof settings.lastServerId === "string") {
       lastServerId = settings.lastServerId;
     }

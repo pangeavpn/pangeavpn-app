@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -100,6 +101,11 @@ type Service struct {
 
 	profileMu      sync.RWMutex
 	currentProfile *state.Profile
+
+	// sessionOpts are the options the live session was brought up with, so a
+	// health-check rebuild can reproduce it rather than guess (AllowLAN shapes
+	// both the kill switch and the WireGuard AllowedIPs). Guarded by profileMu.
+	sessionOpts ConnectOptions
 
 	// activeMu guards activeTransportKind, which of {cloak, naive, reality,
 	// hysteria2, snowflake} is live for the current session. Empty string
@@ -267,6 +273,8 @@ func (s *Service) Connect(ctx context.Context, profileID string, opts ConnectOpt
 		}
 	}
 
+	s.setSessionOpts(opts)
+
 	adopted, err := s.attachToRunningSession(ctx, profile)
 	if err != nil {
 		s.setError(err.Error())
@@ -276,14 +284,10 @@ func (s *Service) Connect(ctx context.Context, profileID string, opts ConnectOpt
 		return nil
 	}
 
-	wireGuardProfile := withTransportBypassHosts(profile)
-	if opts.AllowLAN {
-		rewritten, err := wg.TransformWGConfigExcludeLAN(wireGuardProfile.ConfigText)
-		if err != nil {
-			s.setError(fmt.Sprintf("allow-lan config transform failed: %v", err))
-			return err
-		}
-		wireGuardProfile.ConfigText = rewritten
+	wireGuardProfile, err := wireGuardProfileFor(profile, opts.AllowLAN)
+	if err != nil {
+		s.setError(fmt.Sprintf("allow-lan config transform failed: %v", err))
+		return err
 	}
 	if checker, ok := s.wg.(wgPreflightChecker); ok {
 		if err := checker.Preflight(ctx, wireGuardProfile); err != nil {
@@ -312,11 +316,27 @@ func (s *Service) Connect(ctx context.Context, profileID string, opts ConnectOpt
 	}
 	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("kill switch enabled (%dms)", time.Since(stepStart).Milliseconds()))
 
-	if err := s.bringUpAfterKillSwitch(ctx, profile, wireGuardProfile, opts.PreferredTransport); err != nil {
+	if err := s.bringUpAfterKillSwitch(ctx, profile, wireGuardProfile, opts); err != nil {
 		return err
 	}
 	s.logs.Add(state.LogInfo, state.SourceDaemon, "connect flow completed")
 	return nil
+}
+
+// wireGuardProfileFor builds the WireGuard profile a session runs with: the
+// transport's own endpoints bypass the tunnel, and AllowLAN carves local
+// ranges out of AllowedIPs.
+func wireGuardProfileFor(profile state.Profile, allowLAN bool) (state.WireGuardProfile, error) {
+	wireGuardProfile := withTransportBypassHosts(profile)
+	if !allowLAN {
+		return wireGuardProfile, nil
+	}
+	rewritten, err := wg.TransformWGConfigExcludeLAN(wireGuardProfile.ConfigText)
+	if err != nil {
+		return state.WireGuardProfile{}, err
+	}
+	wireGuardProfile.ConfigText = rewritten
+	return wireGuardProfile, nil
 }
 
 // bringUpAfterKillSwitch starts the transport + WireGuard and updates the
@@ -324,12 +344,12 @@ func (s *Service) Connect(ctx context.Context, profileID string, opts ConnectOpt
 // Connect and Switch. StateConnected is reached only after a real WireGuard
 // handshake (proven per transport inside startTransportWithHandshake), so a
 // started-but-dead tunnel never reports connected.
-func (s *Service) bringUpAfterKillSwitch(ctx context.Context, profile state.Profile, wireGuardProfile state.WireGuardProfile, preferredTransport string) error {
+func (s *Service) bringUpAfterKillSwitch(ctx context.Context, profile state.Profile, wireGuardProfile state.WireGuardProfile, opts ConnectOptions) error {
 	s.machine.Set(state.StateConnecting, "starting transport")
 	stepStart := time.Now()
 
 	networkKey := s.currentNetworkKey()
-	kind, err := s.startTransportWithHandshake(ctx, &profile, &wireGuardProfile, preferredTransport, networkKey)
+	kind, err := s.startTransportWithHandshake(ctx, &profile, &wireGuardProfile, opts.PreferredTransport, networkKey)
 	if err != nil {
 		s.setError(fmt.Sprintf("transport start failed: %v", err))
 		return err
@@ -351,6 +371,7 @@ func (s *Service) bringUpAfterKillSwitch(ctx context.Context, profile state.Prof
 	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("kill switch updated (%dms)", time.Since(stepStart).Milliseconds()))
 
 	s.setCurrentProfile(profile)
+	s.setSessionOpts(opts)
 	s.machine.Set(state.StateConnected, "tunnel active")
 	return nil
 }
@@ -929,6 +950,35 @@ func (s *Service) Switch(ctx context.Context, newProfileID string, opts ConnectO
 
 	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("switch requested: %s -> %s (kill switch stays active)", oldProfile.ID, newProfile.ID))
 
+	// Anything that can refuse the new server runs before the teardown, so a
+	// failure costs nothing. Re-arming while the old tunnel is up is safe: every
+	// backend applies the new set atomically, so the lock is never down.
+	// Rejected before any teardown, so the old session is still live: go back to
+	// Connected. StateError would stop healthLoop watching a working tunnel and
+	// make the gate at the top of Switch reject the retry.
+	refuse := func(err error, detail string) error {
+		s.logs.Add(state.LogError, state.SourceDaemon, fmt.Sprintf("switch: %s", detail))
+		s.machine.Set(state.StateConnected, fmt.Sprintf("staying on %s: %s", oldProfile.ID, detail))
+		return err
+	}
+
+	wireGuardProfile, err := wireGuardProfileFor(newProfile, opts.AllowLAN)
+	if err != nil {
+		return refuse(err, fmt.Sprintf("allow-lan config transform failed: %v", err))
+	}
+	if checker, ok := s.wg.(wgPreflightChecker); ok {
+		if err := checker.Preflight(ctx, wireGuardProfile); err != nil {
+			return refuse(err, fmt.Sprintf("wireguard preflight failed: %v", err))
+		}
+	}
+
+	s.machine.Set(state.StateConnecting, fmt.Sprintf("switching to %s: updating kill switch", newProfile.ID))
+	stepStart := time.Now()
+	if err := s.killSwitch.Enable(ctx, killSwitchPermits(newProfile), opts.AllowLAN, opts.Lockdown); err != nil {
+		return refuse(err, fmt.Sprintf("kill switch re-enable failed: %v", err))
+	}
+	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("kill switch re-enabled for %s (%dms)", newProfile.ID, time.Since(stepStart).Milliseconds()))
+
 	s.machine.Set(state.StateConnecting, fmt.Sprintf("switching to %s: stopping wireguard", newProfile.ID))
 	if err := s.wg.Stop(ctx, withTransportBypassHosts(oldProfile)); err != nil {
 		s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("switch: wg stop warning: %v", err))
@@ -946,31 +996,7 @@ func (s *Service) Switch(ctx context.Context, newProfileID string, opts ConnectO
 
 	s.clearCurrentProfile()
 
-	wireGuardProfile := withTransportBypassHosts(newProfile)
-	if opts.AllowLAN {
-		rewritten, err := wg.TransformWGConfigExcludeLAN(wireGuardProfile.ConfigText)
-		if err != nil {
-			s.setError(fmt.Sprintf("switch: allow-lan config transform failed: %v", err))
-			return err
-		}
-		wireGuardProfile.ConfigText = rewritten
-	}
-	if checker, ok := s.wg.(wgPreflightChecker); ok {
-		if err := checker.Preflight(ctx, wireGuardProfile); err != nil {
-			s.setError(fmt.Sprintf("switch: wireguard preflight failed: %v", err))
-			return err
-		}
-	}
-
-	s.machine.Set(state.StateConnecting, fmt.Sprintf("switching to %s: updating kill switch", newProfile.ID))
-	stepStart := time.Now()
-	if err := s.killSwitch.Enable(ctx, killSwitchPermits(newProfile), opts.AllowLAN, opts.Lockdown); err != nil {
-		s.setError(fmt.Sprintf("switch: kill switch re-enable failed: %v", err))
-		return err
-	}
-	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("kill switch re-enabled for %s (%dms)", newProfile.ID, time.Since(stepStart).Milliseconds()))
-
-	if err := s.bringUpAfterKillSwitch(ctx, newProfile, wireGuardProfile, opts.PreferredTransport); err != nil {
+	if err := s.bringUpAfterKillSwitch(ctx, newProfile, wireGuardProfile, opts); err != nil {
 		return err
 	}
 	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("switch flow completed: %s -> %s", oldProfile.ID, newProfile.ID))
@@ -995,32 +1021,170 @@ func (s *Service) ClearKillSwitch(ctx context.Context) error {
 	return nil
 }
 
+// loadKillSwitchState reads the persisted kill-switch state. Indirected for
+// tests.
+var loadKillSwitchState = platform.LoadKillSwitchStatePublic
+
+// PermitHosts opens a control-plane hole in an already-engaged kill switch.
+//
+// A Lockdown lock engaged while disconnected blocks everything, including the
+// Pangea hub — but the app must reach the hub to provision a profile before it
+// has anything to connect to, so without this the lock is a trap: no
+// provisioning, therefore no connection, therefore no way out but turning
+// Lockdown off. The app calls this just before it provisions, so the hole opens
+// on a connection attempt rather than sitting open the whole time the device is
+// locked. The chosen server's own endpoints stay blocked until Connect permits
+// them.
+//
+// Only IP literals are accepted: the lock blocks DNS, so a hostname could not
+// be resolved while it is engaged, and the lock must never depend on a lookup.
+// hosts is what the app knows (its resolved hub IP); when it has none — a cold
+// start under lockdown, before it has reached the hub — the hub IP carried by
+// the last provisioned profile's WireGuard bypass hosts is used instead.
+// No-op when no lock is engaged.
+func (s *Service) PermitHosts(ctx context.Context, hosts []string) error {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+
+	if !s.killSwitch.Active() {
+		return nil
+	}
+
+	permits := ipLiterals(hosts)
+	if len(permits) == 0 {
+		permits = ipLiterals(s.storedControlPlaneHosts())
+	}
+	if len(permits) == 0 {
+		return errors.New("no control-plane IP to permit: none supplied and no provisioned profile carries one")
+	}
+
+	// Reuse the persisted AllowLAN/Locked flags: widening the permit set must
+	// not change what kind of lock is engaged (dropping Locked would make a
+	// deliberate lockdown lock look like crash leftover to the next startup).
+	persisted, err := loadKillSwitchState()
+	if err != nil {
+		return fmt.Errorf("read kill switch state: %w", err)
+	}
+	if !persisted.Active {
+		return errors.New("kill switch is active but no persisted state describes it; refusing to re-apply")
+	}
+
+	merged := mergeUniqueSorted(persisted.EndpointIPs, permits)
+	if slices.Equal(merged, sortedCopy(persisted.EndpointIPs)) {
+		return nil
+	}
+
+	ksCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if err := s.killSwitch.Enable(ksCtx, merged, persisted.AllowLAN, persisted.Locked); err != nil {
+		s.logs.Add(state.LogError, state.SourceDaemon, fmt.Sprintf("kill switch control-plane permit failed: %v", err))
+		return err
+	}
+	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("kill switch permitted control-plane endpoints %v", permits))
+	return nil
+}
+
+// storedControlPlaneHosts is the bypass hosts of every stored profile — where
+// the app records the hub IP it provisioned through (see the desktop client's
+// provision()). Transport endpoints are deliberately excluded: those are the
+// server's own IPs and are only unblocked once Connect picks that server.
+func (s *Service) storedControlPlaneHosts() []string {
+	var out []string
+	for _, profile := range s.config.Get().Profiles {
+		out = append(out, profile.WireGuard.BypassHosts...)
+	}
+	return out
+}
+
+// ipLiterals keeps only entries that are already IPv4 addresses, so no caller
+// can make the kill switch depend on a DNS lookup it is itself blocking.
+func ipLiterals(hosts []string) []string {
+	out := make([]string, 0, len(hosts))
+	for _, host := range hosts {
+		host = strings.TrimSpace(host)
+		if ip := net.ParseIP(host); ip != nil && ip.To4() != nil {
+			out = append(out, ip.To4().String())
+		}
+	}
+	return out
+}
+
+func sortedCopy(in []string) []string {
+	out := slices.Clone(in)
+	slices.Sort(out)
+	return out
+}
+
+func mergeUniqueSorted(a, b []string) []string {
+	merged := slices.Clone(a)
+	for _, s := range b {
+		if !slices.Contains(merged, s) {
+			merged = append(merged, s)
+		}
+	}
+	slices.Sort(merged)
+	return slices.Compact(merged)
+}
+
 // EngageKillSwitch turns on the kill switch without starting a VPN session,
 // giving the device a fail-closed network lock. Used when Lockdown is enabled
 // while disconnected: internet is blocked immediately even though nothing is
-// connected yet. When profileID names a known profile, that profile's transport
-// endpoints are permitted so a later Connect is seamless; otherwise the lock
-// blocks all outbound except loopback/DHCP.
+// connected yet. Only the Pangea hub is reachable through it — the app talks to
+// nothing else while disconnected, and cutting that off would leave it unable to
+// list servers or provision, with no way to re-resolve anything since the lock
+// blocks DNS too. VPN endpoints stay blocked: a server's IP is unblocked by
+// Connect, once that server is the one being connected to.
+//
+// The hub IP comes from the stored profiles (see storedControlPlaneHosts) and
+// is used as an IP literal, so the lock still lands with no DNS lookup to wait
+// on — a lookup would delay the block and leak traffic until it landed. Before
+// anything has ever been provisioned there is no hub IP to permit and this is a
+// pure block-all; the app tops the permit up via PermitHosts when it provisions.
 func (s *Service) EngageKillSwitch(ctx context.Context, profileID string, allowLAN bool) error {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
 
 	if s.killSwitch.Active() {
-		return nil
+		// Already armed, but it may only now be becoming a Lockdown lock.
+		return s.markKillSwitchLocked(ctx, allowLAN)
 	}
 
-	// Pure block-all lock: no endpoint permits, so this lands instantly with no
-	// DNS resolution — which would otherwise delay the block (leaking until it
-	// lands) and can hang the request. The VPN endpoint is permitted later by
+	// IP literals only, so the lock lands instantly with no DNS resolution —
+	// which would otherwise delay the block (leaking until it lands) and can
+	// hang the request. profileID is unused: every profile records the same hub,
+	// and the VPN endpoints this profile would use are permitted later by
 	// Connect, which re-enters Enable.
 	_ = profileID
+	hubPermits := ipLiterals(s.storedControlPlaneHosts())
 	ksCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	if err := s.killSwitch.Enable(ksCtx, nil, allowLAN, true); err != nil {
+	if err := s.killSwitch.Enable(ksCtx, hubPermits, allowLAN, true); err != nil {
 		s.logs.Add(state.LogError, state.SourceDaemon, fmt.Sprintf("kill switch engage failed: %v", err))
 		return err
 	}
-	s.logs.Add(state.LogInfo, state.SourceDaemon, "kill switch engaged (lockdown, no connection)")
+	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("kill switch engaged (lockdown, no connection), hub permits %v", hubPermits))
+	return nil
+}
+
+// Records an already-engaged lock as a Lockdown lock so reconcileStartup
+// re-applies it instead of clearing it as stale. Re-arms with the persisted
+// endpoints, which the backends see as unchanged (flag-only write).
+func (s *Service) markKillSwitchLocked(ctx context.Context, allowLAN bool) error {
+	persisted, err := loadKillSwitchState()
+	if err != nil || !persisted.Active {
+		s.logs.Add(state.LogWarn, state.SourceDaemon, "lockdown not recorded: kill switch state unreadable or inactive")
+		return nil
+	}
+	if persisted.Locked {
+		return nil
+	}
+	ksCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if err := s.killSwitch.Enable(ksCtx, persisted.EndpointIPs, allowLAN || persisted.AllowLAN, true); err != nil {
+		s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("could not record lockdown on the engaged kill switch: %v", err))
+		return nil
+	}
+	s.logs.Add(state.LogInfo, state.SourceDaemon, "engaged kill switch marked as a lockdown lock")
 	return nil
 }
 
@@ -1111,6 +1275,9 @@ func (s *Service) Disconnect(ctx context.Context, keepKillSwitch bool) error {
 
 	if s.killSwitch.Active() {
 		if keepKillSwitch {
+			// Retaining the lock past the session is what Lockdown means; record it
+			// or the next startup clears it as stale.
+			_ = s.markKillSwitchLocked(ctx, false)
 			s.logs.Add(state.LogInfo, state.SourceDaemon, "kill switch retained (lockdown mode)")
 		} else {
 			s.machine.Set(state.StateDisconnecting, "clearing kill switch")
@@ -1255,7 +1422,14 @@ func (s *Service) runHealthCheck(ctx context.Context) {
 	}
 	if s.wireGuardHandshakeStale(wgStatus) {
 		age := time.Since(time.Unix(wgStatus.LastHandshakeUnix, 0)).Round(time.Second)
-		s.setError(fmt.Sprintf("health check failed: wireguard tunnel is silent (no handshake for %s)", age))
+		s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("wireguard tunnel is silent (no handshake for %s); rebuilding session", age))
+		if err := s.rebuildSilentSession(ctx, profile); err != nil {
+			// A Disconnect can land mid-rebuild and interrupt it; that's the
+			// user getting what they asked for, not a session to mark failed.
+			if st, _ := s.machine.Get(); st != state.StateDisconnecting && st != state.StateDisconnected {
+				s.setError(fmt.Sprintf("health check failed: wireguard tunnel is silent (no handshake for %s) and rebuild failed: %v", age, err))
+			}
+		}
 		return
 	}
 
@@ -1281,6 +1455,79 @@ func (s *Service) wireGuardHandshakeStale(status state.WireGuardStatus) bool {
 		return false
 	}
 	return time.Since(time.Unix(status.LastHandshakeUnix, 0)) > wireGuardHandshakeStaleAfter
+}
+
+// rebuildSilentSession restarts the transport and WireGuard in place after the
+// tunnel has gone silent. The usual cause is a suspend/resume: the transport's
+// session dies with the host's network (a Hysteria2 QUIC connection especially,
+// which the server times out while the machine sleeps) while the transport
+// itself stays up, so WireGuard keeps handshaking into a loopback socket whose
+// far side leads nowhere. Only a fresh transport session recovers that, and no
+// transport can see the breakage from the inside — its local writes still
+// succeed — so a silent WireGuard is the signal to act on.
+//
+// The kill switch is deliberately left armed for the whole rebuild, so the
+// device stays fail-closed while the tunnel is down. Same profile and same
+// options as the live session: this restores what the user asked for, it does
+// not renegotiate it.
+func (s *Service) rebuildSilentSession(ctx context.Context, profile state.Profile) error {
+	if !s.opMu.TryLock() {
+		return errors.New("operation in progress")
+	}
+	defer s.opMu.Unlock()
+
+	if currentState, _ := s.machine.Get(); currentState != state.StateConnected {
+		return errors.New("state changed")
+	}
+
+	// Make the rebuild interruptible by Disconnect, like Connect and Switch —
+	// the transport cascade can otherwise hold opMu for tens of seconds.
+	rebuildCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	s.cancelMu.Lock()
+	s.cancelConnect = cancel
+	s.cancelMu.Unlock()
+	defer func() {
+		s.cancelMu.Lock()
+		s.cancelConnect = nil
+		s.cancelMu.Unlock()
+	}()
+	ctx = rebuildCtx
+
+	// Bring up from the stored profile, not the live copy: bring-up mutates the
+	// live copy's transport LocalPort to whatever port the bridge bound, which
+	// no longer agrees with its own Endpoint line and would make the next
+	// rebind think there is nothing to rewrite. The teardown below still uses
+	// the live copy, since that's what names the tunnel actually running.
+	live := profile
+	if stored, found := s.config.FindProfile(profile.ID); found {
+		profile = stored
+	}
+
+	opts := s.getSessionOpts()
+	wireGuardProfile, err := wireGuardProfileFor(profile, opts.AllowLAN)
+	if err != nil {
+		return fmt.Errorf("allow-lan config transform failed: %w", err)
+	}
+
+	s.machine.Set(state.StateConnecting, "rebuilding silent tunnel")
+	if err := s.wg.Stop(ctx, withTransportBypassHosts(live)); err != nil {
+		s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("rebuild: wireguard stop warning: %v", err))
+	}
+	if active := s.activeTransport(); active != nil {
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), 4*time.Second)
+		if err := active.Stop(stopCtx); err != nil {
+			s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("rebuild: transport stop warning: %v", err))
+		}
+		stopCancel()
+	}
+	s.setActiveTransportKind("")
+
+	if err := s.bringUpAfterKillSwitch(ctx, profile, wireGuardProfile, opts); err != nil {
+		return err
+	}
+	s.logs.Add(state.LogInfo, state.SourceDaemon, "silent tunnel rebuilt")
+	return nil
 }
 
 // recoverActiveTransport restarts whichever transport is active in-place —
@@ -1409,15 +1656,19 @@ func (s *Service) reconcileStartup(ctx context.Context) {
 	// restarts, so re-apply it when there's no tunnel. Anything else with no
 	// tunnel is stale (e.g. a crash) and is cleared to restore networking.
 	if len(runningProfiles) == 0 {
-		persisted, _ := platform.LoadKillSwitchStatePublic()
+		persisted, _ := loadKillSwitchState()
 		switch {
 		case persisted.Active && persisted.Locked:
 			if !s.killSwitch.Active() {
 				// On Windows the dynamic WFP session was torn down on the prior
 				// exit; on pf/nftables the rules may persist. Re-Enable is
 				// idempotent and reuses the persisted endpoint IPs (no DNS).
+				// The hub is topped up so a lock persisted without it (an older
+				// daemon, or one engaged before anything was provisioned) comes
+				// back reachable rather than leaving the app unable to bootstrap.
+				endpoints := mergeUniqueSorted(persisted.EndpointIPs, ipLiterals(s.storedControlPlaneHosts()))
 				s.logs.Add(state.LogInfo, state.SourceDaemon, "re-applying lockdown kill switch (no tunnel)")
-				if err := s.killSwitch.Enable(startupCtx, persisted.EndpointIPs, persisted.AllowLAN, true); err != nil {
+				if err := s.killSwitch.Enable(startupCtx, endpoints, persisted.AllowLAN, true); err != nil {
 					s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("lockdown kill switch re-apply failed: %v", err))
 				}
 			}
@@ -1598,6 +1849,18 @@ func (s *Service) clearCurrentProfile() {
 	s.currentProfile = nil
 }
 
+func (s *Service) setSessionOpts(opts ConnectOptions) {
+	s.profileMu.Lock()
+	defer s.profileMu.Unlock()
+	s.sessionOpts = opts
+}
+
+func (s *Service) getSessionOpts() ConnectOptions {
+	s.profileMu.RLock()
+	defer s.profileMu.RUnlock()
+	return s.sessionOpts
+}
+
 func (s *Service) getCurrentProfile() (state.Profile, bool) {
 	s.profileMu.RLock()
 	defer s.profileMu.RUnlock()
@@ -1743,6 +2006,35 @@ func killSwitchPermits(profile state.Profile) []string {
 	if host := strings.TrimSpace(profile.Cloak.RemoteHost); host != "" {
 		out = append(out, host)
 	}
+	out = append(out, transportPermitHosts(profile)...)
+	for _, h := range profile.WireGuard.BypassHosts {
+		if h = strings.TrimSpace(h); h != "" {
+			out = append(out, h)
+		}
+	}
+	return out
+}
+
+// transportPermitHosts is where each non-Cloak transport can be reached.
+//
+// The hub's own addresses (TransportEndpointIPs) are used whenever it sent
+// any, and then the node hostnames are left out entirely: resolving one costs
+// a cleartext DNS query that tells the user's ISP exactly which node they are
+// about to use, and behind an engaged Lockdown lock it cannot be answered at
+// all — leaving every transport but Cloak blocked by our own kill switch.
+//
+// Hostnames remain the fallback for a profile the hub gave no addresses for
+// (one provisioned by an older build, or hand-written).
+func transportPermitHosts(profile state.Profile) []string {
+	out := make([]string, 0, 4)
+	for _, ip := range profile.TransportEndpointIPs {
+		if ip = strings.TrimSpace(ip); ip != "" {
+			out = append(out, ip)
+		}
+	}
+	if len(out) > 0 {
+		return out
+	}
 	if profile.Naive != nil {
 		if host := strings.TrimSpace(profile.Naive.RemoteHost); host != "" {
 			out = append(out, host)
@@ -1758,13 +2050,7 @@ func killSwitchPermits(profile state.Profile) []string {
 			out = append(out, host)
 		}
 	}
-	out = append(out, snowflakeHosts(profile.Snowflake)...)
-	for _, h := range profile.WireGuard.BypassHosts {
-		if h = strings.TrimSpace(h); h != "" {
-			out = append(out, h)
-		}
-	}
-	return out
+	return append(out, snowflakeHosts(profile.Snowflake)...)
 }
 
 // withTransportBypassHosts adds the cloak, naive, reality, hysteria2, and
@@ -1779,21 +2065,9 @@ func withTransportBypassHosts(profile state.Profile) state.WireGuardProfile {
 	if host := strings.TrimSpace(profile.Cloak.RemoteHost); host != "" {
 		copyProfile.BypassHosts = append(copyProfile.BypassHosts, host)
 	}
-	if profile.Naive != nil {
-		if host := strings.TrimSpace(profile.Naive.RemoteHost); host != "" {
-			copyProfile.BypassHosts = append(copyProfile.BypassHosts, host)
-		}
-	}
-	if profile.Reality != nil {
-		if host := strings.TrimSpace(profile.Reality.RemoteHost); host != "" {
-			copyProfile.BypassHosts = append(copyProfile.BypassHosts, host)
-		}
-	}
-	if profile.Hysteria2 != nil {
-		if host := strings.TrimSpace(profile.Hysteria2.RemoteHost); host != "" {
-			copyProfile.BypassHosts = append(copyProfile.BypassHosts, host)
-		}
-	}
-	copyProfile.BypassHosts = append(copyProfile.BypassHosts, snowflakeHosts(profile.Snowflake)...)
+	// Same source as the kill-switch permits, and for the same reason: the
+	// hub's addresses when it sent any, never a node hostname we would have to
+	// look up (see transportPermitHosts).
+	copyProfile.BypassHosts = append(copyProfile.BypassHosts, transportPermitHosts(profile)...)
 	return copyProfile
 }

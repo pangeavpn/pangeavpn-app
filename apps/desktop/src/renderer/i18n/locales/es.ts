@@ -59,6 +59,8 @@ export const es = {
   "hero.disconnect": "Desconectar",
   "hero.provisioning": "Aprovisionando...",
   "hero.disconnecting": "Desconectando...",
+  "hero.stop": "Detener",
+  "hero.stopping": "Deteniendo...",
   "hero.noServers": "No hay servidores disponibles",
   "hero.noServersForTransport": "Ningún servidor admite este transporte",
 
@@ -169,6 +171,7 @@ export const es = {
   "sub.renews": "Se renueva",
   "sub.expires": "Caduca",
   "sub.pastDue": "Pago vencido",
+  "sub.expired": "Suscripción vencida",
   "account.noToken": "No hay token para copiar.",
   "account.tokenCopied": "Token copiado al portapapeles.",
 
@@ -188,6 +191,8 @@ export const es = {
   "connect.disconnecting": "Desconectando...",
   "connect.disconnected": "Desconectado.",
   "connect.disconnectFailed": "No se pudo desconectar. Inténtalo de nuevo.",
+  "connect.cancelled": "Conexión cancelada.",
+  "connect.expired": "Tu tiempo se acabó: recarga para reconectar.",
   "connect.recovered": "Conexión recuperada.",
   "connect.refreshServersFailed": "No se pudo actualizar la lista de servidores. Se reintentará automáticamente.",
 
