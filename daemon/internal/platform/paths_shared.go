@@ -1,10 +1,45 @@
 package platform
 
-import "path/filepath"
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+)
 
-// TransportMemoryPath is where the daemon persists the per-network map of the
-// transport that last established a tunnel, so auto-connect can try it first on
-// a familiar network. Lives alongside config.json in the app support dir.
+// LogDir holds the daemon's on-disk logs. The in-memory ring buffer dies with
+// the process, so a crash erases its own evidence unless it is mirrored here.
+func LogDir() (string, error) {
+	appDir, err := AppSupportDir()
+	if err != nil {
+		return "", err
+	}
+	dir := filepath.Join(appDir, "logs")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("create log dir: %w", err)
+	}
+	return dir, nil
+}
+
+func LogPath() (string, error) {
+	dir, err := LogDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "daemon.log"), nil
+}
+
+// CrashLogPath receives the process's raw stderr, which is where the Go runtime
+// prints panics and fatal faults. The service discards stderr otherwise.
+func CrashLogPath() (string, error) {
+	dir, err := LogDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "daemon-crash.log"), nil
+}
+
+// TransportMemoryPath persists the per-network last-good transport, so
+// auto-connect tries it first on a familiar network.
 func TransportMemoryPath() (string, error) {
 	appDir, err := AppSupportDir()
 	if err != nil {

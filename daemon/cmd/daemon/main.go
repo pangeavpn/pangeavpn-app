@@ -76,6 +76,7 @@ func startDaemonRuntime() (*daemonRuntime, error) {
 	}
 
 	logs := state.NewLogStore(4000)
+	attachLogFile(logs)
 	logs.Add(state.LogInfo, state.SourceDaemon, "daemon booting")
 
 	machine := state.NewMachine()
@@ -86,23 +87,20 @@ func startDaemonRuntime() (*daemonRuntime, error) {
 
 	cloakManager := cloak.NewManager(logs)
 	naiveManager := newNaiveManager(logs)
-	// realityManager always builds; without -tags with_utls, sing-box's own
-	// TLS layer returns a clean "rebuild with -tags with_utls" error on
-	// Start rather than needing a stub here (see internal/reality's doc).
+	// Without -tags with_utls, sing-box's TLS layer returns a clean
+	// "rebuild with -tags with_utls" error on Start, so no stub is needed.
 	realityManager := reality.NewManager(logs)
 	hysteria2Manager := hysteria2.NewManager(logs)
 	snowflakeManager := snowflake.NewManager(logs)
 	wgManager := wg.NewManager(logs)
 	killSwitch := platform.NewKillSwitch()
-	// A permit host that won't resolve is skipped rather than failing the whole
-	// Enable (see resolveEndpointHosts); surface it so a transport quietly
-	// losing its permit is visible in support logs.
+	// An unresolvable permit host is skipped rather than failing Enable; surface
+	// it so a transport quietly losing its permit stays visible.
 	platform.EndpointResolveWarn = func(host string, err error) {
 		logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("kill switch could not resolve permit host %s, skipping: %v", host, err))
 	}
-	// Degraded-but-closed conditions: the lock still holds, but something is off
-	// (a stale permit that outlived its server, an incomplete teardown). These
-	// are the states that become leaks later, so they must not stay silent.
+	// Degraded-but-closed: the lock holds but something is off. These become
+	// leaks later, so they must not stay silent.
 	platform.KillSwitchWarnf = func(format string, args ...any) {
 		logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf(format, args...))
 	}
@@ -153,8 +151,7 @@ func (r *daemonRuntime) Stop(ctx context.Context) error {
 	}
 
 	// A graceful stop happens on every clean reboot, so a Lockdown lock must
-	// survive it — clearing here deletes the state file too and the device boots
-	// open.
+	// survive it — clearing here would boot the device open.
 	keepKillSwitch := false
 	if persisted, err := platform.LoadKillSwitchStatePublic(); err == nil {
 		keepKillSwitch = persisted.Active && persisted.Locked

@@ -1,17 +1,11 @@
 #!/bin/bash
-# PangeaVPN macOS Installer
-#
-# This script removes macOS quarantine flags, installs PangeaVPN, and
-# ensures the background daemon starts correctly.
-#
-# Usage:
-#   bash install-mac.sh              (auto-finds PangeaVPN*.pkg next to this script)
-#   bash install-mac.sh /path/to/PangeaVPN.pkg
+# PangeaVPN macOS installer: strips quarantine, installs, starts the daemon.
+# Usage: bash install-mac.sh [/path/to/PangeaVPN.pkg]
 
 set -euo pipefail
 
 # ── Configuration ────────────────────────────────────────────────────────────
-VERSION="0.4.5"
+VERSION="0.5.0"
 
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -105,16 +99,13 @@ if [[ -d "$APP_PATH" ]]; then
 fi
 
 # ── Stop any running daemon before overwriting binaries ──────────────────────
-# The postinstall script inside the .pkg may have signed these binaries already.
-# If we overwrite them while launchd has KeepAlive=true, launchd will try to
-# restart the daemon with the new unsigned binary and macOS will kill it.
+# Overwriting under KeepAlive=true makes launchd restart an unsigned binary.
 log "Stopping any existing daemon..."
 sudo launchctl bootout "system/$DAEMON_LABEL" 2>/dev/null || true
 sleep 1
 
 # ── Copy daemon binary to system path ───────────────────────────────────────
-# WireGuard and Cloak run in-process inside the daemon, so no helper binaries
-# need to be staged.
+# Transports run in-process inside the daemon, so nothing else needs staging.
 log "Setting up system daemon..."
 DAEMON_SRC="$APP_PATH/Contents/Resources/daemon/daemon"
 
@@ -133,9 +124,7 @@ sudo chmod 755 "$SUPPORT_DIR"
 sudo xattr -dr com.apple.quarantine "$SUPPORT_DIR" 2>/dev/null || true
 
 # ── Create shared auth token ────────────────────────────────────────────────
-# Both the daemon (root) and the Electron app (user) read this token file.
-# We chown it to the logged-in user so that even if the daemon tightens
-# permissions to 0600, the user (as owner) can still read it.
+# Owned by the login user so a later 0600 tightening keeps the app able to read.
 REAL_USER="${SUDO_USER:-$USER}"
 TOKEN_FILE="$SUPPORT_DIR/daemon-token.txt"
 log "Generating daemon auth token..."
@@ -180,8 +169,7 @@ sudo chown root:wheel "$DAEMON_PLIST"
 sudo chmod 644 "$DAEMON_PLIST"
 
 # ── Re-sign daemon for Apple Silicon ────────────────────────────────────────
-# Copying invalidates ad-hoc signatures and Apple Silicon requires all
-# executables to carry a valid code signature.
+# Copying invalidates the ad-hoc signature Apple Silicon requires.
 log "Signing daemon for Apple Silicon compatibility..."
 sudo codesign --force --sign - "$SUPPORT_DIR/PangeaDaemon"
 
