@@ -1,4 +1,4 @@
-import { Menu, Tray, app, BrowserWindow, ipcMain, nativeImage, session, shell, type NativeImage } from "electron";
+import { Menu, Notification, Tray, app, BrowserWindow, ipcMain, nativeImage, session, shell, type NativeImage } from "electron";
 import path from "node:path";
 import type { OkResponse, Profile, StatusResponse } from "@pangeavpn/shared-types";
 import { DaemonClient } from "./daemonClient";
@@ -14,6 +14,7 @@ import { setLoginItemEnabled, isLoginItemEnabled, isHiddenLaunchArg } from "./lo
 import { startNetworkWatcher, onNetworkChange } from "./networkWatcher";
 import { mt, mtState, setMainLocale, resolveMainLocale } from "./i18n";
 import { sanitizeLog } from "./logSanitize";
+import { shouldShowTrayHint, trayHintBodyKey } from "./trayHint";
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -27,6 +28,7 @@ let lastConnectedProfileId: string | null = null;
 let trayDefaultImage: NativeImage | null = null;
 let trayConnectedImage: NativeImage | null = null;
 let lastDaemonRestartAttemptAtMs = 0;
+let trayHintShown = false;
 let setWidth = 640;
 let setHeight = 440;
 const daemonRestartBackoffMs = 5000;
@@ -194,7 +196,7 @@ function showMainWindow(): void {
   updateTrayMenu();
 }
 
-function hideMainWindow(): void {
+function hideMainWindow(fromTrayClick = false): void {
   if (!mainWindow || !mainWindow.isVisible() || hiding) {
     return;
   }
@@ -225,8 +227,41 @@ function hideMainWindow(): void {
       mainWindow?.setOpacity(1);
       hiding = false;
       updateTrayMenu();
+      void maybeShowTrayHint(fromTrayClick);
     }
   }, interval);
+}
+
+// The window has no taskbar entry, so a first-time user reads this first
+// vanish as a quit. Tell them where it went, once per install.
+async function maybeShowTrayHint(fromTrayClick: boolean): Promise<void> {
+  const conditions = {
+    alreadyShown: trayHintShown,
+    fromTrayClick,
+    supported: Notification.isSupported()
+  };
+  if (!shouldShowTrayHint(conditions)) {
+    return;
+  }
+  // Set before the async write so a second hide mid-write can't double-fire.
+  trayHintShown = true;
+
+  const iconPath = process.platform === "darwin" ? undefined : getTrayIconPath(__dirname);
+  const notification = new Notification({
+    title: mt("notify.trayTitle"),
+    body: mt(trayHintBodyKey(process.platform)),
+    ...(iconPath ? { icon: iconPath } : {})
+  });
+  notification.on("click", () => showMainWindow());
+  notification.show();
+
+  try {
+    const settings = await readSettingsFile();
+    settings.trayHintShown = true;
+    await writeSettingsFile(settings);
+  } catch (err) {
+    console.warn("failed to persist tray hint flag:", sanitizeLog(err));
+  }
 }
 
 function toggleMainWindowVisibility(): void {
@@ -234,7 +269,7 @@ function toggleMainWindowVisibility(): void {
     showMainWindow();
     return;
   }
-  hideMainWindow();
+  hideMainWindow(true);
 }
 
 function createTray(): void {
@@ -534,16 +569,8 @@ async function resolveTrayServerId(): Promise<string | null> {
   return null;
 }
 
-/**
- * Under Lockdown the daemon's lock blocks everything — including the hub we
- * have to reach to provision a profile, which is why provisioning fails with
- * `connect EACCES <hub ip>:443` behind a lock that permits nothing. Open the
- * hub (and only the hub) as the connection attempt starts; the server's own
- * endpoints stay blocked until the daemon's Connect permits them.
- *
- * Best-effort: if the daemon can't do it we still try to provision, so a
- * failure here shows up as the underlying network error rather than masking it.
- */
+/** Lockdown's lock blocks the hub we must reach to provision, so open the hub
+ *  alone. Best-effort: a failure surfaces as the real network error. */
 async function permitHubThroughLockdown(): Promise<void> {
   if (!alwaysConnectedEnabled) return;
   const hubIp = pangeaApiClient.getHubIp();
@@ -582,20 +609,16 @@ async function provisionAndConnect(serverId: string): Promise<ConnectResult> {
   try {
     const profile = await provisionProfileForServer(serverId, attempt.controller.signal);
 
-    // THE guard. Provisioning is several network round trips; if the user
-    // pressed Stop during them we must not bring the tunnel up now. Without
-    // this, cancelling only told the daemon to disconnect and the connect
-    // below fired anyway, so the tunnel came up moments after they cancelled.
+    // Provisioning is several round trips; without this guard a Stop during
+    // them still let the tunnel come up moments after the user cancelled.
     if (isCancelled(attempt)) {
       return { ok: false, error: "cancelled" };
     }
 
     const result = await connectWithRecovery(profile.id);
 
-    // The daemon connect can't be un-sent: if Stop landed while it was in
-    // flight, tear the tunnel back down rather than leaving the user connected
-    // after asking not to be. keepKillSwitch preserves lockdown — the whole
-    // point of always-connected is that traffic never leaks, including here.
+    // Daemon connect can't be un-sent: if Stop landed mid-flight, tear back
+    // down. keepKillSwitch preserves lockdown so traffic never leaks here.
     if (isCancelled(attempt)) {
       if (result.ok) {
         await daemonClient
@@ -622,10 +645,7 @@ async function provisionAndConnect(serverId: string): Promise<ConnectResult> {
   }
 }
 
-/**
- * Stop the in-flight connect attempt. Safe to call when nothing is running —
- * it must never tear down a connection the user wants to keep.
- */
+/** Stop the in-flight connect attempt; never tears down a wanted connection. */
 async function cancelConnectAttempt(): Promise<void> {
   const cancelled = cancelAttempt();
   if (!cancelled) return;
@@ -686,12 +706,11 @@ async function readSettingsFile(): Promise<Record<string, unknown>> {
 }
 
 async function writeSettingsFile(settings: Record<string, unknown>): Promise<void> {
-  const filePath = path.join(
-    (await import("./platformPaths")).getAppSupportDir(),
-    "settings.json"
-  );
+  const dir = (await import("./platformPaths")).getAppSupportDir();
   const fs = (await import("node:fs/promises")).default;
-  await fs.writeFile(filePath, JSON.stringify(settings, null, 2));
+  // First run can reach here before the daemon has created the directory.
+  await fs.mkdir(dir, { recursive: true });
+  await fs.writeFile(path.join(dir, "settings.json"), JSON.stringify(settings, null, 2));
 }
 
 async function persistHubIp(ip: string): Promise<void> {
@@ -791,9 +810,8 @@ function registerIpcHandlers(): void {
       // Generate a friendly name for this device
       const friendlyName = generateFriendlyName();
 
-      // Register device with the hub (reserves a device slot, max 4 per user).
-      // The server returns the *effective* name (which may differ from ours if the
-      // identityPubkey was already registered and has a stored name).
+      // Reserves a device slot (max 4 per user). The hub returns the *effective*
+      // name, which differs from ours if this identityPubkey already had one.
       let effectiveFriendlyName: string | null = friendlyName;
       try {
         const regResponse = await pangeaApiClient.registerDevice(identityPublicKey, friendlyName);
@@ -804,9 +822,8 @@ function registerIpcHandlers(): void {
         console.warn("device registration failed:", sanitizeLog(regErr));
         const message = regErr instanceof Error ? regErr.message : "Device registration failed";
 
-        // If device limit reached, keep the license key in pangeaApiClient so
-        // the renderer can call listDevices / removeDevice to manage devices.
-        // The license key on disk is cleared — it will be re-saved on successful retry.
+        // Device limit: keep the key in memory so the renderer can list/remove
+        // devices. The on-disk key is cleared, re-saved on a successful retry.
         const isDeviceLimit =
           message.includes("DEVICE_LIMIT_REACHED") || message.includes("Device limit");
         if (isDeviceLimit) {
@@ -1041,10 +1058,8 @@ function registerIpcHandlers(): void {
       console.warn("Failed to apply login item for lockdown:", err);
     }
     if (!previouslyEnabled && alwaysConnectedEnabled) {
-      // Lockdown on: block internet immediately (fail-closed) without connecting.
-      // Sent unconditionally — while connected the daemon only records the lock
-      // as a Lockdown lock, and skipping that left it Locked:false on disk, so a
-      // reboot cleared it as stale and the device came back open.
+      // Sent unconditionally: while connected the daemon only records it as a
+      // Lockdown lock, and skipping left Locked:false on disk, cleared as stale.
       try {
         await daemonClient.engageKillSwitch({
           profileId: lastConnectedProfileId ?? undefined,
@@ -1273,6 +1288,10 @@ async function connectWithRecovery(profileId: string): Promise<OkResponse> {
 async function boot(): Promise<void> {
   await app.whenReady();
 
+  // Windows drops toasts whose AUMID doesn't match a Start Menu shortcut's;
+  // NSIS writes ours with build.appId, so the process must claim the same one.
+  app.setAppUserModelId("com.pangea.pangeavpn");
+
   // Lock down navigation, new windows, embeds, permissions, and TLS.
   app.on("web-contents-created", (_event, contents) => {
     contents.setWindowOpenHandler(({ url }) => {
@@ -1350,6 +1369,9 @@ async function boot(): Promise<void> {
     if (typeof settings.locale === "string") {
       localePref = settings.locale;
     }
+    if (settings.trayHintShown === true) {
+      trayHintShown = true;
+    }
   } catch {
     // no settings file yet
   }
@@ -1425,10 +1447,8 @@ async function boot(): Promise<void> {
   daemonProcess
     .ensureRunning()
     .then(async () => {
-      // Lockdown: make the device fail-closed at startup even before/without
-      // connecting. The daemon re-applies a persisted lock on its own restart;
-      // this covers the case where no lock state was persisted yet. No-ops if a
-      // tunnel is already up or the lock is already engaged.
+      // Covers the case where no lock state was persisted yet; the daemon
+      // re-applies persisted locks itself. No-ops if already up or engaged.
       if (!alwaysConnectedEnabled) return;
       const status = await daemonClient.getStatus();
       if (status.state !== "CONNECTED" && status.state !== "CONNECTING") {
