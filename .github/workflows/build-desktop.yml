@@ -112,6 +112,8 @@ jobs:
         run: npm run build-bin:windows
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Fail the build rather than quietly shipping the naive stub.
+          PANGEA_REQUIRE_NAIVE: '1'
 
       # A codec Nsis7z cannot decode makes the installer drop binaries in
       # silence, so nothing downstream would notice the payload is unusable.
@@ -156,6 +158,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          # Fail the build rather than quietly shipping the naive stub.
+          PANGEA_REQUIRE_NAIVE: '1'
 
       - name: Upload macOS installer DMGs
         uses: actions/upload-artifact@v7
