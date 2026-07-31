@@ -24,9 +24,56 @@ permissions:
   contents: read
 
 jobs:
+  test:
+    name: Tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: daemon/go.mod
+          cache: true
+          cache-dependency-path: daemon/go.sum
+
+      - name: Install workspace dependencies
+        run: npm ci
+
+      # The desktop tests import main-process sources, which resolve
+      # @pangeavpn/shared-types through its built dist.
+      - name: Build shared types
+        run: npm run build --workspace @pangeavpn/shared-types
+
+      - name: Test desktop
+        run: npm test --workspace @pangeavpn/desktop
+
+      - name: Vet daemon
+        run: go vet ./...
+        working-directory: daemon
+
+      # Matrixed because the kill switch splits per OS behind build tags, so a
+      # single runner would never compile the other platforms' tests.
+      - name: Test daemon
+        run: go test ./...
+        working-directory: daemon
+
   build-windows:
     name: Windows (x64 + arm64)
     runs-on: windows-latest
+    needs: test
     timeout-minutes: 45
     steps:
       - name: Checkout
@@ -66,6 +113,11 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      # A codec Nsis7z cannot decode makes the installer drop binaries in
+      # silence, so nothing downstream would notice the payload is unusable.
+      - name: Verify Windows installers
+        run: node scripts/verify-windows-installer.mjs
+
       - name: Upload Windows NSIS installers
         uses: actions/upload-artifact@v7
         with:
@@ -77,6 +129,7 @@ jobs:
   build-mac:
     name: macOS (arm64 + x64)
     runs-on: macos-latest
+    needs: test
     timeout-minutes: 60
     steps:
       - name: Checkout
@@ -146,9 +199,8 @@ jobs:
           generate_release_notes: true
           files: release/*
 
-  # The release above is published by GITHUB_TOKEN, so its `release: published`
-  # event cannot start the AI Release Notes workflow (GitHub's recursion guard).
-  # Call it directly instead — same run graph, deterministic ordering, no PAT.
+  # GITHUB_TOKEN publishes the release, so its event cannot start the notes
+  # workflow (recursion guard). Call it directly: same run graph, no PAT.
   release-notes:
     name: AI Release Notes
     if: startsWith(github.ref, 'refs/tags/v')
