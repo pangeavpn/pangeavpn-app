@@ -2,11 +2,8 @@
 
 package naive
 
-/*
-#cgo LDFLAGS: -lpangea_naive
-#include <stdlib.h>
-#include "pangea_naive_capi.h"
-*/
+// #include <stdlib.h>
+// #include "pangea_naive_capi.h"
 import "C"
 
 import (
@@ -27,19 +24,12 @@ import (
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/transport"
 )
 
-// bridgeAddr is the node-side bridge's fixed loopback address, reached via
-// the naive-server's SOCKS5 CONNECT once the client's TLS+HTTP2 tunnel is
-// up. Co-located with the naive-server in the same container (see
-// PangeaHubServer's node/src/naiveBridge.js, bound 127.0.0.1:9000).
+// The node-side bridge's fixed loopback address, reached via the
+// naive-server's SOCKS5 CONNECT once the TLS+HTTP2 tunnel is up.
 const bridgeAddr = "127.0.0.1:9000"
 
-// Manager wraps the cgo-linked NaiveProxy engine (github.com/pangeavpn/naiveproxy,
-// branch feature/pangea-static-lib) behind the transport.Manager shape,
-// mirroring cloak.inProcessManager's structure: a loopback UDP listener
-// WireGuard's peer Endpoint points at, owned entirely on the Go side. The
-// engine itself only exposes lifecycle control (Start/Stop/Status) across
-// the cgo boundary plus a local SOCKS5 listener that this manager dials
-// through to reach the node-side bridge over a single persistent stream.
+// Manager wraps the cgo-linked NaiveProxy engine behind transport.Manager,
+// owning the loopback UDP listener WireGuard's peer Endpoint points at.
 var _ transport.Manager = (*Manager)(nil)
 
 type Manager struct {
@@ -59,10 +49,8 @@ type Manager struct {
 	sessionCtx    context.Context
 	sessionCancel context.CancelFunc
 
-	// generation bumps every Start; the relay goroutines only clobber shared
-	// state if their generation still matches the current one, preventing a
-	// zombie goroutine from a previous Start from nuking a fresh Start's
-	// state. Mirrors cloak.inProcessManager's same pattern.
+	// generation bumps every Start, so a zombie relay goroutine from a previous
+	// Start cannot clobber a fresh Start's state.
 	generation uint64
 }
 
@@ -95,12 +83,8 @@ func nativeQueryStatus() nativeStatus {
 	return st
 }
 
-// Start binds the engine's local SOCKS5 listener (via cgo) and the
-// Go-owned loopback UDP socket WireGuard's peer Endpoint points at, then
-// returns. The SOCKS5 CONNECT dial to the node-side bridge (a real network
-// round trip through the naive-server's TLS+HTTP2 tunnel) happens in a
-// background goroutine — callers that need to know once that succeeds use
-// WaitForSession, mirroring cloak.inProcessManager exactly.
+// Start binds the engine's SOCKS5 listener and the Go-owned loopback UDP
+// socket; the CONNECT dial happens in the background, see WaitForSession.
 func (m *Manager) Start(ctx context.Context, profile state.NaiveProfile) error {
 	_ = ctx
 
@@ -133,9 +117,16 @@ func (m *Manager) Start(ctx context.Context, profile state.NaiveProfile) error {
 		return fmt.Errorf("naive: marshal start config: %w", err)
 	}
 
+	// Bracket the cgo call: the engine can die without unwinding to Go, so the
+	// last line on disk is what localises a hard crash to the C side.
+	m.logs.Add(state.LogInfo, state.SourceNaive, fmt.Sprintf(
+		"naive: calling engine start (host=%s port=%d sni=%s)", cfg.RemoteHost, cfg.RemotePort, cfg.ServerName))
+
 	cPayload := C.CString(string(payload))
 	startResult := C.PangeaNaiveStart(cPayload)
 	C.free(unsafe.Pointer(cPayload))
+
+	m.logs.Add(state.LogInfo, state.SourceNaive, fmt.Sprintf("naive: engine start returned %d", int(startResult)))
 	if startResult != 0 {
 		st := nativeQueryStatus()
 		m.mu.Unlock()
@@ -193,9 +184,8 @@ func (m *Manager) Start(ctx context.Context, profile state.NaiveProfile) error {
 	return nil
 }
 
-// runSession dials the SOCKS5 CONNECT tunnel to the node-side bridge and,
-// once established, relays datagrams until either side breaks. Runs for
-// the lifetime of one Start/Stop cycle.
+// runSession dials the SOCKS5 CONNECT tunnel, then relays datagrams until
+// either side breaks. Runs for one Start/Stop cycle.
 func (m *Manager) runSession(sessionCtx context.Context, generation uint64, udpConn *net.UDPConn, socksPort int, done, session chan struct{}) {
 	defer close(done)
 
@@ -206,6 +196,8 @@ func (m *Manager) runSession(sessionCtx context.Context, generation uint64, udpC
 		m.teardown(generation)
 		return
 	}
+
+	m.logs.Add(state.LogInfo, state.SourceNaive, fmt.Sprintf("naive: dialing %s via engine socks %s", bridgeAddr, socksAddr))
 
 	streamCh := make(chan net.Conn, 1)
 	errCh := make(chan error, 1)
@@ -463,8 +455,7 @@ func (m *Manager) Status() state.TransportStatus {
 }
 
 // BoundLocalPort reports the loopback UDP port WireGuard's peer Endpoint
-// should target, or 0 when not running. See cloak.inProcessManager's same
-// method for why LocalPort=0 (dynamic allocation) needs this.
+// should target, or 0 when not running. Needed when LocalPort=0.
 func (m *Manager) BoundLocalPort() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
