@@ -63,11 +63,35 @@ export const ar = {
   "hero.stopping": "جارٍ الإيقاف...",
   "hero.noServers": "لا توجد خوادم متاحة",
   "hero.noServersForTransport": "لا توجد خوادم تدعم هذا النقل",
+  "hero.region": "المنطقة",
+  "hero.allRegions": "كل المناطق",
 
-  // ── Status pills ──────────────────────────────────────
-  "pill.killSwitch": "مفتاح الإيقاف",
-  "pill.cloak": "التخفّي",
-  "pill.wireguard": "WireGuard",
+  // ── Headline: {x} marks the emphasised word ───────────
+  "hero.headline.DISCONNECTED": "العالم {x}",
+  "hero.emphasis.DISCONNECTED": "منفصل",
+  "hero.headline.CONNECTING": "جارٍ {x}",
+  "hero.emphasis.CONNECTING": "التوحيد",
+  "hero.headline.CONNECTED": "العالم {x}",
+  "hero.emphasis.CONNECTED": "مكتمل",
+  "hero.headline.DISCONNECTING": "جارٍ {x}",
+  "hero.emphasis.DISCONNECTING": "الفصل",
+  "hero.headline.ERROR": "تعذّر {x}",
+  "hero.emphasis.ERROR": "الاتصال",
+
+  // ── Session facts ─────────────────────────────────────
+  "fact.session": "الجلسة",
+  "fact.down": "التنزيل",
+  "fact.up": "الرفع",
+  "fact.via": "عبر",
+
+  // ── Region rows ───────────────────────────────────────
+  "region.more": "{count} أخرى",
+  "region.bestOf": "{node} · الأفضل من {count}",
+  "region.autoOf": "{count} خوادم · تلقائي",
+  "region.pinned": "{node} · مثبّت",
+  "region.showServers": "عرض خوادم {region}",
+  "region.badgeBest": "الأفضل",
+  "region.badgePinned": "مثبّت",
 
   // ── Connection state labels (hero + tray) ─────────────
   "state.DISCONNECTED": "غير متصل",
@@ -90,17 +114,10 @@ export const ar = {
   // ── Settings overlay ──────────────────────────────────
   "settings.title": "الإعدادات",
   "settings.close": "إغلاق",
-  "settings.account.heading": "الحساب",
-  "settings.account.signedInAs": "مسجّل الدخول باسم",
-  "settings.account.subscription": "الاشتراك",
-  "settings.account.token": "رمز الدخول",
-  "settings.account.show": "إظهار",
-  "settings.account.hide": "إخفاء",
-  "settings.account.copy": "نسخ",
-  "settings.account.tokenHint": "هذا هو الرمز الذي سجّلت الدخول به. احتفظ به سرًّا — أي شخص يملكه يمكنه الوصول إلى حسابك.",
   "settings.account.manageSub": "إدارة الاشتراك",
   "settings.account.devices": "الأجهزة",
   "settings.account.signOut": "تسجيل الخروج",
+  "settings.summary.off": "معطّل",
   "settings.censorship.heading": "تجاوز الحجب",
   "settings.censorship.description": "فعّله إذا كانت شبكتك تحجب الوصول إلى خدمات VPN.",
   "settings.censorship.directIp.title": "IP مباشر",
@@ -134,12 +151,13 @@ export const ar = {
   "settings.language.system": "الافتراضي للنظام",
   "settings.language.restartHint": "أعد تشغيل PangeaVPN لتطبيق اللغة الجديدة.",
   "settings.update.heading": "تحديث البرنامج",
-  "settings.update.currentVersion": "الإصدار الحالي:",
   "settings.update.check": "التحقق من التحديثات",
 
   // ── Server picker overlay ─────────────────────────────
-  "serverPicker.title": "اختر خادمًا",
-  "serverPicker.serversAriaLabel": "الخوادم",
+  "serverPicker.title": "اختيار المنطقة",
+  "serverPicker.serversAriaLabel": "المناطق",
+  "serverPicker.recent": "الأخيرة",
+  "serverPicker.all": "كل المناطق",
   "serverPicker.noServers": "لا توجد خوادم متاحة",
   "serverPicker.noServersForTransport": "لا توجد خوادم تدعم هذا النقل",
   "serverPicker.load": "حمل الخادم {pct}%",
@@ -172,8 +190,6 @@ export const ar = {
   "sub.expires": "ينتهي",
   "sub.pastDue": "الدفع متأخر",
   "sub.expired": "انتهى الاشتراك",
-  "account.noToken": "لا يوجد رمز لنسخه.",
-  "account.tokenCopied": "تم نسخ الرمز إلى الحافظة.",
 
   // ── Session / auth toasts ─────────────────────────────
   "auth.signedOutRetry": "تم تسجيل خروجك. يرجى تسجيل الدخول مرة أخرى.",
@@ -219,13 +235,10 @@ export const ar = {
 
   // ── Daemon sync / generic ─────────────────────────────
   "common.loading": "جارٍ التحميل...",
-  "common.ready": "جاهز.",
   "common.retrying": "حدث خطأ ما. جارٍ إعادة المحاولة...",
   "common.dash": "—",
 
   // ── Daemon status values (technical, kept short) ──────
-  "status.running": "قيد التشغيل",
-  "status.stopped": "متوقف",
   "status.transport.cloak": "التمويه: Cloak",
   "status.transport.naive": "التمويه: NaiveProxy",
   "status.transport.hysteria2": "التمويه: Hysteria2",

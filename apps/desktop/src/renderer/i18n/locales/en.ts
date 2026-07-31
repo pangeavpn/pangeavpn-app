@@ -1,6 +1,5 @@
-// English — source catalogue. This file defines the full set of translatable
-// keys; every other locale must satisfy the `Messages` shape derived from it.
-// Placeholders use `{name}` syntax and are interpolated by `t()`.
+// English — source catalogue defining the full key set; every other locale
+// must satisfy `Messages`. Placeholders use `{name}`, interpolated by `t()`.
 
 export const en = {
   // ── App shell / loading ───────────────────────────────
@@ -64,11 +63,35 @@ export const en = {
   "hero.stopping": "Stopping...",
   "hero.noServers": "No servers available",
   "hero.noServersForTransport": "No servers support this transport",
+  "hero.region": "Region",
+  "hero.allRegions": "All regions",
 
-  // ── Status pills ──────────────────────────────────────
-  "pill.killSwitch": "Kill Switch",
-  "pill.cloak": "Cloak",
-  "pill.wireguard": "WireGuard",
+  // ── Headline: {x} marks the emphasised word ───────────
+  "hero.headline.DISCONNECTED": "The world is {x}",
+  "hero.emphasis.DISCONNECTED": "apart",
+  "hero.headline.CONNECTING": "Drawing it {x}",
+  "hero.emphasis.CONNECTING": "together",
+  "hero.headline.CONNECTED": "The world is {x}",
+  "hero.emphasis.CONNECTED": "whole",
+  "hero.headline.DISCONNECTING": "Letting it {x}",
+  "hero.emphasis.DISCONNECTING": "drift",
+  "hero.headline.ERROR": "Couldn't {x}",
+  "hero.emphasis.ERROR": "connect",
+
+  // ── Session facts ─────────────────────────────────────
+  "fact.session": "Session",
+  "fact.down": "Down",
+  "fact.up": "Up",
+  "fact.via": "Via",
+
+  // ── Region rows ───────────────────────────────────────
+  "region.more": "{count} more",
+  "region.bestOf": "{node} · best of {count}",
+  "region.autoOf": "{count} servers · auto",
+  "region.pinned": "{node} · pinned",
+  "region.showServers": "Show servers in {region}",
+  "region.badgeBest": "Best",
+  "region.badgePinned": "Pinned",
 
   // ── Connection state labels (hero + tray) ─────────────
   "state.DISCONNECTED": "DISCONNECTED",
@@ -91,17 +114,10 @@ export const en = {
   // ── Settings overlay ──────────────────────────────────
   "settings.title": "Settings",
   "settings.close": "Close",
-  "settings.account.heading": "Account",
-  "settings.account.signedInAs": "Signed in as",
-  "settings.account.subscription": "Subscription",
-  "settings.account.token": "Sign-in token",
-  "settings.account.show": "Show",
-  "settings.account.hide": "Hide",
-  "settings.account.copy": "Copy",
-  "settings.account.tokenHint": "This is the token you signed in with. Keep it private — anyone with it can access your account.",
   "settings.account.manageSub": "Manage Subscription",
   "settings.account.devices": "Devices",
   "settings.account.signOut": "Sign Out",
+  "settings.summary.off": "Off",
   "settings.censorship.heading": "Censorship Bypass",
   "settings.censorship.description": "Enable if your network blocks access to VPN services.",
   "settings.censorship.directIp.title": "Direct IP",
@@ -135,12 +151,13 @@ export const en = {
   "settings.language.system": "System default",
   "settings.language.restartHint": "Restart PangeaVPN to apply the new language.",
   "settings.update.heading": "Software Update",
-  "settings.update.currentVersion": "Current version:",
   "settings.update.check": "Check for Updates",
 
   // ── Server picker overlay ─────────────────────────────
-  "serverPicker.title": "Select server",
-  "serverPicker.serversAriaLabel": "Servers",
+  "serverPicker.title": "Select region",
+  "serverPicker.serversAriaLabel": "Regions",
+  "serverPicker.recent": "Recent",
+  "serverPicker.all": "All regions",
   "serverPicker.noServers": "No servers available",
   "serverPicker.noServersForTransport": "No servers support this transport",
   "serverPicker.load": "Server load {pct}%",
@@ -173,8 +190,6 @@ export const en = {
   "sub.expires": "Expires",
   "sub.pastDue": "Payment past due",
   "sub.expired": "Subscription expired",
-  "account.noToken": "No token to copy.",
-  "account.tokenCopied": "Token copied to clipboard.",
 
   // ── Session / auth toasts ─────────────────────────────
   "auth.signedOutRetry": "You've been signed out. Please sign in again.",
@@ -220,13 +235,10 @@ export const en = {
 
   // ── Daemon sync / generic ─────────────────────────────
   "common.loading": "Loading...",
-  "common.ready": "Ready.",
   "common.retrying": "Something went wrong. Retrying...",
   "common.dash": "—",
 
   // ── Daemon status values (technical, kept short) ──────
-  "status.running": "running",
-  "status.stopped": "stopped",
   "status.transport.cloak": "Obfuscation: Cloak",
   "status.transport.naive": "Obfuscation: NaiveProxy",
   "status.transport.hysteria2": "Obfuscation: Hysteria2",

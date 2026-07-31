@@ -5,7 +5,6 @@ import path from "node:path";
 const filesToCopy = [
   ["src/renderer/index.html", "dist/renderer/index.html"],
   ["src/renderer/styles.css", "dist/renderer/styles.css"],
-  ["src/renderer/bg.js", "dist/renderer/bg.js"],
   // Africa silhouette used as the header brand mark (CSS-masked, tinted per theme)
   ["build/PangeaVPN_linux.png", "dist/renderer/logo-africa.png"]
 ];

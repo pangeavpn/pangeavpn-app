@@ -63,11 +63,35 @@ export const uk = {
   "hero.stopping": "Зупинення...",
   "hero.noServers": "Немає доступних серверів",
   "hero.noServersForTransport": "Немає серверів із підтримкою цього транспорту",
+  "hero.region": "Регіон",
+  "hero.allRegions": "Усі регіони",
 
-  // ── Status pills ──────────────────────────────────────
-  "pill.killSwitch": "Аварійне вимкнення",
-  "pill.cloak": "Маскування",
-  "pill.wireguard": "WireGuard",
+  // ── Headline: {x} marks the emphasised word ───────────
+  "hero.headline.DISCONNECTED": "Світ {x}",
+  "hero.emphasis.DISCONNECTED": "розділений",
+  "hero.headline.CONNECTING": "З'єднуємо {x}",
+  "hero.emphasis.CONNECTING": "воєдино",
+  "hero.headline.CONNECTED": "Світ {x}",
+  "hero.emphasis.CONNECTED": "цілісний",
+  "hero.headline.DISCONNECTING": "Відпускаємо в {x}",
+  "hero.emphasis.DISCONNECTING": "дрейф",
+  "hero.headline.ERROR": "Не вдалося {x}",
+  "hero.emphasis.ERROR": "підключитися",
+
+  // ── Session facts ─────────────────────────────────────
+  "fact.session": "Сесія",
+  "fact.down": "Отримано",
+  "fact.up": "Надіслано",
+  "fact.via": "Через",
+
+  // ── Region rows ───────────────────────────────────────
+  "region.more": "ще {count}",
+  "region.bestOf": "{node} · найкращий з {count}",
+  "region.autoOf": "{count} серверів · авто",
+  "region.pinned": "{node} · закріплено",
+  "region.showServers": "Показати сервери в регіоні {region}",
+  "region.badgeBest": "Найкращий",
+  "region.badgePinned": "Закріплено",
 
   // ── Connection state labels (hero + tray) ─────────────
   "state.DISCONNECTED": "ВІДКЛЮЧЕНО",
@@ -90,17 +114,10 @@ export const uk = {
   // ── Settings overlay ──────────────────────────────────
   "settings.title": "Налаштування",
   "settings.close": "Закрити",
-  "settings.account.heading": "Обліковий запис",
-  "settings.account.signedInAs": "Ви ввійшли як",
-  "settings.account.subscription": "Підписка",
-  "settings.account.token": "Токен для входу",
-  "settings.account.show": "Показати",
-  "settings.account.hide": "Сховати",
-  "settings.account.copy": "Копіювати",
-  "settings.account.tokenHint": "Це токен, з яким ви ввійшли. Тримайте його в таємниці — будь-хто з ним може отримати доступ до вашого облікового запису.",
   "settings.account.manageSub": "Керувати підпискою",
   "settings.account.devices": "Пристрої",
   "settings.account.signOut": "Вийти",
+  "settings.summary.off": "Вимк.",
   "settings.censorship.heading": "Обхід цензури",
   "settings.censorship.description": "Увімкніть, якщо ваша мережа блокує доступ до сервісів VPN.",
   "settings.censorship.directIp.title": "Пряме IP",
@@ -134,12 +151,13 @@ export const uk = {
   "settings.language.system": "Як у системі",
   "settings.language.restartHint": "Перезапустіть PangeaVPN, щоб застосувати нову мову.",
   "settings.update.heading": "Оновлення програми",
-  "settings.update.currentVersion": "Поточна версія:",
   "settings.update.check": "Перевірити оновлення",
 
   // ── Server picker overlay ─────────────────────────────
-  "serverPicker.title": "Вибрати сервер",
-  "serverPicker.serversAriaLabel": "Сервери",
+  "serverPicker.title": "Вибір регіону",
+  "serverPicker.serversAriaLabel": "Регіони",
+  "serverPicker.recent": "Нещодавні",
+  "serverPicker.all": "Усі регіони",
   "serverPicker.noServers": "Немає доступних серверів",
   "serverPicker.noServersForTransport": "Немає серверів із підтримкою цього транспорту",
   "serverPicker.load": "Завантаження сервера {pct}%",
@@ -172,8 +190,6 @@ export const uk = {
   "sub.expires": "Закінчується",
   "sub.pastDue": "Прострочений платіж",
   "sub.expired": "Підписку завершено",
-  "account.noToken": "Немає токена для копіювання.",
-  "account.tokenCopied": "Токен скопійовано до буфера обміну.",
 
   // ── Session / auth toasts ─────────────────────────────
   "auth.signedOutRetry": "Ви вийшли із системи. Будь ласка, увійдіть знову.",
@@ -219,13 +235,10 @@ export const uk = {
 
   // ── Daemon sync / generic ─────────────────────────────
   "common.loading": "Завантаження...",
-  "common.ready": "Готово.",
   "common.retrying": "Щось пішло не так. Повторна спроба...",
   "common.dash": "—",
 
   // ── Daemon status values (technical, kept short) ──────
-  "status.running": "працює",
-  "status.stopped": "зупинено",
   "status.transport.cloak": "Обфускація: Cloak",
   "status.transport.naive": "Обфускація: NaiveProxy",
   "status.transport.hysteria2": "Обфускація: Hysteria2",

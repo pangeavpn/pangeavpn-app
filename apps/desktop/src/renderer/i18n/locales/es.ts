@@ -63,11 +63,35 @@ export const es = {
   "hero.stopping": "Deteniendo...",
   "hero.noServers": "No hay servidores disponibles",
   "hero.noServersForTransport": "Ningún servidor admite este transporte",
+  "hero.region": "Región",
+  "hero.allRegions": "Todas las regiones",
 
-  // ── Status pills ──────────────────────────────────────
-  "pill.killSwitch": "Kill Switch",
-  "pill.cloak": "Camuflaje",
-  "pill.wireguard": "WireGuard",
+  // ── Headline: {x} marks the emphasised word ───────────
+  "hero.headline.DISCONNECTED": "El mundo está {x}",
+  "hero.emphasis.DISCONNECTED": "separado",
+  "hero.headline.CONNECTING": "Uniéndolo {x}",
+  "hero.emphasis.CONNECTING": "todo",
+  "hero.headline.CONNECTED": "El mundo está {x}",
+  "hero.emphasis.CONNECTED": "completo",
+  "hero.headline.DISCONNECTING": "Dejándolo {x}",
+  "hero.emphasis.DISCONNECTING": "a la deriva",
+  "hero.headline.ERROR": "No se pudo {x}",
+  "hero.emphasis.ERROR": "conectar",
+
+  // ── Session facts ─────────────────────────────────────
+  "fact.session": "Sesión",
+  "fact.down": "Bajada",
+  "fact.up": "Subida",
+  "fact.via": "Vía",
+
+  // ── Region rows ───────────────────────────────────────
+  "region.more": "{count} más",
+  "region.bestOf": "{node} · mejor de {count}",
+  "region.autoOf": "{count} servidores · auto",
+  "region.pinned": "{node} · fijado",
+  "region.showServers": "Mostrar servidores en {region}",
+  "region.badgeBest": "Mejor",
+  "region.badgePinned": "Fijado",
 
   // ── Connection state labels (hero + tray) ─────────────
   "state.DISCONNECTED": "DESCONECTADO",
@@ -90,17 +114,10 @@ export const es = {
   // ── Settings overlay ──────────────────────────────────
   "settings.title": "Ajustes",
   "settings.close": "Cerrar",
-  "settings.account.heading": "Cuenta",
-  "settings.account.signedInAs": "Sesión iniciada como",
-  "settings.account.subscription": "Suscripción",
-  "settings.account.token": "Token de acceso",
-  "settings.account.show": "Mostrar",
-  "settings.account.hide": "Ocultar",
-  "settings.account.copy": "Copiar",
-  "settings.account.tokenHint": "Este es el token con el que iniciaste sesión. Mantenlo en privado — cualquiera que lo tenga puede acceder a tu cuenta.",
   "settings.account.manageSub": "Gestionar suscripción",
   "settings.account.devices": "Dispositivos",
   "settings.account.signOut": "Cerrar sesión",
+  "settings.summary.off": "Desactivado",
   "settings.censorship.heading": "Elusión de censura",
   "settings.censorship.description": "Actívalo si tu red bloquea el acceso a los servicios de VPN.",
   "settings.censorship.directIp.title": "IP directa",
@@ -134,12 +151,13 @@ export const es = {
   "settings.language.system": "Predeterminado del sistema",
   "settings.language.restartHint": "Reinicia PangeaVPN para aplicar el nuevo idioma.",
   "settings.update.heading": "Actualización de software",
-  "settings.update.currentVersion": "Versión actual:",
   "settings.update.check": "Buscar actualizaciones",
 
   // ── Server picker overlay ─────────────────────────────
-  "serverPicker.title": "Seleccionar servidor",
-  "serverPicker.serversAriaLabel": "Servidores",
+  "serverPicker.title": "Seleccionar región",
+  "serverPicker.serversAriaLabel": "Regiones",
+  "serverPicker.recent": "Recientes",
+  "serverPicker.all": "Todas las regiones",
   "serverPicker.noServers": "No hay servidores disponibles",
   "serverPicker.noServersForTransport": "Ningún servidor admite este transporte",
   "serverPicker.load": "Carga del servidor {pct}%",
@@ -172,8 +190,6 @@ export const es = {
   "sub.expires": "Caduca",
   "sub.pastDue": "Pago vencido",
   "sub.expired": "Suscripción vencida",
-  "account.noToken": "No hay token para copiar.",
-  "account.tokenCopied": "Token copiado al portapapeles.",
 
   // ── Session / auth toasts ─────────────────────────────
   "auth.signedOutRetry": "Se cerró tu sesión. Inicia sesión de nuevo.",
@@ -219,13 +235,10 @@ export const es = {
 
   // ── Daemon sync / generic ─────────────────────────────
   "common.loading": "Cargando...",
-  "common.ready": "Listo.",
   "common.retrying": "Algo salió mal. Reintentando...",
   "common.dash": "—",
 
   // ── Daemon status values (technical, kept short) ──────
-  "status.running": "en ejecución",
-  "status.stopped": "detenido",
   "status.transport.cloak": "Ofuscación: Cloak",
   "status.transport.naive": "Ofuscación: NaiveProxy",
   "status.transport.hysteria2": "Ofuscación: Hysteria2",

@@ -63,11 +63,35 @@ export const fa = {
   "hero.stopping": "در حال توقف...",
   "hero.noServers": "سروری در دسترس نیست",
   "hero.noServersForTransport": "هیچ سروری از این انتقال پشتیبانی نمی‌کند",
+  "hero.region": "منطقه",
+  "hero.allRegions": "همه مناطق",
 
-  // ── Status pills ──────────────────────────────────────
-  "pill.killSwitch": "کلید قطع اضطراری",
-  "pill.cloak": "استتار",
-  "pill.wireguard": "WireGuard",
+  // ── Headline: {x} marks the emphasised word ───────────
+  "hero.headline.DISCONNECTED": "جهان {x} است",
+  "hero.emphasis.DISCONNECTED": "جدا",
+  "hero.headline.CONNECTING": "در حال {x}",
+  "hero.emphasis.CONNECTING": "اتصال",
+  "hero.headline.CONNECTED": "جهان {x} است",
+  "hero.emphasis.CONNECTED": "یکپارچه",
+  "hero.headline.DISCONNECTING": "در حال {x}",
+  "hero.emphasis.DISCONNECTING": "جدا شدن",
+  "hero.headline.ERROR": "{x} ناموفق بود",
+  "hero.emphasis.ERROR": "اتصال",
+
+  // ── Session facts ─────────────────────────────────────
+  "fact.session": "نشست",
+  "fact.down": "دریافت",
+  "fact.up": "ارسال",
+  "fact.via": "از طریق",
+
+  // ── Region rows ───────────────────────────────────────
+  "region.more": "{count} مورد دیگر",
+  "region.bestOf": "{node} · بهترین از {count}",
+  "region.autoOf": "{count} سرور · خودکار",
+  "region.pinned": "{node} · سنجاق‌شده",
+  "region.showServers": "نمایش سرورهای {region}",
+  "region.badgeBest": "بهترین",
+  "region.badgePinned": "سنجاق‌شده",
 
   // ── Connection state labels (hero + tray) ─────────────
   "state.DISCONNECTED": "قطع شده",
@@ -90,17 +114,10 @@ export const fa = {
   // ── Settings overlay ──────────────────────────────────
   "settings.title": "تنظیمات",
   "settings.close": "بستن",
-  "settings.account.heading": "حساب کاربری",
-  "settings.account.signedInAs": "واردشده به عنوان",
-  "settings.account.subscription": "اشتراک",
-  "settings.account.token": "توکن ورود",
-  "settings.account.show": "نمایش",
-  "settings.account.hide": "پنهان",
-  "settings.account.copy": "کپی",
-  "settings.account.tokenHint": "این همان توکنی است که با آن وارد شده‌اید. آن را محرمانه نگه دارید — هرکسی آن را داشته باشد می‌تواند به حساب شما دسترسی پیدا کند.",
   "settings.account.manageSub": "مدیریت اشتراک",
   "settings.account.devices": "دستگاه‌ها",
   "settings.account.signOut": "خروج",
+  "settings.summary.off": "خاموش",
   "settings.censorship.heading": "دور زدن سانسور",
   "settings.censorship.description": "اگر شبکه شما دسترسی به سرویس‌های VPN را مسدود می‌کند، فعال کنید.",
   "settings.censorship.directIp.title": "IP مستقیم",
@@ -134,12 +151,13 @@ export const fa = {
   "settings.language.system": "پیش‌فرض سیستم",
   "settings.language.restartHint": "برای اعمال زبان جدید، PangeaVPN را دوباره راه‌اندازی کنید.",
   "settings.update.heading": "به‌روزرسانی نرم‌افزار",
-  "settings.update.currentVersion": "نسخه فعلی:",
   "settings.update.check": "بررسی به‌روزرسانی‌ها",
 
   // ── Server picker overlay ─────────────────────────────
-  "serverPicker.title": "انتخاب سرور",
-  "serverPicker.serversAriaLabel": "سرورها",
+  "serverPicker.title": "انتخاب منطقه",
+  "serverPicker.serversAriaLabel": "مناطق",
+  "serverPicker.recent": "اخیر",
+  "serverPicker.all": "همه مناطق",
   "serverPicker.noServers": "سروری در دسترس نیست",
   "serverPicker.noServersForTransport": "هیچ سروری از این انتقال پشتیبانی نمی‌کند",
   "serverPicker.load": "بار سرور {pct}%",
@@ -172,8 +190,6 @@ export const fa = {
   "sub.expires": "منقضی می‌شود",
   "sub.pastDue": "پرداخت معوق",
   "sub.expired": "اشتراک منقضی شد",
-  "account.noToken": "توکنی برای کپی وجود ندارد.",
-  "account.tokenCopied": "توکن در کلیپ‌بورد کپی شد.",
 
   // ── Session / auth toasts ─────────────────────────────
   "auth.signedOutRetry": "شما از حساب خارج شده‌اید. لطفاً دوباره وارد شوید.",
@@ -219,13 +235,10 @@ export const fa = {
 
   // ── Daemon sync / generic ─────────────────────────────
   "common.loading": "در حال بارگذاری...",
-  "common.ready": "آماده.",
   "common.retrying": "مشکلی پیش آمد. در حال تلاش مجدد...",
   "common.dash": "—",
 
   // ── Daemon status values (technical, kept short) ──────
-  "status.running": "در حال اجرا",
-  "status.stopped": "متوقف",
   "status.transport.cloak": "مبهم‌سازی: Cloak",
   "status.transport.naive": "مبهم‌سازی: NaiveProxy",
   "status.transport.hysteria2": "مبهم‌سازی: Hysteria2",

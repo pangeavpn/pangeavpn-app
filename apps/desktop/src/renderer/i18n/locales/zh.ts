@@ -63,11 +63,35 @@ export const zh = {
   "hero.stopping": "正在停止…",
   "hero.noServers": "没有可用的服务器",
   "hero.noServersForTransport": "没有服务器支持此传输方式",
+  "hero.region": "区域",
+  "hero.allRegions": "所有区域",
 
-  // ── Status pills ──────────────────────────────────────
-  "pill.killSwitch": "断网保护",
-  "pill.cloak": "伪装",
-  "pill.wireguard": "WireGuard",
+  // ── Headline: {x} marks the emphasised word ───────────
+  "hero.headline.DISCONNECTED": "世界是{x}的",
+  "hero.emphasis.DISCONNECTED": "分离",
+  "hero.headline.CONNECTING": "正在{x}",
+  "hero.emphasis.CONNECTING": "汇聚",
+  "hero.headline.CONNECTED": "世界是{x}的",
+  "hero.emphasis.CONNECTED": "完整",
+  "hero.headline.DISCONNECTING": "正在{x}",
+  "hero.emphasis.DISCONNECTING": "分离",
+  "hero.headline.ERROR": "无法{x}",
+  "hero.emphasis.ERROR": "连接",
+
+  // ── Session facts ─────────────────────────────────────
+  "fact.session": "会话",
+  "fact.down": "下行",
+  "fact.up": "上行",
+  "fact.via": "通过",
+
+  // ── Region rows ───────────────────────────────────────
+  "region.more": "还有 {count} 个",
+  "region.bestOf": "{node} · {count} 个中最优",
+  "region.autoOf": "{count} 台服务器 · 自动",
+  "region.pinned": "{node} · 已固定",
+  "region.showServers": "显示 {region} 的服务器",
+  "region.badgeBest": "最优",
+  "region.badgePinned": "已固定",
 
   // ── Connection state labels (hero + tray) ─────────────
   "state.DISCONNECTED": "已断开",
@@ -90,17 +114,10 @@ export const zh = {
   // ── Settings overlay ──────────────────────────────────
   "settings.title": "设置",
   "settings.close": "关闭",
-  "settings.account.heading": "账户",
-  "settings.account.signedInAs": "登录身份",
-  "settings.account.subscription": "订阅",
-  "settings.account.token": "登录令牌",
-  "settings.account.show": "显示",
-  "settings.account.hide": "隐藏",
-  "settings.account.copy": "复制",
-  "settings.account.tokenHint": "这是您登录时使用的令牌。请妥善保管——任何持有它的人都能访问您的账户。",
   "settings.account.manageSub": "管理订阅",
   "settings.account.devices": "设备",
   "settings.account.signOut": "退出登录",
+  "settings.summary.off": "关闭",
   "settings.censorship.heading": "绕过审查",
   "settings.censorship.description": "如果您的网络屏蔽了 VPN 服务，请启用此项。",
   "settings.censorship.directIp.title": "直连 IP",
@@ -134,12 +151,13 @@ export const zh = {
   "settings.language.system": "系统默认",
   "settings.language.restartHint": "重新启动 PangeaVPN 以应用新语言。",
   "settings.update.heading": "软件更新",
-  "settings.update.currentVersion": "当前版本：",
   "settings.update.check": "检查更新",
 
   // ── Server picker overlay ─────────────────────────────
-  "serverPicker.title": "选择服务器",
-  "serverPicker.serversAriaLabel": "服务器",
+  "serverPicker.title": "选择区域",
+  "serverPicker.serversAriaLabel": "区域",
+  "serverPicker.recent": "最近",
+  "serverPicker.all": "所有区域",
   "serverPicker.noServers": "没有可用的服务器",
   "serverPicker.noServersForTransport": "没有服务器支持此传输方式",
   "serverPicker.load": "服务器负载 {pct}%",
@@ -172,8 +190,6 @@ export const zh = {
   "sub.expires": "到期",
   "sub.pastDue": "付款逾期",
   "sub.expired": "订阅已到期",
-  "account.noToken": "没有可复制的令牌。",
-  "account.tokenCopied": "令牌已复制到剪贴板。",
 
   // ── Session / auth toasts ─────────────────────────────
   "auth.signedOutRetry": "您已退出登录，请重新登录。",
@@ -219,13 +235,10 @@ export const zh = {
 
   // ── Daemon sync / generic ─────────────────────────────
   "common.loading": "正在加载...",
-  "common.ready": "就绪。",
   "common.retrying": "出了点问题，正在重试...",
   "common.dash": "—",
 
   // ── Daemon status values (technical, kept short) ──────
-  "status.running": "运行中",
-  "status.stopped": "已停止",
   "status.transport.cloak": "混淆：Cloak",
   "status.transport.naive": "混淆：NaiveProxy",
   "status.transport.hysteria2": "混淆：Hysteria2",

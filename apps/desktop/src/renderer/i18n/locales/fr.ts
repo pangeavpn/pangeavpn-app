@@ -63,11 +63,35 @@ export const fr = {
   "hero.stopping": "Arrêt...",
   "hero.noServers": "Aucun serveur disponible",
   "hero.noServersForTransport": "Aucun serveur ne prend en charge ce transport",
+  "hero.region": "Région",
+  "hero.allRegions": "Toutes les régions",
 
-  // ── Status pills ──────────────────────────────────────
-  "pill.killSwitch": "Kill Switch",
-  "pill.cloak": "Camouflage",
-  "pill.wireguard": "WireGuard",
+  // ── Headline: {x} marks the emphasised word ───────────
+  "hero.headline.DISCONNECTED": "Le monde est {x}",
+  "hero.emphasis.DISCONNECTED": "séparé",
+  "hero.headline.CONNECTING": "On rassemble {x}",
+  "hero.emphasis.CONNECTING": "tout",
+  "hero.headline.CONNECTED": "Le monde est {x}",
+  "hero.emphasis.CONNECTED": "entier",
+  "hero.headline.DISCONNECTING": "On laisse {x}",
+  "hero.emphasis.DISCONNECTING": "dériver",
+  "hero.headline.ERROR": "Impossible de {x}",
+  "hero.emphasis.ERROR": "se connecter",
+
+  // ── Session facts ─────────────────────────────────────
+  "fact.session": "Session",
+  "fact.down": "Reçu",
+  "fact.up": "Envoyé",
+  "fact.via": "Via",
+
+  // ── Region rows ───────────────────────────────────────
+  "region.more": "{count} de plus",
+  "region.bestOf": "{node} · meilleur sur {count}",
+  "region.autoOf": "{count} serveurs · auto",
+  "region.pinned": "{node} · épinglé",
+  "region.showServers": "Afficher les serveurs de {region}",
+  "region.badgeBest": "Meilleur",
+  "region.badgePinned": "Épinglé",
 
   // ── Connection state labels (hero + tray) ─────────────
   "state.DISCONNECTED": "DÉCONNECTÉ",
@@ -90,17 +114,10 @@ export const fr = {
   // ── Settings overlay ──────────────────────────────────
   "settings.title": "Paramètres",
   "settings.close": "Fermer",
-  "settings.account.heading": "Compte",
-  "settings.account.signedInAs": "Connecté en tant que",
-  "settings.account.subscription": "Abonnement",
-  "settings.account.token": "Jeton de connexion",
-  "settings.account.show": "Afficher",
-  "settings.account.hide": "Masquer",
-  "settings.account.copy": "Copier",
-  "settings.account.tokenHint": "Il s'agit du jeton avec lequel vous vous êtes connecté. Gardez-le privé — quiconque le possède peut accéder à votre compte.",
   "settings.account.manageSub": "Gérer l'abonnement",
   "settings.account.devices": "Appareils",
   "settings.account.signOut": "Se déconnecter",
+  "settings.summary.off": "Désactivé",
   "settings.censorship.heading": "Contournement de la censure",
   "settings.censorship.description": "Activez si votre réseau bloque l'accès aux services VPN.",
   "settings.censorship.directIp.title": "IP directe",
@@ -134,12 +151,13 @@ export const fr = {
   "settings.language.system": "Par défaut du système",
   "settings.language.restartHint": "Redémarrez PangeaVPN pour appliquer la nouvelle langue.",
   "settings.update.heading": "Mise à jour du logiciel",
-  "settings.update.currentVersion": "Version actuelle :",
   "settings.update.check": "Rechercher des mises à jour",
 
   // ── Server picker overlay ─────────────────────────────
-  "serverPicker.title": "Sélectionner un serveur",
-  "serverPicker.serversAriaLabel": "Serveurs",
+  "serverPicker.title": "Sélectionner une région",
+  "serverPicker.serversAriaLabel": "Régions",
+  "serverPicker.recent": "Récents",
+  "serverPicker.all": "Toutes les régions",
   "serverPicker.noServers": "Aucun serveur disponible",
   "serverPicker.noServersForTransport": "Aucun serveur ne prend en charge ce transport",
   "serverPicker.load": "Charge du serveur {pct} %",
@@ -172,8 +190,6 @@ export const fr = {
   "sub.expires": "Expiration",
   "sub.pastDue": "Paiement en retard",
   "sub.expired": "Abonnement expiré",
-  "account.noToken": "Aucun jeton à copier.",
-  "account.tokenCopied": "Jeton copié dans le presse-papiers.",
 
   // ── Session / auth toasts ─────────────────────────────
   "auth.signedOutRetry": "Vous avez été déconnecté. Veuillez vous reconnecter.",
@@ -219,13 +235,10 @@ export const fr = {
 
   // ── Daemon sync / generic ─────────────────────────────
   "common.loading": "Chargement...",
-  "common.ready": "Prêt.",
   "common.retrying": "Une erreur s'est produite. Nouvelle tentative...",
   "common.dash": "—",
 
   // ── Daemon status values (technical, kept short) ──────
-  "status.running": "en cours d'exécution",
-  "status.stopped": "arrêté",
   "status.transport.cloak": "Obfuscation : Cloak",
   "status.transport.naive": "Obfuscation : NaiveProxy",
   "status.transport.hysteria2": "Obfuscation : Hysteria2",

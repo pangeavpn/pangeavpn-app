@@ -63,11 +63,35 @@ export const ru = {
   "hero.stopping": "Остановка...",
   "hero.noServers": "Нет доступных серверов",
   "hero.noServersForTransport": "Нет серверов с поддержкой этого транспорта",
+  "hero.region": "Регион",
+  "hero.allRegions": "Все регионы",
 
-  // ── Status pills ──────────────────────────────────────
-  "pill.killSwitch": "Kill Switch",
-  "pill.cloak": "Cloak",
-  "pill.wireguard": "WireGuard",
+  // ── Headline: {x} marks the emphasised word ───────────
+  "hero.headline.DISCONNECTED": "Мир {x}",
+  "hero.emphasis.DISCONNECTED": "разделён",
+  "hero.headline.CONNECTING": "Соединяем {x}",
+  "hero.emphasis.CONNECTING": "воедино",
+  "hero.headline.CONNECTED": "Мир {x}",
+  "hero.emphasis.CONNECTED": "целостен",
+  "hero.headline.DISCONNECTING": "Отпускаем в {x}",
+  "hero.emphasis.DISCONNECTING": "дрейф",
+  "hero.headline.ERROR": "Не удалось {x}",
+  "hero.emphasis.ERROR": "подключиться",
+
+  // ── Session facts ─────────────────────────────────────
+  "fact.session": "Сессия",
+  "fact.down": "Приём",
+  "fact.up": "Передача",
+  "fact.via": "Через",
+
+  // ── Region rows ───────────────────────────────────────
+  "region.more": "ещё {count}",
+  "region.bestOf": "{node} · лучший из {count}",
+  "region.autoOf": "{count} серверов · авто",
+  "region.pinned": "{node} · закреплён",
+  "region.showServers": "Показать серверы в регионе {region}",
+  "region.badgeBest": "Лучший",
+  "region.badgePinned": "Закреплён",
 
   // ── Connection state labels (hero + tray) ─────────────
   "state.DISCONNECTED": "ОТКЛЮЧЕНО",
@@ -90,17 +114,10 @@ export const ru = {
   // ── Settings overlay ──────────────────────────────────
   "settings.title": "Настройки",
   "settings.close": "Закрыть",
-  "settings.account.heading": "Аккаунт",
-  "settings.account.signedInAs": "Вы вошли как",
-  "settings.account.subscription": "Подписка",
-  "settings.account.token": "Токен для входа",
-  "settings.account.show": "Показать",
-  "settings.account.hide": "Скрыть",
-  "settings.account.copy": "Копировать",
-  "settings.account.tokenHint": "Это токен, с которым вы вошли. Держите его в секрете — любой, у кого он есть, может получить доступ к вашему аккаунту.",
   "settings.account.manageSub": "Управление подпиской",
   "settings.account.devices": "Устройства",
   "settings.account.signOut": "Выйти",
+  "settings.summary.off": "Выкл.",
   "settings.censorship.heading": "Обход цензуры",
   "settings.censorship.description": "Включите, если ваша сеть блокирует доступ к VPN-сервисам.",
   "settings.censorship.directIp.title": "Direct IP",
@@ -134,12 +151,13 @@ export const ru = {
   "settings.language.system": "Как в системе",
   "settings.language.restartHint": "Перезапустите PangeaVPN, чтобы применить новый язык.",
   "settings.update.heading": "Обновление ПО",
-  "settings.update.currentVersion": "Текущая версия:",
   "settings.update.check": "Проверить обновления",
 
   // ── Server picker overlay ─────────────────────────────
-  "serverPicker.title": "Выбрать сервер",
-  "serverPicker.serversAriaLabel": "Серверы",
+  "serverPicker.title": "Выбор региона",
+  "serverPicker.serversAriaLabel": "Регионы",
+  "serverPicker.recent": "Недавние",
+  "serverPicker.all": "Все регионы",
   "serverPicker.noServers": "Нет доступных серверов",
   "serverPicker.noServersForTransport": "Нет серверов с поддержкой этого транспорта",
   "serverPicker.load": "Загрузка сервера {pct}%",
@@ -172,8 +190,6 @@ export const ru = {
   "sub.expires": "Истекает",
   "sub.pastDue": "Просрочен платёж",
   "sub.expired": "Подписка истекла",
-  "account.noToken": "Нет токена для копирования.",
-  "account.tokenCopied": "Токен скопирован в буфер обмена.",
 
   // ── Session / auth toasts ─────────────────────────────
   "auth.signedOutRetry": "Вы вышли из системы. Войдите снова.",
@@ -219,13 +235,10 @@ export const ru = {
 
   // ── Daemon sync / generic ─────────────────────────────
   "common.loading": "Загрузка...",
-  "common.ready": "Готово.",
   "common.retrying": "Что-то пошло не так. Повторная попытка...",
   "common.dash": "—",
 
   // ── Daemon status values (technical, kept short) ──────
-  "status.running": "работает",
-  "status.stopped": "остановлен",
   "status.transport.cloak": "Обфускация: Cloak",
   "status.transport.naive": "Обфускация: NaiveProxy",
   "status.transport.hysteria2": "Обфускация: Hysteria2",

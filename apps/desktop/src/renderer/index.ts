@@ -9,6 +9,16 @@ import {
   getUserIntent
 } from "./autoConnect.js";
 import { pickRandomServer, resolveSelection } from "./serverPick.js";
+import { buildDriftMap } from "./driftMap.js";
+import { buildFlag } from "./flags.js";
+import {
+  groupRegions,
+  orderByRecent,
+  pickNode,
+  promoteRecent,
+  regionOfServer,
+  type Region
+} from "./regions.js";
 import {
   t,
   initLocale,
@@ -38,13 +48,14 @@ function reportError(context: string, error: unknown, friendly?: string): string
 
 const stateEl = document.getElementById("state") as HTMLSpanElement;
 const detailEl = document.getElementById("detail") as HTMLSpanElement;
-const cloakEl = document.getElementById("cloak") as HTMLSpanElement;
-const activeTransportLabel = document.getElementById("activeTransportLabel") as HTMLSpanElement;
-const wireguardEl = document.getElementById("wireguard") as HTMLSpanElement;
-const ksDot = document.getElementById("ksDot") as HTMLElement;
-const throughputPanel = document.getElementById("throughputPanel") as HTMLElement;
 const txBytesEl = document.getElementById("txBytes") as HTMLSpanElement;
 const rxBytesEl = document.getElementById("rxBytes") as HTMLSpanElement;
+const mapHost = document.getElementById("mapHost") as HTMLElement;
+const heroHeadline = document.getElementById("heroHeadline") as HTMLElement;
+const factSessionEl = document.getElementById("factSession") as HTMLSpanElement;
+const factViaEl = document.getElementById("factVia") as HTMLSpanElement;
+const regionSlots = document.getElementById("regionSlots") as HTMLElement;
+const regionMoreCount = document.getElementById("regionMoreCount") as HTMLElement;
 const themeToggleBtn = document.getElementById("themeToggleBtn") as HTMLButtonElement;
 const uiMessageEl = document.getElementById("uiMessage") as HTMLParagraphElement;
 const appVersionEl = document.getElementById("appVersion") as HTMLSpanElement;
@@ -84,11 +95,12 @@ const manageSubLink = document.getElementById("manageSubLink") as HTMLAnchorElem
 const menuSettingsBtn = document.getElementById("menuSettingsBtn") as HTMLButtonElement;
 const settingsOverlay = document.getElementById("settingsOverlay") as HTMLElement;
 const settingsOverlayCloseBtn = document.getElementById("settingsOverlayCloseBtn") as HTMLButtonElement;
-const accountUserLabel = document.getElementById("accountUserLabel") as HTMLSpanElement;
 const accountSubscription = document.getElementById("accountSubscription") as HTMLSpanElement;
-const accountTokenValue = document.getElementById("accountTokenValue") as HTMLElement;
-const accountTokenToggleBtn = document.getElementById("accountTokenToggleBtn") as HTMLButtonElement;
-const accountTokenCopyBtn = document.getElementById("accountTokenCopyBtn") as HTMLButtonElement;
+const setCensorshipValue = document.getElementById("setCensorshipValue") as HTMLSpanElement;
+const setTransportValue = document.getElementById("setTransportValue") as HTMLSpanElement;
+const setNetworkValue = document.getElementById("setNetworkValue") as HTMLSpanElement;
+const setStartupValue = document.getElementById("setStartupValue") as HTMLSpanElement;
+const setLanguageValue = document.getElementById("setLanguageValue") as HTMLSpanElement;
 const checkUpdatesBtn = document.getElementById("checkUpdatesBtn") as HTMLButtonElement;
 const settingsVersionEl = document.getElementById("settingsVersion") as HTMLSpanElement;
 const serverPickerBtn = document.getElementById("serverPickerBtn") as HTMLButtonElement;
@@ -96,8 +108,6 @@ const serverPickerLabel = document.getElementById("serverPickerLabel") as HTMLEl
 const serverPickerOverlay = document.getElementById("serverPickerOverlay") as HTMLElement;
 const serverPickerOverlayList = document.getElementById("serverPickerOverlayList") as HTMLElement;
 const serverPickerOverlayCloseBtn = document.getElementById("serverPickerOverlayCloseBtn") as HTMLButtonElement;
-const cloakDot = document.getElementById("cloakDot") as HTMLElement;
-const wgDot = document.getElementById("wgDot") as HTMLElement;
 
 type ThemeMode = "light" | "dark";
 const THEME_STORAGE_KEY = "pangea-vpn-theme";
@@ -114,21 +124,15 @@ let logEntries: LogEntry[] = [];
 let authState: AuthState = { authenticated: false, user: null };
 let servers: ServerInfo[] = [];
 let serverWorking = false;
-// True while a connect attempt is in flight. Stop is live for the whole of it
-// with no grace delay: cancelling is a hard cancel in the main process (it
-// aborts the hub calls and refuses to start the tunnel), so there is nothing
-// left to protect the user from by making them wait a second first.
+// Stop stays live for the whole attempt: cancelling is a hard cancel in main,
+// so there is no unsafe window a grace delay would protect.
 let connectInFlight = false;
-// The hub's verdict on whether this account may connect. Null until asked.
-// Never derived from subscription.status here — prepaid plans stay "active"
-// after they lapse, so only the hub's flag is trustworthy.
+// Hub's verdict on whether this account may connect; null until asked. Never
+// derived from subscription.status — prepaid plans stay "active" once lapsed.
 let entitled: boolean | null = null;
 
-// Mirrors src/shared/mtu.ts, which the renderer can't import: both tsconfigs
-// emit to dist/ from rootDir src, so a renderer (ESM) copy of dist/shared/mtu.js
-// would clobber main's CommonJS one. Same duplication as global.d.ts ↔ ipc.ts.
-// Main remains the authority — these are only for display. Keep in sync with
-// the min/max on #wireguardMtuInput.
+// Mirrors shared/mtu.ts — the renderer can't import it without clobbering
+// main's CommonJS copy in dist. Display only; keep in step with the input.
 const MTU_MIN = 1280;
 const MTU_MAX = 1420;
 const MTU_DEFAULT = 1380;
@@ -158,26 +162,31 @@ manageSubLink.addEventListener("click", (e) => {
 
 // ── Fullscreen settings overlay ───────────────────────────────
 
-const LAST_TOKEN_KEY = "pangea:lastToken";
-let accountTokenRevealed = false;
+/** Collapsed rows carry their current value, so state is readable without
+ *  opening anything. Reuses the control labels rather than new strings. */
+function updateSettingsSummaries(): void {
+  const off = t("settings.summary.off");
 
-function maskToken(token: string): string {
-  return "•".repeat(Math.min(Math.max(token.length, 8), 16));
-}
+  const censorship: string[] = [];
+  if (directIpToggle.checked) censorship.push(t("settings.censorship.directIp.title"));
+  if (directIpOnlyToggle.checked) censorship.push(t("settings.censorship.directIpOnly.title"));
+  setCensorshipValue.textContent = censorship.length ? censorship.join(" · ") : off;
 
-function refreshAccountToken(): void {
-  const token = localStorage.getItem(LAST_TOKEN_KEY);
-  const hasToken = Boolean(token);
-  accountTokenToggleBtn.disabled = !hasToken;
-  accountTokenCopyBtn.disabled = !hasToken;
-  if (!token) {
-    accountTokenRevealed = false;
-    accountTokenValue.textContent = t("common.dash");
-    accountTokenToggleBtn.textContent = t("settings.account.show");
-    return;
-  }
-  accountTokenValue.textContent = accountTokenRevealed ? token : maskToken(token);
-  accountTokenToggleBtn.textContent = t(accountTokenRevealed ? "settings.account.hide" : "settings.account.show");
+  const transport = preferredTransportSelect.selectedOptions[0];
+  setTransportValue.textContent = transport ? transport.textContent : "";
+
+  const mtu = `MTU ${wireguardMtuInput.value || MTU_DEFAULT}`;
+  setNetworkValue.textContent = allowLanToggle.checked
+    ? `${mtu} · ${t("settings.network.allowLan.title")}`
+    : mtu;
+
+  const startup: string[] = [];
+  if (launchAtStartupToggle.checked) startup.push(t("settings.startup.launch.title"));
+  if (alwaysConnectedToggle.checked) startup.push(t("settings.startup.lockdown.title"));
+  setStartupValue.textContent = startup.length ? startup.join(" · ") : off;
+
+  const language = languageSelect?.selectedOptions[0];
+  setLanguageValue.textContent = language ? language.textContent : "";
 }
 
 function formatSubscriptionDate(iso: string | null): string {
@@ -192,9 +201,8 @@ function formatSubscriptionDate(iso: string | null): string {
 function subscriptionText(sub: SubscriptionInfo | null): { text: string; warn: boolean } {
   if (!sub) return { text: t("sub.none"), warn: false };
   const when = formatSubscriptionDate(sub.expiresAt);
-  // Checked before the status branch: a lapsed prepaid plan is still "active",
-  // so reading status first would tell the customer they expire on a date that
-  // has already passed, with no warning styling.
+  // Before the status branch: a lapsed prepaid plan still reads "active", so
+  // status-first would quote an expiry date already in the past.
   if (sub.entitled === false) {
     return { text: `${t("sub.expired")}${when ? " —" + when : ""}`, warn: true };
   }
@@ -208,14 +216,8 @@ function subscriptionText(sub: SubscriptionInfo | null): { text: string; warn: b
   return { text: t("sub.none"), warn: false };
 }
 
-/**
- * Ask the hub whether this account may connect, and say so once if it can't.
- *
- * The toast is the only notice a prepaid customer gets that their time ran
- * out — nothing else in the app would tell them, since a lapsed prepaid
- * subscription still reads as "active". Announced once per transition into the
- * expired state so it can't nag on every poll.
- */
+/** Ask the hub whether this account may connect. Toasts once per transition
+ *  into expired — the only notice a lapsed prepaid customer ever gets. */
 async function refreshEntitlement(): Promise<void> {
   if (!pangeaApi) return;
   let sub: SubscriptionInfo | null = null;
@@ -259,10 +261,9 @@ async function refreshSubscription(): Promise<void> {
 }
 
 // ── Overlay focus management ──────────────────────────────────
-// Full-screen overlays cover the shell but leave it in the tab order, so a
-// keyboard/screen-reader user could otherwise reach controls hidden behind
-// them. On open we make the shell `inert` (non-interactive + hidden from AT)
-// and move focus into the overlay; on close we release it and restore focus.
+
+// Overlays cover the shell but leave it in the tab order, so the shell goes
+// `inert` on open; focus moves in, and is restored on close.
 const overlayReturnFocus: Array<HTMLElement | null> = [];
 
 function activateOverlay(overlay: HTMLElement): void {
@@ -291,7 +292,7 @@ function openSettings(): void {
   settingsOverlay.classList.add("visible");
   settingsOverlay.setAttribute("aria-hidden", "false");
   settingsVersionEl.textContent = appVersionEl.textContent || t("common.dash");
-  refreshAccountToken();
+  updateSettingsSummaries();
   void refreshSubscription();
   activateOverlay(settingsOverlay);
 }
@@ -299,9 +300,6 @@ function openSettings(): void {
 function closeSettings(): void {
   settingsOverlay.classList.remove("visible");
   settingsOverlay.setAttribute("aria-hidden", "true");
-  // Re-mask the token so it isn't revealed the next time settings opens.
-  accountTokenRevealed = false;
-  refreshAccountToken();
   deactivateOverlay();
 }
 
@@ -319,25 +317,6 @@ document.addEventListener("keydown", (e) => {
     e.preventDefault();
     e.stopPropagation();
     closeSettings();
-  }
-});
-
-accountTokenToggleBtn.addEventListener("click", () => {
-  accountTokenRevealed = !accountTokenRevealed;
-  refreshAccountToken();
-});
-
-accountTokenCopyBtn.addEventListener("click", async () => {
-  const token = localStorage.getItem(LAST_TOKEN_KEY);
-  if (!token) {
-    showToast(t("account.noToken"));
-    return;
-  }
-  try {
-    await copyTextToClipboard(token);
-    showToast(t("account.tokenCopied"), 3000, true);
-  } catch (error) {
-    showToast(reportError("copyToken", error));
   }
 });
 
@@ -847,9 +826,8 @@ serverConnectBtn.addEventListener("click", async () => {
     syncServerPicker();
   }
 
-  // Refuse locally when the hub has told us this account is out of time. The
-  // register call would 403 anyway; catching it here means a clear message
-  // instead of a failed connect, and no pointless round trip.
+  // Refuse locally when the hub says this account is out of time — register
+  // would 403 anyway, and this gives a clear message, not a failed connect.
   if (entitled === false) {
     showToast(t("connect.expired"));
     setUiMessage(t("sub.expired"));
@@ -952,11 +930,8 @@ async function switchToServer(serverId: string): Promise<void> {
 serverDisconnectBtn.addEventListener("click", async () => {
   if (!daemonApi) return;
 
-  // Mid-connect this button is Stop, not Disconnect. Cancel the attempt in the
-  // main process rather than only telling the daemon to disconnect: the attempt
-  // is what would otherwise go on to bring the tunnel up a moment later. The
-  // in-flight provisionAndConnect resolves as cancelled and its own finally
-  // clears the busy state, so don't fight it over serverWorking here.
+  // Mid-connect this is Stop: cancel the attempt in main, or it brings the
+  // tunnel up a moment later. Its own finally clears the busy state.
   if (connectInFlight && pangeaApi) {
     updateServerBusyIndicator(true, t("hero.stopping"));
     setUiMessage(t("connect.cancelled"));
@@ -991,9 +966,10 @@ serverRefreshBtn.addEventListener("click", async () => {
   await refreshServers();
 });
 
-// Settings toggles live inside the fullscreen overlay, which covers #uiMessage,
-// so feedback is shown via showToast (renders above the overlay). Each toggle
-// reverts its checkbox and surfaces the error if the backend call fails.
+// Settings toggles sit under the overlay that covers #uiMessage, so feedback
+// goes through showToast; each reverts its checkbox if the backend call fails.
+settingsOverlay.addEventListener("change", updateSettingsSummaries);
+
 directIpToggle.addEventListener("change", async () => {
   if (!pangeaApi) return;
   try {
@@ -1178,8 +1154,9 @@ function showLoginScreen(): void {
 }
 
 // ── Language selection ────────────────────────────────
-// The locale is resolved once at startup and applied before the shell shows.
-// Changing it persists the choice; it takes effect on the next launch.
+
+// Resolved once at startup, before the shell shows. Changing it persists the
+// choice and takes effect on the next launch.
 const LANGUAGE_SYSTEM = "system";
 const languageSelect = document.getElementById("languageSelect") as HTMLSelectElement | null;
 const languageRestartHint = document.getElementById("languageRestartHint") as HTMLElement | null;
@@ -1225,6 +1202,8 @@ function initLanguagePicker(): void {
 
 async function init(): Promise<void> {
   initTheme();
+  mapHost.replaceChildren(buildDriftMap());
+  setInterval(renderSessionClock, 1000);
   await applyStoredLocale();
   initLanguagePicker();
 
@@ -1451,9 +1430,8 @@ menuUpdateBtn.addEventListener("click", () => {
   showUpdateModal();
 });
 
-// checkForUpdates() resolves with the latest release regardless of whether it's
-// newer, so compare against the running version to decide the message. When it
-// IS newer the onUpdateAvailable event also fires and surfaces the full modal.
+// checkForUpdates() resolves with the latest release whether or not it's newer,
+// so compare against the running version; onUpdateAvailable shows the modal.
 function isNewerVersion(candidate: string, current: string): boolean {
   const parse = (v: string): number[] => v.replace(/^v/, "").split(".").map((n) => parseInt(n, 10) || 0);
   const a = parse(candidate);
@@ -1599,7 +1577,7 @@ async function refreshAll(showIndicator = false): Promise<void> {
 
   try {
     await Promise.all([refreshStatus(), refreshLogs()]);
-    setUiMessage(t("common.ready"));
+    setUiMessage("");
   } catch (error) {
     console.error("[daemonSync]", error);
     setUiMessage(t("common.retrying"));
@@ -1607,7 +1585,7 @@ async function refreshAll(showIndicator = false): Promise<void> {
     try {
       await new Promise((r) => setTimeout(r, 2000));
       await Promise.all([refreshStatus(), refreshLogs()]);
-      setUiMessage(t("common.ready"));
+      setUiMessage("");
     } catch (retryError) {
       setUiMessage(reportError("daemonSyncRetry", retryError));
     }
@@ -1773,6 +1751,36 @@ const TRANSPORT_LABELS: Record<string, string> = {
 
 // The status block for whichever transport is currently active, so the pill
 // reflects the live transport rather than always Cloak.
+const EM_DASH = "—";
+
+/** The {x} placeholder lets each locale put the stressed word where its own
+ *  grammar needs it, without putting markup in the catalogues. */
+function setHeadline(state: StatusResponse["state"]): void {
+  const [before, after = ""] = t(("hero.headline." + state) as MessageKey).split("{x}");
+  const strong = document.createElement("strong");
+  strong.textContent = t(("hero.emphasis." + state) as MessageKey);
+  heroHeadline.replaceChildren(document.createTextNode(before), strong, document.createTextNode(after));
+}
+
+// Wall-clock start of the current session, derived in the renderer — the
+// daemon does not report uptime.
+let connectedSince: number | null = null;
+
+function renderSessionClock(): void {
+  if (connectedSince === null) {
+    factSessionEl.textContent = EM_DASH;
+    return;
+  }
+  const total = Math.max(0, Math.floor((Date.now() - connectedSince) / 1000));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const seconds = total % 60;
+  const pad = (n: number): string => String(n).padStart(2, "0");
+  factSessionEl.textContent = hours > 0
+    ? `${hours}:${pad(minutes)}:${pad(seconds)}`
+    : `${pad(minutes)}:${pad(seconds)}`;
+}
+
 function activeTransportStatus(status: StatusResponse): { running: boolean; pid: number | null } {
   switch (status.activeTransport) {
     case "naive": return status.naive;
@@ -1789,30 +1797,21 @@ function renderStatus(status: StatusResponse): void {
   stateEl.textContent = t(("state." + status.state) as MessageKey);
   detailEl.textContent = status.detail;
 
-  const activeStatus = activeTransportStatus(status);
-  const activePid = activeStatus.pid ?? "none";
-  cloakEl.textContent = `${activeStatus.running ? t("status.running") : t("status.stopped")} (pid: ${activePid})`;
-  wireguardEl.textContent = `${status.wireguard.running ? t("status.running") : t("status.stopped")} (${status.wireguard.detail})`;
-
-  activeTransportLabel.textContent = TRANSPORT_LABELS[status.activeTransport] ?? "";
-
-  // Drive hero card state
+  // Drive hero card state, and the drift map through the body attribute.
   heroCard.dataset.state = status.state;
-  cloakDot.classList.toggle("on", activeStatus.running);
-  wgDot.classList.toggle("on", status.wireguard.running);
-
-  // Kill switch pill
-  const ksActive = (status as StatusResponse & { killSwitchActive?: boolean }).killSwitchActive ?? false;
-  ksDot.classList.toggle("on", ksActive);
+  document.body.dataset.state = status.state;
+  setHeadline(status.state);
 
   // Throughput stats
   const connected = status.state === "CONNECTED";
   const wg = status.wireguard as StatusResponse["wireguard"] & { bytesIn?: number; bytesOut?: number };
-  throughputPanel.hidden = !connected;
-  if (connected) {
-    rxBytesEl.textContent = formatBytes(wg.bytesIn ?? 0);
-    txBytesEl.textContent = formatBytes(wg.bytesOut ?? 0);
-  }
+  connectedSince = connected ? connectedSince ?? Date.now() : null;
+  rxBytesEl.textContent = connected ? formatBytes(wg.bytesIn ?? 0) : EM_DASH;
+  txBytesEl.textContent = connected ? formatBytes(wg.bytesOut ?? 0) : EM_DASH;
+  factViaEl.textContent = status.activeTransport
+    ? TRANSPORT_LABELS[status.activeTransport] ?? status.activeTransport
+    : EM_DASH;
+  renderSessionClock();
 
   // Recovery toast — cloak was down last poll, now it's back
   if (lastCloakWasDown && status.cloak.running && connected) {
@@ -1893,14 +1892,11 @@ function updateAuthUI(): void {
     showAppShell();
     loginBtn.hidden = true;
     menuDevicesBtn.hidden = false;
-    accountUserLabel.textContent = authState.user?.email || authState.user?.name || t("common.dash");
-    refreshAccountToken();
     serverPanel.hidden = false;
   } else {
     showLoginScreen();
     loginBtn.hidden = !pangeaApi;
     menuDevicesBtn.hidden = true;
-    accountUserLabel.textContent = t("common.dash");
     closeSettings();
     serverPanel.hidden = true;
   }
@@ -1943,9 +1939,8 @@ async function refreshServers(): Promise<void> {
   void refreshEntitlement();
 }
 
-// Refresh with backoff until it succeeds, so the list (and its load values) is
-// always current. Triggered when the picker opens or the app is shown. A newer
-// call supersedes the loop; it also stops on sign-out or while the window is hidden.
+// Backoff until it succeeds so load values stay current. A newer call
+// supersedes the loop; it stops on sign-out or while the window is hidden.
 let serverRefreshGeneration = 0;
 async function refreshServersWithRetry(): Promise<void> {
   if (!authState.authenticated || !pangeaApi) return;
@@ -1982,9 +1977,8 @@ function buildLoadIndicator(load: number | null | undefined): HTMLElement | null
 
 type TransportChoice = "auto" | "cloak" | "naive" | "reality" | "hysteria2" | "snowflake";
 
-// A server "supports" a transport when the hub advertised that transport's
-// connection block for it. cloak is always present; "auto" matches every
-// server (it falls back across whatever transports the server actually offers).
+// Supported means the hub advertised that transport's block. cloak is always
+// present; "auto" matches every server and falls back across what it offers.
 function serverSupportsTransport(server: ServerInfo, transport: TransportChoice): boolean {
   switch (transport) {
     case "naive":
@@ -2007,11 +2001,186 @@ function getVisibleServers(): ServerInfo[] {
   return servers.filter((s) => serverSupportsTransport(s, choice));
 }
 
+const RECENT_REGIONS_KEY = "pangea:recentRegions";
+const SLOT_COUNT = 2;
+
+let visibleRegions: Region[] = [];
+let recentRegions: string[] = readRecentRegions();
+// Set only when the user opened a region and chose a node by hand; otherwise
+// the lowest-load node is picked fresh on every connect.
+let pinnedNodeId: string | null = null;
+const expandedRegions = new Set<string>();
+
+function readRecentRegions(): string[] {
+  try {
+    const raw = localStorage.getItem(RECENT_REGIONS_KEY);
+    const parsed: unknown = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.filter((k): k is string => typeof k === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function rememberRegion(key: string): void {
+  recentRegions = promoteRecent(recentRegions, key);
+  try {
+    localStorage.setItem(RECENT_REGIONS_KEY, JSON.stringify(recentRegions));
+  } catch {
+    // A full or blocked localStorage only costs us the ordering, so carry on.
+  }
+}
+
+/** The node a region would connect to: the user's pin, else the lightest. */
+function nodeForRegion(region: Region): ServerInfo {
+  const pinned = pinnedNodeId && region.nodes.find((n) => n.id === pinnedNodeId);
+  return pinned || pickNode(region);
+}
+
+function selectedRegion(): Region | undefined {
+  return regionOfServer(visibleRegions, serverSelect.value);
+}
+
+/** Connects to (or switches to) a region, optionally pinned to one node. */
+function activateRegion(region: Region, nodeId: string | null): void {
+  closeServerPicker();
+  if (serverWorking) return;
+
+  pinnedNodeId = nodeId;
+  const target = nodeId ? region.nodes.find((n) => n.id === nodeId) ?? pickNode(region) : pickNode(region);
+  rememberRegion(region.key);
+
+  // Only commit the selection when an action will actually run, so the slots
+  // can't drift out of sync with the connected node.
+  if (currentDaemonState === "CONNECTED") {
+    serverSelect.value = target.id;
+    syncServerPicker();
+    void switchToServer(target.id);
+  } else if (!serverConnectBtn.disabled) {
+    serverSelect.value = target.id;
+    syncServerPicker();
+    serverConnectBtn.click();
+  } else {
+    serverSelect.value = target.id;
+    syncServerPicker();
+  }
+}
+
+function buildRegionRow(region: Region, forPicker: boolean): HTMLElement {
+  const node = nodeForRegion(region);
+  const isCurrent = region.nodes.some((n) => n.id === serverSelect.value);
+  const count = region.nodes.length;
+
+  const row = document.createElement("button");
+  row.type = "button";
+  row.className = "region-row";
+  row.dataset.key = region.key;
+  row.setAttribute("aria-current", String(isCurrent));
+
+  row.append(buildFlag(region.country));
+
+  const text = document.createElement("span");
+  text.className = "region-text";
+  const name = document.createElement("span");
+  name.className = "region-name";
+  name.textContent = region.name;
+  const sub = document.createElement("span");
+  sub.className = "region-sub";
+  if (isCurrent) {
+    sub.textContent = pinnedNodeId
+      ? t("region.pinned", { node: node.id })
+      : count > 1 ? t("region.bestOf", { node: node.id, count: String(count) }) : node.id;
+  } else {
+    sub.textContent = count > 1 ? t("region.autoOf", { count: String(count) }) : node.id;
+  }
+  text.append(name, sub);
+  row.append(text);
+
+  const load = buildLoadIndicator(node.load);
+  if (load) row.append(load);
+
+  const tick = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  tick.setAttribute("class", "region-tick");
+  tick.setAttribute("viewBox", "0 0 24 24");
+  tick.setAttribute("fill", "none");
+  tick.setAttribute("aria-hidden", "true");
+  tick.innerHTML =
+    '<path d="m5 13 4.5 4.5L19 7" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>';
+  row.append(tick);
+
+  row.addEventListener("click", () => activateRegion(region, null));
+
+  if (!forPicker || count < 2) return row;
+  return buildExpandableRegion(region, row);
+}
+
+/** Wraps a picker row so its sibling chevron can disclose the region's nodes. */
+function buildExpandableRegion(region: Region, row: HTMLElement): HTMLElement {
+  const wrap = document.createElement("div");
+  wrap.className = "region-wrap";
+  wrap.dataset.key = region.key;
+  wrap.dataset.current = String(region.nodes.some((n) => n.id === serverSelect.value));
+
+  const head = document.createElement("div");
+  head.className = "region-head";
+
+  const expanded = expandedRegions.has(region.key);
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.className = "region-expand";
+  toggle.setAttribute("aria-expanded", String(expanded));
+  toggle.setAttribute("aria-label", t("region.showServers", { region: region.name }));
+  toggle.innerHTML =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>';
+
+  head.append(row, toggle);
+  wrap.append(head);
+
+  const list = document.createElement("div");
+  list.className = "region-nodes";
+  list.hidden = !expanded;
+
+  const best = pickNode(region);
+  for (const node of region.nodes) {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "region-node";
+
+    const id = document.createElement("span");
+    id.className = "region-node-id";
+    id.textContent = node.id;
+    item.append(id);
+
+    if (node.id === pinnedNodeId || node.id === best.id) {
+      const badge = document.createElement("span");
+      badge.className = "region-node-badge";
+      badge.textContent = node.id === pinnedNodeId ? t("region.badgePinned") : t("region.badgeBest");
+      item.append(badge);
+    }
+
+    const load = buildLoadIndicator(node.load);
+    if (load) item.append(load);
+
+    item.addEventListener("click", () => activateRegion(region, node.id));
+    list.append(item);
+  }
+
+  toggle.addEventListener("click", () => {
+    const open = expandedRegions.has(region.key);
+    if (open) expandedRegions.delete(region.key);
+    else expandedRegions.add(region.key);
+    toggle.setAttribute("aria-expanded", String(!open));
+    list.hidden = open;
+  });
+
+  wrap.append(list);
+  return wrap;
+}
+
 function renderServers(): void {
   const previousValue = serverSelect.value;
   const visible = getVisibleServers();
+  visibleRegions = groupRegions(visible);
   serverSelect.innerHTML = "";
-  serverPickerOverlayList.innerHTML = "";
 
   if (visible.length === 0) {
     const noneForTransport = servers.length > 0;
@@ -2022,12 +2191,10 @@ function renderServers(): void {
     serverSelect.append(option);
     serverSelect.disabled = true;
     serverPickerBtn.disabled = true;
-    serverPickerLabel.textContent = emptyText;
     serverConnectBtn.disabled = true;
-    const empty = document.createElement("div");
-    empty.className = "server-picker-overlay-empty";
-    empty.textContent = noneForTransport ? t("serverPicker.noServersForTransport") : t("serverPicker.noServers");
-    serverPickerOverlayList.append(empty);
+    regionSlots.replaceChildren(emptyNotice(noneForTransport));
+    serverPickerOverlayList.replaceChildren(emptyNotice(noneForTransport));
+    regionMoreCount.textContent = "";
     return;
   }
 
@@ -2036,66 +2203,14 @@ function renderServers(): void {
     option.value = server.id;
     option.textContent = `${server.name} (${server.id})`;
     serverSelect.append(option);
-
-    const item = document.createElement("div");
-    item.className = "server-picker-overlay-item";
-    item.dataset.value = server.id;
-    item.setAttribute("role", "option");
-    item.tabIndex = 0;
-
-    const text = document.createElement("div");
-    text.className = "server-picker-overlay-item-text";
-    const nameSpan = document.createElement("span");
-    nameSpan.className = "server-picker-overlay-item-name";
-    nameSpan.textContent = server.name;
-    const regionSpan = document.createElement("span");
-    regionSpan.className = "server-picker-overlay-item-region";
-    regionSpan.textContent = [server.country, server.region].filter(Boolean).join(" · ") || server.id;
-    text.append(nameSpan, regionSpan);
-
-    const idSpan = document.createElement("span");
-    idSpan.className = "server-picker-overlay-item-id";
-    idSpan.textContent = server.id;
-
-    const right = document.createElement("div");
-    right.className = "server-picker-overlay-item-right";
-    right.append(idSpan);
-    const loadEl = buildLoadIndicator(server.load);
-    if (loadEl) right.append(loadEl);
-
-    item.append(text, right);
-    const activate = (): void => {
-      closeServerPicker();
-      if (serverWorking) return;
-      // Only commit the selection when an action will actually run, so the
-      // picker label can't drift out of sync with the connected server.
-      if (currentDaemonState === "CONNECTED") {
-        serverSelect.value = server.id;
-        syncServerPicker();
-        void switchToServer(server.id);
-      } else if (!serverConnectBtn.disabled) {
-        serverSelect.value = server.id;
-        syncServerPicker();
-        serverConnectBtn.click();
-      }
-    };
-    item.addEventListener("click", activate);
-    item.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" || e.key === " ") {
-        e.preventDefault();
-        activate();
-      }
-    });
-    serverPickerOverlayList.append(item);
   }
 
   serverSelect.disabled = false;
   serverPickerBtn.disabled = false;
   const resolved = resolveSelection(visible, previousValue, lastServerIdLocal);
   if (!resolved) {
-    // A <select> snaps to index 0 when set to a value with no matching option,
-    // so an empty selection needs a real placeholder to sit on. #serverSelect is
-    // hidden, so this is never seen — the visible UI is the overlay.
+    // A <select> snaps to index 0 for an unmatched value, so an empty selection
+    // needs a real placeholder to sit on. Hidden — the region list is the UI.
     const placeholder = document.createElement("option");
     placeholder.value = "";
     placeholder.textContent = t("hero.selectServer");
@@ -2107,27 +2222,55 @@ function renderServers(): void {
   updateServerControlStates();
 }
 
+function emptyNotice(noneForTransport: boolean): HTMLElement {
+  const empty = document.createElement("div");
+  empty.className = "server-picker-overlay-empty";
+  empty.textContent = noneForTransport ? t("serverPicker.noServersForTransport") : t("serverPicker.noServers");
+  return empty;
+}
+
 function syncServerPicker(): void {
-  const selected = servers.find((s) => s.id === serverSelect.value);
-  if (selected) {
-    serverPickerLabel.textContent = "";
-    const nameText = document.createTextNode(selected.name + " ");
-    const idSpan = document.createElement("span");
-    idSpan.className = "server-picker-label-id";
-    idSpan.textContent = selected.id;
-    serverPickerLabel.append(nameText, idSpan);
+  const ordered = orderByRecent(visibleRegions, recentRegions);
+  const current = selectedRegion();
+
+  // The connected region always holds a slot, so it can never scroll away.
+  const slots = current && !ordered.slice(0, SLOT_COUNT).includes(current)
+    ? [current, ...ordered.filter((r) => r !== current)].slice(0, SLOT_COUNT)
+    : ordered.slice(0, SLOT_COUNT);
+
+  regionSlots.replaceChildren(...slots.map((region) => buildRegionRow(region, false)));
+
+  const remaining = visibleRegions.length - slots.length;
+  regionMoreCount.textContent = remaining > 0 ? t("region.more", { count: String(remaining) }) : "";
+  serverPickerBtn.hidden = visibleRegions.length <= SLOT_COUNT;
+
+  renderRegionPicker(ordered);
+}
+
+function renderRegionPicker(ordered: readonly Region[]): void {
+  const recent = ordered.filter((region) => recentRegions.includes(region.key));
+  const rest = ordered.filter((region) => !recentRegions.includes(region.key));
+
+  const groups: HTMLElement[] = [];
+  const addGroup = (labelKey: MessageKey, list: readonly Region[]): void => {
+    if (list.length === 0) return;
+    const heading = document.createElement("p");
+    heading.className = "region-group-heading";
+    heading.textContent = t(labelKey);
+    const box = document.createElement("div");
+    box.className = "region-group";
+    box.append(...list.map((region) => buildRegionRow(region, true)));
+    groups.push(heading, box);
+  };
+
+  if (recent.length > 0) {
+    addGroup("serverPicker.recent", recent);
+    addGroup("serverPicker.all", rest);
   } else {
-    serverPickerLabel.textContent = t("hero.selectServer");
+    addGroup("serverPicker.all", ordered);
   }
 
-  for (const opt of Array.from(serverPickerOverlayList.children)) {
-    const el = opt as HTMLElement;
-    if (el.dataset.value !== undefined) {
-      const isSelected = el.dataset.value === serverSelect.value;
-      el.classList.toggle("selected", isSelected);
-      el.setAttribute("aria-selected", String(isSelected));
-    }
-  }
+  serverPickerOverlayList.replaceChildren(...groups);
 }
 
 function updateServerControlStates(): void {
@@ -2144,14 +2287,11 @@ function updateServerControlStates(): void {
     ? latestStatus.state === "DISCONNECTED" && !latestStatus.cloak.running && !latestStatus.wireguard.running
     : true;
 
-  // No selection is fine — Connect rolls a random one — but there has to be at
-  // least one server the current transport can actually use. Deliberately not
-  // hoisted into the guard above: that would also disable Disconnect and strand
-  // a connected user who switched to a transport no server supports.
+  // Not hoisted into the guard above: that would also disable Disconnect and
+  // strand a connected user who switched to a transport no server supports.
   serverConnectBtn.disabled =
     busy || !fullyDisconnected || getVisibleServers().length === 0 || entitled === false;
-  // Stop is live for the entire connect attempt, from the first millisecond:
-  // cancelling is a hard cancel, so there is no unsafe window to guard.
+  // Stop is live for the whole attempt — a hard cancel, no unsafe window.
   // Outside an attempt the standard disabled-while-busy rule applies.
   serverDisconnectBtn.disabled = connectInFlight
     ? false
@@ -2202,6 +2342,9 @@ function initCollapsibleSections(): void {
       const nextOpen = !section.classList.contains("is-open");
       setCollapseState(section, content, toggle, nextOpen, true);
       if (key) saveCollapseState(key, nextOpen);
+      // A collapsing row hands its state back to the summary; recompute so a
+      // reverted toggle can't leave a stale value on the header.
+      updateSettingsSummaries();
     });
   }
 }
