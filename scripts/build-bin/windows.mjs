@@ -58,7 +58,9 @@ for (const target of archTargets) {
       shell: true,
       env: {
         ...process.env,
-        CUSTOM_APP_BUILDER_PATH: appBuilderPath
+        CUSTOM_APP_BUILDER_PATH: appBuilderPath,
+        // Nsis7z is 7-Zip 19.00 and silently drops ARM64-filtered entries.
+        ELECTRON_BUILDER_7Z_FILTER: "BCJ2"
       }
     }
   );
