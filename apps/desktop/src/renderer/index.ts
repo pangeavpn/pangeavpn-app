@@ -76,8 +76,6 @@ const serverSelect = document.getElementById("serverSelect") as HTMLSelectElemen
 const serverConnectBtn = document.getElementById("serverConnectBtn") as HTMLButtonElement;
 const serverDisconnectBtn = document.getElementById("serverDisconnectBtn") as HTMLButtonElement;
 const serverRefreshBtn = document.getElementById("serverRefreshBtn") as HTMLButtonElement;
-const serverIndicator = document.getElementById("serverIndicator") as HTMLSpanElement;
-const serverIndicatorLabel = document.getElementById("serverIndicatorLabel") as HTMLSpanElement;
 const directIpToggle = document.getElementById("directIpToggle") as HTMLInputElement;
 const directIpOnlyToggle = document.getElementById("directIpOnlyToggle") as HTMLInputElement;
 const allowLanToggle = document.getElementById("allowLanToggle") as HTMLInputElement;
@@ -836,7 +834,7 @@ serverConnectBtn.addEventListener("click", async () => {
 
   serverWorking = true;
   connectInFlight = true;
-  updateServerBusyIndicator(true, t("hero.provisioning"));
+  const connectingSince = showConnectingState();
   updateServerControlStates();
   try {
     setUiMessage(t("connect.provisioning"));
@@ -854,6 +852,7 @@ serverConnectBtn.addEventListener("click", async () => {
       // UI settles into the expired state rather than inviting another try.
       void refreshEntitlement();
     }
+    await settleConnectingState(connectingSince);
     await refreshStatus();
   } catch (error) {
     // If auth was invalidated, the onAuthInvalidated listener handles the UI
@@ -873,11 +872,12 @@ serverConnectBtn.addEventListener("click", async () => {
       }
     }
     setUiMessage(reportError("serverConnect", error));
+    await settleConnectingState(connectingSince);
     await refreshStatus();
   } finally {
+    connectingVisual = false;
     serverWorking = false;
     connectInFlight = false;
-    updateServerBusyIndicator(false);
     updateServerControlStates();
   }
 });
@@ -888,7 +888,7 @@ async function switchToServer(serverId: string): Promise<void> {
 
   serverWorking = true;
   connectInFlight = true;
-  updateServerBusyIndicator(true, t("hero.provisioning"));
+  const connectingSince = showConnectingState();
   updateServerControlStates();
   try {
     setUiMessage(t("connect.switching"));
@@ -900,6 +900,7 @@ async function switchToServer(serverId: string): Promise<void> {
     } else {
       setUiMessage(t("connect.switchFailed"));
     }
+    await settleConnectingState(connectingSince);
     await refreshStatus();
   } catch (error) {
     if (pangeaApi) {
@@ -918,11 +919,12 @@ async function switchToServer(serverId: string): Promise<void> {
       }
     }
     setUiMessage(reportError("serverSwitch", error));
+    await settleConnectingState(connectingSince);
     await refreshStatus();
   } finally {
+    connectingVisual = false;
     serverWorking = false;
     connectInFlight = false;
-    updateServerBusyIndicator(false);
     updateServerControlStates();
   }
 }
@@ -933,7 +935,6 @@ serverDisconnectBtn.addEventListener("click", async () => {
   // Mid-connect this is Stop: cancel the attempt in main, or it brings the
   // tunnel up a moment later. Its own finally clears the busy state.
   if (connectInFlight && pangeaApi) {
-    updateServerBusyIndicator(true, t("hero.stopping"));
     setUiMessage(t("connect.cancelled"));
     try {
       await pangeaApi.cancelConnect();
@@ -946,7 +947,6 @@ serverDisconnectBtn.addEventListener("click", async () => {
 
   notifyUserDisconnected();
   serverWorking = true;
-  updateServerBusyIndicator(true, t("hero.disconnecting"));
   updateServerControlStates();
   try {
     setUiMessage(t("connect.disconnecting"));
@@ -957,7 +957,6 @@ serverDisconnectBtn.addEventListener("click", async () => {
     setUiMessage(reportError("serverDisconnect", error));
   } finally {
     serverWorking = false;
-    updateServerBusyIndicator(false);
     updateServerControlStates();
   }
 });
@@ -1762,6 +1761,36 @@ function setHeadline(state: StatusResponse["state"]): void {
   heroHeadline.replaceChildren(document.createTextNode(before), strong, document.createTextNode(after));
 }
 
+const MIN_CONNECTING_MS = 600;
+
+// The 2s status poll samples straight past a connect/switch's transient
+// states, so while we are driving one the hero follows the operation, not the poll.
+let connectingVisual = false;
+
+function showConnectingState(): number {
+  connectingVisual = true;
+  renderConnectingState();
+  return Date.now();
+}
+
+function renderConnectingState(): void {
+  heroCard.dataset.state = "CONNECTING";
+  document.body.dataset.state = "CONNECTING";
+  stateEl.textContent = t("state.CONNECTING");
+  detailEl.textContent = "";
+  setHeadline("CONNECTING");
+}
+
+// Holds a fast connect/switch on CONNECTING long enough to read as a
+// transition. Only ever delays the render; a slower op waits not at all.
+async function settleConnectingState(startedAt: number): Promise<void> {
+  const remaining = MIN_CONNECTING_MS - (Date.now() - startedAt);
+  if (remaining > 0) {
+    await new Promise((resolve) => setTimeout(resolve, remaining));
+  }
+  connectingVisual = false;
+}
+
 // Wall-clock start of the current session, derived in the renderer — the
 // daemon does not report uptime.
 let connectedSince: number | null = null;
@@ -1794,13 +1823,17 @@ function activeTransportStatus(status: StatusResponse): { running: boolean; pid:
 function renderStatus(status: StatusResponse): void {
   latestStatus = status;
   currentDaemonState = status.state;
-  stateEl.textContent = t(("state." + status.state) as MessageKey);
-  detailEl.textContent = status.detail;
 
-  // Drive hero card state, and the drift map through the body attribute.
-  heroCard.dataset.state = status.state;
-  document.body.dataset.state = status.state;
-  setHeadline(status.state);
+  // A poll landing mid-switch must not yank the hero back off CONNECTING.
+  if (connectingVisual) {
+    renderConnectingState();
+  } else {
+    stateEl.textContent = t(("state." + status.state) as MessageKey);
+    detailEl.textContent = status.detail;
+    heroCard.dataset.state = status.state;
+    document.body.dataset.state = status.state;
+    setHeadline(status.state);
+  }
 
   // Throughput stats
   const connected = status.state === "CONNECTED";
@@ -2297,14 +2330,6 @@ function updateServerControlStates(): void {
     ? false
     : !latestStatus || latestStatus.state === "DISCONNECTED" || latestStatus.state === "DISCONNECTING" || busy;
   serverDisconnectBtn.textContent = connectInFlight ? t("hero.stop") : t("hero.disconnect");
-}
-
-function updateServerBusyIndicator(active: boolean, label?: string): void {
-  serverIndicator.classList.toggle("active", active);
-  serverIndicator.setAttribute("aria-hidden", String(!active));
-  if (label) {
-    serverIndicatorLabel.textContent = label;
-  }
 }
 
 function updateControlStates(): void {

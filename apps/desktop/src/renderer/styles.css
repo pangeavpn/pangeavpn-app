@@ -609,19 +609,16 @@ body[data-state="ERROR"] .drift-frag {
 
 body[data-state="CONNECTED"] .drift-frag { transform: none; }
 
+/* A static target, not @keyframes — an animation removed mid-flight snaps
+   instead of handing off to the transition above, which is the one bug fix here. */
 body[data-state="CONNECTING"] .drift-frag {
-  animation: drift-converge 2200ms cubic-bezier(0.45, 0, 0.55, 1) infinite;
-}
-
-@keyframes drift-converge {
-  0% { transform: translate(var(--dx), var(--dy)) rotate(var(--dr)); }
-  55% { transform: translate(calc(var(--dx) * 0.12), calc(var(--dy) * 0.12)) rotate(calc(var(--dr) * 0.12)); }
-  100% { transform: translate(var(--dx), var(--dy)) rotate(var(--dr)); }
+  transform: translate(calc(var(--dx) * 0.12), calc(var(--dy) * 0.12)) rotate(calc(var(--dr) * 0.12));
 }
 
 body[data-state="DISCONNECTED"] .drift-map,
 body[data-state="DISCONNECTING"] .drift-map { color: var(--text-muted); opacity: 0.5; }
 body[data-state="CONNECTING"] .drift-map { opacity: 0.85; }
+body[data-state="CONNECTED"] .drift-map { color: var(--success); }
 body[data-state="ERROR"] .drift-map { color: var(--danger); opacity: 0.55; }
 
 .drift-orbit {
@@ -991,8 +988,9 @@ body[data-theme="light"] .menu-dropdown {
 
 .hero-detail {
   font-size: 0.72rem;
+  line-height: 1.35;
   color: var(--text-muted);
-  min-height: 1em;
+  min-height: 1.35em;
 }
 
 /* ── Session facts ────────────────────────────────────────── */
@@ -1314,10 +1312,18 @@ body[data-theme="light"] .region-flag {
   margin-top: 10px;
 }
 
+/* Bottom-anchored, not top-anchored: height: auto means a wrapped, taller
+   message grows upward off the fixed bottom edge instead of clipping. */
 .hero-message {
-  margin: 3px 0 0;
+  position: fixed;
+  left: 14px;
+  bottom: 12px;
+  max-width: 260px;
+  margin: 0;
   font-size: 0.68rem;
   color: var(--text-muted);
+  pointer-events: none;
+  z-index: 5;
 }
 
 .hero-message:empty { display: none; }
@@ -1884,20 +1890,6 @@ button.ghost:hover:not(:disabled) {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
-}
-
-/* ── Refresh indicator ────────────────────────────────────── */
-
-.refresh-indicator {
-  display: none;
-  align-items: center;
-  gap: 6px;
-  color: var(--text-muted);
-  font-size: 0.8rem;
-}
-
-.refresh-indicator.active {
-  display: inline-flex;
 }
 
 /* ── Spinner ──────────────────────────────────────────────── */
