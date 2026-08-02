@@ -8,6 +8,15 @@ export const uk = {
   "app.loading.progress": "Готуємо все... ({remaining} с)",
   "app.loading.cantStart": "Не вдалося запустити PangeaVPN. Перезапустіть застосунок.",
   "app.loading.didntStart": "PangeaVPN не запустився. Перезапустіть застосунок.",
+  "daemonRecovery.kicker": "Системна служба",
+  "daemonRecovery.title": "Службу VPN зупинено",
+  "daemonRecovery.description": "Фонова служба PangeaVPN не відповідає. Перезапустіть її, щоб відновити керування VPN.",
+  "daemonRecovery.permission": "Система запросить дозвіл адміністратора.",
+  "daemonRecovery.restart": "Перезапустити службу",
+  "daemonRecovery.restarting": "Перезапуск служби...",
+  "daemonRecovery.waitingForApproval": "Очікування дозволу адміністратора...",
+  "daemonRecovery.failed": "Не вдалося перезапустити службу. Підтвердьте запит адміністратора та спробуйте ще раз.",
+  "daemonRecovery.tryAgain": "Спробувати ще раз",
 
   // ── Login screen ──────────────────────────────────────
   "login.subtitle": "Введіть токен для входу, щоб продовжити.",

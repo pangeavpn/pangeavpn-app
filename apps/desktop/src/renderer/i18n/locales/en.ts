@@ -8,6 +8,15 @@ export const en = {
   "app.loading.progress": "Getting things ready... ({remaining}s)",
   "app.loading.cantStart": "PangeaVPN couldn't start. Please restart the app.",
   "app.loading.didntStart": "PangeaVPN didn't start. Please restart the app.",
+  "daemonRecovery.kicker": "System service",
+  "daemonRecovery.title": "VPN service stopped",
+  "daemonRecovery.description": "PangeaVPN's background service is not responding. Restart it to restore VPN controls.",
+  "daemonRecovery.permission": "Your system will ask for administrator approval.",
+  "daemonRecovery.restart": "Restart service",
+  "daemonRecovery.restarting": "Restarting service...",
+  "daemonRecovery.waitingForApproval": "Waiting for administrator approval...",
+  "daemonRecovery.failed": "The service could not be restarted. Approve the administrator prompt and try again.",
+  "daemonRecovery.tryAgain": "Try again",
 
   // ── Login screen ──────────────────────────────────────
   "login.subtitle": "Enter your sign-in token to continue.",

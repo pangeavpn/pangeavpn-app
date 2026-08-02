@@ -8,6 +8,15 @@ export const es = {
   "app.loading.progress": "Preparando todo... ({remaining}s)",
   "app.loading.cantStart": "PangeaVPN no pudo iniciarse. Reinicia la aplicación.",
   "app.loading.didntStart": "PangeaVPN no se inició. Reinicia la aplicación.",
+  "daemonRecovery.kicker": "Servicio del sistema",
+  "daemonRecovery.title": "El servicio VPN se detuvo",
+  "daemonRecovery.description": "El servicio en segundo plano de PangeaVPN no responde. Reinícialo para recuperar los controles de la VPN.",
+  "daemonRecovery.permission": "El sistema solicitará autorización de administrador.",
+  "daemonRecovery.restart": "Reiniciar servicio",
+  "daemonRecovery.restarting": "Reiniciando servicio...",
+  "daemonRecovery.waitingForApproval": "Esperando autorización de administrador...",
+  "daemonRecovery.failed": "No se pudo reiniciar el servicio. Autoriza la solicitud de administrador e inténtalo de nuevo.",
+  "daemonRecovery.tryAgain": "Intentar de nuevo",
 
   // ── Login screen ──────────────────────────────────────
   "login.subtitle": "Introduce tu token de acceso para continuar.",

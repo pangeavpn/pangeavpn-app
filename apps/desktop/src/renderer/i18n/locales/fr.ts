@@ -8,6 +8,15 @@ export const fr = {
   "app.loading.progress": "Préparation en cours... ({remaining} s)",
   "app.loading.cantStart": "PangeaVPN n'a pas pu démarrer. Veuillez redémarrer l'application.",
   "app.loading.didntStart": "PangeaVPN n'a pas démarré. Veuillez redémarrer l'application.",
+  "daemonRecovery.kicker": "Service système",
+  "daemonRecovery.title": "Le service VPN est arrêté",
+  "daemonRecovery.description": "Le service d'arrière-plan de PangeaVPN ne répond pas. Redémarrez-le pour rétablir les commandes VPN.",
+  "daemonRecovery.permission": "Votre système demandera une autorisation administrateur.",
+  "daemonRecovery.restart": "Redémarrer le service",
+  "daemonRecovery.restarting": "Redémarrage du service...",
+  "daemonRecovery.waitingForApproval": "En attente de l'autorisation administrateur...",
+  "daemonRecovery.failed": "Le service n'a pas pu être redémarré. Autorisez la demande administrateur et réessayez.",
+  "daemonRecovery.tryAgain": "Réessayer",
 
   // ── Login screen ──────────────────────────────────────
   "login.subtitle": "Saisissez votre jeton de connexion pour continuer.",

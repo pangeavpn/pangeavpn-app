@@ -8,6 +8,15 @@ export const ru = {
   "app.loading.progress": "Идёт подготовка... ({remaining} с)",
   "app.loading.cantStart": "Не удалось запустить PangeaVPN. Перезапустите приложение.",
   "app.loading.didntStart": "PangeaVPN не запустился. Перезапустите приложение.",
+  "daemonRecovery.kicker": "Системная служба",
+  "daemonRecovery.title": "Служба VPN остановлена",
+  "daemonRecovery.description": "Фоновая служба PangeaVPN не отвечает. Перезапустите ее, чтобы восстановить управление VPN.",
+  "daemonRecovery.permission": "Система запросит разрешение администратора.",
+  "daemonRecovery.restart": "Перезапустить службу",
+  "daemonRecovery.restarting": "Перезапуск службы...",
+  "daemonRecovery.waitingForApproval": "Ожидание разрешения администратора...",
+  "daemonRecovery.failed": "Не удалось перезапустить службу. Разрешите запрос администратора и повторите попытку.",
+  "daemonRecovery.tryAgain": "Повторить",
 
   // ── Login screen ──────────────────────────────────────
   "login.subtitle": "Введите токен для входа, чтобы продолжить.",

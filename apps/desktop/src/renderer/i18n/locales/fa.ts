@@ -8,6 +8,15 @@ export const fa = {
   "app.loading.progress": "در حال آماده‌سازی... ({remaining} ثانیه)",
   "app.loading.cantStart": "PangeaVPN نتوانست اجرا شود. لطفاً برنامه را دوباره اجرا کنید.",
   "app.loading.didntStart": "PangeaVPN اجرا نشد. لطفاً برنامه را دوباره اجرا کنید.",
+  "daemonRecovery.kicker": "سرویس سیستم",
+  "daemonRecovery.title": "سرویس VPN متوقف شده است",
+  "daemonRecovery.description": "سرویس پس‌زمینه PangeaVPN پاسخ نمی‌دهد. برای بازیابی کنترل‌های VPN آن را دوباره راه‌اندازی کنید.",
+  "daemonRecovery.permission": "سیستم تأیید مدیر را درخواست خواهد کرد.",
+  "daemonRecovery.restart": "راه‌اندازی دوباره سرویس",
+  "daemonRecovery.restarting": "در حال راه‌اندازی دوباره سرویس...",
+  "daemonRecovery.waitingForApproval": "در انتظار تأیید مدیر...",
+  "daemonRecovery.failed": "سرویس دوباره راه‌اندازی نشد. درخواست مدیر را تأیید کنید و دوباره تلاش کنید.",
+  "daemonRecovery.tryAgain": "تلاش دوباره",
 
   // ── Login screen ──────────────────────────────────────
   "login.subtitle": "برای ادامه، توکن ورود خود را وارد کنید.",

@@ -8,6 +8,15 @@ export const ar = {
   "app.loading.progress": "جارٍ التجهيز... ({remaining}ث)",
   "app.loading.cantStart": "تعذّر تشغيل PangeaVPN. يرجى إعادة تشغيل التطبيق.",
   "app.loading.didntStart": "لم يبدأ PangeaVPN. يرجى إعادة تشغيل التطبيق.",
+  "daemonRecovery.kicker": "خدمة النظام",
+  "daemonRecovery.title": "توقفت خدمة VPN",
+  "daemonRecovery.description": "خدمة PangeaVPN التي تعمل في الخلفية لا تستجيب. أعد تشغيلها لاستعادة عناصر التحكم في VPN.",
+  "daemonRecovery.permission": "سيطلب النظام موافقة المسؤول.",
+  "daemonRecovery.restart": "إعادة تشغيل الخدمة",
+  "daemonRecovery.restarting": "جارٍ إعادة تشغيل الخدمة...",
+  "daemonRecovery.waitingForApproval": "في انتظار موافقة المسؤول...",
+  "daemonRecovery.failed": "تعذرت إعادة تشغيل الخدمة. وافق على طلب المسؤول وحاول مرة أخرى.",
+  "daemonRecovery.tryAgain": "المحاولة مرة أخرى",
 
   // ── Login screen ──────────────────────────────────────
   "login.subtitle": "أدخل رمز الدخول للمتابعة.",

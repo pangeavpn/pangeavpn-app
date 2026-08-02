@@ -8,6 +8,15 @@ export const zh = {
   "app.loading.progress": "正在准备中... （{remaining} 秒）",
   "app.loading.cantStart": "PangeaVPN 无法启动，请重新启动应用。",
   "app.loading.didntStart": "PangeaVPN 未能启动，请重新启动应用。",
+  "daemonRecovery.kicker": "系统服务",
+  "daemonRecovery.title": "VPN 服务已停止",
+  "daemonRecovery.description": "PangeaVPN 后台服务没有响应。请重新启动服务以恢复 VPN 控制。",
+  "daemonRecovery.permission": "系统将请求管理员授权。",
+  "daemonRecovery.restart": "重新启动服务",
+  "daemonRecovery.restarting": "正在重新启动服务...",
+  "daemonRecovery.waitingForApproval": "正在等待管理员授权...",
+  "daemonRecovery.failed": "无法重新启动服务。请批准管理员请求，然后重试。",
+  "daemonRecovery.tryAgain": "重试",
 
   // ── Login screen ──────────────────────────────────────
   "login.subtitle": "输入登录令牌以继续。",

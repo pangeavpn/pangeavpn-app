@@ -23,6 +23,11 @@ import {
 } from "./regions.js";
 import { scheduleConnectionMessages } from "./connectionProgress.js";
 import {
+  daemonHealthAfterFailure,
+  daemonHealthAfterSuccess,
+  initialDaemonHealth
+} from "./daemonHealth.js";
+import {
   t,
   initLocale,
   resolveLocale,
@@ -1175,6 +1180,89 @@ async function refreshLastServer(): Promise<void> {
 const loadingScreen = document.getElementById("loadingScreen") as HTMLElement;
 const loadingMessage = document.getElementById("loadingMessage") as HTMLParagraphElement;
 const shell = document.querySelector<HTMLElement>(".shell")!;
+const daemonRecoveryScreen = document.getElementById("daemonRecoveryScreen") as HTMLElement;
+const daemonRecoveryBtn = document.getElementById("daemonRecoveryBtn") as HTMLButtonElement;
+const daemonRecoveryMessage = document.getElementById("daemonRecoveryMessage") as HTMLParagraphElement;
+const daemonRecoveryButtonLabel = daemonRecoveryBtn.querySelector<HTMLElement>(".daemon-recovery-button-label")!;
+let daemonHealth = initialDaemonHealth();
+let daemonRecoveryRestartInProgress = false;
+let daemonRecoveryReturnFocus: HTMLElement | null = null;
+let daemonRecoveryResolvers: Array<() => void> = [];
+const daemonRecoveryInerted = new Set<HTMLElement>();
+
+function showDaemonRecovery(): void {
+  if (!daemonRecoveryScreen.hidden) return;
+
+  daemonRecoveryReturnFocus = document.activeElement as HTMLElement | null;
+  for (const child of Array.from(document.body.children)) {
+    if (!(child instanceof HTMLElement) || child === daemonRecoveryScreen || child.tagName === "SCRIPT") continue;
+    if (!child.hasAttribute("inert")) {
+      child.setAttribute("inert", "");
+      daemonRecoveryInerted.add(child);
+    }
+  }
+  daemonRecoveryScreen.hidden = false;
+  daemonRecoveryScreen.dataset.state = "error";
+  daemonRecoveryMessage.textContent = "";
+  daemonRecoveryBtn.disabled = false;
+  daemonRecoveryBtn.removeAttribute("aria-busy");
+  daemonRecoveryButtonLabel.textContent = t("daemonRecovery.restart");
+  window.setTimeout(() => daemonRecoveryBtn.focus(), 0);
+}
+
+function completeDaemonRecovery(force = false): void {
+  daemonHealth = daemonHealthAfterSuccess(daemonHealth);
+  if (daemonRecoveryRestartInProgress && !force) return;
+
+  daemonRecoveryRestartInProgress = false;
+  if (!daemonRecoveryScreen.hidden) {
+    daemonRecoveryScreen.hidden = true;
+    delete daemonRecoveryScreen.dataset.state;
+    daemonRecoveryBtn.removeAttribute("aria-busy");
+    for (const element of daemonRecoveryInerted) element.removeAttribute("inert");
+    daemonRecoveryInerted.clear();
+    daemonRecoveryReturnFocus?.focus?.();
+    daemonRecoveryReturnFocus = null;
+  }
+  const resolvers = daemonRecoveryResolvers;
+  daemonRecoveryResolvers = [];
+  for (const resolve of resolvers) resolve();
+}
+
+function waitForDaemonRecovery(): Promise<void> {
+  showDaemonRecovery();
+  return new Promise((resolve) => daemonRecoveryResolvers.push(resolve));
+}
+
+daemonRecoveryBtn.addEventListener("click", async () => {
+  if (!daemonApi || daemonRecoveryBtn.disabled) return;
+
+  daemonRecoveryBtn.disabled = true;
+  daemonRecoveryRestartInProgress = true;
+  daemonRecoveryScreen.dataset.state = "working";
+  daemonRecoveryBtn.setAttribute("aria-busy", "true");
+  daemonRecoveryButtonLabel.textContent = t("daemonRecovery.restarting");
+  daemonRecoveryMessage.textContent = t("daemonRecovery.waitingForApproval");
+  try {
+    const result = await daemonApi.restartDaemon();
+    if (!result.ok) {
+      throw new Error(result.error || "daemon restart failed");
+    }
+    await daemonApi.getStatus();
+    completeDaemonRecovery(true);
+  } catch (error) {
+    console.error("[daemonRecovery]", error);
+    daemonRecoveryRestartInProgress = false;
+    daemonRecoveryScreen.dataset.state = "error";
+    daemonRecoveryBtn.removeAttribute("aria-busy");
+    daemonRecoveryMessage.textContent = verboseErrors
+      ? `${t("daemonRecovery.failed")} ${error instanceof Error ? error.message : String(error)}`
+      : t("daemonRecovery.failed");
+    daemonRecoveryBtn.disabled = false;
+    daemonRecoveryButtonLabel.textContent = t("daemonRecovery.tryAgain");
+    daemonRecoveryBtn.focus();
+  }
+});
 
 function animateOut(el: HTMLElement): Promise<void> {
   return new Promise((resolve) => {
@@ -1282,25 +1370,28 @@ async function init(): Promise<void> {
     return;
   }
 
-  // Poll until daemon responds (max 30s)
+  // Poll until daemon responds (max 30s), then offer an explicit elevated
+  // recovery instead of leaving the user stranded on the loading screen.
   const maxAttempts = 60;
   for (let i = 0; i < maxAttempts; i++) {
     const remaining = Math.ceil((maxAttempts - i) * 0.5);
     loadingMessage.textContent = t("app.loading.progress", { remaining });
     try {
       const status = await daemonApi.getStatus();
-      if (status) break;
+      if (status) {
+        break;
+      }
     } catch {
       // not ready
     }
     if (i === maxAttempts - 1) {
       loadingMessage.textContent = t("app.loading.didntStart");
-      return;
+      await waitForDaemonRecovery();
     }
     await new Promise((r) => setTimeout(r, 500));
   }
 
-  hideLoadingScreen();
+  void hideLoadingScreen();
 
   // Check auth state before showing any UI
   if (pangeaApi) {
@@ -1774,9 +1865,12 @@ async function refreshStatus(): Promise<StatusResponse | null> {
   }
   try {
     const status = await daemonApi.getStatus();
+    completeDaemonRecovery();
     renderStatus(status);
     return status;
   } catch (error) {
+    daemonHealth = daemonHealthAfterFailure(daemonHealth);
+    if (daemonHealth.recoveryRequired) showDaemonRecovery();
     setUiMessage(reportError("status", error));
     return null;
   }

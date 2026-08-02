@@ -81,6 +81,7 @@ declare global {
     getLogs: (since?: number) => Promise<LogEntry[]>;
     getConfig: () => Promise<ConfigResponse>;
     setConfig: (profiles: Profile[]) => Promise<OkResponse>;
+    restartDaemon: () => Promise<{ ok: boolean; error?: string }>;
     getAppVersion: () => Promise<string>;
   }
 

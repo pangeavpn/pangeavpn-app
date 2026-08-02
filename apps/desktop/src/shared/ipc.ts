@@ -13,6 +13,7 @@ export const IPC_CHANNELS = {
   getLogs: "daemon:getLogs",
   getConfig: "daemon:getConfig",
   setConfig: "daemon:setConfig",
+  restartDaemon: "daemon:restart",
   getAppVersion: "app:getAppVersion",
   authLogin: "auth:login",
   authLogout: "auth:logout",
@@ -66,6 +67,7 @@ export interface DaemonApi {
   getLogs: (since?: number) => Promise<LogEntry[]>;
   getConfig: () => Promise<ConfigResponse>;
   setConfig: (profiles: Profile[]) => Promise<OkResponse>;
+  restartDaemon: () => Promise<{ ok: boolean; error?: string }>;
   getAppVersion: () => Promise<string>;
 }
 

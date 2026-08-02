@@ -9,6 +9,7 @@ const CH = {
   getLogs: "daemon:getLogs",
   getConfig: "daemon:getConfig",
   setConfig: "daemon:setConfig",
+  restartDaemon: "daemon:restart",
   getAppVersion: "app:getAppVersion",
   authLogin: "auth:login",
   authLogout: "auth:logout",
@@ -62,6 +63,7 @@ const daemonApi = {
   getLogs: (since?: number) => ipcRenderer.invoke(CH.getLogs, since),
   getConfig: () => ipcRenderer.invoke(CH.getConfig),
   setConfig: (profiles: unknown[]) => ipcRenderer.invoke(CH.setConfig, profiles),
+  restartDaemon: () => ipcRenderer.invoke(CH.restartDaemon),
   getAppVersion: () => ipcRenderer.invoke(CH.getAppVersion),
 };
 

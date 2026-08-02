@@ -33,6 +33,7 @@ let lastConnectedProfileId: string | null = null;
 let trayDefaultImage: NativeImage | null = null;
 let trayConnectedImage: NativeImage | null = null;
 let lastDaemonRestartAttemptAtMs = 0;
+let daemonRecoveryInProgress = false;
 let trayHintShown = false;
 let setWidth = 640;
 let setHeight = 440;
@@ -110,7 +111,7 @@ function createWindow(): void {
   });
 
   mainWindow.on("blur", () => {
-    if (isQuitting) return;
+    if (isQuitting || daemonRecoveryInProgress) return;
     // Wait for any show animation to finish, then hide.
     const checkAndHide = () => {
       if (!isQuitting && mainWindow?.isVisible() && !hiding) {
@@ -865,6 +866,22 @@ function registerIpcHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.setConfig, async (_event, profiles: Profile[]) =>
     withDaemonRestartOnUnavailable(() => daemonClient.setConfig(profiles), "setConfig")
   );
+  ipcMain.handle(IPC_CHANNELS.restartDaemon, async () => {
+    daemonRecoveryInProgress = true;
+    try {
+      await daemonProcess.restartElevated(() => {
+        daemonRecoveryInProgress = false;
+      });
+      lastDaemonRestartAttemptAtMs = 0;
+      void refreshTrayStatus();
+      return { ok: true };
+    } catch (error) {
+      console.warn("elevated daemon recovery failed", sanitizeLog(error));
+      return { ok: false, error: sanitizeLog(error) };
+    } finally {
+      daemonRecoveryInProgress = false;
+    }
+  });
   ipcMain.handle(IPC_CHANNELS.getAppVersion, async () => app.getVersion());
 
   ipcMain.handle("app:openExternal", async (_event, url: string) => {

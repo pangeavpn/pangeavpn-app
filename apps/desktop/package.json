@@ -168,7 +168,8 @@
       "artifactName": "PangeaVPN_${version}_${arch}.deb",
       "depends": [
         "iproute2",
-        "wireguard-tools"
+        "wireguard-tools",
+        "policykit-1"
       ]
     },
     "pkg": {
