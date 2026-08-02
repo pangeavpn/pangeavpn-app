@@ -1,11 +1,13 @@
 package main
 
-//go:generate goversioninfo -icon=pangeavpn.ico -o resource_windows.syso
+//go:generate goversioninfo -platform-specific
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -23,12 +25,20 @@ import (
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/wg"
 )
 
-const daemonAddr = "127.0.0.1:8787"
+const (
+	daemonAddr            = "127.0.0.1:8787"
+	shutdownTimeout       = 12 * time.Second
+	readHeaderTimeout     = 5 * time.Second
+	requestReadTimeout    = 15 * time.Second
+	idleConnectionTimeout = 60 * time.Second
+)
 
 type daemonRuntime struct {
-	service *api.Service
-	server  *http.Server
-	cancel  context.CancelFunc
+	service  *api.Service
+	server   *http.Server
+	listener net.Listener
+	serveErr <-chan error
+	cancel   context.CancelFunc
 }
 
 func main() {
@@ -52,11 +62,34 @@ func runInteractive() error {
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
-	<-sigCh
+	defer signal.Stop(sigCh)
 
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	var serveErr error
+	select {
+	case <-sigCh:
+	case serveErr = <-runtime.serveErr:
+	}
+
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer shutdownCancel()
-	return runtime.Stop(shutdownCtx)
+	stopErr := stopDaemonRuntime(shutdownCtx, runtime)
+	if serveErr != nil {
+		serveErr = fmt.Errorf("http server stopped: %w", serveErr)
+	}
+	return errors.Join(serveErr, stopErr)
+}
+
+func stopDaemonRuntime(ctx context.Context, runtime *daemonRuntime) error {
+	done := make(chan error, 1)
+	go func() {
+		done <- runtime.Stop(ctx)
+	}()
+	select {
+	case err := <-done:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func startDaemonRuntime() (*daemonRuntime, error) {
@@ -118,26 +151,42 @@ func startDaemonRuntime() (*daemonRuntime, error) {
 
 	handler := api.NewHandler(token, service)
 	server := &http.Server{
-		Addr:    daemonAddr,
-		Handler: handler,
+		Addr:              daemonAddr,
+		Handler:           handler,
+		ReadHeaderTimeout: readHeaderTimeout,
+		ReadTimeout:       requestReadTimeout,
+		IdleTimeout:       idleConnectionTimeout,
+		MaxHeaderBytes:    16 << 10,
+	}
+	listener, err := net.Listen("tcp", server.Addr)
+	if err != nil {
+		return nil, fmt.Errorf("listen on %s: %w", server.Addr, err)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	service.StartBackground(ctx)
 
+	serveErr := make(chan error, 1)
 	go func() {
 		log.Printf("daemon listening on %s", server.Addr)
 		log.Printf("token file: %s", tokenPath)
 		log.Printf("config file: %s", configPath)
-		if serveErr := server.ListenAndServe(); serveErr != nil && serveErr != http.ErrServerClosed {
-			log.Printf("http server error: %v", serveErr)
+		err := server.Serve(listener)
+		if errors.Is(err, http.ErrServerClosed) || errors.Is(err, net.ErrClosed) {
+			err = nil
+		} else if err != nil {
+			log.Printf("http server error: %v", err)
 		}
+		serveErr <- err
+		close(serveErr)
 	}()
 
 	return &daemonRuntime{
-		service: service,
-		server:  server,
-		cancel:  cancel,
+		service:  service,
+		server:   server,
+		listener: listener,
+		serveErr: serveErr,
+		cancel:   cancel,
 	}, nil
 }
 
@@ -150,18 +199,23 @@ func (r *daemonRuntime) Stop(ctx context.Context) error {
 		r.cancel()
 	}
 
-	// A graceful stop happens on every clean reboot, so a Lockdown lock must
-	// survive it — clearing here would boot the device open.
-	keepKillSwitch := false
-	if persisted, err := platform.LoadKillSwitchStatePublic(); err == nil {
-		keepKillSwitch = persisted.Active && persisted.Locked
+	var stopErrors []error
+	// Stop admitting API work before the final disconnect. Close also cancels
+	// active request contexts, while Disconnect cancels an in-flight Connect.
+	if r.server != nil {
+		if err := r.server.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
+			stopErrors = append(stopErrors, fmt.Errorf("close http server: %w", err))
+		}
+	} else if r.listener != nil {
+		if err := r.listener.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
+			stopErrors = append(stopErrors, fmt.Errorf("close http listener: %w", err))
+		}
 	}
-	_ = r.service.Disconnect(ctx, keepKillSwitch)
-	if r.server == nil {
-		return nil
+
+	if r.service != nil {
+		if err := r.service.Shutdown(ctx); err != nil {
+			stopErrors = append(stopErrors, fmt.Errorf("disconnect VPN: %w", err))
+		}
 	}
-	if err := r.server.Shutdown(ctx); err != nil {
-		return fmt.Errorf("shutdown error: %w", err)
-	}
-	return nil
+	return errors.Join(stopErrors...)
 }

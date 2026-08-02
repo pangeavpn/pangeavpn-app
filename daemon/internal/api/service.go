@@ -1192,6 +1192,23 @@ func (s *Service) markKillSwitchLocked(ctx context.Context, allowLAN bool) error
 // (Lockdown mode), the firewall rules stay engaged so the device has no
 // internet until the caller explicitly clears the kill switch.
 func (s *Service) Disconnect(ctx context.Context, keepKillSwitch bool) error {
+	return s.disconnect(ctx, func() bool { return keepKillSwitch })
+}
+
+// Shutdown serializes with all mutating operations before deciding whether a
+// persisted Lockdown lock must survive process exit.
+func (s *Service) Shutdown(ctx context.Context) error {
+	return s.disconnect(ctx, func() bool {
+		persisted, err := loadKillSwitchState()
+		if err != nil {
+			s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("could not read kill switch state during shutdown; retaining it: %v", err))
+			return true
+		}
+		return persisted.Active && persisted.Locked
+	})
+}
+
+func (s *Service) disconnect(ctx context.Context, shouldKeepKillSwitch func() bool) error {
 	// Interrupt any in-flight Connect first so we don't queue behind a
 	// 10s WaitForSession. The cancelled connect will exit, release opMu,
 	// and run its own cleanup — Disconnect then takes the lock and does
@@ -1204,6 +1221,7 @@ func (s *Service) Disconnect(ctx context.Context, keepKillSwitch bool) error {
 
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
+	keepKillSwitch := shouldKeepKillSwitch()
 
 	currentState, _ := s.machine.Get()
 	if currentState == state.StateDisconnecting {
@@ -1297,6 +1315,7 @@ func (s *Service) Disconnect(ctx context.Context, keepKillSwitch bool) error {
 	if len(cleanupErrors) > 0 {
 		detail := fmt.Sprintf("disconnect completed with warnings: %s", strings.Join(cleanupErrors, "; "))
 		s.logs.Add(state.LogWarn, state.SourceDaemon, detail)
+		return errors.New(detail)
 	}
 	s.logs.Add(state.LogInfo, state.SourceDaemon, "disconnect flow completed")
 	return nil

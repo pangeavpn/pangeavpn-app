@@ -6,8 +6,8 @@ import { npmCmd, relPath, rootDir, runOrThrow, selectArchTargets, sha256File, wr
 const platformName = "windows";
 const appBuilderPath = path.join(rootDir, "node_modules", "app-builder-bin", "win", "x64", "app-builder.exe");
 const allArchTargets = [
-  { arch: "x64", goArch: "amd64", wireGuardArch: "amd64" },
-  { arch: "arm64", goArch: "arm64", wireGuardArch: "arm64" }
+  { arch: "x64", goArch: "amd64" },
+  { arch: "arm64", goArch: "arm64" }
 ];
 
 if (process.platform !== "win32") {
@@ -30,7 +30,7 @@ for (const target of archTargets) {
     cwd: rootDir,
     env: {
       ...process.env,
-      PANGEA_WIREGUARD_ARCH: target.wireGuardArch,
+      GOOS: "windows",
       GOARCH: target.goArch
     }
   });

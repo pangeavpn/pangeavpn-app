@@ -757,6 +757,23 @@ func TestDisconnect_ClearsKillSwitchAfterFailedConnect(t *testing.T) {
 	}
 }
 
+func TestShutdown_RetainsKillSwitchWhenPersistedStateIsUnreadable(t *testing.T) {
+	ks := &fakeKillSwitch{active: true}
+	svc := newTestService(t, &fakeCloakManager{}, &fakeNaiveManager{}, &fakeWGManager{}, ks, testProfile())
+	originalLoad := loadKillSwitchState
+	loadKillSwitchState = func() (platform.KillSwitchState, error) {
+		return platform.KillSwitchState{}, errors.New("state unavailable")
+	}
+	t.Cleanup(func() { loadKillSwitchState = originalLoad })
+
+	if err := svc.Shutdown(context.Background()); err != nil {
+		t.Fatalf("shutdown failed: %v", err)
+	}
+	if ks.clearCount != 0 {
+		t.Fatal("shutdown cleared the kill switch when persisted state was unreadable")
+	}
+}
+
 func TestConnect_KillSwitchEnableError_ReturnsError(t *testing.T) {
 	profile := testProfile()
 	cloak := &fakeCloakManager{}

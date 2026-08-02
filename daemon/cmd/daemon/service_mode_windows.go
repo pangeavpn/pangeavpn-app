@@ -30,41 +30,58 @@ func runService() error {
 
 type windowsServiceRunner struct{}
 
+const (
+	serviceStartError uint32 = iota + 1
+	serviceStopError
+	serviceHTTPError
+)
+
 func (w *windowsServiceRunner) Execute(args []string, requests <-chan svc.ChangeRequest, changes chan<- svc.Status) (bool, uint32) {
 	_ = args
 
 	const accepted = svc.AcceptStop | svc.AcceptShutdown
-	changes <- svc.Status{State: svc.StartPending}
+	changes <- svc.Status{State: svc.StartPending, WaitHint: 30_000}
 
 	runtime, err := startDaemonRuntime()
 	if err != nil {
-		return false, 1
+		return true, serviceStartError
 	}
 
 	changes <- svc.Status{State: svc.Running, Accepts: accepted}
 
 	for {
-		request, ok := <-requests
-		if !ok {
-			stopCtx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
-			defer cancel()
-			_ = runtime.Stop(stopCtx)
-			return false, 0
-		}
-
-		switch request.Cmd {
-		case svc.Interrogate:
-			changes <- request.CurrentStatus
-		case svc.Stop, svc.Shutdown:
-			changes <- svc.Status{State: svc.StopPending}
-			stopCtx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
-			defer cancel()
-			if stopErr := runtime.Stop(stopCtx); stopErr != nil {
-				return false, 2
+		select {
+		case <-runtime.serveErr:
+			stopCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+			_ = stopDaemonRuntime(stopCtx, runtime)
+			cancel()
+			return true, serviceHTTPError
+		case request, ok := <-requests:
+			if !ok {
+				stopCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+				stopErr := stopDaemonRuntime(stopCtx, runtime)
+				cancel()
+				if stopErr != nil {
+					return true, serviceStopError
+				}
+				return false, 0
 			}
-			return false, 0
-		default:
-			changes <- request.CurrentStatus
+
+			switch request.Cmd {
+			case svc.Interrogate:
+				changes <- request.CurrentStatus
+			case svc.Stop, svc.Shutdown:
+				changes <- svc.Status{State: svc.StopPending, WaitHint: uint32(shutdownTimeout / time.Millisecond)}
+				stopCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+				stopErr := stopDaemonRuntime(stopCtx, runtime)
+				cancel()
+				if stopErr != nil {
+					return true, serviceStopError
+				}
+				return false, 0
+			default:
+				changes <- request.CurrentStatus
+			}
 		}
 	}
 }

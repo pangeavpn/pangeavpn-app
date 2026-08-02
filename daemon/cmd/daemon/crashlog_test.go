@@ -43,16 +43,31 @@ func TestRedirectStderrCapturesPanic(t *testing.T) {
 }
 
 func TestRedirectStderrAppendsAcrossRestarts(t *testing.T) {
+	if os.Getenv("PANGEA_CRASHLOG_APPEND_CHILD") == "1" {
+		f, err := redirectStderr(os.Getenv("PANGEA_CRASHLOG_PATH"))
+		if err != nil {
+			os.Exit(3)
+		}
+		if _, err := f.WriteString("current run\n"); err != nil {
+			os.Exit(4)
+		}
+		f.Close()
+		return
+	}
+
 	logPath := filepath.Join(t.TempDir(), "daemon-crash.log")
 	if err := os.WriteFile(logPath, []byte("previous run\n"), 0o644); err != nil {
 		t.Fatalf("seed log: %v", err)
 	}
 
-	f, err := redirectStderr(logPath)
-	if err != nil {
-		t.Fatalf("redirectStderr: %v", err)
+	cmd := exec.Command(os.Args[0], "-test.run=TestRedirectStderrAppendsAcrossRestarts")
+	cmd.Env = append(os.Environ(),
+		"PANGEA_CRASHLOG_APPEND_CHILD=1",
+		"PANGEA_CRASHLOG_PATH="+logPath,
+	)
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("redirect child failed: %v", err)
 	}
-	defer f.Close()
 
 	raw, err := os.ReadFile(logPath)
 	if err != nil {
@@ -60,5 +75,8 @@ func TestRedirectStderrAppendsAcrossRestarts(t *testing.T) {
 	}
 	if !strings.Contains(string(raw), "previous run") {
 		t.Fatal("redirect truncated the prior run's crash log")
+	}
+	if !strings.Contains(string(raw), "current run") {
+		t.Fatal("redirected output was not appended to the crash log")
 	}
 }
