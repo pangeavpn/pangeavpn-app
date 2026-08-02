@@ -119,6 +119,9 @@ declare global {
     /** Resolves to the MTU actually stored — differs from `mtu` when it was rejected. */
     setWireguardMtu: (mtu: number) => Promise<number>;
     getWireguardMtu: () => Promise<number>;
+    /** Empty restores the DNS servers supplied by the VPN server. */
+    setCustomDns: (value: string) => Promise<string[]>;
+    getCustomDns: () => Promise<string[]>;
     setPreferredTransport: (value: "auto" | "cloak" | "naive" | "reality" | "hysteria2" | "snowflake") => Promise<void>;
     getPreferredTransport: () => Promise<"auto" | "cloak" | "naive" | "reality" | "hysteria2" | "snowflake">;
     setLaunchAtStartup: (enabled: boolean) => Promise<void>;

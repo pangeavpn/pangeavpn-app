@@ -3,6 +3,7 @@ import https from "node:https";
 import { net } from "electron";
 import type { Profile } from "@pangeavpn/shared-types";
 import type { ServerInfo, SubscriptionInfo } from "../shared/ipc";
+import { normalizeCustomDns, resolveWireGuardDns } from "../shared/dns";
 import { MTU_DEFAULT, normalizeMtu, normalizeMtuOrDefault } from "../shared/mtu";
 import { resolveNaiveEndpoint } from "../shared/naiveEndpoint";
 import { encryptRequest, decryptResponse, type EncryptedResponse } from "./secureChannel";
@@ -371,6 +372,7 @@ export class PangeaApiClient {
   private directIpEnabled = true;
   private directIpOnly = true;
   private wireguardMtu = MTU_DEFAULT;
+  private customDnsServers: string[] | null = null;
   identityPubkey: string | null = null;
 
   // When DoH resolves an IP, we store it here and use fetchDohResolved()
@@ -434,6 +436,19 @@ export class PangeaApiClient {
 
   getWireguardMtu(): number {
     return this.wireguardMtu;
+  }
+
+  setCustomDns(value: unknown): string[] {
+    const normalized = normalizeCustomDns(value);
+    if (normalized === null) {
+      throw new TypeError("Custom DNS must contain only IPv4 addresses");
+    }
+    this.customDnsServers = normalized.length > 0 ? normalized : null;
+    return this.getCustomDns();
+  }
+
+  getCustomDns(): string[] {
+    return this.customDnsServers ? [...this.customDnsServers] : [];
   }
 
   /** Seed the last known good hub IP (from settings) at startup. */
@@ -870,10 +885,10 @@ export class PangeaApiClient {
       );
     }
 
-    const dnsServers = reg.dns
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
+    const { servers: dnsServers, configValue: dnsText } = resolveWireGuardDns(
+      reg.dns,
+      this.customDnsServers
+    );
 
     // Transport endpoints must be excluded from AllowedIPs (or the dial routes
     // into the tunnel it is establishing) and permitted through the kill switch.
@@ -900,7 +915,7 @@ export class PangeaApiClient {
     const configText = buildWireGuardConfig(
       keyPair.privateKey,
       reg.assignedIP,
-      reg.dns,
+      dnsText,
       reg.serverPubkey,
       cloakLocalPort,
       excludeIPs,

@@ -31,6 +31,8 @@ export const IPC_CHANNELS = {
   getAllowLan: "pangea:getAllowLan",
   setWireguardMtu: "settings:setWireguardMtu",
   getWireguardMtu: "settings:getWireguardMtu",
+  setCustomDns: "settings:setCustomDns",
+  getCustomDns: "settings:getCustomDns",
   setPreferredTransport: "settings:setPreferredTransport",
   getPreferredTransport: "settings:getPreferredTransport",
   setLaunchAtStartup: "settings:setLaunchAtStartup",
@@ -225,6 +227,9 @@ export interface PangeaApi {
   /** Resolves to the MTU actually stored — differs from `mtu` when it was rejected. */
   setWireguardMtu: (mtu: number) => Promise<number>;
   getWireguardMtu: () => Promise<number>;
+  /** Empty restores the DNS servers supplied by the VPN server. */
+  setCustomDns: (value: string) => Promise<string[]>;
+  getCustomDns: () => Promise<string[]>;
   setPreferredTransport: (value: "auto" | "cloak" | "naive" | "reality" | "hysteria2" | "snowflake") => Promise<void>;
   getPreferredTransport: () => Promise<"auto" | "cloak" | "naive" | "reality" | "hysteria2" | "snowflake">;
   setLaunchAtStartup: (enabled: boolean) => Promise<void>;

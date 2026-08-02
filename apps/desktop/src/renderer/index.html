@@ -282,6 +282,20 @@
                   </label>
                 </div>
                 <div class="settings-field">
+                  <label class="settings-field-label" for="customDnsInput" data-i18n="settings.network.dns.title">Custom DNS</label>
+                  <input
+                    id="customDnsInput"
+                    class="settings-field-input"
+                    type="text"
+                    autocomplete="off"
+                    spellcheck="false"
+                    placeholder="Automatic (VPN default)"
+                    data-i18n-placeholder="settings.network.dns.placeholder"
+                    data-i18n-aria-label="settings.network.dns.title"
+                  />
+                  <span class="settings-field-hint" data-i18n="settings.network.dns.hint">IPv4 DNS servers separated by commas, for example 1.1.1.1, 1.0.0.1. Leave blank to use the VPN default. Takes effect on next connect.</span>
+                </div>
+                <div class="settings-field">
                   <label class="settings-field-label" for="wireguardMtuInput" data-i18n="settings.network.mtu.title">Tunnel MTU</label>
                   <input
                     id="wireguardMtuInput"

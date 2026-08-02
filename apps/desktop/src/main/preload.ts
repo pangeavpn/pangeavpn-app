@@ -27,6 +27,8 @@ const CH = {
   getAllowLan: "pangea:getAllowLan",
   setWireguardMtu: "settings:setWireguardMtu",
   getWireguardMtu: "settings:getWireguardMtu",
+  setCustomDns: "settings:setCustomDns",
+  getCustomDns: "settings:getCustomDns",
   setPreferredTransport: "settings:setPreferredTransport",
   getPreferredTransport: "settings:getPreferredTransport",
   setLaunchAtStartup: "settings:setLaunchAtStartup",
@@ -83,6 +85,8 @@ const pangeaApi = {
   getAllowLan: () => ipcRenderer.invoke(CH.getAllowLan),
   setWireguardMtu: (mtu: number) => ipcRenderer.invoke(CH.setWireguardMtu, mtu),
   getWireguardMtu: () => ipcRenderer.invoke(CH.getWireguardMtu),
+  setCustomDns: (value: string) => ipcRenderer.invoke(CH.setCustomDns, value),
+  getCustomDns: () => ipcRenderer.invoke(CH.getCustomDns),
   setPreferredTransport: (value: "auto" | "cloak" | "naive" | "reality" | "hysteria2" | "snowflake") =>
     ipcRenderer.invoke(CH.setPreferredTransport, value),
   getPreferredTransport: () => ipcRenderer.invoke(CH.getPreferredTransport),

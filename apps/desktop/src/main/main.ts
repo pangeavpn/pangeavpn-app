@@ -995,6 +995,20 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.getWireguardMtu, async () => pangeaApiClient.getWireguardMtu());
 
+  ipcMain.handle(IPC_CHANNELS.setCustomDns, async (_event, value: unknown) => {
+    const stored = pangeaApiClient.setCustomDns(value);
+    try {
+      const settings = await readSettingsFile();
+      settings.customDns = stored;
+      await writeSettingsFile(settings);
+    } catch (err) {
+      console.warn("Failed to persist customDns setting:", err);
+    }
+    return stored;
+  });
+
+  ipcMain.handle(IPC_CHANNELS.getCustomDns, async () => pangeaApiClient.getCustomDns());
+
   ipcMain.handle(IPC_CHANNELS.setPreferredTransport, async (_event, value: "auto" | "cloak" | "naive" | "reality" | "hysteria2" | "snowflake") => {
     preferredTransport =
       value === "cloak" || value === "naive" || value === "reality" || value === "hysteria2" || value === "snowflake"
@@ -1342,6 +1356,13 @@ async function boot(): Promise<void> {
     // settings.json is hand-editable, so this goes through the same normalizer
     // as IPC input — anything unusable falls back to the default.
     pangeaApiClient.setWireguardMtu(settings.wireguardMtu);
+    if (settings.customDns !== undefined) {
+      try {
+        pangeaApiClient.setCustomDns(settings.customDns);
+      } catch {
+        // Ignore invalid hand-edited settings and use the VPN server default.
+      }
+    }
     if (
       settings.preferredTransport === "cloak" ||
       settings.preferredTransport === "naive" ||

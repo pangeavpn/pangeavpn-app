@@ -79,6 +79,7 @@ const serverRefreshBtn = document.getElementById("serverRefreshBtn") as HTMLButt
 const directIpToggle = document.getElementById("directIpToggle") as HTMLInputElement;
 const directIpOnlyToggle = document.getElementById("directIpOnlyToggle") as HTMLInputElement;
 const allowLanToggle = document.getElementById("allowLanToggle") as HTMLInputElement;
+const customDnsInput = document.getElementById("customDnsInput") as HTMLInputElement;
 const wireguardMtuInput = document.getElementById("wireguardMtuInput") as HTMLInputElement;
 const preferredTransportSelect = document.getElementById("preferredTransportSelect") as HTMLSelectElement;
 const launchAtStartupToggle = document.getElementById("launchAtStartupToggle") as HTMLInputElement;
@@ -173,10 +174,10 @@ function updateSettingsSummaries(): void {
   const transport = preferredTransportSelect.selectedOptions[0];
   setTransportValue.textContent = transport ? transport.textContent : "";
 
-  const mtu = `MTU ${wireguardMtuInput.value || MTU_DEFAULT}`;
-  setNetworkValue.textContent = allowLanToggle.checked
-    ? `${mtu} · ${t("settings.network.allowLan.title")}`
-    : mtu;
+  const network = [`MTU ${wireguardMtuInput.value || MTU_DEFAULT}`];
+  if (customDnsInput.value.trim()) network.push(t("settings.network.dns.title"));
+  if (allowLanToggle.checked) network.push(t("settings.network.allowLan.title"));
+  setNetworkValue.textContent = network.join(" · ");
 
   const startup: string[] = [];
   if (launchAtStartupToggle.checked) startup.push(t("settings.startup.launch.title"));
@@ -1040,6 +1041,30 @@ wireguardMtuInput.addEventListener("change", async () => {
   }
 });
 
+customDnsInput.addEventListener("change", async () => {
+  if (!pangeaApi) return;
+  const requested = customDnsInput.value.trim();
+  try {
+    const stored = await pangeaApi.setCustomDns(requested);
+    customDnsInput.value = stored.join(", ");
+    showToast(
+      stored.length > 0
+        ? t("settings.network.dns.saved", { dns: stored.join(", ") })
+        : t("settings.network.dns.defaultSaved"),
+      4000,
+      true
+    );
+  } catch (err) {
+    customDnsInput.value = (await pangeaApi.getCustomDns().catch(() => [])).join(", ");
+    const invalid = err instanceof Error && err.message.includes("Custom DNS");
+    showToast(invalid
+      ? t("settings.network.dns.invalid")
+      : reportError("customDns", err, t("toggle.updateFailed")));
+  } finally {
+    updateSettingsSummaries();
+  }
+});
+
 preferredTransportSelect.addEventListener("change", async () => {
   if (!pangeaApi) return;
   const previous = preferredTransportSelect.dataset.previousValue ?? "auto";
@@ -1260,6 +1285,7 @@ async function init(): Promise<void> {
       directIpToggle.checked = await pangeaApi.getDirectIp();
       directIpOnlyToggle.checked = await pangeaApi.getDirectIpOnly();
       allowLanToggle.checked = await pangeaApi.getAllowLan();
+      customDnsInput.value = (await pangeaApi.getCustomDns()).join(", ");
       wireguardMtuInput.value = String(await pangeaApi.getWireguardMtu());
       const preferredTransport = await pangeaApi.getPreferredTransport();
       preferredTransportSelect.value = preferredTransport;
