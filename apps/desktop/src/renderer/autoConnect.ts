@@ -5,6 +5,7 @@ export type AutoConnectDeps = {
   getAuthenticated: () => boolean;
   getDaemonState: () => StatusResponse["state"];
   getUserIntent: () => "connected" | "disconnected";
+  getConnectionInFlight: () => boolean;
   getLastServerId: () => string | null;
   /** Server to use when nothing has been connected to yet. Re-rolled per attempt. */
   getFallbackServerId: () => string | null;
@@ -63,6 +64,7 @@ function shouldAttempt(): boolean {
   if (!deps.getEnabled()) return false;
   if (!deps.getAuthenticated()) return false;
   if (userIntent !== "connected") return false;
+  if (deps.getConnectionInFlight()) return false;
   if (inFlight) return false;
   const state = deps.getDaemonState();
   if (state !== "DISCONNECTED" && state !== "ERROR") return false;

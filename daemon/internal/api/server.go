@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"strconv"
@@ -103,7 +104,15 @@ type permitHostsRequest struct {
 }
 
 type okResponse struct {
-	OK bool `json:"ok"`
+	OK    bool   `json:"ok"`
+	Error string `json:"error,omitempty"`
+}
+
+func serviceErrorResponse(err error) okResponse {
+	if errors.Is(err, ErrTransportExhausted) {
+		return okResponse{OK: false, Error: "transport_exhausted"}
+	}
+	return okResponse{OK: false}
 }
 
 func NewHandler(token string, service *Service) http.Handler {
@@ -145,7 +154,7 @@ func NewHandler(token string, service *Service) http.Handler {
 
 		err := service.Connect(r.Context(), req.ProfileID, ConnectOptions{AllowLAN: req.AllowLAN, Lockdown: req.Lockdown, PreferredTransport: req.PreferredTransport})
 		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, okResponse{OK: false})
+			writeJSON(w, http.StatusInternalServerError, serviceErrorResponse(err))
 			return
 		}
 
@@ -255,7 +264,7 @@ func NewHandler(token string, service *Service) http.Handler {
 
 		err := service.Switch(r.Context(), req.ProfileID, ConnectOptions{AllowLAN: req.AllowLAN, Lockdown: req.Lockdown, PreferredTransport: req.PreferredTransport})
 		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, okResponse{OK: false})
+			writeJSON(w, http.StatusInternalServerError, serviceErrorResponse(err))
 			return
 		}
 

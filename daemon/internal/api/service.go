@@ -20,6 +20,10 @@ import (
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/wg"
 )
 
+// ErrTransportExhausted is returned only after auto mode tried every configured
+// transport for one server. Desktop may then safely try another server.
+var ErrTransportExhausted = errors.New("all configured transports failed")
+
 // cloakManager is transport.Manager (Stop) plus Start/Status with Cloak's
 // concrete types. cloak.Manager's real signature — Start(ctx,
 // state.CloakProfile) error; Stop(ctx) error; Status() state.CloakStatus
@@ -736,6 +740,7 @@ func (s *Service) transportStarter(profile *state.Profile, kind string) (transpo
 // is the fallback chain; with a specific transport there is a single candidate
 // and no fallback.
 func (s *Service) startTransportWithHandshake(ctx context.Context, profile *state.Profile, wireGuardProfile *state.WireGuardProfile, preferredTransport, networkKey string) (string, error) {
+	autoMode := preferredTransport == "" || preferredTransport == "auto"
 	candidates, err := s.transportCandidates(profile, preferredTransport)
 	if err != nil {
 		return "", err
@@ -759,10 +764,10 @@ func (s *Service) startTransportWithHandshake(ctx context.Context, profile *stat
 		return candidate.kind, nil
 	}
 
-	if len(failures) == 1 {
+	if !autoMode && len(failures) == 1 {
 		return "", errors.New(failures[0])
 	}
-	return "", fmt.Errorf("all configured transports failed: %s", strings.Join(failures, "; "))
+	return "", fmt.Errorf("%w: %s", ErrTransportExhausted, strings.Join(failures, "; "))
 }
 
 // currentNetworkKey returns the fingerprint of the network the host is on, or

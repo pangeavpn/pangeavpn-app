@@ -215,6 +215,9 @@ export const ru = {
   // ── Connect / disconnect flow ─────────────────────────
   "connect.noServer": "Сервер не выбран.",
   "connect.provisioning": "Подготовка и подключение...",
+  "connect.stillConnecting": "Подключение всё ещё выполняется…",
+  "connect.takingLonger": "Это занимает больше времени, чем обычно…",
+  "connect.stillWorking": "Мы всё ещё работаем. При необходимости попробуем другие серверы.",
   "connect.connected": "Подключено.",
   "connect.failed": "Не удалось подключиться. Попробуйте ещё раз или выберите другой сервер.",
   "connect.switching": "Подготовка нового сервера...",

@@ -6,6 +6,13 @@ import type {
   StatusResponse
 } from "@pangeavpn/shared-types";
 
+export class TransportExhaustedError extends Error {
+  constructor() {
+    super("All configured transports failed");
+    this.name = "TransportExhaustedError";
+  }
+}
+
 export class DaemonClient {
   private readonly baseUrl: string;
   private readonly tokenProvider: () => Promise<string | string[]>;
@@ -17,7 +24,8 @@ export class DaemonClient {
     this.baseUrl = baseUrl;
     this.tokenProvider = tokenProvider;
     this.defaultRequestTimeoutMs = 5000;
-    this.connectTimeoutMs = 45000;
+    // Auto mode can spend 10s proving each configured transport end-to-end.
+    this.connectTimeoutMs = 120000;
     this.disconnectTimeoutMs = 45000;
   }
 
@@ -170,6 +178,14 @@ export class DaemonClient {
 
       if (!response.ok) {
         const text = await response.text();
+        try {
+          const payload = JSON.parse(text) as { error?: unknown };
+          if (payload.error === "transport_exhausted") {
+            throw new TransportExhaustedError();
+          }
+        } catch (error) {
+          if (error instanceof TransportExhaustedError) throw error;
+        }
         throw new Error(`daemon request failed (${response.status}): ${text}`);
       }
 

@@ -17,6 +17,7 @@ declare global {
   interface ConnectResult {
     ok: boolean;
     error?: string;
+    serverId?: string;
   }
 
   interface AuthState {
@@ -105,9 +106,9 @@ declare global {
     logout: () => Promise<void>;
     getAuthState: () => Promise<AuthState>;
     getServers: () => Promise<ServerInfo[]>;
-    provisionAndConnect: (serverId: string) => Promise<ConnectResult>;
+    provisionAndConnect: (serverIds: string[]) => Promise<ConnectResult>;
     cancelConnect: () => Promise<void>;
-    provisionAndSwitch: (serverId: string) => Promise<OkResponse>;
+    provisionAndSwitch: (serverIds: string[]) => Promise<ConnectResult>;
     setDoh: (enabled: boolean) => Promise<void>;
     getDoh: () => Promise<boolean>;
     setDirectIp: (enabled: boolean) => Promise<void>;

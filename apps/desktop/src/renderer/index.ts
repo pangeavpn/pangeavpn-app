@@ -13,6 +13,7 @@ import { buildDriftMap } from "./driftMap.js";
 import { dnsChoiceFor, dnsServersFor, type DnsChoice } from "./dnsPresets.js";
 import { buildFlag } from "./flags.js";
 import {
+  buildServerRetryOrder,
   groupRegions,
   orderByRecent,
   pickNode,
@@ -20,6 +21,7 @@ import {
   regionOfServer,
   type Region
 } from "./regions.js";
+import { scheduleConnectionMessages } from "./connectionProgress.js";
 import {
   t,
   initLocale,
@@ -841,10 +843,13 @@ serverConnectBtn.addEventListener("click", async () => {
   connectInFlight = true;
   const connectingSince = showConnectingState();
   updateServerControlStates();
+  setUiMessage(t("connect.provisioning"));
+  const clearProgressMessages = startConnectionProgressMessages();
   try {
-    setUiMessage(t("connect.provisioning"));
-    const result = await pangeaApi.provisionAndConnect(serverId);
+    const result = await pangeaApi.provisionAndConnect(serverRetryPlan(serverId));
+    clearProgressMessages();
     if (result.ok) {
+      applyConnectedServer(result.serverId);
       setUiMessage(t("connect.connected"));
       notifyUserConnected();
       void refreshLastServer();
@@ -860,6 +865,7 @@ serverConnectBtn.addEventListener("click", async () => {
     await settleConnectingState(connectingSince);
     await refreshStatus();
   } catch (error) {
+    clearProgressMessages();
     // If auth was invalidated, the onAuthInvalidated listener handles the UI
     if (pangeaApi) {
       try {
@@ -880,6 +886,7 @@ serverConnectBtn.addEventListener("click", async () => {
     await settleConnectingState(connectingSince);
     await refreshStatus();
   } finally {
+    clearProgressMessages();
     connectingVisual = false;
     serverWorking = false;
     connectInFlight = false;
@@ -895,19 +902,25 @@ async function switchToServer(serverId: string): Promise<void> {
   connectInFlight = true;
   const connectingSince = showConnectingState();
   updateServerControlStates();
+  setUiMessage(t("connect.switching"));
+  const clearProgressMessages = startConnectionProgressMessages();
   try {
-    setUiMessage(t("connect.switching"));
-    const result = await pangeaApi.provisionAndSwitch(serverId);
+    const result = await pangeaApi.provisionAndSwitch(serverRetryPlan(serverId));
+    clearProgressMessages();
     if (result.ok) {
+      applyConnectedServer(result.serverId);
       setUiMessage(t("connect.connected"));
       notifyUserConnected();
       void refreshLastServer();
+    } else if (result.error === "cancelled") {
+      setUiMessage(t("connect.cancelled"));
     } else {
       setUiMessage(t("connect.switchFailed"));
     }
     await settleConnectingState(connectingSince);
     await refreshStatus();
   } catch (error) {
+    clearProgressMessages();
     if (pangeaApi) {
       try {
         const state = await pangeaApi.getAuthState();
@@ -927,6 +940,7 @@ async function switchToServer(serverId: string): Promise<void> {
     await settleConnectingState(connectingSince);
     await refreshStatus();
   } finally {
+    clearProgressMessages();
     connectingVisual = false;
     serverWorking = false;
     connectInFlight = false;
@@ -940,6 +954,8 @@ serverDisconnectBtn.addEventListener("click", async () => {
   // Mid-connect this is Stop: cancel the attempt in main, or it brings the
   // tunnel up a moment later. Its own finally clears the busy state.
   if (connectInFlight && pangeaApi) {
+    clearActiveConnectionMessages?.();
+    notifyUserDisconnected();
     setUiMessage(t("connect.cancelled"));
     try {
       await pangeaApi.cancelConnect();
@@ -1349,9 +1365,10 @@ async function init(): Promise<void> {
       getAuthenticated: () => authState.authenticated,
       getDaemonState: () => currentDaemonState,
       getUserIntent,
+      getConnectionInFlight: () => connectInFlight,
       getLastServerId: () => lastServerIdLocal,
       getFallbackServerId: () => pickRandomServer(getVisibleServers())?.id ?? null,
-      provisionAndSwitch: (serverId: string) => pangeaApi.provisionAndSwitch(serverId),
+      provisionAndSwitch: (serverId: string) => pangeaApi.provisionAndConnect(serverRetryPlan(serverId)),
       // Pull the server auto-connect settled on into the picker, so it can't sit
       // on "Select server" while we're actually connected.
       onConnected: () => void refreshLastServer().then(renderServers)
@@ -1957,6 +1974,22 @@ function setUiMessage(message: string): void {
   uiMessageEl.textContent = message;
 }
 
+let clearActiveConnectionMessages: (() => void) | null = null;
+
+function startConnectionProgressMessages(): () => void {
+  clearActiveConnectionMessages?.();
+  const clearScheduled = scheduleConnectionMessages(
+    [t("connect.stillConnecting"), t("connect.takingLonger"), t("connect.stillWorking")],
+    setUiMessage
+  );
+  const cleanup = (): void => {
+    clearScheduled();
+    if (clearActiveConnectionMessages === cleanup) clearActiveConnectionMessages = null;
+  };
+  clearActiveConnectionMessages = cleanup;
+  return cleanup;
+}
+
 function showToast(message: string, durationMs = 5000, success = false): void {
   const container = document.getElementById("toastContainer");
   if (!container) return;
@@ -2088,6 +2121,20 @@ function serverSupportsTransport(server: ServerInfo, transport: TransportChoice)
 function getVisibleServers(): ServerInfo[] {
   const choice = (preferredTransportSelect.value as TransportChoice) || "auto";
   return servers.filter((s) => serverSupportsTransport(s, choice));
+}
+
+function serverRetryPlan(initialServerId: string): string[] {
+  const choice = (preferredTransportSelect.value as TransportChoice) || "auto";
+  return choice === "auto"
+    ? buildServerRetryOrder(getVisibleServers(), initialServerId)
+    : [initialServerId];
+}
+
+function applyConnectedServer(serverId: string | undefined): void {
+  if (!serverId) return;
+  lastServerIdLocal = serverId;
+  serverSelect.value = serverId;
+  syncServerPicker();
 }
 
 const RECENT_REGIONS_KEY = "pangea:recentRegions";

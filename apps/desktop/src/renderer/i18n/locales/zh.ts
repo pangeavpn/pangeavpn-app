@@ -215,6 +215,9 @@ export const zh = {
   // ── Connect / disconnect flow ─────────────────────────
   "connect.noServer": "未选择服务器。",
   "connect.provisioning": "正在配置并连接...",
+  "connect.stillConnecting": "仍在连接…",
+  "connect.takingLonger": "这比平时花费更长时间…",
+  "connect.stillWorking": "仍在处理中。如有需要，我们会尝试其他服务器。",
   "connect.connected": "已连接。",
   "connect.failed": "无法连接。请重试，或选择其他服务器。",
   "connect.switching": "正在配置新服务器...",

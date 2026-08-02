@@ -54,6 +54,24 @@ export function regionOfServer(regions: readonly Region[], serverId: string): Re
   return regions.find((region) => region.nodes.some((node) => node.id === serverId));
 }
 
+/** Selected node, then its siblings by load, then every later region in hub order. */
+export function buildServerRetryOrder(servers: readonly ServerInfo[], initialServerId: string): string[] {
+  const regions = groupRegions(servers);
+  const initialRegion = regionOfServer(regions, initialServerId);
+  if (!initialRegion) return [initialServerId];
+
+  const byLoad = (nodes: readonly ServerInfo[]): ServerInfo[] =>
+    [...nodes].sort((a, b) => loadOf(a) - loadOf(b));
+  const sameRegion = byLoad(initialRegion.nodes)
+    .filter((node) => node.id !== initialServerId)
+    .map((node) => node.id);
+  const initialRegionIndex = regions.indexOf(initialRegion);
+  const laterRegions = [...regions.slice(initialRegionIndex + 1), ...regions.slice(0, initialRegionIndex)]
+    .flatMap((region) => byLoad(region.nodes).map((node) => node.id));
+
+  return [initialServerId, ...sameRegion, ...laterRegions];
+}
+
 /** Most-recent-first, then everything else in hub order. */
 export function orderByRecent(regions: readonly Region[], recent: readonly string[]): Region[] {
   const ranked = recent

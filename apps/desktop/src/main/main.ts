@@ -1,7 +1,7 @@
 import { Menu, Notification, Tray, app, BrowserWindow, ipcMain, nativeImage, session, shell, type NativeImage } from "electron";
 import path from "node:path";
 import type { OkResponse, Profile, StatusResponse } from "@pangeavpn/shared-types";
-import { DaemonClient } from "./daemonClient";
+import { DaemonClient, TransportExhaustedError } from "./daemonClient";
 import { DaemonProcessManager } from "./daemonProcess";
 import { readDaemonTokens } from "./platformPaths";
 import { getConnectedTrayIconPath, getTrayIconPath, getWindowsAppIconPath } from "./resourcePaths";
@@ -15,6 +15,11 @@ import { startNetworkWatcher, onNetworkChange } from "./networkWatcher";
 import { mt, mtState, setMainLocale, resolveMainLocale } from "./i18n";
 import { sanitizeLog } from "./logSanitize";
 import { shouldShowTrayHint, trayHintBodyKey } from "./trayHint";
+import {
+  buildServerRetryOrder as buildMainServerRetryOrder,
+  replaceManagedProfile,
+  runServerFallback
+} from "./serverFallback";
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -39,6 +44,7 @@ const pangeaApiClient = new PangeaApiClient();
 
 let managedProfileId: string | null = null;
 let lastServerId: string | null = null;
+let connectionAttemptRunning = false;
 let allowLanEnabled = true;
 let launchAtStartupEnabled = false;
 let alwaysConnectedEnabled = false;
@@ -448,13 +454,14 @@ let lastNetworkRecoverAtMs = 0;
 const NETWORK_RECOVER_COOLDOWN_MS = 10_000;
 
 async function recoverFromNetworkChange(): Promise<void> {
-  if (networkRecoverInProgress) return;
+  if (networkRecoverInProgress || connectionAttemptRunning) return;
   const now = Date.now();
   if (now - lastNetworkRecoverAtMs < NETWORK_RECOVER_COOLDOWN_MS) return;
   if (!alwaysConnectedEnabled) return;
   if (!lastConnectedProfileId) return;
 
   networkRecoverInProgress = true;
+  connectionAttemptRunning = true;
   lastNetworkRecoverAtMs = now;
   try {
     // Refresh status first so we don't fire over an already-healthy tunnel.
@@ -476,7 +483,33 @@ async function recoverFromNetworkChange(): Promise<void> {
     }
   } finally {
     networkRecoverInProgress = false;
+    connectionAttemptRunning = false;
     await refreshTrayStatus();
+  }
+}
+
+async function reconnectExistingProfile(): Promise<boolean> {
+  const profileId = lastConnectedProfileId ?? managedProfileId;
+  if (!profileId || connectionAttemptRunning) return false;
+
+  connectionAttemptRunning = true;
+  try {
+    const config = await withDaemonRestartOnUnavailable(
+      () => daemonClient.getConfig(),
+      "tray config",
+      { allowRestart: false }
+    );
+    if (!config.profiles.some((profile) => profile.id === profileId)) return false;
+
+    const result = await connectWithRecovery(profileId);
+    if (result.ok) {
+      lastConnectedProfileId = profileId;
+      void persistLastConnection();
+      return true;
+    }
+    return false;
+  } finally {
+    connectionAttemptRunning = false;
   }
 }
 
@@ -488,29 +521,22 @@ async function connectFromTray(): Promise<void> {
   trayActionInProgress = true;
   updateTrayMenu();
   try {
-    // Try to reconnect to existing profile first (no network roundtrip)
-    const profileId = lastConnectedProfileId ?? managedProfileId;
-    if (profileId) {
-      const config = await withDaemonRestartOnUnavailable(() => daemonClient.getConfig(), "tray config", { allowRestart: false });
-      if (config.profiles.some((p) => p.id === profileId)) {
-        const result = await connectWithRecovery(profileId);
-        if (result.ok) {
-          lastConnectedProfileId = profileId;
-          void persistLastConnection();
-          return;
-        }
-      }
+    let exhaustedServerId: string | null = null;
+    try {
+      if (await reconnectExistingProfile()) return;
+    } catch (error) {
+      if (!(error instanceof TransportExhaustedError)) throw error;
+      exhaustedServerId = lastServerId;
     }
 
-    // No existing profile — provision a new one
-    const serverId = await resolveTrayServerId();
-    if (!serverId) {
+    const serverPlan = await resolveTrayServerPlan(exhaustedServerId);
+    if (!serverPlan) {
       trayStatusState = "ERROR";
       trayStatusDetail = "no server available";
       return;
     }
 
-    const result = await provisionAndConnect(serverId);
+    const result = await provisionAndConnect(serverPlan);
     if (!result.ok) {
       trayStatusState = "ERROR";
       trayStatusDetail = "connect request failed";
@@ -551,16 +577,16 @@ async function disconnectFromTray(): Promise<void> {
   }
 }
 
-async function resolveTrayServerId(): Promise<string | null> {
-  if (lastServerId) {
-    return lastServerId;
-  }
-
-  // Fall back to first available server
+async function resolveTrayServerPlan(excludedServerId: string | null = null): Promise<string[] | null> {
   try {
     const servers = await pangeaApiClient.getServers();
     if (servers.length > 0) {
-      return servers[0].id;
+      const initialServerId = lastServerId && servers.some((server) => server.id === lastServerId)
+        ? lastServerId
+        : servers[0].id;
+      const plan = buildMainServerRetryOrder(servers, initialServerId)
+        .filter((serverId) => serverId !== excludedServerId);
+      return plan.length > 0 ? plan : null;
     }
   } catch {
     // no servers available
@@ -592,57 +618,132 @@ async function provisionProfileForServer(serverId: string, signal?: AbortSignal)
   );
 
   let profiles = config.profiles;
-  if (managedProfileId) {
-    profiles = profiles.filter((p) => p.id !== managedProfileId);
-  }
   profiles = profiles.filter((p) => p.id !== profile.id);
   profiles.push(profile);
-  managedProfileId = profile.id;
-  lastServerId = serverId;
 
   await withDaemonRestartOnUnavailable(() => daemonClient.setConfig(profiles), "provision-setConfig");
   return profile;
 }
 
-async function provisionAndConnect(serverId: string): Promise<ConnectResult> {
-  const attempt = beginAttempt();
-  try {
-    const profile = await provisionProfileForServer(serverId, attempt.controller.signal);
-
-    // Provisioning is several round trips; without this guard a Stop during
-    // them still let the tunnel come up moments after the user cancelled.
-    if (isCancelled(attempt)) {
-      return { ok: false, error: "cancelled" };
+function normalizeServerPlan(value: unknown): string[] {
+  if (!Array.isArray(value) || value.length === 0 || value.length > 128) {
+    throw new Error("Invalid server retry plan");
+  }
+  const serverIds: string[] = [];
+  for (const candidate of value) {
+    if (typeof candidate !== "string" || candidate.trim() === "") {
+      throw new Error("Invalid server retry plan");
     }
+    const serverId = candidate.trim();
+    if (!serverIds.includes(serverId)) serverIds.push(serverId);
+  }
+  return serverIds;
+}
 
-    const result = await connectWithRecovery(profile.id);
+async function provisionAcrossServers(serverIds: readonly string[], mode: "connect" | "switch"): Promise<ConnectResult> {
+  if (connectionAttemptRunning) {
+    return { ok: false, error: "connect-in-progress" };
+  }
+  connectionAttemptRunning = true;
+  const attempt = beginAttempt();
+  const previousManagedProfileId = managedProfileId;
+  let initialProfiles: Profile[] | null = null;
+  let configChanged = false;
+  let committed = false;
+  try {
+    const initialConfig = await withDaemonRestartOnUnavailable(
+      () => daemonClient.getConfig(),
+      "connect-config-snapshot",
+      { allowRestart: false }
+    );
+    initialProfiles = initialConfig.profiles;
+    const candidates = preferredTransport === "auto" ? serverIds : serverIds.slice(0, 1);
+    const outcome = await runServerFallback(
+      candidates,
+      async (serverId, index) => {
+        if (isCancelled(attempt)) throw new ConnectCancelledError();
+        const profile = await provisionProfileForServer(serverId, attempt.controller.signal);
+        configChanged = true;
 
-    // Daemon connect can't be un-sent: if Stop landed mid-flight, tear back
-    // down. keepKillSwitch preserves lockdown so traffic never leaks here.
-    if (isCancelled(attempt)) {
-      if (result.ok) {
+        // Provisioning is several round trips; Stop must win before the daemon
+        // receives a connect or switch request.
+        if (isCancelled(attempt)) throw new ConnectCancelledError();
+
+        const result = mode === "switch" && index === 0
+          ? await withDaemonRestartOnUnavailable(
+              () => daemonClient.switch(profile.id, connectionOptions()),
+              "switch"
+            )
+          : await connectWithRecovery(profile.id);
+
+        // Daemon connect can't be un-sent. If Stop landed mid-flight, tear it
+        // back down while preserving Lockdown's kill switch.
+        if (isCancelled(attempt)) {
+          if (result.ok) {
+            await daemonClient
+              .disconnect({ keepKillSwitch: alwaysConnectedEnabled })
+              .catch((err) => console.warn("cancel: disconnect failed", sanitizeLog(err)));
+          }
+          throw new ConnectCancelledError();
+        }
+        return { profile, result };
+      },
+      (error) => preferredTransport === "auto" && error instanceof TransportExhaustedError
+    );
+
+    if (outcome.value.result.ok) {
+      const committedProfiles = replaceManagedProfile(
+        initialProfiles,
+        previousManagedProfileId,
+        outcome.value.profile
+      );
+      await daemonClient.setConfig(committedProfiles).catch((error) => {
+        console.warn("connect: profile cleanup failed", sanitizeLog(error));
+      });
+      if (isCancelled(attempt)) {
         await daemonClient
           .disconnect({ keepKillSwitch: alwaysConnectedEnabled })
-          .catch((err) => console.warn("cancel: disconnect failed", sanitizeLog(err)));
+          .catch((error) => console.warn("cancel: disconnect after cleanup failed", sanitizeLog(error)));
+        throw new ConnectCancelledError();
       }
-      return { ok: false, error: "cancelled" };
-    }
-
-    if (result.ok) {
-      lastConnectedProfileId = profile.id;
+      committed = true;
+      managedProfileId = outcome.value.profile.id;
+      lastServerId = outcome.serverId;
+      lastConnectedProfileId = outcome.value.profile.id;
       void persistLastConnection();
     }
-    return result;
+    return { ...outcome.value.result, serverId: outcome.serverId };
   } catch (err) {
     // A cancelled attempt aborts its in-flight request, which surfaces here.
     // Report it as a non-error so the UI goes idle instead of showing a toast.
     if (err instanceof ConnectCancelledError || isCancelled(attempt)) {
       return { ok: false, error: "cancelled" };
     }
+    if (err instanceof TransportExhaustedError) {
+      return { ok: false, error: "all-servers-exhausted" };
+    }
     throw err;
   } finally {
+    if (configChanged && !committed && initialProfiles) {
+      await daemonClient.setConfig(initialProfiles).catch((error) => {
+        console.warn("connect: profile restore failed", sanitizeLog(error));
+      });
+    }
+    const cancelledDuringCleanup = !committed && isCancelled(attempt);
     endAttempt(attempt);
+    connectionAttemptRunning = false;
+    if (cancelledDuringCleanup) {
+      return { ok: false, error: "cancelled" };
+    }
   }
+}
+
+async function provisionAndConnect(serverIds: readonly string[]): Promise<ConnectResult> {
+  return provisionAcrossServers(serverIds, "connect");
+}
+
+async function provisionAndSwitch(serverIds: readonly string[]): Promise<ConnectResult> {
+  return provisionAcrossServers(serverIds, "switch");
 }
 
 /** Stop the in-flight connect attempt; never tears down a wanted connection. */
@@ -663,33 +764,16 @@ async function cancelConnectAttempt(): Promise<void> {
   await refreshTrayStatus();
 }
 
-async function provisionAndSwitch(serverId: string): Promise<import("@pangeavpn/shared-types").OkResponse> {
-  let profile: Profile;
-  try {
-    profile = await provisionProfileForServer(serverId);
-  } catch (err) {
-    if (err instanceof AuthError) throw err;
-    const msg = err instanceof Error ? err.message : String(err);
-    throw new Error(`provision: ${msg}`);
-  }
-
-  const opts = {
+function connectionOptions(): {
+  allowLAN: boolean;
+  lockdown: boolean;
+  preferredTransport?: "cloak" | "naive" | "reality" | "hysteria2" | "snowflake";
+} {
+  return {
     allowLAN: allowLanEnabled,
     lockdown: alwaysConnectedEnabled,
     ...(preferredTransport !== "auto" && { preferredTransport })
   };
-  let result: import("@pangeavpn/shared-types").OkResponse;
-  try {
-    result = await withDaemonRestartOnUnavailable(() => daemonClient.switch(profile.id, opts), "switch");
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    throw new Error(`switch: ${msg}`);
-  }
-  if (result.ok) {
-    lastConnectedProfileId = profile.id;
-    void persistLastConnection();
-  }
-  return result;
 }
 
 async function readSettingsFile(): Promise<Record<string, unknown>> {
@@ -1175,9 +1259,9 @@ function registerIpcHandlers(): void {
     return pangeaApiClient.getSubscription();
   });
 
-  ipcMain.handle(IPC_CHANNELS.provisionAndConnect, async (_event, serverId: string) => {
+  ipcMain.handle(IPC_CHANNELS.provisionAndConnect, async (_event, serverPlan: unknown) => {
     try {
-      const result = await provisionAndConnect(serverId);
+      const result = await provisionAndConnect(normalizeServerPlan(serverPlan));
       void refreshTrayStatus();
       return result;
     } catch (err) {
@@ -1195,9 +1279,9 @@ function registerIpcHandlers(): void {
     await cancelConnectAttempt();
   });
 
-  ipcMain.handle(IPC_CHANNELS.provisionAndSwitch, async (_event, serverId: string) => {
+  ipcMain.handle(IPC_CHANNELS.provisionAndSwitch, async (_event, serverPlan: unknown) => {
     try {
-      const result = await provisionAndSwitch(serverId);
+      const result = await provisionAndSwitch(normalizeServerPlan(serverPlan));
       void refreshTrayStatus();
       return result;
     } catch (err) {
@@ -1276,11 +1360,7 @@ function isUnauthorizedError(error: unknown): boolean {
 }
 
 async function connectWithRecovery(profileId: string): Promise<OkResponse> {
-  const opts = {
-    allowLAN: allowLanEnabled,
-    lockdown: alwaysConnectedEnabled,
-    ...(preferredTransport !== "auto" && { preferredTransport })
-  };
+  const opts = connectionOptions();
   const firstAttempt = await withDaemonRestartOnUnavailable(() => daemonClient.connect(profileId, opts), "connect");
   if (firstAttempt.ok) {
     return firstAttempt;

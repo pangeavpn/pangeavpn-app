@@ -189,6 +189,7 @@ export interface DeviceInfo {
 export interface ConnectResult {
   ok: boolean;
   error?: string;
+  serverId?: string;
 }
 
 export interface SubscriptionInfo {
@@ -212,10 +213,10 @@ export interface PangeaApi {
   logout: () => Promise<void>;
   getAuthState: () => Promise<AuthState>;
   getServers: () => Promise<ServerInfo[]>;
-  provisionAndConnect: (serverId: string) => Promise<ConnectResult>;
+  provisionAndConnect: (serverIds: string[]) => Promise<ConnectResult>;
   /** Stop the in-flight connect attempt. No-op when nothing is connecting. */
   cancelConnect: () => Promise<void>;
-  provisionAndSwitch: (serverId: string) => Promise<OkResponse>;
+  provisionAndSwitch: (serverIds: string[]) => Promise<ConnectResult>;
   setDoh: (enabled: boolean) => Promise<void>;
   getDoh: () => Promise<boolean>;
   setDirectIp: (enabled: boolean) => Promise<void>;

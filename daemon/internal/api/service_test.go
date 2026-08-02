@@ -2045,6 +2045,9 @@ func TestConnect_AutoCascadeAttemptsTransportsInCensorshipOrder(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected connect to fail when nothing handshakes")
 	}
+	if !errors.Is(err, ErrTransportExhausted) {
+		t.Fatalf("Connect error = %v, want ErrTransportExhausted", err)
+	}
 	msg := err.Error()
 	lastIdx := -1
 	for _, kind := range []string{"cloak", "reality", "hysteria2", "naive"} {
@@ -2059,6 +2062,20 @@ func TestConnect_AutoCascadeAttemptsTransportsInCensorshipOrder(t *testing.T) {
 	}
 	if strings.Contains(msg, "snowflake:") {
 		t.Fatalf("snowflake is gated and must not be attempted in auto mode: %v", msg)
+	}
+}
+
+func TestConnect_ExplicitTransportFailureIsNotAutoExhaustion(t *testing.T) {
+	profile := testProfile()
+	cloakMgr := &fakeCloakManager{startErr: errors.New("cloak boom")}
+	svc := newTestService(t, cloakMgr, &fakeNaiveManager{}, &fakeWGManager{}, &fakeKillSwitch{}, profile)
+
+	err := svc.Connect(context.Background(), profile.ID, ConnectOptions{PreferredTransport: "cloak"})
+	if err == nil {
+		t.Fatal("expected explicit cloak connect to fail")
+	}
+	if errors.Is(err, ErrTransportExhausted) {
+		t.Fatalf("explicit transport error must not be retryable across servers: %v", err)
 	}
 }
 

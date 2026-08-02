@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  buildServerRetryOrder,
   groupRegions,
   loadOf,
   orderByRecent,
@@ -103,4 +104,50 @@ test("promoteRecent moves a key to the front without duplicating it", () => {
 
 test("promoteRecent caps the list", () => {
   assert.deepEqual(promoteRecent(["a", "b", "c"], "z", 2), ["z", "a"]);
+});
+
+test("buildServerRetryOrder exhausts the selected region before later regions", () => {
+  const servers = [
+    server("eu-central-1", "Amsterdam", 70),
+    server("us-east-1", "New York", 5),
+    server("eu-central-2", "Amsterdam", 20),
+    server("eu-central-3", "Amsterdam", null),
+    server("us-east-2", "New York", 10),
+    server("ap-south-1", "Mumbai", 1)
+  ];
+
+  assert.deepEqual(buildServerRetryOrder(servers, "eu-central-1"), [
+    "eu-central-1",
+    "eu-central-2",
+    "eu-central-3",
+    "us-east-1",
+    "us-east-2",
+    "ap-south-1"
+  ]);
+  assert.deepEqual(servers.map((item) => item.id), [
+    "eu-central-1",
+    "us-east-1",
+    "eu-central-2",
+    "eu-central-3",
+    "us-east-2",
+    "ap-south-1"
+  ]);
+});
+
+test("buildServerRetryOrder keeps the requested server when it is not in the snapshot", () => {
+  assert.deepEqual(buildServerRetryOrder([server("eu-west-1", "London")], "gone-1"), ["gone-1"]);
+});
+
+test("buildServerRetryOrder continues with the next region and wraps around", () => {
+  const servers = [
+    server("eu-west-1", "London", 20),
+    server("us-east-1", "New York", 30),
+    server("ap-south-1", "Mumbai", 40)
+  ];
+
+  assert.deepEqual(buildServerRetryOrder(servers, "us-east-1"), [
+    "us-east-1",
+    "ap-south-1",
+    "eu-west-1"
+  ]);
 });

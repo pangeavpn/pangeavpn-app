@@ -215,6 +215,9 @@ export const fa = {
   // ── Connect / disconnect flow ─────────────────────────
   "connect.noServer": "سروری انتخاب نشده است.",
   "connect.provisioning": "در حال آماده‌سازی و اتصال...",
+  "connect.stillConnecting": "اتصال همچنان در حال انجام است…",
+  "connect.takingLonger": "این کار بیشتر از معمول طول کشیده است…",
+  "connect.stillWorking": "هنوز در حال تلاش هستیم. در صورت نیاز سرورهای دیگری را امتحان می‌کنیم.",
   "connect.connected": "متصل شد.",
   "connect.failed": "اتصال ممکن نشد. دوباره تلاش کنید یا سرور دیگری انتخاب کنید.",
   "connect.switching": "در حال آماده‌سازی سرور جدید...",

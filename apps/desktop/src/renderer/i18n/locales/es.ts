@@ -215,6 +215,9 @@ export const es = {
   // ── Connect / disconnect flow ─────────────────────────
   "connect.noServer": "Ningún servidor seleccionado.",
   "connect.provisioning": "Aprovisionando y conectando...",
+  "connect.stillConnecting": "La conexión sigue en curso…",
+  "connect.takingLonger": "Esto está tardando más de lo habitual…",
+  "connect.stillWorking": "Seguimos trabajando. Probaremos otros servidores si es necesario.",
   "connect.connected": "Conectado.",
   "connect.failed": "No se pudo conectar. Inténtalo de nuevo o elige otro servidor.",
   "connect.switching": "Aprovisionando el nuevo servidor...",

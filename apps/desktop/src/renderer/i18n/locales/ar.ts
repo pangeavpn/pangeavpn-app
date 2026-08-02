@@ -215,6 +215,9 @@ export const ar = {
   // ── Connect / disconnect flow ─────────────────────────
   "connect.noServer": "لم يتم اختيار خادم.",
   "connect.provisioning": "جارٍ التجهيز والاتصال...",
+  "connect.stillConnecting": "ما زال الاتصال جارياً…",
+  "connect.takingLonger": "يستغرق هذا وقتاً أطول من المعتاد…",
+  "connect.stillWorking": "ما زلنا نعمل على ذلك. سنجرب خوادم أخرى عند الحاجة.",
   "connect.connected": "تم الاتصال.",
   "connect.failed": "تعذّر الاتصال. حاول مرة أخرى، أو اختر خادمًا آخر.",
   "connect.switching": "جارٍ تجهيز خادم جديد...",

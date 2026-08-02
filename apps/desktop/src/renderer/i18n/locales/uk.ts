@@ -215,6 +215,9 @@ export const uk = {
   // ── Connect / disconnect flow ─────────────────────────
   "connect.noServer": "Сервер не вибрано.",
   "connect.provisioning": "Підготовка та підключення...",
+  "connect.stillConnecting": "Підключення все ще триває…",
+  "connect.takingLonger": "Це займає більше часу, ніж зазвичай…",
+  "connect.stillWorking": "Ми все ще працюємо. За потреби спробуємо інші сервери.",
   "connect.connected": "Підключено.",
   "connect.failed": "Не вдалося підключитися. Спробуйте ще раз або виберіть інший сервер.",
   "connect.switching": "Підготовка нового сервера...",

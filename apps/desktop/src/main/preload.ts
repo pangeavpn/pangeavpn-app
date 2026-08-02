@@ -70,11 +70,11 @@ const pangeaApi = {
   logout: () => ipcRenderer.invoke(CH.authLogout),
   getAuthState: () => ipcRenderer.invoke(CH.authGetState),
   getServers: () => ipcRenderer.invoke(CH.getServers),
-  provisionAndConnect: (serverId: string) =>
-    ipcRenderer.invoke(CH.provisionAndConnect, serverId),
+  provisionAndConnect: (serverIds: string[]) =>
+    ipcRenderer.invoke(CH.provisionAndConnect, serverIds),
   cancelConnect: () => ipcRenderer.invoke(CH.cancelConnect),
-  provisionAndSwitch: (serverId: string) =>
-    ipcRenderer.invoke(CH.provisionAndSwitch, serverId),
+  provisionAndSwitch: (serverIds: string[]) =>
+    ipcRenderer.invoke(CH.provisionAndSwitch, serverIds),
   setDoh: (enabled: boolean) => ipcRenderer.invoke(CH.setDoh, enabled),
   getDoh: () => ipcRenderer.invoke(CH.getDoh),
   setDirectIp: (enabled: boolean) => ipcRenderer.invoke(CH.setDirectIp, enabled),
