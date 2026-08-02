@@ -2082,6 +2082,10 @@ button.ghost:hover:not(:disabled) {
   margin-top: 12px;
 }
 
+.settings-field[hidden] {
+  display: none;
+}
+
 .settings-field-label {
   font-weight: 600;
   font-size: 0.85rem;

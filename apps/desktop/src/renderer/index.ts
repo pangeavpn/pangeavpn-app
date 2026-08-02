@@ -10,6 +10,7 @@ import {
 } from "./autoConnect.js";
 import { pickRandomServer, resolveSelection } from "./serverPick.js";
 import { buildDriftMap } from "./driftMap.js";
+import { dnsChoiceFor, dnsServersFor, type DnsChoice } from "./dnsPresets.js";
 import { buildFlag } from "./flags.js";
 import {
   groupRegions,
@@ -79,6 +80,8 @@ const serverRefreshBtn = document.getElementById("serverRefreshBtn") as HTMLButt
 const directIpToggle = document.getElementById("directIpToggle") as HTMLInputElement;
 const directIpOnlyToggle = document.getElementById("directIpOnlyToggle") as HTMLInputElement;
 const allowLanToggle = document.getElementById("allowLanToggle") as HTMLInputElement;
+const dnsPresetSelect = document.getElementById("dnsPresetSelect") as HTMLSelectElement;
+const customDnsField = document.getElementById("customDnsField") as HTMLElement;
 const customDnsInput = document.getElementById("customDnsInput") as HTMLInputElement;
 const wireguardMtuInput = document.getElementById("wireguardMtuInput") as HTMLInputElement;
 const preferredTransportSelect = document.getElementById("preferredTransportSelect") as HTMLSelectElement;
@@ -175,7 +178,8 @@ function updateSettingsSummaries(): void {
   setTransportValue.textContent = transport ? transport.textContent : "";
 
   const network = [`MTU ${wireguardMtuInput.value || MTU_DEFAULT}`];
-  if (customDnsInput.value.trim()) network.push(t("settings.network.dns.title"));
+  const dnsChoice = dnsPresetSelect.selectedOptions[0];
+  if (dnsPresetSelect.value !== "automatic" && dnsChoice) network.push(dnsChoice.textContent ?? "DNS");
   if (allowLanToggle.checked) network.push(t("settings.network.allowLan.title"));
   setNetworkValue.textContent = network.join(" · ");
 
@@ -1041,12 +1045,20 @@ wireguardMtuInput.addEventListener("change", async () => {
   }
 });
 
-customDnsInput.addEventListener("change", async () => {
+function syncDnsControls(servers: readonly string[]): void {
+  const choice = dnsChoiceFor(servers);
+  dnsPresetSelect.value = choice;
+  customDnsField.hidden = choice !== "custom";
+  customDnsInput.value = servers.join(", ");
+}
+
+async function saveDns(requested: string): Promise<void> {
   if (!pangeaApi) return;
-  const requested = customDnsInput.value.trim();
+  dnsPresetSelect.disabled = true;
+  customDnsInput.disabled = true;
   try {
     const stored = await pangeaApi.setCustomDns(requested);
-    customDnsInput.value = stored.join(", ");
+    syncDnsControls(stored);
     showToast(
       stored.length > 0
         ? t("settings.network.dns.saved", { dns: stored.join(", ") })
@@ -1055,14 +1067,32 @@ customDnsInput.addEventListener("change", async () => {
       true
     );
   } catch (err) {
-    customDnsInput.value = (await pangeaApi.getCustomDns().catch(() => [])).join(", ");
+    syncDnsControls(await pangeaApi.getCustomDns().catch(() => []));
     const invalid = err instanceof Error && err.message.includes("Custom DNS");
     showToast(invalid
       ? t("settings.network.dns.invalid")
       : reportError("customDns", err, t("toggle.updateFailed")));
   } finally {
+    dnsPresetSelect.disabled = false;
+    customDnsInput.disabled = false;
     updateSettingsSummaries();
   }
+}
+
+dnsPresetSelect.addEventListener("change", async () => {
+  const choice = dnsPresetSelect.value as DnsChoice;
+  const servers = dnsServersFor(choice);
+  if (servers === null) {
+    customDnsField.hidden = false;
+    customDnsInput.focus();
+    customDnsInput.select();
+    return;
+  }
+  await saveDns(servers.join(", "));
+});
+
+customDnsInput.addEventListener("change", async () => {
+  await saveDns(customDnsInput.value.trim());
 });
 
 preferredTransportSelect.addEventListener("change", async () => {
@@ -1285,7 +1315,7 @@ async function init(): Promise<void> {
       directIpToggle.checked = await pangeaApi.getDirectIp();
       directIpOnlyToggle.checked = await pangeaApi.getDirectIpOnly();
       allowLanToggle.checked = await pangeaApi.getAllowLan();
-      customDnsInput.value = (await pangeaApi.getCustomDns()).join(", ");
+      syncDnsControls(await pangeaApi.getCustomDns());
       wireguardMtuInput.value = String(await pangeaApi.getWireguardMtu());
       const preferredTransport = await pangeaApi.getPreferredTransport();
       preferredTransportSelect.value = preferredTransport;

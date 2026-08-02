@@ -282,6 +282,22 @@
                   </label>
                 </div>
                 <div class="settings-field">
+                  <label class="settings-field-label" for="dnsPresetSelect" data-i18n="settings.network.dns.provider.title">DNS Provider</label>
+                  <div class="select-wrap">
+                    <select id="dnsPresetSelect" class="language-select" aria-label="DNS Provider" data-i18n-aria-label="settings.network.dns.provider.title">
+                      <option value="automatic" data-i18n="settings.network.dns.provider.automatic">Automatic (VPN default)</option>
+                      <option value="adguard" data-i18n="settings.network.dns.provider.adguard">AdGuard DNS - Ads &amp; trackers</option>
+                      <option value="cloudflare" data-i18n="settings.network.dns.provider.cloudflare">Cloudflare</option>
+                      <option value="quad9" data-i18n="settings.network.dns.provider.quad9">Quad9 - Malware blocking</option>
+                      <option value="cloudflareFamily" data-i18n="settings.network.dns.provider.cloudflareFamily">Cloudflare Family - Malware &amp; adult content</option>
+                      <option value="google" data-i18n="settings.network.dns.provider.google">Google Public DNS</option>
+                      <option value="custom" data-i18n="settings.network.dns.provider.custom">Custom</option>
+                    </select>
+                    <span class="select-chevron"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></span>
+                  </div>
+                  <span class="settings-field-hint" data-i18n="settings.network.dns.provider.hint">Choose a resolver or enter your own. Filtering is provided by the selected DNS service. Takes effect on next connect.</span>
+                </div>
+                <div id="customDnsField" class="settings-field" hidden>
                   <label class="settings-field-label" for="customDnsInput" data-i18n="settings.network.dns.title">Custom DNS</label>
                   <input
                     id="customDnsInput"
@@ -289,7 +305,7 @@
                     type="text"
                     autocomplete="off"
                     spellcheck="false"
-                    placeholder="Automatic (VPN default)"
+                    placeholder="1.1.1.1, 1.0.0.1"
                     data-i18n-placeholder="settings.network.dns.placeholder"
                     data-i18n-aria-label="settings.network.dns.title"
                   />
