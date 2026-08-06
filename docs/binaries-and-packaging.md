@@ -1,124 +1,429 @@
-# Binaries And Packaging
+# Binaries and Packaging
 
-## Repo binary locations
+PangeaVPN packages a TypeScript Electron application together with a native Go
+daemon. Windows additionally ships architecture-matched WireGuard runtime DLLs;
+macOS and Linux embed the daemon without separate tunnel executables.
 
-- Windows runtime DLLs: `apps/desktop/resources/bin/win/wintun.dll`
-- Windows `wireguard.dll` sources: `apps/desktop/build/{amd64|arm|arm64|x86}/wireguard.dll`
-- Windows `wintun.dll` sources: `apps/desktop/build/{amd64|arm|arm64|x86}/wintun.dll`
+> [!IMPORTANT]
+> Each platform build is host-native. Run the Windows builder on Windows, the
+> macOS builder on macOS, and the Linux builder on Linux.
 
-Put `wintun.dll` in the Windows folder.
-Put architecture-matched `wireguard.dll` files in the Windows build arch folders above.
-No tunnel binaries (`wireguard-go`, `wg`, `cloak`, `ck-client`, `wireguard.exe`) are required on any platform — WireGuard and Cloak run in-process inside the daemon. Only `wintun.dll` / `wireguard.dll` are loaded at runtime (via `syscall.LoadLibrary` on Windows).
+## Build matrix
 
-## Runtime binary resolution
+| Platform | Command | Architectures | Installers | Managed service |
+| --- | --- | --- | --- | --- |
+| Windows | `npm run build-bin:windows` | x64, arm64 | NSIS `.exe` | Installed automatically as `PangeaDaemon` |
+| macOS | `npm run build-bin:mac` | x64, arm64 | `.pkg` plus installer `.dmg` | Installed by the DMG-bundled `install-mac.sh`, not by the raw `.pkg` alone |
+| Linux | `npm run build-bin:linux` | x64, arm64 | AppImage and `.deb` | Not installed by either package; `install-linux.sh` creates the systemd service |
 
-The daemon binary is bundled at `process.resourcesPath/daemon/{daemon|PangeaDaemon.exe}`.
-Implementation is in `apps/desktop/src/main/resourcePaths.ts`.
+The packaging scripts compile both architectures by default, stage standalone
+daemon artifacts, and write a SHA-256 manifest under `dist/bin/<platform>/`.
 
-## Daemon packaging
+## Prerequisites
 
-`electron-builder` includes:
+### Common
 
-- `apps/desktop/resources/bin/**` -> app resources `bin/`
-- `daemon/bin/**` -> app resources `daemon/`
+- Node.js 24 is the CI baseline.
+- Go 1.25 or newer, as required by [`daemon/go.mod`](../daemon/go.mod).
+- npm workspace dependencies installed from the repository root with `npm ci`.
+- Network access for npm packages, Go modules, Electron downloads, and optional
+  NaiveProxy native artifacts.
+- The platform's standard compiler and packaging tools.
 
-Windows daemon build (`scripts/build-daemon.mjs`) stages exactly one `wireguard.dll` and one `wintun.dll` into `daemon/bin/` from the matching `apps/desktop/build/<arch>/` folder. Those staged files are what get bundled and installed.
+The platform scripts install the desktop workspace's development dependencies
+and rebuild the shared types and desktop application before packaging, so a
+separate `npm run build` is not required.
 
-Build config is in `apps/desktop/package.json` under `build.extraResources`.
+### Windows
 
-Windows installer also includes NSIS custom service hooks via:
+- `goversioninfo` 1.7.0:
 
-- `apps/desktop/build/installer.nsh`
+  ```powershell
+  go install github.com/josephspurrier/goversioninfo/cmd/goversioninfo@v1.7.0
+  ```
 
-The installer config runs per-machine and elevated (`build.nsis.perMachine`, `build.nsis.allowElevation`).
-Windows packaging also sets `build.npmRebuild=false` to avoid npm-workspace rebuild issues during electron-builder packaging.
+- Architecture-matched `wireguard.dll` and `wintun.dll` inputs.
+- LLVM `clang-cl` and Visual Studio C++ tools for a NaiveProxy-enabled build.
+- 7-Zip only when running the separate installer payload verifier.
 
-## Windows app icon
+### macOS
 
-Place the Windows icon at:
+- Xcode Command Line Tools, including `clang`, `codesign`, and `iconutil`.
+- `hdiutil` for the installer DMG.
+- NaiveProxy native archives for each requested architecture when NaiveProxy is
+  required.
 
-- `apps/desktop/build/PangeaVPN.ico`
+### Linux
 
-It is used for:
+- The normal electron-builder Linux packaging toolchain.
+- `dpkg`/`fakeroot` or equivalent tools for `.deb` creation.
+- Runtime networking tools. The `.deb` currently declares `iproute2`,
+  `wireguard-tools`, and `policykit-1`; kill-switch operation also expects
+  nftables or the iptables fallback.
 
-- Windows app executable (`build.win.icon`)
-- NSIS installer (`build.nsis.installerIcon`)
-- NSIS uninstaller (`build.nsis.uninstallerIcon`)
-- NSIS installer header (`build.nsis.installerHeaderIcon`)
-- Browser window/taskbar icon in dev and packaged runtime (via `apps/desktop/src/main/resourcePaths.ts`)
+## Packaging pipeline
 
-## Important note
+```mermaid
+flowchart LR
+    Types[Build shared types] --> Desktop[Compile Electron app]
+    Desktop --> Daemon[Build Go daemon<br/>for target architecture]
+    Daemon --> Stage[Stage daemon and<br/>platform resources]
+    Stage --> Builder[electron-builder]
+    Builder --> Installers[Installer artifacts]
+    Installers --> Collect[Collect standalone files]
+    Collect --> Manifest[Write SHA-256 manifest]
+```
 
-Daemon token/config for Windows service-installed daemon:
+The key entry points are:
 
-- `%ProgramData%/PangeaVPN/daemon-token.txt`
-- `%ProgramData%/PangeaVPN/config.json`
+- [`scripts/build-daemon.mjs`](../scripts/build-daemon.mjs): builds one daemon for
+  the requested `GOOS` and `GOARCH`.
+- [`scripts/build-bin/windows.mjs`](../scripts/build-bin/windows.mjs): builds and
+  packages Windows x64 and arm64 sequentially.
+- [`scripts/build-bin/mac.mjs`](../scripts/build-bin/mac.mjs): builds and packages
+  macOS arm64 and x64 sequentially, then creates installer DMGs.
+- [`scripts/build-bin/linux.mjs`](../scripts/build-bin/linux.mjs): builds AppImage
+  and `.deb` artifacts for x64 and arm64.
+- [`apps/desktop/package.json`](../apps/desktop/package.json): defines
+  electron-builder resources, targets, names, and installer options.
 
-Windows WireGuard operations require the daemon process to run with administrator privileges.
+The platform artifact scripts currently pass
+`--config.electronVersion=34.1.0` to electron-builder. This overrides the
+Electron 41.5.0 dependency and package-level build setting for these artifact
+commands. `npm run pack --workspace @pangeavpn/desktop` does not apply that
+override.
 
-On macOS:
+## Daemon build
 
-- The daemon configures WireGuard and Cloak entirely in-process (no external tunnel binaries).
-- The daemon process must run as root for tunnel bring-up/teardown.
-- The `.pkg` installer registers `com.pangea.pangeavpn.daemon` as a system `launchd` daemon.
+Production daemon builds always include the `with_utls` Go build tag because
+VLESS + REALITY depends on sing-box's uTLS support.
 
-On Linux:
+NaiveProxy is compiled into the daemon only when its native archive, headers,
+and compiler toolchain resolve. In that case the builder also adds the
+`naive_cgo` tag. Otherwise the daemon contains a stub that reports NaiveProxy as
+unavailable.
 
-- The daemon configures WireGuard and Cloak entirely in-process (no external tunnel binaries).
-- The daemon process must run as root for tunnel bring-up/teardown.
-- DNS entries are applied during connect and restored during disconnect using systemd-resolved D-Bus when available, with `/etc/resolv.conf` fallback.
+| Target | NaiveProxy behavior |
+| --- | --- |
+| Windows x64/arm64 | Native CGO engine when inputs and `clang-cl` resolve |
+| macOS x64/arm64 | Native CGO engine when the matching archive resolves |
+| Linux x64/arm64 | Stub; the current native resolver has no Linux implementation |
+| Windows/macOS CI | `PANGEA_REQUIRE_NAIVE=1` makes missing native support a build failure |
 
-On Windows:
+The native inputs can come from a local NaiveProxy checkout or the pinned cache
+under `.cache/pangea-naive/`. See
+[`scripts/lib/naive-cgo.mjs`](../scripts/lib/naive-cgo.mjs) and
+[`scripts/lib/naive-cgo-darwin.mjs`](../scripts/lib/naive-cgo-darwin.mjs).
 
-- Dev flow (`npm run dev`) requests UAC to run the daemon elevated.
-- Packaged installer app relies on the installed `PangeaDaemon` Windows service (no routine UAC prompt).
-- Packaged portable app launches bundled `resources/daemon/PangeaDaemon.exe` with elevation when service install is not available.
+## Runtime resources
 
-## Build commands
+In a packaged application, Electron resolves the bundled daemon relative to
+`process.resourcesPath`:
 
-Use:
+```text
+resources/daemon/PangeaDaemon.exe   # Windows
+resources/daemon/daemon             # macOS and Linux
+```
 
-- `npm run build-bin:windows`
+The implementation is in
+[`apps/desktop/src/main/resourcePaths.ts`](../apps/desktop/src/main/resourcePaths.ts).
 
-- `npm run build-bin:mac`
+No separate `wg`, `wg-quick`, `wireguard-go`, Cloak, or NaiveProxy executable is
+bundled. Those engines run in-process. Standard operating-system tools are still
+used for service management, routes, DNS, and firewall integration.
 
-All targets:
+### Windows binary inputs
 
-- `npm run build-bin`
+The daemon builder requires both DLLs for the target Go architecture:
 
-`build-bin` runs target builds in order (`windows`, then `mac`) and fails non-zero if any target fails.
+```text
+apps/desktop/build/amd64/wireguard.dll
+apps/desktop/build/amd64/wintun.dll
+apps/desktop/build/arm64/wireguard.dll
+apps/desktop/build/arm64/wintun.dll
+```
 
-`build-bin:mac` builds both macOS targets in one run:
+The lower-level daemon builder also understands `x86` and `arm` source folders,
+but the installer pipeline currently emits only x64 and arm64.
 
-- `x64` (Intel)
-- `arm64` (Apple Silicon)
+During each architecture build, the matching files are copied to:
 
-## Windows artifact outputs
+```text
+daemon/bin/PangeaDaemon.exe
+daemon/bin/wireguard.dll
+daemon/bin/wintun.dll
+```
 
-`npm run build-bin:windows` produces:
+electron-builder then places that staged set under `resources/daemon/`. The
+repository also carries `apps/desktop/resources/bin/win/wintun.dll`, which is
+packaged under `resources/bin/win/`; it is separate from the architecture-matched
+side-by-side DLL set used by the daemon.
 
-- `dist/bin/windows/installer/*.exe` (NSIS installer)
-- `dist/bin/windows/daemon/PangeaDaemon.exe` (standalone daemon binary)
-- `dist/bin/windows/daemon/wireguard.dll` (standalone daemon runtime dependency)
-- `dist/bin/windows/daemon/wintun.dll` (standalone daemon runtime dependency)
-- `dist/bin/windows/manifest.json` (artifact manifest with hashes)
+## Windows package
 
-Both arches are built by default. `npm run build-bin:windows:x64` (or
-`--arch x64` / `PANGEA_BUILD_ARCHES=x64`) builds x64 only, which roughly halves
-a local build. `build-bin:mac` takes the same `--arch` flag
-(`npm run build-bin:mac:arm64`). Releases must keep the default so every arch
-still ships.
+### Build
 
-`npm run build-bin` also writes:
+```powershell
+npm run build-bin:windows
+```
 
-- `dist/bin/manifest-all.json` (per-target status summary)
+Build only x64:
 
-## macOS artifact outputs
+```powershell
+npm run build-bin:windows:x64
+```
 
-`npm run build-bin:mac` produces:
+Build or verify one architecture directly:
 
-- `dist/bin/mac/installer/x64/*.pkg`
-- `dist/bin/mac/installer/arm64/*.pkg`
-- `dist/bin/mac/daemon/daemon-x64`
-- `dist/bin/mac/daemon/daemon-arm64`
-- `dist/bin/mac/manifest.json`
+```powershell
+node scripts/build-bin/windows.mjs --arch arm64
+node scripts/verify-windows-installer.mjs
+```
+
+The verifier extracts each NSIS package and checks that critical resources were
+not silently dropped by its embedded 7-Zip codec.
+
+### Outputs
+
+```text
+dist/bin/windows/
+|-- installer/
+|   |-- x64/PangeaVPN-Setup-<version>-x64.exe
+|   `-- arm64/PangeaVPN-Setup-<version>-arm64.exe
+|-- daemon/
+|   |-- PangeaDaemon-x64.exe
+|   |-- PangeaDaemon-arm64.exe
+|   |-- wireguard-x64.dll
+|   |-- wireguard-arm64.dll
+|   |-- wintun-x64.dll
+|   `-- wintun-arm64.dll
+`-- manifest.json
+```
+
+### Installer behavior
+
+The assisted, per-machine NSIS installer:
+
+1. installs the Electron application;
+2. stages the daemon and DLLs in `%ProgramData%\PangeaVPN\`;
+3. creates the automatic LocalSystem service `PangeaDaemon`;
+4. configures restart-on-failure behavior;
+5. grants built-in users permission to query and start the service;
+6. starts the service;
+7. optionally creates a common desktop shortcut.
+
+The packaged app expects this installed service. A portable target name exists
+in electron-builder configuration, but the current Windows target is NSIS only
+and there is no packaged portable-daemon fallback.
+
+Uninstall removes the service binaries and shortcuts but intentionally leaves
+runtime state such as configuration, token, and logs in the support directory.
+The custom service hooks live in
+[`apps/desktop/build/installer.nsh`](../apps/desktop/build/installer.nsh).
+
+### Icons and artwork
+
+| Asset | Use |
+| --- | --- |
+| `apps/desktop/built/pangeavpn.ico` | App executable, installer, uninstaller, and installer header icon |
+| `apps/desktop/build/PangeaVPN_connected.ico` | Connected-state runtime icon |
+| `apps/desktop/build/installerHeader.bmp` | NSIS header artwork |
+| `apps/desktop/build/installerSidebar.bmp` | NSIS install and uninstall sidebar |
+
+The built primary icon is copied into app resources as
+`build/PangeaVPN.ico` for runtime use.
+
+## macOS package
+
+### Build
+
+```bash
+npm run build-bin:mac
+```
+
+Build only Apple Silicon:
+
+```bash
+npm run build-bin:mac:arm64
+```
+
+Build Intel directly:
+
+```bash
+node scripts/build-bin/mac.mjs --arch x64
+```
+
+### Outputs
+
+```text
+dist/bin/mac/
+|-- installer/
+|   |-- arm64/
+|   |   |-- <installer>.pkg
+|   |   `-- <installer>-installer.dmg
+|   `-- x64/
+|       |-- <installer>-x64.pkg
+|       `-- <installer>-x64-installer.dmg
+|-- daemon/
+|   |-- daemon-arm64
+|   `-- daemon-x64
+|-- bin/mac/
+`-- manifest.json
+```
+
+`bin/mac/` receives any standalone files from
+`apps/desktop/resources/bin/mac/`; it is currently empty apart from repository
+placeholders.
+
+### PKG versus installer DMG
+
+These artifacts have different behavior:
+
+| Artifact | What it does |
+| --- | --- |
+| Raw `.pkg` | Installs `PangeaVPN.app`, copies the daemon to `/Library/Application Support/PangeaVPN/PangeaDaemon`, clears quarantine, and ad-hoc signs the copied daemon |
+| Installer `.dmg` | Contains the matching `.pkg` and `install-mac.sh`; the script performs the complete privileged service setup |
+
+The raw package deliberately does **not** create a daemon token, install a
+LaunchDaemon plist, or start the daemon. The complete script:
+
+1. installs the `.pkg`;
+2. creates the machine-scoped support directory and token;
+3. installs `/Library/LaunchDaemons/com.pangea.pangeavpn.daemon.plist`;
+4. configures `RunAtLoad` and `KeepAlive`;
+5. bootstraps and starts the service;
+6. verifies `http://127.0.0.1:8787/ping`.
+
+See [`scripts/install-mac.sh`](../scripts/install-mac.sh) and the raw package's
+[`postinstall`](../apps/desktop/build/pkg-scripts/postinstall).
+
+## Linux package
+
+### Build
+
+```bash
+npm run build-bin:linux
+```
+
+The Linux script always builds both x64 and arm64. Unlike the Windows and macOS
+scripts, it does not currently implement `--arch` or `PANGEA_BUILD_ARCHES`.
+
+### Outputs
+
+```text
+dist/bin/linux/
+|-- appimage/
+|   |-- x64/<installer>.AppImage
+|   `-- arm64/<installer>.AppImage
+|-- deb/
+|   |-- x64/PangeaVPN_<version>_<arch>.deb
+|   `-- arm64/PangeaVPN_<version>_arm64.deb
+|-- daemon/
+|   |-- daemon-x64
+|   `-- daemon-arm64
+`-- manifest.json
+```
+
+### Service installation
+
+The generated AppImage and `.deb` include `resources/daemon/daemon` but do not
+create a systemd unit. For a complete source-based installation, use:
+
+```bash
+./scripts/install-linux.sh
+```
+
+That script installs the AppImage under `/opt/PangeaVPN/`, stages the daemon at
+`/usr/local/bin/pangea-daemon`, creates `/etc/pangeavpn/`, and enables
+`pangea-daemon.service`.
+
+Without a managed service, the desktop package can find or launch its bundled
+daemon, but actual tunnel creation still requires root. Recovery may use systemd
+or PolicyKit where available.
+
+## Architecture selection and environment
+
+Windows and macOS accept a command-line or environment filter:
+
+```bash
+node scripts/build-bin/windows.mjs --arch x64
+node scripts/build-bin/mac.mjs --arch arm64
+```
+
+```text
+PANGEA_BUILD_ARCHES=x64
+PANGEA_BUILD_ARCHES=x64,arm64
+```
+
+| Variable | Purpose |
+| --- | --- |
+| `PANGEA_REQUIRE_NAIVE=1` | Fail if the native NaiveProxy engine cannot be linked |
+| `PANGEA_NAIVEPROXY_SRC` | Override the local NaiveProxy source directory |
+| `PANGEA_CLANG_CL` | Override the Windows `clang-cl.exe` path |
+| `PANGEA_BUILD_ARCHES` | Select Windows/macOS output architectures |
+| `PANGEA_APP_SUPPORT_DIR` | Override the daemon's runtime state directory |
+| `CSC_IDENTITY_AUTO_DISCOVERY=false` | Disable macOS signing identity discovery, as release CI currently does |
+
+`GOOS`, `GOARCH`, CGO variables, and the NaiveProxy compiler wrapper variables
+are normally set internally by the build scripts.
+
+## Aggregate command
+
+```bash
+npm run build-bin
+```
+
+This runs the Windows, macOS, and Linux builders in sequence, records each result
+in `dist/bin/manifest-all.json`, and exits non-zero if any target fails. Because
+each child builder enforces its native host, this command is primarily an
+orchestration/summary entry point and cannot complete all three targets on a
+normal single-OS machine.
+
+## Manifests and integrity
+
+Each platform manifest records:
+
+- generation time and selected architectures;
+- artifact type and filename;
+- source and output path;
+- size in bytes;
+- SHA-256 digest;
+- Go architecture for daemon artifacts.
+
+The project does not currently apply a Windows code-signing certificate or a
+macOS Developer ID/notarization workflow. macOS installation ad-hoc signs the
+copied daemon. Release CI publishes `SHA256SUMS.txt` beside the user-facing
+installers so downloads can be checked independently.
+
+## CI and releases
+
+[`build-desktop.yml`](../.github/workflows/build-desktop.yml) currently:
+
+1. runs desktop tests, `go vet`, and Go tests on Ubuntu, Windows, and macOS;
+2. builds and verifies Windows x64/arm64 NSIS installers;
+3. builds macOS x64/arm64 installer DMGs;
+4. requires NaiveProxy native support for Windows and macOS artifacts;
+5. publishes Windows `.exe` files, macOS installer `.dmg` files, and
+   `SHA256SUMS.txt` for tagged releases.
+
+Linux packaging is supported locally but is not currently built or published by
+the release workflow. Standalone daemons and per-platform JSON manifests are
+also local build outputs rather than GitHub release assets.
+
+## Source map
+
+| Concern | Source of truth |
+| --- | --- |
+| Root build commands | [`package.json`](../package.json) |
+| electron-builder configuration | [`apps/desktop/package.json`](../apps/desktop/package.json) |
+| Host daemon build | [`scripts/build-daemon.mjs`](../scripts/build-daemon.mjs) |
+| Windows artifacts | [`scripts/build-bin/windows.mjs`](../scripts/build-bin/windows.mjs) |
+| macOS artifacts | [`scripts/build-bin/mac.mjs`](../scripts/build-bin/mac.mjs) |
+| Linux artifacts | [`scripts/build-bin/linux.mjs`](../scripts/build-bin/linux.mjs) |
+| Aggregate manifest | [`scripts/build-bin/all.mjs`](../scripts/build-bin/all.mjs) |
+| NaiveProxy native resolution | [`scripts/lib/naive-cgo.mjs`](../scripts/lib/naive-cgo.mjs) |
+| Windows service installer | [`apps/desktop/build/installer.nsh`](../apps/desktop/build/installer.nsh) |
+| macOS complete installer | [`scripts/install-mac.sh`](../scripts/install-mac.sh) |
+| Linux complete installer | [`scripts/install-linux.sh`](../scripts/install-linux.sh) |
+| CI and release assets | [`.github/workflows/build-desktop.yml`](../.github/workflows/build-desktop.yml) |
+| Runtime design | [Architecture](architecture.md) |
