@@ -7,7 +7,12 @@ import { readDaemonTokens } from "./platformPaths";
 import { getConnectedTrayIconPath, getTrayIconPath, getWindowsAppIconPath } from "./resourcePaths";
 import { IPC_CHANNELS, type ConnectResult } from "../shared/ipc";
 import * as auth from "./auth";
-import { PangeaApiClient, AuthError, ConnectCancelledError } from "./pangeaApiClient";
+import {
+  PangeaApiClient,
+  AuthError,
+  ConnectCancelledError,
+  type HubShadowsocksCreds
+} from "./pangeaApiClient";
 import { beginAttempt, cancelAttempt, endAttempt, isCancelled } from "./connectAttempt";
 import { setupAutoUpdater, notifyConnectionStateChange } from "./autoUpdater";
 import { setLoginItemEnabled, isLoginItemEnabled, isHiddenLaunchArg } from "./loginItem";
@@ -15,6 +20,7 @@ import { startNetworkWatcher, onNetworkChange } from "./networkWatcher";
 import { mt, mtState, setMainLocale, resolveMainLocale } from "./i18n";
 import { sanitizeLog } from "./logSanitize";
 import { shouldShowTrayHint, trayHintBodyKey } from "./trayHint";
+import { applyHubMethod, isHubMethod, normalizeHubMethods } from "../shared/hubMethods";
 import {
   buildServerRetryOrder as buildMainServerRetryOrder,
   replaceManagedProfile,
@@ -49,9 +55,9 @@ let connectionAttemptRunning = false;
 let allowLanEnabled = true;
 let launchAtStartupEnabled = false;
 let alwaysConnectedEnabled = false;
-// "auto" (cloak, fall back to naive, reality, hysteria2, then snowflake), or
-// "cloak"/"naive"/"reality"/"hysteria2"/"snowflake" (that transport only).
-let preferredTransport: "auto" | "cloak" | "naive" | "reality" | "hysteria2" | "snowflake" = "auto";
+// "auto" (cloak, then reality, hysteria2, naive, shadowsocks), or one of
+// "cloak"/"naive"/"reality"/"hysteria2"/"shadowsocks"/"snowflake" only.
+let preferredTransport: "auto" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "snowflake" = "auto";
 // Stored language preference: a locale code, or "system" to follow the OS.
 let localePref = "system";
 const hiddenLaunch = process.argv.some(isHiddenLaunchArg);
@@ -768,7 +774,7 @@ async function cancelConnectAttempt(): Promise<void> {
 function connectionOptions(): {
   allowLAN: boolean;
   lockdown: boolean;
-  preferredTransport?: "cloak" | "naive" | "reality" | "hysteria2" | "snowflake";
+  preferredTransport?: "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "snowflake";
 } {
   return {
     allowLAN: allowLanEnabled,
@@ -805,6 +811,16 @@ async function persistHubIp(ip: string): Promise<void> {
     await writeSettingsFile(settings);
   } catch (err) {
     console.warn("Failed to persist hub IP:", err);
+  }
+}
+
+async function persistHubShadowsocks(creds: HubShadowsocksCreds): Promise<void> {
+  try {
+    const settings = await readSettingsFile();
+    settings.hubShadowsocks = creds;
+    await writeSettingsFile(settings);
+  } catch (err) {
+    console.warn("Failed to persist hub Shadowsocks credentials:", err);
   }
 }
 
@@ -1021,46 +1037,39 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.getDoh, async () => pangeaApiClient.isDohEnabled());
 
-  ipcMain.handle(IPC_CHANNELS.setDirectIp, async (_event, enabled: boolean) => {
-    pangeaApiClient.setDirectIpEnabled(enabled);
-    try {
-      const filePath = (await import("node:path")).join(
-        (await import("./platformPaths")).getAppSupportDir(),
-        "settings.json"
-      );
-      const fs = (await import("node:fs/promises")).default;
-      let settings: Record<string, unknown> = {};
-      try {
-        settings = JSON.parse(await fs.readFile(filePath, "utf8"));
-      } catch {
-        // no existing file
-      }
-      settings.directIpEnabled = enabled;
-      await fs.writeFile(filePath, JSON.stringify(settings, null, 2));
-    } catch {
-      // best-effort persistence
+  // The renderer disables the last remaining switch, but settings.json is
+  // hand-editable and IPC is callable directly, so the invariant is enforced
+  // here as well — this is the authority, the UI only reflects it.
+  ipcMain.handle(IPC_CHANNELS.setHubMethod, async (_event, method: unknown, enabled: unknown) => {
+    const current = pangeaApiClient.getHubMethods();
+    if (!isHubMethod(method)) {
+      return { methods: current, applied: false };
     }
-  });
-
-  ipcMain.handle(IPC_CHANNELS.getDirectIp, async () => pangeaApiClient.isDirectIpEnabled());
-
-  ipcMain.handle(IPC_CHANNELS.setDirectIpOnly, async (_event, enabled: boolean) => {
-    pangeaApiClient.setDirectIpOnly(enabled);
+    const { methods, applied } = applyHubMethod(current, method, enabled === true);
+    if (!applied) {
+      return { methods: current, applied: false };
+    }
+    pangeaApiClient.setHubMethods(methods);
     try {
       const settingsPath = (await import("node:path")).join(
         (await import("./platformPaths")).getAppSupportDir(),
         "settings.json"
       );
-      const raw = await (await import("node:fs/promises")).default.readFile(settingsPath, "utf8").catch(() => "{}");
+      const fs = (await import("node:fs/promises")).default;
+      const raw = await fs.readFile(settingsPath, "utf8").catch(() => "{}");
       const settings = JSON.parse(raw) as Record<string, unknown>;
-      settings.directIpOnly = enabled;
-      await (await import("node:fs/promises")).default.writeFile(settingsPath, JSON.stringify(settings, null, 2));
+      settings.hubMethods = methods;
+      // Drop the keys this replaced so a later downgrade cannot resurrect them.
+      delete settings.directIpEnabled;
+      delete settings.directIpOnly;
+      await fs.writeFile(settingsPath, JSON.stringify(settings, null, 2));
     } catch (err) {
-      console.warn("Failed to persist directIpOnly setting:", err);
+      console.warn("Failed to persist hubMethods setting:", err);
     }
+    return { methods, applied: true };
   });
 
-  ipcMain.handle(IPC_CHANNELS.getDirectIpOnly, async () => pangeaApiClient.isDirectIpOnly());
+  ipcMain.handle(IPC_CHANNELS.getHubMethods, async () => pangeaApiClient.getHubMethods());
 
   ipcMain.handle(IPC_CHANNELS.setAllowLan, async (_event, enabled: boolean) => {
     allowLanEnabled = !!enabled;
@@ -1110,9 +1119,14 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.getCustomDns, async () => pangeaApiClient.getCustomDns());
 
-  ipcMain.handle(IPC_CHANNELS.setPreferredTransport, async (_event, value: "auto" | "cloak" | "naive" | "reality" | "hysteria2" | "snowflake") => {
+  ipcMain.handle(IPC_CHANNELS.setPreferredTransport, async (_event, value: "auto" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "snowflake") => {
     preferredTransport =
-      value === "cloak" || value === "naive" || value === "reality" || value === "hysteria2" || value === "snowflake"
+      value === "cloak" ||
+      value === "naive" ||
+      value === "reality" ||
+      value === "hysteria2" ||
+      value === "shadowsocks" ||
+      value === "snowflake"
         ? value
         : "auto";
     try {
@@ -1429,6 +1443,26 @@ async function boot(): Promise<void> {
   // Registered before the restore below so a first run with no settings file
   // still persists the hub IP once it is learned.
   pangeaApiClient.onHubIp((ip) => void persistHubIp(ip));
+  pangeaApiClient.onHubShadowsocksResolved((creds) => void persistHubShadowsocks(creds));
+
+  // The daemon owns the proxy; the client only decides when to ask for it.
+  pangeaApiClient.setShadowsocksHubProxy({
+    start: async (creds) => {
+      try {
+        return await daemonClient.startSsProxy(creds);
+      } catch (err) {
+        console.warn("Failed to start the Shadowsocks hub proxy:", sanitizeLog(err));
+        return null;
+      }
+    },
+    stop: async () => {
+      try {
+        await daemonClient.stopSsProxy();
+      } catch {
+        // best-effort
+      }
+    }
+  });
 
   // Restore persisted settings
   try {
@@ -1441,12 +1475,9 @@ async function boot(): Promise<void> {
     if (settings.dohEnabled === true) {
       pangeaApiClient.setDohEnabled(true);
     }
-    if (settings.directIpEnabled === true) {
-      pangeaApiClient.setDirectIpEnabled(true);
-    }
-    if (settings.directIpOnly === false) {
-      pangeaApiClient.setDirectIpOnly(false);
-    }
+    // Reads the current shape, and migrates the directIpEnabled/directIpOnly
+    // pair it replaced. Always yields at least one enabled method.
+    pangeaApiClient.setHubMethods(normalizeHubMethods(settings.hubMethods ?? settings));
     if (settings.allowLan === false) {
       allowLanEnabled = false;
     }
@@ -1465,6 +1496,7 @@ async function boot(): Promise<void> {
       settings.preferredTransport === "naive" ||
       settings.preferredTransport === "reality" ||
       settings.preferredTransport === "hysteria2" ||
+      settings.preferredTransport === "shadowsocks" ||
       settings.preferredTransport === "snowflake"
     ) {
       preferredTransport = settings.preferredTransport;
@@ -1478,6 +1510,17 @@ async function boot(): Promise<void> {
     // Last known good hub IP: the only way to reach the hub once a Lockdown
     // lock is engaged, since the lock permits that IP but blocks DNS and DoH.
     pangeaApiClient.setCachedHubIp(settings.hubIp);
+    if (settings.hubShadowsocks && typeof settings.hubShadowsocks === "object") {
+      const c = settings.hubShadowsocks as Partial<HubShadowsocksCreds>;
+      if (c.remoteHost && c.remotePort && c.method && c.password) {
+        pangeaApiClient.setCachedHubShadowsocks({
+          remoteHost: c.remoteHost,
+          remotePort: c.remotePort,
+          method: c.method,
+          password: c.password
+        });
+      }
+    }
     if (typeof settings.lastServerId === "string") {
       lastServerId = settings.lastServerId;
     }

@@ -249,21 +249,28 @@
             </button>
             <div id="setCensorshipContent" class="collapse-content" aria-hidden="true">
               <div class="set-body">
-                <p class="settings-description" data-i18n="settings.censorship.description">Enable if your network blocks access to VPN services.</p>
+                <p class="settings-description" data-i18n="settings.censorship.description">How the app reaches your account servers. Each method you leave on is tried in turn; at least one must stay on.</p>
                 <div class="settings-toggles">
                   <label class="toggle-label">
                     <span class="toggle-copy">
                       <span class="toggle-title" data-i18n="settings.censorship.directIp.title">Direct IP</span>
-                      <span class="toggle-hint" data-i18n="settings.censorship.directIp.hint">Connect to our servers by IP address, skipping DNS entirely.</span>
+                      <span class="toggle-hint" data-i18n="settings.censorship.directIp.hint">Connect by IP address, skipping DNS entirely. The only method that works with the kill switch locked.</span>
                     </span>
-                    <input id="directIpToggle" class="toggle-switch" type="checkbox" />
+                    <input id="hubDirectIpToggle" class="toggle-switch" type="checkbox" />
                   </label>
                   <label class="toggle-label">
                     <span class="toggle-copy">
-                      <span class="toggle-title" data-i18n="settings.censorship.directIpOnly.title">Direct IP Only</span>
-                      <span class="toggle-hint" data-i18n="settings.censorship.directIpOnly.hint">Always use direct IP connections. Skips normal API calls entirely — use if your network blocks HTTPS to our servers.</span>
+                      <span class="toggle-title" data-i18n="settings.censorship.hubShadowsocks.title">Shadowsocks</span>
+                      <span class="toggle-hint" data-i18n="settings.censorship.hubShadowsocks.hint">Route account traffic through a Shadowsocks tunnel. Hides which server you are contacting, without turning the VPN on.</span>
                     </span>
-                    <input id="directIpOnlyToggle" class="toggle-switch" type="checkbox" />
+                    <input id="hubShadowsocksToggle" class="toggle-switch" type="checkbox" />
+                  </label>
+                  <label class="toggle-label">
+                    <span class="toggle-copy">
+                      <span class="toggle-title" data-i18n="settings.censorship.hubNormal.title">Normal connection</span>
+                      <span class="toggle-hint" data-i18n="settings.censorship.hubNormal.hint">Ordinary HTTPS using a normal DNS lookup. Tried last, because it is the only method that reveals our domain on the network.</span>
+                    </span>
+                    <input id="hubNormalToggle" class="toggle-switch" type="checkbox" />
                   </label>
                 </div>
               </div>
@@ -288,6 +295,7 @@
                     <option value="naive" data-i18n="settings.transport.naive">NaiveProxy only</option>
                     <option value="reality" data-i18n="settings.transport.reality">VLESS+REALITY only</option>
                     <option value="hysteria2" data-i18n="settings.transport.hysteria2">Hysteria2 only</option>
+                    <option value="shadowsocks" data-i18n="settings.transport.shadowsocks">Shadowsocks only</option>
                     <!-- Snowflake option gated for this release pending kill-switch dynamic-peer support; restore to re-enable user selection. -->
                   </select>
                   <span class="select-chevron"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></span>

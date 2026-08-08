@@ -6,8 +6,11 @@ import type { ServerInfo, SubscriptionInfo } from "../shared/ipc";
 import { normalizeCustomDns, resolveWireGuardDns } from "../shared/dns";
 import { MTU_DEFAULT, normalizeMtu, normalizeMtuOrDefault } from "../shared/mtu";
 import { resolveNaiveEndpoint } from "../shared/naiveEndpoint";
+import { buildShadowsocksProfile } from "../shared/shadowsocksProfile";
+import { DEFAULT_HUB_METHODS, type HubMethods } from "../shared/hubMethods";
 import { encryptRequest, decryptResponse, type EncryptedResponse } from "./secureChannel";
 import { sanitizeLog } from "./logSanitize";
+import { fetchViaConnectProxy } from "./hubTransport";
 
 export class AuthError extends Error {
   status: number;
@@ -364,13 +367,30 @@ export interface DeviceInfo {
   status: string;
 }
 
+/**
+ * The daemon-side Shadowsocks proxy ensureHub routes the secure envelope
+ * through. Injected so the client keeps no daemon dependency of its own.
+ */
+export interface HubShadowsocksCreds {
+  remoteHost: string;
+  remotePort: number;
+  method: string;
+  password: string;
+}
+
+export interface ShadowsocksHubProxy {
+  /** Resolves to the proxy's loopback port, or null when unavailable. */
+  start(creds: HubShadowsocksCreds): Promise<number | null>;
+  stop(): Promise<void>;
+}
+
 export class PangeaApiClient {
   private readonly timeoutMs: number;
   private cachedServers: ServerInfo[] = [];
   private licenseKey: string | null = null;
   private dohEnabled = true;
-  private directIpEnabled = true;
-  private directIpOnly = true;
+  // Which paths to the hub are permitted, in ensureHub's attempt order.
+  private hubMethods: HubMethods = { ...DEFAULT_HUB_METHODS };
   private wireguardMtu = MTU_DEFAULT;
   private customDnsServers: string[] | null = null;
   identityPubkey: string | null = null;
@@ -388,6 +408,15 @@ export class PangeaApiClient {
   private cachedHubIp: string | null = null;
   private onHubIpResolved: ((ip: string) => void) | null = null;
 
+  // Loopback port of the daemon's Shadowsocks hub proxy while it is carrying
+  // our traffic; null when that method is off or not currently in use.
+  private ssProxyPort: number | null = null;
+  private shadowsocksHubProxy: ShadowsocksHubProxy | null = null;
+  // Control-plane credentials from the last good /api/client/regions, restored
+  // from settings.json at startup — a cold install behind a block has none.
+  private hubShadowsocks: HubShadowsocksCreds | null = null;
+  private onHubShadowsocks: ((creds: HubShadowsocksCreds) => void) | null = null;
+
   constructor() {
     this.timeoutMs = 15000;
   }
@@ -401,26 +430,46 @@ export class PangeaApiClient {
     return this.dohEnabled;
   }
 
-  setDirectIpEnabled(enabled: boolean): void {
-    this.directIpEnabled = enabled;
+  /**
+   * Replaces which hub-connection methods ensureHub may attempt. The
+   * at-least-one-enabled invariant is enforced by the caller (see
+   * shared/hubMethods.ts); this only stores what it is given.
+   */
+  setHubMethods(methods: HubMethods): void {
+    this.hubMethods = { ...methods };
     this.resetHubResolution();
   }
 
-  isDirectIpEnabled(): boolean {
-    return this.directIpEnabled;
+  getHubMethods(): HubMethods {
+    return { ...this.hubMethods };
   }
 
-  setDirectIpOnly(enabled: boolean): void {
-    this.directIpOnly = enabled;
-    if (enabled) {
-      this.dohEnabled = true;
-      this.directIpEnabled = true;
-    }
+  /**
+   * Supplies the Shadowsocks hub proxy. Until one is wired in, the shadowsocks
+   * method is a no-op that ensureHub skips over.
+   */
+  setShadowsocksHubProxy(proxy: ShadowsocksHubProxy | null): void {
+    this.shadowsocksHubProxy = proxy;
     this.resetHubResolution();
   }
 
-  isDirectIpOnly(): boolean {
-    return this.directIpOnly;
+  /** The proxy port currently carrying hub traffic, for diagnostics. */
+  getShadowsocksProxyPort(): number | null {
+    return this.ssProxyPort;
+  }
+
+  /** Restores cached control-plane credentials at startup. */
+  setCachedHubShadowsocks(creds: HubShadowsocksCreds | null): void {
+    this.hubShadowsocks = creds;
+  }
+
+  getCachedHubShadowsocks(): HubShadowsocksCreds | null {
+    return this.hubShadowsocks;
+  }
+
+  /** Called when fresh credentials arrive, so the caller can persist them. */
+  onHubShadowsocksResolved(fn: (creds: HubShadowsocksCreds) => void): void {
+    this.onHubShadowsocks = fn;
   }
 
   /**
@@ -486,6 +535,14 @@ export class PangeaApiClient {
   private resetHubResolution(): void {
     this.dohResolvedIp = null;
     this.hubReady = false;
+    // Drop the proxy too: the next ensureHub re-decides whether to use it, and
+    // leaving it running would keep a listener open for a path we abandoned.
+    if (this.ssProxyPort !== null) {
+      this.ssProxyPort = null;
+      this.shadowsocksHubProxy?.stop().catch(() => {
+        // best-effort teardown
+      });
+    }
   }
 
   /**
@@ -505,7 +562,14 @@ export class PangeaApiClient {
 
     try {
       let rawResponse: Response;
-      if (this.dohResolvedIp) {
+      if (this.ssProxyPort) {
+        rawResponse = await fetchViaConnectProxy(this.ssProxyPort, HUB_HOSTNAME, HUB_HOSTNAME, "/v1/secure", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: envelopeJson,
+          timeoutMs: 8000
+        });
+      } else if (this.dohResolvedIp) {
         rawResponse = await fetchDohResolved(this.dohResolvedIp, HUB_HOSTNAME, "/v1/secure", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -545,13 +609,18 @@ export class PangeaApiClient {
   }
 
   /**
-   * Ensure we have a working connection strategy to the hub API.
-   * Tries in order:
-   *   0. Last known good IP (no lookup at all — the only path that survives an
-   *      engaged Lockdown lock, which blocks DNS and DoH alike)
-   *   1. Direct domain (normal DNS works)
-   *   2. DoH + no SNI (DNS blocked / DPI — resolve via encrypted DNS,
-   *      connect to resolved IP with no SNI so DPI can't see the domain)
+   * Ensure we have a working connection strategy to the hub API. Each step
+   * belongs to a hub method the user can switch off; at least one is always
+   * enabled (see shared/hubMethods.ts). Order, skipping disabled methods:
+   *
+   *   directIp     1. Last known good IP — no lookup at all, so it is the only
+   *                   path that survives an engaged Lockdown lock.
+   *                2. DoH-resolved IP, connected with no SNI.
+   *   shadowsocks  3. Through the daemon's Shadowsocks proxy.
+   *   normal       4. Plain HTTPS to the hub domain.
+   *
+   * "normal" is last on purpose: it is the only step that puts the hub's name
+   * on the wire in cleartext, so anything else that works should win first.
    */
   private async ensureHub(): Promise<void> {
     if (this.hubReady) {
@@ -560,8 +629,8 @@ export class PangeaApiClient {
 
     console.log(`[HubURL] Finding working API connection...`);
 
-    // 0. Last known good IP — no lookup, so it works under a lockdown lock.
-    if (this.cachedHubIp && this.directIpEnabled) {
+    // 1. Last known good IP — no lookup, so it works under a lockdown lock.
+    if (this.hubMethods.directIp && this.cachedHubIp) {
       console.log(`[HubURL] Trying cached hub IP ${this.cachedHubIp}`);
       this.dohResolvedIp = this.cachedHubIp;
       if (await this.trySecureProbeCurrentPath()) {
@@ -573,22 +642,8 @@ export class PangeaApiClient {
       this.dohResolvedIp = null;
     }
 
-    // 1. Try direct domain (normal DNS) — skip if direct IP only mode
-    if (!this.directIpOnly) {
-      console.log(`[HubURL] Trying direct domain: ${HUB_API_BASE}`);
-      this.dohResolvedIp = null;
-      if (await this.trySecureProbeCurrentPath()) {
-        console.log(`[HubURL] Direct domain secure probe works`);
-        this.hubReady = true;
-        return;
-      }
-      console.log(`[HubURL] Direct domain failed`);
-    } else {
-      console.log(`[HubURL] Direct IP only mode — skipping domain check`);
-    }
-
-    // 2. Try DoH — resolve via encrypted DNS, connect with no SNI
-    if (this.directIpEnabled && this.dohEnabled) {
+    // 2. DoH — resolve via encrypted DNS, connect to the IP with no SNI.
+    if (this.hubMethods.directIp && this.dohEnabled) {
       const resolvedIp = await resolveViaDoH(HUB_HOSTNAME);
       if (resolvedIp) {
         console.log(`[HubURL] Trying DoH-resolved IP ${resolvedIp}`);
@@ -604,16 +659,66 @@ export class PangeaApiClient {
       }
     }
 
-    // directIpOnly (default): fail closed rather than fall back to the domain (would leak SNI in cleartext).
+    // 3. Shadowsocks — the daemon proxies the secure envelope for us.
+    if (this.hubMethods.shadowsocks) {
+      this.dohResolvedIp = null;
+      if (await this.tryShadowsocksHubPath()) {
+        console.log(`[HubURL] Shadowsocks hub path works`);
+        this.hubReady = true;
+        return;
+      }
+    }
+
+    // 4. Plain HTTPS to the domain. Last because it is the only step whose
+    //    SNI names the hub in cleartext.
+    if (this.hubMethods.normal) {
+      console.log(`[HubURL] Trying direct domain: ${HUB_API_BASE}`);
+      this.dohResolvedIp = null;
+      if (await this.trySecureProbeCurrentPath()) {
+        console.log(`[HubURL] Direct domain secure probe works`);
+        this.hubReady = true;
+        return;
+      }
+      console.log(`[HubURL] Direct domain failed`);
+    }
+
     this.dohResolvedIp = null;
-    if (this.directIpOnly) {
+    if (!this.hubMethods.normal) {
+      // Fail closed: falling back to the domain here would leak the SNI the
+      // user switched that method off to avoid.
       throw new Error(
-        "Hub unreachable: DNS-over-HTTPS resolution failed and direct-IP-only mode forbids a cleartext domain connection"
+        "Hub unreachable: every enabled connection method failed, and the normal (cleartext domain) method is switched off"
       );
     }
 
     console.log(`[HubURL] All strategies failed, falling back to direct domain`);
     this.hubReady = true;
+  }
+
+  /**
+   * Attempt the hub through the daemon's Shadowsocks proxy. Returns false —
+   * never throws — so ensureHub can fall through to the remaining methods.
+   */
+  private async tryShadowsocksHubPath(): Promise<boolean> {
+    if (!this.shadowsocksHubProxy || !this.hubShadowsocks) {
+      console.log(`[HubURL] Shadowsocks hub path unavailable (no proxy or no cached credentials)`);
+      return false;
+    }
+    try {
+      const port = await this.shadowsocksHubProxy.start(this.hubShadowsocks);
+      if (!port) return false;
+      this.ssProxyPort = port;
+      if (await this.trySecureProbeCurrentPath()) {
+        return true;
+      }
+      this.ssProxyPort = null;
+      await this.shadowsocksHubProxy.stop();
+      return false;
+    } catch (err) {
+      console.warn("[HubURL] Shadowsocks hub path failed:", sanitizeLog(err));
+      this.ssProxyPort = null;
+      return false;
+    }
   }
 
   /**
@@ -642,16 +747,26 @@ export class PangeaApiClient {
 
     // Send encrypted envelope to /v1/secure
     let rawResponse: Response;
-    if (this.dohResolvedIp) {
+    if (this.ssProxyPort) {
+      // CONNECT names the hub by hostname: the node resolves it, so a client
+      // with no cached IP still gets through.
+      rawResponse = await fetchViaConnectProxy(this.ssProxyPort, HUB_HOSTNAME, HUB_HOSTNAME, "/v1/secure", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: envelopeJson,
+        timeoutMs: this.timeoutMs
+      });
+    } else if (this.dohResolvedIp) {
       rawResponse = await fetchDohResolved(this.dohResolvedIp, HUB_HOSTNAME, "/v1/secure", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: envelopeJson,
         timeoutMs: this.timeoutMs
       });
-    } else if (this.directIpOnly) {
-      // Defensive: ensureHub() should already have thrown in directIpOnly mode.
-      throw new Error("Hub transport unavailable: direct-IP-only mode forbids a cleartext domain connection");
+    } else if (!this.hubMethods.normal) {
+      // Defensive: ensureHub() should already have thrown when the cleartext
+      // domain method is off and nothing else resolved a path.
+      throw new Error("Hub transport unavailable: the normal (cleartext domain) method is switched off");
     } else {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), this.timeoutMs);
@@ -667,7 +782,7 @@ export class PangeaApiClient {
         const msg = err instanceof Error ? err.message : "";
         if (msg.includes("CERT") || msg.includes("certificate") || msg.includes("SSL")) {
           console.log("[hubFetch] TLS cert error, falling back to DoH + direct IP");
-          if (this.directIpEnabled) {
+          if (this.hubMethods.directIp) {
             const resolvedIp = await resolveViaDoH(HUB_HOSTNAME);
             if (resolvedIp) {
               this.dohResolvedIp = resolvedIp;
@@ -701,7 +816,7 @@ export class PangeaApiClient {
     // If response looks like HTML, the request is being intercepted (DPI / captive portal).
     // Fall back to DoH + direct IP to bypass interception.
     if (responseText.trimStart().startsWith("<")) {
-      if (!this.dohResolvedIp && this.dohEnabled && this.directIpEnabled) {
+      if (!this.dohResolvedIp && this.dohEnabled && this.hubMethods.directIp) {
         console.log("[hubFetch] Response intercepted (HTML), falling back to DoH");
         const resolvedIp = await resolveViaDoH(HUB_HOSTNAME);
         if (resolvedIp) {
@@ -769,6 +884,7 @@ export class PangeaApiClient {
       const data = (await response.json()) as TokenLoginResponse;
       this.licenseKey = data.vpnAccessToken;
       this.cachedServers = data.servers;
+      this.rememberHubShadowsocks(data.servers);
       return data;
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") {
@@ -799,6 +915,7 @@ export class PangeaApiClient {
       const data = (await response.json()) as BootstrapResponse;
       this.licenseKey = data.vpnAccessToken;
       this.cachedServers = data.servers;
+      this.rememberHubShadowsocks(data.servers);
       return data;
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") {
@@ -820,6 +937,7 @@ export class PangeaApiClient {
       : "/api/client/regions";
     const data = await this.hubRequest<ServerInfo[]>("GET", route);
     this.cachedServers = data;
+    this.rememberHubShadowsocks(data);
     return data;
   }
 
@@ -855,6 +973,28 @@ export class PangeaApiClient {
       console.warn("[getSubscription]", sanitizeLog(err));
       return null;
     }
+  }
+
+
+  /**
+   * Records the first control-plane Shadowsocks block the hub advertised, so a
+   * later run that cannot reach the hub any other way still has credentials.
+   */
+  private rememberHubShadowsocks(servers: ServerInfo[]): void {
+    const found = servers.find((s) => s.controlPlaneShadowsocks)?.controlPlaneShadowsocks;
+    if (!found) return;
+    const current = this.hubShadowsocks;
+    if (
+      current &&
+      current.remoteHost === found.remoteHost &&
+      current.remotePort === found.remotePort &&
+      current.method === found.method &&
+      current.password === found.password
+    ) {
+      return;
+    }
+    this.hubShadowsocks = { ...found };
+    this.onHubShadowsocks?.(this.hubShadowsocks);
   }
 
   async provision(serverId: string, signal?: AbortSignal): Promise<Profile> {
@@ -903,7 +1043,8 @@ export class PangeaApiClient {
       nodeIp,
       server.naive?.remoteIp,
       server.reality?.remoteIp,
-      server.hysteria2?.remoteIp
+      server.hysteria2?.remoteIp,
+      server.shadowsocks?.remoteIp
     ]).filter(isIPv4Literal);
     // Snowflake is the exception and is left out: its broker is a third-party
     // Tor host, not one of our nodes, and its data-plane peer is a volunteer
@@ -976,6 +1117,9 @@ export class PangeaApiClient {
           serverName: server.hysteria2.serverName ?? server.hysteria2.remoteHost,
           ...(server.hysteria2.pinSha256 ? { pinSha256: server.hysteria2.pinSha256 } : {})
         }
+      } : {}),
+      ...(server.shadowsocks ? {
+        shadowsocks: buildShadowsocksProfile(server.shadowsocks, nodeIp)
       } : {}),
       ...(server.snowflake ? {
         snowflake: {
