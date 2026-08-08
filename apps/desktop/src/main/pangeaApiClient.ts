@@ -8,6 +8,13 @@ import { MTU_DEFAULT, normalizeMtu, normalizeMtuOrDefault } from "../shared/mtu"
 import { resolveNaiveEndpoint } from "../shared/naiveEndpoint";
 import { buildShadowsocksProfile } from "../shared/shadowsocksProfile";
 import { DEFAULT_HUB_METHODS, type HubMethods } from "../shared/hubMethods";
+import {
+  firstWorkingCreds,
+  mergeAdvertisedCreds,
+  promoteCreds,
+  restoreCachedCreds,
+  type HubShadowsocksCreds
+} from "../shared/hubShadowsocksCreds";
 import { encryptRequest, decryptResponse, type EncryptedResponse } from "./secureChannel";
 import { sanitizeLog } from "./logSanitize";
 import { fetchViaConnectProxy } from "./hubTransport";
@@ -371,13 +378,6 @@ export interface DeviceInfo {
  * The daemon-side Shadowsocks proxy ensureHub routes the secure envelope
  * through. Injected so the client keeps no daemon dependency of its own.
  */
-export interface HubShadowsocksCreds {
-  remoteHost: string;
-  remotePort: number;
-  method: string;
-  password: string;
-}
-
 export interface ShadowsocksHubProxy {
   /** Resolves to the proxy's loopback port, or null when unavailable. */
   start(creds: HubShadowsocksCreds): Promise<number | null>;
@@ -414,8 +414,10 @@ export class PangeaApiClient {
   private shadowsocksHubProxy: ShadowsocksHubProxy | null = null;
   // Control-plane credentials from the last good /api/client/regions, restored
   // from settings.json at startup — a cold install behind a block has none.
-  private hubShadowsocks: HubShadowsocksCreds | null = null;
-  private onHubShadowsocks: ((creds: HubShadowsocksCreds) => void) | null = null;
+  // Every node the hub named, not just one: a node whose key has rotated past
+  // this cache is useless, and the others are the only way back to the hub.
+  private hubShadowsocks: HubShadowsocksCreds[] = [];
+  private onHubShadowsocks: ((creds: HubShadowsocksCreds[]) => void) | null = null;
 
   constructor() {
     this.timeoutMs = 15000;
@@ -459,16 +461,16 @@ export class PangeaApiClient {
   }
 
   /** Restores cached control-plane credentials at startup. */
-  setCachedHubShadowsocks(creds: HubShadowsocksCreds | null): void {
-    this.hubShadowsocks = creds;
+  setCachedHubShadowsocks(stored: unknown): void {
+    this.hubShadowsocks = restoreCachedCreds(stored);
   }
 
-  getCachedHubShadowsocks(): HubShadowsocksCreds | null {
+  getCachedHubShadowsocks(): HubShadowsocksCreds[] {
     return this.hubShadowsocks;
   }
 
   /** Called when fresh credentials arrive, so the caller can persist them. */
-  onHubShadowsocksResolved(fn: (creds: HubShadowsocksCreds) => void): void {
+  onHubShadowsocksResolved(fn: (creds: HubShadowsocksCreds[]) => void): void {
     this.onHubShadowsocks = fn;
   }
 
@@ -700,25 +702,37 @@ export class PangeaApiClient {
    * never throws — so ensureHub can fall through to the remaining methods.
    */
   private async tryShadowsocksHubPath(): Promise<boolean> {
-    if (!this.shadowsocksHubProxy || !this.hubShadowsocks) {
+    if (!this.shadowsocksHubProxy || this.hubShadowsocks.length === 0) {
       console.log(`[HubURL] Shadowsocks hub path unavailable (no proxy or no cached credentials)`);
       return false;
     }
-    try {
-      const port = await this.shadowsocksHubProxy.start(this.hubShadowsocks);
-      if (!port) return false;
-      this.ssProxyPort = port;
-      if (await this.trySecureProbeCurrentPath()) {
-        return true;
+    const proxy = this.shadowsocksHubProxy;
+    const won = await firstWorkingCreds(
+      this.hubShadowsocks,
+      async (creds) => {
+        const port = await proxy.start(creds);
+        if (!port) return null;
+        this.ssProxyPort = port;
+        if (await this.trySecureProbeCurrentPath()) return port;
+        this.ssProxyPort = null;
+        await proxy.stop();
+        return null;
+      },
+      (err, index) => {
+        console.warn(`[HubURL] Shadowsocks hub node ${index + 1} failed:`, sanitizeLog(err));
+        this.ssProxyPort = null;
       }
-      this.ssProxyPort = null;
-      await this.shadowsocksHubProxy.stop();
-      return false;
-    } catch (err) {
-      console.warn("[HubURL] Shadowsocks hub path failed:", sanitizeLog(err));
-      this.ssProxyPort = null;
-      return false;
-    }
+    );
+    if (!won) return false;
+    this.promoteHubShadowsocks(won.index);
+    return true;
+  }
+
+  private promoteHubShadowsocks(index: number): void {
+    const promoted = promoteCreds(this.hubShadowsocks, index);
+    if (!promoted) return;
+    this.hubShadowsocks = promoted;
+    this.onHubShadowsocks?.(this.hubShadowsocks);
   }
 
   /**
@@ -981,19 +995,12 @@ export class PangeaApiClient {
    * later run that cannot reach the hub any other way still has credentials.
    */
   private rememberHubShadowsocks(servers: ServerInfo[]): void {
-    const found = servers.find((s) => s.controlPlaneShadowsocks)?.controlPlaneShadowsocks;
-    if (!found) return;
-    const current = this.hubShadowsocks;
-    if (
-      current &&
-      current.remoteHost === found.remoteHost &&
-      current.remotePort === found.remotePort &&
-      current.method === found.method &&
-      current.password === found.password
-    ) {
-      return;
-    }
-    this.hubShadowsocks = { ...found };
+    const merged = mergeAdvertisedCreds(
+      this.hubShadowsocks,
+      servers.map((s) => s.controlPlaneShadowsocks)
+    );
+    if (!merged) return;
+    this.hubShadowsocks = merged;
     this.onHubShadowsocks?.(this.hubShadowsocks);
   }
 

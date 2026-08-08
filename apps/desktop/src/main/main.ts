@@ -10,9 +10,9 @@ import * as auth from "./auth";
 import {
   PangeaApiClient,
   AuthError,
-  ConnectCancelledError,
-  type HubShadowsocksCreds
+  ConnectCancelledError
 } from "./pangeaApiClient";
+import type { HubShadowsocksCreds } from "../shared/hubShadowsocksCreds";
 import { beginAttempt, cancelAttempt, endAttempt, isCancelled } from "./connectAttempt";
 import { setupAutoUpdater, notifyConnectionStateChange } from "./autoUpdater";
 import { setLoginItemEnabled, isLoginItemEnabled, isHiddenLaunchArg } from "./loginItem";
@@ -814,7 +814,7 @@ async function persistHubIp(ip: string): Promise<void> {
   }
 }
 
-async function persistHubShadowsocks(creds: HubShadowsocksCreds): Promise<void> {
+async function persistHubShadowsocks(creds: HubShadowsocksCreds[]): Promise<void> {
   try {
     const settings = await readSettingsFile();
     settings.hubShadowsocks = creds;
@@ -1510,17 +1510,9 @@ async function boot(): Promise<void> {
     // Last known good hub IP: the only way to reach the hub once a Lockdown
     // lock is engaged, since the lock permits that IP but blocks DNS and DoH.
     pangeaApiClient.setCachedHubIp(settings.hubIp);
-    if (settings.hubShadowsocks && typeof settings.hubShadowsocks === "object") {
-      const c = settings.hubShadowsocks as Partial<HubShadowsocksCreds>;
-      if (c.remoteHost && c.remotePort && c.method && c.password) {
-        pangeaApiClient.setCachedHubShadowsocks({
-          remoteHost: c.remoteHost,
-          remotePort: c.remotePort,
-          method: c.method,
-          password: c.password
-        });
-      }
-    }
+    // Was a single object before every node's credentials were cached, so an
+    // existing install still has one to migrate.
+    pangeaApiClient.setCachedHubShadowsocks(settings.hubShadowsocks);
     if (typeof settings.lastServerId === "string") {
       lastServerId = settings.lastServerId;
     }
