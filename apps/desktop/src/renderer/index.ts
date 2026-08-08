@@ -114,7 +114,6 @@ const setLanguageValue = document.getElementById("setLanguageValue") as HTMLSpan
 const checkUpdatesBtn = document.getElementById("checkUpdatesBtn") as HTMLButtonElement;
 const settingsVersionEl = document.getElementById("settingsVersion") as HTMLSpanElement;
 const serverPickerBtn = document.getElementById("serverPickerBtn") as HTMLButtonElement;
-const serverPickerLabel = document.getElementById("serverPickerLabel") as HTMLElement;
 const serverPickerOverlay = document.getElementById("serverPickerOverlay") as HTMLElement;
 const serverPickerOverlayList = document.getElementById("serverPickerOverlayList") as HTMLElement;
 const serverPickerOverlayCloseBtn = document.getElementById("serverPickerOverlayCloseBtn") as HTMLButtonElement;
@@ -1990,17 +1989,6 @@ function renderSessionClock(): void {
   factSessionEl.textContent = hours > 0
     ? `${hours}:${pad(minutes)}:${pad(seconds)}`
     : `${pad(minutes)}:${pad(seconds)}`;
-}
-
-function activeTransportStatus(status: StatusResponse): { running: boolean; pid: number | null } {
-  switch (status.activeTransport) {
-    case "naive": return status.naive;
-    case "reality": return status.reality;
-    case "hysteria2": return status.hysteria2;
-    case "shadowsocks": return status.shadowsocks;
-    case "snowflake": return status.snowflake;
-    default: return status.cloak;
-  }
 }
 
 function renderStatus(status: StatusResponse): void {
