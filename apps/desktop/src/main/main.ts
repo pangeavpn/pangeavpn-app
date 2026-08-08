@@ -5,12 +5,13 @@ import { DaemonClient, TransportExhaustedError } from "./daemonClient";
 import { DaemonProcessManager } from "./daemonProcess";
 import { readDaemonTokens } from "./platformPaths";
 import { getConnectedTrayIconPath, getTrayIconPath, getWindowsAppIconPath } from "./resourcePaths";
-import { IPC_CHANNELS, type ConnectResult } from "../shared/ipc";
+import { IPC_CHANNELS, type ConnectResult, type ServerInfo } from "../shared/ipc";
 import * as auth from "./auth";
 import {
   PangeaApiClient,
   AuthError,
-  ConnectCancelledError
+  ConnectCancelledError,
+  SubscriptionExpiredError
 } from "./pangeaApiClient";
 import type { HubShadowsocksCreds } from "../shared/hubShadowsocksCreds";
 import { beginAttempt, cancelAttempt, endAttempt, isCancelled } from "./connectAttempt";
@@ -495,29 +496,58 @@ async function recoverFromNetworkChange(): Promise<void> {
   }
 }
 
-async function reconnectExistingProfile(): Promise<boolean> {
+/**
+ * Connect the profile the daemon already holds, with no hub contact at all.
+ *
+ * The profile carries a WireGuard key the hub registered on a previous run, so
+ * it is the one way to reach a node while the hub is unreachable — provisioning
+ * a new one needs a /api/register round trip, which is exactly what is blocked.
+ * Assumes the caller owns connectionAttemptRunning.
+ */
+async function connectExistingProfile(): Promise<boolean> {
   const profileId = lastConnectedProfileId ?? managedProfileId;
-  if (!profileId || connectionAttemptRunning) return false;
+  if (!profileId) return false;
+
+  const config = await withDaemonRestartOnUnavailable(
+    () => daemonClient.getConfig(),
+    "tray config",
+    { allowRestart: false }
+  );
+  if (!config.profiles.some((profile) => profile.id === profileId)) return false;
+
+  const result = await connectWithRecovery(profileId);
+  if (!result.ok) return false;
+  lastConnectedProfileId = profileId;
+  void persistLastConnection();
+  return true;
+}
+
+async function reconnectExistingProfile(): Promise<boolean> {
+  if (connectionAttemptRunning) return false;
 
   connectionAttemptRunning = true;
   try {
-    const config = await withDaemonRestartOnUnavailable(
-      () => daemonClient.getConfig(),
-      "tray config",
-      { allowRestart: false }
-    );
-    if (!config.profiles.some((profile) => profile.id === profileId)) return false;
-
-    const result = await connectWithRecovery(profileId);
-    if (result.ok) {
-      lastConnectedProfileId = profileId;
-      void persistLastConnection();
-      return true;
-    }
-    return false;
+    return await connectExistingProfile();
   } finally {
     connectionAttemptRunning = false;
   }
+}
+
+/**
+ * Is this failure worth retrying against the profile we already have?
+ *
+ * Only reachability failures are. A hub that answered and said no — the device
+ * was removed, the subscription lapsed — will have deprovisioned the peer that
+ * profile names, so retrying it wastes a handshake deadline to arrive at the
+ * same answer with a worse error message. Cancellation is the user's decision
+ * and must not be undone by a fallback.
+ */
+function isHubReachabilityFailure(err: unknown): boolean {
+  return !(
+    err instanceof AuthError ||
+    err instanceof SubscriptionExpiredError ||
+    err instanceof ConnectCancelledError
+  );
 }
 
 async function connectFromTray(): Promise<void> {
@@ -745,8 +775,29 @@ async function provisionAcrossServers(serverIds: readonly string[], mode: "conne
   }
 }
 
+/**
+ * Provision and connect, falling back to the profile the daemon already holds
+ * when the hub cannot be reached.
+ *
+ * Runs after provisionAcrossServers has fully unwound — its finally has already
+ * restored the config snapshot and released connectionAttemptRunning — so the
+ * fallback connects against settled state rather than racing the cleanup.
+ *
+ * Switching deliberately has no equivalent: a switch that cannot reach the hub
+ * unwinds to the connection the user already had, which is a better outcome
+ * than replacing it with an older one.
+ */
 async function provisionAndConnect(serverIds: readonly string[]): Promise<ConnectResult> {
-  return provisionAcrossServers(serverIds, "connect");
+  try {
+    return await provisionAcrossServers(serverIds, "connect");
+  } catch (err) {
+    if (!isHubReachabilityFailure(err)) throw err;
+    console.warn("connect: hub unreachable, trying the last working profile", sanitizeLog(err));
+    if (await reconnectExistingProfile()) {
+      return { ok: true, ...(lastServerId ? { serverId: lastServerId } : {}) };
+    }
+    throw err;
+  }
 }
 
 async function provisionAndSwitch(serverIds: readonly string[]): Promise<ConnectResult> {
@@ -821,6 +872,22 @@ async function persistHubShadowsocks(creds: HubShadowsocksCreds[]): Promise<void
     await writeSettingsFile(settings);
   } catch (err) {
     console.warn("Failed to persist hub Shadowsocks credentials:", err);
+  }
+}
+
+/** The node list, so a client that cannot reach the hub still knows where the
+ *  servers are. Cleared on logout, which passes an empty list. */
+async function persistServers(servers: ServerInfo[]): Promise<void> {
+  try {
+    const settings = await readSettingsFile();
+    if (servers.length === 0) {
+      delete settings.servers;
+    } else {
+      settings.servers = servers;
+    }
+    await writeSettingsFile(settings);
+  } catch (err) {
+    console.warn("Failed to persist server list:", err);
   }
 }
 
@@ -1444,6 +1511,7 @@ async function boot(): Promise<void> {
   // still persists the hub IP once it is learned.
   pangeaApiClient.onHubIp((ip) => void persistHubIp(ip));
   pangeaApiClient.onHubShadowsocksResolved((creds) => void persistHubShadowsocks(creds));
+  pangeaApiClient.onServersResolved((servers) => void persistServers(servers));
 
   // The daemon owns the proxy; the client only decides when to ask for it.
   pangeaApiClient.setShadowsocksHubProxy({
@@ -1513,6 +1581,9 @@ async function boot(): Promise<void> {
     // Was a single object before every node's credentials were cached, so an
     // existing install still has one to migrate.
     pangeaApiClient.setCachedHubShadowsocks(settings.hubShadowsocks);
+    // The last node list the hub gave us — what stands between a blocked hub
+    // and a client with nowhere left to go.
+    pangeaApiClient.setCachedServers(settings.servers);
     if (typeof settings.lastServerId === "string") {
       lastServerId = settings.lastServerId;
     }

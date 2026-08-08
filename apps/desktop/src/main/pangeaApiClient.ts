@@ -15,6 +15,7 @@ import {
   restoreCachedCreds,
   type HubShadowsocksCreds
 } from "../shared/hubShadowsocksCreds";
+import { restoreCachedServers } from "../shared/cachedServers";
 import { encryptRequest, decryptResponse, type EncryptedResponse } from "./secureChannel";
 import { sanitizeLog } from "./logSanitize";
 import { fetchViaConnectProxy } from "./hubTransport";
@@ -386,7 +387,12 @@ export interface ShadowsocksHubProxy {
 
 export class PangeaApiClient {
   private readonly timeoutMs: number;
+  // The last node list the hub gave us, restored from settings.json at startup.
+  // Persisted because a client that cannot reach the hub still needs somewhere
+  // to connect: without this a cold start behind a block has no server to name,
+  // so the picker is empty and the tray has no retry plan to build.
   private cachedServers: ServerInfo[] = [];
+  private onServers: ((servers: ServerInfo[]) => void) | null = null;
   private licenseKey: string | null = null;
   private dohEnabled = true;
   // Which paths to the hub are permitted, in ensureHub's attempt order.
@@ -472,6 +478,20 @@ export class PangeaApiClient {
   /** Called when fresh credentials arrive, so the caller can persist them. */
   onHubShadowsocksResolved(fn: (creds: HubShadowsocksCreds[]) => void): void {
     this.onHubShadowsocks = fn;
+  }
+
+  /** Restores the cached node list at startup. */
+  setCachedServers(stored: unknown): void {
+    this.cachedServers = restoreCachedServers(stored);
+  }
+
+  getCachedServers(): ServerInfo[] {
+    return [...this.cachedServers];
+  }
+
+  /** Called when a fresh node list arrives, so the caller can persist it. */
+  onServersResolved(fn: (servers: ServerInfo[]) => void): void {
+    this.onServers = fn;
   }
 
   /**
@@ -897,7 +917,7 @@ export class PangeaApiClient {
 
       const data = (await response.json()) as TokenLoginResponse;
       this.licenseKey = data.vpnAccessToken;
-      this.cachedServers = data.servers;
+      this.rememberServers(data.servers);
       this.rememberHubShadowsocks(data.servers);
       return data;
     } catch (error) {
@@ -928,7 +948,7 @@ export class PangeaApiClient {
 
       const data = (await response.json()) as BootstrapResponse;
       this.licenseKey = data.vpnAccessToken;
-      this.cachedServers = data.servers;
+      this.rememberServers(data.servers);
       this.rememberHubShadowsocks(data.servers);
       return data;
     } catch (error) {
@@ -941,6 +961,15 @@ export class PangeaApiClient {
     }
   }
 
+  /**
+   * The node list, falling back to the cached one when the hub cannot be
+   * reached at all. Without that fallback a blocked hub leaves the client with
+   * nowhere to connect even though it knows perfectly well where the nodes are.
+   *
+   * An AuthError or an expired subscription still propagates: those are the hub
+   * answering, and answering "no". Serving a stale list over the top of a real
+   * answer would show a signed-out user a working server picker.
+   */
   async getServers(): Promise<ServerInfo[]> {
     if (!this.licenseKey) throw new Error("Not authenticated");
     // Send identityPubkey so the hub returns this device's own cloakUid
@@ -949,10 +978,21 @@ export class PangeaApiClient {
     const route = this.identityPubkey
       ? `/api/client/regions?identityPubkey=${encodeURIComponent(this.identityPubkey)}`
       : "/api/client/regions";
-    const data = await this.hubRequest<ServerInfo[]>("GET", route);
-    this.cachedServers = data;
-    this.rememberHubShadowsocks(data);
-    return data;
+    try {
+      const data = await this.hubRequest<ServerInfo[]>("GET", route);
+      this.rememberServers(data);
+      this.rememberHubShadowsocks(data);
+      return data;
+    } catch (err) {
+      if (err instanceof AuthError || err instanceof SubscriptionExpiredError) throw err;
+      if (err instanceof ConnectCancelledError) throw err;
+      if (this.cachedServers.length === 0) throw err;
+      console.warn(
+        `[getServers] hub unreachable, using ${this.cachedServers.length} cached node(s):`,
+        sanitizeLog(err)
+      );
+      return [...this.cachedServers];
+    }
   }
 
   async registerDevice(identityPubkey: string, friendlyName?: string): Promise<DeviceRegisterResponse> {
@@ -994,6 +1034,17 @@ export class PangeaApiClient {
    * Records the first control-plane Shadowsocks block the hub advertised, so a
    * later run that cannot reach the hub any other way still has credentials.
    */
+  /**
+   * Records the node list the hub just gave us. An empty list is ignored rather
+   * than cached: it is far more likely a truncated response or a hub mid-deploy
+   * than an instruction to forget every server the user could still reach.
+   */
+  private rememberServers(servers: ServerInfo[]): void {
+    if (!Array.isArray(servers) || servers.length === 0) return;
+    this.cachedServers = servers;
+    this.onServers?.(servers);
+  }
+
   private rememberHubShadowsocks(servers: ServerInfo[]): void {
     const merged = mergeAdvertisedCreds(
       this.hubShadowsocks,
@@ -1160,6 +1211,12 @@ export class PangeaApiClient {
   clearCache(): void {
     this.licenseKey = null;
     this.cachedServers = [];
+    // The node list is account-scoped, so it goes when the account does — and
+    // it must leave disk too, or the next user of this machine gets a picker
+    // full of the last one's servers. The hub IP and control-plane credentials
+    // deliberately survive: they are how a signed-out client reaches the hub to
+    // sign in again.
+    this.onServers?.([]);
     this.resetHubResolution();
     this.identityPubkey = null;
   }
