@@ -14,11 +14,27 @@ export interface HubMethods {
 // because it is the only one that puts the hub's name on the wire in cleartext.
 export const HUB_METHOD_ORDER: readonly HubMethod[] = ["directIp", "shadowsocks", "normal"];
 
+// Shadowsocks is on by default: it is the only method that survives the hub's
+// own address being blackholed, and leaving the strongest fallback off until
+// someone finds the setting means it is off for everyone who needs it most.
 export const DEFAULT_HUB_METHODS: HubMethods = {
   directIp: true,
-  shadowsocks: false,
+  shadowsocks: true,
   normal: false
 };
+
+/**
+ * Bumped when a method's default changes in a way existing installs should
+ * inherit. Everything the old default wrote to disk looks identical to a
+ * deliberate choice, so without this an install would stay frozen on a value
+ * the user never actually picked. normalizeHubMethods re-applies the changed
+ * defaults once for anything stored below this; from then on the stored value
+ * wins. Persisted inside the hubMethods object as `rev`.
+ */
+export const HUB_METHODS_REV = 1;
+
+/** Methods whose default flipped on at HUB_METHODS_REV 1. */
+const REV_1_DEFAULTS: readonly HubMethod[] = ["shadowsocks"];
 
 export function isHubMethod(value: unknown): value is HubMethod {
   return typeof value === "string" && (HUB_METHOD_ORDER as readonly string[]).includes(value);
@@ -50,22 +66,24 @@ export function normalizeHubMethods(raw: unknown): HubMethods {
   const source = (raw ?? {}) as Record<string, unknown>;
 
   let methods: HubMethods;
-  if (
-    typeof source.directIp === "boolean" ||
-    typeof source.shadowsocks === "boolean" ||
-    typeof source.normal === "boolean"
-  ) {
+  if (HUB_METHOD_ORDER.some((method) => typeof source[method] === "boolean")) {
     methods = {
       directIp: source.directIp === true,
       shadowsocks: source.shadowsocks === true,
       normal: source.normal === true
     };
+    if (typeof source.rev !== "number" || source.rev < HUB_METHODS_REV) {
+      for (const method of REV_1_DEFAULTS) {
+        methods[method] = DEFAULT_HUB_METHODS[method];
+      }
+    }
   } else {
     // Migration: directIpEnabled defaulted true, and directIpOnly defaulted
-    // true meaning "never touch the domain", so normal is its inverse.
+    // true meaning "never touch the domain", so normal is its inverse. A file
+    // this old predates Shadowsocks, which takes its current default.
     methods = {
       directIp: source.directIpEnabled !== false,
-      shadowsocks: false,
+      shadowsocks: DEFAULT_HUB_METHODS.shadowsocks,
       normal: source.directIpOnly === false
     };
   }
@@ -74,4 +92,10 @@ export function normalizeHubMethods(raw: unknown): HubMethods {
     return { ...methods, directIp: true };
   }
   return methods;
+}
+
+/** The shape written to settings.json: the switches plus the rev that says
+ *  which default changes this file has already seen. */
+export function persistableHubMethods(methods: HubMethods): Record<string, unknown> {
+  return { ...methods, rev: HUB_METHODS_REV };
 }

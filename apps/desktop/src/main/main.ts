@@ -21,7 +21,12 @@ import { startNetworkWatcher, onNetworkChange } from "./networkWatcher";
 import { mt, mtState, setMainLocale, resolveMainLocale } from "./i18n";
 import { sanitizeLog } from "./logSanitize";
 import { shouldShowTrayHint, trayHintBodyKey } from "./trayHint";
-import { applyHubMethod, isHubMethod, normalizeHubMethods } from "../shared/hubMethods";
+import {
+  applyHubMethod,
+  isHubMethod,
+  normalizeHubMethods,
+  persistableHubMethods
+} from "../shared/hubMethods";
 import {
   buildServerRetryOrder as buildMainServerRetryOrder,
   replaceManagedProfile,
@@ -1125,7 +1130,9 @@ function registerIpcHandlers(): void {
       const fs = (await import("node:fs/promises")).default;
       const raw = await fs.readFile(settingsPath, "utf8").catch(() => "{}");
       const settings = JSON.parse(raw) as Record<string, unknown>;
-      settings.hubMethods = methods;
+      // Stamped with the rev, so this deliberate choice is not overwritten by
+      // the next default change the way a pre-rev file's would be.
+      settings.hubMethods = persistableHubMethods(methods);
       // Drop the keys this replaced so a later downgrade cannot resurrect them.
       delete settings.directIpEnabled;
       delete settings.directIpOnly;
