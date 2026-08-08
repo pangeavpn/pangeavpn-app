@@ -5,6 +5,15 @@ import type {
   Profile,
   StatusResponse
 } from "@pangeavpn/shared-types";
+import type { HubMethod, HubMethods } from "./hubMethods";
+
+export type { HubMethod, HubMethods } from "./hubMethods";
+
+/** Result of setHubMethod: `applied` is false when the last method was kept on. */
+export interface HubMethodResult {
+  methods: HubMethods;
+  applied: boolean;
+}
 
 export const IPC_CHANNELS = {
   getStatus: "daemon:getStatus",
@@ -24,10 +33,8 @@ export const IPC_CHANNELS = {
   provisionAndSwitch: "pangea:provisionAndSwitch",
   setDoh: "pangea:setDoh",
   getDoh: "pangea:getDoh",
-  setDirectIp: "pangea:setDirectIp",
-  getDirectIp: "pangea:getDirectIp",
-  setDirectIpOnly: "pangea:setDirectIpOnly",
-  getDirectIpOnly: "pangea:getDirectIpOnly",
+  setHubMethod: "pangea:setHubMethod",
+  getHubMethods: "pangea:getHubMethods",
   setAllowLan: "pangea:setAllowLan",
   getAllowLan: "pangea:getAllowLan",
   setWireguardMtu: "settings:setWireguardMtu",
@@ -158,6 +165,32 @@ export interface ServerInfo {
     pinSha256?: string;
   };
   /**
+   * Shadowsocks (AEAD / SS-2022) connection info, present only when the hub
+   * node has a public Shadowsocks listener. `targetHost`/`targetPort` name
+   * the node-side WireGuard listener the relay forwards to.
+   */
+  shadowsocks?: {
+    remoteHost: string;
+    /** Per-transport endpoint address; see naive.remoteIp above. */
+    remoteIp?: string;
+    remotePort: number;
+    method: string;
+    password: string;
+    targetHost?: string;
+    targetPort?: number;
+    udpOverTcp?: boolean;
+  };
+  /**
+   * Shadowsocks listener that reaches the hub instead of WireGuard, used as a
+   * fallback path for account traffic. Per-region, but the same for all.
+   */
+  controlPlaneShadowsocks?: {
+    remoteHost: string;
+    remotePort: number;
+    method: string;
+    password: string;
+  };
+  /**
    * Tor Snowflake (WebRTC rendezvous) connection info, present only when the
    * hub node has Snowflake configured. Static per-node config, same as
    * Hysteria2 — see SnowflakeProfileSchema in @pangeavpn/shared-types for
@@ -221,10 +254,14 @@ export interface PangeaApi {
   provisionAndSwitch: (serverIds: string[]) => Promise<ConnectResult>;
   setDoh: (enabled: boolean) => Promise<void>;
   getDoh: () => Promise<boolean>;
-  setDirectIp: (enabled: boolean) => Promise<void>;
-  getDirectIp: () => Promise<boolean>;
-  setDirectIpOnly: (enabled: boolean) => Promise<void>;
-  getDirectIpOnly: () => Promise<boolean>;
+  /**
+   * Toggles one hub-connection method. Resolves to the resulting state, which
+   * is unchanged with `applied: false` when the change would have left no
+   * method enabled — the renderer reflects what comes back rather than
+   * assuming the click took effect.
+   */
+  setHubMethod: (method: HubMethod, enabled: boolean) => Promise<HubMethodResult>;
+  getHubMethods: () => Promise<HubMethods>;
   setAllowLan: (enabled: boolean) => Promise<void>;
   getAllowLan: () => Promise<boolean>;
   /** Resolves to the MTU actually stored — differs from `mtu` when it was rejected. */
@@ -233,8 +270,8 @@ export interface PangeaApi {
   /** Empty restores the DNS servers supplied by the VPN server. */
   setCustomDns: (value: string) => Promise<string[]>;
   getCustomDns: () => Promise<string[]>;
-  setPreferredTransport: (value: "auto" | "cloak" | "naive" | "reality" | "hysteria2" | "snowflake") => Promise<void>;
-  getPreferredTransport: () => Promise<"auto" | "cloak" | "naive" | "reality" | "hysteria2" | "snowflake">;
+  setPreferredTransport: (value: "auto" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "snowflake") => Promise<void>;
+  getPreferredTransport: () => Promise<"auto" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "snowflake">;
   setLaunchAtStartup: (enabled: boolean) => Promise<void>;
   getLaunchAtStartup: () => Promise<boolean>;
   setAlwaysConnected: (enabled: boolean) => Promise<void>;
