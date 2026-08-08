@@ -794,20 +794,18 @@ func (s *Service) transportCandidates(profile *state.Profile, preferredTransport
 //   - cloak: the reliable default (TLS obfuscation to a decoy cover site).
 //   - reality: the strongest TLS disguise — borrows a real site's TLS
 //     handshake, so active probing and SNI blocking see a genuine site.
+//   - shadowsocks: SS-2022, which presents no TLS at all on its own port, so it
+//     is the first attempt that shares nothing with a TLS block above it.
 //   - hysteria2: a different wire protocol (UDP/QUIC + Salamander), so a block
-//     that kills the TCP/TLS transports does not kill every attempt.
+//     that kills the TCP transports does not kill every attempt.
 //   - naive: real Chromium TLS+HTTP/2 — a different TLS fingerprint than
 //     reality, for when UDP is blocked and reality's approach was the problem.
-//   - shadowsocks: plain AEAD, the most fingerprinted protocol here — it earns
-//     its slot on independence (own port, own wire format), not on stealth, so
-//     it goes behind everything with a TLS-shaped or randomised handshake.
-//     With snowflake gated off it is effectively last in shipping builds.
 //   - snowflake: heavy-artillery last resort (WebRTC rendezvous, no fixed
 //     endpoint); currently gated off (see snowflakeReleaseGated).
 //
 // Per-network memory can still promote whatever last worked here ahead of this
 // default (see reorderByMemory).
-var autoCascadeOrder = []string{"cloak", "reality", "hysteria2", "naive", "shadowsocks", "snowflake"}
+var autoCascadeOrder = []string{"cloak", "reality", "shadowsocks", "hysteria2", "naive", "snowflake"}
 
 // autoCascade builds the auto-mode candidate list in autoCascadeOrder, keeping
 // only the transports this profile actually configures.

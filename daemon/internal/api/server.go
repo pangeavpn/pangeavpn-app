@@ -82,7 +82,7 @@ type connectRequest struct {
 	Lockdown  bool   `json:"lockdown,omitempty"`
 	// PreferredTransport: "cloak", "reality", "hysteria2", "naive",
 	// "shadowsocks", "snowflake", or "" / "auto" (cascade in autoCascadeOrder:
-	// cloak, reality, hysteria2, naive, then shadowsocks; snowflake is gated
+	// cloak, reality, shadowsocks, hysteria2, then naive; snowflake is gated
 	// off this release -- see snowflakeReleaseGated). Auto mode keeps only the transports this
 	// profile configures, then reorderByMemory may promote whatever last
 	// worked on this network. Service.startTransport dispatches on this value;

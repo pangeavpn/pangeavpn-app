@@ -55,7 +55,7 @@ let connectionAttemptRunning = false;
 let allowLanEnabled = true;
 let launchAtStartupEnabled = false;
 let alwaysConnectedEnabled = false;
-// "auto" (cloak, then reality, hysteria2, naive, shadowsocks), or one of
+// "auto" (cloak, then reality, shadowsocks, hysteria2, naive), or one of
 // "cloak"/"naive"/"reality"/"hysteria2"/"shadowsocks"/"snowflake" only.
 let preferredTransport: "auto" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "snowflake" = "auto";
 // Stored language preference: a locale code, or "system" to follow the OS.

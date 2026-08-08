@@ -2072,7 +2072,7 @@ func TestConnect_CloakFails_FallsBackToRealityBeforeNaive(t *testing.T) {
 }
 
 // TestConnect_AutoCascadeAttemptsTransportsInCensorshipOrder pins the auto-mode
-// order: cloak, reality, hysteria2, naive, then shadowsocks (snowflake is gated
+// order: cloak, reality, shadowsocks, hysteria2, then naive (snowflake is gated
 // off). With every transport configured but none able to handshake, the
 // aggregated failure records the order they were attempted in.
 func TestConnect_AutoCascadeAttemptsTransportsInCensorshipOrder(t *testing.T) {
@@ -2102,7 +2102,7 @@ func TestConnect_AutoCascadeAttemptsTransportsInCensorshipOrder(t *testing.T) {
 	}
 	msg := err.Error()
 	lastIdx := -1
-	for _, kind := range []string{"cloak", "reality", "hysteria2", "naive", "shadowsocks"} {
+	for _, kind := range []string{"cloak", "reality", "shadowsocks", "hysteria2", "naive"} {
 		idx := strings.Index(msg, kind+":")
 		if idx < 0 {
 			t.Fatalf("error missing %s attempt: %v", kind, msg)
@@ -2316,7 +2316,7 @@ func TestConnect_AllOthersFail_FallsBackToShadowsocks(t *testing.T) {
 	startCalled := shadowsocksMgr.startCalled
 	shadowsocksMgr.mu.Unlock()
 	if !startCalled {
-		t.Fatal("expected shadowsocks.Start after cloak, reality, hysteria2 and naive failed")
+		t.Fatal("expected shadowsocks.Start after cloak and reality failed")
 	}
 
 	status := svc.Status(context.Background())
