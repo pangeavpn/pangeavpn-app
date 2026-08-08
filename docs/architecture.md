@@ -203,9 +203,9 @@ The daemon's automatic preference is:
 
 1. Cloak
 2. VLESS + REALITY
-3. Hysteria2
-4. NaiveProxy
-5. Shadowsocks
+3. Shadowsocks
+4. Hysteria2
+5. NaiveProxy
 6. Snowflake
 
 Only transports configured in the selected profile are candidates. Cloak is
