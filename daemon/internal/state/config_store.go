@@ -189,6 +189,7 @@ func cloneProfile(profile Profile) Profile {
 	copyProfile.Naive = cloneNaiveProfile(profile.Naive)
 	copyProfile.Reality = cloneRealityProfile(profile.Reality)
 	copyProfile.Hysteria2 = cloneHysteria2Profile(profile.Hysteria2)
+	copyProfile.Shadowsocks = cloneShadowsocksProfile(profile.Shadowsocks)
 	copyProfile.Snowflake = cloneSnowflakeProfile(profile.Snowflake)
 	return copyProfile
 }
@@ -220,6 +221,16 @@ func cloneRealityProfile(profile *RealityProfile) *RealityProfile {
 // cloneHysteria2Profile mirrors cloneNaiveProfile: Hysteria2Profile is flat
 // (scalar fields only), so a value copy behind a fresh pointer is enough.
 func cloneHysteria2Profile(profile *Hysteria2Profile) *Hysteria2Profile {
+	if profile == nil {
+		return nil
+	}
+	copyProfile := *profile
+	return &copyProfile
+}
+
+// cloneShadowsocksProfile mirrors cloneNaiveProfile: ShadowsocksProfile is
+// flat (scalar fields only), so a value copy behind a fresh pointer is enough.
+func cloneShadowsocksProfile(profile *ShadowsocksProfile) *ShadowsocksProfile {
 	if profile == nil {
 		return nil
 	}
