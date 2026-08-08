@@ -16,7 +16,8 @@ func redirectStderr(path string) (*os.File, error) {
 	}
 
 	if err := dupOverStderr(int(f.Fd())); err != nil {
-		f.Close()
+		// Nothing written yet, so a close error has no data behind it.
+		_ = f.Close()
 		return nil, fmt.Errorf("redirect stderr to %s: %w", path, err)
 	}
 
