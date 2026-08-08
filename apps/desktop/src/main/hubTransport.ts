@@ -78,10 +78,15 @@ export interface ConnectProxyOptions {
   headers?: Record<string, string>;
   body?: string;
   timeoutMs?: number;
+  /** Extra trust anchor. Tests supply their self-signed cert; production
+   *  passes nothing and validates against the system store. */
+  ca?: string;
 }
 
-/** HTTPS to `ip` through a local CONNECT proxy, naming `hostname` only in the
- *  Host header. Same shape, empty SNI and external timer as fetchDohResolved. */
+/** HTTPS to `target` (hostname or IP) through a local CONNECT proxy. Unlike
+ *  fetchDohResolved this validates the certificate normally: that one dials an
+ *  IP with an empty SNI to hide the host from DPI, whereas here the tunnel
+ *  already hides it, so there is nothing to trade the check away for. */
 export function fetchViaConnectProxy(
   proxyPort: number,
   ip: string,
@@ -117,8 +122,8 @@ export function fetchViaConnectProxy(
           if (settled) return;
           tlsSocket = tls.connect({
             socket: socket as net.Socket,
-            servername: "",
-            rejectUnauthorized: false
+            servername: hostname,
+            ...(options.ca ? { ca: options.ca } : {})
           });
           tlsSocket.once("error", fail);
 

@@ -19,8 +19,8 @@ test("parseConnectStatus rejects anything that is not a status line", () => {
 });
 
 // Self-signed localhost cert (CN=localhost, SAN 127.0.0.1), valid to 2036.
-// Test-only, and fetchViaConnectProxy does not verify it — what it carries is
-// already end-to-end encrypted by the secure channel.
+// Passed as `ca` so the tests validate against it, exactly as production
+// validates the hub against the system store.
 const TEST_CERT = `-----BEGIN CERTIFICATE-----
 MIIDJTCCAg2gAwIBAgIUAQ53rDPhTKZ1zz28ttwM2ShAHWgwDQYJKoZIhvcNAQEL
 BQAwFDESMBAGA1UEAwwJbG9jYWxob3N0MB4XDTI2MDgwNzIyNDMyNFoXDTM2MDgw
@@ -166,17 +166,17 @@ test("carries a POST through the proxy and returns the origin's response", async
   });
   const proxy = await startProxy({ dialPort: origin.port });
   try {
-    const res = await fetchViaConnectProxy(proxy.port, "203.0.113.9", "api.example.com", "/v1/secure", {
+    const res = await fetchViaConnectProxy(proxy.port, "203.0.113.9", "localhost", "/v1/secure", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: '{"eph":"x"}',
-      timeoutMs: 8000
+      timeoutMs: 8000, ca: TEST_CERT
     });
     assert.equal(res.status, 200);
     const body = (await res.json()) as { echoed: string; path: string };
     assert.equal(body.echoed, '{"eph":"x"}');
     assert.equal(body.path, "/v1/secure");
-    assert.equal(origin.hosts[0], "api.example.com", "Host header must name the hub, not the IP");
+    assert.equal(origin.hosts[0], "localhost", "Host header must name the hub, not the address");
     assert.equal(proxy.seen[0], "CONNECT 203.0.113.9:443 HTTP/1.1");
   } finally {
     await proxy.close();
@@ -191,8 +191,8 @@ test("surfaces a non-2xx status from the origin rather than throwing", async () 
   });
   const proxy = await startProxy({ dialPort: origin.port });
   try {
-    const res = await fetchViaConnectProxy(proxy.port, "203.0.113.9", "api.example.com", "/v1/secure", {
-      timeoutMs: 8000
+    const res = await fetchViaConnectProxy(proxy.port, "203.0.113.9", "localhost", "/v1/secure", {
+      timeoutMs: 8000, ca: TEST_CERT
     });
     assert.equal(res.status, 401);
     assert.equal(await res.text(), "nope");
@@ -206,7 +206,7 @@ test("rejects when the proxy refuses CONNECT", async () => {
   const proxy = await startProxy({ status: 403 });
   try {
     await assert.rejects(
-      fetchViaConnectProxy(proxy.port, "203.0.113.9", "api.example.com", "/v1/secure", { timeoutMs: 3000 }),
+      fetchViaConnectProxy(proxy.port, "203.0.113.9", "localhost", "/v1/secure", { timeoutMs: 3000, ca: TEST_CERT }),
       /status 403/
     );
     assert.equal(proxy.seen[0], "CONNECT 203.0.113.9:443 HTTP/1.1");
@@ -225,7 +225,7 @@ test("honours its timeout when the proxy accepts but never answers", async () =>
   try {
     const started = Date.now();
     await assert.rejects(
-      fetchViaConnectProxy(port, "203.0.113.9", "api.example.com", "/v1/secure", { timeoutMs: 300 }),
+      fetchViaConnectProxy(port, "203.0.113.9", "localhost", "/v1/secure", { timeoutMs: 300, ca: TEST_CERT }),
       /timeout/i
     );
     assert.ok(Date.now() - started < 3000, "must reject on its own timer rather than hang");
@@ -243,7 +243,7 @@ test("rejects a proxy that answers with something other than HTTP", async () => 
   const port = (server.address() as net.AddressInfo).port;
   try {
     await assert.rejects(
-      fetchViaConnectProxy(port, "203.0.113.9", "api.example.com", "/v1/secure", { timeoutMs: 3000 }),
+      fetchViaConnectProxy(port, "203.0.113.9", "localhost", "/v1/secure", { timeoutMs: 3000, ca: TEST_CERT }),
       /Malformed/
     );
   } finally {
@@ -258,6 +258,40 @@ test("fails when nothing is listening on the proxy port", async () => {
   await new Promise<void>((resolve) => probe.close(() => resolve()));
 
   await assert.rejects(
-    fetchViaConnectProxy(deadPort, "203.0.113.9", "api.example.com", "/v1/secure", { timeoutMs: 3000 })
+    fetchViaConnectProxy(deadPort, "203.0.113.9", "localhost", "/v1/secure", { timeoutMs: 3000, ca: TEST_CERT })
   );
+});
+
+test("rejects a certificate that does not chain to the supplied trust anchor", async () => {
+  const origin = await startTlsOrigin((_req, res) => res.end("secret"));
+  const proxy = await startProxy({ dialPort: origin.port });
+  try {
+    // No `ca`, so the self-signed fixture is untrusted, as an attacker's cert
+    // would be. Before validation was enabled this resolved happily.
+    await assert.rejects(
+      fetchViaConnectProxy(proxy.port, "203.0.113.9", "localhost", "/v1/secure", { timeoutMs: 5000 }),
+      /self.signed|unable to verify|certificate/i
+    );
+  } finally {
+    await proxy.close();
+    await origin.close();
+  }
+});
+
+test("rejects a certificate valid for a different host", async () => {
+  const origin = await startTlsOrigin((_req, res) => res.end("secret"));
+  const proxy = await startProxy({ dialPort: origin.port });
+  try {
+    // Trusted anchor, wrong name: the fixture cert is CN=localhost.
+    await assert.rejects(
+      fetchViaConnectProxy(proxy.port, "203.0.113.9", "api.pangeavpn.org", "/v1/secure", {
+        timeoutMs: 5000,
+        ca: TEST_CERT
+      }),
+      /altnames|does not match|Hostname/i
+    );
+  } finally {
+    await proxy.close();
+    await origin.close();
+  }
 });
