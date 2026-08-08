@@ -1,6 +1,7 @@
 package shadowsocks
 
 import (
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"slices"
@@ -13,9 +14,9 @@ import (
 
 const outboundTag = "shadowsocks-out"
 
-// defaultMethod matches the nodes' existing ssserver cipher. SS-2022 needs
-// base64 key material of an exact length, so switching is a provisioning change.
-const defaultMethod = "chacha20-ietf-poly1305"
+// defaultMethod matches the nodes' public listeners. SS-2022 resists the active
+// probing that broke AEAD-2017; its keys are base64 PSKs of an exact length.
+const defaultMethod = "2022-blake3-aes-128-gcm"
 
 // Where the SS server relays decoded packets: the node's own WireGuard
 // listener. Overridable because the node's outbound ACL decides what it may reach.
@@ -37,6 +38,38 @@ var supportedMethods = []string{
 	"2022-blake3-chacha20-poly1305",
 }
 
+// keySaltLengths mirrors shadowaead_2022: those methods take a base64 PSK of
+// exactly this many bytes, not a passphrase. AEAD-2017 methods are absent.
+var keySaltLengths = map[string]int{
+	"2022-blake3-aes-128-gcm":       16,
+	"2022-blake3-aes-256-gcm":       32,
+	"2022-blake3-chacha20-poly1305": 32,
+}
+
+// validateKeyMaterial rejects a malformed SS-2022 PSK here, where the message
+// names the fix, rather than at dial time as an opaque outbound-create failure.
+func validateKeyMaterial(method, password string) error {
+	keyLen, ok := keySaltLengths[method]
+	if !ok {
+		return nil
+	}
+	keys := strings.Split(password, ":")
+	// An iPSK chain needs EIH, which the chacha20 variant does not implement.
+	if len(keys) > 1 && method == "2022-blake3-chacha20-poly1305" {
+		return fmt.Errorf("shadowsocks method %s takes a single key, got %d", method, len(keys))
+	}
+	for i, key := range keys {
+		raw, err := base64.StdEncoding.DecodeString(key)
+		if err != nil {
+			return fmt.Errorf("shadowsocks %s key %d is not standard base64: %w", method, i+1, err)
+		}
+		if len(raw) != keyLen {
+			return fmt.Errorf("shadowsocks %s key %d decodes to %d bytes, need exactly %d (openssl rand -base64 %d)", method, i+1, len(raw), keyLen, keyLen)
+		}
+	}
+	return nil
+}
+
 func validateProfile(profile state.ShadowsocksProfile) error {
 	if strings.TrimSpace(profile.RemoteHost) == "" {
 		return errors.New("shadowsocks remoteHost is required")
@@ -56,7 +89,7 @@ func validateProfile(profile state.ShadowsocksProfile) error {
 	if method := strings.TrimSpace(profile.Method); method != "" && !slices.Contains(supportedMethods, method) {
 		return fmt.Errorf("shadowsocks method %q is not supported (allowed: %s)", method, strings.Join(supportedMethods, ", "))
 	}
-	return nil
+	return validateKeyMaterial(methodOrDefault(profile.Method), profile.Password)
 }
 
 // buildOutboundOptions returns the pointer type protocol/shadowsocks

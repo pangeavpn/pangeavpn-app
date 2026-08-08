@@ -5,16 +5,16 @@ import { buildShadowsocksProfile } from "./shadowsocksProfile.ts";
 const base = {
   remoteHost: "ss.node.example.com",
   remotePort: 8488,
-  method: "chacha20-ietf-poly1305",
-  password: "hunter2"
+  method: "2022-blake3-aes-128-gcm",
+  password: "MTIzNDU2Nzg5MGFiY2RlZg=="
 };
 
 test("dials the node IP rather than the shadowsocks domain", () => {
   const block = buildShadowsocksProfile(base, "192.0.2.10");
   assert.equal(block.remoteHost, "192.0.2.10");
   assert.equal(block.remotePort, 8488);
-  assert.equal(block.method, "chacha20-ietf-poly1305");
-  assert.equal(block.password, "hunter2");
+  assert.equal(block.method, "2022-blake3-aes-128-gcm");
+  assert.equal(block.password, "MTIzNDU2Nzg5MGFiY2RlZg==");
 });
 
 test("a per-transport remoteIp outranks the shared node address", () => {

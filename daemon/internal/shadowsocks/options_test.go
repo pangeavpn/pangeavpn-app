@@ -7,12 +7,18 @@ import (
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/state"
 )
 
+// Base64 of 16 and 32 ASCII bytes: the PSK lengths shadowaead_2022 requires.
+const (
+	testPSK16 = "MTIzNDU2Nzg5MGFiY2RlZg=="
+	testPSK32 = "MTIzNDU2Nzg5MGFiY2RlZjEyMzQ1Njc4OTBhYmNkZWY="
+)
+
 func validProfile() state.ShadowsocksProfile {
 	return state.ShadowsocksProfile{
 		RemoteHost: "ss.example.com",
 		RemotePort: 8488,
-		Method:     "chacha20-ietf-poly1305",
-		Password:   "hunter2",
+		Method:     "2022-blake3-aes-128-gcm",
+		Password:   testPSK16,
 	}
 }
 
@@ -23,8 +29,23 @@ func TestValidateProfile(t *testing.T) {
 		wantErr string
 	}{
 		{name: "valid", mutate: func(*state.ShadowsocksProfile) {}},
-		{name: "empty method defaults later", mutate: func(p *state.ShadowsocksProfile) { p.Method = "" }},
-		{name: "ss2022 method", mutate: func(p *state.ShadowsocksProfile) { p.Method = "2022-blake3-aes-128-gcm" }},
+		{name: "empty method takes the ss2022 default", mutate: func(p *state.ShadowsocksProfile) { p.Method = "" }},
+		{
+			name: "aead-2017 method keeps taking a passphrase",
+			mutate: func(p *state.ShadowsocksProfile) {
+				p.Method, p.Password = "chacha20-ietf-poly1305", "hunter2"
+			},
+		},
+		{
+			name: "ss2022 aes-256 takes a 32 byte key",
+			mutate: func(p *state.ShadowsocksProfile) {
+				p.Method, p.Password = "2022-blake3-aes-256-gcm", testPSK32
+			},
+		},
+		{
+			name: "ss2022 aes accepts an ipsk chain",
+			mutate: func(p *state.ShadowsocksProfile) { p.Password = testPSK16 + ":" + testPSK16 },
+		},
 		{name: "dynamic local port", mutate: func(p *state.ShadowsocksProfile) { p.LocalPort = 0 }},
 		{
 			name:    "missing remote host",
@@ -55,6 +76,28 @@ func TestValidateProfile(t *testing.T) {
 			name:    "unknown method",
 			mutate:  func(p *state.ShadowsocksProfile) { p.Method = "salsa20" },
 			wantErr: "is not supported",
+		},
+		{
+			name:    "ss2022 rejects a passphrase",
+			mutate:  func(p *state.ShadowsocksProfile) { p.Password = "hunter2!!" },
+			wantErr: "not standard base64",
+		},
+		{
+			name:    "ss2022 rejects a short key",
+			mutate:  func(p *state.ShadowsocksProfile) { p.Password = "MTIzNA==" },
+			wantErr: "decodes to 4 bytes, need exactly 16",
+		},
+		{
+			name:    "ss2022 aes-256 rejects a 16 byte key",
+			mutate:  func(p *state.ShadowsocksProfile) { p.Method = "2022-blake3-aes-256-gcm" },
+			wantErr: "decodes to 16 bytes, need exactly 32",
+		},
+		{
+			name: "ss2022 chacha20 rejects an ipsk chain",
+			mutate: func(p *state.ShadowsocksProfile) {
+				p.Method, p.Password = "2022-blake3-chacha20-poly1305", testPSK32+":"+testPSK32
+			},
+			wantErr: "takes a single key, got 2",
 		},
 	}
 
@@ -101,8 +144,8 @@ func TestBuildOutboundOptions_Defaults(t *testing.T) {
 	if opts.Server != "ss.example.com" || opts.ServerPort != 8488 {
 		t.Errorf("server = %s:%d, want ss.example.com:8488", opts.Server, opts.ServerPort)
 	}
-	if opts.Password != "hunter2" {
-		t.Errorf("Password = %q, want hunter2", opts.Password)
+	if opts.Password != testPSK16 {
+		t.Errorf("Password = %q, want %q", opts.Password, testPSK16)
 	}
 	if opts.UDPOverTCP != nil {
 		t.Errorf("UDPOverTCP = %+v, want nil when the profile does not ask for it", opts.UDPOverTCP)

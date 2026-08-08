@@ -4,6 +4,7 @@ package shadowsocks
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"fmt"
 	"net"
@@ -401,5 +402,120 @@ func TestE2EWrongPasswordStartsButCannotCarryTraffic(t *testing.T) {
 
 	if got, err := roundTrip(t, mgr.BoundLocalPort(), []byte("should-not-arrive"), 3*time.Second); err == nil {
 		t.Fatalf("round trip returned %q, want a timeout: the server must drop an undecryptable datagram", got)
+	}
+}
+
+// startUDPSizeProbe relays datagrams to dstPort and records the largest it
+// forwarded, so a test can measure a cipher's real on-the-wire cost.
+func startUDPSizeProbe(t *testing.T, dstPort int) (port int, maxSent func() int, closeFn func()) {
+	t.Helper()
+	front, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1")})
+	if err != nil {
+		t.Fatalf("listen size probe: %v", err)
+	}
+	back, err := net.DialUDP("udp", nil, &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: dstPort})
+	if err != nil {
+		front.Close()
+		t.Fatalf("dial size probe upstream: %v", err)
+	}
+
+	var largest atomic.Int32
+	var client atomic.Pointer[net.UDPAddr]
+
+	go func() {
+		buf := make([]byte, 65535)
+		for {
+			n, src, err := front.ReadFromUDP(buf)
+			if err != nil {
+				return
+			}
+			for {
+				cur := largest.Load()
+				if int32(n) <= cur || largest.CompareAndSwap(cur, int32(n)) {
+					break
+				}
+			}
+			client.Store(src)
+			back.Write(buf[:n])
+		}
+	}()
+	go func() {
+		buf := make([]byte, 65535)
+		for {
+			n, err := back.Read(buf)
+			if err != nil {
+				return
+			}
+			if dst := client.Load(); dst != nil {
+				front.WriteToUDP(buf[:n], dst)
+			}
+		}
+	}()
+
+	return front.LocalAddr().(*net.UDPAddr).Port,
+		func() int { return int(largest.Load()) },
+		func() { front.Close(); back.Close() }
+}
+
+// The daemon clamps WireGuard to MTU 1280 whenever Shadowsocks carries it
+// (shadowsocksMaxMTU, internal/api). SS-2022 frames UDP differently from
+// AEAD-2017, so measure the real datagram rather than trusting the old margin.
+func TestE2EClampedMTUFitsA1500PathPerCipher(t *testing.T) {
+	const (
+		clampedMTU        = 1280
+		wireGuardOverhead = 32
+		ipUDPHeaders      = 28
+		pathMTU           = 1500
+	)
+
+	for _, tc := range []struct{ name, method, password string }{
+		{"ss2022", "2022-blake3-aes-128-gcm", "MTIzNDU2Nzg5MGFiY2RlZg=="},
+		{"aead2017", "chacha20-ietf-poly1305", "e2e-mtu-password"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ssPort := pickFreeLoopbackDualPort(t)
+			echoPort, closeEcho := startUDPEcho(t)
+			defer closeEcho()
+
+			stopServer := startShadowsocksTestServer(t, ssPort, tc.method, tc.password)
+			defer stopServer()
+
+			probePort, maxSent, closeProbe := startUDPSizeProbe(t, ssPort)
+			defer closeProbe()
+
+			mgr := NewManager(state.NewLogStore(200))
+			err := mgr.Start(context.Background(), state.ShadowsocksProfile{
+				RemoteHost: "127.0.0.1",
+				RemotePort: probePort,
+				Method:     tc.method,
+				Password:   tc.password,
+				TargetHost: "127.0.0.1",
+				TargetPort: echoPort,
+			})
+			if err != nil {
+				t.Fatalf("Manager.Start: %v", err)
+			}
+			defer mgr.Stop(context.Background())
+
+			payload := bytes.Repeat([]byte{0xA5}, clampedMTU+wireGuardOverhead)
+			got, err := roundTrip(t, mgr.BoundLocalPort(), payload, 10*time.Second)
+			if err != nil {
+				t.Fatalf("round trip a full-MTU WireGuard datagram: %v", err)
+			}
+			if len(got) != len(payload) {
+				t.Fatalf("round trip returned %d bytes, want %d", len(got), len(payload))
+			}
+
+			wire := maxSent()
+			if wire <= len(payload) {
+				t.Fatalf("probe saw %d bytes for a %d byte payload — it is not on the encrypted path", wire, len(payload))
+			}
+			if wire+ipUDPHeaders > pathMTU {
+				t.Fatalf("%s: a clamped-MTU datagram is %d bytes on the wire, %d with IP/UDP headers, over the %d path MTU",
+					tc.method, wire, wire+ipUDPHeaders, pathMTU)
+			}
+			t.Logf("%s: %d byte payload -> %d on the wire (+%d), %d bytes of headroom on a %d path",
+				tc.method, len(payload), wire, wire-len(payload), pathMTU-ipUDPHeaders-wire, pathMTU)
+		})
 	}
 }
