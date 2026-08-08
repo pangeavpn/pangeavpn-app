@@ -60,6 +60,22 @@ type hysteria2Manager interface {
 	Status() state.TransportStatus
 }
 
+// shadowsocksManager is transport.Manager (Stop) plus Start/Status with
+// Shadowsocks's concrete types. shadowsocks.Manager satisfies this directly.
+type shadowsocksManager interface {
+	transport.Manager
+	Start(ctx context.Context, profile state.ShadowsocksProfile) error
+	Status() state.TransportStatus
+}
+
+// shadowsocksProxyManager carries hub control-plane traffic: no WireGuard, no
+// activeTransport, runs before a profile exists. shadowsocks.ProxyManager fits.
+type shadowsocksProxyManager interface {
+	Start(ctx context.Context, profile state.ShadowsocksProfile) (int, error)
+	Stop(ctx context.Context) error
+	Port() int
+}
+
 // snowflakeManager is transport.Manager (Stop) plus Start/Status with
 // Snowflake's concrete types. snowflake.Manager satisfies this directly.
 type snowflakeManager interface {
@@ -77,22 +93,27 @@ type transportMemory interface {
 }
 
 type Service struct {
-	machine    *state.Machine
-	logs       *state.LogStore
-	config     *state.ConfigStore
-	cloak      cloakManager
-	naive      naiveManager
-	reality    realityManager
-	hysteria2  hysteria2Manager
-	snowflake  snowflakeManager
-	wg         wg.Manager
-	killSwitch platform.KillSwitch
+	machine     *state.Machine
+	logs        *state.LogStore
+	config      *state.ConfigStore
+	cloak       cloakManager
+	naive       naiveManager
+	reality     realityManager
+	hysteria2   hysteria2Manager
+	shadowsocks shadowsocksManager
+	snowflake   snowflakeManager
+	wg          wg.Manager
+	killSwitch  platform.KillSwitch
 
 	// transportMemory remembers the last-good transport per network; nil
 	// disables the reorder/record optimization. networkKey fingerprints the
 	// current network. Both are set once and read-only thereafter.
 	transportMemory transportMemory
 	networkKey      func() string
+
+	// shadowsocksProxy serves the hub control plane; nil leaves /ssproxy/*
+	// reporting unavailable. Set once at startup.
+	shadowsocksProxy shadowsocksProxyManager
 
 	opMu sync.Mutex
 
@@ -112,8 +133,8 @@ type Service struct {
 	sessionOpts ConnectOptions
 
 	// activeMu guards activeTransportKind, which of {cloak, naive, reality,
-	// hysteria2, snowflake} is live for the current session. Empty string
-	// when disconnected.
+	// hysteria2, shadowsocks, snowflake} is live for the current session.
+	// Empty string when disconnected.
 	activeMu            sync.RWMutex
 	activeTransportKind string
 
@@ -138,6 +159,36 @@ var wgListenPortPattern = regexp.MustCompile(`(?im)^\s*ListenPort\s*=\s*(\d+)\s*
 // loopback UDP socket binds to an ephemeral port instead of the default.
 var wgLoopbackEndpointPattern = regexp.MustCompile(`(?im)^(\s*Endpoint\s*=\s*127\.0\.0\.1:)\d+(\s*)$`)
 
+// wgMTUPattern matches the "MTU = N" line in a WireGuard config's [Interface].
+var wgMTUPattern = regexp.MustCompile(`(?im)^(\s*MTU\s*=\s*)(\d+)(\s*)$`)
+
+// shadowsocksMaxMTU caps the tunnel MTU while Shadowsocks carries it. SS wraps
+// each datagram in a salt, address header and AEAD tag (~55 B for
+// chacha20-ietf-poly1305, more for SS-2022), on top of WireGuard's own 32 B.
+// At the 1380 default that lands within a few bytes of a 1500 B path, and any
+// link below it (PPPoE at 1492, another tunnel) makes the OS refuse the send
+// outright — EMSGSIZE on Windows — as soon as a full-size packet appears. The
+// handshake is small enough to succeed first, so it fails only once traffic
+// flows. 1280 is IPv6's guaranteed minimum, and this is the cascade's last
+// resort: reaching the node at all beats a wider MTU that sometimes cannot.
+const shadowsocksMaxMTU = 1280
+
+// clampWireGuardMTU lowers an existing MTU line to max, leaving a lower one
+// alone. Returns the text unchanged when there is no MTU line to rewrite.
+func clampWireGuardMTU(configText string, max int) string {
+	return wgMTUPattern.ReplaceAllStringFunc(configText, func(line string) string {
+		groups := wgMTUPattern.FindStringSubmatch(line)
+		if len(groups) != 4 {
+			return line
+		}
+		current, err := strconv.Atoi(groups[2])
+		if err != nil || current <= max {
+			return line
+		}
+		return groups[1] + strconv.Itoa(max) + groups[3]
+	})
+}
+
 func NewService(
 	machine *state.Machine,
 	logs *state.LogStore,
@@ -146,6 +197,7 @@ func NewService(
 	naiveManager naiveManager,
 	realityManager realityManager,
 	hysteria2Manager hysteria2Manager,
+	shadowsocksManager shadowsocksManager,
 	snowflakeManager snowflakeManager,
 	wgManager wg.Manager,
 	killSwitch platform.KillSwitch,
@@ -158,6 +210,7 @@ func NewService(
 		naive:            naiveManager,
 		reality:          realityManager,
 		hysteria2:        hysteria2Manager,
+		shadowsocks:      shadowsocksManager,
 		snowflake:        snowflakeManager,
 		wg:               wgManager,
 		killSwitch:       killSwitch,
@@ -171,6 +224,34 @@ func NewService(
 // off, in which case connects always walk the full cascade.
 func (s *Service) SetTransportMemory(store transportMemory) {
 	s.transportMemory = store
+}
+
+// SetShadowsocksProxy wires the hub proxy; nil makes /ssproxy/* report it
+// unavailable.
+func (s *Service) SetShadowsocksProxy(proxy shadowsocksProxyManager) {
+	s.shadowsocksProxy = proxy
+}
+
+// StartShadowsocksProxy returns the proxy's loopback port. Permits the remote
+// first, or a Lockdown lock would block our own dial.
+func (s *Service) StartShadowsocksProxy(ctx context.Context, profile state.ShadowsocksProfile) (int, error) {
+	if s.shadowsocksProxy == nil {
+		return 0, errors.New("shadowsocks proxy is not available")
+	}
+	if host := strings.TrimSpace(profile.RemoteHost); host != "" {
+		if err := s.PermitHosts(ctx, []string{host}); err != nil {
+			s.logs.Add(state.LogWarn, state.SourceShadowsocks, fmt.Sprintf(
+				"could not permit shadowsocks hub proxy remote %s through the kill switch: %v", host, err))
+		}
+	}
+	return s.shadowsocksProxy.Start(ctx, profile)
+}
+
+func (s *Service) StopShadowsocksProxy(ctx context.Context) error {
+	if s.shadowsocksProxy == nil {
+		return nil
+	}
+	return s.shadowsocksProxy.Stop(ctx)
 }
 
 // activeTransport returns whichever manager is live for the current session,
@@ -195,6 +276,8 @@ func (s *Service) managerForKind(kind string) transport.Manager {
 		return s.reality
 	case "hysteria2":
 		return s.hysteria2
+	case "shadowsocks":
+		return s.shadowsocks
 	case "snowflake":
 		return s.snowflake
 	default:
@@ -230,8 +313,8 @@ type ConnectOptions struct {
 	// daemon restarts (re-applied on startup rather than cleared as stale).
 	Lockdown bool
 
-	// "cloak", "naive", "reality", "hysteria2", "snowflake", or "" (default:
-	// cloak first, fall back to naive, reality, hysteria2, then snowflake).
+	// "cloak", "naive", "reality", "hysteria2", "shadowsocks", "snowflake", or
+	// "" for the auto cascade (see autoCascadeOrder).
 	PreferredTransport string
 }
 
@@ -571,6 +654,36 @@ func (s *Service) startHysteria2Transport(ctx context.Context, profile *state.Pr
 	return nil
 }
 
+// startShadowsocksTransport runs Shadowsocks's start sequence, mirroring
+// startHysteria2Transport minus the SessionWaiter block — see Manager.Start.
+func (s *Service) startShadowsocksTransport(ctx context.Context, profile *state.Profile, wireGuardProfile *state.WireGuardProfile) error {
+	// De-alias from the config store's shared *ShadowsocksProfile before mutating LocalPort.
+	shadowsocksCopy := *profile.Shadowsocks
+	profile.Shadowsocks = &shadowsocksCopy
+
+	if clamped := clampWireGuardMTU(wireGuardProfile.ConfigText, shadowsocksMaxMTU); clamped != wireGuardProfile.ConfigText {
+		wireGuardProfile.ConfigText = clamped
+		s.logs.Add(state.LogInfo, state.SourceShadowsocks, fmt.Sprintf(
+			"clamped wireguard MTU to %d for the shadowsocks transport", shadowsocksMaxMTU))
+	}
+
+	shadowsocksStartProfile := *profile.Shadowsocks
+	shadowsocksStartProfile.LocalPort = 0
+	if err := s.shadowsocks.Start(ctx, shadowsocksStartProfile); err != nil {
+		return fmt.Errorf("start: %w", err)
+	}
+
+	profile.Shadowsocks.LocalPort = s.rebindWireGuardEndpoint(s.shadowsocks, profile.Shadowsocks.LocalPort, wireGuardProfile)
+	shadowsocksRunning := func() bool { return s.shadowsocks.Status().Running }
+	if err := s.waitForManagedTransportStable(ctx, shadowsocksRunning, profile.Shadowsocks.LocalPort, 200*time.Millisecond); err != nil {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		_ = s.shadowsocks.Stop(cleanupCtx)
+		cleanupCancel()
+		return err
+	}
+	return nil
+}
+
 // startSnowflakeTransport runs Snowflake's start sequence, mirroring
 // startHysteria2Transport. Cleans up (stops snowflake) on its own failure.
 func (s *Service) startSnowflakeTransport(ctx context.Context, profile *state.Profile, wireGuardProfile *state.WireGuardProfile) error {
@@ -653,6 +766,11 @@ func (s *Service) transportCandidates(profile *state.Profile, preferredTransport
 			return nil, errors.New("hysteria2 transport requested but this profile has no hysteria2 configuration")
 		}
 		return []transportCandidate{{"hysteria2", s.startHysteria2Transport}}, nil
+	case "shadowsocks":
+		if profile.Shadowsocks == nil {
+			return nil, errors.New("shadowsocks transport requested but this profile has no shadowsocks configuration")
+		}
+		return []transportCandidate{{"shadowsocks", s.startShadowsocksTransport}}, nil
 	case "snowflake":
 		// Gated off for this release (see snowflakeReleaseGated). Re-enable by
 		// removing this guard.
@@ -680,12 +798,16 @@ func (s *Service) transportCandidates(profile *state.Profile, preferredTransport
 //     that kills the TCP/TLS transports does not kill every attempt.
 //   - naive: real Chromium TLS+HTTP/2 — a different TLS fingerprint than
 //     reality, for when UDP is blocked and reality's approach was the problem.
+//   - shadowsocks: plain AEAD, the most fingerprinted protocol here — it earns
+//     its slot on independence (own port, own wire format), not on stealth, so
+//     it goes behind everything with a TLS-shaped or randomised handshake.
+//     With snowflake gated off it is effectively last in shipping builds.
 //   - snowflake: heavy-artillery last resort (WebRTC rendezvous, no fixed
 //     endpoint); currently gated off (see snowflakeReleaseGated).
 //
 // Per-network memory can still promote whatever last worked here ahead of this
 // default (see reorderByMemory).
-var autoCascadeOrder = []string{"cloak", "reality", "hysteria2", "naive", "snowflake"}
+var autoCascadeOrder = []string{"cloak", "reality", "hysteria2", "naive", "shadowsocks", "snowflake"}
 
 // autoCascade builds the auto-mode candidate list in autoCascadeOrder, keeping
 // only the transports this profile actually configures.
@@ -721,6 +843,11 @@ func (s *Service) transportStarter(profile *state.Profile, kind string) (transpo
 			return nil, false
 		}
 		return s.startNaiveTransport, true
+	case "shadowsocks":
+		if profile.Shadowsocks == nil {
+			return nil, false
+		}
+		return s.startShadowsocksTransport, true
 	case "snowflake":
 		if snowflakeReleaseGated || profile.Snowflake == nil {
 			return nil, false
@@ -1337,6 +1464,7 @@ func (s *Service) Status(ctx context.Context) state.StatusResponse {
 	naiveStatus := s.naive.Status()
 	realityStatus := s.reality.Status()
 	hysteria2Status := s.hysteria2.Status()
+	shadowsocksStatus := s.shadowsocks.Status()
 	snowflakeStatus := s.snowflake.Status()
 
 	wgStatus := state.WireGuardStatus{Running: false, Detail: "not connected"}
@@ -1361,6 +1489,7 @@ func (s *Service) Status(ctx context.Context) state.StatusResponse {
 		Naive:            naiveStatus,
 		Reality:          realityStatus,
 		Hysteria2:        hysteria2Status,
+		Shadowsocks:      shadowsocksStatus,
 		Snowflake:        snowflakeStatus,
 		WireGuard:        wgStatus,
 		KillSwitchActive: s.killSwitch.Active(),
@@ -1423,6 +1552,8 @@ func (s *Service) runHealthCheck(ctx context.Context) {
 		transportRunning = s.reality.Status().Running
 	case "hysteria2":
 		transportRunning = s.hysteria2.Status().Running
+	case "shadowsocks":
+		transportRunning = s.shadowsocks.Status().Running
 	case "snowflake":
 		transportRunning = s.snowflake.Status().Running
 	}
@@ -1618,6 +1749,18 @@ func (s *Service) recoverActiveTransport(ctx context.Context, profile state.Prof
 			return err
 		}
 		return s.waitForManagedTransportStable(restartCtx, func() bool { return s.hysteria2.Status().Running }, profile.Hysteria2.LocalPort, 2*time.Second)
+	case "shadowsocks":
+		if s.shadowsocks.Status().Running {
+			return nil
+		}
+		if profile.Shadowsocks == nil {
+			return errors.New("active transport is shadowsocks but profile has no shadowsocks config")
+		}
+		s.logs.Add(state.LogWarn, state.SourceDaemon, "health check detected shadowsocks stopped; attempting restart")
+		if err := s.shadowsocks.Start(restartCtx, *profile.Shadowsocks); err != nil {
+			return err
+		}
+		return s.waitForManagedTransportStable(restartCtx, func() bool { return s.shadowsocks.Status().Running }, profile.Shadowsocks.LocalPort, 2*time.Second)
 	case "snowflake":
 		if s.snowflake.Status().Running {
 			return nil
@@ -2074,11 +2217,16 @@ func transportPermitHosts(profile state.Profile) []string {
 			out = append(out, host)
 		}
 	}
+	if profile.Shadowsocks != nil {
+		if host := strings.TrimSpace(profile.Shadowsocks.RemoteHost); host != "" {
+			out = append(out, host)
+		}
+	}
 	return append(out, snowflakeHosts(profile.Snowflake)...)
 }
 
-// withTransportBypassHosts adds the cloak, naive, reality, hysteria2, and
-// snowflake (whichever are configured) remote hosts to the WireGuard bypass
+// withTransportBypassHosts adds the cloak, naive, reality, hysteria2,
+// shadowsocks and snowflake (whichever are configured) remote hosts to the bypass
 // list, so no transport's own connection to its remote endpoint gets routed
 // back through the tunnel it's establishing — same "arm before the transport
 // is chosen" reasoning as killSwitchPermits above.

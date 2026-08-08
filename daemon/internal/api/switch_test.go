@@ -41,7 +41,7 @@ func TestSwitch_PerTransport(t *testing.T) {
 			sfMgr := &fakeSnowflakeManager{}
 			wgMgr := &fakeWGManager{}
 			ks := &fakeKillSwitch{}
-			svc := newTestServiceFull(t, cloakMgr, naiveMgr, realityMgr, hy2Mgr, sfMgr, wgMgr, ks, a, b)
+			svc := newTestServiceFull(t, cloakMgr, naiveMgr, realityMgr, hy2Mgr, &fakeShadowsocksManager{}, sfMgr, wgMgr, ks, a, b)
 
 			opts := ConnectOptions{PreferredTransport: kind}
 			if err := svc.Connect(context.Background(), a.ID, opts); err != nil {
@@ -82,7 +82,7 @@ func TestSwitch_KillSwitchReEnableFailure_KeepsWorkingSession(t *testing.T) {
 	sfMgr := &fakeSnowflakeManager{}
 	wgMgr := &fakeWGManager{}
 	ks := &fakeKillSwitch{}
-	svc := newTestServiceFull(t, cloakMgr, naiveMgr, realityMgr, hy2Mgr, sfMgr, wgMgr, ks, a, b)
+	svc := newTestServiceFull(t, cloakMgr, naiveMgr, realityMgr, hy2Mgr, &fakeShadowsocksManager{}, sfMgr, wgMgr, ks, a, b)
 
 	opts := ConnectOptions{PreferredTransport: "hysteria2"}
 	if err := svc.Connect(context.Background(), a.ID, opts); err != nil {
@@ -138,7 +138,7 @@ func TestSwitch_PreflightFailure_KeepsWorkingSession(t *testing.T) {
 	wgMgr := &fakeWGManager{}
 	ks := &fakeKillSwitch{}
 	svc := newTestServiceFull(t, &fakeCloakManager{}, &fakeNaiveManager{}, &fakeRealityManager{},
-		hy2Mgr, &fakeSnowflakeManager{}, wgMgr, ks, a, b)
+		hy2Mgr, &fakeShadowsocksManager{}, &fakeSnowflakeManager{}, wgMgr, ks, a, b)
 
 	opts := ConnectOptions{PreferredTransport: "hysteria2"}
 	if err := svc.Connect(context.Background(), a.ID, opts); err != nil {
@@ -182,7 +182,7 @@ func TestSwitch_ArmsKillSwitchForNewServer(t *testing.T) {
 
 	ks := &fakeKillSwitch{}
 	svc := newTestServiceFull(t, &fakeCloakManager{}, &fakeNaiveManager{}, &fakeRealityManager{},
-		&fakeHysteria2Manager{}, &fakeSnowflakeManager{}, &fakeWGManager{}, ks, a, b)
+		&fakeHysteria2Manager{}, &fakeShadowsocksManager{}, &fakeSnowflakeManager{}, &fakeWGManager{}, ks, a, b)
 
 	opts := ConnectOptions{PreferredTransport: "hysteria2"}
 	if err := svc.Connect(context.Background(), a.ID, opts); err != nil {

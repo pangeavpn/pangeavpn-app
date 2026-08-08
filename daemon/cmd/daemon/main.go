@@ -20,6 +20,7 @@ import (
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/hysteria2"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/platform"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/reality"
+	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/shadowsocks"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/snowflake"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/state"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/wg"
@@ -124,6 +125,7 @@ func startDaemonRuntime() (*daemonRuntime, error) {
 	// "rebuild with -tags with_utls" error on Start, so no stub is needed.
 	realityManager := reality.NewManager(logs)
 	hysteria2Manager := hysteria2.NewManager(logs)
+	shadowsocksManager := shadowsocks.NewManager(logs)
 	snowflakeManager := snowflake.NewManager(logs)
 	wgManager := wg.NewManager(logs)
 	killSwitch := platform.NewKillSwitch()
@@ -137,7 +139,9 @@ func startDaemonRuntime() (*daemonRuntime, error) {
 	platform.KillSwitchWarnf = func(format string, args ...any) {
 		logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf(format, args...))
 	}
-	service := api.NewService(machine, logs, configStore, cloakManager, naiveManager, realityManager, hysteria2Manager, snowflakeManager, wgManager, killSwitch)
+	service := api.NewService(machine, logs, configStore, cloakManager, naiveManager, realityManager, hysteria2Manager, shadowsocksManager, snowflakeManager, wgManager, killSwitch)
+
+	service.SetShadowsocksProxy(shadowsocks.NewProxyManager(logs))
 
 	// Per-network last-good-transport cache is a best-effort optimization; a
 	// failure to open it just leaves auto-connect walking the full cascade.
