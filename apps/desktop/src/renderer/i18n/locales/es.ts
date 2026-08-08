@@ -133,6 +133,8 @@ export const es = {
   "settings.censorship.directIp.hint": "Conecta por dirección IP, omitiendo el DNS por completo. El único método que funciona con el bloqueo de seguridad activado.",
   "settings.censorship.hubShadowsocks.title": "Shadowsocks",
   "settings.censorship.hubShadowsocks.hint": "Enruta el tráfico de la cuenta por un túnel Shadowsocks. Oculta con qué servidor contactas, sin activar la VPN.",
+  "settings.censorship.hubFronted.title": "Retransmisor",
+  "settings.censorship.hubFronted.hint": "Accede a tu cuenta a través de un retransmisor en una gran red de contenido, cuya dirección comparte con buena parte de la web y no puede bloquearse a bajo coste. El retransmisor solo reenvía datos sellados que no puede leer.",
   "settings.censorship.hubNormal.title": "Conexión normal",
   "settings.censorship.hubNormal.hint": "HTTPS corriente con una consulta DNS normal. Se prueba en último lugar porque es el único método que revela nuestro dominio en la red.",
   "settings.censorship.lastMethod": "Al menos un método de conexión debe permanecer activo.",

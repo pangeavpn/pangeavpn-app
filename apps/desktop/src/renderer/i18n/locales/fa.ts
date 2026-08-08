@@ -133,6 +133,8 @@ export const fa = {
   "settings.censorship.directIp.hint": "اتصال مستقیم با آدرس IP و نادیده‌گرفتن کامل DNS. تنها روشی که با قفل محافظ فعال کار می‌کند.",
   "settings.censorship.hubShadowsocks.title": "Shadowsocks",
   "settings.censorship.hubShadowsocks.hint": "هدایت ترافیک حساب از طریق تونل Shadowsocks. سروری که با آن تماس می‌گیرید را پنهان می‌کند، بدون روشن‌کردن VPN.",
+  "settings.censorship.hubFronted.title": "بازپخش",
+  "settings.censorship.hubFronted.hint": "دسترسی به حساب شما از طریق یک بازپخش روی یک شبکهٔ محتوای بزرگ که نشانی آن با بخش زیادی از وب مشترک است و نمی‌توان آن را ارزان مسدود کرد. بازپخش تنها داده‌های مهروموم‌شده‌ای را عبور می‌دهد که نمی‌تواند بخواند.",
   "settings.censorship.hubNormal.title": "اتصال عادی",
   "settings.censorship.hubNormal.hint": "HTTPS معمولی با جست‌وجوی DNS عادی. آخر از همه امتحان می‌شود، چون تنها روشی است که دامنه ما را روی شبکه آشکار می‌کند.",
   "settings.censorship.lastMethod": "دست‌کم یک روش اتصال باید فعال بماند.",

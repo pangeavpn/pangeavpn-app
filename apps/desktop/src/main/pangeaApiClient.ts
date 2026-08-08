@@ -15,6 +15,11 @@ import {
   restoreCachedCreds,
   type HubShadowsocksCreds
 } from "../shared/hubShadowsocksCreds";
+import {
+  mergeFrontedEndpoints,
+  promoteFrontedEndpoint,
+  restoreFrontedEndpoints
+} from "../shared/frontedEndpoints";
 import { restoreCachedServers } from "../shared/cachedServers";
 import { encryptRequest, decryptResponse, type EncryptedResponse } from "./secureChannel";
 import { sanitizeLog } from "./logSanitize";
@@ -71,12 +76,15 @@ const DOH_PROVIDERS = [
 interface BootstrapResponse {
   vpnAccessToken: string;
   servers: ServerInfo[];
+  /** Edge relays the hub currently runs. Absent on hubs that predate them. */
+  frontedEndpoints?: string[];
 }
 
 interface TokenLoginResponse {
   vpnAccessToken: string;
   user: { email: string; name: string };
   servers: ServerInfo[];
+  frontedEndpoints?: string[];
 }
 
 interface RegisterResponse {
@@ -223,6 +231,45 @@ function fetchDohResolved(
     }
     req.end();
   });
+}
+
+/**
+ * POST the envelope to an edge relay, which forwards it to the hub.
+ *
+ * Unlike fetchDohResolved this validates the certificate normally: the relay is
+ * reached by its own name on shared CDN address space, so its certificate is a
+ * real one for that name and there is no reason to accept anything less. That
+ * the relay itself is untrusted costs nothing — it carries a sealed envelope
+ * (see secureChannel), so it forwards ciphertext it cannot read and cannot
+ * forge a reply to.
+ */
+function fetchFronted(
+  host: string,
+  requestPath: string,
+  options: {
+    method?: string;
+    headers?: Record<string, string>;
+    body?: string;
+    timeoutMs?: number;
+    signal?: AbortSignal;
+  }
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? 15000);
+  const onExternalAbort = () => controller.abort();
+  options.signal?.addEventListener("abort", onExternalAbort, { once: true });
+
+  return net
+    .fetch(`https://${host}${requestPath}`, {
+      method: options.method ?? "GET",
+      headers: options.headers,
+      body: options.body,
+      signal: controller.signal
+    })
+    .finally(() => {
+      clearTimeout(timer);
+      options.signal?.removeEventListener("abort", onExternalAbort);
+    });
 }
 
 function generateWireGuardKeyPair(): { privateKey: string; publicKey: string } {
@@ -425,6 +472,16 @@ export class PangeaApiClient {
   private hubShadowsocks: HubShadowsocksCreds[] = [];
   private onHubShadowsocks: ((creds: HubShadowsocksCreds[]) => void) | null = null;
 
+  // Edge relays that will forward the envelope, restored from settings.json and
+  // refreshed from whatever the hub advertises. Empty until one is configured,
+  // which makes the fronted method a no-op ensureHub skips over — the same way
+  // the shadowsocks method sits inert until credentials are cached.
+  private frontedEndpoints: string[] = [];
+  private onFrontedEndpoints: ((endpoints: string[]) => void) | null = null;
+  // The relay currently carrying our traffic; null when the method is off or
+  // not the path in use.
+  private frontedHost: string | null = null;
+
   constructor() {
     this.timeoutMs = 15000;
   }
@@ -494,6 +551,26 @@ export class PangeaApiClient {
     this.onServers = fn;
   }
 
+  /** Restores cached edge relays at startup. */
+  setCachedFrontedEndpoints(stored: unknown): void {
+    this.frontedEndpoints = restoreFrontedEndpoints(stored);
+    this.resetHubResolution();
+  }
+
+  getCachedFrontedEndpoints(): string[] {
+    return [...this.frontedEndpoints];
+  }
+
+  /** Called when a fresh relay list arrives, so the caller can persist it. */
+  onFrontedEndpointsResolved(fn: (endpoints: string[]) => void): void {
+    this.onFrontedEndpoints = fn;
+  }
+
+  /** The relay currently carrying hub traffic, for diagnostics. */
+  getFrontedHost(): string | null {
+    return this.frontedHost;
+  }
+
   /**
    * Returns the value actually stored, which differs from the requested one when
    * that was rejected. Invalid input leaves the current value alone rather than
@@ -556,6 +633,7 @@ export class PangeaApiClient {
 
   private resetHubResolution(): void {
     this.dohResolvedIp = null;
+    this.frontedHost = null;
     this.hubReady = false;
     // Drop the proxy too: the next ensureHub re-decides whether to use it, and
     // leaving it running would keep a listener open for a path we abandoned.
@@ -569,8 +647,8 @@ export class PangeaApiClient {
 
   /**
    * Verify that /v1/secure is reachable and decryptable on the currently
-   * selected transport path (direct domain when dohResolvedIp is null,
-   * DoH-resolved direct IP otherwise).
+   * selected transport path (direct domain when nothing else is selected, and
+   * otherwise the Shadowsocks proxy, an edge relay, or a DoH-resolved IP).
    *
    * Uses /api/client/regions as the inner probe route because the hub's
    * /v1/secure handler enforces an ALLOWED_ROUTES whitelist; unauthenticated
@@ -586,6 +664,13 @@ export class PangeaApiClient {
       let rawResponse: Response;
       if (this.ssProxyPort) {
         rawResponse = await fetchViaConnectProxy(this.ssProxyPort, HUB_HOSTNAME, HUB_HOSTNAME, "/v1/secure", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: envelopeJson,
+          timeoutMs: 8000
+        });
+      } else if (this.frontedHost) {
+        rawResponse = await fetchFronted(this.frontedHost, "/v1/secure", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: envelopeJson,
@@ -639,7 +724,13 @@ export class PangeaApiClient {
    *                   path that survives an engaged Lockdown lock.
    *                2. DoH-resolved IP, connected with no SNI.
    *   shadowsocks  3. Through the daemon's Shadowsocks proxy.
-   *   normal       4. Plain HTTPS to the hub domain.
+   *   fronted      4. Through an edge relay on shared CDN address space.
+   *   normal       5. Plain HTTPS to the hub domain.
+   *
+   * Steps 1-3 all terminate on address space we own, so one enumeration sweep
+   * that blackholes it takes out all three at once. Step 4 is the answer to
+   * exactly that: its address is the CDN's, shared with enough of the web that
+   * blocking it costs the censor more than it costs us.
    *
    * "normal" is last on purpose: it is the only step that puts the hub's name
    * on the wire in cleartext, so anything else that works should win first.
@@ -691,7 +782,17 @@ export class PangeaApiClient {
       }
     }
 
-    // 4. Plain HTTPS to the domain. Last because it is the only step whose
+    // 4. Edge relay — the CDN forwards the envelope to the hub for us.
+    if (this.hubMethods.fronted) {
+      this.dohResolvedIp = null;
+      if (await this.tryFrontedPath()) {
+        console.log(`[HubURL] Fronted relay works`);
+        this.hubReady = true;
+        return;
+      }
+    }
+
+    // 5. Plain HTTPS to the domain. Last because it is the only step whose
     //    SNI names the hub in cleartext.
     if (this.hubMethods.normal) {
       console.log(`[HubURL] Trying direct domain: ${HUB_API_BASE}`);
@@ -748,6 +849,37 @@ export class PangeaApiClient {
     return true;
   }
 
+  /**
+   * Attempt the hub through each cached edge relay in turn. Returns false —
+   * never throws — so ensureHub can fall through to the remaining methods.
+   */
+  private async tryFrontedPath(): Promise<boolean> {
+    if (this.frontedEndpoints.length === 0) {
+      console.log(`[HubURL] Fronted path unavailable (no relay configured)`);
+      return false;
+    }
+    for (const [index, host] of this.frontedEndpoints.entries()) {
+      this.frontedHost = host;
+      try {
+        if (await this.trySecureProbeCurrentPath()) {
+          this.promoteFronted(index);
+          return true;
+        }
+      } catch (err) {
+        console.warn(`[HubURL] Fronted relay ${index + 1} failed:`, sanitizeLog(err));
+      }
+    }
+    this.frontedHost = null;
+    return false;
+  }
+
+  private promoteFronted(index: number): void {
+    const promoted = promoteFrontedEndpoint(this.frontedEndpoints, index);
+    if (!promoted) return;
+    this.frontedEndpoints = promoted;
+    this.onFrontedEndpoints?.(this.frontedEndpoints);
+  }
+
   private promoteHubShadowsocks(index: number): void {
     const promoted = promoteCreds(this.hubShadowsocks, index);
     if (!promoted) return;
@@ -789,6 +921,14 @@ export class PangeaApiClient {
         headers: { "Content-Type": "application/json" },
         body: envelopeJson,
         timeoutMs: this.timeoutMs
+      });
+    } else if (this.frontedHost) {
+      rawResponse = await fetchFronted(this.frontedHost, "/v1/secure", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: envelopeJson,
+        timeoutMs: this.timeoutMs,
+        signal: options.signal
       });
     } else if (this.dohResolvedIp) {
       rawResponse = await fetchDohResolved(this.dohResolvedIp, HUB_HOSTNAME, "/v1/secure", {
@@ -855,6 +995,10 @@ export class PangeaApiClient {
         const resolvedIp = await resolveViaDoH(HUB_HOSTNAME);
         if (resolvedIp) {
           this.dohResolvedIp = resolvedIp;
+          // A relay that answers with an error page is being intercepted just
+          // as surely as the domain would be; drop it so the branch order in
+          // this method actually reaches the DoH path we just resolved.
+          this.frontedHost = null;
           const retryResponse = await fetchDohResolved(resolvedIp, HUB_HOSTNAME, "/v1/secure", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -919,6 +1063,7 @@ export class PangeaApiClient {
       this.licenseKey = data.vpnAccessToken;
       this.rememberServers(data.servers);
       this.rememberHubShadowsocks(data.servers);
+      this.rememberFrontedEndpoints(data.frontedEndpoints);
       return data;
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") {
@@ -950,6 +1095,7 @@ export class PangeaApiClient {
       this.licenseKey = data.vpnAccessToken;
       this.rememberServers(data.servers);
       this.rememberHubShadowsocks(data.servers);
+      this.rememberFrontedEndpoints(data.frontedEndpoints);
       return data;
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") {
@@ -1043,6 +1189,13 @@ export class PangeaApiClient {
     if (!Array.isArray(servers) || servers.length === 0) return;
     this.cachedServers = servers;
     this.onServers?.(servers);
+  }
+
+  private rememberFrontedEndpoints(advertised: unknown): void {
+    const merged = mergeFrontedEndpoints(this.frontedEndpoints, advertised);
+    if (!merged) return;
+    this.frontedEndpoints = merged;
+    this.onFrontedEndpoints?.(this.frontedEndpoints);
   }
 
   private rememberHubShadowsocks(servers: ServerInfo[]): void {
@@ -1213,9 +1366,9 @@ export class PangeaApiClient {
     this.cachedServers = [];
     // The node list is account-scoped, so it goes when the account does — and
     // it must leave disk too, or the next user of this machine gets a picker
-    // full of the last one's servers. The hub IP and control-plane credentials
-    // deliberately survive: they are how a signed-out client reaches the hub to
-    // sign in again.
+    // full of the last one's servers. The hub IP, relays and control-plane
+    // credentials deliberately survive: they are how a signed-out client
+    // reaches the hub to sign in again.
     this.onServers?.([]);
     this.resetHubResolution();
     this.identityPubkey = null;

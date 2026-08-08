@@ -133,6 +133,8 @@ export const fr = {
   "settings.censorship.directIp.hint": "Se connecte par adresse IP, en contournant entièrement le DNS. La seule méthode qui fonctionne quand le verrou de sécurité est engagé.",
   "settings.censorship.hubShadowsocks.title": "Shadowsocks",
   "settings.censorship.hubShadowsocks.hint": "Achemine le trafic du compte via un tunnel Shadowsocks. Masque le serveur que vous contactez, sans activer le VPN.",
+  "settings.censorship.hubFronted.title": "Relais",
+  "settings.censorship.hubFronted.hint": "Accédez à votre compte via un relais sur un grand réseau de diffusion, dont l'adresse est partagée avec une bonne partie du web et ne peut pas être bloquée à moindre coût. Le relais ne transmet que des données scellées qu'il ne peut pas lire.",
   "settings.censorship.hubNormal.title": "Connexion normale",
   "settings.censorship.hubNormal.hint": "HTTPS ordinaire avec une résolution DNS normale. Essayée en dernier, car c'est la seule méthode qui révèle notre domaine sur le réseau.",
   "settings.censorship.lastMethod": "Au moins une méthode de connexion doit rester active.",

@@ -133,6 +133,8 @@ export const ru = {
   "settings.censorship.directIp.hint": "Подключение по IP-адресу, полностью минуя DNS. Единственный способ, работающий при включённой блокировке.",
   "settings.censorship.hubShadowsocks.title": "Shadowsocks",
   "settings.censorship.hubShadowsocks.hint": "Направляет трафик учётной записи через туннель Shadowsocks. Скрывает, с каким сервером вы связываетесь, не включая VPN.",
+  "settings.censorship.hubFronted.title": "Ретранслятор",
+  "settings.censorship.hubFronted.hint": "Доступ к учётной записи через ретранслятор в крупной сети доставки контента: его адрес общий с большой частью веба, поэтому дёшево заблокировать его не получится. Ретранслятор передаёт только запечатанные данные, которые не может прочитать.",
   "settings.censorship.hubNormal.title": "Обычное подключение",
   "settings.censorship.hubNormal.hint": "Обычный HTTPS с обычным DNS-запросом. Пробуется последним, так как это единственный способ, раскрывающий наш домен в сети.",
   "settings.censorship.lastMethod": "Хотя бы один способ подключения должен оставаться включённым.",

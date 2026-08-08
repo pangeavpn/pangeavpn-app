@@ -133,6 +133,8 @@ export const uk = {
   "settings.censorship.directIp.hint": "Підключення за IP-адресою, повністю оминаючи DNS. Єдиний спосіб, що працює при увімкненому блокуванні.",
   "settings.censorship.hubShadowsocks.title": "Shadowsocks",
   "settings.censorship.hubShadowsocks.hint": "Спрямовує трафік облікового запису через тунель Shadowsocks. Приховує, з яким сервером ви зв'язуєтесь, не вмикаючи VPN.",
+  "settings.censorship.hubFronted.title": "Ретранслятор",
+  "settings.censorship.hubFronted.hint": "Доступ до облікового запису через ретранслятор у великій мережі доставки контенту: його адреса спільна з великою частиною вебу, тож заблокувати її дешево не вийде. Ретранслятор передає лише запечатані дані, які не може прочитати.",
   "settings.censorship.hubNormal.title": "Звичайне з'єднання",
   "settings.censorship.hubNormal.hint": "Звичайний HTTPS зі звичайним DNS-запитом. Пробується останнім, бо це єдиний спосіб, який розкриває наш домен у мережі.",
   "settings.censorship.lastMethod": "Принаймні один спосіб підключення має лишатися увімкненим.",

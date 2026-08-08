@@ -880,6 +880,16 @@ async function persistHubShadowsocks(creds: HubShadowsocksCreds[]): Promise<void
   }
 }
 
+async function persistFrontedEndpoints(endpoints: string[]): Promise<void> {
+  try {
+    const settings = await readSettingsFile();
+    settings.frontedEndpoints = endpoints;
+    await writeSettingsFile(settings);
+  } catch (err) {
+    console.warn("Failed to persist fronted endpoints:", err);
+  }
+}
+
 /** The node list, so a client that cannot reach the hub still knows where the
  *  servers are. Cleared on logout, which passes an empty list. */
 async function persistServers(servers: ServerInfo[]): Promise<void> {
@@ -1518,6 +1528,7 @@ async function boot(): Promise<void> {
   // still persists the hub IP once it is learned.
   pangeaApiClient.onHubIp((ip) => void persistHubIp(ip));
   pangeaApiClient.onHubShadowsocksResolved((creds) => void persistHubShadowsocks(creds));
+  pangeaApiClient.onFrontedEndpointsResolved((endpoints) => void persistFrontedEndpoints(endpoints));
   pangeaApiClient.onServersResolved((servers) => void persistServers(servers));
 
   // The daemon owns the proxy; the client only decides when to ask for it.
@@ -1588,8 +1599,9 @@ async function boot(): Promise<void> {
     // Was a single object before every node's credentials were cached, so an
     // existing install still has one to migrate.
     pangeaApiClient.setCachedHubShadowsocks(settings.hubShadowsocks);
-    // The last node list the hub gave us — what stands between a blocked hub
-    // and a client with nowhere left to go.
+    // Edge relays, and the last node list the hub gave us. Both are what stands
+    // between a blocked hub and a client with nowhere left to go.
+    pangeaApiClient.setCachedFrontedEndpoints(settings.frontedEndpoints);
     pangeaApiClient.setCachedServers(settings.servers);
     if (typeof settings.lastServerId === "string") {
       lastServerId = settings.lastServerId;

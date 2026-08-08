@@ -86,6 +86,7 @@ const serverDisconnectBtn = document.getElementById("serverDisconnectBtn") as HT
 const serverRefreshBtn = document.getElementById("serverRefreshBtn") as HTMLButtonElement;
 const hubDirectIpToggle = document.getElementById("hubDirectIpToggle") as HTMLInputElement;
 const hubShadowsocksToggle = document.getElementById("hubShadowsocksToggle") as HTMLInputElement;
+const hubFrontedToggle = document.getElementById("hubFrontedToggle") as HTMLInputElement;
 const hubNormalToggle = document.getElementById("hubNormalToggle") as HTMLInputElement;
 const allowLanToggle = document.getElementById("allowLanToggle") as HTMLInputElement;
 const dnsPresetSelect = document.getElementById("dnsPresetSelect") as HTMLSelectElement;
@@ -179,6 +180,7 @@ function updateSettingsSummaries(): void {
   const censorship: string[] = [];
   if (hubDirectIpToggle.checked) censorship.push(t("settings.censorship.directIp.title"));
   if (hubShadowsocksToggle.checked) censorship.push(t("settings.censorship.hubShadowsocks.title"));
+  if (hubFrontedToggle.checked) censorship.push(t("settings.censorship.hubFronted.title"));
   if (hubNormalToggle.checked) censorship.push(t("settings.censorship.hubNormal.title"));
   setCensorshipValue.textContent = censorship.length ? censorship.join(" · ") : off;
 
@@ -996,18 +998,25 @@ serverRefreshBtn.addEventListener("click", async () => {
 // goes through showToast; each reverts its checkbox if the backend call fails.
 settingsOverlay.addEventListener("change", updateSettingsSummaries);
 
-type HubMethodName = "directIp" | "shadowsocks" | "normal";
-type HubMethodState = { directIp: boolean; shadowsocks: boolean; normal: boolean };
+type HubMethodName = "directIp" | "shadowsocks" | "fronted" | "normal";
+type HubMethodState = {
+  directIp: boolean;
+  shadowsocks: boolean;
+  fronted: boolean;
+  normal: boolean;
+};
 
 const hubMethodToggles: Record<HubMethodName, HTMLInputElement> = {
   directIp: hubDirectIpToggle,
   shadowsocks: hubShadowsocksToggle,
+  fronted: hubFrontedToggle,
   normal: hubNormalToggle
 };
 
 const hubMethodLabels: Record<HubMethodName, MessageKey> = {
   directIp: "settings.censorship.directIp.title",
   shadowsocks: "settings.censorship.hubShadowsocks.title",
+  fronted: "settings.censorship.hubFronted.title",
   normal: "settings.censorship.hubNormal.title"
 };
 

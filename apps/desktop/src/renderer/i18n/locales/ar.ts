@@ -133,6 +133,8 @@ export const ar = {
   "settings.censorship.directIp.hint": "الاتصال عبر عنوان IP مباشرةً، متجاوزًا DNS تمامًا. الطريقة الوحيدة التي تعمل عند تفعيل قفل الحماية.",
   "settings.censorship.hubShadowsocks.title": "Shadowsocks",
   "settings.censorship.hubShadowsocks.hint": "توجيه حركة الحساب عبر نفق Shadowsocks. يخفي الخادم الذي تتصل به، دون تشغيل VPN.",
+  "settings.censorship.hubFronted.title": "مُرحِّل",
+  "settings.censorship.hubFronted.hint": "الوصول إلى حسابك عبر مُرحِّل على شبكة محتوى كبيرة، عنوانه مشترك مع جزء كبير من الويب فلا يمكن حجبه بتكلفة زهيدة. لا ينقل المُرحِّل سوى بيانات مُغلقة لا يستطيع قراءتها.",
   "settings.censorship.hubNormal.title": "اتصال عادي",
   "settings.censorship.hubNormal.hint": "HTTPS عادي مع بحث DNS عادي. يُجرَّب أخيرًا لأنه الطريقة الوحيدة التي تكشف نطاقنا على الشبكة.",
   "settings.censorship.lastMethod": "يجب أن تبقى طريقة اتصال واحدة على الأقل مُفعَّلة.",

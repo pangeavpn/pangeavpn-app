@@ -1,25 +1,32 @@
 /** Ways the app may reach the hub. ensureHub tries each enabled one in order. */
-export type HubMethod = "directIp" | "shadowsocks" | "normal";
+export type HubMethod = "directIp" | "shadowsocks" | "fronted" | "normal";
 
 export interface HubMethods {
   /** Cached hub IP, and DoH-resolved IP with no SNI. Survives a Lockdown lock. */
   directIp: boolean;
   /** Hub traffic through the daemon's Shadowsocks proxy. */
   shadowsocks: boolean;
+  /** The envelope relayed by an edge worker on shared CDN address space. */
+  fronted: boolean;
   /** Plain HTTPS to the hub domain — a normal DNS lookup and a cleartext SNI. */
   normal: boolean;
 }
 
-// Attempt order. directIp is first because it needs no lookup; normal is last
-// because it is the only one that puts the hub's name on the wire in cleartext.
-export const HUB_METHOD_ORDER: readonly HubMethod[] = ["directIp", "shadowsocks", "normal"];
+// Attempt order. directIp is first because it needs no lookup; fronted comes
+// after our own paths because it hands a third party the timing of our traffic
+// (never its content — see secureChannel), but before normal, which is the only
+// one that puts the hub's name on the wire in cleartext.
+export const HUB_METHOD_ORDER: readonly HubMethod[] = [
+  "directIp",
+  "shadowsocks",
+  "fronted",
+  "normal"
+];
 
-// Shadowsocks is on by default: it is the only method that survives the hub's
-// own address being blackholed, and leaving the strongest fallback off until
-// someone finds the setting means it is off for everyone who needs it most.
 export const DEFAULT_HUB_METHODS: HubMethods = {
   directIp: true,
   shadowsocks: true,
+  fronted: true,
   normal: false
 };
 
@@ -34,7 +41,7 @@ export const DEFAULT_HUB_METHODS: HubMethods = {
 export const HUB_METHODS_REV = 1;
 
 /** Methods whose default flipped on at HUB_METHODS_REV 1. */
-const REV_1_DEFAULTS: readonly HubMethod[] = ["shadowsocks"];
+const REV_1_DEFAULTS: readonly HubMethod[] = ["shadowsocks", "fronted"];
 
 export function isHubMethod(value: unknown): value is HubMethod {
   return typeof value === "string" && (HUB_METHOD_ORDER as readonly string[]).includes(value);
@@ -70,6 +77,7 @@ export function normalizeHubMethods(raw: unknown): HubMethods {
     methods = {
       directIp: source.directIp === true,
       shadowsocks: source.shadowsocks === true,
+      fronted: source.fronted === true,
       normal: source.normal === true
     };
     if (typeof source.rev !== "number" || source.rev < HUB_METHODS_REV) {
@@ -80,10 +88,11 @@ export function normalizeHubMethods(raw: unknown): HubMethods {
   } else {
     // Migration: directIpEnabled defaulted true, and directIpOnly defaulted
     // true meaning "never touch the domain", so normal is its inverse. A file
-    // this old predates Shadowsocks, which takes its current default.
+    // this old predates both newer methods, which take their current default.
     methods = {
       directIp: source.directIpEnabled !== false,
       shadowsocks: DEFAULT_HUB_METHODS.shadowsocks,
+      fronted: DEFAULT_HUB_METHODS.fronted,
       normal: source.directIpOnly === false
     };
   }

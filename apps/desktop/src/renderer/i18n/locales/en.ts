@@ -133,6 +133,8 @@ export const en = {
   "settings.censorship.directIp.hint": "Connect by IP address, skipping DNS entirely. The only method that works with the kill switch locked.",
   "settings.censorship.hubShadowsocks.title": "Shadowsocks",
   "settings.censorship.hubShadowsocks.hint": "Route account traffic through a Shadowsocks tunnel. Hides which server you are contacting, without turning the VPN on.",
+  "settings.censorship.hubFronted.title": "Relay",
+  "settings.censorship.hubFronted.hint": "Reach your account through a relay on a large content network, whose address is shared with much of the web and cannot be blocked cheaply. The relay only passes along sealed data it cannot read.",
   "settings.censorship.hubNormal.title": "Normal connection",
   "settings.censorship.hubNormal.hint": "Ordinary HTTPS using a normal DNS lookup. Tried last, because it is the only method that reveals our domain on the network.",
   "settings.censorship.lastMethod": "At least one connection method must stay on.",

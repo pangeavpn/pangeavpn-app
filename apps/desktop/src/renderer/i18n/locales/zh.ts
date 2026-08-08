@@ -133,6 +133,8 @@ export const zh = {
   "settings.censorship.directIp.hint": "直接通过 IP 地址连接，完全跳过 DNS。这是断网保护锁定时唯一可用的方式。",
   "settings.censorship.hubShadowsocks.title": "Shadowsocks",
   "settings.censorship.hubShadowsocks.hint": "通过 Shadowsocks 隧道转发账户流量。无需开启 VPN 即可隐藏您正在联系的服务器。",
+  "settings.censorship.hubFronted.title": "中继",
+  "settings.censorship.hubFronted.hint": "通过大型内容网络上的中继访问您的账户。该地址与大量网站共用，封锁代价高昂。中继只转发它无法读取的密封数据。",
   "settings.censorship.hubNormal.title": "常规连接",
   "settings.censorship.hubNormal.hint": "使用常规 DNS 查询的普通 HTTPS。最后尝试，因为它是唯一会在网络上暴露我们域名的方式。",
   "settings.censorship.lastMethod": "至少需保留一种连接方式开启。",

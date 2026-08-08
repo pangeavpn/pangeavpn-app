@@ -129,13 +129,23 @@ declare global {
     setDoh: (enabled: boolean) => Promise<void>;
     getDoh: () => Promise<boolean>;
     setHubMethod: (
-      method: "directIp" | "shadowsocks" | "normal",
+      method: "directIp" | "shadowsocks" | "fronted" | "normal",
       enabled: boolean
     ) => Promise<{
-      methods: { directIp: boolean; shadowsocks: boolean; normal: boolean };
+      methods: {
+        directIp: boolean;
+        shadowsocks: boolean;
+        fronted: boolean;
+        normal: boolean;
+      };
       applied: boolean;
     }>;
-    getHubMethods: () => Promise<{ directIp: boolean; shadowsocks: boolean; normal: boolean }>;
+    getHubMethods: () => Promise<{
+      directIp: boolean;
+      shadowsocks: boolean;
+      fronted: boolean;
+      normal: boolean;
+    }>;
     setAllowLan: (enabled: boolean) => Promise<void>;
     getAllowLan: () => Promise<boolean>;
     /** Resolves to the MTU actually stored — differs from `mtu` when it was rejected. */
