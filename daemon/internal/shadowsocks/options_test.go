@@ -43,7 +43,7 @@ func TestValidateProfile(t *testing.T) {
 			},
 		},
 		{
-			name: "ss2022 aes accepts an ipsk chain",
+			name:   "ss2022 aes accepts an ipsk chain",
 			mutate: func(p *state.ShadowsocksProfile) { p.Password = testPSK16 + ":" + testPSK16 },
 		},
 		{name: "dynamic local port", mutate: func(p *state.ShadowsocksProfile) { p.LocalPort = 0 }},
