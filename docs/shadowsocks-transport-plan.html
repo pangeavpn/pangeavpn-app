@@ -1,0 +1,1116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shadowsocks Transport — Implementation Plan (PangeaVPN)</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #171a21;
+    --panel-2: #1e222b;
+    --text: #d8dee9;
+    --muted: #8b95a7;
+    --accent: #5fb3f5;
+    --accent-2: #7fd6a2;
+    --warn: #f0b45f;
+    --danger: #f07f7f;
+    --border: #2a2f3a;
+    --code-bg: #11141a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.65 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 40px 28px 120px; }
+  header.doc {
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 24px;
+    margin-bottom: 32px;
+  }
+  h1 { font-size: 30px; margin: 0 0 8px; letter-spacing: -0.4px; }
+  h2 {
+    font-size: 22px;
+    margin: 48px 0 14px;
+    padding-top: 20px;
+    border-top: 1px solid var(--border);
+    letter-spacing: -0.2px;
+  }
+  h3 { font-size: 17px; margin: 28px 0 10px; color: var(--accent); }
+  h4 { font-size: 15px; margin: 20px 0 8px; color: var(--accent-2); }
+  p, li { color: var(--text); }
+  .sub { color: var(--muted); font-size: 14px; }
+  code, pre { font-family: "Cascadia Code", Consolas, "SF Mono", Menlo, monospace; }
+  code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; font-size: 13px; color: #cfe3f5; }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
+    overflow-x: auto;
+    font-size: 12.5px;
+    line-height: 1.55;
+  }
+  pre code { background: none; padding: 0; }
+  table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 13.5px; }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; text-transform: uppercase; font-size: 11.5px; letter-spacing: 0.6px; }
+  tr:last-child td { border-bottom: none; }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px 22px;
+    margin: 18px 0;
+  }
+  .card.tight { padding: 14px 18px; }
+  .note, .warn, .danger {
+    border-left: 3px solid var(--accent);
+    background: var(--panel-2);
+    border-radius: 0 8px 8px 0;
+    padding: 12px 16px;
+    margin: 16px 0;
+    font-size: 14px;
+  }
+  .warn { border-left-color: var(--warn); }
+  .danger { border-left-color: var(--danger); }
+  .tag {
+    display: inline-block;
+    font-size: 11px;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    padding: 2px 8px;
+    border-radius: 20px;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    margin-left: 8px;
+    vertical-align: 2px;
+  }
+  .tag.new { color: var(--accent-2); border-color: #2f5d45; }
+  .tag.edit { color: var(--accent); border-color: #2b4a63; }
+  .tag.srv { color: var(--warn); border-color: #5e4a29; }
+  .tag.fix { color: var(--danger); border-color: #6b3838; }
+  ol.phases > li { margin-bottom: 8px; }
+  ul.compact li { margin-bottom: 4px; }
+  .file { color: #e6d3a3; font-family: "Cascadia Code", Consolas, monospace; font-size: 13px; }
+  .toc { columns: 2; column-gap: 40px; font-size: 14px; }
+  .toc a { color: var(--accent); text-decoration: none; display: block; padding: 3px 0; }
+  .toc a:hover { text-decoration: underline; }
+  .flow {
+    font-family: "Cascadia Code", Consolas, monospace;
+    font-size: 12.5px;
+    white-space: pre;
+    overflow-x: auto;
+    color: #b9c7d9;
+  }
+  hr { border: none; border-top: 1px solid var(--border); margin: 32px 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="doc">
+  <h1>Shadowsocks as a Transport — Implementation Plan</h1>
+  <p class="sub">
+    Two independent deliverables: <strong>(A)</strong> Shadowsocks as a WireGuard-carrying DPI-evasion
+    transport in the daemon, and <strong>(B)</strong> Shadowsocks as a fallback path for the desktop app's
+    hub control-plane traffic — used only after <em>cached direct IP</em>, <em>direct domain</em> and
+    <em>DoH-resolved IP</em> have all failed.
+    <br>Repos: <span class="file">pangeavpn-app</span> (daemon + desktop) and <span class="file">PangeaHubServer</span> (hub + node).
+  </p>
+  <p class="sub" style="margin-top:14px">
+    <strong>Verified 2026-08-07</strong> against <span class="file">pangeavpn-app</span>@<code>f9ca553</code> and
+    <span class="file">PangeaHubServer</span>@<code>f4ee6b9</code>, sing-box <code>v1.13.14</code> /
+    sing-shadowsocks2 <code>v0.2.1</code> as vendored. Every file path, line number, API signature and
+    server-side convention below was read from the tree rather than recalled. Items corrected during that
+    pass are tagged <span class="tag fix">fixed</span>.
+  </p>
+</header>
+
+<div class="card tight">
+  <div class="toc">
+    <a href="#state">1. Current state &amp; why this is cheap</a>
+    <a href="#goals">2. Goals and non-goals</a>
+    <a href="#arch">3. Architecture</a>
+    <a href="#server">4. Server-side (node + hub)</a>
+    <a href="#daemon">5. Daemon: SS as a WG transport</a>
+    <a href="#cascade">6. Cascade &amp; kill-switch integration</a>
+    <a href="#client">7. Desktop client plumbing</a>
+    <a href="#hubfallback">8. Hub control-plane over Shadowsocks</a>
+    <a href="#phases">9. Phasing &amp; task checklist</a>
+    <a href="#testing">10. Testing</a>
+    <a href="#risks">11. Risks &amp; open decisions</a>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════ -->
+<h2 id="state">1. Current state &amp; why this is cheap</h2>
+
+<p>Shadowsocks already exists across this stack — just never as a first-class desktop transport:</p>
+
+<table>
+  <tr><th>Where</th><th>What exists today</th></tr>
+  <tr>
+    <td><span class="file">node/entrypoint.sh</span></td>
+    <td><code>ssserver</code> (shadowsocks-rust) runs on every node, <code>chacha20-ietf-poly1305</code>,
+        <code>mode: tcp_and_udp</code>, bound to <strong>127.0.0.1:8388</strong> and fronted by Cloak
+        (<code>ProxyBook.shadowsocks</code>). Not publicly reachable.</td>
+  </tr>
+  <tr>
+    <td><span class="file">node/src/routes/ssAddUser.js</span></td>
+    <td><code>/internal/ss-add-user</code> / <code>ss-remove-user</code>, JWT-authed from the hub, sending
+        <code>add:</code>/<code>remove:</code> commands to <code>127.0.0.1:6100</code> over UDP
+        (<span class="file">node/src/services/ssManagerService.js</span>).
+        <strong>But no <code>ssmanager</code> process exists</strong> <span class="tag fix">fixed</span> — the
+        binary is installed by <span class="file">node/Dockerfile</span> and never launched:
+        <span class="file">supervisord.conf</span> defines only <code>[program:ssserver]</code>, and
+        <span class="file">entrypoint.sh</span> writes no ssmanager conf. These routes time out today. See
+        Phase 4.</td>
+  </tr>
+  <tr>
+    <td><span class="file">hub/src/routes/ssRegister.js</span></td>
+    <td><code>/api/ss-register</code> mints a per-device Cloak UID and returns the node's shared
+        <code>ssPassword</code>/<code>ssPort</code>. Desktop-oriented but currently unused by the app.</td>
+  </tr>
+  <tr>
+    <td><span class="file">hub/config/nodes.json</span></td>
+    <td>Every node entry already carries <code>cloak.ssPassword</code> and <code>cloak.ssPort</code>.</td>
+  </tr>
+  <tr>
+    <td><span class="file">daemon/go.mod</span></td>
+    <td><code>sing-box v1.13.14</code> is vendored. Its <code>protocol/shadowsocks</code> package ships a
+        ready outbound; we already embed sing-box in-process for <code>reality</code> and <code>hysteria2</code>.</td>
+  </tr>
+</table>
+
+<p>The verified sing-box API surface we will build on (v1.13.14):</p>
+<pre><code>// protocol/shadowsocks/outbound.go
+func RegisterOutbound(registry *outbound.Registry)   // registers C.TypeShadowsocks ("shadowsocks")
+func (h *Outbound) DialContext(ctx, network, dst M.Socksaddr) (net.Conn, error)
+func (h *Outbound) ListenPacket(ctx, dst M.Socksaddr) (net.PacketConn, error)   // ← the UDP relay we need
+
+// option/shadowsocks.go
+type ShadowsocksOutboundOptions struct {
+    DialerOptions
+    ServerOptions                            // Server, ServerPort
+    Method        string                     // "chacha20-ietf-poly1305", "2022-blake3-aes-128-gcm", ...
+    Password      string
+    Plugin        string                     // SIP003 (external process) — NOT used here
+    PluginOptions string
+    Network       NetworkList
+    UDPOverTCP    *UDPOverTCPOptions         // {Enabled bool, Version uint8}
+    Multiplex     *OutboundMultiplexOptions
+}</code></pre>
+
+<p>Method support comes from <code>sing-shadowsocks2 v0.2.1</code>, whose <code>CreateMethod</code> registry
+covers three families: <code>shadowaead</code> (<code>aes-{128,192,256}-gcm</code>,
+<code>chacha20-ietf-poly1305</code>, <code>xchacha20-ietf-poly1305</code>), <code>shadowaead_2022</code>
+(<code>2022-blake3-aes-{128,256}-gcm</code>, <code>2022-blake3-chacha20-poly1305</code>), and the legacy
+<code>shadowstream</code> ciphers. The <code>options.go</code> allow-list must admit the first two families
+and <em>reject</em> <code>shadowstream</code> — those ciphers are unauthenticated and trivially probed.</p>
+
+<div class="warn">
+  <strong>Module graph note.</strong> <span class="file">daemon/go.sum</span> currently has <em>no</em>
+  <code>github.com/sagernet/sing-shadowsocks2</code> entry — Go's module graph pruning drops it because
+  nothing in the build imports <code>protocol/shadowsocks</code>, which is the only thing that pulls it in.
+  It is <em>not</em> a dependency we add by hand: it is sing-box's own, and the daemon never imports it
+  directly. The first task of Phase 1 is simply to write the
+  <code>import "github.com/sagernet/sing-box/protocol/shadowsocks"</code> in the new package and run
+  <code>go mod tidy</code> inside <span class="file">daemon/</span>; tidy then records
+  <code>sing-shadowsocks2</code> (plus its own transitive entries) as <code>// indirect</code>.
+  Expect <code>go.mod</code>/<code>go.sum</code> churn only; nothing else in the tree changes.
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════ -->
+<h2 id="goals">2. Goals and non-goals</h2>
+
+<h3>Goals</h3>
+<ul class="compact">
+  <li><strong>G1.</strong> A <code>shadowsocks</code> transport in the daemon that carries WireGuard UDP,
+      shaped exactly like <code>reality</code>/<code>hysteria2</code>: loopback UDP listener → in-process
+      sing-box outbound → node's WireGuard listener.</li>
+  <li><strong>G2.</strong> A Shadowsocks path for the desktop's <em>hub</em> traffic (the
+      <code>/v1/secure</code> envelope), engaged only after all three existing <code>ensureHub()</code> steps
+      — cached IP, direct domain, DoH-resolved IP — have failed.</li>
+  <li><strong>G3.</strong> Backup positioning: Shadowsocks never pre-empts Cloak for the tunnel, and never
+      pre-empts cached IP / direct domain / DoH for the hub. It sits at the back of both cascades.</li>
+  <li><strong>G4.</strong> Zero regression: every existing transport, the kill switch, and the Lockdown
+      no-DNS invariant behave exactly as before when Shadowsocks is absent from a profile.</li>
+</ul>
+
+<h3>Non-goals (this plan)</h3>
+<ul class="compact">
+  <li>Android/TV client support — <span class="file">apps/android</span> has no transport wiring yet; out of scope.</li>
+  <li>Replacing the mobile Shadowrocket flow (<code>ShadowsocksConfig</code> table, <code>/api/shadowrocket/*</code>) — untouched.</li>
+  <li>SIP003 plugin chaining (external <code>ck-client</code> process). We reach Cloak in-process already;
+      running SS <em>through</em> Cloak is explicitly rejected below.</li>
+</ul>
+
+<!-- ══════════════════════════════════════════════════════════════ -->
+<h2 id="arch">3. Architecture</h2>
+
+<h3>3.1 Deployment shape: direct SS, not SS-over-Cloak</h3>
+
+<p>Two options exist; only one is worth building as a transport:</p>
+
+<table>
+  <tr><th>Option</th><th>Node change</th><th>Verdict</th></tr>
+  <tr>
+    <td><strong>SS through Cloak</strong> — SS outbound dials <code>127.0.0.1:&lt;local cloak port&gt;</code>
+        with <code>ProxyMethod: shadowsocks</code>.</td>
+    <td>None. <code>ProxyBook.shadowsocks</code> already exists.</td>
+    <td class="sub"><strong>Reject as a transport.</strong> If Cloak is blocked, this is blocked. It adds a
+        second wire format behind an identical outer handshake — no censorship-resistance diversity, only
+        overhead. (Still fine as a debug/lab mode.)</td>
+  </tr>
+  <tr>
+    <td><strong>Direct SS</strong> — a second <code>ssserver</code> instance bound publicly on the node,
+        client dials it straight.</td>
+    <td>New listener + published port + ACL.</td>
+    <td class="sub"><strong>Build this.</strong> A genuinely independent wire protocol and independent
+        port/IP-level failure mode from Cloak, REALITY, Hysteria2 and NaiveProxy.</td>
+  </tr>
+</table>
+
+<h3>3.2 Data path (G1 — WireGuard over Shadowsocks)</h3>
+
+<div class="card">
+<div class="flow">
+  WireGuard (userspace, daemon)
+        │  peer Endpoint = 127.0.0.1:&lt;boundLocalPort&gt;
+        ▼
+  shadowsocks.Manager  ── loopback *net.UDPConn ──┐
+                                                  │ bridgeUDP (single-flow NAT,
+                                                  │  identical to reality/bridge.go)
+                                                  ▼
+  sing-box Outbound(tag="shadowsocks-out").ListenPacket(ctx, 127.0.0.1:51820)
+        │  SS AEAD UDP datagrams (or UoT when udpOverTcp=true)
+        ▼
+  node: ssserver  (public port, tcp_and_udp)
+        │  relays to the destination in the SS header
+        ▼
+  node: wg0 listener 127.0.0.1:51820
+</div>
+</div>
+
+<p>This mirrors <span class="file">daemon/internal/reality/manager.go</span> almost line for line: single
+outbound, no local SOCKS inbound, <code>ListenPacket</code> against a fixed destination, a two-goroutine UDP
+bridge, and a <code>generation</code> counter guarding against a zombie bridge from a previous
+<code>Start</code>. <em>Do not</em> copy the hysteria2 shape (mixed inbound + SOCKS5 UDP ASSOCIATE) — that
+indirection exists only because sing-quic needs it.</p>
+
+<div class="note">
+  <strong>Destination choice.</strong> Default <code>targetPort</code> = 51820 against <code>127.0.0.1</code>,
+  same convention as <code>reality.defaultTargetPort</code> (reality/manager.go:59, which hardcodes
+  <code>127.0.0.1</code> and exposes only the port; Shadowsocks adds <code>targetHost</code> because its ACL
+  makes the address a deployment variable). If a hardened <code>ssserver</code> ACL refuses loopback
+  destinations, fall back to the node's WG interface address (<code>10.10.1.1:51820</code>).
+  <br><br><strong>Coupled to the node.</strong> <code>targetHost</code> is only "hub-configurable without a
+  client release" as far as the node's <code>outbound_allow_list</code> permits — changing it means editing
+  <code>SS_RELAY_TARGET</code> and restarting <code>ssserver-public</code> too. It buys a config change
+  instead of a client release, not a config change instead of a deploy.
+</div>
+
+<h3>3.3 Data path (G2 — hub control plane over Shadowsocks)</h3>
+
+<div class="card">
+<div class="flow">
+  Electron main (pangeaApiClient.hubFetch)
+        │  POST /v1/secure  {eph, iv, ct, tag}   ← already end-to-end encrypted
+        ▼
+  hubTransport.ts  ── TCP → 127.0.0.1:&lt;daemon SS proxy port&gt;
+        │  HTTP CONNECT &lt;hubIp&gt;:443     (mixed inbound speaks HTTP CONNECT)
+        │  then tls.connect({ socket, servername: "" })   ← same no-SNI trick as fetchDohResolved
+        ▼
+  daemon: shadowsocks.ProxyManager  (mixed inbound → shadowsocks outbound, no WG bridge)
+        ▼
+  node ssserver ──→ api.pangeavpn.org:443
+</div>
+</div>
+
+<p>The app never gains a SOCKS dependency: sing-box's <code>mixed</code> inbound already answers HTTP
+<code>CONNECT</code>, and Node's <code>tls.connect({ socket })</code> + <code>https.request({ createConnection })</code>
+composes over it with zero new npm packages. This also preserves the existing
+<code>servername: ""</code> / <code>rejectUnauthorized: false</code> behaviour that
+<code>fetchDohResolved</code> relies on.</p>
+
+<div class="warn">
+  <strong>Bootstrap chicken-and-egg.</strong> SS hub credentials normally come <em>from</em> the hub. On a
+  cold install behind a block there is nothing cached. Resolution — two sources, tried in order:
+  <ol class="compact" style="margin-bottom:0">
+    <li><strong>Cached</strong> SS entry persisted to <code>settings.json</code> from the last successful
+        <code>/api/client/regions</code> (exactly how <code>cachedHubIp</code> already works).</li>
+    <li><strong>Baked-in bootstrap</strong> entry compiled into the app — host IP, port, method, password —
+        rotatable via app update. Precedent already exists: <code>SERVER_PUBLIC_KEY_B64</code> is pinned in
+        <span class="file">secureChannel.ts</span>. Point it at a dedicated control-plane SS listener whose
+        ACL only permits the hub IP:443, so a leaked bootstrap password buys an attacker nothing but a path
+        to our own public API.</li>
+  </ol>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════ -->
+<h2 id="server">4. Server-side (node + hub) <span class="tag srv">PangeaHubServer</span></h2>
+
+<h3>4.1 Node: a publicly-bound ssserver</h3>
+
+<h4><span class="file">node/entrypoint.sh</span> <span class="tag edit">edit</span></h4>
+<p>Keep the existing loopback instance untouched (Cloak depends on it). Add a second config + ACL, and
+register its supervisord program the way every other opt-in service on this node does — by writing
+<span class="file">/etc/supervisor/conf.d/*.conf</span> only when the env vars are set:</p>
+<pre><code># ── Public Shadowsocks (direct transport) ──────────────────────────────
+SS_PUBLIC_PORT="${SS_PUBLIC_PORT:-8488}"
+if [ -n "$SS_PUBLIC_PASSWORD" ]; then
+  cat &gt; /etc/shadowsocks/config-public.json &lt;&lt;EOF
+{
+  "server": "0.0.0.0",
+  "server_port": ${SS_PUBLIC_PORT},
+  "password": "${SS_PUBLIC_PASSWORD}",
+  "method": "${SS_PUBLIC_METHOD:-chacha20-ietf-poly1305}",
+  "mode": "tcp_and_udp",
+  "timeout": 300,
+  "acl": "/etc/shadowsocks/public.acl",
+  "security": { "replay_attack": { "policy": "reject" } }
+}
+EOF
+  # ACL: this listener is a tunnel endpoint, NOT an open proxy. The OUTBOUND
+  # sections are what enforce that — see the note below on why [white_list] is
+  # the wrong tool here.
+  cat &gt; /etc/shadowsocks/public.acl &lt;&lt;EOF
+[outbound_block_all]
+[outbound_allow_list]
+${SS_RELAY_TARGET:-127.0.0.1}
+EOF
+  cat &gt; /etc/supervisor/conf.d/ss-public.conf &lt;&lt;EOF
+[program:ssserver-public]
+command=ssserver -c /etc/shadowsocks/config-public.json
+autostart=true
+autorestart=true
+stdout_logfile=/dev/null
+stdout_logfile_maxbytes=0
+stderr_logfile=/dev/null
+stderr_logfile_maxbytes=0
+priority=12
+EOF
+  echo "[entrypoint] public Shadowsocks registered at /etc/supervisor/conf.d/ss-public.conf"
+else
+  rm -f /etc/supervisor/conf.d/ss-public.conf
+  echo "[entrypoint] SS_PUBLIC_PASSWORD not set — public Shadowsocks is opt-in per node, skipping"
+fi</code></pre>
+
+<div class="danger">
+  <strong>The ACL is not optional, and the obvious sections are the wrong ones.</strong>
+  <span class="tag fix">fixed</span>
+  shadowsocks-rust gives <code>ssserver</code> <em>two independent</em> ACL axes, and only one of them
+  restricts where the server will relay to:
+  <table style="margin-top:10px">
+    <tr><th>Sections</th><th>What they actually filter</th></tr>
+    <tr>
+      <td><code>[reject_all]</code> / <code>[accept_all]</code> + <code>[white_list]</code> /
+          <code>[black_list]</code></td>
+      <td>The <strong>client's source address</strong>. Upstream wording: <em>"[reject_all] — rejects all
+          clients except those matching any rules"</em>, <em>"[white_list] — rules for accepted clients"</em>.</td>
+    </tr>
+    <tr>
+      <td><code>[outbound_block_all]</code> / <code>[outbound_allow_all]</code> +
+          <code>[outbound_allow_list]</code> / <code>[outbound_block_list]</code></td>
+      <td>The <strong>destination the server relays to</strong>. This is the open-proxy control.</td>
+    </tr>
+  </table>
+  The earlier draft of this plan used <code>[reject_all]</code> + <code>[white_list] 127.0.0.1, 10.10.1.1,
+  HUB_IP</code>. That would have rejected <em>every real user</em> (their source IPs are arbitrary and
+  unknowable) while leaving the relay wide open to anyone who did get in — exactly backwards. Ship the
+  outbound form above, in the same commit as the listener.
+</div>
+
+<div class="warn">
+  <strong>The outbound allow-list is address-scoped, not port-scoped.</strong> <span class="tag fix">fixed</span>
+  Allowing <code>127.0.0.1</code> lets an authenticated SS client reach <em>every</em> loopback service on
+  the node, not just WireGuard on 51820 — the node API (<code>:3001</code>), Cloak's admin client
+  (<code>:8100</code>), sing-box's inbounds, and <code>ssmanager</code> (<code>:6100</code>) if Phase 4 ever
+  starts it. Switching <code>targetHost</code> to <code>10.10.1.1</code> does not fix this: services bound to
+  <code>0.0.0.0</code> answer on the WG address too. Mitigations, in order of preference:
+  <ol class="compact" style="margin-bottom:0">
+    <li>Run <code>ssserver-public</code> as a dedicated uid and add an iptables rule
+        <code>-A OUTPUT -m owner --uid-owner ssrelay ! --dport 51820 -j REJECT</code> — the only mechanism
+        that actually enforces the port.</li>
+    <li>Bind the node API and admin services to interfaces the relay cannot reach.</li>
+    <li>At minimum, treat the shared password as granting node-loopback access and prioritise Phase 4's
+        per-device credentials accordingly.</li>
+  </ol>
+</div>
+
+<h4><span class="file">node/supervisord.conf</span> — <em>no change</em> <span class="tag fix">fixed</span></h4>
+<p>An earlier draft added a static <code>[program:ssserver-public]</code> with <code>autostart=true</code>
+here. That would crash-loop on every node without <code>SS_PUBLIC_PASSWORD</code> — precisely what the
+comment block at the bottom of this file forbids ("naive-caddy / naive-bridge / sing-box / snowflake-* are
+NOT defined statically here… vs. autostart=true + a permanently-failing/crash-looping process"). The
+<code>[include] files = /etc/supervisor/conf.d/*.conf</code> glob already picks up the conf written above.</p>
+
+<h4>Host firewall <span class="tag edit">edit</span></h4>
+<p><span class="file">docker-compose.yml</span> needs <strong>no change</strong> <span class="tag fix">fixed</span>:
+<code>vpn-node</code> runs <code>network_mode: host</code> and publishes no ports at all — there is no
+<code>ports:</code> block to extend. The real change is one line in
+<span class="file">setup-host.sh</span>'s existing "UFW allow ports" block:</p>
+<pre><code>ufw allow 8488/tcp  comment 'Shadowsocks (direct transport)' &gt; /dev/null
+ufw allow 8488/udp  comment 'Shadowsocks UDP'                &gt; /dev/null</code></pre>
+<p>Pick a port that reads as ordinary: avoid 8388 (the SS default, actively scanned).</p>
+
+<h4><span class="file">node/.env.example</span> <span class="tag edit">edit</span></h4>
+<pre><code># Public Shadowsocks (direct DPI-evasion transport, opt-in per node).
+# Unset SS_PUBLIC_PASSWORD => no listener, no supervisord program.
+# SS_RELAY_TARGET is the only address the relay may reach (see public.acl).
+SS_PUBLIC_PORT=8488
+SS_PUBLIC_PASSWORD=
+SS_PUBLIC_METHOD=chacha20-ietf-poly1305
+SS_RELAY_TARGET=127.0.0.1</code></pre>
+<p class="sub">No <code>HUB_IP</code> here — it belongs only to the separate control-plane listener of §8, whose
+<code>outbound_allow_list</code> names the hub instead of the WireGuard target.</p>
+
+<h3>4.2 Hub: advertise it</h3>
+
+<h4><span class="file">hub/config/nodes.json</span> (+ <span class="file">nodes.local.json</span>) <span class="tag edit">edit</span></h4>
+<pre><code>"shadowsocks": {
+  "remoteHost": "192.248.175.17",
+  "remotePort": 8488,
+  "method":     "chacha20-ietf-poly1305",
+  "password":   "&lt;SS_PUBLIC_PASSWORD for this node&gt;",
+  "targetHost": "127.0.0.1",
+  "targetPort": 51820,
+  "udpOverTcp": false
+}</code></pre>
+<p><span class="tag fix">fixed</span> Two fields dropped from the earlier draft, to match how every other
+transport block in this file is actually written:</p>
+<ul class="compact">
+  <li><code>enabled</code> — no transport block uses it. Presence <em>is</em> the enable flag
+      (<code>...(hysteria2 ? … : {})</code> in clientRegions.js).</li>
+  <li><code>remoteIp</code> — nothing in the hub emits it. <code>buildNaiveBlock</code>,
+      <code>buildRealityBlock</code> and <code>buildHysteria2Block</code> all copy <code>remoteHost</code>
+      only; the client's <code>server.&lt;transport&gt;.remoteIp ?? nodeIp</code> fallback is what supplies
+      the address, and <code>nodeIp</code> (<code>cloak.remoteHost</code>) is already an IP literal. Adding
+      <code>remoteIp</code> here would be the first use of a field the whole stack currently ignores.</li>
+</ul>
+
+<h4><span class="file">hub/src/lib/shadowsocksConnectionInfo.js</span> <span class="tag new">new</span></h4>
+<p><span class="tag fix">fixed</span> <span class="file">clientRegions.js</span> no longer builds transport
+blocks inline — the earlier draft's conditional-spread snippet describes a shape this file outgrew. Each
+transport now delegates to a <code>build*Block</code> helper in <span class="file">hub/src/lib/</span>
+(<code>naiveConnectionInfo.js</code>, <code>snowflakeConnectionInfo.js</code>,
+<code>realityConnectionInfo.js</code>, <code>hysteria2ConnectionInfo.js</code>). Add a fifth, modelled
+line-for-line on <code>buildHysteria2Block</code>:</p>
+<pre><code>// buildShadowsocksBlock returns the client-facing Shadowsocks connection block
+// for a node, or undefined if the node has no shadowsocks config. Credentials
+// are static per node (shared password) until per-device provisioning lands —
+// same reasoning as buildHysteria2Block: a pure copy, no DB lookups.
+export function buildShadowsocksBlock(node) {
+  if (!node.shadowsocks) return undefined;
+
+  const { remoteHost, remotePort, method, password,
+          targetHost, targetPort, udpOverTcp } = node.shadowsocks;
+  return {
+    remoteHost,
+    remotePort,
+    method,
+    password,
+    // Hub-configurable so a node whose ssserver ACL refuses loopback can be
+    // repointed at 10.10.1.1 without a client release (see §3.2).
+    ...(targetHost ? { targetHost } : {}),
+    ...(targetPort ? { targetPort } : {}),
+    ...(udpOverTcp ? { udpOverTcp: true } : {}),
+  };
+}</code></pre>
+
+<h4><span class="file">hub/src/routes/clientRegions.js</span> <span class="tag edit">edit</span></h4>
+<p>Three lines: the import, <code>shadowsocks</code> in the
+<code>getEnabledNodes().map(({ id, region, flag, endpoint, dns, cloak, naive, snowflake, reality, hysteria2 })</code>
+destructure, and the spread beside the others:</p>
+<pre><code>...(shadowsocks ? { shadowsocks: buildShadowsocksBlock({ id, shadowsocks }) } : {}),</code></pre>
+
+<h4>Control-plane listener (for G2) <span class="tag new">new</span></h4>
+<p>Add one hub-managed field, separate from the per-node tunnel listener, returned by
+<code>/api/client/regions</code> and cached client-side:</p>
+<pre><code>// top-level, not per-region — the client caches this for hub reachability
+"controlPlaneShadowsocks": {
+  "remoteHost": "…", "remotePort": 8489,
+  "method": "chacha20-ietf-poly1305", "password": "…"
+}</code></pre>
+<p>Node side: a third <code>ssserver</code> instance whose ACL is
+<code>[outbound_block_all]</code> + <code>[outbound_allow_list] ${HUB_IP}</code> — the same corrected form as
+§4.1, pointed at the hub rather than at WireGuard. Rotating it is a nodes.json edit plus an app release for
+the baked-in copy.</p>
+<p class="sub">Note this payload is <em>top-level</em>, but <code>/api/client/regions</code> currently
+responds with a bare array (<code>res.json(clientRegions)</code>). Emitting a top-level object alongside it
+is a breaking response-shape change for existing clients. Either put the block on each region (redundant but
+additive and safe), or serve it from a new endpoint. <strong>Decide this before Phase 3</strong> — see the
+open decisions in §11.</p>
+
+<h4>Deliberately unchanged</h4>
+<ul class="compact">
+  <li><span class="file">hub/src/routes/ssRegister.js</span> — the Cloak-UID SS flow stays as is.</li>
+  <li><span class="file">hub/src/services/ssProvisioningService.js</span>, <code>/api/shadowrocket/*</code>,
+      the <code>ShadowsocksConfig</code> table — mobile-only, untouched.</li>
+  <li><code>/internal/ss-add-user</code> — reserved for Phase 4, and note it is currently inert (§1).</li>
+</ul>
+
+<!-- ══════════════════════════════════════════════════════════════ -->
+<h2 id="daemon">5. Daemon: Shadowsocks as a WireGuard transport <span class="tag">pangeavpn-app</span></h2>
+
+<h3>5.1 State types</h3>
+
+<h4><span class="file">daemon/internal/state/types.go</span> <span class="tag edit">edit</span></h4>
+<pre><code>const SourceShadowsocks LogSource = "shadowsocks"
+
+// ShadowsocksProfile carries per-node Shadowsocks (AEAD or SS-2022) settings.
+// Unlike Cloak/REALITY, there is no handshake to prove: SS authenticates the
+// first datagram with the pre-shared key, so a successful Start says nothing
+// about credential validity — the WireGuard handshake gate is the real proof.
+// Nil on a Profile means no Shadowsocks transport is configured.
+type ShadowsocksProfile struct {
+    LocalPort  int    `json:"localPort"`
+    RemoteHost string `json:"remoteHost"`
+    RemotePort int    `json:"remotePort"`
+    Method     string `json:"method"`
+    Password   string `json:"password"`
+    // TargetHost/TargetPort are the destination the SS server relays decoded
+    // packets to — the node's own WireGuard listener. Default 127.0.0.1:51820.
+    TargetHost string `json:"targetHost,omitempty"`
+    TargetPort int    `json:"targetPort,omitempty"`
+    // UDPOverTCP tunnels WireGuard's UDP inside the SS TCP stream. Slower, but
+    // the only thing that works where UDP is dropped outright.
+    UDPOverTCP bool `json:"udpOverTcp,omitempty"`
+}</code></pre>
+<p>Then: add <code>Shadowsocks *ShadowsocksProfile</code> to <code>Profile</code>,
+<code>Shadowsocks TransportStatus</code> to <code>StatusResponse</code>, and extend the
+<code>ActiveTransport</code> doc comment (types.go:66).</p>
+<p class="sub"><span class="tag fix">fixed</span> On <code>SourceShadowsocks</code>: precedent is split.
+<code>cloak</code>, <code>naive</code> and <code>snowflake</code> each own a <code>LogSource</code>;
+<code>reality</code> and <code>hysteria2</code> define none and log everything under
+<code>SourceDaemon</code>. Adding the constant is the better half of that split — but it is a deliberate
+choice rather than copying the nearest neighbour, and it only earns its keep if the new package actually
+logs with it.</p>
+
+<h4><span class="file">daemon/internal/state/config_store.go</span> <span class="tag edit">edit</span></h4>
+<p><code>cloneShadowsocksProfile</code> (flat struct — same body as <code>cloneHysteria2Profile</code> at
+line 222), called from <code>cloneProfile</code>'s pointer block at lines 189–192.</p>
+
+<h3>5.2 New package <span class="file">daemon/internal/shadowsocks/</span> <span class="tag new">new</span></h3>
+
+<table>
+  <tr><th>File</th><th>Contents</th></tr>
+  <tr>
+    <td><span class="file">registry.go</span></td>
+    <td><code>registryContext(ctx)</code> — outbound registry with <code>sbshadowsocks.RegisterOutbound</code>
+        only (plus <code>direct</code> and <code>RegisterInbound</code> behind the test harness), the
+        mandatory <code>dnslocal</code> transport, empty endpoint/service registries. Copy
+        <span class="file">reality/manager.go:registryContext</span>.</td>
+  </tr>
+  <tr>
+    <td><span class="file">options.go</span></td>
+    <td><code>validateProfile</code> (remoteHost, remotePort&gt;0, password non-empty, method in a known
+        allow-list, localPort&gt;=0); <code>buildOutboundOptions</code> →
+        <code>*option.ShadowsocksOutboundOptions</code>; consts <code>outboundTag = "shadowsocks-out"</code>,
+        <code>defaultMethod</code>, <code>defaultTargetHost/Port</code>.</td>
+  </tr>
+  <tr>
+    <td><span class="file">bridge.go</span></td>
+    <td><code>bridgeUDP</code> — verbatim port of <span class="file">reality/bridge.go</span> (single-flow
+        NAT via <code>atomic.Pointer[net.UDPAddr]</code>, clean-shutdown on <code>net.ErrClosed</code>).</td>
+  </tr>
+  <tr>
+    <td><span class="file">manager.go</span></td>
+    <td><code>Manager</code> with <code>Start/Stop/Status/BoundLocalPort</code>, generation guard,
+        <code>forceResetStateLocked</code>. Satisfies <code>transport.Manager</code> +
+        <code>transport.BoundPortReporter</code>.</td>
+  </tr>
+  <tr>
+    <td><span class="file">proxy.go</span></td>
+    <td><code>ProxyManager</code> for §8: <code>mixed</code> inbound on an ephemeral loopback port fronting
+        the same SS outbound; <code>Start(ctx, profile) (port int, err error)</code>, <code>Stop</code>.
+        No WireGuard bridge.</td>
+  </tr>
+</table>
+
+<h4>buildOutboundOptions</h4>
+<pre><code>func buildOutboundOptions(p state.ShadowsocksProfile) *option.ShadowsocksOutboundOptions {
+    opts := &amp;option.ShadowsocksOutboundOptions{
+        ServerOptions: option.ServerOptions{
+            Server:     p.RemoteHost,
+            ServerPort: uint16(p.RemotePort),
+        },
+        Method:   methodOrDefault(p.Method),
+        Password: p.Password,
+    }
+    // Multiplex stays nil: WireGuard is one long-lived flow, so yamux/smux
+    // adds framing overhead and a second fingerprintable layer for nothing.
+    if p.UDPOverTCP {
+        opts.UDPOverTCP = &amp;option.UDPOverTCPOptions{Enabled: true}
+    }
+    return opts
+}</code></pre>
+
+<div class="note">
+  <strong>Why no <code>SessionWaiter</code>.</strong> <code>transport.SessionWaiter</code> is optional and
+  checked by type assertion. For Cloak/REALITY/Hysteria2 a successful handshake proves credentials; for
+  Shadowsocks <code>ListenPacket</code> merely dials a UDP socket at the server and returns instantly even
+  with a wrong password. Implementing it would report success on a broken profile — worse than not
+  implementing it. <code>Service.bringUpTransport</code>'s existing
+  <code>waitForWireGuardHandshake</code> gate is the honest end-to-end proof and already runs for every
+  transport. <em>Optional refinement:</em> a <code>DialContext</code> TCP probe to the node's own
+  <code>&lt;targetHost&gt;:51820</code> would surface a bad PSK ~10 s earlier; add only if cascade latency
+  proves painful in testing.
+</div>
+
+<h4>Manager.Start skeleton</h4>
+<pre><code>func (m *Manager) Start(ctx context.Context, profile state.ShadowsocksProfile) error {
+    // 1. lock; early-return if already running; validateProfile
+    // 2. engineCtx, cancel := context.WithCancel(context.Background())
+    // 3. box.New(box.Options{Context: registryContext(engineCtx), Options: option.Options{
+    //        Log: &option.LogOptions{Level: "warn"},
+    //        Outbounds: []option.Outbound{{Type: C.TypeShadowsocks, Tag: outboundTag,
+    //                                      Options: buildOutboundOptions(profile)}},
+    //    }})  →  engine.Start()
+    // 4. ob, _ := engine.Outbound().Outbound(outboundTag)
+    //    remote, err := ob.ListenPacket(dialCtx, M.ParseSocksaddrHostPort(targetHost, targetPort))
+    // 5. localConn := net.ListenUDP("udp", 127.0.0.1:profile.LocalPort)  // 0 ⇒ kernel-assigned
+    //    boundLocalPort = localConn.LocalAddr().(*net.UDPAddr).Port
+    // 6. m.generation++; publish state; unlock
+    // 7. go bridgeUDP(engineCtx, localConn, remote, targetAddr) + generation-guarded teardown
+}</code></pre>
+
+<h3>5.3 Service wiring — <span class="file">daemon/internal/api/service.go</span> <span class="tag edit">edit</span></h3>
+
+<p>Follow the <code>hysteria2</code> pattern exactly. Every touch point, line numbers re-read at
+<code>f9ca553</code> (<span class="file">service.go</span> is 2097 lines):</p>
+<table>
+  <tr><th>Line</th><th>Change</th></tr>
+  <tr><td>55–61</td><td>New <code>shadowsocksManager</code> interface beside <code>hysteria2Manager</code>: <code>transport.Manager</code> + <code>Start(ctx, state.ShadowsocksProfile) error</code> + <code>Status() state.TransportStatus</code>.</td></tr>
+  <tr><td>83–87</td><td><code>shadowsocks shadowsocksManager</code> field on <code>Service</code>.</td></tr>
+  <tr><td>114–116</td><td><code>activeMu</code> doc comment — it enumerates the valid kinds.</td></tr>
+  <tr><td>141–167</td><td><code>NewService</code> parameter + assignment.</td></tr>
+  <tr><td>186–203</td><td><code>managerForKind</code>: <code>case "shadowsocks": return s.shadowsocks</code>.</td></tr>
+  <tr><td>233–235</td><td><code>ConnectOptions.PreferredTransport</code> doc comment — enumerates kinds and the default order.</td></tr>
+  <tr><td>after 610</td><td><code>startShadowsocksTransport</code> — de-alias the shared <code>*ShadowsocksProfile</code>, <code>Start</code> with <code>LocalPort = 0</code>, <code>rebindWireGuardEndpoint</code>, <code>waitForManagedTransportStable</code>, cleanup-on-failure. Copy <code>startHysteria2Transport</code> (539–572) minus the <code>SessionWaiter</code> block.</td></tr>
+  <tr><td>635–669</td><td><code>transportCandidates</code>: explicit <code>case "shadowsocks"</code> with the "profile has no shadowsocks configuration" error.</td></tr>
+  <tr><td>671–688</td><td><code>autoCascadeOrder</code> + its rationale comment — see §6.1.</td></tr>
+  <tr><td>705–732</td><td><code>transportStarter</code>: nil-profile guard + starter.</td></tr>
+  <tr><td>1329–1368</td><td><code>Status()</code>: <code>s.shadowsocks.Status()</code> and the <code>Shadowsocks:</code> field.</td></tr>
+  <tr><td>1416–1428</td><td><code>runHealthCheck</code>: <code>transportRunning</code> case.</td></tr>
+  <tr><td>1575–1635</td><td><code>recoverActiveTransport</code>: restart case (the <code>default:</code> arm errors on an unknown kind, so omitting this breaks health-check recovery loudly).</td></tr>
+  <tr><td>2052–2078</td><td><code>transportPermitHosts</code> — the hostname <em>fallback</em> branch only; see §6.2.</td></tr>
+</table>
+
+<div class="note">
+  <strong><code>withTransportBypassHosts</code> (2085–2097) needs no edit.</strong> <span class="tag fix">fixed</span>
+  It appends <code>transportPermitHosts(profile)</code> wholesale, so it inherits the Shadowsocks host for
+  free. The earlier draft listed it as a separate change.
+</div>
+
+<h4>Also</h4>
+<ul class="compact">
+  <li><span class="file">daemon/internal/api/server.go</span> — <code>connectRequest.PreferredTransport</code> doc comment (lines 83–90); it spells out the cascade order.</li>
+  <li><span class="file">daemon/cmd/daemon/main.go</span> — <code>shadowsocksManager := shadowsocks.NewManager(logs)</code> beside line 127, and a new argument to the <code>api.NewService(...)</code> call at line 140.</li>
+  <li><span class="file">daemon/internal/api/service_test.go</span> — the <code>NewService(...)</code> call at line 572 is the only one in the package, so the signature change costs a single edit plus the new fake.</li>
+</ul>
+
+<!-- ══════════════════════════════════════════════════════════════ -->
+<h2 id="cascade">6. Cascade &amp; kill-switch integration</h2>
+
+<h3>6.1 Auto-cascade position</h3>
+<pre><code>// before
+var autoCascadeOrder = []string{"cloak", "reality", "hysteria2", "naive", "snowflake"}
+// after
+var autoCascadeOrder = []string{"cloak", "reality", "hysteria2", "naive", "shadowsocks", "snowflake"}</code></pre>
+<p>Rationale, to be added as a sixth bullet in the existing comment block at lines 671–687: plain AEAD
+Shadowsocks is the most widely-fingerprinted protocol in the set — the GFW has active-probed and
+entropy-classified it for years. It earns its slot on <em>independence</em> (different port, different wire
+format, survives a Cloak- or QUIC-specific block) not on stealth, so it goes behind everything with a
+TLS-shaped or randomised handshake. <code>reorderByMemory</code> may still promote it to first on a network
+where it is the thing that worked — that path needs no change.</p>
+<div class="note">
+  <span class="tag fix">fixed</span> "Second-to-last" is nominal only. <code>snowflakeReleaseGated = true</code>
+  (service.go:618), so <code>transportStarter</code> returns <code>false</code> for snowflake and it never
+  enters the candidate list. <strong>In every shipping build, Shadowsocks would be the actual last
+  transport tried</strong> — the slot decision in §11 should be made on that basis, not on the nominal
+  ordering.
+</div>
+
+<h3>6.2 Kill switch &amp; AllowedIPs <span class="danger" style="display:inline;border:0;padding:0;background:none">(easy to get wrong)</span></h3>
+<p>Shadowsocks dials the node <em>outside</em> the tunnel, so its endpoint must be both permitted through
+the Lockdown lock and excluded from <code>AllowedIPs</code>, or the OS routes the SS dial into the tunnel
+it is still establishing. <span class="tag fix">fixed</span> The earlier draft split this across three
+symmetric edits; in the current code it is <strong>really one</strong>, because
+<code>transportPermitHosts</code> short-circuits:</p>
+<pre><code>func transportPermitHosts(profile state.Profile) []string {
+    out := make([]string, 0, 4)
+    for _, ip := range profile.TransportEndpointIPs { /* … */ }
+    if len(out) &gt; 0 {
+        return out          // ← hub-supplied IPs win; the per-transport
+    }                       //   RemoteHost branch below never runs
+    if profile.Naive != nil { /* … */ }
+    …
+}</code></pre>
+<ul class="compact">
+  <li><strong>The real change</strong> — <span class="file">pangeaApiClient.ts</span>
+      <code>provision()</code> line 902: add <code>server.shadowsocks?.remoteIp</code> to the
+      <code>uniqueNonEmpty([...])</code> that produces <code>excludeIPs</code>. That one array is both the
+      <code>allowedIPsExcludingAll</code> input <em>and</em> <code>profile.transportEndpointIPs</code>, so it
+      feeds the kill-switch permits and the WireGuard bypass list at once.</li>
+  <li><strong>Fallback only</strong> — <span class="file">service.go</span>
+      <code>transportPermitHosts</code>: add a <code>profile.Shadowsocks</code> branch beside the
+      <code>Hysteria2</code> one at line 2072. This runs only for a profile the hub gave no
+      <code>TransportEndpointIPs</code> for (older build, or hand-written), but omitting it would leave
+      exactly those profiles with SS blocked by our own kill switch.</li>
+  <li><strong>No change</strong> — <code>withTransportBypassHosts</code>, per the note in §5.3.</li>
+</ul>
+<p>IPv4 literals only, per the existing <code>.filter(isIPv4Literal)</code> — the CIDR split does integer
+arithmetic and a hostname produces garbage ranges. Since the hub emits no <code>remoteIp</code> (§4.2),
+<code>server.shadowsocks?.remoteIp</code> is normally <code>undefined</code> and the node IP already in the
+list from <code>cloak.remoteHost</code> covers it; the entry exists so a node on a <em>different</em> IP
+from Cloak's still works.</p>
+
+<h3>6.3 MTU</h3>
+<p>SS AEAD UDP adds a per-packet salt + address header (~35–60 B depending on method and address form) on
+top of the outer IP/UDP. The current <code>MTU_DEFAULT</code> path already tolerates Cloak and Hysteria2
+overhead; verify SS empirically before shipping and, if 1380 fragments, expose the node's preferred MTU on
+the profile rather than lowering the global default.</p>
+
+<!-- ══════════════════════════════════════════════════════════════ -->
+<h2 id="client">7. Desktop client plumbing</h2>
+
+<h4><span class="file">packages/shared-types/src/index.ts</span> <span class="tag edit">edit</span></h4>
+<pre><code>export const ShadowsocksProfileSchema = z.object({
+  localPort:  z.number().int().nonnegative(),
+  remoteHost: z.string().min(1),
+  remotePort: z.number().int().positive(),
+  method:     z.string().min(1),
+  password:   z.string().min(1),
+  targetHost: z.string().optional(),
+  targetPort: z.number().int().positive().optional(),
+  udpOverTcp: z.boolean().optional()
+});</code></pre>
+<p>Then: <code>shadowsocks: ShadowsocksProfileSchema.optional()</code> on <code>ProfileSchema</code>;
+<code>shadowsocks</code> object on <code>StatusResponseSchema</code>; add <code>"shadowsocks"</code> to
+<code>activeTransport</code> and <code>ConnectRequestSchema.preferredTransport</code>. While here, fix the
+pre-existing drift in <code>LogSourceSchema</code> — it is still
+<code>["daemon","cloak","wireguard"]</code> while the daemon already emits <code>naive</code> and
+<code>snowflake</code>; extend it to the full set including <code>shadowsocks</code>.</p>
+
+<h4><span class="file">apps/desktop/src/shared/ipc.ts</span> <span class="tag edit">edit</span></h4>
+<p><code>ServerInfo.shadowsocks?: { remoteHost; remoteIp?; remotePort; method; password; targetHost?; targetPort?; udpOverTcp? }</code>,
+plus <code>"shadowsocks"</code> in both <code>preferredTransport</code> unions on <code>PangeaApi</code>.</p>
+
+<h4><span class="file">apps/desktop/src/main/pangeaApiClient.ts</span> <span class="tag edit">edit</span></h4>
+<p>In <code>provision()</code>: add to <code>excludeIPs</code> (§6.2) and emit the conditional profile block
+next to the existing <code>hysteria2</code> spread:</p>
+<pre><code>...(server.shadowsocks ? {
+  shadowsocks: {
+    localPort: 0,
+    remoteHost: server.shadowsocks.remoteIp ?? nodeIp,
+    remotePort: server.shadowsocks.remotePort,
+    method:     server.shadowsocks.method,
+    password:   server.shadowsocks.password,
+    ...(server.shadowsocks.targetHost ? { targetHost: server.shadowsocks.targetHost } : {}),
+    ...(server.shadowsocks.targetPort ? { targetPort: server.shadowsocks.targetPort } : {}),
+    ...(server.shadowsocks.udpOverTcp ? { udpOverTcp: true } : {})
+  }
+} : {}),</code></pre>
+<p>Same rule as REALITY/Hysteria2: dial the <em>IP</em>, never a domain — the client must not resolve node
+names (leaks them to a third-party resolver, and is impossible behind a Lockdown lock).</p>
+
+<h4>Union widening <span class="tag edit">edit</span></h4>
+<p><span class="tag fix">fixed</span> The literal union
+<code>"auto" | "cloak" | "naive" | "reality" | "hysteria2" | "snowflake"</code> is duplicated across nine
+sites, not the four the earlier draft listed. TypeScript catches most of them, but not the two that are
+data rather than types (the <code>&lt;option&gt;</code> and the locale key), and not
+<code>serverSupportsTransport</code> — whose <code>default:</code> arm silently returns <code>true</code>,
+so a missed case there shows every server as SS-capable:</p>
+<table>
+  <tr><th>File</th><th>Site</th></tr>
+  <tr><td><span class="file">shared/ipc.ts</span></td><td><code>ServerInfo.shadowsocks?</code> (beside <code>hysteria2?</code> at 148); both <code>PangeaApi</code> unions at 236–237</td></tr>
+  <tr><td><span class="file">renderer/global.d.ts</span></td><td>a <em>second</em> copy of <code>ServerInfo</code> (60) and of both unions (127–128) — kept in sync by hand</td></tr>
+  <tr><td><span class="file">main/preload.ts</span></td><td><code>setPreferredTransport</code> union (92)</td></tr>
+  <tr><td><span class="file">main/main.ts</span></td><td>module-level <code>preferredTransport</code> (54); <code>connect</code> options (771); IPC handler (1113); persisted-value validation chain (1464–1470)</td></tr>
+  <tr><td><span class="file">main/daemonClient.ts</span></td><td><code>connect()</code> (41) and <code>switch()</code> (96) option types</td></tr>
+  <tr><td><span class="file">renderer/index.ts</span></td><td>inline union (1122); <code>type TransportChoice</code> (2194); <code>serverSupportsTransport</code> — add <code>case "shadowsocks": return Boolean(server.shadowsocks)</code> (2198–2211)</td></tr>
+  <tr><td><span class="file">renderer/index.html</span></td><td>the actual picker entry (285–292): <code>&lt;option value="shadowsocks" data-i18n="settings.transport.shadowsocks"&gt;Shadowsocks only&lt;/option&gt;</code></td></tr>
+  <tr><td><span class="file">renderer/i18n/locales/*.ts</span></td><td><code>"settings.transport.shadowsocks"</code> × 8 locales (ar, en, es, fa, fr, ru, uk, zh), beside the existing <code>settings.transport.*</code> keys at 136–143</td></tr>
+</table>
+
+<!-- ══════════════════════════════════════════════════════════════ -->
+<h2 id="hubfallback">8. Hub control plane over Shadowsocks</h2>
+
+<h3>8.1 Daemon side <span class="tag new">new</span></h3>
+<p>Two new authenticated routes in <span class="file">daemon/internal/api/server.go</span>, backed by
+<code>shadowsocks.ProxyManager</code>:</p>
+<pre><code>POST /ssproxy/start   { remoteHost, remotePort, method, password }
+     → { ok: true, port: 49xxx }        // loopback HTTP-CONNECT/SOCKS5 mixed inbound
+POST /ssproxy/stop    → { ok: true }</code></pre>
+<p class="sub"><span class="tag fix">fixed</span> Path renamed from <code>/transport/ss-proxy/*</code> to
+match the one existing multi-segment convention in <span class="file">server.go</span>:
+<code>/killswitch/clear</code>, <code>/killswitch/engage</code>, <code>/killswitch/permit</code> — single
+unhyphenated segments. Register with <code>mux.Handle(…, auth.RequireBearer(token, …))</code> like every
+route but <code>/ping</code>.</p>
+<p>Deliberately decoupled from <code>Connect</code>: this proxy must run <em>before</em> a profile exists,
+including under an engaged Lockdown lock, which is precisely when the app cannot reach the hub. It carries
+no WireGuard traffic and does not touch <code>activeTransport</code>. The SS remote must be added to the
+lock's permitted set — reuse <code>Service.PermitHosts</code> (service.go:1050, already exposed as
+<code>/killswitch/permit</code>), which the app calls today for the hub IP.</p>
+
+<h3>8.2 App side <span class="tag new">new</span></h3>
+
+<h4><span class="file">apps/desktop/src/main/hubTransport.ts</span></h4>
+<pre><code>/**
+ * fetchViaConnectProxy(proxyPort, ip, hostname, path, options)
+ *
+ * net.connect(proxyPort, "127.0.0.1")
+ *   → write "CONNECT {ip}:443 HTTP/1.1\r\nHost: {ip}:443\r\n\r\n"
+ *   → read until "\r\n\r\n", require a 2xx status line
+ *   → tls.connect({ socket, servername: "", rejectUnauthorized: false })
+ *   → https.request({ createConnection: () => tlsSocket, headers: { Host: hostname } })
+ *
+ * Same Response-shaped return value and external-timer timeout as
+ * fetchDohResolved, so hubFetch's call sites are unchanged.
+ */</code></pre>
+
+<h4><span class="file">apps/desktop/src/main/pangeaApiClient.ts</span> — <code>ensureHub()</code> <span class="tag edit">edit</span></h4>
+<p>Insert as a fourth step, strictly after the three existing paths so the "backup only" requirement holds.
+The method spans lines 556–617; its steps are numbered 0–2 in the code:</p>
+<ol class="phases" start="0">
+  <li>Cached hub IP, gated on <code>directIpEnabled</code> (survives a Lockdown lock) — <em>unchanged</em></li>
+  <li>Direct domain, skipped when <code>directIpOnly</code> — <em>unchanged</em></li>
+  <li>DoH-resolved direct IP, no SNI, gated on <code>directIpEnabled &amp;&amp; dohEnabled</code> — <em>unchanged</em></li>
+  <li><strong>NEW</strong> — Shadowsocks: ask the daemon to start the SS proxy (cached creds, else baked-in
+      bootstrap), then run <code>trySecureProbeCurrentPath()</code> through it. On success set
+      <code>ssProxyPort</code> and <code>hubReady</code>. Insert <em>before</em> the
+      <code>this.dohResolvedIp = null</code> / <code>if (this.directIpOnly) throw</code> block at 608–613,
+      so the throw remains the last word.</li>
+  <li>Fail closed as today (line 609) — <em>unchanged</em></li>
+</ol>
+<p>Supporting changes in the same file: an <code>ssProxyPort: number | null</code> field routed through
+<code>hubFetch</code> and <code>trySecureProbeCurrentPath</code>; <code>resetHubResolution()</code> clears
+it (and stops the proxy); <code>setCachedShadowsocks()</code> / <code>onShadowsocks()</code> mirroring the
+<code>cachedHubIp</code> / <code>rememberHubIp</code> pair; persistence via the existing
+<code>readSettingsFile</code>/<code>writeSettingsFile</code> helpers in <span class="file">main.ts</span>
+(new key <code>hubShadowsocks</code>).</p>
+
+<div class="note">
+  The <code>/v1/secure</code> envelope is already end-to-end encrypted against a pinned server key, so
+  routing it through Shadowsocks changes only <em>who can see that you are talking to the hub</em> — not
+  what is said. No change to <span class="file">secureChannel.ts</span> or the hub's crypto is required, and
+  the hub cannot distinguish an SS-relayed request from a direct one beyond source IP.
+</div>
+
+<h3>8.3 Settings surface</h3>
+<p>One new toggle alongside the existing DoH / direct-IP switches: <em>"Allow Shadowsocks fallback for
+account traffic"</em>, default <strong>on</strong>. Add <code>setHubShadowsocks</code> /
+<code>getHubShadowsocks</code> to <code>IPC_CHANNELS</code> and <code>PangeaApi</code>, with the same
+persist-to-settings.json handler shape as <code>setDirectIp</code>.</p>
+
+<!-- ══════════════════════════════════════════════════════════════ -->
+<h2 id="phases">9. Phasing &amp; task checklist</h2>
+
+<h3>Phase 0 — Server enablement <span class="tag srv">PangeaHubServer</span></h3>
+<ul class="compact">
+  <li>☐ <span class="file">node/entrypoint.sh</span>: public <code>ssserver</code> config, <strong>outbound</strong> ACL file, and <code>/etc/supervisor/conf.d/ss-public.conf</code> written inside the <code>SS_PUBLIC_PASSWORD</code> guard (<code>rm -f</code> in the else branch)</li>
+  <li>☐ <span class="file">node/supervisord.conf</span>: <strong>no change</strong> — the <code>[include]</code> glob covers it (§4.1)</li>
+  <li>☐ <span class="file">setup-host.sh</span>: <code>ufw allow 8488/tcp</code> + <code>8488/udp</code> (no docker-compose change — host networking)</li>
+  <li>☐ Loopback-exposure mitigation for the relay (dedicated uid + iptables owner rule, §4.1)</li>
+  <li>☐ <span class="file">node/.env.example</span>: <code>SS_PUBLIC_PORT</code>, <code>SS_PUBLIC_PASSWORD</code>, <code>SS_PUBLIC_METHOD</code>, <code>SS_RELAY_TARGET</code></li>
+  <li>☐ <span class="file">hub/config/nodes.json</span>: <code>shadowsocks</code> block per node (+ <code>nodes.local.json</code>)</li>
+  <li>☐ <span class="file">hub/src/lib/shadowsocksConnectionInfo.js</span> <span class="tag new">new</span> + three lines in <span class="file">clientRegions.js</span></li>
+  <li>☐ Verify from a clean host: <code>sslocal</code> → SS → node WG loopback carries a real handshake</li>
+  <li>☐ Verify the ACL actually bites: relay to a non-allowed address is refused, and a normal client from an arbitrary source IP still connects</li>
+</ul>
+
+<h3>Phase 1 — Daemon transport <span class="tag">pangeavpn-app</span></h3>
+<ul class="compact">
+  <li>☐ <code>go mod tidy</code> after the first <code>protocol/shadowsocks</code> import (see §1 module graph note)</li>
+  <li>☐ <span class="file">state/types.go</span>, <span class="file">state/config_store.go</span></li>
+  <li>☐ <span class="file">internal/shadowsocks/</span>: registry, options, bridge, manager (+ unit tests)</li>
+  <li>☐ <span class="file">internal/shadowsocks/e2e_test.go</span> under <code>//go:build transport_e2e</code> (the tag every other transport's e2e uses): in-process SS inbound + echo target</li>
+  <li>☐ <span class="file">api/service.go</span> wiring (all 13 touch points in §5.3)</li>
+  <li>☐ <span class="file">cmd/daemon/main.go</span> construction</li>
+  <li>☐ <span class="file">api/service_test.go</span>: fake manager, cascade-order and permit-host tests</li>
+  <li>☐ <span class="file">docs/architecture.md</span>: transport table (line 236), fallback-order list (200–216), and the mermaid node label at line 39 all enumerate transports</li>
+  <li>☐ <span class="file">README.md</span>: transport table (line 48) and the ASCII diagram at line 168</li>
+</ul>
+
+<h3>Phase 2 — Client plumbing</h3>
+<ul class="compact">
+  <li>☐ <span class="file">shared-types</span> schemas (+ <code>LogSourceSchema</code> drift fix)</li>
+  <li>☐ <span class="file">shared/ipc.ts</span>, <span class="file">pangeaApiClient.ts</span> provision block + excludeIPs</li>
+  <li>☐ Union widening across all nine sites in §7 — including <span class="file">preload.ts</span>, <span class="file">global.d.ts</span>'s second <code>ServerInfo</code>, and <code>serverSupportsTransport</code></li>
+  <li>☐ <span class="file">renderer/index.html</span> picker option + 8 locale strings</li>
+</ul>
+
+<h3>Phase 3 — Hub control-plane fallback</h3>
+<ul class="compact">
+  <li>☐ Decide the <code>controlPlaneShadowsocks</code> delivery shape — <code>/api/client/regions</code> returns a bare array today, so a top-level field is a breaking response change (§4.2)</li>
+  <li>☐ Node: control-plane SS listener with hub-only <code>outbound_allow_list</code>; hub: the payload</li>
+  <li>☐ Daemon: <code>shadowsocks/proxy.go</code> + <code>/transport/ss-proxy/{start,stop}</code></li>
+  <li>☐ App: <span class="file">hubTransport.ts</span>, <code>ensureHub()</code> step 4, cached + baked-in bootstrap creds</li>
+  <li>☐ Settings toggle + IPC</li>
+  <li>☐ Verify under an engaged Lockdown lock (permit the SS IP first)</li>
+</ul>
+
+<h3>Phase 4 — Hardening (optional, after ship)</h3>
+<ul class="compact">
+  <li>☐ SS-2022 (<code>2022-blake3-aes-128-gcm</code>): replay-resistant, EIH multi-user. Both
+      shadowsocks-rust and sing-shadowsocks2 v0.2.1 support it. <span class="tag fix">fixed</span> It is
+      <em>not</em> a plain string swap: <code>shadowaead_2022.NewMethod</code> base64-decodes the password
+      and rejects anything whose length ≠ the method's key size (16 B for <code>aes-128-gcm</code>, 32 B for
+      the 256/chacha variants), splitting on <code>:</code> for <code>serverPSK:userPSK</code> EIH. So the
+      hub must generate real key material rather than a passphrase, and <code>validateProfile</code>'s
+      password check must not assume an arbitrary string. SS-2022 also stamps requests with wall-clock time
+      — node and client must stay inside the server's skew window.</li>
+  <li>☐ <strong>Start <code>ssmanager</code> first.</strong> <span class="tag fix">fixed</span> Per-device
+      credentials via <code>/internal/ss-add-user</code> assume a running manager, and there isn't one
+      (§1) — the binary ships, nothing launches it. This phase begins with an
+      <code>[program:ssmanager]</code> entry (manager address <code>127.0.0.1:6100</code>, matching
+      <code>SSMANAGER_ADDR</code>) and a smoke test of the existing route, before any hub route modelled on
+      <code>ssRegister.js</code> can work.</li>
+  <li>☐ Node health probe for the public SS port in <span class="file">hub/src/services/nodeMonitorService.js</span>.</li>
+  <li>☐ Expose <code>udpOverTcp</code> as an automatic second attempt when the UDP-mode WG handshake times out.</li>
+</ul>
+
+<!-- ══════════════════════════════════════════════════════════════ -->
+<h2 id="testing">10. Testing</h2>
+
+<table>
+  <tr><th>Level</th><th>What</th></tr>
+  <tr>
+    <td>Unit (Go)</td>
+    <td><code>validateProfile</code> table tests; <code>buildOutboundOptions</code> defaults
+        (method fallback, target host/port fallback, <code>UDPOverTCP</code> nil vs set);
+        <code>Manager</code> lifecycle — double <code>Start</code> is a no-op, <code>Stop</code> when not
+        running returns nil, <code>BoundLocalPort</code> is 0 when stopped and non-zero after a
+        <code>LocalPort: 0</code> start.</td>
+  </tr>
+  <tr>
+    <td>E2E (Go, in-process)</td>
+    <td>Model on <span class="file">hysteria2/e2e_test.go</span>, including its
+        <code>//go:build transport_e2e</code> tag (these never run in the default
+        <code>go test ./...</code>): stand up a sing-box
+        <code>shadowsocks</code> <em>inbound</em> in the same process (<code>RegisterInbound</code> +
+        <code>direct</code> outbound), point a UDP echo server behind it, drive datagrams through
+        <code>Manager</code>'s loopback port and assert byte-identical round-trip. Add a wrong-password case
+        asserting the round-trip fails (documenting that <code>Start</code> still succeeds — the exact
+        reason there is no <code>SessionWaiter</code>).</td>
+  </tr>
+  <tr>
+    <td>Service (Go)</td>
+    <td>Fake <code>shadowsocksManager</code> in <span class="file">api/service_test.go</span>:
+        auto-cascade reaches shadowsocks only after cloak/reality/hysteria2/naive all fail;
+        <code>preferredTransport: "shadowsocks"</code> with a nil profile errors clearly;
+        <code>transportPermitHosts</code> and <code>withTransportBypassHosts</code> include the SS host;
+        <code>Status().Shadowsocks</code> reflects the manager.</td>
+  </tr>
+  <tr>
+    <td>TS unit</td>
+    <td><code>provision()</code> emits the shadowsocks block and includes its IP in
+        <code>transportEndpointIPs</code>; the CONNECT-proxy helper parses a 200 response, rejects a 403,
+        and honours its timeout.</td>
+  </tr>
+  <tr>
+    <td>Manual matrix</td>
+    <td>(1) SS-only forced transport, clean network. (2) Auto cascade with Cloak's port blackholed locally.
+        (3) UDP blocked at the host firewall → <code>udpOverTcp: true</code> recovers.
+        (4) Lockdown engaged → hub fallback over SS reaches <code>/v1/secure</code>.
+        (5) Cold install with no cached creds → baked-in bootstrap works.
+        (6) Network switch mid-session → <code>recoverActiveTransport</code> restarts SS.
+        (7) <strong>ACL negative test</strong> — an <code>sslocal</code> pointed at the public listener
+        cannot reach anything but the WireGuard target, and a client from an unrelated source IP is still
+        accepted (catches the client-vs-outbound ACL inversion).</td>
+  </tr>
+</table>
+
+<!-- ══════════════════════════════════════════════════════════════ -->
+<h2 id="risks">11. Risks &amp; open decisions</h2>
+
+<table>
+  <tr><th>Risk</th><th>Assessment / mitigation</th></tr>
+  <tr>
+    <td><strong>Plain SS is well-fingerprinted.</strong></td>
+    <td>Real and unavoidable at the protocol level. The GFW active-probes AEAD SS and classifies it on packet
+        entropy/length. This is why it sits second-to-last in the cascade and is framed as a <em>diversity</em>
+        backup, not a stealth upgrade. Phase 4's SS-2022 (with <code>replay_attack: reject</code>, already in
+        the config above) materially improves probe resistance.</td>
+  </tr>
+  <tr>
+    <td><strong>Public SS listener = open proxy.</strong></td>
+    <td>Highest-severity item here. Mitigated by the shadowsocks-rust <em>outbound</em> ACL (§4.1), a
+        non-default port, and Phase 4 per-device credentials. Do not ship the listener without the ACL —
+        and check it is the outbound form: the client-side <code>[reject_all]</code>/<code>[white_list]</code>
+        pair looks like it does this job and does the opposite.</td>
+  </tr>
+  <tr>
+    <td><strong>Relay reaches all node loopback services.</strong> <span class="tag fix">fixed</span></td>
+    <td>shadowsocks-rust ACLs match addresses, not ports, so allowing the WireGuard target also allows the
+        node API, Cloak admin, sing-box inbounds and (post-Phase 4) <code>ssmanager</code> on the same
+        address. New risk, not present in the earlier draft. Enforce the port outside the ACL — dedicated
+        uid + iptables owner rule (§4.1) — or accept that the shared password grants node-loopback reach
+        and treat Phase 4 as a prerequisite rather than a nice-to-have.</td>
+  </tr>
+  <tr>
+    <td><strong>Shared node password.</strong></td>
+    <td>One leak deanonymises nothing (traffic is WG-encrypted inside) but does grant tunnel access, plus
+        the loopback reach above. Bounded by the ACL; properly fixed by Phase 4.</td>
+  </tr>
+  <tr>
+    <td><strong><code>go.sum</code> churn.</strong></td>
+    <td>New <em>indirect</em> dep <code>sing-shadowsocks2</code>, unpruned by the first
+        <code>protocol/shadowsocks</code> import. Low risk — it is sing-box's own dependency at a version
+        sing-box already pins — but re-run the full daemon test suite and confirm the Windows/macOS/Linux
+        builds in <span class="file">.github</span> after tidy.</td>
+  </tr>
+  <tr>
+    <td><strong>Loopback destination refused by ssserver.</strong></td>
+    <td>Handled by making <code>targetHost</code> hub-configurable: switch to <code>10.10.1.1</code> without
+        a client release.</td>
+  </tr>
+  <tr>
+    <td><strong>MTU / fragmentation.</strong></td>
+    <td>Measure before shipping (§6.3). Do not lower the global default speculatively.</td>
+  </tr>
+  <tr>
+    <td><strong>Baked-in bootstrap credential leaks.</strong></td>
+    <td>By design it reaches only <code>hubIp:443</code> — our own public API. Rotate on app release.
+        Precedent: the pinned <code>SERVER_PUBLIC_KEY_B64</code>.</td>
+  </tr>
+</table>
+
+<h3>Decisions to confirm before Phase 0</h3>
+<ol class="phases">
+  <li><strong>Public SS port number</strong> — 8488 is a placeholder. Something that reads as a mundane
+      service is better than an SS-adjacent number.</li>
+  <li><strong>Method for v1</strong> — plan assumes <code>chacha20-ietf-poly1305</code> (matches the node's
+      existing config and the hub's <code>SHADOWSOCKS_CIPHER</code> constant). Going straight to
+      <code>2022-blake3-aes-128-gcm</code> is strictly better security-wise, but it is <em>not</em> free:
+      the password becomes base64 key material of an exact length and the clock-skew requirement appears
+      (see Phase 4). Deciding now still beats migrating later — just budget the key-generation work.</li>
+  <li><strong>Separate control-plane listener, or reuse the tunnel listener with a wider ACL?</strong>
+      Plan assumes separate (tighter blast radius, independent rotation). Reuse is one fewer moving part.</li>
+  <li><strong>How does <code>controlPlaneShadowsocks</code> reach the client?</strong>
+      <code>/api/client/regions</code> returns a bare array today, so a top-level object breaks existing
+      clients. Per-region duplication is additive and safe; a new endpoint is cleaner. Needed before
+      Phase 3.</li>
+  <li><strong>Cascade slot</strong> — plan puts shadowsocks 5th of 6 nominally, but with
+      <code>snowflakeReleaseGated</code> that is <em>last</em> in every shipping build (§6.1). Confirm it
+      should not sit ahead of <code>naive</code>.</li>
+</ol>
+
+<hr>
+<p class="sub">
+  Roughly: Phase 0 ≈ 1–2 days (the ACL and the loopback-scoping mitigation are the substance, not the
+  listener), Phase 1 ≈ 2–3 days (the new package is a close structural copy of
+  <span class="file">internal/reality</span>), Phase 2 ≈ 1 day, Phase 3 ≈ 2–3 days (the CONNECT-proxy
+  transport is the only genuinely new shape in the codebase). Phase 4 is independent and can trail a
+  release, but grew an <code>ssmanager</code> prerequisite and real SS-2022 key handling — closer to 2 days
+  than the "swap two config values" it read as before.
+</p>
+
+</div>
+</body>
+</html>
