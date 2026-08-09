@@ -13,19 +13,7 @@ import (
 const (
 	nftTableName = "pangeavpn_killswitch"
 	nftFamily    = "inet"
-
-	iptChainName  = "PANGEAVPN_KS"
-	ipt6ChainName = "PANGEAVPN_KS6"
 )
-
-var runIPTablesCommand = func(ctx context.Context, binary string, args ...string) error {
-	cmd := exec.CommandContext(ctx, binary, args...)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("%s %s: %w (%s)", binary, strings.Join(args, " "), err, strings.TrimSpace(string(out)))
-	}
-	return nil
-}
 
 func init() {
 	newPlatformKillSwitch = func() KillSwitch {
@@ -53,11 +41,37 @@ func (ks *linuxKillSwitch) Enable(ctx context.Context, endpointHosts []string, a
 	if ks.active {
 		prev, _ := loadKillSwitchState()
 		if stringSlicesEqual(prev.EndpointIPs, ips) && prev.AllowLAN == allowLAN {
-			return nil
+			// Rules match; still record a Lockdown re-arm.
+			return persistLockedUpgrade(prev, locked)
 		}
 		tunnelInterface = prev.TunnelInterface
 	}
 
+	if hasNFT(ctx) {
+		ks.useNFT = true
+		if err := applyNFTRules(ctx, ips, tunnelInterface, allowLAN); err != nil {
+			if !ks.active {
+				_ = removeNFTRules(ctx)
+			}
+			return fmt.Errorf("kill switch enable (nft): %w", err)
+		}
+	} else {
+		ks.useNFT = false
+		if err := applyIPTablesRules(ctx, ips, tunnelInterface, allowLAN); err != nil {
+			if !ks.active {
+				_ = removeIPTablesRules(ctx)
+			}
+			return fmt.Errorf("kill switch enable (iptables): %w", err)
+		}
+	}
+
+	// Rules are live from here. Marking active before the save means a save
+	// failure still leaves them trackable by Clear.
+	ks.active = true
+	ks.allowLAN = allowLAN
+
+	// Saved only after the rules land: saving first let a failed re-apply leave
+	// phantom state that the next attempt's equality check would match.
 	st := KillSwitchState{
 		Active:          true,
 		AllowLAN:        allowLAN,
@@ -68,29 +82,6 @@ func (ks *linuxKillSwitch) Enable(ctx context.Context, endpointHosts []string, a
 	if err := saveKillSwitchState(st); err != nil {
 		return fmt.Errorf("kill switch enable: save state: %w", err)
 	}
-
-	if hasNFT(ctx) {
-		ks.useNFT = true
-		if err := applyNFTRules(ctx, ips, tunnelInterface, allowLAN); err != nil {
-			if !ks.active {
-				_ = removeNFTRules(ctx)
-				_ = removeKillSwitchState()
-			}
-			return fmt.Errorf("kill switch enable (nft): %w", err)
-		}
-	} else {
-		ks.useNFT = false
-		if err := applyIPTablesRules(ctx, ips, tunnelInterface, allowLAN); err != nil {
-			if !ks.active {
-				_ = removeIPTablesRules(ctx)
-				_ = removeKillSwitchState()
-			}
-			return fmt.Errorf("kill switch enable (iptables): %w", err)
-		}
-	}
-
-	ks.active = true
-	ks.allowLAN = allowLAN
 	return nil
 }
 
@@ -236,102 +227,4 @@ func removeNFTRules(ctx context.Context) error {
 		return fmt.Errorf("delete nft table: %w (%s)", err, strings.TrimSpace(string(out)))
 	}
 	return nil
-}
-
-// ---------------------------------------------------------------------------
-// iptables fallback backend
-// ---------------------------------------------------------------------------
-
-func applyIPTablesRules(ctx context.Context, endpointIPs []string, tunnelInterface string, allowLAN bool) error {
-	// Clean up any previous rules.
-	_ = removeIPTablesRules(ctx)
-
-	// Create chain.
-	if err := iptCmd(ctx, "-N", iptChainName); err != nil {
-		return fmt.Errorf("create chain: %w", err)
-	}
-
-	// Allow loopback.
-	if err := iptCmd(ctx, "-A", iptChainName, "-o", "lo", "-j", "ACCEPT"); err != nil {
-		return fmt.Errorf("allow loopback: %w", err)
-	}
-
-	// Allow DHCP.
-	if err := iptCmd(ctx, "-A", iptChainName, "-p", "udp", "--sport", "68", "--dport", "67", "-j", "ACCEPT"); err != nil {
-		return fmt.Errorf("allow DHCP: %w", err)
-	}
-
-	// Allow endpoint IPs.
-	for _, ip := range endpointIPs {
-		if strings.Contains(ip, ":") {
-			continue // Skip IPv6 in iptables (would need ip6tables).
-		}
-		if err := iptCmd(ctx, "-A", iptChainName, "-d", ip, "-j", "ACCEPT"); err != nil {
-			return fmt.Errorf("allow endpoint %s: %w", ip, err)
-		}
-	}
-
-	// Allow LAN ranges when the user opts in.
-	if allowLAN {
-		for _, cidr := range LANAllowPrefixes {
-			if err := iptCmd(ctx, "-A", iptChainName, "-d", cidr, "-j", "ACCEPT"); err != nil {
-				return fmt.Errorf("allow LAN %s: %w", cidr, err)
-			}
-		}
-	}
-
-	// Allow tunnel interface.
-	if tunnelInterface != "" {
-		if err := iptCmd(ctx, "-A", iptChainName, "-o", tunnelInterface, "-j", "ACCEPT"); err != nil {
-			return fmt.Errorf("allow tunnel interface: %w", err)
-		}
-	}
-
-	// Drop everything else.
-	if err := iptCmd(ctx, "-A", iptChainName, "-j", "DROP"); err != nil {
-		return fmt.Errorf("add drop rule: %w", err)
-	}
-
-	// Insert jump to our chain at the top of OUTPUT.
-	if err := iptCmd(ctx, "-I", "OUTPUT", "1", "-j", iptChainName); err != nil {
-		return fmt.Errorf("insert jump: %w", err)
-	}
-
-	// Enforce outbound IPv6 block when nftables is unavailable.
-	if err := ip6tCmd(ctx, "-N", ipt6ChainName); err != nil {
-		return fmt.Errorf("create IPv6 chain: %w", err)
-	}
-	if err := ip6tCmd(ctx, "-A", ipt6ChainName, "-o", "lo", "-j", "ACCEPT"); err != nil {
-		return fmt.Errorf("allow IPv6 loopback: %w", err)
-	}
-	if err := ip6tCmd(ctx, "-A", ipt6ChainName, "-j", "DROP"); err != nil {
-		return fmt.Errorf("add IPv6 drop rule: %w", err)
-	}
-	if err := ip6tCmd(ctx, "-I", "OUTPUT", "1", "-j", ipt6ChainName); err != nil {
-		return fmt.Errorf("insert IPv6 jump: %w", err)
-	}
-
-	return nil
-}
-
-func removeIPTablesRules(ctx context.Context) error {
-	// Remove jump from OUTPUT (ignore errors if chain doesn't exist).
-	_ = iptCmd(ctx, "-D", "OUTPUT", "-j", iptChainName)
-	_ = ip6tCmd(ctx, "-D", "OUTPUT", "-j", ipt6ChainName)
-
-	// Flush and delete our chain.
-	_ = iptCmd(ctx, "-F", iptChainName)
-	_ = iptCmd(ctx, "-X", iptChainName)
-	_ = ip6tCmd(ctx, "-F", ipt6ChainName)
-	_ = ip6tCmd(ctx, "-X", ipt6ChainName)
-
-	return nil
-}
-
-func iptCmd(ctx context.Context, args ...string) error {
-	return runIPTablesCommand(ctx, "iptables", args...)
-}
-
-func ip6tCmd(ctx context.Context, args ...string) error {
-	return runIPTablesCommand(ctx, "ip6tables", args...)
 }

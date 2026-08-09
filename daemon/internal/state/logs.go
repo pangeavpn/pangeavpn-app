@@ -9,6 +9,38 @@ type LogStore struct {
 	mu         sync.RWMutex
 	entries    []LogEntry
 	maxEntries int
+	sink       *fileSink
+}
+
+// AttachFile mirrors every entry to disk, so logs survive a crash that wipes
+// the in-memory ring buffer.
+func (s *LogStore) AttachFile(path string, maxSize int64, keep int) error {
+	sink, err := newFileSink(path, maxSize, keep)
+	if err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	previous := s.sink
+	s.sink = sink
+	s.mu.Unlock()
+
+	if previous != nil {
+		previous.Close()
+	}
+	return nil
+}
+
+func (s *LogStore) CloseFile() error {
+	s.mu.Lock()
+	sink := s.sink
+	s.sink = nil
+	s.mu.Unlock()
+
+	if sink == nil {
+		return nil
+	}
+	return sink.Close()
 }
 
 func NewLogStore(maxEntries int) *LogStore {
@@ -23,19 +55,24 @@ func NewLogStore(maxEntries int) *LogStore {
 }
 
 func (s *LogStore) Add(level LogLevel, source LogSource, msg string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	s.entries = append(s.entries, LogEntry{
+	entry := LogEntry{
 		TS:     time.Now().UnixMilli(),
 		Level:  level,
 		Source: source,
 		Msg:    msg,
-	})
+	}
 
+	s.mu.Lock()
+	s.entries = append(s.entries, entry)
 	if len(s.entries) > s.maxEntries {
 		delta := len(s.entries) - s.maxEntries
 		s.entries = append([]LogEntry(nil), s.entries[delta:]...)
+	}
+	sink := s.sink
+	s.mu.Unlock()
+
+	if sink != nil {
+		sink.write(entry)
 	}
 }
 

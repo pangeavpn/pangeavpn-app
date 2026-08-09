@@ -1,6 +1,6 @@
 {
   "name": "pangea-vpn",
-  "version": "0.4.0",
+  "version": "0.5.1",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -10,11 +10,19 @@
     "dev": "node ./scripts/dev.mjs",
     "build": "npm run build --workspace @pangeavpn/shared-types && npm run build --workspace @pangeavpn/desktop && node ./scripts/build-daemon.mjs",
     "build-bin:windows": "node ./scripts/build-bin/windows.mjs",
+    "build-bin:windows:x64": "node ./scripts/build-bin/windows.mjs --arch x64",
     "build-bin:mac": "node ./scripts/build-bin/mac.mjs",
+    "build-bin:mac:arm64": "node ./scripts/build-bin/mac.mjs --arch arm64",
     "build-bin:linux": "node ./scripts/build-bin/linux.mjs",
     "build-bin": "node ./scripts/build-bin/all.mjs"
   },
   "devDependencies": {
     "app-builder-bin": "^5.0.0-alpha.13"
+  },
+  "//overrides": "brace-expansion reaches us only through minimatch (3.x/5.x/9.x/10.x pull different majors). Pin each line to its patched release so a lockfile regeneration cannot reintroduce the ReDoS/OOM versions.",
+  "overrides": {
+    "brace-expansion@1": "^1.1.16",
+    "brace-expansion@2": "^2.1.2",
+    "brace-expansion@5": "^5.0.8"
   }
 }

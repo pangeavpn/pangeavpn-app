@@ -100,7 +100,10 @@ const ps = [
   "} finally { $img.Dispose() }"
 ].join("\n");
 
-const ps1Path = path.join(os.tmpdir(), "pangea-installer-art.ps1");
+// Private, unpredictable temp dir — a fixed name in the shared temp dir lets a
+// local attacker pre-create the file and get their own script run instead.
+const ps1Dir = fs.mkdtempSync(path.join(os.tmpdir(), "pangea-installer-art-"));
+const ps1Path = path.join(ps1Dir, "render.ps1");
 fs.writeFileSync(ps1Path, ps, "utf8");
 
 try {
@@ -133,5 +136,5 @@ try {
     );
   }
 } finally {
-  fs.rmSync(ps1Path, { force: true });
+  fs.rmSync(ps1Dir, { recursive: true, force: true });
 }

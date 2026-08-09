@@ -73,6 +73,22 @@ var lookupResolverIP = func(ctx context.Context, network, host string) ([]net.IP
 	return net.DefaultResolver.LookupIP(ctx, network, host)
 }
 
+// EndpointResolveWarn, when set, is called for each endpoint host that could
+// not be resolved and was therefore skipped instead of being permitted through
+// the kill switch. Wired to the daemon log store in cmd/daemon so a transport
+// silently losing its permit is visible in support logs.
+var EndpointResolveWarn func(host string, err error)
+
+// KillSwitchWarnf reports a degraded-but-still-closed kill switch (stale permit
+// left behind, incomplete teardown). Wired to the daemon log store.
+var KillSwitchWarnf func(format string, args ...any)
+
+func KillSwitchWarn(format string, args ...any) {
+	if warn := KillSwitchWarnf; warn != nil {
+		warn(format, args...)
+	}
+}
+
 // NewKillSwitch returns a platform-appropriate kill-switch implementation.
 func NewKillSwitch() KillSwitch {
 	if newPlatformKillSwitch != nil {
@@ -85,9 +101,9 @@ func NewKillSwitch() KillSwitch {
 type noopKillSwitch struct{}
 
 func (n *noopKillSwitch) Enable(_ context.Context, _ []string, _ bool, _ bool) error { return nil }
-func (n *noopKillSwitch) Update(_ context.Context, _ string) error           { return nil }
-func (n *noopKillSwitch) Clear(_ context.Context) error                      { return nil }
-func (n *noopKillSwitch) Active() bool                                       { return false }
+func (n *noopKillSwitch) Update(_ context.Context, _ string) error                   { return nil }
+func (n *noopKillSwitch) Clear(_ context.Context) error                              { return nil }
+func (n *noopKillSwitch) Active() bool                                               { return false }
 
 // ---------------------------------------------------------------------------
 // Shared helpers for state persistence
@@ -173,6 +189,20 @@ func LoadKillSwitchStatePublic() (KillSwitchState, error) {
 	return loadKillSwitchState()
 }
 
+// Records a Lockdown re-arm when the rules need no change. Without it the flag
+// never reaches disk and reconcileStartup clears the lock as crash leftover.
+// Raise-only.
+func persistLockedUpgrade(prev KillSwitchState, locked bool) error {
+	if !locked || prev.Locked {
+		return nil
+	}
+	prev.Locked = true
+	if err := saveKillSwitchState(prev); err != nil {
+		return fmt.Errorf("kill switch enable: record lockdown: %w", err)
+	}
+	return nil
+}
+
 func stringSlicesEqual(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
@@ -185,29 +215,16 @@ func stringSlicesEqual(a, b []string) bool {
 	return true
 }
 
-func mergeStringSets(a, b []string) []string {
-	seen := make(map[string]struct{}, len(a)+len(b))
-	out := make([]string, 0, len(a)+len(b))
-	for _, s := range a {
-		if _, ok := seen[s]; ok {
-			continue
-		}
-		seen[s] = struct{}{}
-		out = append(out, s)
-	}
-	for _, s := range b {
-		if _, ok := seen[s]; ok {
-			continue
-		}
-		seen[s] = struct{}{}
-		out = append(out, s)
-	}
-	sort.Strings(out)
-	return out
-}
-
 // resolveEndpointHosts resolves each entry to IPs, dedups and sorts. An
 // entry that is already an IP literal contributes itself without a DNS lookup.
+//
+// A host that fails to resolve is skipped rather than failing the whole call:
+// the kill switch blocks DNS while it is engaged, so every hostname permit
+// (the naive/reality/hysteria2/snowflake endpoints — cloak's is always an IP
+// literal) fails to resolve when Connect re-arms an already-active lockdown
+// lock. Failing there would leave the lock permanently un-armable and the
+// device stuck offline. Skipped hosts are reported via EndpointResolveWarn;
+// only a wholesale failure (nothing resolved at all) is an error.
 func resolveEndpointHosts(ctx context.Context, hosts []string) ([]string, error) {
 	if len(hosts) == 0 {
 		// No endpoints to permit: caller wants a pure block-all lock
@@ -219,7 +236,10 @@ func resolveEndpointHosts(ctx context.Context, hosts []string) ([]string, error)
 	for _, host := range hosts {
 		ips, err := resolveEndpointIPs(ctx, host)
 		if err != nil {
-			return nil, err
+			if warn := EndpointResolveWarn; warn != nil {
+				warn(host, err)
+			}
+			continue
 		}
 		for _, ip := range ips {
 			if _, ok := seen[ip]; ok {
@@ -230,7 +250,7 @@ func resolveEndpointHosts(ctx context.Context, hosts []string) ([]string, error)
 		}
 	}
 	if len(out) == 0 {
-		return nil, fmt.Errorf("no IPs resolved from endpoint hosts")
+		return nil, fmt.Errorf("no IPs resolved from endpoint hosts %v", hosts)
 	}
 	sort.Strings(out)
 	return out, nil

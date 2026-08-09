@@ -6,6 +6,13 @@ import type {
   StatusResponse
 } from "@pangeavpn/shared-types";
 
+export class TransportExhaustedError extends Error {
+  constructor() {
+    super("All configured transports failed");
+    this.name = "TransportExhaustedError";
+  }
+}
+
 export class DaemonClient {
   private readonly baseUrl: string;
   private readonly tokenProvider: () => Promise<string | string[]>;
@@ -17,7 +24,8 @@ export class DaemonClient {
     this.baseUrl = baseUrl;
     this.tokenProvider = tokenProvider;
     this.defaultRequestTimeoutMs = 5000;
-    this.connectTimeoutMs = 45000;
+    // Auto mode can spend 10s proving each configured transport end-to-end.
+    this.connectTimeoutMs = 120000;
     this.disconnectTimeoutMs = 45000;
   }
 
@@ -25,13 +33,23 @@ export class DaemonClient {
     return this.request<StatusResponse>("GET", "/status");
   }
 
-  async connect(profileId: string, opts?: { allowLAN?: boolean; lockdown?: boolean }): Promise<OkResponse> {
+  async connect(
+    profileId: string,
+    opts?: {
+      allowLAN?: boolean;
+      lockdown?: boolean;
+      preferredTransport?: "cloak" | "naive" | "reality" | "hysteria2" | "snowflake";
+    }
+  ): Promise<OkResponse> {
     const body: Record<string, unknown> = { profileId };
     if (opts?.allowLAN) {
       body.allowLAN = true;
     }
     if (opts?.lockdown) {
       body.lockdown = true;
+    }
+    if (opts?.preferredTransport) {
+      body.preferredTransport = opts.preferredTransport;
     }
     return this.request<OkResponse>("POST", "/connect", body, this.connectTimeoutMs);
   }
@@ -47,6 +65,17 @@ export class DaemonClient {
     return this.request<OkResponse>("POST", "/killswitch/clear", undefined, 15000);
   }
 
+  /**
+   * Ask the daemon to let these IPs through an engaged kill switch. Used before
+   * provisioning under Lockdown: the lock blocks everything, including the hub
+   * the app must reach to get a profile. IP literals only — the lock blocks DNS
+   * too, so a hostname could never be resolved behind it. An empty list lets
+   * the daemon fall back to the hub IP stored with the last profile.
+   */
+  async permitHosts(hosts: string[]): Promise<OkResponse> {
+    return this.request<OkResponse>("POST", "/killswitch/permit", { hosts }, 15000);
+  }
+
   async engageKillSwitch(opts?: { profileId?: string; allowLAN?: boolean }): Promise<OkResponse> {
     const body: Record<string, unknown> = {};
     if (opts?.profileId) body.profileId = opts.profileId;
@@ -59,13 +88,23 @@ export class DaemonClient {
     );
   }
 
-  async switch(profileId: string, opts?: { allowLAN?: boolean; lockdown?: boolean }): Promise<OkResponse> {
+  async switch(
+    profileId: string,
+    opts?: {
+      allowLAN?: boolean;
+      lockdown?: boolean;
+      preferredTransport?: "cloak" | "naive" | "reality" | "hysteria2" | "snowflake";
+    }
+  ): Promise<OkResponse> {
     const body: Record<string, unknown> = { profileId };
     if (opts?.allowLAN) {
       body.allowLAN = true;
     }
     if (opts?.lockdown) {
       body.lockdown = true;
+    }
+    if (opts?.preferredTransport) {
+      body.preferredTransport = opts.preferredTransport;
     }
     return this.request<OkResponse>("POST", "/switch", body, this.connectTimeoutMs);
   }
@@ -139,6 +178,14 @@ export class DaemonClient {
 
       if (!response.ok) {
         const text = await response.text();
+        try {
+          const payload = JSON.parse(text) as { error?: unknown };
+          if (payload.error === "transport_exhausted") {
+            throw new TransportExhaustedError();
+          }
+        } catch (error) {
+          if (error instanceof TransportExhaustedError) throw error;
+        }
         throw new Error(`daemon request failed (${response.status}): ${text}`);
       }
 

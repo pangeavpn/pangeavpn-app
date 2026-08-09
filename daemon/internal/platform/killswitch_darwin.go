@@ -40,10 +40,23 @@ func (ks *darwinKillSwitch) Enable(ctx context.Context, endpointHosts []string, 
 	if ks.active {
 		prev, _ := loadKillSwitchState()
 		if stringSlicesEqual(prev.EndpointIPs, ips) && prev.AllowLAN == allowLAN {
-			return nil
+			// Rules match; still record a Lockdown re-arm.
+			return persistLockedUpgrade(prev, locked)
 		}
 		tunnelInterface = prev.TunnelInterface
 	}
+
+	if err := applyPFAnchor(ctx, ips, tunnelInterface, allowLAN); err != nil {
+		if !ks.active {
+			_ = removePFAnchor(ctx)
+		}
+		return fmt.Errorf("kill switch enable: %w", err)
+	}
+
+	// Rules are live from here. Marking active before the save means a save
+	// failure still leaves the anchor trackable by Clear.
+	ks.active = true
+	ks.allowLAN = allowLAN
 
 	st := KillSwitchState{
 		Active:          true,
@@ -55,17 +68,6 @@ func (ks *darwinKillSwitch) Enable(ctx context.Context, endpointHosts []string, 
 	if err := saveKillSwitchState(st); err != nil {
 		return fmt.Errorf("kill switch enable: save state: %w", err)
 	}
-
-	if err := applyPFAnchor(ctx, ips, tunnelInterface, allowLAN); err != nil {
-		if !ks.active {
-			_ = removePFAnchor(ctx)
-			_ = removeKillSwitchState()
-		}
-		return fmt.Errorf("kill switch enable: %w", err)
-	}
-
-	ks.active = true
-	ks.allowLAN = allowLAN
 	return nil
 }
 

@@ -8,6 +8,25 @@ import {
   attemptInitialAutoConnect,
   getUserIntent
 } from "./autoConnect.js";
+import { pickRandomServer, resolveSelection } from "./serverPick.js";
+import { buildDriftMap } from "./driftMap.js";
+import { dnsChoiceFor, dnsServersFor, type DnsChoice } from "./dnsPresets.js";
+import { buildFlag } from "./flags.js";
+import {
+  buildServerRetryOrder,
+  groupRegions,
+  orderByRecent,
+  pickNode,
+  promoteRecent,
+  regionOfServer,
+  type Region
+} from "./regions.js";
+import { scheduleConnectionMessages } from "./connectionProgress.js";
+import {
+  daemonHealthAfterFailure,
+  daemonHealthAfterSuccess,
+  initialDaemonHealth
+} from "./daemonHealth.js";
 import {
   t,
   initLocale,
@@ -37,12 +56,14 @@ function reportError(context: string, error: unknown, friendly?: string): string
 
 const stateEl = document.getElementById("state") as HTMLSpanElement;
 const detailEl = document.getElementById("detail") as HTMLSpanElement;
-const cloakEl = document.getElementById("cloak") as HTMLSpanElement;
-const wireguardEl = document.getElementById("wireguard") as HTMLSpanElement;
-const ksDot = document.getElementById("ksDot") as HTMLElement;
-const throughputPanel = document.getElementById("throughputPanel") as HTMLElement;
 const txBytesEl = document.getElementById("txBytes") as HTMLSpanElement;
 const rxBytesEl = document.getElementById("rxBytes") as HTMLSpanElement;
+const mapHost = document.getElementById("mapHost") as HTMLElement;
+const heroHeadline = document.getElementById("heroHeadline") as HTMLElement;
+const factSessionEl = document.getElementById("factSession") as HTMLSpanElement;
+const factViaEl = document.getElementById("factVia") as HTMLSpanElement;
+const regionSlots = document.getElementById("regionSlots") as HTMLElement;
+const regionMoreCount = document.getElementById("regionMoreCount") as HTMLElement;
 const themeToggleBtn = document.getElementById("themeToggleBtn") as HTMLButtonElement;
 const uiMessageEl = document.getElementById("uiMessage") as HTMLParagraphElement;
 const appVersionEl = document.getElementById("appVersion") as HTMLSpanElement;
@@ -63,11 +84,14 @@ const serverSelect = document.getElementById("serverSelect") as HTMLSelectElemen
 const serverConnectBtn = document.getElementById("serverConnectBtn") as HTMLButtonElement;
 const serverDisconnectBtn = document.getElementById("serverDisconnectBtn") as HTMLButtonElement;
 const serverRefreshBtn = document.getElementById("serverRefreshBtn") as HTMLButtonElement;
-const serverIndicator = document.getElementById("serverIndicator") as HTMLSpanElement;
-const serverIndicatorLabel = document.getElementById("serverIndicatorLabel") as HTMLSpanElement;
 const directIpToggle = document.getElementById("directIpToggle") as HTMLInputElement;
 const directIpOnlyToggle = document.getElementById("directIpOnlyToggle") as HTMLInputElement;
 const allowLanToggle = document.getElementById("allowLanToggle") as HTMLInputElement;
+const dnsPresetSelect = document.getElementById("dnsPresetSelect") as HTMLSelectElement;
+const customDnsField = document.getElementById("customDnsField") as HTMLElement;
+const customDnsInput = document.getElementById("customDnsInput") as HTMLInputElement;
+const wireguardMtuInput = document.getElementById("wireguardMtuInput") as HTMLInputElement;
+const preferredTransportSelect = document.getElementById("preferredTransportSelect") as HTMLSelectElement;
 const launchAtStartupToggle = document.getElementById("launchAtStartupToggle") as HTMLInputElement;
 const alwaysConnectedToggle = document.getElementById("alwaysConnectedToggle") as HTMLInputElement;
 const loginScreen = document.getElementById("loginScreen") as HTMLElement;
@@ -80,11 +104,12 @@ const manageSubLink = document.getElementById("manageSubLink") as HTMLAnchorElem
 const menuSettingsBtn = document.getElementById("menuSettingsBtn") as HTMLButtonElement;
 const settingsOverlay = document.getElementById("settingsOverlay") as HTMLElement;
 const settingsOverlayCloseBtn = document.getElementById("settingsOverlayCloseBtn") as HTMLButtonElement;
-const accountUserLabel = document.getElementById("accountUserLabel") as HTMLSpanElement;
 const accountSubscription = document.getElementById("accountSubscription") as HTMLSpanElement;
-const accountTokenValue = document.getElementById("accountTokenValue") as HTMLElement;
-const accountTokenToggleBtn = document.getElementById("accountTokenToggleBtn") as HTMLButtonElement;
-const accountTokenCopyBtn = document.getElementById("accountTokenCopyBtn") as HTMLButtonElement;
+const setCensorshipValue = document.getElementById("setCensorshipValue") as HTMLSpanElement;
+const setTransportValue = document.getElementById("setTransportValue") as HTMLSpanElement;
+const setNetworkValue = document.getElementById("setNetworkValue") as HTMLSpanElement;
+const setStartupValue = document.getElementById("setStartupValue") as HTMLSpanElement;
+const setLanguageValue = document.getElementById("setLanguageValue") as HTMLSpanElement;
 const checkUpdatesBtn = document.getElementById("checkUpdatesBtn") as HTMLButtonElement;
 const settingsVersionEl = document.getElementById("settingsVersion") as HTMLSpanElement;
 const serverPickerBtn = document.getElementById("serverPickerBtn") as HTMLButtonElement;
@@ -92,8 +117,6 @@ const serverPickerLabel = document.getElementById("serverPickerLabel") as HTMLEl
 const serverPickerOverlay = document.getElementById("serverPickerOverlay") as HTMLElement;
 const serverPickerOverlayList = document.getElementById("serverPickerOverlayList") as HTMLElement;
 const serverPickerOverlayCloseBtn = document.getElementById("serverPickerOverlayCloseBtn") as HTMLButtonElement;
-const cloakDot = document.getElementById("cloakDot") as HTMLElement;
-const wgDot = document.getElementById("wgDot") as HTMLElement;
 
 type ThemeMode = "light" | "dark";
 const THEME_STORAGE_KEY = "pangea-vpn-theme";
@@ -110,12 +133,18 @@ let logEntries: LogEntry[] = [];
 let authState: AuthState = { authenticated: false, user: null };
 let servers: ServerInfo[] = [];
 let serverWorking = false;
-// True once a connect attempt has been in-flight for >= 1s, signaling the UI
-// to enable the disconnect button so the user can bail out before the 10s
-// cloak timeout fires.
-let connectCancelAllowed = false;
-let connectCancelTimer: ReturnType<typeof setTimeout> | null = null;
-const CONNECT_CANCEL_DELAY_MS = 1000;
+// Stop stays live for the whole attempt: cancelling is a hard cancel in main,
+// so there is no unsafe window a grace delay would protect.
+let connectInFlight = false;
+// Hub's verdict on whether this account may connect; null until asked. Never
+// derived from subscription.status — prepaid plans stay "active" once lapsed.
+let entitled: boolean | null = null;
+
+// Mirrors shared/mtu.ts — the renderer can't import it without clobbering
+// main's CommonJS copy in dist. Display only; keep in step with the input.
+const MTU_MIN = 1280;
+const MTU_MAX = 1420;
+const MTU_DEFAULT = 1380;
 
 themeToggleBtn.addEventListener("click", () => {
   const nextTheme: ThemeMode = document.body.dataset.theme === "dark" ? "light" : "dark";
@@ -142,26 +171,32 @@ manageSubLink.addEventListener("click", (e) => {
 
 // ── Fullscreen settings overlay ───────────────────────────────
 
-const LAST_TOKEN_KEY = "pangea:lastToken";
-let accountTokenRevealed = false;
+/** Collapsed rows carry their current value, so state is readable without
+ *  opening anything. Reuses the control labels rather than new strings. */
+function updateSettingsSummaries(): void {
+  const off = t("settings.summary.off");
 
-function maskToken(token: string): string {
-  return "•".repeat(Math.min(Math.max(token.length, 8), 16));
-}
+  const censorship: string[] = [];
+  if (directIpToggle.checked) censorship.push(t("settings.censorship.directIp.title"));
+  if (directIpOnlyToggle.checked) censorship.push(t("settings.censorship.directIpOnly.title"));
+  setCensorshipValue.textContent = censorship.length ? censorship.join(" · ") : off;
 
-function refreshAccountToken(): void {
-  const token = localStorage.getItem(LAST_TOKEN_KEY);
-  const hasToken = Boolean(token);
-  accountTokenToggleBtn.disabled = !hasToken;
-  accountTokenCopyBtn.disabled = !hasToken;
-  if (!token) {
-    accountTokenRevealed = false;
-    accountTokenValue.textContent = t("common.dash");
-    accountTokenToggleBtn.textContent = t("settings.account.show");
-    return;
-  }
-  accountTokenValue.textContent = accountTokenRevealed ? token : maskToken(token);
-  accountTokenToggleBtn.textContent = t(accountTokenRevealed ? "settings.account.hide" : "settings.account.show");
+  const transport = preferredTransportSelect.selectedOptions[0];
+  setTransportValue.textContent = transport ? transport.textContent : "";
+
+  const network = [`MTU ${wireguardMtuInput.value || MTU_DEFAULT}`];
+  const dnsChoice = dnsPresetSelect.selectedOptions[0];
+  if (dnsPresetSelect.value !== "automatic" && dnsChoice) network.push(dnsChoice.textContent ?? "DNS");
+  if (allowLanToggle.checked) network.push(t("settings.network.allowLan.title"));
+  setNetworkValue.textContent = network.join(" · ");
+
+  const startup: string[] = [];
+  if (launchAtStartupToggle.checked) startup.push(t("settings.startup.launch.title"));
+  if (alwaysConnectedToggle.checked) startup.push(t("settings.startup.lockdown.title"));
+  setStartupValue.textContent = startup.length ? startup.join(" · ") : off;
+
+  const language = languageSelect?.selectedOptions[0];
+  setLanguageValue.textContent = language ? language.textContent : "";
 }
 
 function formatSubscriptionDate(iso: string | null): string {
@@ -176,6 +211,11 @@ function formatSubscriptionDate(iso: string | null): string {
 function subscriptionText(sub: SubscriptionInfo | null): { text: string; warn: boolean } {
   if (!sub) return { text: t("sub.none"), warn: false };
   const when = formatSubscriptionDate(sub.expiresAt);
+  // Before the status branch: a lapsed prepaid plan still reads "active", so
+  // status-first would quote an expiry date already in the past.
+  if (sub.entitled === false) {
+    return { text: `${t("sub.expired")}${when ? " —" + when : ""}`, warn: true };
+  }
   if (sub.status === "active" || sub.status === "trialing") {
     const trial = sub.status === "trialing" ? t("sub.trialPrefix") : "";
     return { text: `${trial}${sub.renews ? t("sub.renews") : t("sub.expires")}${when}`, warn: false };
@@ -184,6 +224,26 @@ function subscriptionText(sub: SubscriptionInfo | null): { text: string; warn: b
     return { text: `${t("sub.pastDue")}${when ? " —" + when : ""}`, warn: true };
   }
   return { text: t("sub.none"), warn: false };
+}
+
+/** Ask the hub whether this account may connect. Toasts once per transition
+ *  into expired — the only notice a lapsed prepaid customer ever gets. */
+async function refreshEntitlement(): Promise<void> {
+  if (!pangeaApi) return;
+  let sub: SubscriptionInfo | null = null;
+  try {
+    sub = await pangeaApi.getSubscription();
+  } catch {
+    return; // offline or hub down — leave the previous verdict alone
+  }
+  // Absent on older hubs: assume entitled rather than locking someone out.
+  const next = sub === null ? null : sub.entitled !== false;
+  const wasEntitled = entitled;
+  entitled = next;
+  if (next === false && wasEntitled !== false) {
+    showToast(t("connect.expired"), 8000);
+  }
+  updateServerControlStates();
 }
 
 // Fetched fresh each time Settings opens so expiry/renewal is always current.
@@ -203,13 +263,17 @@ async function refreshSubscription(): Promise<void> {
   const { text, warn } = subscriptionText(sub);
   accountSubscription.textContent = text;
   accountSubscription.classList.toggle("account-subscription-warn", warn);
+  // Settings just told us the truth — keep the connect gate in step with it.
+  if (sub) {
+    entitled = sub.entitled !== false;
+    updateServerControlStates();
+  }
 }
 
 // ── Overlay focus management ──────────────────────────────────
-// Full-screen overlays cover the shell but leave it in the tab order, so a
-// keyboard/screen-reader user could otherwise reach controls hidden behind
-// them. On open we make the shell `inert` (non-interactive + hidden from AT)
-// and move focus into the overlay; on close we release it and restore focus.
+
+// Overlays cover the shell but leave it in the tab order, so the shell goes
+// `inert` on open; focus moves in, and is restored on close.
 const overlayReturnFocus: Array<HTMLElement | null> = [];
 
 function activateOverlay(overlay: HTMLElement): void {
@@ -238,7 +302,7 @@ function openSettings(): void {
   settingsOverlay.classList.add("visible");
   settingsOverlay.setAttribute("aria-hidden", "false");
   settingsVersionEl.textContent = appVersionEl.textContent || t("common.dash");
-  refreshAccountToken();
+  updateSettingsSummaries();
   void refreshSubscription();
   activateOverlay(settingsOverlay);
 }
@@ -246,9 +310,6 @@ function openSettings(): void {
 function closeSettings(): void {
   settingsOverlay.classList.remove("visible");
   settingsOverlay.setAttribute("aria-hidden", "true");
-  // Re-mask the token so it isn't revealed the next time settings opens.
-  accountTokenRevealed = false;
-  refreshAccountToken();
   deactivateOverlay();
 }
 
@@ -266,25 +327,6 @@ document.addEventListener("keydown", (e) => {
     e.preventDefault();
     e.stopPropagation();
     closeSettings();
-  }
-});
-
-accountTokenToggleBtn.addEventListener("click", () => {
-  accountTokenRevealed = !accountTokenRevealed;
-  refreshAccountToken();
-});
-
-accountTokenCopyBtn.addEventListener("click", async () => {
-  const token = localStorage.getItem(LAST_TOKEN_KEY);
-  if (!token) {
-    showToast(t("account.noToken"));
-    return;
-  }
-  try {
-    await copyTextToClipboard(token);
-    showToast(t("account.tokenCopied"), 3000, true);
-  } catch (error) {
-    showToast(reportError("copyToken", error));
   }
 });
 
@@ -781,34 +823,54 @@ loginScreenBtn.addEventListener("click", async () => {
 
 serverConnectBtn.addEventListener("click", async () => {
   if (!pangeaApi || !daemonApi) return;
-  const serverId = serverSelect.value;
+  let serverId = serverSelect.value;
   if (!serverId) {
-    setUiMessage(t("connect.noServer"));
+    // Nothing picked — choose for them, and show which one before connecting.
+    const picked = pickRandomServer(getVisibleServers());
+    if (!picked) {
+      setUiMessage(t("connect.noServer"));
+      return;
+    }
+    serverId = picked.id;
+    serverSelect.value = serverId;
+    syncServerPicker();
+  }
+
+  // Refuse locally when the hub says this account is out of time — register
+  // would 403 anyway, and this gives a clear message, not a failed connect.
+  if (entitled === false) {
+    showToast(t("connect.expired"));
+    setUiMessage(t("sub.expired"));
     return;
   }
 
   serverWorking = true;
-  connectCancelAllowed = false;
-  if (connectCancelTimer) clearTimeout(connectCancelTimer);
-  connectCancelTimer = setTimeout(() => {
-    connectCancelAllowed = true;
-    connectCancelTimer = null;
-    updateServerControlStates();
-  }, CONNECT_CANCEL_DELAY_MS);
-  updateServerBusyIndicator(true, t("hero.provisioning"));
+  connectInFlight = true;
+  const connectingSince = showConnectingState();
   updateServerControlStates();
+  setUiMessage(t("connect.provisioning"));
+  const clearProgressMessages = startConnectionProgressMessages();
   try {
-    setUiMessage(t("connect.provisioning"));
-    const result = await pangeaApi.provisionAndConnect(serverId);
+    const result = await pangeaApi.provisionAndConnect(serverRetryPlan(serverId));
+    clearProgressMessages();
     if (result.ok) {
+      applyConnectedServer(result.serverId);
       setUiMessage(t("connect.connected"));
       notifyUserConnected();
       void refreshLastServer();
+    } else if ((result as { error?: string }).error === "cancelled") {
+      // The user stopped it — not a failure, so no error styling.
+      setUiMessage(t("connect.cancelled"));
     } else {
       setUiMessage(t("connect.failed"));
+      // The most likely reason a connect is refused outright: re-check so the
+      // UI settles into the expired state rather than inviting another try.
+      void refreshEntitlement();
     }
+    await settleConnectingState(connectingSince);
     await refreshStatus();
   } catch (error) {
+    clearProgressMessages();
     // If auth was invalidated, the onAuthInvalidated listener handles the UI
     if (pangeaApi) {
       try {
@@ -826,15 +888,13 @@ serverConnectBtn.addEventListener("click", async () => {
       }
     }
     setUiMessage(reportError("serverConnect", error));
+    await settleConnectingState(connectingSince);
     await refreshStatus();
   } finally {
+    clearProgressMessages();
+    connectingVisual = false;
     serverWorking = false;
-    if (connectCancelTimer) {
-      clearTimeout(connectCancelTimer);
-      connectCancelTimer = null;
-    }
-    connectCancelAllowed = false;
-    updateServerBusyIndicator(false);
+    connectInFlight = false;
     updateServerControlStates();
   }
 });
@@ -844,27 +904,28 @@ async function switchToServer(serverId: string): Promise<void> {
   if (!serverId) return;
 
   serverWorking = true;
-  connectCancelAllowed = false;
-  if (connectCancelTimer) clearTimeout(connectCancelTimer);
-  connectCancelTimer = setTimeout(() => {
-    connectCancelAllowed = true;
-    connectCancelTimer = null;
-    updateServerControlStates();
-  }, CONNECT_CANCEL_DELAY_MS);
-  updateServerBusyIndicator(true, t("hero.provisioning"));
+  connectInFlight = true;
+  const connectingSince = showConnectingState();
   updateServerControlStates();
+  setUiMessage(t("connect.switching"));
+  const clearProgressMessages = startConnectionProgressMessages();
   try {
-    setUiMessage(t("connect.switching"));
-    const result = await pangeaApi.provisionAndSwitch(serverId);
+    const result = await pangeaApi.provisionAndSwitch(serverRetryPlan(serverId));
+    clearProgressMessages();
     if (result.ok) {
+      applyConnectedServer(result.serverId);
       setUiMessage(t("connect.connected"));
       notifyUserConnected();
       void refreshLastServer();
+    } else if (result.error === "cancelled") {
+      setUiMessage(t("connect.cancelled"));
     } else {
       setUiMessage(t("connect.switchFailed"));
     }
+    await settleConnectingState(connectingSince);
     await refreshStatus();
   } catch (error) {
+    clearProgressMessages();
     if (pangeaApi) {
       try {
         const state = await pangeaApi.getAuthState();
@@ -881,24 +942,37 @@ async function switchToServer(serverId: string): Promise<void> {
       }
     }
     setUiMessage(reportError("serverSwitch", error));
+    await settleConnectingState(connectingSince);
     await refreshStatus();
   } finally {
+    clearProgressMessages();
+    connectingVisual = false;
     serverWorking = false;
-    if (connectCancelTimer) {
-      clearTimeout(connectCancelTimer);
-      connectCancelTimer = null;
-    }
-    connectCancelAllowed = false;
-    updateServerBusyIndicator(false);
+    connectInFlight = false;
     updateServerControlStates();
   }
 }
 
 serverDisconnectBtn.addEventListener("click", async () => {
   if (!daemonApi) return;
+
+  // Mid-connect this is Stop: cancel the attempt in main, or it brings the
+  // tunnel up a moment later. Its own finally clears the busy state.
+  if (connectInFlight && pangeaApi) {
+    clearActiveConnectionMessages?.();
+    notifyUserDisconnected();
+    setUiMessage(t("connect.cancelled"));
+    try {
+      await pangeaApi.cancelConnect();
+    } catch (error) {
+      setUiMessage(reportError("cancelConnect", error));
+    }
+    await refreshStatus();
+    return;
+  }
+
   notifyUserDisconnected();
   serverWorking = true;
-  updateServerBusyIndicator(true, t("hero.disconnecting"));
   updateServerControlStates();
   try {
     setUiMessage(t("connect.disconnecting"));
@@ -909,7 +983,6 @@ serverDisconnectBtn.addEventListener("click", async () => {
     setUiMessage(reportError("serverDisconnect", error));
   } finally {
     serverWorking = false;
-    updateServerBusyIndicator(false);
     updateServerControlStates();
   }
 });
@@ -918,9 +991,10 @@ serverRefreshBtn.addEventListener("click", async () => {
   await refreshServers();
 });
 
-// Settings toggles live inside the fullscreen overlay, which covers #uiMessage,
-// so feedback is shown via showToast (renders above the overlay). Each toggle
-// reverts its checkbox and surfaces the error if the backend call fails.
+// Settings toggles sit under the overlay that covers #uiMessage, so feedback
+// goes through showToast; each reverts its checkbox if the backend call fails.
+settingsOverlay.addEventListener("change", updateSettingsSummaries);
+
 directIpToggle.addEventListener("change", async () => {
   if (!pangeaApi) return;
   try {
@@ -970,6 +1044,94 @@ allowLanToggle.addEventListener("change", async () => {
   }
 });
 
+// Commits on blur/Enter. Main owns validation and returns what it actually
+// stored, so the field always ends up showing the truth rather than the typo.
+wireguardMtuInput.addEventListener("change", async () => {
+  if (!pangeaApi) return;
+  const requested = wireguardMtuInput.value.trim();
+  try {
+    const stored = await pangeaApi.setWireguardMtu(Number(requested));
+    // Always show what was actually stored; the field self-corrects, so there's
+    // no invalid state to style — the toast explains why it changed.
+    wireguardMtuInput.value = String(stored);
+    const rejected = requested === "" || Number(requested) !== stored;
+    if (rejected) {
+      showToast(t("settings.network.mtu.invalid", { min: MTU_MIN, max: MTU_MAX }));
+    } else {
+      showToast(t("settings.network.mtu.saved", { mtu: stored }), 4000, true);
+    }
+  } catch (err) {
+    wireguardMtuInput.value = String(await pangeaApi.getWireguardMtu().catch(() => MTU_DEFAULT));
+    showToast(reportError("wireguardMtu", err, t("toggle.updateFailed")));
+  }
+});
+
+function syncDnsControls(servers: readonly string[]): void {
+  const choice = dnsChoiceFor(servers);
+  dnsPresetSelect.value = choice;
+  customDnsField.hidden = choice !== "custom";
+  customDnsInput.value = servers.join(", ");
+}
+
+async function saveDns(requested: string): Promise<void> {
+  if (!pangeaApi) return;
+  dnsPresetSelect.disabled = true;
+  customDnsInput.disabled = true;
+  try {
+    const stored = await pangeaApi.setCustomDns(requested);
+    syncDnsControls(stored);
+    showToast(
+      stored.length > 0
+        ? t("settings.network.dns.saved", { dns: stored.join(", ") })
+        : t("settings.network.dns.defaultSaved"),
+      4000,
+      true
+    );
+  } catch (err) {
+    syncDnsControls(await pangeaApi.getCustomDns().catch(() => []));
+    const invalid = err instanceof Error && err.message.includes("Custom DNS");
+    showToast(invalid
+      ? t("settings.network.dns.invalid")
+      : reportError("customDns", err, t("toggle.updateFailed")));
+  } finally {
+    dnsPresetSelect.disabled = false;
+    customDnsInput.disabled = false;
+    updateSettingsSummaries();
+  }
+}
+
+dnsPresetSelect.addEventListener("change", async () => {
+  const choice = dnsPresetSelect.value as DnsChoice;
+  const servers = dnsServersFor(choice);
+  if (servers === null) {
+    customDnsField.hidden = false;
+    customDnsInput.focus();
+    customDnsInput.select();
+    return;
+  }
+  await saveDns(servers.join(", "));
+});
+
+customDnsInput.addEventListener("change", async () => {
+  await saveDns(customDnsInput.value.trim());
+});
+
+preferredTransportSelect.addEventListener("change", async () => {
+  if (!pangeaApi) return;
+  const previous = preferredTransportSelect.dataset.previousValue ?? "auto";
+  const choice = preferredTransportSelect.value as "auto" | "cloak" | "naive" | "reality" | "hysteria2" | "snowflake";
+  try {
+    await pangeaApi.setPreferredTransport(choice);
+    preferredTransportSelect.dataset.previousValue = choice;
+    // Re-filter the server list: hide servers that don't support the new choice.
+    renderServers();
+    showToast(t("toggle.preferredTransport.updated"), 4000, true);
+  } catch (err) {
+    preferredTransportSelect.value = previous;
+    showToast(reportError("preferredTransport", err, t("toggle.updateFailed")));
+  }
+});
+
 launchAtStartupToggle.addEventListener("change", async () => {
   if (!pangeaApi) return;
   try {
@@ -997,9 +1159,7 @@ alwaysConnectedToggle.addEventListener("change", async () => {
   notifyToggleChanged(alwaysConnectedLocal);
   if (alwaysConnectedLocal) {
     showToast(t("toggle.lockdown.on"), 5000, true);
-    if (lastServerIdLocal) {
-      void attemptInitialAutoConnect();
-    }
+    void attemptInitialAutoConnect();
   } else {
     showToast(t("toggle.lockdown.off"), 4000, true);
   }
@@ -1020,6 +1180,89 @@ async function refreshLastServer(): Promise<void> {
 const loadingScreen = document.getElementById("loadingScreen") as HTMLElement;
 const loadingMessage = document.getElementById("loadingMessage") as HTMLParagraphElement;
 const shell = document.querySelector<HTMLElement>(".shell")!;
+const daemonRecoveryScreen = document.getElementById("daemonRecoveryScreen") as HTMLElement;
+const daemonRecoveryBtn = document.getElementById("daemonRecoveryBtn") as HTMLButtonElement;
+const daemonRecoveryMessage = document.getElementById("daemonRecoveryMessage") as HTMLParagraphElement;
+const daemonRecoveryButtonLabel = daemonRecoveryBtn.querySelector<HTMLElement>(".daemon-recovery-button-label")!;
+let daemonHealth = initialDaemonHealth();
+let daemonRecoveryRestartInProgress = false;
+let daemonRecoveryReturnFocus: HTMLElement | null = null;
+let daemonRecoveryResolvers: Array<() => void> = [];
+const daemonRecoveryInerted = new Set<HTMLElement>();
+
+function showDaemonRecovery(): void {
+  if (!daemonRecoveryScreen.hidden) return;
+
+  daemonRecoveryReturnFocus = document.activeElement as HTMLElement | null;
+  for (const child of Array.from(document.body.children)) {
+    if (!(child instanceof HTMLElement) || child === daemonRecoveryScreen || child.tagName === "SCRIPT") continue;
+    if (!child.hasAttribute("inert")) {
+      child.setAttribute("inert", "");
+      daemonRecoveryInerted.add(child);
+    }
+  }
+  daemonRecoveryScreen.hidden = false;
+  daemonRecoveryScreen.dataset.state = "error";
+  daemonRecoveryMessage.textContent = "";
+  daemonRecoveryBtn.disabled = false;
+  daemonRecoveryBtn.removeAttribute("aria-busy");
+  daemonRecoveryButtonLabel.textContent = t("daemonRecovery.restart");
+  window.setTimeout(() => daemonRecoveryBtn.focus(), 0);
+}
+
+function completeDaemonRecovery(force = false): void {
+  daemonHealth = daemonHealthAfterSuccess(daemonHealth);
+  if (daemonRecoveryRestartInProgress && !force) return;
+
+  daemonRecoveryRestartInProgress = false;
+  if (!daemonRecoveryScreen.hidden) {
+    daemonRecoveryScreen.hidden = true;
+    delete daemonRecoveryScreen.dataset.state;
+    daemonRecoveryBtn.removeAttribute("aria-busy");
+    for (const element of daemonRecoveryInerted) element.removeAttribute("inert");
+    daemonRecoveryInerted.clear();
+    daemonRecoveryReturnFocus?.focus?.();
+    daemonRecoveryReturnFocus = null;
+  }
+  const resolvers = daemonRecoveryResolvers;
+  daemonRecoveryResolvers = [];
+  for (const resolve of resolvers) resolve();
+}
+
+function waitForDaemonRecovery(): Promise<void> {
+  showDaemonRecovery();
+  return new Promise((resolve) => daemonRecoveryResolvers.push(resolve));
+}
+
+daemonRecoveryBtn.addEventListener("click", async () => {
+  if (!daemonApi || daemonRecoveryBtn.disabled) return;
+
+  daemonRecoveryBtn.disabled = true;
+  daemonRecoveryRestartInProgress = true;
+  daemonRecoveryScreen.dataset.state = "working";
+  daemonRecoveryBtn.setAttribute("aria-busy", "true");
+  daemonRecoveryButtonLabel.textContent = t("daemonRecovery.restarting");
+  daemonRecoveryMessage.textContent = t("daemonRecovery.waitingForApproval");
+  try {
+    const result = await daemonApi.restartDaemon();
+    if (!result.ok) {
+      throw new Error(result.error || "daemon restart failed");
+    }
+    await daemonApi.getStatus();
+    completeDaemonRecovery(true);
+  } catch (error) {
+    console.error("[daemonRecovery]", error);
+    daemonRecoveryRestartInProgress = false;
+    daemonRecoveryScreen.dataset.state = "error";
+    daemonRecoveryBtn.removeAttribute("aria-busy");
+    daemonRecoveryMessage.textContent = verboseErrors
+      ? `${t("daemonRecovery.failed")} ${error instanceof Error ? error.message : String(error)}`
+      : t("daemonRecovery.failed");
+    daemonRecoveryBtn.disabled = false;
+    daemonRecoveryButtonLabel.textContent = t("daemonRecovery.tryAgain");
+    daemonRecoveryBtn.focus();
+  }
+});
 
 function animateOut(el: HTMLElement): Promise<void> {
   return new Promise((resolve) => {
@@ -1069,8 +1312,9 @@ function showLoginScreen(): void {
 }
 
 // ── Language selection ────────────────────────────────
-// The locale is resolved once at startup and applied before the shell shows.
-// Changing it persists the choice; it takes effect on the next launch.
+
+// Resolved once at startup, before the shell shows. Changing it persists the
+// choice and takes effect on the next launch.
 const LANGUAGE_SYSTEM = "system";
 const languageSelect = document.getElementById("languageSelect") as HTMLSelectElement | null;
 const languageRestartHint = document.getElementById("languageRestartHint") as HTMLElement | null;
@@ -1116,6 +1360,8 @@ function initLanguagePicker(): void {
 
 async function init(): Promise<void> {
   initTheme();
+  mapHost.replaceChildren(buildDriftMap());
+  setInterval(renderSessionClock, 1000);
   await applyStoredLocale();
   initLanguagePicker();
 
@@ -1124,25 +1370,28 @@ async function init(): Promise<void> {
     return;
   }
 
-  // Poll until daemon responds (max 30s)
+  // Poll until daemon responds (max 30s), then offer an explicit elevated
+  // recovery instead of leaving the user stranded on the loading screen.
   const maxAttempts = 60;
   for (let i = 0; i < maxAttempts; i++) {
     const remaining = Math.ceil((maxAttempts - i) * 0.5);
     loadingMessage.textContent = t("app.loading.progress", { remaining });
     try {
       const status = await daemonApi.getStatus();
-      if (status) break;
+      if (status) {
+        break;
+      }
     } catch {
       // not ready
     }
     if (i === maxAttempts - 1) {
       loadingMessage.textContent = t("app.loading.didntStart");
-      return;
+      await waitForDaemonRecovery();
     }
     await new Promise((r) => setTimeout(r, 500));
   }
 
-  hideLoadingScreen();
+  void hideLoadingScreen();
 
   // Check auth state before showing any UI
   if (pangeaApi) {
@@ -1173,6 +1422,11 @@ async function init(): Promise<void> {
       directIpToggle.checked = await pangeaApi.getDirectIp();
       directIpOnlyToggle.checked = await pangeaApi.getDirectIpOnly();
       allowLanToggle.checked = await pangeaApi.getAllowLan();
+      syncDnsControls(await pangeaApi.getCustomDns());
+      wireguardMtuInput.value = String(await pangeaApi.getWireguardMtu());
+      const preferredTransport = await pangeaApi.getPreferredTransport();
+      preferredTransportSelect.value = preferredTransport;
+      preferredTransportSelect.dataset.previousValue = preferredTransport;
       if (directIpOnlyToggle.checked) {
         directIpToggle.checked = true;
         directIpToggle.disabled = true;
@@ -1202,8 +1456,13 @@ async function init(): Promise<void> {
       getAuthenticated: () => authState.authenticated,
       getDaemonState: () => currentDaemonState,
       getUserIntent,
+      getConnectionInFlight: () => connectInFlight,
       getLastServerId: () => lastServerIdLocal,
-      provisionAndSwitch: (serverId: string) => pangeaApi.provisionAndSwitch(serverId)
+      getFallbackServerId: () => pickRandomServer(getVisibleServers())?.id ?? null,
+      provisionAndSwitch: (serverId: string) => pangeaApi.provisionAndConnect(serverRetryPlan(serverId)),
+      // Pull the server auto-connect settled on into the picker, so it can't sit
+      // on "Select server" while we're actually connected.
+      onConnected: () => void refreshLastServer().then(renderServers)
     });
 
     await loadCachedServers();
@@ -1211,7 +1470,7 @@ async function init(): Promise<void> {
       await refreshServers();
     }
 
-    if (alwaysConnectedLocal && lastServerIdLocal && authState.authenticated) {
+    if (alwaysConnectedLocal && authState.authenticated) {
       void attemptInitialAutoConnect();
     }
   }
@@ -1334,9 +1593,8 @@ menuUpdateBtn.addEventListener("click", () => {
   showUpdateModal();
 });
 
-// checkForUpdates() resolves with the latest release regardless of whether it's
-// newer, so compare against the running version to decide the message. When it
-// IS newer the onUpdateAvailable event also fires and surfaces the full modal.
+// checkForUpdates() resolves with the latest release whether or not it's newer,
+// so compare against the running version; onUpdateAvailable shows the modal.
 function isNewerVersion(candidate: string, current: string): boolean {
   const parse = (v: string): number[] => v.replace(/^v/, "").split(".").map((n) => parseInt(n, 10) || 0);
   const a = parse(candidate);
@@ -1482,7 +1740,7 @@ async function refreshAll(showIndicator = false): Promise<void> {
 
   try {
     await Promise.all([refreshStatus(), refreshLogs()]);
-    setUiMessage(t("common.ready"));
+    setUiMessage("");
   } catch (error) {
     console.error("[daemonSync]", error);
     setUiMessage(t("common.retrying"));
@@ -1490,7 +1748,7 @@ async function refreshAll(showIndicator = false): Promise<void> {
     try {
       await new Promise((r) => setTimeout(r, 2000));
       await Promise.all([refreshStatus(), refreshLogs()]);
-      setUiMessage(t("common.ready"));
+      setUiMessage("");
     } catch (retryError) {
       setUiMessage(reportError("daemonSyncRetry", retryError));
     }
@@ -1607,9 +1865,12 @@ async function refreshStatus(): Promise<StatusResponse | null> {
   }
   try {
     const status = await daemonApi.getStatus();
+    completeDaemonRecovery();
     renderStatus(status);
     return status;
   } catch (error) {
+    daemonHealth = daemonHealthAfterFailure(daemonHealth);
+    if (daemonHealth.recoveryRequired) showDaemonRecovery();
     setUiMessage(reportError("status", error));
     return null;
   }
@@ -1644,33 +1905,113 @@ function formatBytes(bytes: number): string {
 
 let lastCloakWasDown = false;
 
+// Display names for the active-transport pill — protocol/product proper nouns,
+// identical across locales, so they are not translated.
+const TRANSPORT_LABELS: Record<string, string> = {
+  cloak: "Cloak",
+  naive: "NaiveProxy",
+  reality: "VLESS+REALITY",
+  hysteria2: "Hysteria2",
+  snowflake: "Snowflake",
+};
+
+// The status block for whichever transport is currently active, so the pill
+// reflects the live transport rather than always Cloak.
+const EM_DASH = "—";
+
+/** The {x} placeholder lets each locale put the stressed word where its own
+ *  grammar needs it, without putting markup in the catalogues. */
+function setHeadline(state: StatusResponse["state"]): void {
+  const [before, after = ""] = t(("hero.headline." + state) as MessageKey).split("{x}");
+  const strong = document.createElement("strong");
+  strong.textContent = t(("hero.emphasis." + state) as MessageKey);
+  heroHeadline.replaceChildren(document.createTextNode(before), strong, document.createTextNode(after));
+}
+
+const MIN_CONNECTING_MS = 600;
+
+// The 2s status poll samples straight past a connect/switch's transient
+// states, so while we are driving one the hero follows the operation, not the poll.
+let connectingVisual = false;
+
+function showConnectingState(): number {
+  connectingVisual = true;
+  renderConnectingState();
+  return Date.now();
+}
+
+function renderConnectingState(): void {
+  heroCard.dataset.state = "CONNECTING";
+  document.body.dataset.state = "CONNECTING";
+  stateEl.textContent = t("state.CONNECTING");
+  detailEl.textContent = "";
+  setHeadline("CONNECTING");
+}
+
+// Holds a fast connect/switch on CONNECTING long enough to read as a
+// transition. Only ever delays the render; a slower op waits not at all.
+async function settleConnectingState(startedAt: number): Promise<void> {
+  const remaining = MIN_CONNECTING_MS - (Date.now() - startedAt);
+  if (remaining > 0) {
+    await new Promise((resolve) => setTimeout(resolve, remaining));
+  }
+  connectingVisual = false;
+}
+
+// Wall-clock start of the current session, derived in the renderer — the
+// daemon does not report uptime.
+let connectedSince: number | null = null;
+
+function renderSessionClock(): void {
+  if (connectedSince === null) {
+    factSessionEl.textContent = EM_DASH;
+    return;
+  }
+  const total = Math.max(0, Math.floor((Date.now() - connectedSince) / 1000));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const seconds = total % 60;
+  const pad = (n: number): string => String(n).padStart(2, "0");
+  factSessionEl.textContent = hours > 0
+    ? `${hours}:${pad(minutes)}:${pad(seconds)}`
+    : `${pad(minutes)}:${pad(seconds)}`;
+}
+
+function activeTransportStatus(status: StatusResponse): { running: boolean; pid: number | null } {
+  switch (status.activeTransport) {
+    case "naive": return status.naive;
+    case "reality": return status.reality;
+    case "hysteria2": return status.hysteria2;
+    case "snowflake": return status.snowflake;
+    default: return status.cloak;
+  }
+}
+
 function renderStatus(status: StatusResponse): void {
   latestStatus = status;
   currentDaemonState = status.state;
-  stateEl.textContent = t(("state." + status.state) as MessageKey);
-  detailEl.textContent = status.detail;
 
-  const cloakPid = status.cloak.pid ?? "none";
-  cloakEl.textContent = `${status.cloak.running ? t("status.running") : t("status.stopped")} (pid: ${cloakPid})`;
-  wireguardEl.textContent = `${status.wireguard.running ? t("status.running") : t("status.stopped")} (${status.wireguard.detail})`;
-
-  // Drive hero card state
-  heroCard.dataset.state = status.state;
-  cloakDot.classList.toggle("on", status.cloak.running);
-  wgDot.classList.toggle("on", status.wireguard.running);
-
-  // Kill switch pill
-  const ksActive = (status as StatusResponse & { killSwitchActive?: boolean }).killSwitchActive ?? false;
-  ksDot.classList.toggle("on", ksActive);
+  // A poll landing mid-switch must not yank the hero back off CONNECTING.
+  if (connectingVisual) {
+    renderConnectingState();
+  } else {
+    stateEl.textContent = t(("state." + status.state) as MessageKey);
+    detailEl.textContent = status.detail;
+    heroCard.dataset.state = status.state;
+    document.body.dataset.state = status.state;
+    setHeadline(status.state);
+  }
 
   // Throughput stats
   const connected = status.state === "CONNECTED";
   const wg = status.wireguard as StatusResponse["wireguard"] & { bytesIn?: number; bytesOut?: number };
-  throughputPanel.hidden = !connected;
-  if (connected) {
-    rxBytesEl.textContent = formatBytes(wg.bytesIn ?? 0);
-    txBytesEl.textContent = formatBytes(wg.bytesOut ?? 0);
-  }
+  connectedSince = connected ? connectedSince ?? Date.now() : null;
+  rxBytesEl.textContent = connected ? formatBytes(wg.bytesIn ?? 0) : EM_DASH;
+  txBytesEl.textContent = connected ? formatBytes(wg.bytesOut ?? 0) : EM_DASH;
+  factViaEl.textContent = status.activeTransport
+    ? TRANSPORT_LABELS[status.activeTransport] ?? status.activeTransport
+    : EM_DASH;
+  renderSessionClock();
 
   // Recovery toast — cloak was down last poll, now it's back
   if (lastCloakWasDown && status.cloak.running && connected) {
@@ -1727,6 +2068,22 @@ function setUiMessage(message: string): void {
   uiMessageEl.textContent = message;
 }
 
+let clearActiveConnectionMessages: (() => void) | null = null;
+
+function startConnectionProgressMessages(): () => void {
+  clearActiveConnectionMessages?.();
+  const clearScheduled = scheduleConnectionMessages(
+    [t("connect.stillConnecting"), t("connect.takingLonger"), t("connect.stillWorking")],
+    setUiMessage
+  );
+  const cleanup = (): void => {
+    clearScheduled();
+    if (clearActiveConnectionMessages === cleanup) clearActiveConnectionMessages = null;
+  };
+  clearActiveConnectionMessages = cleanup;
+  return cleanup;
+}
+
 function showToast(message: string, durationMs = 5000, success = false): void {
   const container = document.getElementById("toastContainer");
   if (!container) return;
@@ -1751,14 +2108,11 @@ function updateAuthUI(): void {
     showAppShell();
     loginBtn.hidden = true;
     menuDevicesBtn.hidden = false;
-    accountUserLabel.textContent = authState.user?.email || authState.user?.name || t("common.dash");
-    refreshAccountToken();
     serverPanel.hidden = false;
   } else {
     showLoginScreen();
     loginBtn.hidden = !pangeaApi;
     menuDevicesBtn.hidden = true;
-    accountUserLabel.textContent = t("common.dash");
     closeSettings();
     serverPanel.hidden = true;
   }
@@ -1796,11 +2150,13 @@ async function refreshServers(): Promise<void> {
   if (!(await fetchServers())) {
     setUiMessage(t("connect.refreshServersFailed"));
   }
+  // Piggyback on every server refresh (login, picker open, app shown) so the
+  // expired state is discovered without its own polling loop.
+  void refreshEntitlement();
 }
 
-// Refresh with backoff until it succeeds, so the list (and its load values) is
-// always current. Triggered when the picker opens or the app is shown. A newer
-// call supersedes the loop; it also stops on sign-out or while the window is hidden.
+// Backoff until it succeeds so load values stay current. A newer call
+// supersedes the loop; it stops on sign-out or while the window is hidden.
 let serverRefreshGeneration = 0;
 async function refreshServersWithRetry(): Promise<void> {
   if (!authState.authenticated || !pangeaApi) return;
@@ -1835,115 +2191,316 @@ function buildLoadIndicator(load: number | null | undefined): HTMLElement | null
   return el;
 }
 
+type TransportChoice = "auto" | "cloak" | "naive" | "reality" | "hysteria2" | "snowflake";
+
+// Supported means the hub advertised that transport's block. cloak is always
+// present; "auto" matches every server and falls back across what it offers.
+function serverSupportsTransport(server: ServerInfo, transport: TransportChoice): boolean {
+  switch (transport) {
+    case "naive":
+      return Boolean(server.naive);
+    case "reality":
+      return Boolean(server.reality);
+    case "hysteria2":
+      return Boolean(server.hysteria2);
+    case "snowflake":
+      return Boolean(server.snowflake);
+    default:
+      return true; // auto + cloak: every server qualifies
+  }
+}
+
+// Servers to show for the currently selected transport — hide any that can't
+// carry the chosen transport so the user can't pick an unsupported combination.
+function getVisibleServers(): ServerInfo[] {
+  const choice = (preferredTransportSelect.value as TransportChoice) || "auto";
+  return servers.filter((s) => serverSupportsTransport(s, choice));
+}
+
+function serverRetryPlan(initialServerId: string): string[] {
+  const choice = (preferredTransportSelect.value as TransportChoice) || "auto";
+  return choice === "auto"
+    ? buildServerRetryOrder(getVisibleServers(), initialServerId)
+    : [initialServerId];
+}
+
+function applyConnectedServer(serverId: string | undefined): void {
+  if (!serverId) return;
+  lastServerIdLocal = serverId;
+  serverSelect.value = serverId;
+  syncServerPicker();
+}
+
+const RECENT_REGIONS_KEY = "pangea:recentRegions";
+const SLOT_COUNT = 2;
+
+let visibleRegions: Region[] = [];
+let recentRegions: string[] = readRecentRegions();
+// Set only when the user opened a region and chose a node by hand; otherwise
+// the lowest-load node is picked fresh on every connect.
+let pinnedNodeId: string | null = null;
+const expandedRegions = new Set<string>();
+
+function readRecentRegions(): string[] {
+  try {
+    const raw = localStorage.getItem(RECENT_REGIONS_KEY);
+    const parsed: unknown = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.filter((k): k is string => typeof k === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function rememberRegion(key: string): void {
+  recentRegions = promoteRecent(recentRegions, key);
+  try {
+    localStorage.setItem(RECENT_REGIONS_KEY, JSON.stringify(recentRegions));
+  } catch {
+    // A full or blocked localStorage only costs us the ordering, so carry on.
+  }
+}
+
+/** The node a region would connect to: the user's pin, else the lightest. */
+function nodeForRegion(region: Region): ServerInfo {
+  const pinned = pinnedNodeId && region.nodes.find((n) => n.id === pinnedNodeId);
+  return pinned || pickNode(region);
+}
+
+function selectedRegion(): Region | undefined {
+  return regionOfServer(visibleRegions, serverSelect.value);
+}
+
+/** Connects to (or switches to) a region, optionally pinned to one node. */
+function activateRegion(region: Region, nodeId: string | null): void {
+  closeServerPicker();
+  if (serverWorking) return;
+
+  pinnedNodeId = nodeId;
+  const target = nodeId ? region.nodes.find((n) => n.id === nodeId) ?? pickNode(region) : pickNode(region);
+  rememberRegion(region.key);
+
+  // Only commit the selection when an action will actually run, so the slots
+  // can't drift out of sync with the connected node.
+  if (currentDaemonState === "CONNECTED") {
+    serverSelect.value = target.id;
+    syncServerPicker();
+    void switchToServer(target.id);
+  } else if (!serverConnectBtn.disabled) {
+    serverSelect.value = target.id;
+    syncServerPicker();
+    serverConnectBtn.click();
+  } else {
+    serverSelect.value = target.id;
+    syncServerPicker();
+  }
+}
+
+function buildRegionRow(region: Region, forPicker: boolean): HTMLElement {
+  const node = nodeForRegion(region);
+  const isCurrent = region.nodes.some((n) => n.id === serverSelect.value);
+  const count = region.nodes.length;
+
+  const row = document.createElement("button");
+  row.type = "button";
+  row.className = "region-row";
+  row.dataset.key = region.key;
+  row.setAttribute("aria-current", String(isCurrent));
+
+  row.append(buildFlag(region.country));
+
+  const text = document.createElement("span");
+  text.className = "region-text";
+  const name = document.createElement("span");
+  name.className = "region-name";
+  name.textContent = region.name;
+  const sub = document.createElement("span");
+  sub.className = "region-sub";
+  if (isCurrent) {
+    sub.textContent = pinnedNodeId
+      ? t("region.pinned", { node: node.id })
+      : count > 1 ? t("region.bestOf", { node: node.id, count: String(count) }) : node.id;
+  } else {
+    sub.textContent = count > 1 ? t("region.autoOf", { count: String(count) }) : node.id;
+  }
+  text.append(name, sub);
+  row.append(text);
+
+  const load = buildLoadIndicator(node.load);
+  if (load) row.append(load);
+
+  const tick = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  tick.setAttribute("class", "region-tick");
+  tick.setAttribute("viewBox", "0 0 24 24");
+  tick.setAttribute("fill", "none");
+  tick.setAttribute("aria-hidden", "true");
+  tick.innerHTML =
+    '<path d="m5 13 4.5 4.5L19 7" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>';
+  row.append(tick);
+
+  row.addEventListener("click", () => activateRegion(region, null));
+
+  if (!forPicker || count < 2) return row;
+  return buildExpandableRegion(region, row);
+}
+
+/** Wraps a picker row so its sibling chevron can disclose the region's nodes. */
+function buildExpandableRegion(region: Region, row: HTMLElement): HTMLElement {
+  const wrap = document.createElement("div");
+  wrap.className = "region-wrap";
+  wrap.dataset.key = region.key;
+  wrap.dataset.current = String(region.nodes.some((n) => n.id === serverSelect.value));
+
+  const head = document.createElement("div");
+  head.className = "region-head";
+
+  const expanded = expandedRegions.has(region.key);
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.className = "region-expand";
+  toggle.setAttribute("aria-expanded", String(expanded));
+  toggle.setAttribute("aria-label", t("region.showServers", { region: region.name }));
+  toggle.innerHTML =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>';
+
+  head.append(row, toggle);
+  wrap.append(head);
+
+  const list = document.createElement("div");
+  list.className = "region-nodes";
+  list.hidden = !expanded;
+
+  const best = pickNode(region);
+  for (const node of region.nodes) {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "region-node";
+
+    const id = document.createElement("span");
+    id.className = "region-node-id";
+    id.textContent = node.id;
+    item.append(id);
+
+    if (node.id === pinnedNodeId || node.id === best.id) {
+      const badge = document.createElement("span");
+      badge.className = "region-node-badge";
+      badge.textContent = node.id === pinnedNodeId ? t("region.badgePinned") : t("region.badgeBest");
+      item.append(badge);
+    }
+
+    const load = buildLoadIndicator(node.load);
+    if (load) item.append(load);
+
+    item.addEventListener("click", () => activateRegion(region, node.id));
+    list.append(item);
+  }
+
+  toggle.addEventListener("click", () => {
+    const open = expandedRegions.has(region.key);
+    if (open) expandedRegions.delete(region.key);
+    else expandedRegions.add(region.key);
+    toggle.setAttribute("aria-expanded", String(!open));
+    list.hidden = open;
+  });
+
+  wrap.append(list);
+  return wrap;
+}
+
 function renderServers(): void {
   const previousValue = serverSelect.value;
+  const visible = getVisibleServers();
+  visibleRegions = groupRegions(visible);
   serverSelect.innerHTML = "";
-  serverPickerOverlayList.innerHTML = "";
 
-  if (servers.length === 0) {
+  if (visible.length === 0) {
+    const noneForTransport = servers.length > 0;
+    const emptyText = noneForTransport ? t("hero.noServersForTransport") : t("hero.noServers");
     const option = document.createElement("option");
     option.value = "";
-    option.textContent = t("hero.noServers");
+    option.textContent = emptyText;
     serverSelect.append(option);
     serverSelect.disabled = true;
     serverPickerBtn.disabled = true;
-    serverPickerLabel.textContent = t("hero.noServers");
     serverConnectBtn.disabled = true;
-    const empty = document.createElement("div");
-    empty.className = "server-picker-overlay-empty";
-    empty.textContent = t("serverPicker.noServers");
-    serverPickerOverlayList.append(empty);
+    regionSlots.replaceChildren(emptyNotice(noneForTransport));
+    serverPickerOverlayList.replaceChildren(emptyNotice(noneForTransport));
+    regionMoreCount.textContent = "";
     return;
   }
 
-  for (const server of servers) {
+  for (const server of visible) {
     const option = document.createElement("option");
     option.value = server.id;
     option.textContent = `${server.name} (${server.id})`;
     serverSelect.append(option);
-
-    const item = document.createElement("div");
-    item.className = "server-picker-overlay-item";
-    item.dataset.value = server.id;
-    item.setAttribute("role", "option");
-    item.tabIndex = 0;
-
-    const text = document.createElement("div");
-    text.className = "server-picker-overlay-item-text";
-    const nameSpan = document.createElement("span");
-    nameSpan.className = "server-picker-overlay-item-name";
-    nameSpan.textContent = server.name;
-    const regionSpan = document.createElement("span");
-    regionSpan.className = "server-picker-overlay-item-region";
-    regionSpan.textContent = [server.country, server.region].filter(Boolean).join(" · ") || server.id;
-    text.append(nameSpan, regionSpan);
-
-    const idSpan = document.createElement("span");
-    idSpan.className = "server-picker-overlay-item-id";
-    idSpan.textContent = server.id;
-
-    const right = document.createElement("div");
-    right.className = "server-picker-overlay-item-right";
-    right.append(idSpan);
-    const loadEl = buildLoadIndicator(server.load);
-    if (loadEl) right.append(loadEl);
-
-    item.append(text, right);
-    const activate = (): void => {
-      closeServerPicker();
-      if (serverWorking) return;
-      // Only commit the selection when an action will actually run, so the
-      // picker label can't drift out of sync with the connected server.
-      if (currentDaemonState === "CONNECTED") {
-        serverSelect.value = server.id;
-        syncServerPicker();
-        void switchToServer(server.id);
-      } else if (!serverConnectBtn.disabled) {
-        serverSelect.value = server.id;
-        syncServerPicker();
-        serverConnectBtn.click();
-      }
-    };
-    item.addEventListener("click", activate);
-    item.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" || e.key === " ") {
-        e.preventDefault();
-        activate();
-      }
-    });
-    serverPickerOverlayList.append(item);
   }
 
   serverSelect.disabled = false;
   serverPickerBtn.disabled = false;
-  const hasSelection = servers.some((s) => s.id === previousValue);
-  serverSelect.value = hasSelection ? previousValue : servers[0].id;
+  const resolved = resolveSelection(visible, previousValue, lastServerIdLocal);
+  if (!resolved) {
+    // A <select> snaps to index 0 for an unmatched value, so an empty selection
+    // needs a real placeholder to sit on. Hidden — the region list is the UI.
+    const placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = t("hero.selectServer");
+    serverSelect.prepend(placeholder);
+  }
+  serverSelect.value = resolved;
   syncServerPicker();
 
   updateServerControlStates();
 }
 
+function emptyNotice(noneForTransport: boolean): HTMLElement {
+  const empty = document.createElement("div");
+  empty.className = "server-picker-overlay-empty";
+  empty.textContent = noneForTransport ? t("serverPicker.noServersForTransport") : t("serverPicker.noServers");
+  return empty;
+}
+
 function syncServerPicker(): void {
-  const selected = servers.find((s) => s.id === serverSelect.value);
-  if (selected) {
-    serverPickerLabel.textContent = "";
-    const nameText = document.createTextNode(selected.name + " ");
-    const idSpan = document.createElement("span");
-    idSpan.className = "server-picker-label-id";
-    idSpan.textContent = selected.id;
-    serverPickerLabel.append(nameText, idSpan);
+  const ordered = orderByRecent(visibleRegions, recentRegions);
+  const current = selectedRegion();
+
+  // The connected region always holds a slot, so it can never scroll away.
+  const slots = current && !ordered.slice(0, SLOT_COUNT).includes(current)
+    ? [current, ...ordered.filter((r) => r !== current)].slice(0, SLOT_COUNT)
+    : ordered.slice(0, SLOT_COUNT);
+
+  regionSlots.replaceChildren(...slots.map((region) => buildRegionRow(region, false)));
+
+  const remaining = visibleRegions.length - slots.length;
+  regionMoreCount.textContent = remaining > 0 ? t("region.more", { count: String(remaining) }) : "";
+  serverPickerBtn.hidden = visibleRegions.length <= SLOT_COUNT;
+
+  renderRegionPicker(ordered);
+}
+
+function renderRegionPicker(ordered: readonly Region[]): void {
+  const recent = ordered.filter((region) => recentRegions.includes(region.key));
+  const rest = ordered.filter((region) => !recentRegions.includes(region.key));
+
+  const groups: HTMLElement[] = [];
+  const addGroup = (labelKey: MessageKey, list: readonly Region[]): void => {
+    if (list.length === 0) return;
+    const heading = document.createElement("p");
+    heading.className = "region-group-heading";
+    heading.textContent = t(labelKey);
+    const box = document.createElement("div");
+    box.className = "region-group";
+    box.append(...list.map((region) => buildRegionRow(region, true)));
+    groups.push(heading, box);
+  };
+
+  if (recent.length > 0) {
+    addGroup("serverPicker.recent", recent);
+    addGroup("serverPicker.all", rest);
   } else {
-    serverPickerLabel.textContent = t("hero.selectServer");
+    addGroup("serverPicker.all", ordered);
   }
 
-  for (const opt of Array.from(serverPickerOverlayList.children)) {
-    const el = opt as HTMLElement;
-    if (el.dataset.value !== undefined) {
-      const isSelected = el.dataset.value === serverSelect.value;
-      el.classList.toggle("selected", isSelected);
-      el.setAttribute("aria-selected", String(isSelected));
-    }
-  }
+  serverPickerOverlayList.replaceChildren(...groups);
 }
 
 function updateServerControlStates(): void {
@@ -1960,22 +2517,16 @@ function updateServerControlStates(): void {
     ? latestStatus.state === "DISCONNECTED" && !latestStatus.cloak.running && !latestStatus.wireguard.running
     : true;
 
-  serverConnectBtn.disabled = busy || !fullyDisconnected || !serverSelect.value;
-  // Allow cancel mid-connect once the 1s grace window has elapsed, so the
-  // user can bail before the 10s cloak timeout. Outside that window the
-  // standard disabled-while-busy rule applies.
-  const cancelAllowedNow = serverWorking && connectCancelAllowed;
-  serverDisconnectBtn.disabled = cancelAllowedNow
+  // Not hoisted into the guard above: that would also disable Disconnect and
+  // strand a connected user who switched to a transport no server supports.
+  serverConnectBtn.disabled =
+    busy || !fullyDisconnected || getVisibleServers().length === 0 || entitled === false;
+  // Stop is live for the whole attempt — a hard cancel, no unsafe window.
+  // Outside an attempt the standard disabled-while-busy rule applies.
+  serverDisconnectBtn.disabled = connectInFlight
     ? false
     : !latestStatus || latestStatus.state === "DISCONNECTED" || latestStatus.state === "DISCONNECTING" || busy;
-}
-
-function updateServerBusyIndicator(active: boolean, label?: string): void {
-  serverIndicator.classList.toggle("active", active);
-  serverIndicator.setAttribute("aria-hidden", String(!active));
-  if (label) {
-    serverIndicatorLabel.textContent = label;
-  }
+  serverDisconnectBtn.textContent = connectInFlight ? t("hero.stop") : t("hero.disconnect");
 }
 
 function updateControlStates(): void {
@@ -2013,6 +2564,9 @@ function initCollapsibleSections(): void {
       const nextOpen = !section.classList.contains("is-open");
       setCollapseState(section, content, toggle, nextOpen, true);
       if (key) saveCollapseState(key, nextOpen);
+      // A collapsing row hands its state back to the summary; recompute so a
+      // reverted toggle can't leave a stale value on the header.
+      updateSettingsSummaries();
     });
   }
 }

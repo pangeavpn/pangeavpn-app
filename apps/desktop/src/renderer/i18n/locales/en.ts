@@ -1,6 +1,5 @@
-// English — source catalogue. This file defines the full set of translatable
-// keys; every other locale must satisfy the `Messages` shape derived from it.
-// Placeholders use `{name}` syntax and are interpolated by `t()`.
+// English — source catalogue defining the full key set; every other locale
+// must satisfy `Messages`. Placeholders use `{name}`, interpolated by `t()`.
 
 export const en = {
   // ── App shell / loading ───────────────────────────────
@@ -9,6 +8,15 @@ export const en = {
   "app.loading.progress": "Getting things ready... ({remaining}s)",
   "app.loading.cantStart": "PangeaVPN couldn't start. Please restart the app.",
   "app.loading.didntStart": "PangeaVPN didn't start. Please restart the app.",
+  "daemonRecovery.kicker": "System service",
+  "daemonRecovery.title": "VPN service stopped",
+  "daemonRecovery.description": "PangeaVPN's background service is not responding. Restart it to restore VPN controls.",
+  "daemonRecovery.permission": "Your system will ask for administrator approval.",
+  "daemonRecovery.restart": "Restart service",
+  "daemonRecovery.restarting": "Restarting service...",
+  "daemonRecovery.waitingForApproval": "Waiting for administrator approval...",
+  "daemonRecovery.failed": "The service could not be restarted. Approve the administrator prompt and try again.",
+  "daemonRecovery.tryAgain": "Try again",
 
   // ── Login screen ──────────────────────────────────────
   "login.subtitle": "Enter your sign-in token to continue.",
@@ -60,12 +68,39 @@ export const en = {
   "hero.disconnect": "Disconnect",
   "hero.provisioning": "Provisioning...",
   "hero.disconnecting": "Disconnecting...",
+  "hero.stop": "Stop",
+  "hero.stopping": "Stopping...",
   "hero.noServers": "No servers available",
+  "hero.noServersForTransport": "No servers support this transport",
+  "hero.region": "Region",
+  "hero.allRegions": "All regions",
 
-  // ── Status pills ──────────────────────────────────────
-  "pill.killSwitch": "Kill Switch",
-  "pill.cloak": "Cloak",
-  "pill.wireguard": "WireGuard",
+  // ── Headline: {x} marks the emphasised word ───────────
+  "hero.headline.DISCONNECTED": "The world is {x}",
+  "hero.emphasis.DISCONNECTED": "apart",
+  "hero.headline.CONNECTING": "Drawing it {x}",
+  "hero.emphasis.CONNECTING": "together",
+  "hero.headline.CONNECTED": "The world is {x}",
+  "hero.emphasis.CONNECTED": "whole",
+  "hero.headline.DISCONNECTING": "Letting it {x}",
+  "hero.emphasis.DISCONNECTING": "drift",
+  "hero.headline.ERROR": "Couldn't {x}",
+  "hero.emphasis.ERROR": "connect",
+
+  // ── Session facts ─────────────────────────────────────
+  "fact.session": "Session",
+  "fact.down": "Down",
+  "fact.up": "Up",
+  "fact.via": "Via",
+
+  // ── Region rows ───────────────────────────────────────
+  "region.more": "{count} more",
+  "region.bestOf": "{node} · best of {count}",
+  "region.autoOf": "{count} servers · auto",
+  "region.pinned": "{node} · pinned",
+  "region.showServers": "Show servers in {region}",
+  "region.badgeBest": "Best",
+  "region.badgePinned": "Pinned",
 
   // ── Connection state labels (hero + tray) ─────────────
   "state.DISCONNECTED": "DISCONNECTED",
@@ -88,27 +123,47 @@ export const en = {
   // ── Settings overlay ──────────────────────────────────
   "settings.title": "Settings",
   "settings.close": "Close",
-  "settings.account.heading": "Account",
-  "settings.account.signedInAs": "Signed in as",
-  "settings.account.subscription": "Subscription",
-  "settings.account.token": "Sign-in token",
-  "settings.account.show": "Show",
-  "settings.account.hide": "Hide",
-  "settings.account.copy": "Copy",
-  "settings.account.tokenHint": "This is the token you signed in with. Keep it private — anyone with it can access your account.",
   "settings.account.manageSub": "Manage Subscription",
   "settings.account.devices": "Devices",
   "settings.account.signOut": "Sign Out",
+  "settings.summary.off": "Off",
   "settings.censorship.heading": "Censorship Bypass",
   "settings.censorship.description": "Enable if your network blocks access to VPN services.",
   "settings.censorship.directIp.title": "Direct IP",
   "settings.censorship.directIp.hint": "Connect to our servers by IP address, skipping DNS entirely.",
   "settings.censorship.directIpOnly.title": "Direct IP Only",
   "settings.censorship.directIpOnly.hint": "Always use direct IP connections. Skips normal API calls entirely — use if your network blocks HTTPS to our servers.",
+  "settings.transport.heading": "Connection Method",
+  "settings.transport.description": "How PangeaVPN disguises your traffic.",
+  "settings.transport.auto": "Automatic (recommended)",
+  "settings.transport.cloak": "Cloak only",
+  "settings.transport.naive": "NaiveProxy only",
+  "settings.transport.reality": "VLESS+REALITY only",
+  "settings.transport.hysteria2": "Hysteria2 only",
+  "settings.transport.snowflake": "Snowflake only",
   "settings.network.heading": "Network",
   "settings.network.description": "Fixes for restrictive Wi-Fi networks.",
   "settings.network.allowLan.title": "Allow LAN",
   "settings.network.allowLan.hint": "Let local-network traffic (router, printers, captive portals) bypass the tunnel. Turn on if your Wi-Fi intermittently drops to \"No internet\" while connected. Takes effect on next connect.",
+  "settings.network.dns.provider.title": "DNS Provider",
+  "settings.network.dns.provider.hint": "Choose a resolver or enter your own. Filtering is provided by the selected DNS service. Takes effect on next connect.",
+  "settings.network.dns.provider.automatic": "Automatic (VPN default)",
+  "settings.network.dns.provider.adguard": "AdGuard DNS - Ads & trackers",
+  "settings.network.dns.provider.cloudflare": "Cloudflare",
+  "settings.network.dns.provider.quad9": "Quad9 - Malware blocking",
+  "settings.network.dns.provider.cloudflareFamily": "Cloudflare Family - Malware & adult content",
+  "settings.network.dns.provider.google": "Google Public DNS",
+  "settings.network.dns.provider.custom": "Custom",
+  "settings.network.dns.title": "Custom DNS",
+  "settings.network.dns.placeholder": "1.1.1.1, 1.0.0.1",
+  "settings.network.dns.hint": "IPv4 DNS servers separated by commas, for example 1.1.1.1, 1.0.0.1. Leave blank to use the VPN default. Takes effect on next connect.",
+  "settings.network.dns.invalid": "Enter one or more valid IPv4 DNS addresses separated by commas.",
+  "settings.network.dns.saved": "WireGuard DNS set to {dns}. Takes effect on next connect.",
+  "settings.network.dns.defaultSaved": "WireGuard DNS restored to the VPN default. Takes effect on next connect.",
+  "settings.network.mtu.title": "Tunnel MTU",
+  "settings.network.mtu.hint": "Size of packets sent through the tunnel. Lower this if pages hang or large downloads stall on a network that otherwise connects fine. Default 1380. Takes effect on next connect.",
+  "settings.network.mtu.invalid": "Enter a whole number between {min} and {max}.",
+  "settings.network.mtu.saved": "Tunnel MTU set to {mtu}. Takes effect on next connect.",
   "settings.startup.heading": "Startup",
   "settings.startup.description": "Background launch and automatic reconnection.",
   "settings.startup.launch.title": "Launch at startup",
@@ -120,13 +175,15 @@ export const en = {
   "settings.language.system": "System default",
   "settings.language.restartHint": "Restart PangeaVPN to apply the new language.",
   "settings.update.heading": "Software Update",
-  "settings.update.currentVersion": "Current version:",
   "settings.update.check": "Check for Updates",
 
   // ── Server picker overlay ─────────────────────────────
-  "serverPicker.title": "Select server",
-  "serverPicker.serversAriaLabel": "Servers",
+  "serverPicker.title": "Select region",
+  "serverPicker.serversAriaLabel": "Regions",
+  "serverPicker.recent": "Recent",
+  "serverPicker.all": "All regions",
   "serverPicker.noServers": "No servers available",
+  "serverPicker.noServersForTransport": "No servers support this transport",
   "serverPicker.load": "Server load {pct}%",
   "serverPicker.loadPct": "{pct}%",
 
@@ -156,8 +213,7 @@ export const en = {
   "sub.renews": "Renews",
   "sub.expires": "Expires",
   "sub.pastDue": "Payment past due",
-  "account.noToken": "No token to copy.",
-  "account.tokenCopied": "Token copied to clipboard.",
+  "sub.expired": "Subscription expired",
 
   // ── Session / auth toasts ─────────────────────────────
   "auth.signedOutRetry": "You've been signed out. Please sign in again.",
@@ -168,6 +224,9 @@ export const en = {
   // ── Connect / disconnect flow ─────────────────────────
   "connect.noServer": "No server selected.",
   "connect.provisioning": "Provisioning and connecting...",
+  "connect.stillConnecting": "Still connecting…",
+  "connect.takingLonger": "This is taking longer than usual…",
+  "connect.stillWorking": "Still working on it. We'll try other servers if needed.",
   "connect.connected": "Connected.",
   "connect.failed": "Couldn't connect. Try again, or choose another server.",
   "connect.switching": "Provisioning new server...",
@@ -175,6 +234,8 @@ export const en = {
   "connect.disconnecting": "Disconnecting...",
   "connect.disconnected": "Disconnected.",
   "connect.disconnectFailed": "Couldn't disconnect. Please try again.",
+  "connect.cancelled": "Connection cancelled.",
+  "connect.expired": "Your time is up — top up to reconnect.",
   "connect.recovered": "Connection recovered.",
   "connect.refreshServersFailed": "Couldn't refresh the server list. It will retry automatically.",
 
@@ -186,6 +247,7 @@ export const en = {
   "toggle.directIpOnly.off": "Direct IP only mode disabled.",
   "toggle.allowLan.on": "Allow LAN enabled. Reconnect for it to take effect.",
   "toggle.allowLan.off": "Allow LAN disabled. Reconnect for it to take effect.",
+  "toggle.preferredTransport.updated": "Connection method updated. Reconnect for it to take effect.",
   "toggle.launch.on": "PangeaVPN will launch at startup.",
   "toggle.launch.off": "Launch at startup disabled.",
   "toggle.launch.failed": "Failed to update startup setting.",
@@ -200,13 +262,16 @@ export const en = {
 
   // ── Daemon sync / generic ─────────────────────────────
   "common.loading": "Loading...",
-  "common.ready": "Ready.",
   "common.retrying": "Something went wrong. Retrying...",
   "common.dash": "—",
 
   // ── Daemon status values (technical, kept short) ──────
-  "status.running": "running",
-  "status.stopped": "stopped",
+  "status.transport.cloak": "Obfuscation: Cloak",
+  "status.transport.naive": "Obfuscation: NaiveProxy",
+  "status.transport.hysteria2": "Obfuscation: Hysteria2",
+  "status.transport.snowflake": "Obfuscation: Snowflake",
+  "status.transport.reality": "Obfuscation: VLESS+REALITY",
+  "status.transport.none": "",
 
   // ── Generic error fallbacks ───────────────────────────
   "error.network": "Please check your internet connection and try again.",

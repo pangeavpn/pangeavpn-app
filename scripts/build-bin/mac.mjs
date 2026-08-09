@@ -3,7 +3,8 @@ import fsSync from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { spawnSync } from "node:child_process";
-import { npmCmd, relPath, rootDir, runOrThrow, sha256File, writeJson } from "./shared.mjs";
+import { npmCmd, relPath, rootDir, runOrThrow, selectArchTargets, sha256File, writeJson } from "./shared.mjs";
+import { resolveNaiveCgoConfig } from "../lib/naive-cgo.mjs";
 
 const platformName = "mac";
 const daemonDir = path.join(rootDir, "daemon");
@@ -13,7 +14,7 @@ const macToolsSourceDir = path.join(rootDir, "apps", "desktop", "resources", "bi
 const macToolsOutputDir = path.join(rootDir, "dist", "bin", platformName, "bin", "mac");
 const verifyPackResourcesScript = path.join(rootDir, "apps", "desktop", "scripts", "verify-pack-resources.mjs");
 const goCmd = resolveGoCommand();
-const archTargets = [
+const allArchTargets = [
   { arch: "arm64", goArch: "arm64" },
   { arch: "x64", goArch: "amd64" }
 ];
@@ -32,6 +33,8 @@ if (!goCmd) {
   console.error("Install Go 1.22+ or ensure go is available.");
   process.exit(1);
 }
+
+const archTargets = selectArchTargets(allArchTargets, "macOS");
 
 await cleanOutput();
 await copyStandaloneMacTools();
@@ -62,7 +65,6 @@ for (const target of archTargets) {
       ".",
       "--mac",
       "pkg",
-      "zip",
       `--${target.arch}`,
       "--publish",
       "never",
@@ -90,7 +92,6 @@ async function cleanOutput() {
   await removeOutputPath(installersDir);
   for (const target of archTargets) {
     await fs.mkdir(path.join(macOutputRoot, "installer", target.arch), { recursive: true });
-    await fs.mkdir(path.join(macOutputRoot, "portable", target.arch), { recursive: true });
   }
   await fs.mkdir(path.join(macOutputRoot, "daemon"), { recursive: true });
   await fs.mkdir(path.join(macOutputRoot, "bin", "mac"), { recursive: true });
@@ -136,13 +137,22 @@ async function copyStandaloneMacTools() {
 }
 
 function buildDaemon(goArch, outPath) {
-  runOrThrow(goCmd, ["build", "-o", outPath, "./cmd/daemon"], {
+  // with_utls is required by the VLESS+REALITY transport (sing-box compiles
+  // uTLS out by default). naive_cgo is added on top when the pangea_naive
+  // archive + toolchain resolve; otherwise the stub transport builds.
+  const naiveCgo = resolveNaiveCgoConfig(goArch, rootDir);
+  if (naiveCgo) {
+    console.log(`naive_cgo: enabled for ${goArch} (pangea_naive lib found and toolchain resolved)`);
+  }
+  const buildTags = ["with_utls", ...(naiveCgo ? naiveCgo.tags : [])];
+  runOrThrow(goCmd, ["build", "-tags", buildTags.join(","), "-o", outPath, "./cmd/daemon"], {
     cwd: daemonDir,
     shell: false,
     env: {
       ...goEnv(),
       GOOS: "darwin",
-      GOARCH: goArch
+      GOARCH: goArch,
+      ...(naiveCgo ? naiveCgo.env : {})
     }
   });
 }
@@ -151,7 +161,6 @@ async function collectArchArtifacts(arch, goArch, daemonArchPath, packagingStart
   const installersDir = path.join(rootDir, "dist", "installers");
   const macBinDir = path.join(rootDir, "dist", "bin", platformName);
   const installerOut = path.join(macBinDir, "installer", arch);
-  const portableOut = path.join(macBinDir, "portable", arch);
   const daemonOut = path.join(macBinDir, "daemon");
   const daemonOutPath = path.join(daemonOut, `daemon-${arch}`);
 
@@ -162,7 +171,7 @@ async function collectArchArtifacts(arch, goArch, daemonArchPath, packagingStart
       continue;
     }
     const lower = entry.name.toLowerCase();
-    if (!lower.endsWith(".pkg") && !lower.endsWith(".dmg") && !lower.endsWith(".zip")) {
+    if (!lower.endsWith(".pkg") && !lower.endsWith(".dmg")) {
       continue;
     }
 
@@ -179,16 +188,11 @@ async function collectArchArtifacts(arch, goArch, daemonArchPath, packagingStart
   const selected = currentRun.length > 0 ? currentRun : artifacts;
   const pkgCandidates = selected.filter((item) => item.name.toLowerCase().endsWith(".pkg"));
   const dmgCandidates = selected.filter((item) => item.name.toLowerCase().endsWith(".dmg"));
-  const zipCandidates = selected.filter((item) => item.name.toLowerCase().endsWith(".zip"));
   if (pkgCandidates.length === 0 && dmgCandidates.length === 0) {
     throw new Error(`Installer artifact (.pkg or .dmg) not found for ${arch}`);
   }
-  if (zipCandidates.length === 0) {
-    throw new Error(`ZIP artifact not found for ${arch}`);
-  }
 
   const installerFile = pkgCandidates.length > 0 ? newestByMtime(pkgCandidates) : newestByMtime(dmgCandidates);
-  const zipFile = newestByMtime(zipCandidates);
   const copied = [];
   const installerName = arch === "x64" ? addArchSuffix(installerFile.name, "-x64") : installerFile.name;
   const installerDestPath = path.join(installerOut, installerName);
@@ -199,9 +203,6 @@ async function collectArchArtifacts(arch, goArch, daemonArchPath, packagingStart
     copied.push(installerDmg);
   }
 
-  const portableZipOutPath = path.join(portableOut, zipFile.name);
-  copied.push(await copyArtifact(zipFile.fullPath, portableZipOutPath, "portable", arch));
-  await materializePortableAppBundle(portableZipOutPath, portableOut, arch);
   copied.push(await copyArtifact(daemonArchPath, daemonOutPath, "daemon", arch, goArch));
   return copied;
 }
@@ -317,21 +318,6 @@ function verifyPackagedMacAppBundle(appBundlePath, arch) {
       throw new Error(`Missing required file in ${arch} app bundle: ${filePath}`);
     }
   }
-}
-
-async function materializePortableAppBundle(zipPath, portableOut, arch) {
-  const appPath = path.join(portableOut, "PangeaVPN.app");
-  await fs.rm(appPath, { recursive: true, force: true });
-  runOrThrow("ditto", ["-x", "-k", zipPath, portableOut], {
-    cwd: rootDir,
-    shell: false
-  });
-
-  if (!fsSync.existsSync(appPath)) {
-    throw new Error(`Portable ${arch} app bundle was not extracted from ${zipPath}`);
-  }
-
-  verifyPackagedMacAppBundle(appPath, `${arch} portable`);
 }
 
 async function copyArtifact(sourcePath, destinationPath, type, arch, goArch = null) {

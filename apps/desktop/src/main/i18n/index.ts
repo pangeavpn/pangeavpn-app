@@ -1,8 +1,4 @@
-// Main-process localisation. The main process is compiled to CommonJS and
-// cannot import the renderer's ESM catalogue, so it carries its own small set
-// of tray / menu / tooltip strings. The locale is resolved once at startup
-// from the persisted preference; changes take effect on next launch.
-//
+// Separate from the renderer catalogue: CommonJS here can't import its ESM.
 // Non-English values are machine translations pending native review.
 
 export type MainLocale = "en" | "es" | "fr" | "ru" | "uk" | "zh" | "ar" | "fa";
@@ -18,6 +14,9 @@ export type MainMessages = Record<
   | "menu.hideWindow"
   | "menu.quit"
   | "menu.edit"
+  | "notify.trayTitle"
+  | "notify.trayBody"
+  | "notify.menuBarBody"
   | "state.DISCONNECTED"
   | "state.CONNECTING"
   | "state.CONNECTED"
@@ -37,6 +36,9 @@ const en: MainMessages = {
   "menu.hideWindow": "Hide Window",
   "menu.quit": "Quit",
   "menu.edit": "Edit",
+  "notify.trayTitle": "PangeaVPN is still running",
+  "notify.trayBody": "It's in your system tray. Click the tray icon to open it again.",
+  "notify.menuBarBody": "It's in your menu bar. Click the menu bar icon to open it again.",
   "state.DISCONNECTED": "DISCONNECTED",
   "state.CONNECTING": "CONNECTING",
   "state.CONNECTED": "CONNECTED",
@@ -55,6 +57,9 @@ const es: MainMessages = {
   "menu.hideWindow": "Ocultar ventana",
   "menu.quit": "Salir",
   "menu.edit": "Editar",
+  "notify.trayTitle": "PangeaVPN sigue en ejecución",
+  "notify.trayBody": "Está en la bandeja del sistema. Haz clic en el icono para volver a abrirlo.",
+  "notify.menuBarBody": "Está en la barra de menús. Haz clic en el icono para volver a abrirlo.",
   "state.DISCONNECTED": "DESCONECTADO",
   "state.CONNECTING": "CONECTANDO",
   "state.CONNECTED": "CONECTADO",
@@ -73,6 +78,9 @@ const fr: MainMessages = {
   "menu.hideWindow": "Masquer la fenêtre",
   "menu.quit": "Quitter",
   "menu.edit": "Édition",
+  "notify.trayTitle": "PangeaVPN est toujours actif",
+  "notify.trayBody": "Il est dans la zone de notification. Cliquez sur l'icône pour le rouvrir.",
+  "notify.menuBarBody": "Il est dans la barre de menus. Cliquez sur l'icône pour le rouvrir.",
   "state.DISCONNECTED": "DÉCONNECTÉ",
   "state.CONNECTING": "CONNEXION",
   "state.CONNECTED": "CONNECTÉ",
@@ -91,6 +99,9 @@ const ru: MainMessages = {
   "menu.hideWindow": "Скрыть окно",
   "menu.quit": "Выход",
   "menu.edit": "Правка",
+  "notify.trayTitle": "PangeaVPN всё ещё работает",
+  "notify.trayBody": "Он в системном трее. Нажмите на значок, чтобы открыть его снова.",
+  "notify.menuBarBody": "Он в строке меню. Нажмите на значок, чтобы открыть его снова.",
   "state.DISCONNECTED": "ОТКЛЮЧЕНО",
   "state.CONNECTING": "ПОДКЛЮЧЕНИЕ",
   "state.CONNECTED": "ПОДКЛЮЧЕНО",
@@ -109,6 +120,9 @@ const uk: MainMessages = {
   "menu.hideWindow": "Сховати вікно",
   "menu.quit": "Вихід",
   "menu.edit": "Редагувати",
+  "notify.trayTitle": "PangeaVPN усе ще працює",
+  "notify.trayBody": "Він у системному лотку. Натисніть на значок, щоб відкрити його знову.",
+  "notify.menuBarBody": "Він у рядку меню. Натисніть на значок, щоб відкрити його знову.",
   "state.DISCONNECTED": "ВІДКЛЮЧЕНО",
   "state.CONNECTING": "ПІДКЛЮЧЕННЯ",
   "state.CONNECTED": "ПІДКЛЮЧЕНО",
@@ -127,6 +141,9 @@ const zh: MainMessages = {
   "menu.hideWindow": "隐藏窗口",
   "menu.quit": "退出",
   "menu.edit": "编辑",
+  "notify.trayTitle": "PangeaVPN 仍在运行",
+  "notify.trayBody": "它在系统托盘中。点击托盘图标即可重新打开。",
+  "notify.menuBarBody": "它在菜单栏中。点击菜单栏图标即可重新打开。",
   "state.DISCONNECTED": "已断开",
   "state.CONNECTING": "连接中",
   "state.CONNECTED": "已连接",
@@ -145,6 +162,9 @@ const ar: MainMessages = {
   "menu.hideWindow": "إخفاء النافذة",
   "menu.quit": "إنهاء",
   "menu.edit": "تحرير",
+  "notify.trayTitle": "لا يزال PangeaVPN قيد التشغيل",
+  "notify.trayBody": "إنه في شريط النظام. انقر على الأيقونة لفتحه مرة أخرى.",
+  "notify.menuBarBody": "إنه في شريط القوائم. انقر على الأيقونة لفتحه مرة أخرى.",
   "state.DISCONNECTED": "غير متصل",
   "state.CONNECTING": "جارٍ الاتصال",
   "state.CONNECTED": "متصل",
@@ -163,6 +183,9 @@ const fa: MainMessages = {
   "menu.hideWindow": "پنهان کردن پنجره",
   "menu.quit": "خروج",
   "menu.edit": "ویرایش",
+  "notify.trayTitle": "PangeaVPN همچنان در حال اجراست",
+  "notify.trayBody": "در سینی سیستم است. روی نماد کلیک کنید تا دوباره باز شود.",
+  "notify.menuBarBody": "در نوار منو است. روی نماد کلیک کنید تا دوباره باز شود.",
   "state.DISCONNECTED": "قطع شده",
   "state.CONNECTING": "در حال اتصال",
   "state.CONNECTED": "متصل",
@@ -191,10 +214,7 @@ export function matchMainLocale(tag: string | null | undefined): MainLocale | nu
   return null;
 }
 
-/**
- * Resolve the concrete locale from the stored preference and the OS locale.
- * `stored` is "system"/undefined (detect from OS) or a locale code.
- */
+/** Resolve the locale; `stored` is "system"/undefined (follow the OS) or a code. */
 export function resolveMainLocale(stored: string | null | undefined, osLocale: string | null | undefined): MainLocale {
   return matchMainLocale(stored) ?? matchMainLocale(osLocale) ?? DEFAULT;
 }

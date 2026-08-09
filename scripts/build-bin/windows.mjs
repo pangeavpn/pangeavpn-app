@@ -1,19 +1,21 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
-import { npmCmd, relPath, rootDir, runOrThrow, sha256File, writeJson } from "./shared.mjs";
+import { npmCmd, relPath, rootDir, runOrThrow, selectArchTargets, sha256File, writeJson } from "./shared.mjs";
 
 const platformName = "windows";
 const appBuilderPath = path.join(rootDir, "node_modules", "app-builder-bin", "win", "x64", "app-builder.exe");
-const archTargets = [
-  { arch: "x64", goArch: "amd64", wireGuardArch: "amd64" },
-  { arch: "arm64", goArch: "arm64", wireGuardArch: "arm64" }
+const allArchTargets = [
+  { arch: "x64", goArch: "amd64" },
+  { arch: "arm64", goArch: "arm64" }
 ];
 
 if (process.platform !== "win32") {
   console.error("build-bin:windows must run on a Windows host.");
   process.exit(1);
 }
+
+const archTargets = selectArchTargets(allArchTargets, "Windows");
 
 await cleanOutput();
 runOrThrow(npmCmd, ["install", "--workspace", "@pangeavpn/desktop", "--include=dev"], { cwd: rootDir, shell: true });
@@ -28,7 +30,7 @@ for (const target of archTargets) {
     cwd: rootDir,
     env: {
       ...process.env,
-      PANGEA_WIREGUARD_ARCH: target.wireGuardArch,
+      GOOS: "windows",
       GOARCH: target.goArch
     }
   });
@@ -46,7 +48,6 @@ for (const target of archTargets) {
       ".",
       "--win",
       "nsis",
-      "portable",
       `--${target.arch}`,
       "--publish",
       "never",
@@ -57,7 +58,9 @@ for (const target of archTargets) {
       shell: true,
       env: {
         ...process.env,
-        CUSTOM_APP_BUILDER_PATH: appBuilderPath
+        CUSTOM_APP_BUILDER_PATH: appBuilderPath,
+        // Nsis7z is 7-Zip 19.00 and silently drops ARM64-filtered entries.
+        ELECTRON_BUILDER_7Z_FILTER: "BCJ2"
       }
     }
   );
@@ -76,7 +79,6 @@ async function cleanOutput() {
   await fs.rm(installersDir, { recursive: true, force: true });
   for (const target of archTargets) {
     await fs.mkdir(path.join(windowsOutputRoot, "installer", target.arch), { recursive: true });
-    await fs.mkdir(path.join(windowsOutputRoot, "portable", target.arch), { recursive: true });
   }
   await fs.mkdir(path.join(windowsOutputRoot, "daemon"), { recursive: true });
 }
@@ -85,7 +87,6 @@ async function collectArchArtifacts(arch, goArch, packagingStartedAtMs) {
   const installersDir = path.join(rootDir, "dist", "installers");
   const windowsBinDir = path.join(rootDir, "dist", "bin", platformName);
   const installerOut = path.join(windowsBinDir, "installer", arch);
-  const portableOut = path.join(windowsBinDir, "portable", arch);
   const daemonOut = path.join(windowsBinDir, "daemon");
   const daemonSource = path.join(rootDir, "daemon", "bin", "PangeaDaemon.exe");
   const wireGuardDllSource = path.join(rootDir, "daemon", "bin", "wireguard.dll");
@@ -106,28 +107,21 @@ async function collectArchArtifacts(arch, goArch, packagingStartedAtMs) {
     });
   }
 
+  // nsis artifactName carries the arch (PangeaVPN-Setup-<version>-<arch>.exe),
+  // so match on that rather than guessing from mtime.
   const currentRunExes = exes.filter((entry) => entry.mtimeMs >= packagingStartedAtMs - 1000);
-  const selectedExes = currentRunExes.length >= 2 ? currentRunExes : exes;
-  if (selectedExes.length < 2) {
-    throw new Error(`expected at least 2 Windows executables for ${arch} in ${installersDir}, found ${selectedExes.length}`);
-  }
-
-  const installerCandidates = selectedExes.filter((entry) => entry.name.toLowerCase().includes("setup"));
-  const portableCandidates = selectedExes.filter((entry) => !entry.name.toLowerCase().includes("setup"));
-
+  const installerCandidates = (currentRunExes.length > 0 ? currentRunExes : exes).filter((entry) => {
+    const name = entry.name.toLowerCase();
+    return name.includes("setup") && name.includes(`-${arch.toLowerCase()}.`);
+  });
   if (installerCandidates.length === 0) {
-    throw new Error(`NSIS installer executable not found for ${arch} in dist/installers`);
-  }
-  if (portableCandidates.length === 0) {
-    throw new Error(`portable executable not found for ${arch} in dist/installers`);
+    throw new Error(`NSIS installer for ${arch} not found in ${installersDir}`);
   }
 
   const installerFile = newestByMtime(installerCandidates);
-  const portableFile = newestByMtime(portableCandidates);
 
   const copied = [];
   copied.push(await copyArtifact(installerFile.fullPath, path.join(installerOut, installerFile.name), "installer", arch));
-  copied.push(await copyArtifact(portableFile.fullPath, path.join(portableOut, portableFile.name), "portable", arch));
   copied.push(await copyArtifact(daemonSource, path.join(daemonOut, `PangeaDaemon-${arch}.exe`), "daemon", arch, goArch));
   copied.push(await copyArtifact(wireGuardDllSource, path.join(daemonOut, `wireguard-${arch}.dll`), "daemon-runtime", arch));
   copied.push(await copyArtifact(wintunDllSource, path.join(daemonOut, `wintun-${arch}.dll`), "daemon-runtime", arch));

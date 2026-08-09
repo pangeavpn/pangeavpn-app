@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"strconv"
@@ -79,6 +80,14 @@ type connectRequest struct {
 	ProfileID string `json:"profileId"`
 	AllowLAN  bool   `json:"allowLAN,omitempty"`
 	Lockdown  bool   `json:"lockdown,omitempty"`
+	// PreferredTransport: "cloak", "reality", "hysteria2", "naive",
+	// "snowflake", or "" / "auto" (cascade in autoCascadeOrder: cloak, then
+	// reality, then hysteria2, then naive; snowflake is gated off this release
+	// -- see snowflakeReleaseGated). Auto mode keeps only the transports this
+	// profile configures, then reorderByMemory may promote whatever last
+	// worked on this network. Service.startTransport dispatches on this value;
+	// unrecognized values fall through to auto.
+	PreferredTransport string `json:"preferredTransport,omitempty"`
 }
 
 type disconnectRequest struct {
@@ -90,8 +99,23 @@ type engageKillSwitchRequest struct {
 	AllowLAN  bool   `json:"allowLAN,omitempty"`
 }
 
+// permitHostsRequest carries control-plane IPs (the Pangea hub) that must stay
+// reachable through an engaged lockdown lock. IP literals only — see
+// Service.PermitHosts.
+type permitHostsRequest struct {
+	Hosts []string `json:"hosts,omitempty"`
+}
+
 type okResponse struct {
-	OK bool `json:"ok"`
+	OK    bool   `json:"ok"`
+	Error string `json:"error,omitempty"`
+}
+
+func serviceErrorResponse(err error) okResponse {
+	if errors.Is(err, ErrTransportExhausted) {
+		return okResponse{OK: false, Error: "transport_exhausted"}
+	}
+	return okResponse{OK: false}
 }
 
 func NewHandler(token string, service *Service) http.Handler {
@@ -131,9 +155,9 @@ func NewHandler(token string, service *Service) http.Handler {
 			return
 		}
 
-		err := service.Connect(r.Context(), req.ProfileID, ConnectOptions{AllowLAN: req.AllowLAN, Lockdown: req.Lockdown})
+		err := service.Connect(r.Context(), req.ProfileID, ConnectOptions{AllowLAN: req.AllowLAN, Lockdown: req.Lockdown, PreferredTransport: req.PreferredTransport})
 		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, okResponse{OK: false})
+			writeJSON(w, http.StatusInternalServerError, serviceErrorResponse(err))
 			return
 		}
 
@@ -201,6 +225,29 @@ func NewHandler(token string, service *Service) http.Handler {
 		writeJSON(w, http.StatusOK, okResponse{OK: true})
 	})))
 
+	mux.Handle("/killswitch/permit", auth.RequireBearer(token, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+
+		var req permitHostsRequest
+		if r.ContentLength > 0 {
+			r.Body = http.MaxBytesReader(w, r.Body, maxBodySize)
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid json")
+				return
+			}
+		}
+
+		if err := service.PermitHosts(r.Context(), req.Hosts); err != nil {
+			writeJSON(w, http.StatusInternalServerError, okResponse{OK: false})
+			return
+		}
+
+		writeJSON(w, http.StatusOK, okResponse{OK: true})
+	})))
+
 	mux.Handle("/switch", auth.RequireBearer(token, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -218,9 +265,9 @@ func NewHandler(token string, service *Service) http.Handler {
 			return
 		}
 
-		err := service.Switch(r.Context(), req.ProfileID, ConnectOptions{AllowLAN: req.AllowLAN, Lockdown: req.Lockdown})
+		err := service.Switch(r.Context(), req.ProfileID, ConnectOptions{AllowLAN: req.AllowLAN, Lockdown: req.Lockdown, PreferredTransport: req.PreferredTransport})
 		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, okResponse{OK: false})
+			writeJSON(w, http.StatusInternalServerError, serviceErrorResponse(err))
 			return
 		}
 

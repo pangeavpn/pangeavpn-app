@@ -30,6 +30,7 @@ func TestWFPStructSizes(t *testing.T) {
 		{"fwpmFilterCondition0", unsafe.Sizeof(fwpmFilterCondition0{}), 40},
 		{"fwpmFilter0", unsafe.Sizeof(fwpmFilter0{}), 200},
 		{"fwpV4AddrAndMask", unsafe.Sizeof(fwpV4AddrAndMask{}), 8},
+		{"fwpV6AddrAndMask", unsafe.Sizeof(fwpV6AddrAndMask{}), 17},
 	}
 
 	for _, tc := range tests {
@@ -70,6 +71,27 @@ func TestWFPFilterFieldOffsets(t *testing.T) {
 	}
 }
 
+func TestWFPAddrMaskFieldOffsets(t *testing.T) {
+	var v4 fwpV4AddrAndMask
+	var v6 fwpV6AddrAndMask
+	offsets := []struct {
+		name string
+		got  uintptr
+		want uintptr
+	}{
+		{"fwpV4AddrAndMask.addr", unsafe.Offsetof(v4.addr), 0},
+		{"fwpV4AddrAndMask.mask", unsafe.Offsetof(v4.mask), 4},
+		{"fwpV6AddrAndMask.addr", unsafe.Offsetof(v6.addr), 0},
+		{"fwpV6AddrAndMask.prefixLength", unsafe.Offsetof(v6.prefixLength), 16},
+	}
+
+	for _, tc := range offsets {
+		if tc.got != tc.want {
+			t.Errorf("%s: offset = %d, want %d", tc.name, tc.got, tc.want)
+		}
+	}
+}
+
 func TestWFPConstants(t *testing.T) {
 	// FWP_DATA_TYPE
 	if fwpUint8 != 1 {
@@ -83,6 +105,9 @@ func TestWFPConstants(t *testing.T) {
 	}
 	if fwpV4AddrMask != 0x100 {
 		t.Errorf("fwpV4AddrMask = 0x%x, want 0x100", fwpV4AddrMask)
+	}
+	if fwpV6AddrMask != 0x101 {
+		t.Errorf("fwpV6AddrMask = 0x%x, want 0x101", fwpV6AddrMask)
 	}
 
 	// FWP_MATCH_TYPE

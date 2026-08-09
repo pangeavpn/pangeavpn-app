@@ -60,6 +60,52 @@ export class DaemonProcessManager {
     return task;
   }
 
+  async restartElevated(onElevationComplete: () => void = () => {}): Promise<void> {
+    if (process.platform === "win32" && app.isPackaged) {
+      const restart = await restartWindowsDaemonServiceElevated();
+      onElevationComplete();
+      if (!restart.ok) {
+        throw new Error(restart.message);
+      }
+      await this.waitForReachable();
+      return;
+    }
+
+    if (process.platform === "darwin" && app.isPackaged) {
+      const daemonPath = this.resolveDaemonPath();
+      if (!daemonPath) {
+        throw new Error("daemon binary not found for this runtime");
+      }
+
+      const restart = shouldUseManagedMacLaunchDaemon(daemonPath) && hasManagedMacLaunchDaemon()
+        ? await restartManagedMacLaunchDaemonElevated()
+        : await restartProcessElevatedMac(daemonPath, resolveMacUserContext(daemonPath));
+      onElevationComplete();
+      if (!restart.ok) {
+        throw new Error(restart.message);
+      }
+      await this.waitForReachable();
+      return;
+    }
+
+    if (process.platform === "linux" && app.isPackaged) {
+      const daemonPath = this.resolveDaemonPath();
+      if (!daemonPath) {
+        throw new Error("daemon binary not found for this runtime");
+      }
+      await ensureUserRuntimeFiles();
+      const restart = await restartLinuxDaemonServiceElevated(daemonPath, getAppSupportDir());
+      onElevationComplete();
+      if (!restart.ok) {
+        throw new Error(restart.message);
+      }
+      await this.waitForReachable();
+      return;
+    }
+
+    await this.ensureRunning({ forceRestart: true });
+  }
+
   private async ensureRunningInternal(options: EnsureDaemonOptions): Promise<void> {
     const forceRestart = options.forceRestart === true;
 
@@ -101,7 +147,7 @@ export class DaemonProcessManager {
         throw new Error("daemon binary not found for this runtime");
       }
 
-      const elevate = startProcessElevatedWindows(daemonPath, []);
+      const elevate = await startProcessElevatedWindows(daemonPath, []);
       if (!elevate.ok) {
         throw new Error(elevate.message);
       }
@@ -166,7 +212,7 @@ export class DaemonProcessManager {
     if (typeof process.getuid === "function" && process.getuid() === 0) {
       this.startMacDaemonChild(daemonPath, context);
     } else {
-      const elevate = restartProcessElevatedMac(daemonPath, context);
+      const elevate = await restartProcessElevatedMac(daemonPath, context);
       if (!elevate.ok) {
         if (allowUnelevatedFallback) {
           console.warn(`daemon elevation failed (${elevate.message}); starting non-root daemon fallback`);
@@ -296,7 +342,7 @@ function stripMacQuarantine(daemonPath: string): void {
   }
 }
 
-function restartProcessElevatedMac(filePath: string, context: MacDaemonContext): { ok: boolean; message: string } {
+async function restartProcessElevatedMac(filePath: string, context: MacDaemonContext): Promise<{ ok: boolean; message: string }> {
   const daemonPath = shSingleQuoteMac(filePath);
   const resourcesDir = shSingleQuoteMac(path.resolve(path.dirname(filePath), ".."));
   const appSupportDir = shSingleQuoteMac(context.appSupportDir);
@@ -325,10 +371,7 @@ function restartProcessElevatedMac(filePath: string, context: MacDaemonContext):
   ].join("; ");
 
   const appleScript = `do shell script ${appleScriptString(shellCommand)} with administrator privileges`;
-  const result = spawnSync("osascript", ["-e", appleScript], {
-    stdio: "pipe",
-    shell: false
-  });
+  const result = await runProcess("osascript", ["-e", appleScript]);
   const output = combineOutput(result).trim();
 
   if (result.error) {
@@ -403,7 +446,27 @@ function kickstartManagedMacLaunchDaemon(): { ok: boolean; message: string } {
   };
 }
 
-function startProcessElevatedWindows(filePath: string, args: string[]): { ok: boolean; message: string } {
+async function restartManagedMacLaunchDaemonElevated(): Promise<{ ok: boolean; message: string }> {
+  const shellCommand = `/bin/launchctl kickstart -k system/${macLaunchDaemonLabel}`;
+  const appleScript = `do shell script ${appleScriptString(shellCommand)} with administrator privileges`;
+  const result = await runProcess("osascript", ["-e", appleScript]);
+  const output = combineOutput(result).trim();
+
+  if (result.error) {
+    return { ok: false, message: `Failed to request daemon elevation: ${result.error.message}` };
+  }
+  if (result.status !== 0) {
+    return {
+      ok: false,
+      message: output
+        ? `Daemon service restart failed: ${output}`
+        : "Daemon service restart was cancelled or failed."
+    };
+  }
+  return { ok: true, message: "" };
+}
+
+async function startProcessElevatedWindows(filePath: string, args: string[]): Promise<{ ok: boolean; message: string }> {
   const escapedPath = psSingleQuote(filePath);
   const escapedWorkingDir = psSingleQuote(path.dirname(filePath));
   const appArgs = args.map((arg) => `'${psSingleQuote(arg)}'`).join(", ");
@@ -412,6 +475,10 @@ function startProcessElevatedWindows(filePath: string, args: string[]): { ok: bo
     : `Start-Process -FilePath '${escapedPath}' -WorkingDirectory '${escapedWorkingDir}' -WindowStyle Hidden`;
   const innerCommand = [
     "$ErrorActionPreference = 'SilentlyContinue'",
+    // The elevated daemon inherits this process's environment, so clear the
+    // state-dir override — otherwise user-level code could redirect the
+    // elevated daemon's token/config/kill-switch state to a directory it owns.
+    "Remove-Item Env:PANGEA_APP_SUPPORT_DIR -ErrorAction SilentlyContinue",
     "$daemonPids = @()",
     "$daemonPids += (Get-Process -Name daemon,PangeaDaemon -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id)",
     "$daemonPids += (Get-NetTCPConnection -LocalAddress '127.0.0.1' -LocalPort 8787 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess)",
@@ -429,12 +496,10 @@ function startProcessElevatedWindows(filePath: string, args: string[]): { ok: bo
   ].join("\n");
   const encodedOuter = psEncodedCommand(command);
 
-  const result = spawnSync(
+  const result = await runProcess(
     "powershell.exe",
     ["-NoProfile", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encodedOuter],
     {
-      stdio: "ignore",
-      shell: false,
       windowsHide: true
     }
   );
@@ -448,29 +513,144 @@ function startProcessElevatedWindows(filePath: string, args: string[]): { ok: bo
   return { ok: true, message: "" };
 }
 
-function ensureWindowsDaemonServiceRunning(): { ok: boolean; message: string } {
-  const expectedExecutable = expectedWindowsServiceDaemonPath();
-  const qc = spawnSync("sc.exe", ["qc", "PangeaDaemon"], {
-    stdio: "pipe",
-    shell: false,
-    windowsHide: true
-  });
-  const qcOutput = combineOutput(qc);
-  const qcLower = qcOutput.toLowerCase();
-  if ((qc.status ?? 1) !== 0 && qcLower.includes("1060")) {
+async function restartWindowsDaemonServiceElevated(): Promise<{ ok: boolean; message: string }> {
+  const validation = validateWindowsDaemonServiceInstallation();
+  if (!validation.ok) {
+    return validation;
+  }
+
+  const innerCommand = [
+    "$ErrorActionPreference = 'Stop'",
+    "$service = Get-Service -Name 'PangeaDaemon'",
+    "if ($service.Status -eq 'Stopped') { Start-Service -Name 'PangeaDaemon' } else { Restart-Service -Name 'PangeaDaemon' -Force }",
+    "$service.WaitForStatus('Running', [TimeSpan]::FromSeconds(15))"
+  ].join("; ");
+  const encodedInner = psEncodedCommand(innerCommand);
+  const outerCommand = [
+    "$ErrorActionPreference = 'Stop'",
+    "try {",
+    "  $process = Start-Process -FilePath 'powershell.exe' -Verb RunAs -WindowStyle Hidden -Wait -PassThru -ArgumentList @(",
+    "    '-NoProfile',",
+    "    '-ExecutionPolicy', 'Bypass',",
+    `    '-EncodedCommand', '${encodedInner}'`,
+    "  )",
+    "  exit $process.ExitCode",
+    "} catch { exit 1 }"
+  ].join("\n");
+  const result = await runProcess(
+    "powershell.exe",
+    ["-NoProfile", "-ExecutionPolicy", "Bypass", "-EncodedCommand", psEncodedCommand(outerCommand)],
+    {
+      windowsHide: true
+    }
+  );
+
+  if (result.error) {
+    return { ok: false, message: `Failed to request daemon elevation: ${result.error.message}` };
+  }
+  if (result.status !== 0) {
+    return { ok: false, message: "Administrator approval was cancelled or the daemon service could not be restarted." };
+  }
+  return { ok: true, message: "" };
+}
+
+async function restartLinuxDaemonServiceElevated(
+  daemonPath: string,
+  appSupportDir: string
+): Promise<{ ok: boolean; message: string }> {
+  const serviceInstalled = [
+    "/etc/systemd/system/pangea-daemon.service",
+    "/lib/systemd/system/pangea-daemon.service",
+    "/usr/lib/systemd/system/pangea-daemon.service"
+  ].some((servicePath) => fs.existsSync(servicePath));
+  if (!serviceInstalled && !fs.existsSync("/usr/bin/pkexec")) {
     return {
       ok: false,
-      message: "PangeaDaemon service is not installed. Run the installer Repair option as administrator."
+      message: "PolicyKit is required to restart the VPN service. Install policykit-1 or reinstall PangeaVPN."
     };
   }
-  if ((qc.status ?? 1) === 0) {
-    const configuredExecutable = parseServiceExecutablePath(qcOutput);
-    if (configuredExecutable && !sameWindowsPath(configuredExecutable, expectedExecutable)) {
-      return {
-        ok: false,
-        message: `PangeaDaemon service path is ${configuredExecutable}, expected ${expectedExecutable}. Run installer repair as administrator.`
-      };
+  const command = serviceInstalled ? "systemctl" : "/usr/bin/pkexec";
+  const args = serviceInstalled
+    ? ["restart", "pangea-daemon"]
+    : [
+        "/bin/sh",
+        "-c",
+        "for proc in /proc/[0-9]*; do [ \"$(readlink \"$proc/exe\" 2>/dev/null)\" = \"$2\" ] && kill -TERM \"${proc##*/}\" >/dev/null 2>&1 || true; done; /bin/sleep 0.2; /usr/bin/nohup /usr/bin/env PANGEA_APP_SUPPORT_DIR=\"$1\" \"$2\" >/dev/null 2>&1 &",
+        "pangeavpn-recovery",
+        appSupportDir,
+        daemonPath
+      ];
+  const result = await runProcess(command, args);
+  const output = combineOutput(result).trim();
+
+  if (result.error) {
+    return { ok: false, message: `Failed to request daemon elevation: ${result.error.message}` };
+  }
+  if (result.status !== 0) {
+    return {
+      ok: false,
+      message: output
+        ? `Daemon service restart failed: ${output}`
+        : "Daemon service restart was cancelled or failed."
+    };
+  }
+  return { ok: true, message: "" };
+}
+
+type ProcessResult = {
+  status: number | null;
+  stdout: Buffer;
+  stderr: Buffer;
+  error?: Error;
+};
+
+function runProcess(
+  command: string,
+  args: string[],
+  options: { windowsHide?: boolean } = {}
+): Promise<ProcessResult> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const stdout: Buffer[] = [];
+    const stderr: Buffer[] = [];
+    const finish = (result: ProcessResult) => {
+      if (settled) return;
+      settled = true;
+      resolve(result);
+    };
+
+    let child: ChildProcess;
+    try {
+      child = spawn(command, args, {
+        shell: false,
+        windowsHide: options.windowsHide === true,
+        stdio: ["ignore", "pipe", "pipe"]
+      });
+    } catch (error) {
+      finish({
+        status: null,
+        stdout: Buffer.alloc(0),
+        stderr: Buffer.alloc(0),
+        error: error instanceof Error ? error : new Error(String(error))
+      });
+      return;
     }
+
+    child.stdout?.on("data", (chunk: Buffer) => stdout.push(Buffer.from(chunk)));
+    child.stderr?.on("data", (chunk: Buffer) => stderr.push(Buffer.from(chunk)));
+    child.once("error", (error) => {
+      finish({ status: null, stdout: Buffer.concat(stdout), stderr: Buffer.concat(stderr), error });
+    });
+    child.once("close", (status) => {
+      finish({ status, stdout: Buffer.concat(stdout), stderr: Buffer.concat(stderr) });
+    });
+  });
+}
+
+function ensureWindowsDaemonServiceRunning(): { ok: boolean; message: string } {
+  const validation = validateWindowsDaemonServiceInstallation();
+  if (!validation.ok) {
+    return validation;
   }
 
   const query = spawnSync("sc.exe", ["query", "PangeaDaemon"], {
@@ -531,6 +711,39 @@ function ensureWindowsDaemonServiceRunning(): { ok: boolean; message: string } {
     ok: false,
     message: `Failed to start PangeaDaemon service. ${startOutput.trim()}`
   };
+}
+
+function validateWindowsDaemonServiceInstallation(): { ok: boolean; message: string } {
+  const expectedExecutable = expectedWindowsServiceDaemonPath();
+  const qc = spawnSync("sc.exe", ["qc", "PangeaDaemon"], {
+    stdio: "pipe",
+    shell: false,
+    windowsHide: true
+  });
+  const qcOutput = combineOutput(qc);
+  const qcLower = qcOutput.toLowerCase();
+  if ((qc.status ?? 1) !== 0 && qcLower.includes("1060")) {
+    return {
+      ok: false,
+      message: "PangeaDaemon service is not installed. Run the installer Repair option as administrator."
+    };
+  }
+  if ((qc.status ?? 1) !== 0) {
+    return {
+      ok: false,
+      message: "PangeaDaemon service configuration could not be verified. Run installer repair as administrator."
+    };
+  }
+  if ((qc.status ?? 1) === 0) {
+    const configuredExecutable = parseServiceExecutablePath(qcOutput);
+    if (configuredExecutable && !sameWindowsPath(configuredExecutable, expectedExecutable)) {
+      return {
+        ok: false,
+        message: `PangeaDaemon service path is ${configuredExecutable}, expected ${expectedExecutable}. Run installer repair as administrator.`
+      };
+    }
+  }
+  return { ok: true, message: "" };
 }
 
 function expectedWindowsServiceDaemonPath(): string {

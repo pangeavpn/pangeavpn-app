@@ -37,3 +37,7 @@ tmp/
 # OS/editor noise
 .DS_Store
 Thumbs.db
+
+# pnpm (not adopted yet — npm/package-lock.json is authoritative)
+pnpm-lock.yaml
+pnpm-workspace.yaml

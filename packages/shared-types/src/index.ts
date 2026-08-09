@@ -23,6 +23,50 @@ export const CloakProfileSchema = z.object({
   serverName: z.string().optional()
 });
 
+export const NaiveProfileSchema = z.object({
+  localPort: z.number().int().nonnegative(),
+  remoteHost: z.string().min(1),
+  remotePort: z.number().int().positive(),
+  username: z.string().min(1),
+  password: z.string(),
+  serverName: z.string().optional()
+});
+
+export const RealityProfileSchema = z.object({
+  localPort: z.number().int().nonnegative(),
+  remoteHost: z.string().min(1),
+  remotePort: z.number().int().positive(),
+  uuid: z.string().min(1),
+  publicKey: z.string().min(1),
+  shortId: z.string().min(1),
+  flow: z.string().optional(),
+  serverName: z.string().optional(),
+  targetPort: z.number().int().positive().optional()
+});
+
+export const Hysteria2ProfileSchema = z.object({
+  localPort: z.number().int().nonnegative(),
+  remoteHost: z.string().min(1),
+  remotePort: z.number().int().positive(),
+  serverName: z.string().optional(),
+  password: z.string(),
+  obfsPassword: z.string(),
+  upMbps: z.number().int().nonnegative().optional(),
+  downMbps: z.number().int().nonnegative().optional(),
+  insecure: z.boolean().optional(),
+  pinSha256: z.string().optional()
+});
+
+export const SnowflakeProfileSchema = z.object({
+  localPort: z.number().int().nonnegative(),
+  brokerURL: z.string().min(1),
+  fronts: z.array(z.string()).optional(),
+  ampCacheUrl: z.string().optional(),
+  iceServers: z.array(z.string()).optional(),
+  bridgeFingerprint: z.string().min(1),
+  keepLocalAddresses: z.boolean().optional()
+});
+
 export const WireGuardProfileSchema = z.object({
   configText: z.string(),
   tunnelName: z.string().min(1),
@@ -34,6 +78,18 @@ export const ProfileSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
   cloak: CloakProfileSchema,
+  /**
+   * Every transport endpoint of this profile's node as a raw IP, straight from
+   * the hub. The daemon permits these through the kill switch and routes them
+   * outside the tunnel without a DNS lookup — which matters because an engaged
+   * Lockdown lock blocks DNS, so a hostname permit can never be resolved behind
+   * it and every transport but Cloak would be blocked by our own kill switch.
+   */
+  transportEndpointIPs: z.array(z.string()).optional(),
+  naive: NaiveProfileSchema.optional(),
+  reality: RealityProfileSchema.optional(),
+  hysteria2: Hysteria2ProfileSchema.optional(),
+  snowflake: SnowflakeProfileSchema.optional(),
   wireguard: WireGuardProfileSchema
 });
 
@@ -44,7 +100,24 @@ export const AppConfigSchema = z.object({
 export const StatusResponseSchema = z.object({
   state: DaemonStateSchema,
   detail: z.string(),
+  activeTransport: z.enum(["cloak", "naive", "reality", "hysteria2", "snowflake", ""]).default(""),
   cloak: z.object({
+    running: z.boolean(),
+    pid: z.number().nullable()
+  }),
+  naive: z.object({
+    running: z.boolean(),
+    pid: z.number().nullable()
+  }),
+  reality: z.object({
+    running: z.boolean(),
+    pid: z.number().nullable()
+  }),
+  hysteria2: z.object({
+    running: z.boolean(),
+    pid: z.number().nullable()
+  }),
+  snowflake: z.object({
     running: z.boolean(),
     pid: z.number().nullable()
   }),
@@ -58,7 +131,8 @@ export const StatusResponseSchema = z.object({
 });
 
 export const ConnectRequestSchema = z.object({
-  profileId: z.string().min(1)
+  profileId: z.string().min(1),
+  preferredTransport: z.enum(["cloak", "naive", "reality", "hysteria2", "snowflake"]).optional()
 });
 
 export const OkResponseSchema = z.object({
@@ -87,6 +161,10 @@ export type LogLevel = z.infer<typeof LogLevelSchema>;
 export type LogSource = z.infer<typeof LogSourceSchema>;
 
 export type CloakProfile = z.infer<typeof CloakProfileSchema>;
+export type NaiveProfile = z.infer<typeof NaiveProfileSchema>;
+export type RealityProfile = z.infer<typeof RealityProfileSchema>;
+export type Hysteria2Profile = z.infer<typeof Hysteria2ProfileSchema>;
+export type SnowflakeProfile = z.infer<typeof SnowflakeProfileSchema>;
 export type WireGuardProfile = z.infer<typeof WireGuardProfileSchema>;
 export type Profile = z.infer<typeof ProfileSchema>;
 export type AppConfig = z.infer<typeof AppConfigSchema>;

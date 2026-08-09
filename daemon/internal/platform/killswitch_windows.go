@@ -23,6 +23,11 @@ type windowsKillSwitch struct {
 	active         bool
 	engine         *wfpEngine // dynamic session — closing handle removes all filters
 	tunnelFilterId uint64     // WFP filter ID for the tunnel interface permit
+
+	// Per-arm permit filter IDs so a re-arm can retire the previous set instead
+	// of stacking. Without this every node visited stays permitted until Clear.
+	endpointFilterIds []uint64
+	lanFilterIds      []uint64
 }
 
 func (ks *windowsKillSwitch) Enable(ctx context.Context, endpointHosts []string, allowLAN bool, locked bool) error {
@@ -34,39 +39,67 @@ func (ks *windowsKillSwitch) Enable(ctx context.Context, endpointHosts []string,
 		return fmt.Errorf("kill switch enable: %w", err)
 	}
 
-	// Re-entry: stack new endpoint permits in one WFP transaction. Old permits
-	// linger harmlessly until Disconnect closes the dynamic session.
+	// Re-entry: swap the permit set in one transaction — new permits in before
+	// old ones out, so the lock is never wider than old ∪ new nor too narrow.
 	if ks.active && ks.engine != nil {
 		prev, _ := loadKillSwitchState()
 		if stringSlicesEqual(prev.EndpointIPs, ips) && prev.AllowLAN == allowLAN {
-			return nil
+			// Filters already match, but a caller re-arming an existing lock as a
+			// Lockdown lock still has to be recorded — see persistLockedUpgrade.
+			return persistLockedUpgrade(prev, locked)
 		}
 
 		if err := ks.engine.beginTransaction(); err != nil {
 			return fmt.Errorf("kill switch re-enable: %w", err)
 		}
+		endpointIds := make([]uint64, 0, len(ips))
 		for _, ip := range ips {
-			if _, err := ks.engine.addPermitEndpointIP(ip); err != nil {
+			id, err := ks.engine.addPermitEndpointIP(ip)
+			if err != nil {
 				ks.engine.abortTransaction()
 				return fmt.Errorf("kill switch re-enable: permit %s: %w", ip, err)
 			}
+			endpointIds = append(endpointIds, id)
 		}
-		// LAN permits can only be added on re-entry, not removed (no filter IDs tracked).
-		if allowLAN && !prev.AllowLAN {
+		lanIds := make([]uint64, 0, len(LANAllowPrefixes))
+		if allowLAN {
 			for _, cidr := range LANAllowPrefixes {
-				if _, err := ks.engine.addPermitIPv4Subnet(cidr); err != nil {
+				id, err := ks.engine.addPermitIPv4Subnet(cidr)
+				if err != nil {
 					ks.engine.abortTransaction()
 					return fmt.Errorf("kill switch re-enable: permit LAN %s: %w", cidr, err)
 				}
+				lanIds = append(lanIds, id)
+			}
+		}
+		// Old permits out last, same transaction.
+		var staleDeletes []string
+		for _, id := range ks.endpointFilterIds {
+			if err := ks.engine.deleteFilter(id); err != nil {
+				staleDeletes = append(staleDeletes, fmt.Sprintf("%d: %v", id, err))
+			}
+		}
+		for _, id := range ks.lanFilterIds {
+			if err := ks.engine.deleteFilter(id); err != nil {
+				staleDeletes = append(staleDeletes, fmt.Sprintf("%d: %v", id, err))
 			}
 		}
 		if err := ks.engine.commitTransaction(); err != nil {
+			// Otherwise every later re-arm fails with "transaction in progress".
+			ks.engine.abortTransaction()
 			return fmt.Errorf("kill switch re-enable: %w", err)
 		}
+		ks.endpointFilterIds = endpointIds
+		ks.lanFilterIds = lanIds
+		if len(staleDeletes) > 0 {
+			// Lock is intact, but a departing server's permit survives until Clear.
+			KillSwitchWarn("kill switch re-arm could not retire stale permits (%s)", strings.Join(staleDeletes, "; "))
+		}
 
-		prev.EndpointIPs = mergeStringSets(prev.EndpointIPs, ips)
-		prev.AllowLAN = allowLAN || prev.AllowLAN
-		prev.Locked = prev.Locked || locked
+		prev.Active = true // the load above may have failed; rules are live
+		prev.EndpointIPs = ips
+		prev.AllowLAN = allowLAN
+		prev.Locked = locked
 		_ = saveKillSwitchState(prev)
 		return nil
 	}
@@ -126,13 +159,16 @@ func (ks *windowsKillSwitch) Enable(ctx context.Context, endpointHosts []string,
 		return fmt.Errorf("kill switch enable: %w", err)
 	}
 
+	endpointIds := make([]uint64, 0, len(ips))
 	for _, ip := range ips {
-		if _, err := engine.addPermitEndpointIP(ip); err != nil {
+		id, err := engine.addPermitEndpointIP(ip)
+		if err != nil {
 			engine.abortTransaction()
 			engine.close()
 			_ = removeKillSwitchState()
 			return fmt.Errorf("kill switch enable: %w", err)
 		}
+		endpointIds = append(endpointIds, id)
 	}
 
 	// DHCP best-effort — ALE layer may not see broadcast DHCP traffic.
@@ -141,14 +177,17 @@ func (ks *windowsKillSwitch) Enable(ctx context.Context, endpointHosts []string,
 	// Permit LAN ranges so captive portals / gateway probes / mDNS work on
 	// restrictive WiFi. Only applied when the user opts in — fail-open would
 	// defeat the kill switch.
+	lanIds := make([]uint64, 0, len(LANAllowPrefixes))
 	if allowLAN {
 		for _, cidr := range LANAllowPrefixes {
-			if _, err := engine.addPermitIPv4Subnet(cidr); err != nil {
+			id, err := engine.addPermitIPv4Subnet(cidr)
+			if err != nil {
 				engine.abortTransaction()
 				engine.close()
 				_ = removeKillSwitchState()
 				return fmt.Errorf("kill switch enable: permit LAN %s: %w", cidr, err)
 			}
+			lanIds = append(lanIds, id)
 		}
 	}
 
@@ -172,6 +211,30 @@ func (ks *windowsKillSwitch) Enable(ctx context.Context, endpointHosts []string,
 		return fmt.Errorf("kill switch enable: %w", err)
 	}
 
+	// localhost resolves to ::1 first on Windows, so IPv6 loopback needs the
+	// same treatment as IPv4: ::1 address permits alongside the IS_LOOPBACK
+	// flag (unreliable for fresh connects), and permits at the inbound layer —
+	// the inbound V6 block otherwise drops the server side of every [::1]
+	// connection, making localhost websites unreachable while connected.
+	if _, err := engine.addPermitLoopbackSubnetV6(fwpmLayerAleAuthConnectV6, "PangeaVPN Allow Loopback Subnet IPv6"); err != nil {
+		engine.abortTransaction()
+		engine.close()
+		_ = removeKillSwitchState()
+		return fmt.Errorf("kill switch enable: %w", err)
+	}
+	if _, err := engine.addPermitLoopbackInboundV6(); err != nil {
+		engine.abortTransaction()
+		engine.close()
+		_ = removeKillSwitchState()
+		return fmt.Errorf("kill switch enable: %w", err)
+	}
+	if _, err := engine.addPermitLoopbackSubnetV6(fwpmLayerAleAuthRecvAcceptV6, "PangeaVPN Allow Loopback Subnet Inbound IPv6"); err != nil {
+		engine.abortTransaction()
+		engine.close()
+		_ = removeKillSwitchState()
+		return fmt.Errorf("kill switch enable: %w", err)
+	}
+
 	if err := engine.commitTransaction(); err != nil {
 		engine.close()
 		_ = removeKillSwitchState()
@@ -180,6 +243,8 @@ func (ks *windowsKillSwitch) Enable(ctx context.Context, endpointHosts []string,
 
 	ks.engine = engine
 	ks.active = true
+	ks.endpointFilterIds = endpointIds
+	ks.lanFilterIds = lanIds
 	return nil
 }
 
@@ -241,6 +306,9 @@ func (ks *windowsKillSwitch) Clear(ctx context.Context) error {
 
 	_ = removeKillSwitchState()
 	ks.active = false
+	ks.endpointFilterIds = nil
+	ks.lanFilterIds = nil
+	ks.tunnelFilterId = 0
 	return nil
 }
 

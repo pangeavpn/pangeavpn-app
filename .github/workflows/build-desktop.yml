@@ -24,9 +24,56 @@ permissions:
   contents: read
 
 jobs:
+  test:
+    name: Tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: daemon/go.mod
+          cache: true
+          cache-dependency-path: daemon/go.sum
+
+      - name: Install workspace dependencies
+        run: npm ci
+
+      # The desktop tests import main-process sources, which resolve
+      # @pangeavpn/shared-types through its built dist.
+      - name: Build shared types
+        run: npm run build --workspace @pangeavpn/shared-types
+
+      - name: Test desktop
+        run: npm test --workspace @pangeavpn/desktop
+
+      - name: Vet daemon
+        run: go vet ./...
+        working-directory: daemon
+
+      # Matrixed because the kill switch splits per OS behind build tags, so a
+      # single runner would never compile the other platforms' tests.
+      - name: Test daemon
+        run: go test ./...
+        working-directory: daemon
+
   build-windows:
     name: Windows (x64 + arm64)
     runs-on: windows-latest
+    needs: test
     timeout-minutes: 45
     steps:
       - name: Checkout
@@ -39,14 +86,24 @@ jobs:
           cache: 'npm'
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version-file: daemon/go.mod
           cache: true
           cache-dependency-path: daemon/go.sum
 
       - name: Install goversioninfo
-        run: go install github.com/josephspurrier/goversioninfo/cmd/goversioninfo@latest
+        run: go install github.com/josephspurrier/goversioninfo/cmd/goversioninfo@v1.7.0
+
+      # cgo-links the prebuilt pangea_naive.lib (native COFF) for the naive
+      # transport. windows-latest ships LLVM; install it only if missing.
+      - name: Ensure LLVM (clang-cl) for naive_cgo
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "C:\Program Files\LLVM\bin\clang-cl.exe")) {
+            choco install llvm --no-progress -y
+          }
+          & "C:\Program Files\LLVM\bin\clang-cl.exe" --version
 
       - name: Install workspace dependencies
         run: npm ci
@@ -55,9 +112,16 @@ jobs:
         run: npm run build-bin:windows
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Fail the build rather than quietly shipping the naive stub.
+          PANGEA_REQUIRE_NAIVE: '1'
+
+      # A codec Nsis7z cannot decode makes the installer drop binaries in
+      # silence, so nothing downstream would notice the payload is unusable.
+      - name: Verify Windows installers
+        run: node scripts/verify-windows-installer.mjs
 
       - name: Upload Windows NSIS installers
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: pangeavpn-windows-installers
           path: dist/bin/windows/installer/**/*.exe
@@ -67,6 +131,7 @@ jobs:
   build-mac:
     name: macOS (arm64 + x64)
     runs-on: macos-latest
+    needs: test
     timeout-minutes: 60
     steps:
       - name: Checkout
@@ -79,7 +144,7 @@ jobs:
           cache: 'npm'
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version-file: daemon/go.mod
           cache: true
@@ -93,9 +158,11 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          # Fail the build rather than quietly shipping the naive stub.
+          PANGEA_REQUIRE_NAIVE: '1'
 
       - name: Upload macOS installer DMGs
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: pangeavpn-mac-installers
           path: dist/bin/mac/installer/**/*-installer.dmg
@@ -111,13 +178,13 @@ jobs:
       contents: write
     steps:
       - name: Download Windows installers
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: pangeavpn-windows-installers
           path: artifacts/windows
 
       - name: Download macOS installers
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: pangeavpn-mac-installers
           path: artifacts/mac
@@ -129,16 +196,33 @@ jobs:
           find artifacts/mac -type f -name '*-installer.dmg' -exec cp {} release/ \;
           ls -la release/
 
+      # Releases are not code-signed yet, so published checksums are the only
+      # integrity check users have. Generated here, from the same artifacts that
+      # are uploaded, in a public log.
+      - name: Generate SHA-256 checksums
+        working-directory: release
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          artifacts=(*.exe *.dmg)
+          if [ ${#artifacts[@]} -eq 0 ]; then
+            echo "::error::No release artifacts found to checksum"
+            exit 1
+          fi
+          # Explicit extensions rather than '*' so SHA256SUMS.txt can never
+          # list itself, regardless of shell expansion order.
+          sha256sum "${artifacts[@]}" > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
       - name: Publish release
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           draft: false
           generate_release_notes: true
           files: release/*
 
-  # The release above is published by GITHUB_TOKEN, so its `release: published`
-  # event cannot start the AI Release Notes workflow (GitHub's recursion guard).
-  # Call it directly instead — same run graph, deterministic ordering, no PAT.
+  # GITHUB_TOKEN publishes the release, so its event cannot start the notes
+  # workflow (recursion guard). Call it directly: same run graph, no PAT.
   release-notes:
     name: AI Release Notes
     if: startsWith(github.ref, 'refs/tags/v')

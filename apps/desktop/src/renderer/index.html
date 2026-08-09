@@ -11,8 +11,6 @@
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
-    <canvas id="bgCanvas" aria-hidden="true"></canvas>
-    <script src="./bg.js"></script>
     <div id="loadingScreen" class="loading-screen">
       <div class="loading-content">
         <h1 data-i18n="app.brand">Pangea VPN</h1>
@@ -20,6 +18,41 @@
         <p id="loadingMessage" data-i18n="app.loading.starting">Starting PangeaVPN...</p>
       </div>
     </div>
+
+    <section
+      id="daemonRecoveryScreen"
+      class="daemon-recovery-screen"
+      role="alertdialog"
+      aria-modal="true"
+      aria-labelledby="daemonRecoveryTitle"
+      aria-describedby="daemonRecoveryDescription daemonRecoveryMessage"
+      hidden
+    >
+      <div class="daemon-recovery-visual" aria-hidden="true">
+        <span class="daemon-recovery-brand"></span>
+        <div class="daemon-recovery-signal">
+          <svg viewBox="0 0 96 96" fill="none">
+            <path d="M48 13 22 24v20c0 18 10.8 31.5 26 38 15.2-6.5 26-20 26-38V24L48 13Z" stroke="currentColor" stroke-width="3"/>
+            <path d="M37 36 59 58M59 36 37 58" stroke="currentColor" stroke-width="4" stroke-linecap="round"/>
+          </svg>
+        </div>
+        <span class="daemon-recovery-code">SERVICE / OFFLINE</span>
+      </div>
+      <div class="daemon-recovery-content">
+        <span class="daemon-recovery-kicker" data-i18n="daemonRecovery.kicker">System service</span>
+        <h1 id="daemonRecoveryTitle" data-i18n="daemonRecovery.title">VPN service stopped</h1>
+        <p id="daemonRecoveryDescription" class="daemon-recovery-description" data-i18n="daemonRecovery.description">PangeaVPN's background service is not responding. Restart it to restore VPN controls.</p>
+        <div class="daemon-recovery-permission">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 5 6v6c0 4.4 3 7.6 7 9 4-1.4 7-4.6 7-9V6l-7-3Z"/><path d="m9.5 12 1.7 1.7 3.6-4"/></svg>
+          <span data-i18n="daemonRecovery.permission">Your system will ask for administrator approval.</span>
+        </div>
+        <button id="daemonRecoveryBtn" class="daemon-recovery-button" type="button">
+          <span class="daemon-recovery-button-label" data-i18n="daemonRecovery.restart">Restart service</span>
+          <span class="spinner daemon-recovery-spinner" aria-hidden="true"></span>
+        </button>
+        <p id="daemonRecoveryMessage" class="daemon-recovery-message" role="status" aria-live="polite"></p>
+      </div>
+    </section>
 
     <div id="toastContainer" class="toast-container" role="status" aria-live="polite"></div>
 
@@ -79,78 +112,71 @@
 
     <main class="shell" hidden>
       <header class="header">
-        <div class="header-row">
-          <h1 class="brand">
-            <span class="brand-logo" role="img" aria-label="Pangea VPN" data-i18n-aria-label="header.brandAriaLabel"></span>
-            <span id="appVersion" class="app-version">v-</span>
-          </h1>
-          <nav class="header-menu" aria-label="Account and settings">
-            <button id="loginBtn" class="btn-ghost" type="button" hidden data-i18n="header.signIn">Sign In</button>
-            <button id="themeToggleBtn" class="btn-icon" type="button" aria-pressed="false" aria-label="Toggle theme" data-i18n-aria-label="header.toggleTheme" title="Toggle theme" data-i18n-title="header.toggleTheme">&#9789;</button>
-            <div class="menu-wrapper">
-              <button id="menuBtn" class="btn-icon menu-btn-wrapper" type="button" title="Menu" data-i18n-title="header.menu" aria-label="Menu" data-i18n-aria-label="header.menu" aria-haspopup="true" aria-expanded="false">&#9776;<span id="menuBadge" class="menu-badge" aria-hidden="true" hidden>!</span></button>
-              <div id="menuDropdown" class="menu-dropdown">
-                <button id="menuSettingsBtn" class="menu-item" type="button" data-i18n="menu.settings">Settings</button>
-                <button id="menuUpdateBtn" class="menu-item menu-update-item" type="button" hidden data-i18n="menu.updateAvailable">Update Available</button>
-              </div>
+        <span class="brand-logo" role="img" aria-label="Pangea VPN" data-i18n-aria-label="header.brandAriaLabel"></span>
+        <span id="appVersion" class="app-version">v-</span>
+        <span class="header-spacer"></span>
+        <nav class="header-menu" aria-label="Account and settings">
+          <button id="loginBtn" class="btn-ghost" type="button" hidden data-i18n="header.signIn">Sign In</button>
+          <button id="themeToggleBtn" class="btn-icon" type="button" aria-pressed="false" aria-label="Toggle theme" data-i18n-aria-label="header.toggleTheme" title="Toggle theme" data-i18n-title="header.toggleTheme">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M20.2 14.2A8.2 8.2 0 0 1 9.8 3.8a8.2 8.2 0 1 0 10.4 10.4Z"/></svg>
+          </button>
+          <div class="menu-wrapper">
+            <button id="menuBtn" class="btn-icon menu-btn-wrapper" type="button" title="Menu" data-i18n-title="header.menu" aria-label="Menu" data-i18n-aria-label="header.menu" aria-haspopup="true" aria-expanded="false">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+              <span id="menuBadge" class="menu-badge" aria-hidden="true" hidden>!</span>
+            </button>
+            <div id="menuDropdown" class="menu-dropdown">
+              <button id="menuSettingsBtn" class="menu-item" type="button" data-i18n="menu.settings">Settings</button>
+              <button id="menuUpdateBtn" class="menu-item menu-update-item" type="button" hidden data-i18n="menu.updateAvailable">Update Available</button>
             </div>
-          </nav>
-        </div>
+          </div>
+        </nav>
       </header>
 
-      <!-- Hero connection card -->
-      <section id="heroCard" class="hero-card" data-state="DISCONNECTED">
-        <div class="hero-indicator">
-          <div class="hero-dot"></div>
+      <div class="stage">
+        <div class="map-stage">
+          <div id="mapHost" class="map-host"></div>
         </div>
 
-        <div class="hero-state" aria-live="polite">
-          <strong id="state" class="hero-state-label" data-i18n="state.DISCONNECTED">DISCONNECTED</strong>
-          <span id="detail" class="hero-detail"></span>
-        </div>
+        <section id="heroCard" class="hero-card" data-state="DISCONNECTED">
+          <div class="hero-state" aria-live="polite">
+            <span class="hero-kicker"><i class="hero-dot" aria-hidden="true"></i><strong id="state" data-i18n="state.DISCONNECTED">DISCONNECTED</strong></span>
+            <h2 id="heroHeadline" class="hero-headline"></h2>
+            <span id="detail" class="hero-detail"></span>
+          </div>
 
-        <div id="serverPanel" class="hero-server" hidden>
-          <select id="serverSelect" hidden></select>
-          <button id="serverPickerBtn" class="server-picker" type="button" aria-haspopup="dialog" aria-expanded="false">
-            <span id="serverPickerLabel" class="server-picker-label" data-i18n="hero.selectServer">Select server</span>
-            <span class="server-picker-arrow">&#9662;</span>
-          </button>
-          <button id="serverRefreshBtn" class="btn-ghost" type="button" aria-label="Refresh servers" data-i18n-aria-label="hero.refreshServers" title="Refresh servers" data-i18n-title="hero.refreshServers">&#8635;</button>
-        </div>
+          <div class="hero-facts">
+            <div class="fact"><span class="fact-key" data-i18n="fact.session">Session</span><span id="factSession" class="fact-value">&mdash;</span></div>
+            <div class="fact"><span class="fact-key" data-i18n="fact.down">Down</span><span id="rxBytes" class="fact-value">&mdash;</span></div>
+            <div class="fact"><span class="fact-key" data-i18n="fact.up">Up</span><span id="txBytes" class="fact-value">&mdash;</span></div>
+            <div class="fact"><span class="fact-key" data-i18n="fact.via">Via</span><span id="factVia" class="fact-value">&mdash;</span></div>
+          </div>
 
-        <div class="hero-actions">
-          <button id="serverConnectBtn" class="btn-primary btn-lg" data-i18n="hero.connect">Connect</button>
-          <button id="serverDisconnectBtn" class="btn-danger btn-lg" data-i18n="hero.disconnect">Disconnect</button>
-          <span id="serverIndicator" class="refresh-indicator" aria-live="polite" aria-hidden="true">
-            <span class="spinner" aria-hidden="true"></span>
-            <span id="serverIndicatorLabel" data-i18n="hero.provisioning">Provisioning...</span>
-          </span>
-        </div>
+          <div id="serverPanel" class="hero-server" hidden>
+            <select id="serverSelect" hidden></select>
+            <span class="hero-server-label" data-i18n="hero.region">Region</span>
+            <div id="regionSlots" class="region-slots"></div>
+            <div class="hero-server-actions">
+              <button id="serverPickerBtn" class="region-more" type="button" aria-haspopup="dialog" aria-expanded="false">
+                <span class="region-more-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"/></svg>
+                </span>
+                <span id="serverPickerLabel" class="region-more-label" data-i18n="hero.allRegions">All regions</span>
+                <span id="regionMoreCount" class="region-more-count"></span>
+              </button>
+              <button id="serverRefreshBtn" class="btn-icon" type="button" aria-label="Refresh servers" data-i18n-aria-label="hero.refreshServers" title="Refresh servers" data-i18n-title="hero.refreshServers">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 1 0-.6 4"/><path d="M20 4.5V11h-6.5"/></svg>
+              </button>
+            </div>
+          </div>
 
-        <div class="hero-pills">
-          <span class="status-pill">
-            <span class="pill-dot" id="ksDot"></span>
-            <span data-i18n="pill.killSwitch">Kill Switch</span>
-          </span>
-          <span class="status-pill">
-            <span class="pill-dot" id="cloakDot"></span>
-            <span data-i18n="pill.cloak">Cloak</span>
-            <span id="cloak" class="pill-value">-</span>
-          </span>
-          <span class="status-pill">
-            <span class="pill-dot" id="wgDot"></span>
-            <span data-i18n="pill.wireguard">WireGuard</span>
-            <span id="wireguard" class="pill-value">-</span>
-          </span>
-        </div>
+          <div class="hero-actions">
+            <button id="serverConnectBtn" class="btn-primary btn-lg" data-i18n="hero.connect">Connect</button>
+            <button id="serverDisconnectBtn" class="btn-quiet btn-lg" data-i18n="hero.disconnect">Disconnect</button>
+          </div>
 
-        <p id="uiMessage" class="hero-message" aria-live="polite"></p>
-      </section>
-
-      <div id="throughputPanel" class="throughput-panel" hidden>
-        <span class="throughput-item">↑ <span id="txBytes">0 B</span></span>
-        <span class="throughput-sep">·</span>
-        <span class="throughput-item">↓ <span id="rxBytes">0 B</span></span>
+          <p id="uiMessage" class="hero-message" aria-live="polite"></p>
+        </section>
       </div>
 
       <!-- Logs (gated behind the verbose-errors debug toggle) -->
@@ -175,7 +201,7 @@
     <div id="devicesModal" class="update-overlay" role="dialog" aria-modal="true" aria-label="Devices" data-i18n-aria-label="devices.title">
       <div class="update-modal devices-modal-card">
         <button id="devicesModalCloseBtn" class="update-close" type="button" aria-label="Close" data-i18n-aria-label="settings.close">&times;</button>
-        <h2 class="update-title" style="margin-bottom:0" data-i18n="devices.title">Devices</h2>
+        <h2 class="update-title devices-modal-title" data-i18n="devices.title">Devices</h2>
         <p class="devices-modal-subtitle" data-i18n="devices.subtitle">Devices signed in to your account.</p>
         <div id="devicesModalList" class="device-list">
           <div class="device-list-loading"><span class="spinner"></span></div>
@@ -212,118 +238,218 @@
         <button id="settingsOverlayCloseBtn" class="settings-overlay-close" type="button" aria-label="Close" data-i18n-aria-label="settings.close">&times;</button>
       </header>
       <div class="settings-overlay-body">
-        <!-- Account -->
-        <section class="settings-section">
-          <h3 class="settings-heading" data-i18n="settings.account.heading">Account</h3>
-          <div class="account-identity">
-            <span class="account-identity-label" data-i18n="settings.account.signedInAs">Signed in as</span>
-            <span id="accountUserLabel" class="account-identity-value">&mdash;</span>
-          </div>
-          <div class="account-identity">
-            <span class="account-identity-label" data-i18n="settings.account.subscription">Subscription</span>
-            <span id="accountSubscription" class="account-identity-value">&mdash;</span>
-          </div>
-          <div class="account-token">
-            <span class="account-token-label" data-i18n="settings.account.token">Sign-in token</span>
-            <div class="account-token-row">
-              <code id="accountTokenValue" class="account-token-value">&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;</code>
-              <button id="accountTokenToggleBtn" class="btn-ghost account-token-btn" type="button" data-i18n="settings.account.show">Show</button>
-              <button id="accountTokenCopyBtn" class="btn-ghost account-token-btn" type="button" data-i18n="settings.account.copy">Copy</button>
+        <div class="settings-stack">
+          <!-- Censorship Bypass -->
+          <section class="settings-item" data-collapsible="censorship">
+            <button class="collapse-toggle" type="button" aria-expanded="false" aria-controls="setCensorshipContent">
+              <span class="set-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 5 6v6c0 4.4 3 7.6 7 9 4-1.4 7-4.6 7-9V6l-7-3Z"/></svg></span>
+              <span class="set-title" data-i18n="settings.censorship.heading">Censorship Bypass</span>
+              <span id="setCensorshipValue" class="set-value"></span>
+              <span class="set-chevron"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></span>
+            </button>
+            <div id="setCensorshipContent" class="collapse-content" aria-hidden="true">
+              <div class="set-body">
+                <p class="settings-description" data-i18n="settings.censorship.description">Enable if your network blocks access to VPN services.</p>
+                <div class="settings-toggles">
+                  <label class="toggle-label">
+                    <span class="toggle-copy">
+                      <span class="toggle-title" data-i18n="settings.censorship.directIp.title">Direct IP</span>
+                      <span class="toggle-hint" data-i18n="settings.censorship.directIp.hint">Connect to our servers by IP address, skipping DNS entirely.</span>
+                    </span>
+                    <input id="directIpToggle" class="toggle-switch" type="checkbox" />
+                  </label>
+                  <label class="toggle-label">
+                    <span class="toggle-copy">
+                      <span class="toggle-title" data-i18n="settings.censorship.directIpOnly.title">Direct IP Only</span>
+                      <span class="toggle-hint" data-i18n="settings.censorship.directIpOnly.hint">Always use direct IP connections. Skips normal API calls entirely — use if your network blocks HTTPS to our servers.</span>
+                    </span>
+                    <input id="directIpOnlyToggle" class="toggle-switch" type="checkbox" />
+                  </label>
+                </div>
+              </div>
             </div>
-            <p class="account-token-hint" data-i18n="settings.account.tokenHint">This is the token you signed in with. Keep it private — anyone with it can access your account.</p>
-          </div>
-          <div class="account-actions">
-            <a id="manageSubLink" class="menu-item" href="#" data-i18n="settings.account.manageSub">Manage Subscription</a>
-            <button id="menuDevicesBtn" class="menu-item" type="button" hidden data-i18n="settings.account.devices">Devices</button>
-            <button id="logoutBtn" class="menu-item account-signout" type="button" data-i18n="settings.account.signOut">Sign Out</button>
-          </div>
-        </section>
+          </section>
 
-        <!-- Censorship Bypass -->
-        <section class="settings-section">
-          <h3 class="settings-heading" data-i18n="settings.censorship.heading">Censorship Bypass</h3>
-          <p class="settings-description" data-i18n="settings.censorship.description">Enable if your network blocks access to VPN services.</p>
-          <div class="settings-toggles">
-            <label class="toggle-label">
-              <input id="directIpToggle" type="checkbox" />
-              <div>
-                <span class="toggle-title" data-i18n="settings.censorship.directIp.title">Direct IP</span>
-                <span class="toggle-hint" data-i18n="settings.censorship.directIp.hint">Connect to our servers by IP address, skipping DNS entirely.</span>
+          <!-- Connection method -->
+          <section class="settings-item" data-collapsible="transport">
+            <button class="collapse-toggle" type="button" aria-expanded="false" aria-controls="setTransportContent">
+              <span class="set-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="2.4"/><circle cx="15" cy="17" r="2.4"/></svg></span>
+              <span class="set-title" data-i18n="settings.transport.heading">Connection Method</span>
+              <span id="setTransportValue" class="set-value"></span>
+              <span class="set-chevron"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></span>
+            </button>
+            <div id="setTransportContent" class="collapse-content" aria-hidden="true">
+              <div class="set-body">
+                <p class="settings-description" data-i18n="settings.transport.description">How PangeaVPN disguises your traffic.</p>
+                <div class="select-wrap">
+                  <select id="preferredTransportSelect" class="language-select" aria-label="Connection method" data-i18n-aria-label="settings.transport.heading">
+                    <option value="auto" data-i18n="settings.transport.auto">Automatic (recommended)</option>
+                    <option value="cloak" data-i18n="settings.transport.cloak">Cloak only</option>
+                    <option value="naive" data-i18n="settings.transport.naive">NaiveProxy only</option>
+                    <option value="reality" data-i18n="settings.transport.reality">VLESS+REALITY only</option>
+                    <option value="hysteria2" data-i18n="settings.transport.hysteria2">Hysteria2 only</option>
+                    <!-- Snowflake option gated for this release pending kill-switch dynamic-peer support; restore to re-enable user selection. -->
+                  </select>
+                  <span class="select-chevron"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></span>
+                </div>
               </div>
-            </label>
-            <label class="toggle-label">
-              <input id="directIpOnlyToggle" type="checkbox" />
-              <div>
-                <span class="toggle-title" data-i18n="settings.censorship.directIpOnly.title">Direct IP Only</span>
-                <span class="toggle-hint" data-i18n="settings.censorship.directIpOnly.hint">Always use direct IP connections. Skips normal API calls entirely — use if your network blocks HTTPS to our servers.</span>
-              </div>
-            </label>
-          </div>
-        </section>
+            </div>
+          </section>
 
-        <!-- Network -->
-        <section class="settings-section">
-          <h3 class="settings-heading" data-i18n="settings.network.heading">Network</h3>
-          <p class="settings-description" data-i18n="settings.network.description">Fixes for restrictive Wi-Fi networks.</p>
-          <div class="settings-toggles">
-            <label class="toggle-label">
-              <input id="allowLanToggle" type="checkbox" />
-              <div>
-                <span class="toggle-title" data-i18n="settings.network.allowLan.title">Allow LAN</span>
-                <span class="toggle-hint" data-i18n="settings.network.allowLan.hint">Let local-network traffic (router, printers, captive portals) bypass the tunnel. Turn on if your Wi-Fi intermittently drops to "No internet" while connected. Takes effect on next connect.</span>
+          <!-- Network -->
+          <section class="settings-item" data-collapsible="network">
+            <button class="collapse-toggle" type="button" aria-expanded="false" aria-controls="setNetworkContent">
+              <span class="set-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a15 15 0 0 1 0 18 15 15 0 0 1 0-18Z"/></svg></span>
+              <span class="set-title" data-i18n="settings.network.heading">Network</span>
+              <span id="setNetworkValue" class="set-value"></span>
+              <span class="set-chevron"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></span>
+            </button>
+            <div id="setNetworkContent" class="collapse-content" aria-hidden="true">
+              <div class="set-body">
+                <p class="settings-description" data-i18n="settings.network.description">Fixes for restrictive Wi-Fi networks.</p>
+                <div class="settings-toggles">
+                  <label class="toggle-label">
+                    <span class="toggle-copy">
+                      <span class="toggle-title" data-i18n="settings.network.allowLan.title">Allow LAN</span>
+                      <span class="toggle-hint" data-i18n="settings.network.allowLan.hint">Let local-network traffic (router, printers, captive portals) bypass the tunnel. Turn on if your Wi-Fi intermittently drops to "No internet" while connected. Takes effect on next connect.</span>
+                    </span>
+                    <input id="allowLanToggle" class="toggle-switch" type="checkbox" />
+                  </label>
+                </div>
+                <div class="settings-field">
+                  <label class="settings-field-label" for="dnsPresetSelect" data-i18n="settings.network.dns.provider.title">DNS Provider</label>
+                  <div class="select-wrap">
+                    <select id="dnsPresetSelect" class="language-select" aria-label="DNS Provider" data-i18n-aria-label="settings.network.dns.provider.title">
+                      <option value="automatic" data-i18n="settings.network.dns.provider.automatic">Automatic (VPN default)</option>
+                      <option value="adguard" data-i18n="settings.network.dns.provider.adguard">AdGuard DNS - Ads &amp; trackers</option>
+                      <option value="cloudflare" data-i18n="settings.network.dns.provider.cloudflare">Cloudflare</option>
+                      <option value="quad9" data-i18n="settings.network.dns.provider.quad9">Quad9 - Malware blocking</option>
+                      <option value="cloudflareFamily" data-i18n="settings.network.dns.provider.cloudflareFamily">Cloudflare Family - Malware &amp; adult content</option>
+                      <option value="google" data-i18n="settings.network.dns.provider.google">Google Public DNS</option>
+                      <option value="custom" data-i18n="settings.network.dns.provider.custom">Custom</option>
+                    </select>
+                    <span class="select-chevron"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></span>
+                  </div>
+                  <span class="settings-field-hint" data-i18n="settings.network.dns.provider.hint">Choose a resolver or enter your own. Filtering is provided by the selected DNS service. Takes effect on next connect.</span>
+                </div>
+                <div id="customDnsField" class="settings-field" hidden>
+                  <label class="settings-field-label" for="customDnsInput" data-i18n="settings.network.dns.title">Custom DNS</label>
+                  <input
+                    id="customDnsInput"
+                    class="settings-field-input"
+                    type="text"
+                    autocomplete="off"
+                    spellcheck="false"
+                    placeholder="1.1.1.1, 1.0.0.1"
+                    data-i18n-placeholder="settings.network.dns.placeholder"
+                    data-i18n-aria-label="settings.network.dns.title"
+                  />
+                  <span class="settings-field-hint" data-i18n="settings.network.dns.hint">IPv4 DNS servers separated by commas, for example 1.1.1.1, 1.0.0.1. Leave blank to use the VPN default. Takes effect on next connect.</span>
+                </div>
+                <div class="settings-field">
+                  <label class="settings-field-label" for="wireguardMtuInput" data-i18n="settings.network.mtu.title">Tunnel MTU</label>
+                  <input
+                    id="wireguardMtuInput"
+                    class="settings-field-input"
+                    type="number"
+                    min="1280"
+                    max="1420"
+                    step="1"
+                    value="1380"
+                    inputmode="numeric"
+                    data-i18n-aria-label="settings.network.mtu.title"
+                  />
+                  <span class="settings-field-hint" data-i18n="settings.network.mtu.hint">Size of packets sent through the tunnel. Lower this if pages hang or large downloads stall on a network that otherwise connects fine. Default 1380. Takes effect on next connect.</span>
+                </div>
               </div>
-            </label>
-          </div>
-        </section>
+            </div>
+          </section>
 
-        <!-- Startup -->
-        <section class="settings-section">
-          <h3 class="settings-heading" data-i18n="settings.startup.heading">Startup</h3>
-          <p class="settings-description" data-i18n="settings.startup.description">Background launch and automatic reconnection.</p>
-          <div class="settings-toggles">
-            <label class="toggle-label">
-              <input id="launchAtStartupToggle" type="checkbox" />
-              <div>
-                <span class="toggle-title" data-i18n="settings.startup.launch.title">Launch at startup</span>
-                <span class="toggle-hint" data-i18n="settings.startup.launch.hint">Start PangeaVPN automatically when you sign in. Opens hidden — use the tray icon to access it.</span>
+          <!-- Startup -->
+          <section class="settings-item" data-collapsible="startup">
+            <button class="collapse-toggle" type="button" aria-expanded="false" aria-controls="setStartupContent">
+              <span class="set-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 3 5 14h6l-1 7 8-11h-6l1-7Z"/></svg></span>
+              <span class="set-title" data-i18n="settings.startup.heading">Startup</span>
+              <span id="setStartupValue" class="set-value"></span>
+              <span class="set-chevron"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></span>
+            </button>
+            <div id="setStartupContent" class="collapse-content" aria-hidden="true">
+              <div class="set-body">
+                <p class="settings-description" data-i18n="settings.startup.description">Background launch and automatic reconnection.</p>
+                <div class="settings-toggles">
+                  <label class="toggle-label">
+                    <span class="toggle-copy">
+                      <span class="toggle-title" data-i18n="settings.startup.launch.title">Launch at startup</span>
+                      <span class="toggle-hint" data-i18n="settings.startup.launch.hint">Start PangeaVPN automatically when you sign in. Opens hidden — use the tray icon to access it.</span>
+                    </span>
+                    <input id="launchAtStartupToggle" class="toggle-switch" type="checkbox" />
+                  </label>
+                  <label class="toggle-label">
+                    <span class="toggle-copy">
+                      <span class="toggle-title" data-i18n="settings.startup.lockdown.title">Lockdown</span>
+                      <span class="toggle-hint" data-i18n="settings.startup.lockdown.hint">Launch PangeaVPN at startup (hidden in the tray), auto-connect to the last server, and keep the kill switch on after you disconnect — only VPN traffic is allowed. Turn off Lockdown to regain unprotected internet.</span>
+                    </span>
+                    <input id="alwaysConnectedToggle" class="toggle-switch" type="checkbox" />
+                  </label>
+                </div>
               </div>
-            </label>
-            <label class="toggle-label">
-              <input id="alwaysConnectedToggle" type="checkbox" />
-              <div>
-                <span class="toggle-title" data-i18n="settings.startup.lockdown.title">Lockdown</span>
-                <span class="toggle-hint" data-i18n="settings.startup.lockdown.hint">Launch PangeaVPN at startup (hidden in the tray), auto-connect to the last server, and keep the kill switch on after you disconnect — only VPN traffic is allowed. Turn off Lockdown to regain unprotected internet.</span>
+            </div>
+          </section>
+
+          <!-- Language -->
+          <section class="settings-item" data-collapsible="language">
+            <button class="collapse-toggle" type="button" aria-expanded="false" aria-controls="setLanguageContent">
+              <span class="set-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h10"/><path d="M9 4v2c0 4-2.5 7-5 8"/><path d="M6.5 11c1.5 2.5 3.5 4 6 5"/><path d="m12.5 20 4-9 4 9"/><path d="M14 17h5"/></svg></span>
+              <span class="set-title" data-i18n="settings.language.heading">Language</span>
+              <span id="setLanguageValue" class="set-value"></span>
+              <span class="set-chevron"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></span>
+            </button>
+            <div id="setLanguageContent" class="collapse-content" aria-hidden="true">
+              <div class="set-body">
+                <p class="settings-description" data-i18n="settings.language.description">Choose the app's display language.</p>
+                <div class="select-wrap">
+                  <select id="languageSelect" class="language-select" aria-label="Language" data-i18n-aria-label="settings.language.heading"></select>
+                  <span class="select-chevron"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></span>
+                </div>
+                <p id="languageRestartHint" class="settings-description language-restart-hint" data-i18n="settings.language.restartHint" hidden>Restart PangeaVPN to apply the new language.</p>
               </div>
-            </label>
-          </div>
-        </section>
+            </div>
+          </section>
 
-        <!-- Language -->
-        <section class="settings-section">
-          <h3 class="settings-heading" data-i18n="settings.language.heading">Language</h3>
-          <p class="settings-description" data-i18n="settings.language.description">Choose the app's display language.</p>
-          <div class="settings-language">
-            <select id="languageSelect" class="language-select" aria-label="Language" data-i18n-aria-label="settings.language.heading"></select>
-            <p id="languageRestartHint" class="settings-description language-restart-hint" data-i18n="settings.language.restartHint" hidden>Restart PangeaVPN to apply the new language.</p>
-          </div>
-        </section>
+          <!-- Software update -->
+          <section class="settings-item" data-collapsible="update">
+            <button class="collapse-toggle" type="button" aria-expanded="false" aria-controls="setUpdateContent">
+              <span class="set-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v10"/><path d="m8 11 4 4 4-4"/><path d="M5 19h14"/></svg></span>
+              <span class="set-title" data-i18n="settings.update.heading">Software Update</span>
+              <span id="settingsVersion" class="set-value">&mdash;</span>
+              <span class="set-chevron"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></span>
+            </button>
+            <div id="setUpdateContent" class="collapse-content" aria-hidden="true">
+              <div class="set-body">
+                <button id="checkUpdatesBtn" class="btn-ghost" type="button" data-i18n="settings.update.check">Check for Updates</button>
+              </div>
+            </div>
+          </section>
+        </div>
 
-        <!-- Software update -->
-        <section class="settings-section">
-          <h3 class="settings-heading" data-i18n="settings.update.heading">Software Update</h3>
-          <p class="settings-description"><span data-i18n="settings.update.currentVersion">Current version:</span> <span id="settingsVersion">&mdash;</span></p>
-          <button id="checkUpdatesBtn" class="btn-ghost" type="button" data-i18n="settings.update.check">Check for Updates</button>
-        </section>
+        <div class="settings-actions">
+          <a id="manageSubLink" class="settings-action" href="#">
+            <span data-i18n="settings.account.manageSub">Manage Subscription</span>
+            <span id="accountSubscription" class="settings-action-value">&mdash;</span>
+          </a>
+          <button id="menuDevicesBtn" class="settings-action" type="button" hidden data-i18n="settings.account.devices">Devices</button>
+          <button id="logoutBtn" class="settings-action settings-action-danger" type="button" data-i18n="settings.account.signOut">Sign Out</button>
+        </div>
       </div>
     </div>
 
-    <!-- Full-screen server picker -->
-    <div id="serverPickerOverlay" class="server-picker-overlay" role="dialog" aria-modal="true" aria-label="Select server" data-i18n-aria-label="serverPicker.title" aria-hidden="true">
+    <!-- Full-screen region picker -->
+    <div id="serverPickerOverlay" class="server-picker-overlay" role="dialog" aria-modal="true" aria-label="Select region" data-i18n-aria-label="serverPicker.title" aria-hidden="true">
       <header class="server-picker-overlay-header">
-        <h2 class="server-picker-overlay-title" data-i18n="serverPicker.title">Select server</h2>
+        <h2 class="server-picker-overlay-title" data-i18n="serverPicker.title">Select region</h2>
         <button id="serverPickerOverlayCloseBtn" class="server-picker-overlay-close" type="button" aria-label="Close" data-i18n-aria-label="settings.close">&times;</button>
       </header>
-      <div id="serverPickerOverlayList" class="server-picker-overlay-list" role="listbox" aria-label="Servers" data-i18n-aria-label="serverPicker.serversAriaLabel"></div>
+      <div id="serverPickerOverlayList" class="server-picker-overlay-list" aria-label="Regions" data-i18n-aria-label="serverPicker.serversAriaLabel"></div>
     </div>
 
     <script type="module" src="./index.js"></script>

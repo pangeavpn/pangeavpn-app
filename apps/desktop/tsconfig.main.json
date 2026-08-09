@@ -17,5 +17,8 @@
   "include": [
     "src/main/**/*.ts",
     "src/shared/**/*.ts"
+  ],
+  "exclude": [
+    "src/**/*.test.ts"
   ]
 }

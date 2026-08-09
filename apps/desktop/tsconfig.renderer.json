@@ -18,5 +18,8 @@
   "include": [
     "src/renderer/**/*.ts",
     "src/renderer/**/*.d.ts"
+  ],
+  "exclude": [
+    "src/renderer/**/*.test.ts"
   ]
 }
