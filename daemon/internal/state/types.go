@@ -22,11 +22,12 @@ const (
 type LogSource string
 
 const (
-	SourceDaemon    LogSource = "daemon"
-	SourceCloak     LogSource = "cloak"
-	SourceNaive     LogSource = "naive"
-	SourceSnowflake LogSource = "snowflake"
-	SourceWireGuard LogSource = "wireguard"
+	SourceDaemon      LogSource = "daemon"
+	SourceCloak       LogSource = "cloak"
+	SourceNaive       LogSource = "naive"
+	SourceShadowsocks LogSource = "shadowsocks"
+	SourceSnowflake   LogSource = "snowflake"
+	SourceWireGuard   LogSource = "wireguard"
 )
 
 type LogEntry struct {
@@ -63,12 +64,14 @@ type WireGuardStatus struct {
 type StatusResponse struct {
 	State  DaemonState `json:"state"`
 	Detail string      `json:"detail"`
-	// ActiveTransport is "cloak", "naive", "reality", "hysteria2", "snowflake", or "" when disconnected.
+	// ActiveTransport is "cloak", "naive", "reality", "hysteria2", "shadowsocks",
+	// "snowflake", or "" when disconnected.
 	ActiveTransport  string          `json:"activeTransport"`
 	Cloak            CloakStatus     `json:"cloak"`
 	Naive            TransportStatus `json:"naive"`
 	Reality          TransportStatus `json:"reality"`
 	Hysteria2        TransportStatus `json:"hysteria2"`
+	Shadowsocks      TransportStatus `json:"shadowsocks"`
 	Snowflake        TransportStatus `json:"snowflake"`
 	WireGuard        WireGuardStatus `json:"wireguard"`
 	KillSwitchActive bool            `json:"killSwitchActive"`
@@ -149,6 +152,23 @@ type Hysteria2Profile struct {
 	PinSHA256 string `json:"pinSha256,omitempty"`
 }
 
+// ShadowsocksProfile carries per-node Shadowsocks (AEAD or SS-2022) settings.
+// Nil on a Profile means no Shadowsocks transport is configured.
+type ShadowsocksProfile struct {
+	LocalPort  int    `json:"localPort"`
+	RemoteHost string `json:"remoteHost"`
+	RemotePort int    `json:"remotePort"`
+	Method     string `json:"method"`
+	Password   string `json:"password"`
+	// Where the SS server relays decoded packets: the node's WireGuard listener.
+	// Client config because the node's ACL scopes it. Default 127.0.0.1:51820.
+	TargetHost string `json:"targetHost,omitempty"`
+	TargetPort int    `json:"targetPort,omitempty"`
+	// UDPOverTCP tunnels WireGuard's UDP inside the SS TCP stream. Slower, but
+	// the only thing that works where UDP is dropped outright.
+	UDPOverTCP bool `json:"udpOverTcp,omitempty"`
+}
+
 // SnowflakeProfile carries per-device Tor Snowflake (WebRTC rendezvous)
 // settings. Unlike Cloak/NaiveProxy/REALITY/Hysteria2, Snowflake has no
 // single fixed remote host: rendezvous happens against a broker (optionally
@@ -193,6 +213,9 @@ type Profile struct {
 	// Hysteria2 is optional; nil means this profile has no Hysteria2
 	// transport configured.
 	Hysteria2 *Hysteria2Profile `json:"hysteria2,omitempty"`
+	// Shadowsocks is optional; nil means this profile has no Shadowsocks
+	// transport configured.
+	Shadowsocks *ShadowsocksProfile `json:"shadowsocks,omitempty"`
 	// Snowflake is optional; nil means this profile has no Snowflake
 	// transport configured.
 	Snowflake *SnowflakeProfile `json:"snowflake,omitempty"`

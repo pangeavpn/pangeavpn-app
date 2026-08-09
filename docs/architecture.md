@@ -36,7 +36,7 @@ flowchart LR
         Renderer[Sandboxed renderer] <-->|contextBridge + IPC| Main[Electron main process]
         Main -->|Bearer-authenticated HTTP<br/>127.0.0.1:8787| Daemon[Privileged Go daemon]
         OS[Application traffic and OS networking] --> WG[In-process WireGuard]
-        WG --> Transport[In-process transport<br/>Cloak / REALITY / Hysteria2 / Naive]
+        WG --> Transport[In-process transport<br/>Cloak / REALITY / Hysteria2 / Naive / Shadowsocks]
         Daemon -. owns .-> OS
         Daemon -. owns .-> WG
         Daemon -. owns .-> Transport
@@ -140,12 +140,11 @@ Hub payloads use an encrypted channel implemented in
 5. Send `{ eph, iv, ct, tag }` to `/v1/secure` over HTTPS.
 6. Decrypt and authenticate the encrypted response with the same derived key.
 
-The pinned key authenticates the encrypted application payload when the client
-uses direct-IP/no-SNI routing on an intercepting network. Current defaults enable
-direct-IP-only mode, so this is the normal route unless that setting is disabled;
-outer TLS certificate verification is disabled for those direct-IP requests.
-When direct-IP-only mode is disabled, normal domain requests use Electron
-networking with certificate validation before direct-IP routes are considered.
+The pinned key authenticates the encrypted application payload independently of
+the transport carrying it. That is what lets the client take paths where the
+outer TLS session proves nothing: direct-IP/no-SNI requests disable certificate
+verification, and the fronted path runs through a relay that terminates TLS
+itself. Neither can read or forge an envelope.
 
 > [!IMPORTANT]
 > This is ephemeral-static ECDH, not full forward secrecy. A later compromise of
@@ -154,6 +153,52 @@ networking with certificate validation before direct-IP routes are considered.
 
 The remote route allowlist and server-side cryptographic handling are outside
 this repository and must not be inferred from the client alone.
+
+### Reaching the hub
+
+`ensureHub` tries each enabled method in order, keeping the first that completes
+an encrypted probe. Each is a switch the user can turn off; at least one must
+stay on.
+
+| # | Method | Defeats |
+|---|---|---|
+| 1 | Cached hub IP, no SNI | DNS entirely — no lookup, so it is the only method that survives an engaged Lockdown lock |
+| 2 | DoH-resolved IP, no SNI | DNS poisoning, and SNI-based blocking |
+| 3 | Daemon's Shadowsocks proxy | A blackholed hub IP |
+| 4 | Edge relay | Enumeration of our address space, which takes out 1–3 at once |
+| 5 | Plain HTTPS to the domain | Nothing; it is the baseline |
+
+Methods 1–3 all terminate on address space we own, so a censor who enumerates
+and null-routes our IPs defeats every one of them together. Method 4 exists for
+exactly that case: the relay answers on CDN anycast space shared with a large
+part of the web, where a block costs the censor real collateral. It is attempted
+after our own paths because it tells a third party the timing of our traffic —
+never its content. See [`infra/edge-relay`](../infra/edge-relay).
+
+Method 5 is last because it is the only one that puts the hub's hostname on the
+wire in cleartext. When it is switched off and everything else has failed,
+`ensureHub` throws rather than falling back to it.
+
+Relays and control-plane Shadowsocks credentials are cached to `settings.json`
+as the hub advertises them, and the client promotes whichever last worked. The
+fronted method is inert until a relay is configured, the same way the
+Shadowsocks method is inert until credentials are cached.
+
+### Connecting with no hub at all
+
+Provisioning needs the hub: `provision()` registers a fresh WireGuard key at
+`/api/register`, so a cached node list alone cannot produce a working profile.
+
+Two caches cover the gap. The node list is persisted, so a cold start behind a
+block still has servers to show and a retry plan to build. And when provisioning
+fails on a reachability error, `provisionAndConnect` falls back to the profile
+the daemon already holds — its WireGuard key was registered on an earlier run,
+which makes it the one way to reach a node while the hub is unreachable.
+
+The fallback is skipped for auth and subscription failures: those are the hub
+answering, and the peer that profile names will already have been deprovisioned.
+Switching has no equivalent fallback, because a switch that cannot reach the hub
+unwinds to the connection the user already had.
 
 ## Connection lifecycle
 
@@ -203,9 +248,10 @@ The daemon's automatic preference is:
 
 1. Cloak
 2. VLESS + REALITY
-3. Hysteria2
-4. NaiveProxy
-5. Snowflake
+3. Shadowsocks
+4. Hysteria2
+5. NaiveProxy
+6. Snowflake
 
 Only transports configured in the selected profile are candidates. Cloak is
 required by the current profile model. Snowflake is implemented but removed
@@ -239,6 +285,7 @@ Application traffic
 | VLESS + REALITY | [`daemon/internal/reality`](../daemon/internal/reality) using embedded sing-box/uTLS | Enabled when provisioned |
 | Hysteria2 | [`daemon/internal/hysteria2`](../daemon/internal/hysteria2) using embedded sing-box/QUIC | Enabled when provisioned |
 | NaiveProxy | [`daemon/internal/naive`](../daemon/internal/naive) with a CGO-linked native engine and in-process relay | Windows/macOS builds when native inputs resolve; release CI requires it |
+| Shadowsocks | [`daemon/internal/shadowsocks`](../daemon/internal/shadowsocks) using embedded sing-box (AEAD / SS-2022) | Enabled when provisioned |
 | Snowflake | [`daemon/internal/snowflake`](../daemon/internal/snowflake) using the Tor Snowflake library | Implemented but release-gated |
 
 No separate `wg`, `wg-quick`, `wireguard-go`, Cloak, or NaiveProxy tunnel
@@ -345,7 +392,7 @@ Depending on mode, the directory contains:
 | `config.json` | VPN profiles, including WireGuard and transport credentials |
 | `killswitch-state.json` | Persistent Lockdown intent |
 | `transport-memory.json` | Last-good transport by network fingerprint |
-| `settings.json` | Desktop settings plus cached recovery details such as the last server and hub IP |
+| `settings.json` | Desktop settings plus the caches a blocked client falls back on: last server and hub IP, the node list, edge relays, and control-plane Shadowsocks credentials |
 | `logs/daemon.log` | Persistent daemon log |
 | `logs/daemon-crash.log` | Crash diagnostics |
 

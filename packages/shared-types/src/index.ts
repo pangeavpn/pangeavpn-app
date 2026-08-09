@@ -9,7 +9,14 @@ export const DaemonStateSchema = z.enum([
 ]);
 
 export const LogLevelSchema = z.enum(["info", "warn", "error", "debug"]);
-export const LogSourceSchema = z.enum(["daemon", "cloak", "wireguard"]);
+export const LogSourceSchema = z.enum([
+  "daemon",
+  "cloak",
+  "naive",
+  "shadowsocks",
+  "snowflake",
+  "wireguard"
+]);
 
 export const CloakProfileSchema = z.object({
   localPort: z.number().int().positive(),
@@ -57,6 +64,19 @@ export const Hysteria2ProfileSchema = z.object({
   pinSha256: z.string().optional()
 });
 
+export const ShadowsocksProfileSchema = z.object({
+  localPort: z.number().int().nonnegative(),
+  remoteHost: z.string().min(1),
+  remotePort: z.number().int().positive(),
+  method: z.string().min(1),
+  password: z.string().min(1),
+  // Where the SS server relays decoded packets (the node's WireGuard
+  // listener); hub-configurable because the node's ACL scopes it.
+  targetHost: z.string().optional(),
+  targetPort: z.number().int().positive().optional(),
+  udpOverTcp: z.boolean().optional()
+});
+
 export const SnowflakeProfileSchema = z.object({
   localPort: z.number().int().nonnegative(),
   brokerURL: z.string().min(1),
@@ -89,6 +109,7 @@ export const ProfileSchema = z.object({
   naive: NaiveProfileSchema.optional(),
   reality: RealityProfileSchema.optional(),
   hysteria2: Hysteria2ProfileSchema.optional(),
+  shadowsocks: ShadowsocksProfileSchema.optional(),
   snowflake: SnowflakeProfileSchema.optional(),
   wireguard: WireGuardProfileSchema
 });
@@ -100,7 +121,9 @@ export const AppConfigSchema = z.object({
 export const StatusResponseSchema = z.object({
   state: DaemonStateSchema,
   detail: z.string(),
-  activeTransport: z.enum(["cloak", "naive", "reality", "hysteria2", "snowflake", ""]).default(""),
+  activeTransport: z
+    .enum(["cloak", "naive", "reality", "hysteria2", "shadowsocks", "snowflake", ""])
+    .default(""),
   cloak: z.object({
     running: z.boolean(),
     pid: z.number().nullable()
@@ -114,6 +137,10 @@ export const StatusResponseSchema = z.object({
     pid: z.number().nullable()
   }),
   hysteria2: z.object({
+    running: z.boolean(),
+    pid: z.number().nullable()
+  }),
+  shadowsocks: z.object({
     running: z.boolean(),
     pid: z.number().nullable()
   }),
@@ -132,7 +159,9 @@ export const StatusResponseSchema = z.object({
 
 export const ConnectRequestSchema = z.object({
   profileId: z.string().min(1),
-  preferredTransport: z.enum(["cloak", "naive", "reality", "hysteria2", "snowflake"]).optional()
+  preferredTransport: z
+    .enum(["cloak", "naive", "reality", "hysteria2", "shadowsocks", "snowflake"])
+    .optional()
 });
 
 export const OkResponseSchema = z.object({
@@ -164,6 +193,7 @@ export type CloakProfile = z.infer<typeof CloakProfileSchema>;
 export type NaiveProfile = z.infer<typeof NaiveProfileSchema>;
 export type RealityProfile = z.infer<typeof RealityProfileSchema>;
 export type Hysteria2Profile = z.infer<typeof Hysteria2ProfileSchema>;
+export type ShadowsocksProfile = z.infer<typeof ShadowsocksProfileSchema>;
 export type SnowflakeProfile = z.infer<typeof SnowflakeProfileSchema>;
 export type WireGuardProfile = z.infer<typeof WireGuardProfileSchema>;
 export type Profile = z.infer<typeof ProfileSchema>;

@@ -33,7 +33,8 @@ func newFileSink(path string, maxSize int64, keep int) (*fileSink, error) {
 
 	info, err := f.Stat()
 	if err != nil {
-		f.Close()
+		// Nothing written yet, so a close error has no data behind it.
+		_ = f.Close()
 		return nil, fmt.Errorf("stat log file %s: %w", path, err)
 	}
 
@@ -67,7 +68,12 @@ func (s *fileSink) rotateLocked() {
 	if s.f == nil {
 		return
 	}
-	s.f.Close()
+	// This handle has log lines behind it, so a close error means entries were
+	// lost. Report to stderr, which the daemon points at its crash log — writing
+	// it back through the sink being rotated would recurse.
+	if err := s.f.Close(); err != nil {
+		fmt.Fprintf(os.Stderr, "log rotation: closing %s failed, entries may be lost: %v\n", s.path, err)
+	}
 	s.f = nil
 
 	if s.keep == 0 {

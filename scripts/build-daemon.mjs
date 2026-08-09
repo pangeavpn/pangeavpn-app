@@ -70,9 +70,26 @@ try {
   process.exitCode = 1;
 }
 
+// Strips comments so a commented-out <supportedOS> cannot satisfy the check
+// below. Repeats because one pass can splice a fresh <!-- out of the
+// surrounding text, and rejects a leftover opener: that means an unterminated
+// comment, so the rest of the file is not trustworthy to pattern-match.
+function stripHtmlComments(text) {
+  let out = text;
+  let previous;
+  do {
+    previous = out;
+    out = out.replace(/<!--[\s\S]*?-->/g, "");
+  } while (out !== previous);
+  if (out.includes("<!--")) {
+    throw new Error(`${manifestPath} has an unterminated XML comment`);
+  }
+  return out;
+}
+
 function generateWindowsResources() {
   assertWindowsVersionInfo();
-  const manifest = fs.readFileSync(manifestPath, "utf8").replace(/<!--.*?-->/gs, "");
+  const manifest = stripHtmlComments(fs.readFileSync(manifestPath, "utf8"));
   const supportedOsPattern = new RegExp(
     `<supportedOS\\s+Id=["']\\{${supportedOSWin10Guid}\\}["']\\s*/?>`,
     "i"

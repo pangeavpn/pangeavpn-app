@@ -65,6 +65,22 @@ declare global {
       serverName?: string;
       pinSha256?: string;
     };
+    shadowsocks?: {
+      remoteHost: string;
+      remoteIp?: string;
+      remotePort: number;
+      method: string;
+      password: string;
+      targetHost?: string;
+      targetPort?: number;
+      udpOverTcp?: boolean;
+    };
+    controlPlaneShadowsocks?: {
+      remoteHost: string;
+      remotePort: number;
+      method: string;
+      password: string;
+    };
     snowflake?: {
       brokerURL: string;
       bridgeFingerprint: string;
@@ -112,10 +128,24 @@ declare global {
     provisionAndSwitch: (serverIds: string[]) => Promise<ConnectResult>;
     setDoh: (enabled: boolean) => Promise<void>;
     getDoh: () => Promise<boolean>;
-    setDirectIp: (enabled: boolean) => Promise<void>;
-    getDirectIp: () => Promise<boolean>;
-    setDirectIpOnly: (enabled: boolean) => Promise<void>;
-    getDirectIpOnly: () => Promise<boolean>;
+    setHubMethod: (
+      method: "directIp" | "shadowsocks" | "fronted" | "normal",
+      enabled: boolean
+    ) => Promise<{
+      methods: {
+        directIp: boolean;
+        shadowsocks: boolean;
+        fronted: boolean;
+        normal: boolean;
+      };
+      applied: boolean;
+    }>;
+    getHubMethods: () => Promise<{
+      directIp: boolean;
+      shadowsocks: boolean;
+      fronted: boolean;
+      normal: boolean;
+    }>;
     setAllowLan: (enabled: boolean) => Promise<void>;
     getAllowLan: () => Promise<boolean>;
     /** Resolves to the MTU actually stored — differs from `mtu` when it was rejected. */
@@ -124,8 +154,8 @@ declare global {
     /** Empty restores the DNS servers supplied by the VPN server. */
     setCustomDns: (value: string) => Promise<string[]>;
     getCustomDns: () => Promise<string[]>;
-    setPreferredTransport: (value: "auto" | "cloak" | "naive" | "reality" | "hysteria2" | "snowflake") => Promise<void>;
-    getPreferredTransport: () => Promise<"auto" | "cloak" | "naive" | "reality" | "hysteria2" | "snowflake">;
+    setPreferredTransport: (value: "auto" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "snowflake") => Promise<void>;
+    getPreferredTransport: () => Promise<"auto" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "snowflake">;
     setLaunchAtStartup: (enabled: boolean) => Promise<void>;
     getLaunchAtStartup: () => Promise<boolean>;
     setAlwaysConnected: (enabled: boolean) => Promise<void>;

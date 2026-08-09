@@ -84,8 +84,10 @@ const serverSelect = document.getElementById("serverSelect") as HTMLSelectElemen
 const serverConnectBtn = document.getElementById("serverConnectBtn") as HTMLButtonElement;
 const serverDisconnectBtn = document.getElementById("serverDisconnectBtn") as HTMLButtonElement;
 const serverRefreshBtn = document.getElementById("serverRefreshBtn") as HTMLButtonElement;
-const directIpToggle = document.getElementById("directIpToggle") as HTMLInputElement;
-const directIpOnlyToggle = document.getElementById("directIpOnlyToggle") as HTMLInputElement;
+const hubDirectIpToggle = document.getElementById("hubDirectIpToggle") as HTMLInputElement;
+const hubShadowsocksToggle = document.getElementById("hubShadowsocksToggle") as HTMLInputElement;
+const hubFrontedToggle = document.getElementById("hubFrontedToggle") as HTMLInputElement;
+const hubNormalToggle = document.getElementById("hubNormalToggle") as HTMLInputElement;
 const allowLanToggle = document.getElementById("allowLanToggle") as HTMLInputElement;
 const dnsPresetSelect = document.getElementById("dnsPresetSelect") as HTMLSelectElement;
 const customDnsField = document.getElementById("customDnsField") as HTMLElement;
@@ -113,7 +115,6 @@ const setLanguageValue = document.getElementById("setLanguageValue") as HTMLSpan
 const checkUpdatesBtn = document.getElementById("checkUpdatesBtn") as HTMLButtonElement;
 const settingsVersionEl = document.getElementById("settingsVersion") as HTMLSpanElement;
 const serverPickerBtn = document.getElementById("serverPickerBtn") as HTMLButtonElement;
-const serverPickerLabel = document.getElementById("serverPickerLabel") as HTMLElement;
 const serverPickerOverlay = document.getElementById("serverPickerOverlay") as HTMLElement;
 const serverPickerOverlayList = document.getElementById("serverPickerOverlayList") as HTMLElement;
 const serverPickerOverlayCloseBtn = document.getElementById("serverPickerOverlayCloseBtn") as HTMLButtonElement;
@@ -177,8 +178,10 @@ function updateSettingsSummaries(): void {
   const off = t("settings.summary.off");
 
   const censorship: string[] = [];
-  if (directIpToggle.checked) censorship.push(t("settings.censorship.directIp.title"));
-  if (directIpOnlyToggle.checked) censorship.push(t("settings.censorship.directIpOnly.title"));
+  if (hubDirectIpToggle.checked) censorship.push(t("settings.censorship.directIp.title"));
+  if (hubShadowsocksToggle.checked) censorship.push(t("settings.censorship.hubShadowsocks.title"));
+  if (hubFrontedToggle.checked) censorship.push(t("settings.censorship.hubFronted.title"));
+  if (hubNormalToggle.checked) censorship.push(t("settings.censorship.hubNormal.title"));
   setCensorshipValue.textContent = censorship.length ? censorship.join(" · ") : off;
 
   const transport = preferredTransportSelect.selectedOptions[0];
@@ -995,41 +998,66 @@ serverRefreshBtn.addEventListener("click", async () => {
 // goes through showToast; each reverts its checkbox if the backend call fails.
 settingsOverlay.addEventListener("change", updateSettingsSummaries);
 
-directIpToggle.addEventListener("change", async () => {
-  if (!pangeaApi) return;
-  try {
-    await pangeaApi.setDirectIp(directIpToggle.checked);
-    showToast(directIpToggle.checked ? t("toggle.directIp.on") : t("toggle.directIp.off"), 3000, true);
-  } catch (err) {
-    directIpToggle.checked = !directIpToggle.checked;
-    showToast(reportError("directIp", err, t("toggle.updateFailed")));
-  }
-});
+type HubMethodName = "directIp" | "shadowsocks" | "fronted" | "normal";
+type HubMethodState = {
+  directIp: boolean;
+  shadowsocks: boolean;
+  fronted: boolean;
+  normal: boolean;
+};
 
-directIpOnlyToggle.addEventListener("change", async () => {
-  if (!pangeaApi) return;
-  const enabled = directIpOnlyToggle.checked;
-  try {
-    await pangeaApi.setDirectIpOnly(enabled);
-  } catch (err) {
-    directIpOnlyToggle.checked = !enabled;
-    showToast(reportError("directIpOnly", err, t("toggle.updateFailed")));
-    return;
+const hubMethodToggles: Record<HubMethodName, HTMLInputElement> = {
+  directIp: hubDirectIpToggle,
+  shadowsocks: hubShadowsocksToggle,
+  fronted: hubFrontedToggle,
+  normal: hubNormalToggle
+};
+
+const hubMethodLabels: Record<HubMethodName, MessageKey> = {
+  directIp: "settings.censorship.directIp.title",
+  shadowsocks: "settings.censorship.hubShadowsocks.title",
+  fronted: "settings.censorship.hubFronted.title",
+  normal: "settings.censorship.hubNormal.title"
+};
+
+/** Mirrors main-process state onto the switches, and locks the last one on so
+ *  the user cannot leave the app with no way to reach the hub. */
+function renderHubMethods(methods: HubMethodState): void {
+  const names = Object.keys(hubMethodToggles) as HubMethodName[];
+  const enabled = names.filter((name) => methods[name]);
+  for (const name of names) {
+    const toggle = hubMethodToggles[name];
+    toggle.checked = methods[name];
+    toggle.disabled = enabled.length === 1 && methods[name];
+    toggle.title = toggle.disabled ? t("settings.censorship.lastMethod") : "";
   }
-  if (enabled) {
-    directIpToggle.checked = true;
-    directIpToggle.disabled = true;
-  } else {
-    directIpToggle.disabled = false;
-    // Forcing Direct IP on above was visual only; restore its real persisted value.
+  updateSettingsSummaries();
+}
+
+function wireHubMethodToggle(name: HubMethodName): void {
+  hubMethodToggles[name].addEventListener("change", async () => {
+    if (!pangeaApi) return;
+    const requested = hubMethodToggles[name].checked;
     try {
-      directIpToggle.checked = await pangeaApi.getDirectIp();
-    } catch {
-      // keep current
+      const result = await pangeaApi.setHubMethod(name, requested);
+      renderHubMethods(result.methods);
+      if (!result.applied) {
+        showToast(t("settings.censorship.lastMethod"), 4000, true);
+        return;
+      }
+      showToast(
+        `${t(hubMethodLabels[name])} — ${requested ? t("toggle.hubMethod.on") : t("toggle.hubMethod.off")}`,
+        3000,
+        true
+      );
+    } catch (err) {
+      hubMethodToggles[name].checked = !requested;
+      showToast(reportError(`hubMethod:${name}`, err, t("toggle.updateFailed")));
     }
-  }
-  showToast(enabled ? t("toggle.directIpOnly.on") : t("toggle.directIpOnly.off"), 3000, true);
-});
+  });
+}
+
+(Object.keys(hubMethodToggles) as HubMethodName[]).forEach(wireHubMethodToggle);
 
 allowLanToggle.addEventListener("change", async () => {
   if (!pangeaApi) return;
@@ -1119,7 +1147,7 @@ customDnsInput.addEventListener("change", async () => {
 preferredTransportSelect.addEventListener("change", async () => {
   if (!pangeaApi) return;
   const previous = preferredTransportSelect.dataset.previousValue ?? "auto";
-  const choice = preferredTransportSelect.value as "auto" | "cloak" | "naive" | "reality" | "hysteria2" | "snowflake";
+  const choice = preferredTransportSelect.value as "auto" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "snowflake";
   try {
     await pangeaApi.setPreferredTransport(choice);
     preferredTransportSelect.dataset.previousValue = choice;
@@ -1419,18 +1447,13 @@ async function init(): Promise<void> {
 
   if (pangeaApi) {
     try {
-      directIpToggle.checked = await pangeaApi.getDirectIp();
-      directIpOnlyToggle.checked = await pangeaApi.getDirectIpOnly();
+      renderHubMethods(await pangeaApi.getHubMethods());
       allowLanToggle.checked = await pangeaApi.getAllowLan();
       syncDnsControls(await pangeaApi.getCustomDns());
       wireguardMtuInput.value = String(await pangeaApi.getWireguardMtu());
       const preferredTransport = await pangeaApi.getPreferredTransport();
       preferredTransportSelect.value = preferredTransport;
       preferredTransportSelect.dataset.previousValue = preferredTransport;
-      if (directIpOnlyToggle.checked) {
-        directIpToggle.checked = true;
-        directIpToggle.disabled = true;
-      }
     } catch {
       // default off
     }
@@ -1977,16 +2000,6 @@ function renderSessionClock(): void {
     : `${pad(minutes)}:${pad(seconds)}`;
 }
 
-function activeTransportStatus(status: StatusResponse): { running: boolean; pid: number | null } {
-  switch (status.activeTransport) {
-    case "naive": return status.naive;
-    case "reality": return status.reality;
-    case "hysteria2": return status.hysteria2;
-    case "snowflake": return status.snowflake;
-    default: return status.cloak;
-  }
-}
-
 function renderStatus(status: StatusResponse): void {
   latestStatus = status;
   currentDaemonState = status.state;
@@ -2191,7 +2204,7 @@ function buildLoadIndicator(load: number | null | undefined): HTMLElement | null
   return el;
 }
 
-type TransportChoice = "auto" | "cloak" | "naive" | "reality" | "hysteria2" | "snowflake";
+type TransportChoice = "auto" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "snowflake";
 
 // Supported means the hub advertised that transport's block. cloak is always
 // present; "auto" matches every server and falls back across what it offers.
@@ -2203,6 +2216,8 @@ function serverSupportsTransport(server: ServerInfo, transport: TransportChoice)
       return Boolean(server.reality);
     case "hysteria2":
       return Boolean(server.hysteria2);
+    case "shadowsocks":
+      return Boolean(server.shadowsocks);
     case "snowflake":
       return Boolean(server.snowflake);
     default:

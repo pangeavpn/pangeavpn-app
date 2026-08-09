@@ -18,7 +18,8 @@ func redirectStderr(path string) (*os.File, error) {
 	}
 
 	if err := windows.SetStdHandle(windows.STD_ERROR_HANDLE, windows.Handle(f.Fd())); err != nil {
-		f.Close()
+		// Nothing written yet, so a close error has no data behind it.
+		_ = f.Close()
 		return nil, fmt.Errorf("redirect stderr to %s: %w", path, err)
 	}
 

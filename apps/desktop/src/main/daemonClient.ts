@@ -38,7 +38,7 @@ export class DaemonClient {
     opts?: {
       allowLAN?: boolean;
       lockdown?: boolean;
-      preferredTransport?: "cloak" | "naive" | "reality" | "hysteria2" | "snowflake";
+      preferredTransport?: "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "snowflake";
     }
   ): Promise<OkResponse> {
     const body: Record<string, unknown> = { profileId };
@@ -52,6 +52,28 @@ export class DaemonClient {
       body.preferredTransport = opts.preferredTransport;
     }
     return this.request<OkResponse>("POST", "/connect", body, this.connectTimeoutMs);
+  }
+
+  /** Starts the hub Shadowsocks proxy; resolves to its loopback port. */
+  async startSsProxy(profile: {
+    remoteHost: string;
+    remotePort: number;
+    method: string;
+    password: string;
+  }): Promise<number> {
+    const res = await this.request<{ ok: boolean; port?: number; error?: string }>(
+      "POST",
+      "/ssproxy/start",
+      profile
+    );
+    if (!res.ok || !res.port) {
+      throw new Error(res.error || "shadowsocks proxy failed to start");
+    }
+    return res.port;
+  }
+
+  async stopSsProxy(): Promise<OkResponse> {
+    return this.request<OkResponse>("POST", "/ssproxy/stop");
   }
 
   async disconnect(opts?: { keepKillSwitch?: boolean }): Promise<OkResponse> {
@@ -93,7 +115,7 @@ export class DaemonClient {
     opts?: {
       allowLAN?: boolean;
       lockdown?: boolean;
-      preferredTransport?: "cloak" | "naive" | "reality" | "hysteria2" | "snowflake";
+      preferredTransport?: "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "snowflake";
     }
   ): Promise<OkResponse> {
     const body: Record<string, unknown> = { profileId };

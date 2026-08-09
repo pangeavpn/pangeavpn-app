@@ -45,8 +45,9 @@ In auto mode the daemon walks this list until one establishes. You can also pin 
 |---|---|---|
 | 1 | **Cloak** | A TLS session to an innocuous-looking web host |
 | 2 | **VLESS + REALITY** | A TLS handshake borrowing a real third-party site's certificate |
-| 3 | **Hysteria2** | QUIC / HTTP-3, hard to distinguish from modern web traffic |
-| 4 | **NaiveProxy** | Traffic carrying a genuine Chrome TLS fingerprint |
+| 3 | **Shadowsocks** | An encrypted stream on its own port, with no TLS shape at all — the first attempt that shares nothing with a block on the two above |
+| 4 | **Hysteria2** | QUIC / HTTP-3, hard to distinguish from modern web traffic |
+| 5 | **NaiveProxy** | Traffic carrying a genuine Chrome TLS fingerprint |
 
 Cloak is always available. The others activate when the hub provisions configuration for them, so the exact cascade depends on your account and the node you land on.
 
@@ -165,7 +166,8 @@ All four steps complete in well under a second on a normal connection.
 │                                            │      │                             │
 │                          ┌─────────────────▼──┐   │                             │
 │                          │ Cloak / REALITY /  │   │                             │
-│                          │ Hysteria2 / Naive  │   │                             │
+│                          │ Hysteria2 / Naive /│   │                             │
+│                          │    Shadowsocks     │   │                             │
 │                          └─────────────────┬──┘   │                             │
 │                                            ▼      ▼                             │
 │                                       ┌──────────────┐                          │

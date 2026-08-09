@@ -253,6 +253,56 @@ func (f *fakeHysteria2Manager) BoundLocalPort() int {
 	return 51823
 }
 
+// fakeShadowsocksManager mirrors fakeHysteria2Manager minus WaitForSession —
+// the real manager implements no SessionWaiter (see shadowsocks.Manager.Start).
+type fakeShadowsocksManager struct {
+	mu             sync.Mutex
+	startCalled    bool
+	startLocalPort int
+	startErr       error
+	stopCalled     bool
+	running        bool
+	stayDown       bool
+	boundLocalPort int
+}
+
+func (f *fakeShadowsocksManager) Start(ctx context.Context, profile state.ShadowsocksProfile) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.startCalled = true
+	f.startLocalPort = profile.LocalPort
+	if f.startErr != nil {
+		return f.startErr
+	}
+	if !f.stayDown {
+		f.running = true
+	}
+	return nil
+}
+
+func (f *fakeShadowsocksManager) Stop(ctx context.Context) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.stopCalled = true
+	f.running = false
+	return nil
+}
+
+func (f *fakeShadowsocksManager) Status() state.TransportStatus {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return state.TransportStatus{Running: f.running}
+}
+
+func (f *fakeShadowsocksManager) BoundLocalPort() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.boundLocalPort != 0 {
+		return f.boundLocalPort
+	}
+	return 51824
+}
+
 // fakeSnowflakeManager mirrors fakeNaiveManager; see its fields for docs.
 type fakeSnowflakeManager struct {
 	mu             sync.Mutex
@@ -551,7 +601,7 @@ func newTestServiceWithReality(
 	profiles ...state.Profile,
 ) *Service {
 	t.Helper()
-	return newTestServiceFull(t, cloak, naive, reality, &fakeHysteria2Manager{}, &fakeSnowflakeManager{}, wgMgr, ks, profiles...)
+	return newTestServiceFull(t, cloak, naive, reality, &fakeHysteria2Manager{}, &fakeShadowsocksManager{}, &fakeSnowflakeManager{}, wgMgr, ks, profiles...)
 }
 
 func newTestServiceFull(
@@ -560,6 +610,7 @@ func newTestServiceFull(
 	naive *fakeNaiveManager,
 	reality *fakeRealityManager,
 	hysteria2 *fakeHysteria2Manager,
+	shadowsocks *fakeShadowsocksManager,
 	snowflake *fakeSnowflakeManager,
 	wgMgr *fakeWGManager,
 	ks *fakeKillSwitch,
@@ -569,7 +620,7 @@ func newTestServiceFull(
 	machine := state.NewMachine()
 	logs := state.NewLogStore(100)
 	config := testConfigStore(t, profiles...)
-	svc := NewService(machine, logs, config, cloak, naive, reality, hysteria2, snowflake, wgMgr, ks)
+	svc := NewService(machine, logs, config, cloak, naive, reality, hysteria2, shadowsocks, snowflake, wgMgr, ks)
 	// Keep handshake-gated failure paths fast in tests; a live fake tunnel
 	// handshakes on the first status poll, so success paths are unaffected.
 	svc.handshakeTimeout = 200 * time.Millisecond
@@ -2021,17 +2072,18 @@ func TestConnect_CloakFails_FallsBackToRealityBeforeNaive(t *testing.T) {
 }
 
 // TestConnect_AutoCascadeAttemptsTransportsInCensorshipOrder pins the auto-mode
-// order: cloak, then reality, then hysteria2, then naive (snowflake is gated
+// order: cloak, reality, shadowsocks, hysteria2, then naive (snowflake is gated
 // off). With every transport configured but none able to handshake, the
 // aggregated failure records the order they were attempted in.
 func TestConnect_AutoCascadeAttemptsTransportsInCensorshipOrder(t *testing.T) {
 	profile := state.Profile{
-		ID:        "p1",
-		Name:      "p1",
-		Cloak:     state.CloakProfile{RemoteHost: "example.com", RemotePort: 443, LocalPort: 51821},
-		Naive:     &state.NaiveProfile{RemoteHost: "n.example.com", RemotePort: 443, Username: "u", Password: "p"},
-		Reality:   &state.RealityProfile{RemoteHost: "r.example.com", RemotePort: 8443, UUID: "u", PublicKey: "k", ShortID: "ab12"},
-		Hysteria2: &state.Hysteria2Profile{RemoteHost: "h.example.com", RemotePort: 8443, Password: "p", ObfsPassword: "o"},
+		ID:          "p1",
+		Name:        "p1",
+		Cloak:       state.CloakProfile{RemoteHost: "example.com", RemotePort: 443, LocalPort: 51821},
+		Naive:       &state.NaiveProfile{RemoteHost: "n.example.com", RemotePort: 443, Username: "u", Password: "p"},
+		Reality:     &state.RealityProfile{RemoteHost: "r.example.com", RemotePort: 8443, UUID: "u", PublicKey: "k", ShortID: "ab12"},
+		Hysteria2:   &state.Hysteria2Profile{RemoteHost: "h.example.com", RemotePort: 8443, Password: "p", ObfsPassword: "o"},
+		Shadowsocks: &state.ShadowsocksProfile{RemoteHost: "s.example.com", RemotePort: 8488, Password: "p"},
 		WireGuard: state.WireGuardProfile{
 			TunnelName: "pangea0",
 			ConfigText: "[Interface]\nPrivateKey=x\n[Peer]\nEndpoint=127.0.0.1:51821\nPublicKey=y\nAllowedIPs=0.0.0.0/0\n",
@@ -2039,7 +2091,7 @@ func TestConnect_AutoCascadeAttemptsTransportsInCensorshipOrder(t *testing.T) {
 	}
 	wgMgr := &fakeWGManager{noHandshake: true} // every transport starts but no tunnel handshakes
 	ks := &fakeKillSwitch{}
-	svc := newTestServiceFull(t, &fakeCloakManager{}, &fakeNaiveManager{}, &fakeRealityManager{}, &fakeHysteria2Manager{}, &fakeSnowflakeManager{}, wgMgr, ks, profile)
+	svc := newTestServiceFull(t, &fakeCloakManager{}, &fakeNaiveManager{}, &fakeRealityManager{}, &fakeHysteria2Manager{}, &fakeShadowsocksManager{}, &fakeSnowflakeManager{}, wgMgr, ks, profile)
 
 	err := svc.Connect(context.Background(), "p1", ConnectOptions{})
 	if err == nil {
@@ -2050,7 +2102,7 @@ func TestConnect_AutoCascadeAttemptsTransportsInCensorshipOrder(t *testing.T) {
 	}
 	msg := err.Error()
 	lastIdx := -1
-	for _, kind := range []string{"cloak", "reality", "hysteria2", "naive"} {
+	for _, kind := range []string{"cloak", "reality", "shadowsocks", "hysteria2", "naive"} {
 		idx := strings.Index(msg, kind+":")
 		if idx < 0 {
 			t.Fatalf("error missing %s attempt: %v", kind, msg)
@@ -2104,7 +2156,7 @@ func TestConnect_CloakNaiveRealityFail_FallsBackToHysteria2(t *testing.T) {
 	snowflakeMgr := &fakeSnowflakeManager{}
 	wgMgr := &fakeWGManager{}
 	ks := &fakeKillSwitch{}
-	svc := newTestServiceFull(t, cloakMgr, naiveMgr, realityMgr, hysteria2Mgr, snowflakeMgr, wgMgr, ks, profile)
+	svc := newTestServiceFull(t, cloakMgr, naiveMgr, realityMgr, hysteria2Mgr, &fakeShadowsocksManager{}, snowflakeMgr, wgMgr, ks, profile)
 
 	if err := svc.Connect(context.Background(), "p1", ConnectOptions{}); err != nil {
 		t.Fatalf("Connect: %v", err)
@@ -2151,7 +2203,7 @@ func TestConnect_CloakNaiveRealityHysteria2Fail_DoesNotFallBackToSnowflake_WhenG
 	snowflakeMgr := &fakeSnowflakeManager{}
 	wgMgr := &fakeWGManager{}
 	ks := &fakeKillSwitch{}
-	svc := newTestServiceFull(t, cloakMgr, naiveMgr, realityMgr, hysteria2Mgr, snowflakeMgr, wgMgr, ks, profile)
+	svc := newTestServiceFull(t, cloakMgr, naiveMgr, realityMgr, hysteria2Mgr, &fakeShadowsocksManager{}, snowflakeMgr, wgMgr, ks, profile)
 
 	// Snowflake is gated off this release (see snowflakeReleaseGated in
 	// service.go): AUTO mode must fail once the other transports fail rather
@@ -2193,7 +2245,7 @@ func TestConnect_PreferredTransportSnowflake_IsGated(t *testing.T) {
 			snowflakeMgr := &fakeSnowflakeManager{}
 			wgMgr := &fakeWGManager{}
 			ks := &fakeKillSwitch{}
-			svc := newTestServiceFull(t, cloakMgr, naiveMgr, realityMgr, hysteria2Mgr, snowflakeMgr, wgMgr, ks, tt.profile)
+			svc := newTestServiceFull(t, cloakMgr, naiveMgr, realityMgr, hysteria2Mgr, &fakeShadowsocksManager{}, snowflakeMgr, wgMgr, ks, tt.profile)
 
 			if err := svc.Connect(context.Background(), tt.profile.ID, ConnectOptions{PreferredTransport: "snowflake"}); err == nil {
 				t.Fatal("expected Connect to fail: snowflake transport is gated off")
@@ -2226,6 +2278,152 @@ func TestWithTransportBypassHosts_IncludesRealityHostWhenPresent(t *testing.T) {
 	wgProfile := withTransportBypassHosts(profile)
 	if !slices.Contains(wgProfile.BypassHosts, "reality.example.com") {
 		t.Errorf("withTransportBypassHosts().BypassHosts = %v, want to contain reality.example.com", wgProfile.BypassHosts)
+	}
+}
+
+func shadowsocksProfile() state.Profile {
+	return state.Profile{
+		ID:          "p1",
+		Name:        "p1",
+		Cloak:       state.CloakProfile{RemoteHost: "example.com", RemotePort: 443, LocalPort: 51821},
+		Shadowsocks: &state.ShadowsocksProfile{RemoteHost: "ss.example.com", RemotePort: 8488, Method: "chacha20-ietf-poly1305", Password: "p"},
+		WireGuard: state.WireGuardProfile{
+			TunnelName: "pangea0",
+			ConfigText: "[Interface]\nPrivateKey=x\n[Peer]\nEndpoint=127.0.0.1:51821\nPublicKey=y\nAllowedIPs=0.0.0.0/0\n",
+		},
+	}
+}
+
+func TestConnect_AllOthersFail_FallsBackToShadowsocks(t *testing.T) {
+	profile := shadowsocksProfile()
+	profile.Naive = &state.NaiveProfile{RemoteHost: "naive.example.com", RemotePort: 8443, Username: "u", Password: "p"}
+	profile.Reality = &state.RealityProfile{RemoteHost: "reality.example.com", RemotePort: 8443, UUID: "u", PublicKey: "k", ShortID: "ab12"}
+	profile.Hysteria2 = &state.Hysteria2Profile{RemoteHost: "hysteria2.example.com", RemotePort: 8443, Password: "p", ObfsPassword: "o"}
+
+	cloakMgr := &fakeCloakManager{startErr: errors.New("cloak boom")}
+	naiveMgr := &fakeNaiveManager{startErr: errors.New("naive boom")}
+	realityMgr := &fakeRealityManager{startErr: errors.New("reality boom")}
+	hysteria2Mgr := &fakeHysteria2Manager{startErr: errors.New("hysteria2 boom")}
+	shadowsocksMgr := &fakeShadowsocksManager{}
+	wgMgr := &fakeWGManager{}
+	ks := &fakeKillSwitch{}
+	svc := newTestServiceFull(t, cloakMgr, naiveMgr, realityMgr, hysteria2Mgr, shadowsocksMgr, &fakeSnowflakeManager{}, wgMgr, ks, profile)
+
+	if err := svc.Connect(context.Background(), "p1", ConnectOptions{}); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	shadowsocksMgr.mu.Lock()
+	startCalled := shadowsocksMgr.startCalled
+	shadowsocksMgr.mu.Unlock()
+	if !startCalled {
+		t.Fatal("expected shadowsocks.Start after cloak and reality failed")
+	}
+
+	status := svc.Status(context.Background())
+	if status.ActiveTransport != "shadowsocks" {
+		t.Fatalf("ActiveTransport = %q, want shadowsocks", status.ActiveTransport)
+	}
+	if !status.Shadowsocks.Running {
+		t.Fatal("Status().Shadowsocks.Running = false, want true")
+	}
+}
+
+// Shadowsocks must never pre-empt the transports ahead of it: with cloak
+// healthy the cascade stops there and shadowsocks is never touched.
+func TestConnect_AutoMode_DoesNotReachShadowsocksWhenCloakWorks(t *testing.T) {
+	profile := shadowsocksProfile()
+	shadowsocksMgr := &fakeShadowsocksManager{}
+	svc := newTestServiceFull(t, &fakeCloakManager{}, &fakeNaiveManager{}, &fakeRealityManager{},
+		&fakeHysteria2Manager{}, shadowsocksMgr, &fakeSnowflakeManager{}, &fakeWGManager{}, &fakeKillSwitch{}, profile)
+
+	if err := svc.Connect(context.Background(), "p1", ConnectOptions{}); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	shadowsocksMgr.mu.Lock()
+	startCalled := shadowsocksMgr.startCalled
+	shadowsocksMgr.mu.Unlock()
+	if startCalled {
+		t.Fatal("shadowsocks must sit behind cloak in the cascade, not run alongside it")
+	}
+}
+
+func TestConnect_PreferredTransportShadowsocks_WithoutConfigErrors(t *testing.T) {
+	profile := testProfile()
+	shadowsocksMgr := &fakeShadowsocksManager{}
+	svc := newTestServiceFull(t, &fakeCloakManager{}, &fakeNaiveManager{}, &fakeRealityManager{},
+		&fakeHysteria2Manager{}, shadowsocksMgr, &fakeSnowflakeManager{}, &fakeWGManager{}, &fakeKillSwitch{}, profile)
+
+	err := svc.Connect(context.Background(), profile.ID, ConnectOptions{PreferredTransport: "shadowsocks"})
+	if err == nil {
+		t.Fatal("expected Connect to fail: profile has no shadowsocks configuration")
+	}
+	if !strings.Contains(err.Error(), "no shadowsocks configuration") {
+		t.Fatalf("Connect error = %v, want it to name the missing shadowsocks configuration", err)
+	}
+	shadowsocksMgr.mu.Lock()
+	startCalled := shadowsocksMgr.startCalled
+	shadowsocksMgr.mu.Unlock()
+	if startCalled {
+		t.Fatal("shadowsocks.Start must not run without a profile")
+	}
+}
+
+// The health check restarts a stopped shadowsocks rather than falling through
+// to recoverActiveTransport's unknown-kind error arm.
+func TestRecoverActiveTransport_RestartsShadowsocks(t *testing.T) {
+	profile := shadowsocksProfile()
+	shadowsocksMgr := &fakeShadowsocksManager{}
+	svc := newTestServiceFull(t, &fakeCloakManager{}, &fakeNaiveManager{}, &fakeRealityManager{},
+		&fakeHysteria2Manager{}, shadowsocksMgr, &fakeSnowflakeManager{}, &fakeWGManager{}, &fakeKillSwitch{}, profile)
+
+	if err := svc.Connect(context.Background(), "p1", ConnectOptions{PreferredTransport: "shadowsocks"}); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+
+	shadowsocksMgr.mu.Lock()
+	shadowsocksMgr.running = false
+	shadowsocksMgr.startCalled = false
+	shadowsocksMgr.mu.Unlock()
+
+	live, _ := svc.getCurrentProfile()
+	if err := svc.recoverActiveTransport(context.Background(), live, "shadowsocks"); err != nil {
+		t.Fatalf("recoverActiveTransport: %v", err)
+	}
+	shadowsocksMgr.mu.Lock()
+	restarted := shadowsocksMgr.startCalled
+	shadowsocksMgr.mu.Unlock()
+	if !restarted {
+		t.Fatal("expected shadowsocks.Start on recovery")
+	}
+}
+
+func TestKillSwitchPermits_IncludesShadowsocksHostWhenPresent(t *testing.T) {
+	profile := shadowsocksProfile()
+	permits := killSwitchPermits(profile)
+	if !slices.Contains(permits, "ss.example.com") {
+		t.Errorf("killSwitchPermits() = %v, want to contain shadowsocks host ss.example.com", permits)
+	}
+}
+
+func TestWithTransportBypassHosts_IncludesShadowsocksHostWhenPresent(t *testing.T) {
+	profile := shadowsocksProfile()
+	wgProfile := withTransportBypassHosts(profile)
+	if !slices.Contains(wgProfile.BypassHosts, "ss.example.com") {
+		t.Errorf("withTransportBypassHosts().BypassHosts = %v, want to contain ss.example.com", wgProfile.BypassHosts)
+	}
+}
+
+// Hub-supplied TransportEndpointIPs short-circuit transportPermitHosts, so the
+// shadowsocks hostname must not leak into the permit list alongside them.
+func TestTransportPermitHosts_HubIPsSupersedeShadowsocksHostname(t *testing.T) {
+	profile := shadowsocksProfile()
+	profile.TransportEndpointIPs = []string{"203.0.113.7"}
+	permits := transportPermitHosts(profile)
+	if !slices.Contains(permits, "203.0.113.7") {
+		t.Errorf("transportPermitHosts() = %v, want to contain the hub-supplied IP", permits)
+	}
+	if slices.Contains(permits, "ss.example.com") {
+		t.Errorf("transportPermitHosts() = %v, must not resolve a node hostname when the hub sent IPs", permits)
 	}
 }
 

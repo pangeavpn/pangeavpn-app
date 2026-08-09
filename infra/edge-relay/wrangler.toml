@@ -1,0 +1,16 @@
+name = "pangea-edge-relay"
+main = "worker.js"
+compatibility_date = "2025-01-01"
+
+# Deliberately no routes block. The relay is reached by its workers.dev
+# hostname, or by a custom domain that must not resemble ours — a relay on
+# anything recognisably pangeavpn is blocked by the same keyword rule that
+# blocks the hub, which defeats the point of running it.
+
+[observability]
+enabled = true
+
+# Keep request bodies out of the logs. They are sealed envelopes, so there is
+# nothing readable in them, but there is no reason to retain them either.
+[observability.logs]
+invocation_logs = false

@@ -81,9 +81,9 @@ type connectRequest struct {
 	AllowLAN  bool   `json:"allowLAN,omitempty"`
 	Lockdown  bool   `json:"lockdown,omitempty"`
 	// PreferredTransport: "cloak", "reality", "hysteria2", "naive",
-	// "snowflake", or "" / "auto" (cascade in autoCascadeOrder: cloak, then
-	// reality, then hysteria2, then naive; snowflake is gated off this release
-	// -- see snowflakeReleaseGated). Auto mode keeps only the transports this
+	// "shadowsocks", "snowflake", or "" / "auto" (cascade in autoCascadeOrder:
+	// cloak, reality, shadowsocks, hysteria2, then naive; snowflake is gated
+	// off this release -- see snowflakeReleaseGated). Auto mode keeps only the transports this
 	// profile configures, then reorderByMemory may promote whatever last
 	// worked on this network. Service.startTransport dispatches on this value;
 	// unrecognized values fall through to auto.
@@ -108,6 +108,23 @@ type permitHostsRequest struct {
 
 type okResponse struct {
 	OK    bool   `json:"ok"`
+	Error string `json:"error,omitempty"`
+}
+
+// ssProxyStartRequest carries the control-plane Shadowsocks credentials. This
+// is a separate listener from any tunnel transport: its node-side ACL permits
+// the hub only, so these credentials cannot reach WireGuard.
+type ssProxyStartRequest struct {
+	RemoteHost string `json:"remoteHost"`
+	RemotePort int    `json:"remotePort"`
+	Method     string `json:"method"`
+	Password   string `json:"password"`
+	UDPOverTCP bool   `json:"udpOverTcp,omitempty"`
+}
+
+type ssProxyStartResponse struct {
+	OK    bool   `json:"ok"`
+	Port  int    `json:"port,omitempty"`
 	Error string `json:"error,omitempty"`
 }
 
@@ -241,6 +258,50 @@ func NewHandler(token string, service *Service) http.Handler {
 		}
 
 		if err := service.PermitHosts(r.Context(), req.Hosts); err != nil {
+			writeJSON(w, http.StatusInternalServerError, okResponse{OK: false})
+			return
+		}
+
+		writeJSON(w, http.StatusOK, okResponse{OK: true})
+	})))
+
+	// Single unhyphenated segments, matching /killswitch/*. Deliberately not
+	// part of Connect: this must work before a profile exists.
+	mux.Handle("/ssproxy/start", auth.RequireBearer(token, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+
+		r.Body = http.MaxBytesReader(w, r.Body, maxBodySize)
+		var req ssProxyStartRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid json")
+			return
+		}
+
+		port, err := service.StartShadowsocksProxy(r.Context(), state.ShadowsocksProfile{
+			RemoteHost: req.RemoteHost,
+			RemotePort: req.RemotePort,
+			Method:     req.Method,
+			Password:   req.Password,
+			UDPOverTCP: req.UDPOverTCP,
+		})
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, ssProxyStartResponse{OK: false, Error: err.Error()})
+			return
+		}
+
+		writeJSON(w, http.StatusOK, ssProxyStartResponse{OK: true, Port: port})
+	})))
+
+	mux.Handle("/ssproxy/stop", auth.RequireBearer(token, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+
+		if err := service.StopShadowsocksProxy(r.Context()); err != nil {
 			writeJSON(w, http.StatusInternalServerError, okResponse{OK: false})
 			return
 		}
