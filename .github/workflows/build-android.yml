@@ -90,6 +90,7 @@ jobs:
           mkdir -p ../apps/android/core/libs
           gomobile bind -target=android -androidapi ${{ env.ANDROID_API }} \
             -javapkg=org.pangeavpn \
+            -ldflags=-checklinkname=0 \
             -o ../apps/android/core/libs/pangeacore.aar \
             ./mobile
 

@@ -39,9 +39,14 @@ From `daemon/`, the Go module root:
 
 ```bash
 gomobile bind -target=android -androidapi 24 -javapkg=org.pangeavpn \
+  -ldflags=-checklinkname=0 \
   -o ../apps/android/core/libs/pangeacore.aar \
   ./mobile
 ```
+
+`-checklinkname=0` is required: sing-box pulls in `wlynxg/anet`, which
+`//go:linkname`s into `net.zoneCache` to read interfaces on Android, and Go
+1.23+ rejects that push without the flag.
 
 This produces `org.pangeavpn.mobile.Mobile` and drops the AAR where `:core`
 consumes it (`core/libs/*.aar`). Re-run whenever `daemon/mobile` changes.
