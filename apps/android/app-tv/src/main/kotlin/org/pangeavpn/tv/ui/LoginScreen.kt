@@ -51,7 +51,7 @@ fun LoginScreen(loginViewModel: LoginViewModel) {
     ) {
         Spacer(modifier = Modifier.weight(1f))
 
-        BrandLogo()
+        BrandLogo(size = 72.dp)
         Spacer(modifier = Modifier.height(24.dp))
 
         Text(

@@ -50,6 +50,21 @@ fun regionLoad(region: Region): Int? = pickNode(region).load
 fun regionOfServer(regions: List<Region>, serverId: String): Region? =
     regions.firstOrNull { region -> region.nodes.any { it.id == serverId } }
 
+/** How many regions get a row of their own before the rest go behind "All regions". */
+const val REGION_SLOT_COUNT = 2
+
+/**
+ * The regions shown up front. Whatever is selected is always one of them, even
+ * when it is not among the lightest — a picked region that vanished from view
+ * would read as though the pick had been lost.
+ */
+fun regionSlots(regions: List<Region>, selectedKey: String?, slots: Int = REGION_SLOT_COUNT): List<Region> {
+    val head = regions.take(slots)
+    if (selectedKey == null || head.any { it.key == selectedKey }) return head
+    val selected = regions.firstOrNull { it.key == selectedKey } ?: return head
+    return (listOf(selected) + regions.filter { it.key != selectedKey }).take(slots)
+}
+
 /**
  * Uniform pick from the lightly loaded servers, falling back to all of them
  * when every server is congested or none reports load. Deliberately not

@@ -45,7 +45,7 @@ class MainActivity : ComponentActivity() {
                     connectionViewModel.consentIntentConsumed()
                 }
             }
-            PangeaTheme(darkTheme = true) {
+            PangeaTheme(systemInDark = true) {
                 TvRoot(connectionViewModel = connectionViewModel)
             }
         }

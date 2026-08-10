@@ -97,4 +97,28 @@ class RegionsTest {
         assertEquals("us", regionOfServer(regions, "us-1")?.key)
         assertNull(regionOfServer(regions, "nope"))
     }
+
+    @Test
+    fun `slots take the leading regions when nothing is selected`() {
+        val regions = groupRegions(listOf(server("eu-1"), server("us-1"), server("ap-1")))
+        assertEquals(listOf("eu", "us"), regionSlots(regions, null).map { it.key })
+    }
+
+    @Test
+    fun `slots leave the leading regions alone when the selection is already there`() {
+        val regions = groupRegions(listOf(server("eu-1"), server("us-1"), server("ap-1")))
+        assertEquals(listOf("eu", "us"), regionSlots(regions, "us").map { it.key })
+    }
+
+    @Test
+    fun `a selection outside the leading regions is pulled into the first slot`() {
+        val regions = groupRegions(listOf(server("eu-1"), server("us-1"), server("ap-1")))
+        assertEquals(listOf("ap", "eu"), regionSlots(regions, "ap").map { it.key })
+    }
+
+    @Test
+    fun `a selection that no longer exists does not disturb the slots`() {
+        val regions = groupRegions(listOf(server("eu-1"), server("us-1"), server("ap-1")))
+        assertEquals(listOf("eu", "us"), regionSlots(regions, "gone").map { it.key })
+    }
 }

@@ -32,4 +32,6 @@ dependencies {
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.material3)
     implementation(libs.compose.foundation)
+    // The drift map cross-fades its tint through Transition.animateColor.
+    implementation(libs.compose.animation)
 }

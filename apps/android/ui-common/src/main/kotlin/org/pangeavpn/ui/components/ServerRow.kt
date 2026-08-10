@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -24,13 +25,19 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.pangeavpn.ui.theme.StateConnected
 import org.pangeavpn.ui.theme.StateConnecting
 import org.pangeavpn.ui.theme.StateError
+
+private val RowShape = RoundedCornerShape(14.dp)
 
 /** Converts a 2-letter ISO country code to its regional-indicator flag emoji. */
 fun flagEmoji(country: String): String {
@@ -42,6 +49,10 @@ fun flagEmoji(country: String): String {
     return String(Character.toChars(first)) + String(Character.toChars(second))
 }
 
+/**
+ * One region in the picker: flag, name over its node line, load, and a tick when
+ * it is the one in use. Ports .region-row from the desktop stylesheet.
+ */
 @Composable
 fun ServerRow(
     name: String,
@@ -50,26 +61,29 @@ fun ServerRow(
     selected: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    subtitle: String? = null,
 ) {
     var focused by remember { mutableStateOf(false) }
-    val shape = RoundedCornerShape(14.dp)
 
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .clip(shape)
+            .clip(RowShape)
             .background(
-                if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
                 else MaterialTheme.colorScheme.surface,
             )
             .border(
                 width = if (focused) 2.dp else 1.dp,
-                color = if (focused || selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
-                shape = shape,
+                color = when {
+                    focused || selected -> MaterialTheme.colorScheme.primary
+                    else -> MaterialTheme.colorScheme.outlineVariant
+                },
+                shape = RowShape,
             )
             .onFocusChanged { focused = it.isFocused }
             .clickable(role = Role.Button, onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .padding(horizontal = 14.dp, vertical = 11.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
@@ -78,26 +92,43 @@ fun ServerRow(
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = name,
-                style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurface,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
-            if (load != null) {
-                LoadBar(load = load, modifier = Modifier.padding(top = 4.dp))
+            if (subtitle != null) {
+                Text(
+                    text = subtitle,
+                    modifier = Modifier.padding(top = 1.dp),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 11.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
         }
 
-        if (selected) {
-            Text(
-                text = "✓",
-                color = MaterialTheme.colorScheme.primary,
-                fontWeight = FontWeight.Bold,
-            )
+        if (load != null) {
+            LoadIndicator(load = load)
         }
+
+        // Always laid out so the rows either side of a selection stay aligned.
+        Text(
+            text = "✓",
+            modifier = Modifier.width(18.dp),
+            color = if (selected) MaterialTheme.colorScheme.primary else Color.Transparent,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center,
+        )
     }
 }
 
+/** Load bar plus its percentage — green under 40, amber under 75, red above. */
 @Composable
-private fun LoadBar(load: Int, modifier: Modifier = Modifier) {
+private fun LoadIndicator(load: Int, modifier: Modifier = Modifier) {
     val pct = load.coerceIn(0, 100)
     val fillColor = when {
         pct < 40 -> StateConnected
@@ -107,27 +138,29 @@ private fun LoadBar(load: Int, modifier: Modifier = Modifier) {
     Row(
         modifier = modifier,
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Box(
             modifier = Modifier
-                .width(48.dp)
-                .height(4.dp)
-                .clip(RoundedCornerShape(2.dp))
-                .background(MaterialTheme.colorScheme.outlineVariant),
+                .width(42.dp)
+                .height(5.dp)
+                .clip(RoundedCornerShape(3.dp))
+                .background(MaterialTheme.colorScheme.outline),
         ) {
             Box(
                 modifier = Modifier
                     .fillMaxHeight()
                     .fillMaxWidth(pct / 100f)
-                    .clip(RoundedCornerShape(2.dp))
+                    .clip(RoundedCornerShape(3.dp))
                     .background(fillColor),
             )
         }
         Text(
             text = "$pct%",
-            style = MaterialTheme.typography.labelSmall,
+            modifier = Modifier.widthIn(min = 34.dp),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontSize = 13.sp,
+            textAlign = TextAlign.End,
         )
     }
 }

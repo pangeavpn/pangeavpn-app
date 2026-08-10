@@ -42,7 +42,7 @@ fun LoginScreen(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        BrandLogo()
+        BrandLogo(size = 56.dp)
         Spacer(Modifier.height(8.dp))
         Text(
             text = stringResource(R.string.login_subtitle),
