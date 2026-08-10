@@ -13,7 +13,9 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import org.pangeavpn.core.model.AppSettings
 import org.pangeavpn.core.model.ConnState
 import org.pangeavpn.core.model.Device
 import org.pangeavpn.core.model.Server
@@ -44,9 +46,28 @@ object TunnelBridge : StatusSink {
 
     fun init(context: Context) {
         if (!initialized.compareAndSet(false, true)) return
-        val store = SecretStorePrefs(context.applicationContext)
-        Mobile.init(store, socketProtector, this)
+        val app = context.applicationContext
+        val store = SecretStorePrefs(app)
+        Mobile.init(store, socketProtector, this, ConnectivityNetworkKey(app), app.filesDir.absolutePath)
         startPolling()
+    }
+
+    /** "auto" walks the cascade; a transport name pins that one. */
+    suspend fun setPreferredTransport(kind: String): Unit = withContext(Dispatchers.IO) {
+        Mobile.setPreferredTransport(kind)
+    }
+
+    suspend fun preferredTransport(): String = withContext(Dispatchers.IO) {
+        Mobile.preferredTransport()
+    }
+
+    suspend fun getSettings(): AppSettings = withContext(Dispatchers.IO) {
+        json.decodeFromString(Mobile.getConfig())
+    }
+
+    /** Returns what was actually stored, which differs when a value was rejected. */
+    suspend fun setSettings(settings: AppSettings): AppSettings = withContext(Dispatchers.IO) {
+        json.decodeFromString(Mobile.setConfig(json.encodeToString(settings)))
     }
 
     private fun startPolling() {

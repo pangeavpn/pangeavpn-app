@@ -1,8 +1,7 @@
 //go:build android
 
-// Package mobile is the gomobile control+data plane for PangeaVPN Android.
-// It ports apps/desktop/src/main/{secureChannel,pangeaApiClient,main,auth}.ts
-// (control plane) and reuses daemon/internal/cloak (data plane transport).
+// Package mobile is the gomobile control+data plane for PangeaVPN Android,
+// porting the desktop control plane and reusing the daemon's transports.
 package mobile
 
 import (
@@ -12,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -27,9 +27,8 @@ type SocketProtector interface{ Protect(fd int) bool }
 // StatusSink receives Status JSON pushes on every state transition.
 type StatusSink interface{ OnStatus(statusJSON string) }
 
-// SecretStore persists small secrets (license key, device identity) outside
-// the Go heap, e.g. Android EncryptedSharedPreferences. Get returns "" when
-// the key is absent.
+// SecretStore persists small secrets outside the Go heap, e.g. Android
+// EncryptedSharedPreferences. Get returns "" when the key is absent.
 type SecretStore interface {
 	Get(key string) string
 	Set(key, value string)
@@ -38,12 +37,13 @@ type SecretStore interface {
 const (
 	keyLicense  = "licenseKey"
 	keyIdentity = "identityKey"
+	keyConfig   = "config"
 )
 
 type preparedTunnel struct {
 	wgPrivateKeyRaw []byte
 	serverPubKeyRaw []byte
-	cloakProfile    state.CloakProfile
+	profile         *state.Profile
 	serverID        string
 	serverName      string
 }
@@ -53,42 +53,134 @@ var (
 	store     SecretStore
 	protector SocketProtector
 	sink      StatusSink
+	netKeys   NetworkKeyProvider
 
 	licenseKey string
 	identity   *identityKeyPair
 	servers    []serverInfo
 	prepared   *preparedTunnel
 
+	// preferredTransport is "" / "auto" for the cascade, or one transport kind.
+	preferredTransport string
+	transportMem       *state.TransportMemoryStore
+	settings           = defaultConfig()
+
 	activeTunnel *tunnelRuntime
-	cloakMgr     cloak.Manager
 	wgLogs       *state.LogStore
 
 	currentStatus statusJSON
 )
 
+// NetworkKeyProvider identifies the network in use, so the cascade can try
+// whatever last worked here first. Go cannot reach ConnectivityManager.
+type NetworkKeyProvider interface{ NetworkKey() string }
+
 // Init wires the host callbacks and restores any previously persisted
-// license key / device identity. Must be called once before any other
-// exported function.
-func Init(s SecretStore, p SocketProtector, sk StatusSink) {
+// license key / device identity. Call once before any other export.
+func Init(s SecretStore, p SocketProtector, sk StatusSink, nk NetworkKeyProvider, filesDir string) {
 	logs := state.NewLogStore(500)
+	memory, err := state.NewTransportMemoryStore(filepath.Join(filesDir, "transport-memory.json"))
+	if err != nil {
+		// Best-effort cache: losing it only forfeits trying the winner first.
+		logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("transport memory unavailable: %v", err))
+		memory = nil
+	}
 
 	mu.Lock()
 	store = s
 	protector = p
 	sink = sk
+	netKeys = nk
 	licenseKey = strings.TrimSpace(s.Get(keyLicense))
 	identity = loadIdentity(s)
 	wgLogs = logs
-	cloakMgr = cloak.NewManager(logs)
+	transportMem = memory
+	settings = decodeConfig(s.Get(keyConfig))
+	preferredTransport = settings.PreferredTransport
 	currentStatus = statusJSON{State: string(state.StateDisconnected)}
 	mu.Unlock()
 
 	cloak.DialerControl = protectingControl
 }
 
-// protectingControl is installed as net.Dialer.Control for every real-network
-// dial the control plane and cloak make (DoH, hub, cloak-to-server). The
-// WireGuard<->cloak hop is loopback and never needs protecting.
+// SetPreferredTransport pins one transport, or "" / "auto" for the cascade.
+func SetPreferredTransport(kind string) {
+	mu.Lock()
+	preferredTransport = strings.TrimSpace(kind)
+	current := settings
+	mu.Unlock()
+
+	current.PreferredTransport = strings.TrimSpace(kind)
+	persistConfig(current)
+}
+
+// PreferredTransport returns the pinned transport, "auto" when unset.
+func PreferredTransport() string {
+	mu.Lock()
+	defer mu.Unlock()
+	if preferredTransport == "" {
+		return "auto"
+	}
+	return preferredTransport
+}
+
+// GetConfig returns the settings blob as JSON.
+func GetConfig() (string, error) {
+	mu.Lock()
+	current := settings
+	mu.Unlock()
+	return encodeConfig(current)
+}
+
+// SetConfig replaces the settings from a JSON blob, returning what was stored
+// after validation so the host can show corrected values.
+func SetConfig(raw string) (string, error) {
+	parsed := decodeConfig(raw)
+	persistConfig(parsed)
+	return encodeConfig(parsed)
+}
+
+// persistConfig writes settings through and mirrors the fields the connect
+// path reads directly.
+func persistConfig(c config) {
+	sanitized := c.sanitize()
+	encoded, err := encodeConfig(sanitized)
+
+	mu.Lock()
+	settings = sanitized
+	preferredTransport = sanitized.PreferredTransport
+	s := store
+	mu.Unlock()
+
+	if err == nil && s != nil {
+		s.Set(keyConfig, encoded)
+	}
+}
+
+// networkKey identifies the current network, empty when the host offers none.
+func networkKey() string {
+	if netKeys == nil {
+		return ""
+	}
+	return strings.TrimSpace(netKeys.NetworkKey())
+}
+
+// rememberTransport records the winning transport for this network.
+func rememberTransport(key, kind string) {
+	mu.Lock()
+	memory := transportMem
+	logs := wgLogs
+	mu.Unlock()
+	if memory == nil || key == "" || kind == "" {
+		return
+	}
+	if err := memory.Record(key, kind); err != nil {
+		logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("failed to record last-good transport: %v", err))
+	}
+}
+
+// protectingControl is net.Dialer.Control for every real-network dial. The
+// WireGuard<->transport hop is loopback and never needs protecting.
 func protectingControl(_, address string, c syscall.RawConn) error {
 	mu.Lock()
 	p := protector
@@ -108,8 +200,15 @@ func protectingControl(_, address string, c syscall.RawConn) error {
 }
 
 func pushStatus(st, detail, serverID, serverName string) {
+	pushStatusTransport(st, detail, serverID, serverName, "")
+}
+
+func pushStatusTransport(st, detail, serverID, serverName, activeTransport string) {
 	mu.Lock()
-	currentStatus = statusJSON{State: st, Detail: detail, ServerID: serverID, ServerName: serverName}
+	currentStatus = statusJSON{
+		State: st, Detail: detail, ServerID: serverID,
+		ServerName: serverName, ActiveTransport: activeTransport,
+	}
 	snapshot := currentStatus
 	sk := sink
 	mu.Unlock()
@@ -173,9 +272,8 @@ func Login(token string) (string, error) {
 	return string(b), nil
 }
 
-// RestoreSession validates the stored license key against the hub and
-// rebuilds the Session JSON. Email/name are not persisted locally (only
-// licenseKey and identityKey are), so they come back empty on restore.
+// RestoreSession validates the stored license key and rebuilds the Session
+// JSON. Email/name are not persisted, so they come back empty.
 func RestoreSession() (string, error) {
 	mu.Lock()
 	lk := licenseKey
@@ -349,28 +447,18 @@ func Prepare(serverID string) (string, error) {
 		return "", fmt.Errorf("decode server public key: %w", err)
 	}
 
-	var dnsServers []string
-	for _, part := range strings.Split(reg.DNS, ",") {
-		if trimmed := strings.TrimSpace(part); trimmed != "" {
-			dnsServers = append(dnsServers, trimmed)
-		}
-	}
+	mu.Lock()
+	current := settings
+	mu.Unlock()
+	dnsServers := resolveDNS(reg.DNS, current.CustomDNS)
 
 	mu.Lock()
 	prepared = &preparedTunnel{
 		wgPrivateKeyRaw: wgPriv.Bytes(),
 		serverPubKeyRaw: serverPubRaw,
-		cloakProfile: state.CloakProfile{
-			LocalPort:        0,
-			RemoteHost:       target.Cloak.RemoteHost,
-			RemotePort:       443,
-			UID:              target.Cloak.UID,
-			PublicKey:        target.Cloak.PublicKey,
-			EncryptionMethod: "plain",
-			ServerName:       target.Cloak.ServerName,
-		},
-		serverID:   serverID,
-		serverName: target.Name,
+		profile:         buildProfile(target),
+		serverID:        serverID,
+		serverName:      target.Name,
 	}
 	mu.Unlock()
 
@@ -378,7 +466,7 @@ func Prepare(serverID string) (string, error) {
 		Address:      reg.AssignedIP,
 		PrefixLength: 32,
 		DNS:          dnsServers,
-		MTU:          1380,
+		MTU:          normalizeMTU(current.MTU),
 		ServerID:     serverID,
 		ServerName:   target.Name,
 	})

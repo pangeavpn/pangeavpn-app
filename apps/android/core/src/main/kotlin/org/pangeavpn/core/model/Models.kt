@@ -27,6 +27,8 @@ data class TunnelStatus(
     val bytesOut: Long = 0,
     val serverId: String = "",
     val serverName: String = "",
+    // Which cascade rung carried the live tunnel; empty when disconnected.
+    val activeTransport: String = "",
 )
 
 @Serializable
@@ -58,6 +60,20 @@ data class Session(
     val email: String = "",
     val name: String = "",
     val servers: List<Server> = emptyList(),
+)
+
+/** Mirrors the Go config blob in daemon/mobile/config.go. */
+@Serializable
+data class AppSettings(
+    val preferredTransport: String = "auto",
+    val customDns: List<String> = emptyList(),
+    val mtu: Int = 1380,
+    val allowLan: Boolean = false,
+    val autoConnect: Boolean = false,
+    val lastServerId: String = "",
+    val hubDoh: Boolean = true,
+    val hubDirectIp: Boolean = true,
+    val hubShadowsocks: Boolean = true,
 )
 
 @Serializable
