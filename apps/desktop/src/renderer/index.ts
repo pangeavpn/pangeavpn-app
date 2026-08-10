@@ -2008,11 +2008,15 @@ function renderStatus(status: StatusResponse): void {
   if (connectingVisual) {
     renderConnectingState();
   } else {
-    stateEl.textContent = t(("state." + status.state) as MessageKey);
+    // A drop the daemon is still retrying is a connection in progress, not a
+    // dead one. The detail line keeps the daemon's own text, so the cause of
+    // the drop and the time to the next attempt stay visible.
+    const heroState = status.state === "ERROR" && status.reconnecting ? "CONNECTING" : status.state;
+    stateEl.textContent = t(("state." + heroState) as MessageKey);
     detailEl.textContent = status.detail;
-    heroCard.dataset.state = status.state;
-    document.body.dataset.state = status.state;
-    setHeadline(status.state);
+    heroCard.dataset.state = heroState;
+    document.body.dataset.state = heroState;
+    setHeadline(heroState);
   }
 
   // Throughput stats

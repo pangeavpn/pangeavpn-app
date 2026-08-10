@@ -342,6 +342,7 @@ stateDiagram-v2
     CONNECTED --> DISCONNECTING: disconnect
     CONNECTED --> CONNECTING: switch / rebuild
     DISCONNECTING --> DISCONNECTED: cleanup complete
+    ERROR --> CONNECTING: automatic reconnect
     ERROR --> DISCONNECTING: disconnect / recovery
 ```
 
@@ -358,6 +359,17 @@ connected, a three-second health loop checks the active transport, WireGuard,
 and kill switch. It can restart a stopped transport, mark the session errored
 when critical components disappear, or rebuild a session after a stale
 WireGuard handshake.
+
+A rebuild that fails does not end the session. The health loop keeps retrying
+from `ERROR` on a 2s→60s backoff for as long as the profile is still the user's
+— `DISCONNECT` clears it, nothing else does — because the kill switch stays
+armed throughout, so abandoning the session would leave the device with no
+network at all. Two conditions shape the retry: a host with no off-tunnel
+address is waited on rather than dialled (a resume in progress is not a failed
+attempt), and a session found still handshaking behind an armed kill switch is
+returned to `CONNECTED` instead of being rebuilt. A health tick that lands more
+than 30s late is read as a resume, which pauses checks for 15s so the tunnel is
+not torn down and re-dialled into a network that has not come back yet.
 
 ## Process models
 

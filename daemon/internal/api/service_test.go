@@ -1639,6 +1639,217 @@ func TestHealthCheck_SilentTunnelRebuildFailureMarksError(t *testing.T) {
 	}
 }
 
+// recoveryTestService is a connected naive session wired for deterministic
+// recovery: no backoff to wait out and a network that always looks usable.
+func recoveryTestService(t *testing.T) (*Service, *fakeNaiveManager, *fakeWGManager, *fakeKillSwitch) {
+	t.Helper()
+	naive := &fakeNaiveManager{}
+	wgMgr := &fakeWGManager{}
+	ks := &fakeKillSwitch{}
+	svc := newTestService(t, &fakeCloakManager{}, naive, wgMgr, ks, silentTunnelProfile())
+	svc.recoveryDelays = []time.Duration{0}
+	svc.networkKey = func() string { return "eth0:192.0.2.10" }
+
+	if err := svc.Connect(context.Background(), "p1", ConnectOptions{PreferredTransport: "naive"}); err != nil {
+		t.Fatalf("connect failed: %v", err)
+	}
+	return svc, naive, wgMgr, ks
+}
+
+// dropSession makes the tunnel go silent with a transport that refuses to come
+// back — the laptop that woke up before its network did.
+func dropSession(naive *fakeNaiveManager, wgMgr *fakeWGManager) {
+	naive.mu.Lock()
+	naive.startErr = errors.New("dial udp 192.0.2.1:8488: connect: network is unreachable")
+	naive.mu.Unlock()
+	goSilent(wgMgr)
+}
+
+// restoreNetwork lets the transport dial again and forgets the previous start
+// so the next one is observable.
+func restoreNetwork(naive *fakeNaiveManager) {
+	naive.mu.Lock()
+	naive.startErr = nil
+	naive.startCalled = false
+	naive.mu.Unlock()
+}
+
+func transportStarted(naive *fakeNaiveManager) bool {
+	naive.mu.Lock()
+	defer naive.mu.Unlock()
+	return naive.startCalled
+}
+
+// TestHealthCheck_RetriesAfterFailedRebuild is the laptop-wake case. The first
+// rebuild lands before the host has a route and fails, whichever transport it
+// is dialling; the session still has to come back on its own once the network
+// does. Before this the health check stopped looking at StateError, so that one
+// failure was terminal — with the kill switch left armed, i.e. no network at
+// all until the user noticed and clicked something.
+func TestHealthCheck_RetriesAfterFailedRebuild(t *testing.T) {
+	svc, naive, wgMgr, ks := recoveryTestService(t)
+
+	dropSession(naive, wgMgr)
+	svc.runHealthCheck(context.Background())
+
+	status := svc.Status(context.Background())
+	if status.State != state.StateError {
+		t.Fatalf("state = %q, want ERROR after the first rebuild failed", status.State)
+	}
+	if !strings.Contains(status.Detail, "retrying in") {
+		t.Errorf("detail = %q, want it to say another attempt is coming", status.Detail)
+	}
+	if !status.Reconnecting {
+		t.Error("Reconnecting = false, want the error reported as one the daemon is still working on")
+	}
+
+	restoreNetwork(naive)
+	svc.runHealthCheck(context.Background())
+
+	status = svc.Status(context.Background())
+	if status.State != state.StateConnected {
+		t.Fatalf("state = %q (%s), want CONNECTED after the retry", status.State, status.Detail)
+	}
+	if status.Reconnecting {
+		t.Error("Reconnecting = true after the session came back")
+	}
+	if !transportStarted(naive) {
+		t.Error("expected the retry to restart the transport")
+	}
+	if !ks.Active() {
+		t.Error("expected the kill switch to stay armed across the failed rebuild and the retry")
+	}
+}
+
+// TestHealthCheck_RecoveryWaitsOutTheBackoff proves the retries are paced. An
+// unreachable server would otherwise be re-dialled on every 3s tick forever.
+func TestHealthCheck_RecoveryWaitsOutTheBackoff(t *testing.T) {
+	svc, naive, wgMgr, _ := recoveryTestService(t)
+	svc.recoveryDelays = []time.Duration{time.Hour}
+
+	dropSession(naive, wgMgr)
+	svc.runHealthCheck(context.Background())
+
+	restoreNetwork(naive)
+	svc.runHealthCheck(context.Background())
+
+	if transportStarted(naive) {
+		t.Error("expected no second attempt while the backoff is still running")
+	}
+	if st := svc.Status(context.Background()).State; st != state.StateError {
+		t.Fatalf("state = %q, want ERROR while waiting for the next attempt", st)
+	}
+}
+
+// TestHealthCheck_RecoveryWaitsForUsableNetwork proves a host with no address
+// to dial from is waited on rather than retried against: burning attempts (and
+// backoff) while the WiFi is still re-associating only delays the reconnect.
+func TestHealthCheck_RecoveryWaitsForUsableNetwork(t *testing.T) {
+	svc, naive, wgMgr, _ := recoveryTestService(t)
+
+	var networkKeyMu sync.Mutex
+	networkKey := ""
+	svc.networkKey = func() string {
+		networkKeyMu.Lock()
+		defer networkKeyMu.Unlock()
+		return networkKey
+	}
+
+	dropSession(naive, wgMgr)
+	svc.runHealthCheck(context.Background())
+
+	restoreNetwork(naive)
+	svc.runHealthCheck(context.Background())
+	if transportStarted(naive) {
+		t.Fatal("expected no reconnect attempt while the host has no usable network")
+	}
+
+	networkKeyMu.Lock()
+	networkKey = "wlan0:192.0.2.55"
+	networkKeyMu.Unlock()
+
+	svc.runHealthCheck(context.Background())
+	if st := svc.Status(context.Background()).State; st != state.StateConnected {
+		t.Fatalf("state = %q, want CONNECTED once the network is back", st)
+	}
+}
+
+// TestHealthCheck_DisconnectEndsRecovery proves the retry loop is the user's to
+// stop: a session they tore down themselves must never be dialled again.
+func TestHealthCheck_DisconnectEndsRecovery(t *testing.T) {
+	svc, naive, wgMgr, _ := recoveryTestService(t)
+
+	dropSession(naive, wgMgr)
+	svc.runHealthCheck(context.Background())
+
+	if err := svc.Disconnect(context.Background(), false); err != nil {
+		t.Fatalf("disconnect after a failed rebuild: %v", err)
+	}
+
+	restoreNetwork(naive)
+	svc.runHealthCheck(context.Background())
+
+	if transportStarted(naive) {
+		t.Error("expected no reconnect attempt after the user disconnected")
+	}
+	if st := svc.Status(context.Background()).State; st != state.StateDisconnected {
+		t.Fatalf("state = %q, want DISCONNECTED to stay put", st)
+	}
+}
+
+// TestHealthCheck_RecoveryLeavesALiveTunnelAlone proves recovery only rebuilds
+// broken sessions. A refused Connect stamps an error on a session that is still
+// carrying traffic; tearing that down to "recover" it would be the bug.
+func TestHealthCheck_RecoveryLeavesALiveTunnelAlone(t *testing.T) {
+	svc, naive, wgMgr, _ := recoveryTestService(t)
+
+	wgMgr.mu.Lock()
+	stopsBefore := wgMgr.stopCount
+	wgMgr.mu.Unlock()
+
+	svc.setError("profile p2 is active; disconnect before connecting profile p1")
+	restoreNetwork(naive)
+	svc.runHealthCheck(context.Background())
+
+	wgMgr.mu.Lock()
+	stopsAfter := wgMgr.stopCount
+	wgMgr.mu.Unlock()
+	if stopsAfter != stopsBefore {
+		t.Errorf("wireguard was torn down (%d -> %d stops) for a session that was never broken", stopsBefore, stopsAfter)
+	}
+	if transportStarted(naive) {
+		t.Error("expected no transport restart while the tunnel is still handshaking")
+	}
+	if st := svc.Status(context.Background()).State; st != state.StateConnected {
+		t.Fatalf("state = %q, want CONNECTED restored on a live tunnel", st)
+	}
+}
+
+// TestHealthCheck_HeldWhileTheHostResumes proves the grace period after a
+// detected resume: the tunnel is stale because the machine was asleep, and
+// rebuilding into a network that has not come back yet just wastes the session.
+func TestHealthCheck_HeldWhileTheHostResumes(t *testing.T) {
+	svc, _, wgMgr, _ := recoveryTestService(t)
+
+	wgMgr.mu.Lock()
+	stopsBefore := wgMgr.stopCount
+	wgMgr.mu.Unlock()
+
+	goSilent(wgMgr)
+	svc.holdHealthChecks(time.Minute)
+	svc.runHealthCheck(context.Background())
+
+	wgMgr.mu.Lock()
+	stopsAfter := wgMgr.stopCount
+	wgMgr.mu.Unlock()
+	if stopsAfter != stopsBefore {
+		t.Errorf("wireguard was torn down (%d -> %d stops) during the resume grace period", stopsBefore, stopsAfter)
+	}
+	if st := svc.Status(context.Background()).State; st != state.StateConnected {
+		t.Fatalf("state = %q, want CONNECTED while health checks are held", st)
+	}
+}
+
 // TestHealthCheck_SilentTunnelRebuildRepointsEndpoint proves the rebuilt tunnel
 // is aimed at the port the *new* bridge bound. The live profile's LocalPort was
 // mutated to the previous session's bound port, so rebuilding from it would

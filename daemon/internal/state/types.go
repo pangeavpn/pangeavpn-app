@@ -75,6 +75,10 @@ type StatusResponse struct {
 	Snowflake        TransportStatus `json:"snowflake"`
 	WireGuard        WireGuardStatus `json:"wireguard"`
 	KillSwitchActive bool            `json:"killSwitchActive"`
+	// Reconnecting marks an ERROR the daemon is still working on: the session
+	// dropped on its own and rebuilds are being retried on a backoff. Clients
+	// show it as a connection in progress rather than a dead one.
+	Reconnecting bool `json:"reconnecting"`
 }
 
 type CloakProfile struct {

@@ -138,6 +138,18 @@ type Service struct {
 	activeMu            sync.RWMutex
 	activeTransportKind string
 
+	// recoveryMu guards the reconnect schedule for a session that dropped on
+	// its own: how many rebuilds have been tried, when the next one is due, and
+	// how long health checks are held off after a host resume.
+	recoveryMu       sync.Mutex
+	recoveryAttempts int
+	recoveryNextAt   time.Time
+	healthHoldUntil  time.Time
+
+	// recoveryDelays is the backoff between reconnect attempts; the last entry
+	// repeats for every attempt beyond it. Tests shorten it.
+	recoveryDelays []time.Duration
+
 	// handshakeTimeout bounds how long a single transport is given to carry a
 	// first WireGuard handshake during bring-up. Defaults to
 	// defaultWireGuardHandshakeTimeout; tests set it small.
@@ -216,6 +228,7 @@ func NewService(
 		killSwitch:       killSwitch,
 		handshakeTimeout: defaultWireGuardHandshakeTimeout,
 		networkKey:       currentNetworkKey,
+		recoveryDelays:   defaultRecoveryDelays,
 	}
 }
 
@@ -1491,6 +1504,7 @@ func (s *Service) Status(ctx context.Context) state.StatusResponse {
 		Snowflake:        snowflakeStatus,
 		WireGuard:        wgStatus,
 		KillSwitchActive: s.killSwitch.Active(),
+		Reconnecting:     s.recoveryPending(),
 	}
 }
 
@@ -1510,22 +1524,65 @@ func (s *Service) UpdateConfig(cfg state.Config) error {
 	return nil
 }
 
+// healthTickInterval is how often the health loop samples the live session.
+const healthTickInterval = 3 * time.Second
+
+// suspendGapThreshold is how far behind schedule a health tick must land before
+// it is read as "the host was asleep" rather than "the host was busy".
+const suspendGapThreshold = 30 * time.Second
+
+// resumeSettleGrace is how long health checks pause after a detected resume.
+// The tunnel is almost certainly dead, but the host's interfaces and routes
+// come back over several seconds — tearing the session down and re-dialing into
+// a network that is not up yet just fails, and on an unlucky wake that failure
+// used to be the last thing the daemon ever did about it.
+const resumeSettleGrace = 15 * time.Second
+
+// defaultRecoveryDelays is the backoff between attempts to rebuild a session
+// that dropped on its own. The last entry repeats: recovery does not give up
+// while the session is still the user's, because the kill switch stays armed
+// the whole time and stopping would leave the device with no network at all.
+var defaultRecoveryDelays = []time.Duration{
+	2 * time.Second,
+	5 * time.Second,
+	10 * time.Second,
+	20 * time.Second,
+	30 * time.Second,
+	60 * time.Second,
+}
+
 func (s *Service) healthLoop(ctx context.Context) {
-	ticker := time.NewTicker(3 * time.Second)
+	ticker := time.NewTicker(healthTickInterval)
 	defer ticker.Stop()
 
+	lastTick := time.Now()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			now := time.Now()
+			if gap := now.Sub(lastTick); gap > suspendGapThreshold {
+				s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf(
+					"resume detected (health check gap of %s); letting the network settle before checking the tunnel", gap.Round(time.Second)))
+				s.holdHealthChecks(resumeSettleGrace)
+			}
+			lastTick = now
 			s.runHealthCheck(ctx)
 		}
 	}
 }
 
 func (s *Service) runHealthCheck(ctx context.Context) {
+	if s.healthHeld() {
+		return
+	}
+
 	currentState, _ := s.machine.Get()
+	if currentState == state.StateError {
+		s.retryDroppedSession(ctx)
+		return
+	}
 	if currentState != state.StateConnected {
 		return
 	}
@@ -1576,13 +1633,7 @@ func (s *Service) runHealthCheck(ctx context.Context) {
 	if s.wireGuardHandshakeStale(wgStatus) {
 		age := time.Since(time.Unix(wgStatus.LastHandshakeUnix, 0)).Round(time.Second)
 		s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("wireguard tunnel is silent (no handshake for %s); rebuilding session", age))
-		if err := s.rebuildSilentSession(ctx, profile); err != nil {
-			// A Disconnect can land mid-rebuild and interrupt it; that's the
-			// user getting what they asked for, not a session to mark failed.
-			if st, _ := s.machine.Get(); st != state.StateDisconnecting && st != state.StateDisconnected {
-				s.setError(fmt.Sprintf("health check failed: wireguard tunnel is silent (no handshake for %s) and rebuild failed: %v", age, err))
-			}
-		}
+		s.attemptSessionRebuild(ctx, profile, fmt.Sprintf("wireguard tunnel is silent (no handshake for %s)", age))
 		return
 	}
 
@@ -1590,6 +1641,157 @@ func (s *Service) runHealthCheck(ctx context.Context) {
 		s.setError("health check failed: kill switch was cleared unexpectedly")
 		return
 	}
+
+	s.resetRecovery()
+}
+
+// retryDroppedSession keeps rebuilding a session that dropped on its own until
+// it comes back. Without it a single failed rebuild is terminal: the health
+// check stops at StateError, so nothing looks at the session again, and the
+// kill switch it deliberately left armed means the device has no network until
+// the user notices and clicks something. The common trigger is a laptop waking
+// up — the first rebuild lands before the NIC has a route and fails with
+// "unreachable network", whichever transport it happens to be dialling.
+//
+// Only a session that is still the user's is retried: Disconnect clears the
+// current profile, and a first Connect that never landed never set one, so both
+// are left alone.
+func (s *Service) retryDroppedSession(ctx context.Context) {
+	profile, ok := s.getCurrentProfile()
+	if !ok {
+		return
+	}
+	// Not every error means a broken tunnel — a refused Connect stamps one on a
+	// session that is still carrying traffic. Rebuilding that would tear down a
+	// working tunnel, so a live, fail-closed session just gets its state back.
+	if s.sessionIsHealthy(ctx, profile) {
+		s.logs.Add(state.LogInfo, state.SourceDaemon, "tunnel is still handshaking; clearing the error state")
+		s.machine.Set(state.StateConnected, "tunnel active")
+		s.resetRecovery()
+		return
+	}
+	// Nothing to dial out of yet (still resuming, WiFi not re-associated). That
+	// is a wait, not a failed attempt — it must not push the backoff out.
+	if !s.networkLooksUsable() {
+		return
+	}
+	if !s.recoveryDue() {
+		return
+	}
+	s.attemptSessionRebuild(ctx, profile, "connection lost")
+}
+
+// attemptSessionRebuild runs one rebuild and books the result against the retry
+// schedule: success clears it, failure backs the next attempt off. cause says
+// why the session needs rebuilding and is carried into the error detail so the
+// UI keeps naming the original fault rather than just the latest retry.
+func (s *Service) attemptSessionRebuild(ctx context.Context, profile state.Profile, cause string) {
+	attempt := s.beginRecoveryAttempt()
+	if attempt > 1 {
+		s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("reconnecting dropped session (attempt %d)", attempt))
+	}
+
+	if err := s.rebuildSilentSession(ctx, profile); err != nil {
+		// A Disconnect can land mid-rebuild and interrupt it; that's the user
+		// getting what they asked for, not a session to mark failed.
+		if st, _ := s.machine.Get(); st == state.StateDisconnecting || st == state.StateDisconnected {
+			s.resetRecovery()
+			return
+		}
+		delay := s.scheduleNextRecovery(attempt)
+		s.setError(fmt.Sprintf("%s and reconnect attempt %d failed: %v; retrying in %s", cause, attempt, err, delay))
+		return
+	}
+
+	if attempt > 1 {
+		s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("session recovered after %d reconnect attempts", attempt))
+	}
+	s.resetRecovery()
+}
+
+// sessionIsHealthy reports whether the session is in fact carrying traffic
+// fail-closed: the interface is up, its newest handshake is inside the stale
+// window, and the kill switch is still armed. An unarmed kill switch is not
+// healthy — the rebuild path re-arms it, so let it run.
+func (s *Service) sessionIsHealthy(ctx context.Context, profile state.Profile) bool {
+	if !s.killSwitch.Active() {
+		return false
+	}
+	status, err := s.wg.Status(ctx, profile.WireGuard)
+	if err != nil || !status.Running || status.LastHandshakeUnix <= 0 {
+		return false
+	}
+	return !s.wireGuardHandshakeStale(status)
+}
+
+// networkLooksUsable reports whether the host has an off-tunnel address to dial
+// from. An unknown answer (no fingerprint configured) counts as usable, so the
+// retry falls back to letting the transport itself fail.
+func (s *Service) networkLooksUsable() bool {
+	if s.networkKey == nil {
+		return true
+	}
+	return s.networkKey() != ""
+}
+
+func (s *Service) beginRecoveryAttempt() int {
+	s.recoveryMu.Lock()
+	defer s.recoveryMu.Unlock()
+	s.recoveryAttempts++
+	return s.recoveryAttempts
+}
+
+// scheduleNextRecovery books the next attempt after a failure and reports the
+// wait, so the error detail can say when the daemon will try again.
+func (s *Service) scheduleNextRecovery(attempt int) time.Duration {
+	s.recoveryMu.Lock()
+	defer s.recoveryMu.Unlock()
+
+	delays := s.recoveryDelays
+	if len(delays) == 0 {
+		delays = defaultRecoveryDelays
+	}
+	index := min(max(attempt-1, 0), len(delays)-1)
+	delay := delays[index]
+	s.recoveryNextAt = time.Now().Add(delay)
+	return delay
+}
+
+func (s *Service) recoveryDue() bool {
+	s.recoveryMu.Lock()
+	defer s.recoveryMu.Unlock()
+	return !time.Now().Before(s.recoveryNextAt)
+}
+
+// recoveryPending reports whether a dropped session is mid-recovery: at least
+// one rebuild has been tried and the loop has not given the session back yet.
+func (s *Service) recoveryPending() bool {
+	s.recoveryMu.Lock()
+	defer s.recoveryMu.Unlock()
+	return s.recoveryAttempts > 0
+}
+
+func (s *Service) resetRecovery() {
+	s.recoveryMu.Lock()
+	defer s.recoveryMu.Unlock()
+	s.recoveryAttempts = 0
+	s.recoveryNextAt = time.Time{}
+}
+
+// holdHealthChecks pauses health evaluation for d and clears any backoff, so
+// the first attempt after a resume is immediate once the pause expires.
+func (s *Service) holdHealthChecks(d time.Duration) {
+	s.recoveryMu.Lock()
+	defer s.recoveryMu.Unlock()
+	s.healthHoldUntil = time.Now().Add(d)
+	s.recoveryAttempts = 0
+	s.recoveryNextAt = time.Time{}
+}
+
+func (s *Service) healthHeld() bool {
+	s.recoveryMu.Lock()
+	defer s.recoveryMu.Unlock()
+	return time.Now().Before(s.healthHoldUntil)
 }
 
 // wireGuardHandshakeStaleAfter is how long a Connected tunnel may go without a
@@ -1623,13 +1825,16 @@ func (s *Service) wireGuardHandshakeStale(status state.WireGuardStatus) bool {
 // device stays fail-closed while the tunnel is down. Same profile and same
 // options as the live session: this restores what the user asked for, it does
 // not renegotiate it.
+//
+// Runs from Connected (the first rebuild) and from Error (every retry after
+// one failed); anything else means a Disconnect got here first.
 func (s *Service) rebuildSilentSession(ctx context.Context, profile state.Profile) error {
 	if !s.opMu.TryLock() {
 		return errors.New("operation in progress")
 	}
 	defer s.opMu.Unlock()
 
-	if currentState, _ := s.machine.Get(); currentState != state.StateConnected {
+	if currentState, _ := s.machine.Get(); currentState != state.StateConnected && currentState != state.StateError {
 		return errors.New("state changed")
 	}
 
@@ -1661,6 +1866,17 @@ func (s *Service) rebuildSilentSession(ctx context.Context, profile state.Profil
 	wireGuardProfile, err := wireGuardProfileFor(profile, opts.AllowLAN)
 	if err != nil {
 		return fmt.Errorf("allow-lan config transform failed: %w", err)
+	}
+
+	// Bring-up assumes the kill switch is already armed — true across a rebuild
+	// of a live session, but not when recovery is retrying after the firewall
+	// was cleared out from under us (a resume can take the WFP session with it).
+	// Re-arming first keeps the tunnel from coming back up wide open.
+	if !s.killSwitch.Active() {
+		s.logs.Add(state.LogWarn, state.SourceDaemon, "rebuild: kill switch was not armed; re-arming before bring-up")
+		if err := s.killSwitch.Enable(ctx, killSwitchPermits(profile), opts.AllowLAN, opts.Lockdown); err != nil {
+			return fmt.Errorf("kill switch re-arm failed: %w", err)
+		}
 	}
 
 	s.machine.Set(state.StateConnecting, "rebuilding silent tunnel")
