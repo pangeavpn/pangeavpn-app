@@ -91,3 +91,66 @@ class RoutesTest {
         return start to (start + (1L shl (32 - prefixLength)) - 1)
     }
 }
+
+class RoutesV6Test {
+
+    @Test
+    fun `ipv6 conversion round trips`() {
+        for (address in listOf("::", "fc00::", "fe80::", "2001:4860:4860::8888", "::1")) {
+            assertEquals(
+                ipv6ToBigInteger(address),
+                ipv6ToBigInteger(bigIntegerToIpv6(ipv6ToBigInteger(address))),
+            )
+        }
+    }
+
+    @Test
+    fun `a single default route captures all ipv6 when allow lan is off`() {
+        val routes = tunnelRoutesV6(allowLan = false)
+        assertEquals(1, routes.size)
+        assertEquals(0, routes.first().prefixLength)
+        assertEquals(java.math.BigInteger.ZERO, ipv6ToBigInteger(routes.first().address))
+    }
+
+    @Test
+    fun `allow lan still captures public ipv6 but not the local ranges`() {
+        val covered = tunnelRoutesV6(allowLan = true).map { it.span() }
+
+        for (address in listOf("2001:4860:4860::8888", "2606:4700:4700::1111", "::1")) {
+            assertTrue(covered.any { it.contains(address) }, "$address should be routed into the tunnel")
+        }
+        for (address in listOf("fc00::1", "fd12:3456::1", "fdff:ffff:ffff:ffff:ffff:ffff:ffff:ffff", "fe80::1")) {
+            assertFalse(covered.any { it.contains(address) }, "$address is local and must bypass the tunnel")
+        }
+    }
+
+    @Test
+    fun `ipv6 routes never overlap each other`() {
+        val spans = tunnelRoutesV6(allowLan = true).map { it.span() }.sortedBy { it.first }
+        for (index in 1 until spans.size) {
+            assertTrue(spans[index].first > spans[index - 1].second, "routes overlap at index $index")
+        }
+    }
+
+    @Test
+    fun `every emitted ipv6 route is CIDR aligned`() {
+        for (route in tunnelRoutesV6(allowLan = true)) {
+            val size = java.math.BigInteger.TWO.pow(128 - route.prefixLength)
+            assertEquals(
+                java.math.BigInteger.ZERO,
+                ipv6ToBigInteger(route.address).mod(size),
+                "${route.address}/${route.prefixLength} is not aligned to its block size",
+            )
+        }
+    }
+
+    private fun Route.span(): Pair<java.math.BigInteger, java.math.BigInteger> {
+        val start = ipv6ToBigInteger(address)
+        return start to (start + java.math.BigInteger.TWO.pow(128 - prefixLength) - java.math.BigInteger.ONE)
+    }
+
+    private fun Pair<java.math.BigInteger, java.math.BigInteger>.contains(address: String): Boolean {
+        val value = ipv6ToBigInteger(address)
+        return value >= first && value <= second
+    }
+}

@@ -25,6 +25,9 @@ import org.pangeavpn.core.util.runCatchingCancellable
 private const val CHANNEL_ID = "vpn"
 private const val NOTIFICATION_ID = 1
 
+private const val BLACKHOLE_ADDRESS_V6 = "fd00::1"
+private const val BLACKHOLE_PREFIX_V6 = 128
+
 class PangeaVpnService : VpnService() {
 
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
@@ -73,6 +76,7 @@ class PangeaVpnService : VpnService() {
                     .setSession("PangeaVPN")
                     .addAddress(config.address, config.prefixLength)
                 tunnelRoutes(settings.allowLan).forEach { builder.addRoute(it.address, it.prefixLength) }
+                builder.blackholeIpv6(settings.allowLan)
                 config.dns.forEach { builder.addDnsServer(it) }
                 builder.setMtu(config.mtu)
                 builder.setBlocking(false)
@@ -91,6 +95,16 @@ class PangeaVpnService : VpnService() {
                 stopSelf()
             }
         }
+    }
+
+    /** The peer only advertises 0.0.0.0/0, so captured IPv6 is dropped by
+     *  WireGuard rather than forwarded. Address and routes go in together or
+     *  not at all: routes alone send IPv6 out around the tunnel instead of
+     *  into it, and a device with IPv6 switched off rejects the address. */
+    private fun Builder.blackholeIpv6(allowLan: Boolean) {
+        val added = runCatching { addAddress(BLACKHOLE_ADDRESS_V6, BLACKHOLE_PREFIX_V6) }
+        if (added.isFailure) return
+        tunnelRoutesV6(allowLan).forEach { route -> addRoute(route.address, route.prefixLength) }
     }
 
     /** A package that has since been uninstalled throws, and would otherwise
