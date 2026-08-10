@@ -57,6 +57,8 @@
     <string name="state_connecting">连接中</string>
     <string name="subscription_expires">有效期至 %1$s</string>
     <string name="subscription_none">无有效订阅</string>
+    <string name="toggle_off">关闭</string>
+    <string name="toggle_on">开启</string>
     <string name="transport_status_cloak">混淆：Cloak</string>
     <string name="transport_status_hysteria2">混淆：Hysteria2</string>
     <string name="transport_status_none"></string>

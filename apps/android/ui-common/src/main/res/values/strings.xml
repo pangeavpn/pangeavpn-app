@@ -57,6 +57,8 @@
     <string name="state_connecting">CONNECTING</string>
     <string name="subscription_expires">Expires %1$s</string>
     <string name="subscription_none">No active subscription</string>
+    <string name="toggle_off">Off</string>
+    <string name="toggle_on">On</string>
     <string name="transport_status_cloak">Obfuscation: Cloak</string>
     <string name="transport_status_hysteria2">Obfuscation: Hysteria2</string>
     <string name="transport_status_none"></string>

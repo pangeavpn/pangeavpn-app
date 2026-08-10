@@ -57,6 +57,8 @@
     <string name="state_connecting">CONECTANDO</string>
     <string name="subscription_expires">Caduca el %1$s</string>
     <string name="subscription_none">Sin suscripción activa</string>
+    <string name="toggle_off">Desactivado</string>
+    <string name="toggle_on">Activado</string>
     <string name="transport_status_cloak">Ofuscación: Cloak</string>
     <string name="transport_status_hysteria2">Ofuscación: Hysteria2</string>
     <string name="transport_status_none"></string>

@@ -57,6 +57,8 @@
     <string name="state_connecting">ПІДКЛЮЧЕННЯ</string>
     <string name="subscription_expires">Закінчується %1$s</string>
     <string name="subscription_none">Немає активної підписки</string>
+    <string name="toggle_off">Вимк</string>
+    <string name="toggle_on">Увімк</string>
     <string name="transport_status_cloak">Обфускація: Cloak</string>
     <string name="transport_status_hysteria2">Обфускація: Hysteria2</string>
     <string name="transport_status_none"></string>

@@ -21,8 +21,23 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.tv.material3.Button
 import androidx.tv.material3.Text as TvText
+import org.pangeavpn.core.model.HUB_METHOD_CHOICES
+import org.pangeavpn.core.model.TRANSPORT_CHOICES
+import org.pangeavpn.core.model.isEnabled
 import org.pangeavpn.core.viewmodel.SettingsViewModel
 import org.pangeavpn.ui.R
+import org.pangeavpn.ui.components.hubMethodTitle
+import org.pangeavpn.ui.components.transportChoiceLabel
+
+/** The remote has no picker, so the button cycles through the choices. */
+private fun nextTransport(current: String): String {
+    val index = TRANSPORT_CHOICES.indexOf(current)
+    return TRANSPORT_CHOICES[(index + 1).mod(TRANSPORT_CHOICES.size)]
+}
+
+@Composable
+private fun onOff(enabled: Boolean): String =
+    stringResource(if (enabled) R.string.toggle_on else R.string.toggle_off)
 
 @Composable
 fun SettingsOverlay(settingsViewModel: SettingsViewModel, onDismiss: () -> Unit) {
@@ -48,6 +63,43 @@ fun SettingsOverlay(settingsViewModel: SettingsViewModel, onDismiss: () -> Unit)
                 )
                 Spacer(modifier = Modifier.height(20.dp))
 
+                state.error?.let { message ->
+                    Text(
+                        text = message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                }
+
+                // Buttons rather than switches: they take D-pad focus cleanly
+                // and each press cycles or toggles one setting.
+                Text(
+                    text = stringResource(R.string.settings_transport_heading),
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Button(onClick = { settingsViewModel.setPreferredTransport(nextTransport(state.settings.preferredTransport)) }) {
+                    TvText(transportChoiceLabel(state.settings.preferredTransport))
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    text = stringResource(R.string.settings_censorship_heading),
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                HUB_METHOD_CHOICES.forEach { method ->
+                    val enabled = state.settings.hubMethods.isEnabled(method)
+                    Button(onClick = { settingsViewModel.setHubMethod(method, !enabled) }) {
+                        TvText("${hubMethodTitle(method)} — ${onOff(enabled)}")
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
                 Button(onClick = { settingsViewModel.showKillswitchGuide() }) {
                     TvText(stringResource(R.string.killswitch_title))
                 }

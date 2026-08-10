@@ -57,6 +57,8 @@
     <string name="state_connecting">جارٍ الاتصال</string>
     <string name="subscription_expires">ينتهي في %1$s</string>
     <string name="subscription_none">لا يوجد اشتراك نشط</string>
+    <string name="toggle_off">معطّل</string>
+    <string name="toggle_on">مفعّل</string>
     <string name="transport_status_cloak">التمويه: Cloak</string>
     <string name="transport_status_hysteria2">التمويه: Hysteria2</string>
     <string name="transport_status_none"></string>

@@ -57,6 +57,8 @@
     <string name="state_connecting">در حال اتصال</string>
     <string name="subscription_expires">در %1$s منقضی می‌شود</string>
     <string name="subscription_none">اشتراک فعالی وجود ندارد</string>
+    <string name="toggle_off">خاموش</string>
+    <string name="toggle_on">روشن</string>
     <string name="transport_status_cloak">مبهم‌سازی: Cloak</string>
     <string name="transport_status_hysteria2">مبهم‌سازی: Hysteria2</string>
     <string name="transport_status_none"></string>

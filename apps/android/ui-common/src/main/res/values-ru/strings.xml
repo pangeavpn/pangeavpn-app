@@ -57,6 +57,8 @@
     <string name="state_connecting">ПОДКЛЮЧЕНИЕ</string>
     <string name="subscription_expires">Истекает %1$s</string>
     <string name="subscription_none">Нет активной подписки</string>
+    <string name="toggle_off">Выкл</string>
+    <string name="toggle_on">Вкл</string>
     <string name="transport_status_cloak">Обфускация: Cloak</string>
     <string name="transport_status_hysteria2">Обфускация: Hysteria2</string>
     <string name="transport_status_none"></string>

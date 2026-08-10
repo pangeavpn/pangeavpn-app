@@ -91,6 +91,14 @@ const KEY_MAP = {
 
 // Mobile-only strings, translated inline for all 8 locales.
 const MOBILE_ONLY = {
+  toggle_on: {
+    en: "On", es: "Activado", fr: "Activé", ru: "Вкл",
+    uk: "Увімк", zh: "开启", ar: "مفعّل", fa: "روشن"
+  },
+  toggle_off: {
+    en: "Off", es: "Desactivado", fr: "Désactivé", ru: "Выкл",
+    uk: "Вимк", zh: "关闭", ar: "معطّل", fa: "خاموش"
+  },
   split_tunnel_title: {
     en: "Split Tunnelling", es: "Túnel dividido", fr: "Tunnel divisé",
     ru: "Раздельное туннелирование", uk: "Роздільне тунелювання",
