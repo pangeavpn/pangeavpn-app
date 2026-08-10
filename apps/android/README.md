@@ -35,12 +35,12 @@ The Go layer exposes a JSON API (`Login`, `ListServers`, `Prepare`, `Start(fd)`,
 
 ### 1. Build the Go core AAR
 
-From the repo root:
+From `daemon/`, the Go module root:
 
 ```bash
 gomobile bind -target=android -androidapi 24 -javapkg=org.pangeavpn \
-  -o apps/android/core/libs/pangeacore.aar \
-  github.com/pangeavpn/pangeavpn-desktop/daemon/mobile
+  -o ../apps/android/core/libs/pangeacore.aar \
+  ./mobile
 ```
 
 This produces `org.pangeavpn.mobile.Mobile` and drops the AAR where `:core`

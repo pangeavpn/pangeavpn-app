@@ -1,0 +1,132 @@
+name: Build Android
+
+on:
+  push:
+    branches:
+      - android
+      - master
+  pull_request:
+    branches:
+      - android
+      - master
+  workflow_dispatch:
+
+concurrency:
+  group: build-android-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  GO_VERSION: '1.25.0'
+  JAVA_VERSION: '17'
+  ANDROID_API: '24'
+
+jobs:
+  go:
+    name: Go core
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: daemon/go.sum
+
+      - name: Host tests
+        working-directory: daemon
+        run: go test ./...
+
+      # The AAR only ever builds for these, so a break here is a real break.
+      - name: Compile-check every Android ABI
+        working-directory: daemon
+        run: |
+          for arch in arm64 arm amd64 386; do
+            echo "::group::android/$arch"
+            GOOS=android GOARCH=$arch CGO_ENABLED=0 go build ./mobile/
+            echo "::endgroup::"
+          done
+
+      - name: Vet
+        working-directory: daemon
+        run: GOOS=android GOARCH=arm64 CGO_ENABLED=0 go vet ./mobile/
+
+  android:
+    name: Android apps
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: daemon/go.sum
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install the NDK
+        run: sdkmanager --install "ndk;27.2.12479018"
+
+      - name: Install gomobile
+        run: |
+          go install golang.org/x/mobile/cmd/gomobile@latest
+          go install golang.org/x/mobile/cmd/gobind@latest
+          gomobile init
+
+      # Run from daemon/, the module root, and emit where :core expects it.
+      - name: Build pangeacore.aar
+        working-directory: daemon
+        run: |
+          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/27.2.12479018"
+          mkdir -p ../apps/android/core/libs
+          gomobile bind -target=android -androidapi ${{ env.ANDROID_API }} \
+            -javapkg=org.pangeavpn \
+            -o ../apps/android/core/libs/pangeacore.aar \
+            ./mobile
+
+      - name: Fail if the AAR is missing
+        run: test -s apps/android/core/libs/pangeacore.aar
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Unit tests
+        working-directory: apps/android
+        run: ./gradlew --no-daemon test
+
+      - name: Assemble debug APKs
+        working-directory: apps/android
+        run: ./gradlew --no-daemon :app-mobile:assembleDebug :app-tv:assembleDebug
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-debug-apks
+          if-no-files-found: error
+          path: |
+            apps/android/app-mobile/build/outputs/apk/debug/*.apk
+            apps/android/app-tv/build/outputs/apk/debug/*.apk
+
+  strings:
+    name: Localization is in sync
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      # Regenerating must be a no-op, or strings.xml was hand-edited.
+      - name: Regenerate and diff
+        run: |
+          node scripts/gen-android-strings.mjs
+          git diff --exit-code -- apps/android
