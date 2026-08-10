@@ -275,6 +275,7 @@ export const en = {
   "status.transport.hysteria2": "Obfuscation: Hysteria2",
   "status.transport.snowflake": "Obfuscation: Snowflake",
   "status.transport.reality": "Obfuscation: VLESS+REALITY",
+  "status.transport.shadowsocks": "Obfuscation: Shadowsocks",
   "status.transport.none": "",
 
   // ── Generic error fallbacks ───────────────────────────

@@ -275,6 +275,7 @@ export const fa = {
   "status.transport.hysteria2": "مبهم‌سازی: Hysteria2",
   "status.transport.snowflake": "مبهم‌سازی: Snowflake",
   "status.transport.reality": "مبهم‌سازی: VLESS+REALITY",
+  "status.transport.shadowsocks": "مبهم‌سازی: Shadowsocks",
   "status.transport.none": "",
 
   // ── Generic error fallbacks ───────────────────────────

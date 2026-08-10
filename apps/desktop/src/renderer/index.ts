@@ -1934,6 +1934,7 @@ const TRANSPORT_LABELS: Record<string, string> = {
   cloak: "Cloak",
   naive: "NaiveProxy",
   reality: "VLESS+REALITY",
+  shadowsocks: "Shadowsocks",
   hysteria2: "Hysteria2",
   snowflake: "Snowflake",
 };

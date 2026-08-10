@@ -275,6 +275,7 @@ export const uk = {
   "status.transport.hysteria2": "Обфускація: Hysteria2",
   "status.transport.snowflake": "Обфускація: Snowflake",
   "status.transport.reality": "Обфускація: VLESS+REALITY",
+  "status.transport.shadowsocks": "Обфускація: Shadowsocks",
   "status.transport.none": "",
 
   // ── Generic error fallbacks ───────────────────────────

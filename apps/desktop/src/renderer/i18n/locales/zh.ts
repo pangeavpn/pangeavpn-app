@@ -275,6 +275,7 @@ export const zh = {
   "status.transport.hysteria2": "混淆：Hysteria2",
   "status.transport.snowflake": "混淆：Snowflake",
   "status.transport.reality": "混淆：VLESS+REALITY",
+  "status.transport.shadowsocks": "混淆：Shadowsocks",
   "status.transport.none": "",
 
   // ── Generic error fallbacks ───────────────────────────

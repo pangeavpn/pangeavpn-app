@@ -275,6 +275,7 @@ export const es = {
   "status.transport.hysteria2": "Ofuscación: Hysteria2",
   "status.transport.snowflake": "Ofuscación: Snowflake",
   "status.transport.reality": "Ofuscación: VLESS+REALITY",
+  "status.transport.shadowsocks": "Ofuscación: Shadowsocks",
   "status.transport.none": "",
 
   // ── Generic error fallbacks ───────────────────────────

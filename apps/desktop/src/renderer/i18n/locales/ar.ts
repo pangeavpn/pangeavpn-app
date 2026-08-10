@@ -275,6 +275,7 @@ export const ar = {
   "status.transport.hysteria2": "التمويه: Hysteria2",
   "status.transport.snowflake": "التمويه: Snowflake",
   "status.transport.reality": "التمويه: VLESS+REALITY",
+  "status.transport.shadowsocks": "التمويه: Shadowsocks",
   "status.transport.none": "",
 
   // ── Generic error fallbacks ───────────────────────────
