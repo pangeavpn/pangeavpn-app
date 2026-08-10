@@ -91,6 +91,21 @@ const KEY_MAP = {
 
 // Mobile-only strings, translated inline for all 8 locales.
 const MOBILE_ONLY = {
+  split_tunnel_title: {
+    en: "Split Tunnelling", es: "Túnel dividido", fr: "Tunnel divisé",
+    ru: "Раздельное туннелирование", uk: "Роздільне тунелювання",
+    zh: "分应用代理", ar: "الأنفاق المقسّمة", fa: "تونل تفکیک‌شده"
+  },
+  split_tunnel_hint: {
+    en: "Apps switched on here bypass the VPN and use your normal connection.",
+    es: "Las apps activadas aquí omiten la VPN y usan tu conexión normal.",
+    fr: "Les applications activées ici contournent le VPN et utilisent votre connexion normale.",
+    ru: "Приложения, включённые здесь, идут в обход VPN через обычное соединение.",
+    uk: "Застосунки, увімкнені тут, обходять VPN і використовують звичайне з'єднання.",
+    zh: "在此开启的应用将绕过 VPN，使用您的普通网络连接。",
+    ar: "التطبيقات المفعّلة هنا تتجاوز الشبكة الافتراضية وتستخدم اتصالك العادي.",
+    fa: "برنامه‌های فعال‌شده در اینجا از VPN عبور نمی‌کنند و از اتصال عادی شما استفاده می‌کنند."
+  },
   settings_save: {
     en: "Save", es: "Guardar", fr: "Enregistrer", ru: "Сохранить",
     uk: "Зберегти", zh: "保存", ar: "حفظ", fa: "ذخیره"

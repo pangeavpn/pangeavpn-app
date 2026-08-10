@@ -51,6 +51,8 @@
     <string name="settings_transport_reality">VLESS+REALITY فقط</string>
     <string name="settings_transport_shadowsocks">Shadowsocks فقط</string>
     <string name="settings_transport_snowflake">Snowflake فقط</string>
+    <string name="split_tunnel_hint">التطبيقات المفعّلة هنا تتجاوز الشبكة الافتراضية وتستخدم اتصالك العادي.</string>
+    <string name="split_tunnel_title">الأنفاق المقسّمة</string>
     <string name="state_connected">متصل</string>
     <string name="state_connecting">جارٍ الاتصال</string>
     <string name="subscription_expires">ينتهي في %1$s</string>

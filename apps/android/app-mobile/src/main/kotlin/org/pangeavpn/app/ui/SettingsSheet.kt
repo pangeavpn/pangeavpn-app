@@ -54,6 +54,11 @@ fun SettingsSheet(
 ) {
     val context = LocalContext.current
     val state by settingsViewModel.state.collectAsState()
+    var showSplitTunnel by remember { mutableStateOf(false) }
+
+    if (showSplitTunnel) {
+        SplitTunnelSheet(onDismiss = { showSplitTunnel = false })
+    }
 
     ModalBottomSheet(onDismissRequest = onDismiss, modifier = modifier) {
         Column(
@@ -112,6 +117,11 @@ fun SettingsSheet(
                 onCommit = settingsViewModel::setCustomDns,
             )
             MtuField(initial = state.settings.mtu, onCommit = settingsViewModel::setMtu)
+
+            Spacer(Modifier.height(16.dp))
+            OutlinedButton(onClick = { showSplitTunnel = true }, modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(R.string.split_tunnel_title))
+            }
 
             Spacer(Modifier.height(24.dp))
             HorizontalDivider()

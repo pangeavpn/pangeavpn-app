@@ -51,6 +51,8 @@
     <string name="settings_transport_reality">فقط VLESS+REALITY</string>
     <string name="settings_transport_shadowsocks">فقط Shadowsocks</string>
     <string name="settings_transport_snowflake">فقط Snowflake</string>
+    <string name="split_tunnel_hint">برنامه‌های فعال‌شده در اینجا از VPN عبور نمی‌کنند و از اتصال عادی شما استفاده می‌کنند.</string>
+    <string name="split_tunnel_title">تونل تفکیک‌شده</string>
     <string name="state_connected">متصل</string>
     <string name="state_connecting">در حال اتصال</string>
     <string name="subscription_expires">در %1$s منقضی می‌شود</string>

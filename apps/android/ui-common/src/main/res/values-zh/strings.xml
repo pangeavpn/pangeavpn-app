@@ -51,6 +51,8 @@
     <string name="settings_transport_reality">仅 VLESS+REALITY</string>
     <string name="settings_transport_shadowsocks">仅 Shadowsocks</string>
     <string name="settings_transport_snowflake">仅 Snowflake</string>
+    <string name="split_tunnel_hint">在此开启的应用将绕过 VPN，使用您的普通网络连接。</string>
+    <string name="split_tunnel_title">分应用代理</string>
     <string name="state_connected">已连接</string>
     <string name="state_connecting">连接中</string>
     <string name="subscription_expires">有效期至 %1$s</string>

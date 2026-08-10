@@ -51,6 +51,8 @@
     <string name="settings_transport_reality">Solo VLESS+REALITY</string>
     <string name="settings_transport_shadowsocks">Solo Shadowsocks</string>
     <string name="settings_transport_snowflake">Solo Snowflake</string>
+    <string name="split_tunnel_hint">Las apps activadas aquí omiten la VPN y usan tu conexión normal.</string>
+    <string name="split_tunnel_title">Túnel dividido</string>
     <string name="state_connected">CONECTADO</string>
     <string name="state_connecting">CONECTANDO</string>
     <string name="subscription_expires">Caduca el %1$s</string>

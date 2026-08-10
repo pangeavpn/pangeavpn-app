@@ -51,6 +51,8 @@
     <string name="settings_transport_reality">Лише VLESS+REALITY</string>
     <string name="settings_transport_shadowsocks">Лише Shadowsocks</string>
     <string name="settings_transport_snowflake">Лише Snowflake</string>
+    <string name="split_tunnel_hint">Застосунки, увімкнені тут, обходять VPN і використовують звичайне з\'єднання.</string>
+    <string name="split_tunnel_title">Роздільне тунелювання</string>
     <string name="state_connected">ПІДКЛЮЧЕНО</string>
     <string name="state_connecting">ПІДКЛЮЧЕННЯ</string>
     <string name="subscription_expires">Закінчується %1$s</string>
