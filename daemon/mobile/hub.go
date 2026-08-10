@@ -24,6 +24,10 @@ import (
 
 const hubHost = "api.pangeavpn.org"
 
+// errSubscriptionExpired is distinct so the host shows a top-up prompt rather
+// than treating it as a failed sign-in.
+var errSubscriptionExpired = errors.New("SUBSCRIPTION_EXPIRED: this account's subscription has expired")
+
 type dohProvider struct {
 	url    string
 	accept string
@@ -189,6 +193,11 @@ func hubRequest(method, route string, body any, out any) error {
 	}
 	if status < 200 || status >= 300 {
 		text := string(respBody)
+		// Checked before the auth branch: a lapsed subscription is also a 403,
+		// but signing the user out would discard the token they still need.
+		if strings.Contains(text, "SUBSCRIPTION_EXPIRED") {
+			return errSubscriptionExpired
+		}
 		if status == 401 || status == 403 || strings.Contains(text, "DEVICE_NOT_REGISTERED") {
 			return fmt.Errorf("hub auth error (%d): %s", status, text)
 		}
