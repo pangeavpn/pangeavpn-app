@@ -55,6 +55,9 @@
     <string name="split_tunnel_title">Роздільне тунелювання</string>
     <string name="state_connected">ПІДКЛЮЧЕНО</string>
     <string name="state_connecting">ПІДКЛЮЧЕННЯ</string>
+    <string name="state_disconnected">ВІДКЛЮЧЕНО</string>
+    <string name="state_disconnecting">ВІДКЛЮЧЕННЯ</string>
+    <string name="state_error">ПОМИЛКА</string>
     <string name="subscription_expires">Закінчується %1$s</string>
     <string name="subscription_none">Немає активної підписки</string>
     <string name="toggle_off">Вимк</string>

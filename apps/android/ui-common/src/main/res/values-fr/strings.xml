@@ -55,6 +55,9 @@
     <string name="split_tunnel_title">Tunnel divisé</string>
     <string name="state_connected">CONNECTÉ</string>
     <string name="state_connecting">CONNEXION</string>
+    <string name="state_disconnected">DÉCONNECTÉ</string>
+    <string name="state_disconnecting">DÉCONNEXION</string>
+    <string name="state_error">ERREUR</string>
     <string name="subscription_expires">Expire le %1$s</string>
     <string name="subscription_none">Aucun abonnement actif</string>
     <string name="toggle_off">Désactivé</string>

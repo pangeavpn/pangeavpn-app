@@ -3,7 +3,7 @@
     <string name="notification_connected">متصل</string>
     <string name="notification_connecting">در حال اتصال...</string>
     <string name="notification_disconnect">قطع اتصال</string>
-    <string name="state_disconnected">قطع شده</string>
-    <string name="state_disconnecting">در حال قطع اتصال</string>
-    <string name="state_error">خطا</string>
+    <string name="notification_disconnected">قطع شده</string>
+    <string name="notification_disconnecting">در حال قطع اتصال</string>
+    <string name="notification_error">خطا</string>
 </resources>

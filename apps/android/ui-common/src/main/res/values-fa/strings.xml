@@ -55,6 +55,9 @@
     <string name="split_tunnel_title">تونل تفکیک‌شده</string>
     <string name="state_connected">متصل</string>
     <string name="state_connecting">در حال اتصال</string>
+    <string name="state_disconnected">قطع شده</string>
+    <string name="state_disconnecting">در حال قطع اتصال</string>
+    <string name="state_error">خطا</string>
     <string name="subscription_expires">در %1$s منقضی می‌شود</string>
     <string name="subscription_none">اشتراک فعالی وجود ندارد</string>
     <string name="toggle_off">خاموش</string>

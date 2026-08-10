@@ -55,6 +55,9 @@
     <string name="split_tunnel_title">Раздельное туннелирование</string>
     <string name="state_connected">ПОДКЛЮЧЕНО</string>
     <string name="state_connecting">ПОДКЛЮЧЕНИЕ</string>
+    <string name="state_disconnected">ОТКЛЮЧЕНО</string>
+    <string name="state_disconnecting">ОТКЛЮЧЕНИЕ</string>
+    <string name="state_error">ОШИБКА</string>
     <string name="subscription_expires">Истекает %1$s</string>
     <string name="subscription_none">Нет активной подписки</string>
     <string name="toggle_off">Выкл</string>

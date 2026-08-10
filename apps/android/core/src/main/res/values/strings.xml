@@ -3,7 +3,7 @@
     <string name="notification_connected">Connected</string>
     <string name="notification_connecting">Connecting…</string>
     <string name="notification_disconnect">Disconnect</string>
-    <string name="state_disconnected">DISCONNECTED</string>
-    <string name="state_disconnecting">DISCONNECTING</string>
-    <string name="state_error">ERROR</string>
+    <string name="notification_disconnected">DISCONNECTED</string>
+    <string name="notification_disconnecting">DISCONNECTING</string>
+    <string name="notification_error">ERROR</string>
 </resources>

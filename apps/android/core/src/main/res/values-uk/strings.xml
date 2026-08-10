@@ -3,7 +3,7 @@
     <string name="notification_connected">Підключено</string>
     <string name="notification_connecting">Підключення…</string>
     <string name="notification_disconnect">Відключитися</string>
-    <string name="state_disconnected">ВІДКЛЮЧЕНО</string>
-    <string name="state_disconnecting">ВІДКЛЮЧЕННЯ</string>
-    <string name="state_error">ПОМИЛКА</string>
+    <string name="notification_disconnected">ВІДКЛЮЧЕНО</string>
+    <string name="notification_disconnecting">ВІДКЛЮЧЕННЯ</string>
+    <string name="notification_error">ПОМИЛКА</string>
 </resources>

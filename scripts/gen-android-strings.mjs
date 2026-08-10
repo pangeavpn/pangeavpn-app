@@ -10,14 +10,22 @@ const outDir = path.join(rootDir, "apps", "android", "ui-common", "src", "main",
 // :core cannot depend on :ui-common (ui-common already depends on core), so
 // the strings the VpnService itself needs are emitted into core.
 const coreOutDir = path.join(rootDir, "apps", "android", "core", "src", "main", "res");
+// R classes are non-transitive, so a key must live in the module that uses it.
 const CORE_KEYS = new Set([
   "notification_connected",
   "notification_connecting",
-  "notification_disconnect",
-  "state_disconnected",
-  "state_disconnecting",
-  "state_error"
+  "notification_disconnecting",
+  "notification_disconnected",
+  "notification_error",
+  "notification_disconnect"
 ]);
+
+// Notification titles reuse the state wording rather than translating it twice.
+const CORE_ALIASES = {
+  notification_disconnecting: "state_disconnecting",
+  notification_disconnected: "state_disconnected",
+  notification_error: "state_error"
+};
 
 const LOCALES = ["en", "es", "fr", "ru", "uk", "zh", "ar", "fa"];
 
@@ -204,6 +212,12 @@ function main() {
   let coreCount = 0;
   for (const code of LOCALES) {
     const entries = buildEntries(code, parsedLocales[code]);
+    for (const [alias, source] of Object.entries(CORE_ALIASES)) {
+      if (entries[source] === undefined) {
+        throw new Error(`Alias "${alias}" needs missing key "${source}" for locale "${code}"`);
+      }
+      entries[alias] = entries[source];
+    }
     const coreEntries = {};
     const uiEntries = {};
     for (const [key, value] of Object.entries(entries)) {

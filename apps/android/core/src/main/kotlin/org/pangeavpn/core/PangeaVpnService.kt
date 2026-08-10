@@ -149,9 +149,9 @@ class PangeaVpnService : VpnService() {
         val title = when (status.state) {
             ConnState.CONNECTED -> getString(org.pangeavpn.core.R.string.notification_connected)
             ConnState.CONNECTING -> getString(org.pangeavpn.core.R.string.notification_connecting)
-            ConnState.DISCONNECTING -> getString(org.pangeavpn.core.R.string.state_disconnecting)
-            ConnState.ERROR -> getString(org.pangeavpn.core.R.string.state_error)
-            ConnState.DISCONNECTED -> getString(org.pangeavpn.core.R.string.state_disconnected)
+            ConnState.DISCONNECTING -> getString(org.pangeavpn.core.R.string.notification_disconnecting)
+            ConnState.ERROR -> getString(org.pangeavpn.core.R.string.notification_error)
+            ConnState.DISCONNECTED -> getString(org.pangeavpn.core.R.string.notification_disconnected)
         }
         val disconnectIntent = PendingIntent.getService(
             this,

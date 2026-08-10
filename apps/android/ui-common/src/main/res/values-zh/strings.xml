@@ -55,6 +55,9 @@
     <string name="split_tunnel_title">分应用代理</string>
     <string name="state_connected">已连接</string>
     <string name="state_connecting">连接中</string>
+    <string name="state_disconnected">已断开</string>
+    <string name="state_disconnecting">断开中</string>
+    <string name="state_error">错误</string>
     <string name="subscription_expires">有效期至 %1$s</string>
     <string name="subscription_none">无有效订阅</string>
     <string name="toggle_off">关闭</string>

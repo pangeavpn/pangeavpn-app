@@ -55,6 +55,9 @@
     <string name="split_tunnel_title">Split Tunnelling</string>
     <string name="state_connected">CONNECTED</string>
     <string name="state_connecting">CONNECTING</string>
+    <string name="state_disconnected">DISCONNECTED</string>
+    <string name="state_disconnecting">DISCONNECTING</string>
+    <string name="state_error">ERROR</string>
     <string name="subscription_expires">Expires %1$s</string>
     <string name="subscription_none">No active subscription</string>
     <string name="toggle_off">Off</string>

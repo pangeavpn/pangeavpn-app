@@ -3,7 +3,7 @@
     <string name="notification_connected">Подключено</string>
     <string name="notification_connecting">Подключение…</string>
     <string name="notification_disconnect">Отключить</string>
-    <string name="state_disconnected">ОТКЛЮЧЕНО</string>
-    <string name="state_disconnecting">ОТКЛЮЧЕНИЕ</string>
-    <string name="state_error">ОШИБКА</string>
+    <string name="notification_disconnected">ОТКЛЮЧЕНО</string>
+    <string name="notification_disconnecting">ОТКЛЮЧЕНИЕ</string>
+    <string name="notification_error">ОШИБКА</string>
 </resources>

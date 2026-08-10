@@ -55,6 +55,9 @@
     <string name="split_tunnel_title">الأنفاق المقسّمة</string>
     <string name="state_connected">متصل</string>
     <string name="state_connecting">جارٍ الاتصال</string>
+    <string name="state_disconnected">غير متصل</string>
+    <string name="state_disconnecting">جارٍ قطع الاتصال</string>
+    <string name="state_error">خطأ</string>
     <string name="subscription_expires">ينتهي في %1$s</string>
     <string name="subscription_none">لا يوجد اشتراك نشط</string>
     <string name="toggle_off">معطّل</string>
