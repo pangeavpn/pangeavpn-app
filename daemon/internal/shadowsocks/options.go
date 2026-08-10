@@ -92,10 +92,15 @@ func validateProfile(profile state.ShadowsocksProfile) error {
 	return validateKeyMaterial(methodOrDefault(profile.Method), profile.Password)
 }
 
+// ProtectPath, when set, is the unix socket sing-box's dialer hands each new
+// outbound fd to. Mobile points it at VpnService.protect(); desktop leaves it "".
+var ProtectPath string
+
 // buildOutboundOptions returns the pointer type protocol/shadowsocks
 // registers for C.TypeShadowsocks.
 func buildOutboundOptions(profile state.ShadowsocksProfile) *option.ShadowsocksOutboundOptions {
 	opts := &option.ShadowsocksOutboundOptions{
+		DialerOptions: option.DialerOptions{ProtectPath: ProtectPath},
 		ServerOptions: option.ServerOptions{
 			Server:     strings.TrimSpace(profile.RemoteHost),
 			ServerPort: uint16(profile.RemotePort),

@@ -31,6 +31,10 @@ const (
 // tests reassign this to point at a fixed test destination.
 var relayDestination = "127.0.0.1:51820"
 
+// ProtectPath, when set, is the unix socket sing-box's dialer hands each new
+// outbound fd to. Mobile points it at VpnService.protect(); desktop leaves it "".
+var ProtectPath string
+
 func validateProfile(profile state.Hysteria2Profile) error {
 	if strings.TrimSpace(profile.RemoteHost) == "" {
 		return errors.New("hysteria2 remoteHost is required")
@@ -86,6 +90,7 @@ func buildClientOptions(profile state.Hysteria2Profile, mixedPort int) (option.O
 				Type: C.TypeHysteria2,
 				Tag:  hysteria2OutboundTag,
 				Options: &option.Hysteria2OutboundOptions{
+					DialerOptions: option.DialerOptions{ProtectPath: ProtectPath},
 					ServerOptions: option.ServerOptions{
 						Server:     profile.RemoteHost,
 						ServerPort: uint16(profile.RemotePort),

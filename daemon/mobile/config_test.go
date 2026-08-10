@@ -114,15 +114,20 @@ func TestDecodeConfigSanitizesStoredValues(t *testing.T) {
 	}
 }
 
-// NaiveProxy cannot run on Android, so it must not be selectable.
-func TestDecodeConfigRejectsNaive(t *testing.T) {
-	if got := decodeConfig(`{"preferredTransport":"naive"}`); got.PreferredTransport != "auto" {
-		t.Fatalf("naive should not be selectable, got %q", got.PreferredTransport)
+// Neither can run on Android: NaiveProxy needs cgo, and Snowflake's WebRTC
+// sockets cannot be handed to VpnService.protect(). A pin on either — including
+// one an older build already persisted — must fall back to the cascade.
+func TestDecodeConfigRejectsTransportsAndroidCannotRun(t *testing.T) {
+	for _, kind := range []string{"naive", "snowflake"} {
+		got := decodeConfig(`{"preferredTransport":"` + kind + `"}`)
+		if got.PreferredTransport != "auto" {
+			t.Fatalf("%s should not be selectable, got %q", kind, got.PreferredTransport)
+		}
 	}
 }
 
 func TestDecodeConfigKeepsEveryValidTransport(t *testing.T) {
-	for _, kind := range []string{"auto", "cloak", "reality", "shadowsocks", "hysteria2", "snowflake"} {
+	for _, kind := range []string{"auto", "cloak", "reality", "shadowsocks", "hysteria2"} {
 		got := decodeConfig(`{"preferredTransport":"` + kind + `"}`)
 		if got.PreferredTransport != kind {
 			t.Fatalf("%s was rewritten to %q", kind, got.PreferredTransport)

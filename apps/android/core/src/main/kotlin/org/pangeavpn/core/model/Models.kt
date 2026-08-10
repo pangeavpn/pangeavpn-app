@@ -84,8 +84,9 @@ data class AppSettings(
     val hubMethods: HubMethods = HubMethods(),
 )
 
-/** Transports the Android build can actually run; NaiveProxy is cgo-only. */
-val TRANSPORT_CHOICES = listOf("auto", "cloak", "reality", "shadowsocks", "hysteria2", "snowflake")
+/** Transports the Android build can actually run: NaiveProxy is cgo-only, and
+ *  Snowflake's WebRTC sockets cannot be handed to VpnService.protect(). */
+val TRANSPORT_CHOICES = listOf("auto", "cloak", "reality", "shadowsocks", "hysteria2")
 
 val HUB_METHOD_CHOICES = listOf("directIp", "shadowsocks", "fronted", "normal")
 

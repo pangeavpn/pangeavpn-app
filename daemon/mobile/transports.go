@@ -14,7 +14,6 @@ import (
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/hysteria2"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/reality"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/shadowsocks"
-	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/snowflake"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/state"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/transport"
 )
@@ -48,7 +47,8 @@ func newStarter(logs *state.LogStore) *starter {
 }
 
 // StarterFor reports what this build can attempt. NaiveProxy is permanently
-// unavailable on Android: its engine is cgo and does not link here.
+// unavailable on Android (cgo engine), and so is Snowflake: its WebRTC sockets
+// come from pion, which exposes no hook for VpnService.protect().
 func (s *starter) StarterFor(profile *state.Profile, kind string) (transport.StartFn, transport.Availability) {
 	switch kind {
 	case "cloak":
@@ -57,27 +57,31 @@ func (s *starter) StarterFor(profile *state.Profile, kind string) (transport.Sta
 		if profile.Reality == nil {
 			return nil, transport.NotConfigured
 		}
-		return s.startReality, transport.Available
+		return s.startReality, s.singBoxAvailability()
 	case "shadowsocks":
 		if profile.Shadowsocks == nil {
 			return nil, transport.NotConfigured
 		}
-		return s.startShadowsocks, transport.Available
+		return s.startShadowsocks, s.singBoxAvailability()
 	case "hysteria2":
 		if profile.Hysteria2 == nil {
 			return nil, transport.NotConfigured
 		}
-		return s.startHysteria2, transport.Available
-	case "naive":
+		return s.startHysteria2, s.singBoxAvailability()
+	case "naive", "snowflake":
 		return nil, transport.Unavailable
-	case "snowflake":
-		if profile.Snowflake == nil {
-			return nil, transport.NotConfigured
-		}
-		return s.startSnowflake, transport.Available
 	default:
 		return nil, transport.NotConfigured
 	}
+}
+
+// singBoxAvailability fails these transports closed when the protect socket is
+// missing: their dials would otherwise be captured by the TUN they carry.
+func (s *starter) singBoxAvailability() transport.Availability {
+	if protectServer == nil {
+		return transport.Unavailable
+	}
+	return transport.Available
 }
 
 // record captures the started manager and the loopback port WireGuard must
@@ -172,20 +176,5 @@ func (s *starter) startHysteria2(ctx context.Context, profile *state.Profile, _ 
 		return fmt.Errorf("hysteria2 session: %w", err)
 	}
 	s.record("hysteria2", mgr, profile.Hysteria2.LocalPort)
-	return nil
-}
-
-func (s *starter) startSnowflake(ctx context.Context, profile *state.Profile, _ *state.WireGuardProfile) error {
-	mgr := snowflake.NewManager(s.logs)
-	start := *profile.Snowflake
-	start.LocalPort = 0
-	if err := mgr.Start(ctx, start); err != nil {
-		return fmt.Errorf("snowflake start: %w", err)
-	}
-	if err := awaitSession(ctx, mgr); err != nil {
-		_ = mgr.Stop(context.Background())
-		return fmt.Errorf("snowflake session: %w", err)
-	}
-	s.record("snowflake", mgr, profile.Snowflake.LocalPort)
 	return nil
 }

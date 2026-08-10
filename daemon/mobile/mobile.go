@@ -101,6 +101,7 @@ func Init(s SecretStore, p SocketProtector, sk StatusSink, nk NetworkKeyProvider
 	mu.Unlock()
 
 	cloak.DialerControl = protectingControl
+	_ = startProtectServer(filesDir, logs)
 }
 
 // SetPreferredTransport pins one transport, or "" / "auto" for the cascade.
