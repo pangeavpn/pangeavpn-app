@@ -124,6 +124,27 @@ func PreferredTransport() string {
 	return preferredTransport
 }
 
+// SetHubMethod flips one hub connection method, erroring rather than silently
+// correcting when it would disable the last remaining way to reach the hub.
+func SetHubMethod(method string, enabled bool) (string, error) {
+	mu.Lock()
+	current := settings
+	mu.Unlock()
+
+	next, applied := applyHubMethod(current.HubMethods, method, enabled)
+	if !applied {
+		if !isHubMethod(method) {
+			return "", fmt.Errorf("unknown hub method %q", method)
+		}
+		return "", errors.New("at least one hub connection method must stay enabled")
+	}
+	current.HubMethods = next
+	persistConfig(current)
+	// The route in use may belong to the method just switched off.
+	resetHubPath()
+	return encodeConfig(current)
+}
+
 // GetConfig returns the settings blob as JSON.
 func GetConfig() (string, error) {
 	mu.Lock()

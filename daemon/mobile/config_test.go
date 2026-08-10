@@ -85,8 +85,11 @@ func TestDecodeConfigDefaultsWhenEmpty(t *testing.T) {
 	if got.PreferredTransport != "auto" || got.MTU != mtuDefault {
 		t.Fatalf("got %+v, want defaults", got)
 	}
-	if !got.HubDoH || !got.HubDirectIP || !got.HubShadowsocks {
-		t.Fatalf("hub methods should default on, got %+v", got)
+	if !got.HubMethods.DirectIP || !got.HubMethods.Shadowsocks || !got.HubMethods.Fronted {
+		t.Fatalf("hub methods should default on, got %+v", got.HubMethods)
+	}
+	if got.HubMethods.Normal {
+		t.Fatal("the cleartext-SNI method must default off")
 	}
 }
 
@@ -135,7 +138,7 @@ func TestEncodeConfigRoundTrips(t *testing.T) {
 		AllowLAN:           true,
 		AutoConnect:        true,
 		LastServerID:       "lon-1",
-		HubShadowsocks:     true,
+		HubMethods:         defaultHubMethods(),
 	}
 	encoded, err := encodeConfig(original)
 	if err != nil {

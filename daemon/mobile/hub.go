@@ -8,19 +8,18 @@ package mobile
 // system DNS anywhere (Android's pure-Go resolver is unreliable).
 
 import (
-	"bytes"
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"net/url"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/shadowsocks"
 )
 
 const hubHost = "api.pangeavpn.org"
@@ -38,10 +37,12 @@ var dohProviders = []dohProvider{
 }
 
 var (
-	hubMu      sync.Mutex
-	resolvedIP string
-	hubHTTP    *http.Client
-	dohHTTP    *http.Client
+	hubMu sync.Mutex
+	// activeHubPath is the route that last proved itself; nil forces a
+	// rediscovery on the next request.
+	activeHubPath *hubPath
+	hubSSProxy    *shadowsocks.ProxyManager
+	dohHTTP       *http.Client
 )
 
 func protectedDialer(timeout time.Duration) *net.Dialer {
@@ -113,31 +114,9 @@ func resolveViaDoH(hostname string) (string, error) {
 	return "", errors.New("DoH resolution failed for all providers")
 }
 
-// ensureHub resolves and caches the hub's direct IP for the process lifetime.
+// ensureHub finds a working route to the hub across every enabled method.
 func ensureHub() error {
-	hubMu.Lock()
-	ready := resolvedIP != ""
-	hubMu.Unlock()
-	if ready {
-		return nil
-	}
-
-	ip, err := resolveViaDoH(hubHost)
-	if err != nil {
-		return fmt.Errorf("hub unreachable: %w", err)
-	}
-
-	hubMu.Lock()
-	resolvedIP = ip
-	hubHTTP = &http.Client{
-		Timeout: 15 * time.Second,
-		Transport: &http.Transport{
-			DialContext:     protectedDialer(15 * time.Second).DialContext,
-			TLSClientConfig: &tls.Config{ServerName: "", InsecureSkipVerify: true},
-		},
-	}
-	hubMu.Unlock()
-	return nil
+	return ensureHubPath()
 }
 
 // hubFetch encrypts one request through the secure channel and returns the
@@ -157,32 +136,20 @@ func hubFetch(path, method string, headers map[string]string, body []byte) ([]by
 	}
 
 	hubMu.Lock()
-	ip := resolvedIP
-	client := hubHTTP
+	route := activeHubPath
 	hubMu.Unlock()
-
-	req, err := http.NewRequest(http.MethodPost, "https://"+ip+"/v1/secure", bytes.NewReader(envJSON))
-	if err != nil {
-		return nil, 0, err
+	if route == nil {
+		return nil, 0, errors.New("hub unreachable: no working connection method")
 	}
-	req.Host = hubHost
-	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := client.Do(req)
+	respBytes, status, err := route.postEnvelope(envJSON)
 	if err != nil {
-		hubMu.Lock()
-		resolvedIP = ""
-		hubMu.Unlock()
+		// The route died; drop it so the next call re-walks the methods.
+		resetHubPath()
 		return nil, 0, fmt.Errorf("hub request failed: %w", err)
 	}
-	defer resp.Body.Close()
-
-	respBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, 0, fmt.Errorf("read hub response: %w", err)
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, 0, fmt.Errorf("secure channel error (%d): %s", resp.StatusCode, string(respBytes))
+	if status < 200 || status >= 300 {
+		return nil, 0, fmt.Errorf("secure channel error (%d): %s", status, string(respBytes))
 	}
 
 	var encResp encryptedResponse
@@ -243,6 +210,26 @@ type tokenLoginResponse struct {
 		Name  string `json:"name"`
 	} `json:"user"`
 	Servers []serverInfo `json:"servers"`
+	// FrontedEndpoints is absent on hubs that predate edge relays.
+	FrontedEndpoints []string `json:"frontedEndpoints"`
+}
+
+// captureHubDiscovery caches the relays and control-plane credentials a
+// response advertised, so a later start has more than one way back in.
+func captureHubDiscovery(fronted []string, servers []serverInfo) {
+	creds := make([]hubShadowsocksCreds, 0, len(servers))
+	for _, server := range servers {
+		if server.ControlPlaneShadowsocks == nil {
+			continue
+		}
+		creds = append(creds, hubShadowsocksCreds{
+			RemoteHost: server.ControlPlaneShadowsocks.RemoteHost,
+			RemotePort: server.ControlPlaneShadowsocks.RemotePort,
+			Method:     server.ControlPlaneShadowsocks.Method,
+			Password:   server.ControlPlaneShadowsocks.Password,
+		})
+	}
+	rememberHubDiscovery(fronted, creds)
 }
 
 func tokenLogin(token, identityPub string) (*tokenLoginResponse, error) {
@@ -268,6 +255,7 @@ func tokenLogin(token, identityPub string) (*tokenLoginResponse, error) {
 	if err := json.Unmarshal(respBody, &out); err != nil {
 		return nil, fmt.Errorf("decode token-login response: %w", err)
 	}
+	captureHubDiscovery(out.FrontedEndpoints, out.Servers)
 	return &out, nil
 }
 
@@ -301,6 +289,7 @@ func fetchServers(identityPub string) ([]serverInfo, error) {
 	if err := hubRequest(http.MethodGet, route, nil, &out); err != nil {
 		return nil, err
 	}
+	captureHubDiscovery(nil, out)
 	return out, nil
 }
 

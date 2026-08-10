@@ -19,17 +19,15 @@ const (
 )
 
 // config is the mobile equivalent of the desktop settings surface. Hub methods
-// are independent switches, matching desktop's three toggles.
+// are independent switches, matching desktop's four toggles.
 type config struct {
-	PreferredTransport string   `json:"preferredTransport"`
-	CustomDNS          []string `json:"customDns"`
-	MTU                int      `json:"mtu"`
-	AllowLAN           bool     `json:"allowLan"`
-	AutoConnect        bool     `json:"autoConnect"`
-	LastServerID       string   `json:"lastServerId"`
-	HubDoH             bool     `json:"hubDoh"`
-	HubDirectIP        bool     `json:"hubDirectIp"`
-	HubShadowsocks     bool     `json:"hubShadowsocks"`
+	PreferredTransport string     `json:"preferredTransport"`
+	CustomDNS          []string   `json:"customDns"`
+	MTU                int        `json:"mtu"`
+	AllowLAN           bool       `json:"allowLan"`
+	AutoConnect        bool       `json:"autoConnect"`
+	LastServerID       string     `json:"lastServerId"`
+	HubMethods         hubMethods `json:"hubMethods"`
 }
 
 // defaultConfig mirrors the desktop defaults: cascade on, hub methods all
@@ -38,9 +36,7 @@ func defaultConfig() config {
 	return config{
 		PreferredTransport: "auto",
 		MTU:                mtuDefault,
-		HubDoH:             true,
-		HubDirectIP:        true,
-		HubShadowsocks:     true,
+		HubMethods:         defaultHubMethods(),
 	}
 }
 
@@ -117,6 +113,7 @@ func (c config) sanitize() config {
 	out := c
 	out.MTU = normalizeMTU(c.MTU)
 	out.CustomDNS = normalizeCustomDNS(c.CustomDNS)
+	out.HubMethods = c.HubMethods.normalize()
 	if !isKnownTransportChoice(out.PreferredTransport) {
 		out.PreferredTransport = "auto"
 	}
