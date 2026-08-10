@@ -39,9 +39,10 @@ dependencies {
     implementation(libs.serialization.json)
     implementation(libs.security.crypto)
 
-    // pangeacore.aar is produced by the gomobile build (apps/android/tunnel/)
-    // and dropped into this directory; not present in source control.
-    implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.aar"))))
+    // pangeacore.aar is produced by the gomobile build and dropped here; not in
+    // source control. api, not implementation: TunnelBridge implements the
+    // AAR's StatusSink, so consumers need that supertype on their classpath.
+    api(fileTree(mapOf("dir" to "libs", "include" to listOf("*.aar"))))
 
     testImplementation(kotlin("test"))
 }
