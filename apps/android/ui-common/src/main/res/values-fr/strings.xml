@@ -20,12 +20,18 @@
     <string name="notification_connected">Connecté</string>
     <string name="notification_connecting">Connexion…</string>
     <string name="notification_disconnect">Se déconnecter</string>
-    <string name="pill_cloak">Camouflage</string>
-    <string name="pill_killswitch">Kill Switch</string>
-    <string name="pill_wireguard">WireGuard</string>
+    <string name="server_picker_none_for_transport">Aucun serveur ne prend en charge ce transport</string>
     <string name="servers_title">Serveurs</string>
     <string name="settings_signout">Se déconnecter</string>
     <string name="settings_title">Paramètres</string>
+    <string name="settings_transport_auto">Automatique (recommandé)</string>
+    <string name="settings_transport_cloak">Cloak uniquement</string>
+    <string name="settings_transport_description">Comment PangeaVPN camoufle votre trafic.</string>
+    <string name="settings_transport_heading">Méthode de connexion</string>
+    <string name="settings_transport_hysteria2">Hysteria2 uniquement</string>
+    <string name="settings_transport_reality">VLESS+REALITY uniquement</string>
+    <string name="settings_transport_shadowsocks">Shadowsocks uniquement</string>
+    <string name="settings_transport_snowflake">Snowflake uniquement</string>
     <string name="state_connected">CONNECTÉ</string>
     <string name="state_connecting">CONNEXION</string>
     <string name="state_disconnected">DÉCONNECTÉ</string>
@@ -33,5 +39,11 @@
     <string name="state_error">ERREUR</string>
     <string name="subscription_expires">Expire le %1$s</string>
     <string name="subscription_none">Aucun abonnement actif</string>
+    <string name="transport_status_cloak">Obfuscation : Cloak</string>
+    <string name="transport_status_hysteria2">Obfuscation : Hysteria2</string>
+    <string name="transport_status_none"></string>
+    <string name="transport_status_reality">Obfuscation : VLESS+REALITY</string>
+    <string name="transport_status_shadowsocks">Obfuscation : Shadowsocks</string>
+    <string name="transport_status_snowflake">Obfuscation : Snowflake</string>
     <string name="tv_login_hint">Obtenez votre jeton sur pangeavpn.org/account</string>
 </resources>

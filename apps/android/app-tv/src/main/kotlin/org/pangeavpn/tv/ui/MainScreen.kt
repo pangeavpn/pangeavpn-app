@@ -44,6 +44,7 @@ import org.pangeavpn.ui.components.ConnectButton
 import org.pangeavpn.ui.components.ServerRow
 import org.pangeavpn.ui.components.StatusPill
 import org.pangeavpn.ui.components.ThroughputText
+import org.pangeavpn.ui.components.transportStatusLabel
 import org.pangeavpn.ui.theme.BrandOrange
 import org.pangeavpn.ui.theme.BrandOrangeText
 
@@ -141,13 +142,15 @@ private fun StatusPanel(
 
         Spacer(modifier = Modifier.height(24.dp))
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            val cloakActive = status.state == ConnState.CONNECTED
+            val connected = status.state == ConnState.CONNECTED
             val tunEstablished = status.state == ConnState.CONNECTED ||
                 status.state == ConnState.CONNECTING ||
                 status.state == ConnState.DISCONNECTING
-            StatusPill(label = stringResource(R.string.pill_cloak), active = cloakActive)
-            StatusPill(label = stringResource(R.string.pill_wireguard), active = cloakActive)
-            StatusPill(label = stringResource(R.string.pill_killswitch), active = tunEstablished)
+            val transportLabel = transportStatusLabel(status.activeTransport)
+            if (connected && transportLabel.isNotEmpty()) {
+                StatusPill(label = transportLabel, active = true)
+            }
+            StatusPill(label = stringResource(R.string.killswitch_title), active = tunEstablished)
         }
 
         Spacer(modifier = Modifier.weight(1f))

@@ -20,12 +20,18 @@
     <string name="notification_connected">Підключено</string>
     <string name="notification_connecting">Підключення…</string>
     <string name="notification_disconnect">Відключитися</string>
-    <string name="pill_cloak">Маскування</string>
-    <string name="pill_killswitch">Аварійне вимкнення</string>
-    <string name="pill_wireguard">WireGuard</string>
+    <string name="server_picker_none_for_transport">Немає серверів із підтримкою цього транспорту</string>
     <string name="servers_title">Сервери</string>
     <string name="settings_signout">Вийти</string>
     <string name="settings_title">Налаштування</string>
+    <string name="settings_transport_auto">Автоматично (рекомендовано)</string>
+    <string name="settings_transport_cloak">Лише Cloak</string>
+    <string name="settings_transport_description">Як PangeaVPN маскує ваш трафік.</string>
+    <string name="settings_transport_heading">Спосіб підключення</string>
+    <string name="settings_transport_hysteria2">Лише Hysteria2</string>
+    <string name="settings_transport_reality">Лише VLESS+REALITY</string>
+    <string name="settings_transport_shadowsocks">Лише Shadowsocks</string>
+    <string name="settings_transport_snowflake">Лише Snowflake</string>
     <string name="state_connected">ПІДКЛЮЧЕНО</string>
     <string name="state_connecting">ПІДКЛЮЧЕННЯ</string>
     <string name="state_disconnected">ВІДКЛЮЧЕНО</string>
@@ -33,5 +39,11 @@
     <string name="state_error">ПОМИЛКА</string>
     <string name="subscription_expires">Закінчується %1$s</string>
     <string name="subscription_none">Немає активної підписки</string>
+    <string name="transport_status_cloak">Обфускація: Cloak</string>
+    <string name="transport_status_hysteria2">Обфускація: Hysteria2</string>
+    <string name="transport_status_none"></string>
+    <string name="transport_status_reality">Обфускація: VLESS+REALITY</string>
+    <string name="transport_status_shadowsocks">Обфускація: Shadowsocks</string>
+    <string name="transport_status_snowflake">Обфускація: Snowflake</string>
     <string name="tv_login_hint">Отримайте токен на pangeavpn.org/account</string>
 </resources>

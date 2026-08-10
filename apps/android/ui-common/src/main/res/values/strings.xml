@@ -20,12 +20,18 @@
     <string name="notification_connected">Connected</string>
     <string name="notification_connecting">Connecting…</string>
     <string name="notification_disconnect">Disconnect</string>
-    <string name="pill_cloak">Cloak</string>
-    <string name="pill_killswitch">Kill Switch</string>
-    <string name="pill_wireguard">WireGuard</string>
+    <string name="server_picker_none_for_transport">No servers support this transport</string>
     <string name="servers_title">Servers</string>
     <string name="settings_signout">Sign Out</string>
     <string name="settings_title">Settings</string>
+    <string name="settings_transport_auto">Automatic (recommended)</string>
+    <string name="settings_transport_cloak">Cloak only</string>
+    <string name="settings_transport_description">How PangeaVPN disguises your traffic.</string>
+    <string name="settings_transport_heading">Connection Method</string>
+    <string name="settings_transport_hysteria2">Hysteria2 only</string>
+    <string name="settings_transport_reality">VLESS+REALITY only</string>
+    <string name="settings_transport_shadowsocks">Shadowsocks only</string>
+    <string name="settings_transport_snowflake">Snowflake only</string>
     <string name="state_connected">CONNECTED</string>
     <string name="state_connecting">CONNECTING</string>
     <string name="state_disconnected">DISCONNECTED</string>
@@ -33,5 +39,11 @@
     <string name="state_error">ERROR</string>
     <string name="subscription_expires">Expires %1$s</string>
     <string name="subscription_none">No active subscription</string>
+    <string name="transport_status_cloak">Obfuscation: Cloak</string>
+    <string name="transport_status_hysteria2">Obfuscation: Hysteria2</string>
+    <string name="transport_status_none"></string>
+    <string name="transport_status_reality">Obfuscation: VLESS+REALITY</string>
+    <string name="transport_status_shadowsocks">Obfuscation: Shadowsocks</string>
+    <string name="transport_status_snowflake">Obfuscation: Snowflake</string>
     <string name="tv_login_hint">Get your token at pangeavpn.org/account</string>
 </resources>

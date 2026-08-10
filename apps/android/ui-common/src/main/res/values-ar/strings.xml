@@ -20,12 +20,18 @@
     <string name="notification_connected">متصل</string>
     <string name="notification_connecting">جارٍ الاتصال...</string>
     <string name="notification_disconnect">قطع الاتصال</string>
-    <string name="pill_cloak">التخفّي</string>
-    <string name="pill_killswitch">مفتاح الإيقاف</string>
-    <string name="pill_wireguard">WireGuard</string>
+    <string name="server_picker_none_for_transport">لا توجد خوادم تدعم هذا النقل</string>
     <string name="servers_title">الخوادم</string>
     <string name="settings_signout">تسجيل الخروج</string>
     <string name="settings_title">الإعدادات</string>
+    <string name="settings_transport_auto">تلقائي (موصى به)</string>
+    <string name="settings_transport_cloak">Cloak فقط</string>
+    <string name="settings_transport_description">كيف يموّه PangeaVPN حركة بياناتك.</string>
+    <string name="settings_transport_heading">طريقة الاتصال</string>
+    <string name="settings_transport_hysteria2">Hysteria2 فقط</string>
+    <string name="settings_transport_reality">VLESS+REALITY فقط</string>
+    <string name="settings_transport_shadowsocks">Shadowsocks فقط</string>
+    <string name="settings_transport_snowflake">Snowflake فقط</string>
     <string name="state_connected">متصل</string>
     <string name="state_connecting">جارٍ الاتصال</string>
     <string name="state_disconnected">غير متصل</string>
@@ -33,5 +39,11 @@
     <string name="state_error">خطأ</string>
     <string name="subscription_expires">ينتهي في %1$s</string>
     <string name="subscription_none">لا يوجد اشتراك نشط</string>
+    <string name="transport_status_cloak">التمويه: Cloak</string>
+    <string name="transport_status_hysteria2">التمويه: Hysteria2</string>
+    <string name="transport_status_none"></string>
+    <string name="transport_status_reality">التمويه: VLESS+REALITY</string>
+    <string name="transport_status_shadowsocks">التمويه: Shadowsocks</string>
+    <string name="transport_status_snowflake">التمويه: Snowflake</string>
     <string name="tv_login_hint">احصل على رمزك من pangeavpn.org/account</string>
 </resources>

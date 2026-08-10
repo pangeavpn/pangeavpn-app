@@ -20,12 +20,18 @@
     <string name="notification_connected">已连接</string>
     <string name="notification_connecting">连接中…</string>
     <string name="notification_disconnect">断开连接</string>
-    <string name="pill_cloak">伪装</string>
-    <string name="pill_killswitch">断网保护</string>
-    <string name="pill_wireguard">WireGuard</string>
+    <string name="server_picker_none_for_transport">没有服务器支持此传输方式</string>
     <string name="servers_title">服务器</string>
     <string name="settings_signout">退出登录</string>
     <string name="settings_title">设置</string>
+    <string name="settings_transport_auto">自动（推荐）</string>
+    <string name="settings_transport_cloak">仅 Cloak</string>
+    <string name="settings_transport_description">PangeaVPN 如何伪装您的流量。</string>
+    <string name="settings_transport_heading">连接方式</string>
+    <string name="settings_transport_hysteria2">仅 Hysteria2</string>
+    <string name="settings_transport_reality">仅 VLESS+REALITY</string>
+    <string name="settings_transport_shadowsocks">仅 Shadowsocks</string>
+    <string name="settings_transport_snowflake">仅 Snowflake</string>
     <string name="state_connected">已连接</string>
     <string name="state_connecting">连接中</string>
     <string name="state_disconnected">已断开</string>
@@ -33,5 +39,11 @@
     <string name="state_error">错误</string>
     <string name="subscription_expires">有效期至 %1$s</string>
     <string name="subscription_none">无有效订阅</string>
+    <string name="transport_status_cloak">混淆：Cloak</string>
+    <string name="transport_status_hysteria2">混淆：Hysteria2</string>
+    <string name="transport_status_none"></string>
+    <string name="transport_status_reality">混淆：VLESS+REALITY</string>
+    <string name="transport_status_shadowsocks">混淆：Shadowsocks</string>
+    <string name="transport_status_snowflake">混淆：Snowflake</string>
     <string name="tv_login_hint">在 pangeavpn.org/account 获取您的令牌</string>
 </resources>

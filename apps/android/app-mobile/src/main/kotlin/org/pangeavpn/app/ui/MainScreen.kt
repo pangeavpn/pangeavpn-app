@@ -39,6 +39,7 @@ import org.pangeavpn.ui.components.ConnectButton
 import org.pangeavpn.ui.components.ServerRow
 import org.pangeavpn.ui.components.StatusPill
 import org.pangeavpn.ui.components.ThroughputText
+import org.pangeavpn.ui.components.transportStatusLabel
 
 private val ACTIVE_SUBSCRIPTION_STATUSES = setOf("active", "trialing")
 
@@ -118,10 +119,12 @@ fun MainScreen(
             Spacer(Modifier.height(16.dp))
 
             val connected = status.state == ConnState.CONNECTED
+            val transportLabel = transportStatusLabel(status.activeTransport)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                StatusPill(stringResource(R.string.pill_cloak), active = connected)
-                StatusPill(stringResource(R.string.pill_wireguard), active = connected)
-                StatusPill(stringResource(R.string.pill_killswitch), active = connected)
+                if (connected && transportLabel.isNotEmpty()) {
+                    StatusPill(transportLabel, active = true)
+                }
+                StatusPill(stringResource(R.string.killswitch_title), active = connected)
             }
 
             if (connected) {

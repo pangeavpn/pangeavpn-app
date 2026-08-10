@@ -20,12 +20,18 @@
     <string name="notification_connected">متصل</string>
     <string name="notification_connecting">در حال اتصال...</string>
     <string name="notification_disconnect">قطع اتصال</string>
-    <string name="pill_cloak">استتار</string>
-    <string name="pill_killswitch">کلید قطع اضطراری</string>
-    <string name="pill_wireguard">WireGuard</string>
+    <string name="server_picker_none_for_transport">هیچ سروری از این انتقال پشتیبانی نمی‌کند</string>
     <string name="servers_title">سرورها</string>
     <string name="settings_signout">خروج</string>
     <string name="settings_title">تنظیمات</string>
+    <string name="settings_transport_auto">خودکار (توصیه‌شده)</string>
+    <string name="settings_transport_cloak">فقط Cloak</string>
+    <string name="settings_transport_description">چگونه PangeaVPN ترافیک شما را استتار می‌کند.</string>
+    <string name="settings_transport_heading">روش اتصال</string>
+    <string name="settings_transport_hysteria2">فقط Hysteria2</string>
+    <string name="settings_transport_reality">فقط VLESS+REALITY</string>
+    <string name="settings_transport_shadowsocks">فقط Shadowsocks</string>
+    <string name="settings_transport_snowflake">فقط Snowflake</string>
     <string name="state_connected">متصل</string>
     <string name="state_connecting">در حال اتصال</string>
     <string name="state_disconnected">قطع شده</string>
@@ -33,5 +39,11 @@
     <string name="state_error">خطا</string>
     <string name="subscription_expires">در %1$s منقضی می‌شود</string>
     <string name="subscription_none">اشتراک فعالی وجود ندارد</string>
+    <string name="transport_status_cloak">مبهم‌سازی: Cloak</string>
+    <string name="transport_status_hysteria2">مبهم‌سازی: Hysteria2</string>
+    <string name="transport_status_none"></string>
+    <string name="transport_status_reality">مبهم‌سازی: VLESS+REALITY</string>
+    <string name="transport_status_shadowsocks">مبهم‌سازی: Shadowsocks</string>
+    <string name="transport_status_snowflake">مبهم‌سازی: Snowflake</string>
     <string name="tv_login_hint">توکن خود را در pangeavpn.org/account دریافت کنید</string>
 </resources>

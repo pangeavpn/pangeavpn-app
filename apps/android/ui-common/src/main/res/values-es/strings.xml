@@ -20,12 +20,18 @@
     <string name="notification_connected">Conectado</string>
     <string name="notification_connecting">Conectando…</string>
     <string name="notification_disconnect">Desconectar</string>
-    <string name="pill_cloak">Camuflaje</string>
-    <string name="pill_killswitch">Kill Switch</string>
-    <string name="pill_wireguard">WireGuard</string>
+    <string name="server_picker_none_for_transport">Ningún servidor admite este transporte</string>
     <string name="servers_title">Servidores</string>
     <string name="settings_signout">Cerrar sesión</string>
     <string name="settings_title">Ajustes</string>
+    <string name="settings_transport_auto">Automático (recomendado)</string>
+    <string name="settings_transport_cloak">Solo Cloak</string>
+    <string name="settings_transport_description">Cómo PangeaVPN camufla tu tráfico.</string>
+    <string name="settings_transport_heading">Método de conexión</string>
+    <string name="settings_transport_hysteria2">Solo Hysteria2</string>
+    <string name="settings_transport_reality">Solo VLESS+REALITY</string>
+    <string name="settings_transport_shadowsocks">Solo Shadowsocks</string>
+    <string name="settings_transport_snowflake">Solo Snowflake</string>
     <string name="state_connected">CONECTADO</string>
     <string name="state_connecting">CONECTANDO</string>
     <string name="state_disconnected">DESCONECTADO</string>
@@ -33,5 +39,11 @@
     <string name="state_error">ERROR</string>
     <string name="subscription_expires">Caduca el %1$s</string>
     <string name="subscription_none">Sin suscripción activa</string>
+    <string name="transport_status_cloak">Ofuscación: Cloak</string>
+    <string name="transport_status_hysteria2">Ofuscación: Hysteria2</string>
+    <string name="transport_status_none"></string>
+    <string name="transport_status_reality">Ofuscación: VLESS+REALITY</string>
+    <string name="transport_status_shadowsocks">Ofuscación: Shadowsocks</string>
+    <string name="transport_status_snowflake">Ofuscación: Snowflake</string>
     <string name="tv_login_hint">Obtén tu token en pangeavpn.org/account</string>
 </resources>

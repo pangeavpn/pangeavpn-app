@@ -1,11 +1,5 @@
-// Generates apps/android/ui-common/src/main/res/values[-<locale>]/strings.xml
-// from the desktop i18n catalogues (apps/desktop/src/renderer/i18n/locales/*.ts).
-//
-// Only a mobile-relevant subset of desktop keys is carried over; desktop-only
-// concepts (tray, updater, logs, verbose debug toggle) are intentionally
-// skipped. Mobile-only keys (notifications, kill-switch guide, TV login hint,
-// subscription banner, screen titles) have no desktop equivalent and are
-// translated here directly for all locales.
+// Generates the Android strings.xml files from the desktop i18n catalogues.
+// KEY_MAP carries the mobile-relevant subset; MOBILE_ONLY has no desktop twin.
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
@@ -42,9 +36,21 @@ const KEY_MAP = {
   "state.CONNECTED": "state_connected",
   "state.DISCONNECTING": "state_disconnecting",
   "state.ERROR": "state_error",
-  "pill.killSwitch": "pill_killswitch",
-  "pill.cloak": "pill_cloak",
-  "pill.wireguard": "pill_wireguard",
+  "status.transport.cloak": "transport_status_cloak",
+  "status.transport.reality": "transport_status_reality",
+  "status.transport.shadowsocks": "transport_status_shadowsocks",
+  "status.transport.hysteria2": "transport_status_hysteria2",
+  "status.transport.snowflake": "transport_status_snowflake",
+  "status.transport.none": "transport_status_none",
+  "settings.transport.heading": "settings_transport_heading",
+  "settings.transport.description": "settings_transport_description",
+  "settings.transport.auto": "settings_transport_auto",
+  "settings.transport.cloak": "settings_transport_cloak",
+  "settings.transport.reality": "settings_transport_reality",
+  "settings.transport.shadowsocks": "settings_transport_shadowsocks",
+  "settings.transport.hysteria2": "settings_transport_hysteria2",
+  "settings.transport.snowflake": "settings_transport_snowflake",
+  "serverPicker.noServersForTransport": "server_picker_none_for_transport",
   "devices.title": "devices_title",
   "devices.remove": "devices_remove",
   "deviceLimit.title": "devicelimit_title",

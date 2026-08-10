@@ -20,12 +20,18 @@
     <string name="notification_connected">Подключено</string>
     <string name="notification_connecting">Подключение…</string>
     <string name="notification_disconnect">Отключить</string>
-    <string name="pill_cloak">Cloak</string>
-    <string name="pill_killswitch">Kill Switch</string>
-    <string name="pill_wireguard">WireGuard</string>
+    <string name="server_picker_none_for_transport">Нет серверов с поддержкой этого транспорта</string>
     <string name="servers_title">Серверы</string>
     <string name="settings_signout">Выйти</string>
     <string name="settings_title">Настройки</string>
+    <string name="settings_transport_auto">Автоматически (рекомендуется)</string>
+    <string name="settings_transport_cloak">Только Cloak</string>
+    <string name="settings_transport_description">Как PangeaVPN маскирует ваш трафик.</string>
+    <string name="settings_transport_heading">Способ подключения</string>
+    <string name="settings_transport_hysteria2">Только Hysteria2</string>
+    <string name="settings_transport_reality">Только VLESS+REALITY</string>
+    <string name="settings_transport_shadowsocks">Только Shadowsocks</string>
+    <string name="settings_transport_snowflake">Только Snowflake</string>
     <string name="state_connected">ПОДКЛЮЧЕНО</string>
     <string name="state_connecting">ПОДКЛЮЧЕНИЕ</string>
     <string name="state_disconnected">ОТКЛЮЧЕНО</string>
@@ -33,5 +39,11 @@
     <string name="state_error">ОШИБКА</string>
     <string name="subscription_expires">Истекает %1$s</string>
     <string name="subscription_none">Нет активной подписки</string>
+    <string name="transport_status_cloak">Обфускация: Cloak</string>
+    <string name="transport_status_hysteria2">Обфускация: Hysteria2</string>
+    <string name="transport_status_none"></string>
+    <string name="transport_status_reality">Обфускация: VLESS+REALITY</string>
+    <string name="transport_status_shadowsocks">Обфускация: Shadowsocks</string>
+    <string name="transport_status_snowflake">Обфускация: Snowflake</string>
     <string name="tv_login_hint">Получите токен на pangeavpn.org/account</string>
 </resources>
