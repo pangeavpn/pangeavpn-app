@@ -110,7 +110,7 @@ fun MainScreen(
                 BoxWithConstraints(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                     DriftMap(
                         state = status.state,
-                        modifier = Modifier.size(minOf(maxWidth, 300.dp)),
+                        modifier = Modifier.size(minOf(maxWidth, 236.dp)),
                     )
                 }
 
