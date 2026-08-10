@@ -314,6 +314,7 @@ body::after{
 .load .pct{font-family:var(--f-mono); font-size:10.5px; color:var(--ink-3); min-width:26px; text-align:right}
 .srow .chk{color:var(--terra)}
 
+.hubwarn{margin:8px 4px 0; font-size:12px; color:var(--warn,#e0a458); line-height:1.4}
 /* settings */
 .sgrp{padding:6px 8px 2px}
 .stitle{font-size:10.5px; font-weight:700; letter-spacing:.14em; text-transform:uppercase; color:var(--ink-3); padding:10px 8px 8px}
@@ -443,8 +444,7 @@ body::after{
         </button>
 
         <div class="pills rise" id="pills" style="animation-delay:.28s">
-          <span class="pill"><span class="d"></span>Cloak</span>
-          <span class="pill"><span class="d"></span>WireGuard</span>
+          <span class="pill" id="pill-transport"><span class="d"></span>Obfuscation: Cloak</span>
           <span class="pill"><span class="d"></span>Kill Switch</span>
         </div>
 
@@ -514,10 +514,27 @@ body::after{
                 <div class="t"><h3>Kill switch</h3><p>Only VPN traffic is allowed until you reconnect or turn off the kill switch.</p></div></div>
               <button class="srowset"><span class="lbl">Open VPN settings</span><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7M8 7h9v9"/></svg></button>
             </div>
+            <div class="sgrp"><div class="stitle">Connection Method</div>
+              <div class="srowset"><span class="lbl">How PangeaVPN disguises your traffic</span><span class="val" id="transport-val">Automatic <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg></span></div>
+              <div class="srow" data-transport="auto">Automatic (recommended)</div>
+              <div class="srow" data-transport="cloak">Cloak only</div>
+              <div class="srow" data-transport="reality">VLESS+REALITY only</div>
+              <div class="srow" data-transport="shadowsocks">Shadowsocks only</div>
+              <div class="srow" data-transport="hysteria2">Hysteria2 only</div>
+            </div>
+            <div class="sgrp"><div class="stitle">Censorship Bypass</div>
+              <div class="srowset"><span class="lbl">Direct IP</span><button class="switch on" data-toggle data-hub="directIp"></button></div>
+              <div class="srowset"><span class="lbl">Shadowsocks</span><button class="switch on" data-toggle data-hub="shadowsocks"></button></div>
+              <div class="srowset"><span class="lbl">Relay</span><button class="switch on" data-toggle data-hub="fronted"></button></div>
+              <div class="srowset"><span class="lbl">Normal connection</span><button class="switch" data-toggle data-hub="normal"></button></div>
+              <div class="hubwarn" id="hubwarn" hidden>At least one connection method must stay on.</div>
+            </div>
             <div class="sgrp"><div class="stitle">Network</div>
               <div class="srowset"><span class="lbl">Allow LAN</span><button class="switch on" data-toggle></button></div>
               <div class="srowset"><span class="lbl">Auto-connect on launch</span><button class="switch" data-toggle></button></div>
-              <button class="srowset"><span class="lbl">Language</span><span class="val">English <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg></span></button>
+              <div class="srowset"><span class="lbl">Custom DNS</span><span class="val">1.1.1.1, 1.0.0.1</span></div>
+              <div class="srowset"><span class="lbl">Tunnel MTU</span><span class="val">1380</span></div>
+              <button class="srowset"><span class="lbl">Split Tunnelling</span><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg></button>
             </div>
             <div class="sgrp"><button class="srowset danger"><span class="lbl">Sign out</span><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg></button></div>
             <div class="ver">PangeaVPN · v0.3.8</div>
@@ -590,7 +607,31 @@ const ST={
   DISCONNECTING:{icon:ICON.spin,lb:'Closing…',mt:'Tearing down tunnel…'},
   ERROR:{icon:ICON.alert,lb:'Connection failed',mt:'Tap the dial to try again'},
 };
-const STEPS=['Resolving endpoint…','Cloak TLS handshake…','Bringing up WireGuard…','Securing tunnel…'];
+// Mirrors the real cascade: each rung is proven by a WireGuard handshake.
+const STEPS=['Reaching your account…','Starting cloak…','Waiting for handshake…','Falling back to reality…','Waiting for handshake…','Securing tunnel…'];
+const TRANSPORT_LABELS={auto:'Automatic (recommended)',cloak:'Cloak only',reality:'VLESS+REALITY only',shadowsocks:'Shadowsocks only',hysteria2:'Hysteria2 only'};
+const TRANSPORT_PILL={auto:'Obfuscation: Cloak',cloak:'Obfuscation: Cloak',reality:'Obfuscation: VLESS+REALITY',shadowsocks:'Obfuscation: Shadowsocks',hysteria2:'Obfuscation: Hysteria2'};
+let preferredTransport='auto';
+
+function renderTransport(){
+  document.querySelectorAll('[data-transport]').forEach(r=>r.classList.toggle('sel',r.dataset.transport===preferredTransport));
+  const val=document.getElementById('transport-val');
+  if(val) val.childNodes[0].nodeValue=TRANSPORT_LABELS[preferredTransport].replace(' (recommended)','')+' ';
+  const pill=document.getElementById('pill-transport');
+  if(pill) pill.lastChild.nodeValue=TRANSPORT_PILL[preferredTransport];
+}
+document.querySelectorAll('[data-transport]').forEach(row=>row.addEventListener('click',()=>{
+  preferredTransport=row.dataset.transport; renderTransport();
+}));
+
+// The core refuses to disable the last hub method; the preview shows the same.
+document.querySelectorAll('[data-hub]').forEach(btn=>btn.addEventListener('click',ev=>{
+  const on=[...document.querySelectorAll('[data-hub]')].filter(b=>b.classList.contains('on'));
+  const warn=document.getElementById('hubwarn');
+  if(btn.classList.contains('on')&&on.length===1){ev.stopImmediatePropagation(); if(warn) warn.hidden=false; return;}
+  if(warn) warn.hidden=true;
+},true));
+renderTransport();
 let teleTimer,stepTimer;
 function setState(s){
   screen.dataset.state=s;
