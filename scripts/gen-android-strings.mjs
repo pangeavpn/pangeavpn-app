@@ -7,6 +7,17 @@ import process from "node:process";
 const rootDir = process.cwd();
 const localesDir = path.join(rootDir, "apps", "desktop", "src", "renderer", "i18n", "locales");
 const outDir = path.join(rootDir, "apps", "android", "ui-common", "src", "main", "res");
+// :core cannot depend on :ui-common (ui-common already depends on core), so
+// the strings the VpnService itself needs are emitted into core.
+const coreOutDir = path.join(rootDir, "apps", "android", "core", "src", "main", "res");
+const CORE_KEYS = new Set([
+  "notification_connected",
+  "notification_connecting",
+  "notification_disconnect",
+  "state_disconnected",
+  "state_disconnecting",
+  "state_error"
+]);
 
 const LOCALES = ["en", "es", "fr", "ru", "uk", "zh", "ar", "fa"];
 
@@ -51,6 +62,27 @@ const KEY_MAP = {
   "settings.transport.hysteria2": "settings_transport_hysteria2",
   "settings.transport.snowflake": "settings_transport_snowflake",
   "serverPicker.noServersForTransport": "server_picker_none_for_transport",
+  "settings.censorship.heading": "settings_censorship_heading",
+  "settings.censorship.description": "settings_censorship_description",
+  "settings.censorship.directIp.title": "settings_censorship_directip_title",
+  "settings.censorship.directIp.hint": "settings_censorship_directip_hint",
+  "settings.censorship.hubShadowsocks.title": "settings_censorship_shadowsocks_title",
+  "settings.censorship.hubShadowsocks.hint": "settings_censorship_shadowsocks_hint",
+  "settings.censorship.hubFronted.title": "settings_censorship_fronted_title",
+  "settings.censorship.hubFronted.hint": "settings_censorship_fronted_hint",
+  "settings.censorship.hubNormal.title": "settings_censorship_normal_title",
+  "settings.censorship.hubNormal.hint": "settings_censorship_normal_hint",
+  "settings.censorship.lastMethod": "settings_censorship_last_method",
+  "settings.network.heading": "settings_network_heading",
+  "settings.network.description": "settings_network_description",
+  "settings.network.allowLan.title": "settings_network_allowlan_title",
+  "settings.network.allowLan.hint": "settings_network_allowlan_hint",
+  "settings.network.dns.title": "settings_network_dns_title",
+  "settings.network.dns.placeholder": "settings_network_dns_placeholder",
+  "settings.network.dns.hint": "settings_network_dns_hint",
+  "settings.network.dns.invalid": "settings_network_dns_invalid",
+  "settings.network.mtu.title": "settings_network_mtu_title",
+  "settings.network.mtu.hint": "settings_network_mtu_hint",
   "devices.title": "devices_title",
   "devices.remove": "devices_remove",
   "deviceLimit.title": "devicelimit_title",
@@ -59,6 +91,10 @@ const KEY_MAP = {
 
 // Mobile-only strings, translated inline for all 8 locales.
 const MOBILE_ONLY = {
+  settings_save: {
+    en: "Save", es: "Guardar", fr: "Enregistrer", ru: "Сохранить",
+    uk: "Зберегти", zh: "保存", ar: "حفظ", fa: "ذخیره"
+  },
   notification_connected: {
     en: "Connected", es: "Conectado", fr: "Connecté", ru: "Подключено",
     uk: "Підключено", zh: "已连接", ar: "متصل", fa: "متصل"
@@ -141,14 +177,22 @@ function main() {
     parsedLocales[code] = parseLocale(code);
   }
 
-  let keyCount = 0;
+  let uiCount = 0;
+  let coreCount = 0;
   for (const code of LOCALES) {
     const entries = buildEntries(code, parsedLocales[code]);
-    keyCount = Object.keys(entries).length;
-    writeStringsXml(code, entries);
+    const coreEntries = {};
+    const uiEntries = {};
+    for (const [key, value] of Object.entries(entries)) {
+      (CORE_KEYS.has(key) ? coreEntries : uiEntries)[key] = value;
+    }
+    uiCount = Object.keys(uiEntries).length;
+    coreCount = Object.keys(coreEntries).length;
+    writeStringsXml(outDir, code, uiEntries);
+    writeStringsXml(coreOutDir, code, coreEntries);
   }
 
-  console.log(`Wrote ${LOCALES.length} strings.xml files (${keyCount} keys each) to ${outDir}`);
+  console.log(`Wrote ${LOCALES.length} ui-common files (${uiCount} keys) and ${LOCALES.length} core files (${coreCount} keys)`);
 }
 
 function parseLocale(code) {
@@ -220,8 +264,8 @@ function buildEntries(code, localeData) {
   return entries;
 }
 
-function writeStringsXml(code, entries) {
-  const dirPath = path.join(outDir, RES_DIR[code]);
+function writeStringsXml(root, code, entries) {
+  const dirPath = path.join(root, RES_DIR[code]);
   fs.mkdirSync(dirPath, { recursive: true });
 
   const lines = Object.keys(entries)

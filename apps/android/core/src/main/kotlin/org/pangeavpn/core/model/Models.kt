@@ -62,6 +62,16 @@ data class Session(
     val servers: List<Server> = emptyList(),
 )
 
+/** Mirrors hubMethods in daemon/mobile/hubmethods.go. */
+@Serializable
+data class HubMethods(
+    val directIp: Boolean = true,
+    val shadowsocks: Boolean = true,
+    val fronted: Boolean = true,
+    val normal: Boolean = false,
+    val rev: Int = 1,
+)
+
 /** Mirrors the Go config blob in daemon/mobile/config.go. */
 @Serializable
 data class AppSettings(
@@ -71,10 +81,21 @@ data class AppSettings(
     val allowLan: Boolean = false,
     val autoConnect: Boolean = false,
     val lastServerId: String = "",
-    val hubDoh: Boolean = true,
-    val hubDirectIp: Boolean = true,
-    val hubShadowsocks: Boolean = true,
+    val hubMethods: HubMethods = HubMethods(),
 )
+
+/** Transports the Android build can actually run; NaiveProxy is cgo-only. */
+val TRANSPORT_CHOICES = listOf("auto", "cloak", "reality", "shadowsocks", "hysteria2", "snowflake")
+
+val HUB_METHOD_CHOICES = listOf("directIp", "shadowsocks", "fronted", "normal")
+
+fun HubMethods.isEnabled(method: String): Boolean = when (method) {
+    "directIp" -> directIp
+    "shadowsocks" -> shadowsocks
+    "fronted" -> fronted
+    "normal" -> normal
+    else -> false
+}
 
 @Serializable
 data class TunnelConfig(

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="notification_connected">Подключено</string>
+    <string name="notification_connecting">Подключение…</string>
+    <string name="notification_disconnect">Отключить</string>
+    <string name="state_disconnected">ОТКЛЮЧЕНО</string>
+    <string name="state_disconnecting">ОТКЛЮЧЕНИЕ</string>
+    <string name="state_error">ОШИБКА</string>
+</resources>

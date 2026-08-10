@@ -42,4 +42,6 @@ dependencies {
     // pangeacore.aar is produced by the gomobile build (apps/android/tunnel/)
     // and dropped into this directory; not present in source control.
     implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.aar"))))
+
+    testImplementation(kotlin("test"))
 }

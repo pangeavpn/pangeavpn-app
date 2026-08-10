@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="notification_connected">已连接</string>
+    <string name="notification_connecting">连接中…</string>
+    <string name="notification_disconnect">断开连接</string>
+    <string name="state_disconnected">已断开</string>
+    <string name="state_disconnecting">断开中</string>
+    <string name="state_error">错误</string>
+</resources>

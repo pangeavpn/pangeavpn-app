@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="notification_connected">متصل</string>
+    <string name="notification_connecting">جارٍ الاتصال...</string>
+    <string name="notification_disconnect">قطع الاتصال</string>
+    <string name="state_disconnected">غير متصل</string>
+    <string name="state_disconnecting">جارٍ قطع الاتصال</string>
+    <string name="state_error">خطأ</string>
+</resources>

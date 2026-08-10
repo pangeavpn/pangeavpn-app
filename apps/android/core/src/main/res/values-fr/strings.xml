@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="notification_connected">Connecté</string>
+    <string name="notification_connecting">Connexion…</string>
+    <string name="notification_disconnect">Se déconnecter</string>
+    <string name="state_disconnected">DÉCONNECTÉ</string>
+    <string name="state_disconnecting">DÉCONNEXION</string>
+    <string name="state_error">ERREUR</string>
+</resources>

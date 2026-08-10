@@ -68,13 +68,15 @@ class PangeaVpnService : VpnService() {
         scope.launch {
             try {
                 val config = TunnelBridge.prepare(serverId)
+                val settings = TunnelBridge.getSettings()
                 val builder = Builder()
                     .setSession("PangeaVPN")
                     .addAddress(config.address, config.prefixLength)
-                    .addRoute("0.0.0.0", 0)
+                tunnelRoutes(settings.allowLan).forEach { builder.addRoute(it.address, it.prefixLength) }
                 config.dns.forEach { builder.addDnsServer(it) }
                 builder.setMtu(config.mtu)
                 builder.setBlocking(false)
+                applySplitTunnel(builder)
 
                 val pfd = builder.establish() ?: error("VPN permission not granted")
                 activeFd?.close()
@@ -88,6 +90,21 @@ class PangeaVpnService : VpnService() {
                 endForeground()
                 stopSelf()
             }
+        }
+    }
+
+    /** A package that has since been uninstalled throws, and would otherwise
+     *  block every connect until the user found the stale entry. */
+    private fun applySplitTunnel(builder: Builder) {
+        val excluded = SplitTunnelStore(this).excluded()
+        if (excluded.isEmpty()) return
+        val stillInstalled = mutableSetOf<String>()
+        for (packageName in excluded) {
+            runCatching { builder.addDisallowedApplication(packageName) }
+                .onSuccess { stillInstalled.add(packageName) }
+        }
+        if (stillInstalled.size != excluded.size) {
+            SplitTunnelStore(this).setExcluded(stillInstalled)
         }
     }
 
@@ -130,11 +147,11 @@ class PangeaVpnService : VpnService() {
 
     private fun buildNotification(status: TunnelStatus): Notification {
         val title = when (status.state) {
-            ConnState.CONNECTED -> "PangeaVPN — Connected"
-            ConnState.CONNECTING -> "PangeaVPN — Connecting…"
-            ConnState.DISCONNECTING -> "PangeaVPN — Disconnecting…"
-            ConnState.ERROR -> "PangeaVPN — Connection error"
-            ConnState.DISCONNECTED -> "PangeaVPN"
+            ConnState.CONNECTED -> getString(org.pangeavpn.core.R.string.notification_connected)
+            ConnState.CONNECTING -> getString(org.pangeavpn.core.R.string.notification_connecting)
+            ConnState.DISCONNECTING -> getString(org.pangeavpn.core.R.string.state_disconnecting)
+            ConnState.ERROR -> getString(org.pangeavpn.core.R.string.state_error)
+            ConnState.DISCONNECTED -> getString(org.pangeavpn.core.R.string.state_disconnected)
         }
         val disconnectIntent = PendingIntent.getService(
             this,
@@ -147,7 +164,7 @@ class PangeaVpnService : VpnService() {
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
-            .addAction(0, "Disconnect", disconnectIntent)
+            .addAction(0, getString(org.pangeavpn.core.R.string.notification_disconnect), disconnectIntent)
             .build()
     }
 

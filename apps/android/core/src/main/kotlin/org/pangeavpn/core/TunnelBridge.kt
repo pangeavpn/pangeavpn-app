@@ -70,6 +70,12 @@ object TunnelBridge : StatusSink {
         json.decodeFromString(Mobile.setConfig(json.encodeToString(settings)))
     }
 
+    /** Throws when the switch would disable the last way to reach the hub. */
+    suspend fun setHubMethod(method: String, enabled: Boolean): AppSettings =
+        withContext(Dispatchers.IO) {
+            json.decodeFromString(Mobile.setHubMethod(method, enabled))
+        }
+
     private fun startPolling() {
         scope.launch {
             while (isActive) {
