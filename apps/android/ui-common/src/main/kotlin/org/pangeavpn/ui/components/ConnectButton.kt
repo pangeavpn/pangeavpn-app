@@ -35,9 +35,6 @@ import org.pangeavpn.core.model.ConnState
 import org.pangeavpn.ui.R
 import org.pangeavpn.ui.theme.LocalTextSecondary
 
-/** Pill radius large enough to always round fully, matching border-radius: 999px. */
-private val PillShape = RoundedCornerShape(percent = 50)
-
 /**
  * The primary action. Accent-filled while there is something to connect to, and
  * quiet-outlined once connected, so disconnecting never looks like the main move.

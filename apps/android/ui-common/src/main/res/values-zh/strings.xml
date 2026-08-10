@@ -33,9 +33,11 @@
     <string name="killswitch_body">在重新连接或关闭断网保护之前，仅允许 VPN 流量通过。</string>
     <string name="killswitch_open_settings">打开 VPN 设置</string>
     <string name="killswitch_title">断网保护已启用</string>
+    <string name="login_hint">在 pangeavpn.org/account 获取您的令牌</string>
     <string name="login_signin">登录</string>
     <string name="login_subtitle">输入登录令牌以继续。</string>
     <string name="login_title">登录</string>
+    <string name="login_token_label">令牌</string>
     <string name="login_token_placeholder">0000000000000000</string>
     <string name="region_auto_of">%1$s 台服务器 · 自动</string>
     <string name="region_best_of">%1$s · %2$s 个中最优</string>
@@ -86,11 +88,10 @@
     <string name="subscription_none">无有效订阅</string>
     <string name="toggle_off">关闭</string>
     <string name="toggle_on">开启</string>
-    <string name="transport_status_cloak">混淆：Cloak</string>
-    <string name="transport_status_hysteria2">混淆：Hysteria2</string>
+    <string name="transport_status_cloak">Cloak</string>
+    <string name="transport_status_hysteria2">Hysteria2</string>
     <string name="transport_status_none"></string>
-    <string name="transport_status_reality">混淆：VLESS+REALITY</string>
-    <string name="transport_status_shadowsocks">混淆：Shadowsocks</string>
-    <string name="transport_status_snowflake">混淆：Snowflake</string>
-    <string name="tv_login_hint">在 pangeavpn.org/account 获取您的令牌</string>
+    <string name="transport_status_reality">VLESS+REALITY</string>
+    <string name="transport_status_shadowsocks">Shadowsocks</string>
+    <string name="transport_status_snowflake">Snowflake</string>
 </resources>

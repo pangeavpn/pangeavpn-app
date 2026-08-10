@@ -155,6 +155,30 @@ body{
 [data-state="CONNECTING"] .connect,[data-state="DISCONNECTING"] .connect{animation:pulse 1.8s ease-in-out infinite; cursor:default}
 .tv .connect{margin-top:12px}
 
+/* ── Sign-in ────────────────────────────────────────────────── */
+.auth{min-height:100%; display:flex; flex-direction:column}
+.auth .section-label:first-of-type{margin-top:0}
+.auth-fill{flex:1; min-height:12px}
+.login-map .drift-frag{transform:translate(var(--dx),var(--dy)) rotate(var(--dr))}
+
+.token{display:block; width:100%; padding:15px 16px; border-radius:14px;
+  background:var(--bg-surface); border:1px solid var(--border-subtle); color:var(--text-primary);
+  font-family:var(--mono); font-size:1rem; letter-spacing:.14em; outline:none}
+.token::placeholder{color:var(--text-muted)}
+.token:focus{border-color:var(--accent); background:var(--accent-glow)}
+.auth .connect{margin-top:14px}
+.auth .connect:disabled{opacity:.4; cursor:default}
+
+.auth-error{display:none; margin-top:14px; padding:12px 14px; border-radius:12px;
+  border:1px solid rgba(244,63,94,.35); background:rgba(244,63,94,.1)}
+.has-error .auth-error{display:block}
+.auth-error p{margin:0; font-size:.8rem; line-height:1.45; color:var(--danger)}
+.auth-error button{margin-top:8px; padding:0; border:0; background:none; font:inherit; font-size:.78rem;
+  font-weight:600; color:var(--text-secondary); text-decoration:underline; cursor:pointer}
+
+.auth-hint{margin:16px 0 0; text-align:center; font-size:.72rem; color:var(--text-muted)}
+.auth-hint u{color:var(--text-secondary); text-decoration-color:var(--border)}
+
 .hint{max-width:760px; font-size:.78rem; line-height:1.6; color:var(--text-muted); text-align:center}
 .hint code{font-family:var(--mono); font-size:.9em; color:var(--text-secondary)}
 </style>
@@ -167,6 +191,7 @@ body{
   <button type="button" data-state-btn="CONNECTED" aria-pressed="false">Connected</button>
   <button type="button" data-state-btn="DISCONNECTING" aria-pressed="false">Disconnecting</button>
   <button type="button" data-state-btn="ERROR" aria-pressed="false">Error</button>
+  <button type="button" id="authErrorBtn" aria-pressed="false">Sign-in error</button>
   <button type="button" id="themeBtn" aria-pressed="false">Light theme</button>
 </div>
 
@@ -224,6 +249,37 @@ body{
           </button>
         </div>
         <button class="connect" type="button" data-role="connect">Connect</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="frame">
+    <span class="caption">Phone — sign-in</span>
+    <div class="phone" id="auth">
+      <header class="header">
+        <span class="brand"></span>
+        <span class="version">v1.0.0</span>
+        <span class="header-spacer"></span>
+        <button class="icon-btn" type="button" title="Toggle theme">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="4.6"/><path d="M12 2.6v2.2M12 19.2v2.2M2.6 12h2.2M19.2 12h2.2M5.4 5.4l1.6 1.6M17 17l1.6 1.6M18.6 5.4 17 7M7 17l-1.6 1.6"/></svg>
+        </button>
+      </header>
+      <div class="body">
+        <div class="auth">
+          <div class="map-wrap" id="authMap"></div>
+          <span class="section-label">Sign in</span>
+          <h2 class="headline">The world is <strong>apart</strong></h2>
+          <span class="detail">Enter your sign-in token to continue.</span>
+          <span class="section-label">Token</span>
+          <input class="token" type="text" placeholder="0000000000000000" spellcheck="false" />
+          <div class="auth-error">
+            <p>That token was not accepted.</p>
+            <button type="button">Device Limit Reached</button>
+          </div>
+          <button class="connect" type="button">Sign In</button>
+          <span class="auth-fill"></span>
+          <p class="auth-hint">Get your token at <u>pangeavpn.org/account</u></p>
+        </div>
       </div>
     </div>
   </div>
@@ -326,6 +382,17 @@ function setState(state) {
 document.getElementById("toolbar").addEventListener("click", (event) => {
   const button = event.target.closest("[data-state-btn]");
   if (button) setState(button.dataset.stateBtn);
+});
+
+// The sign-in frame borrows the phone's map rather than repeating the geometry.
+const authMap = document.querySelector("#phone .drift-map").cloneNode(true);
+authMap.classList.add("login-map");
+document.getElementById("authMap").append(authMap);
+
+const authErrorBtn = document.getElementById("authErrorBtn");
+authErrorBtn.addEventListener("click", () => {
+  const shown = document.getElementById("auth").classList.toggle("has-error");
+  authErrorBtn.setAttribute("aria-pressed", String(shown));
 });
 
 const themeBtn = document.getElementById("themeBtn");

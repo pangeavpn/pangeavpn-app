@@ -28,12 +28,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.pangeavpn.ui.R
 
-/** Brand mark, version, and the two icon controls — the desktop header, unchanged. */
+/** Brand mark, version, and the icon controls — the desktop header, unchanged.
+ *  [onMenu] is optional because sign-in has nothing behind the burger yet. */
 @Composable
 fun PangeaHeader(
     version: String,
     onToggleTheme: () -> Unit,
-    onMenu: () -> Unit,
+    onMenu: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     Row(
@@ -55,10 +56,12 @@ fun PangeaHeader(
             contentDescription = stringResource(R.string.header_toggle_theme),
             onClick = onToggleTheme,
         ) { color -> drawSun(color) }
-        IconControl(
-            contentDescription = stringResource(R.string.header_menu),
-            onClick = onMenu,
-        ) { color -> drawBurger(color) }
+        if (onMenu != null) {
+            IconControl(
+                contentDescription = stringResource(R.string.header_menu),
+                onClick = onMenu,
+            ) { color -> drawBurger(color) }
+        }
     }
 }
 

@@ -68,7 +68,7 @@ fun LoginScreen(loginViewModel: LoginViewModel) {
             textAlign = TextAlign.Center,
         )
         Text(
-            text = stringResource(R.string.tv_login_hint),
+            text = stringResource(R.string.login_hint),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,

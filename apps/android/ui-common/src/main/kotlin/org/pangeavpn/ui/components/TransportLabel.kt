@@ -4,8 +4,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.res.stringResource
 import org.pangeavpn.ui.R
 
-/** The obfuscation label for whichever cascade rung carried the tunnel, so the
- *  pill reflects the live transport rather than always naming Cloak. */
+/** Names whichever cascade rung carried the tunnel, so the VIA fact reflects the
+ *  live transport rather than always naming Cloak. */
 @Composable
 fun transportStatusLabel(activeTransport: String): String = when (activeTransport) {
     "cloak" -> stringResource(R.string.transport_status_cloak)

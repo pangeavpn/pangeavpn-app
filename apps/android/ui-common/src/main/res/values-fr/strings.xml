@@ -33,9 +33,11 @@
     <string name="killswitch_body">Seul le trafic VPN est autorisé jusqu\'à ce que vous vous reconnectiez ou désactiviez le kill switch.</string>
     <string name="killswitch_open_settings">Ouvrir les paramètres VPN</string>
     <string name="killswitch_title">Kill Switch actif</string>
+    <string name="login_hint">Obtenez votre jeton sur pangeavpn.org/account</string>
     <string name="login_signin">Se connecter</string>
     <string name="login_subtitle">Saisissez votre jeton de connexion pour continuer.</string>
     <string name="login_title">Se connecter</string>
+    <string name="login_token_label">Jeton</string>
     <string name="login_token_placeholder">0000000000000000</string>
     <string name="region_auto_of">%1$s serveurs · auto</string>
     <string name="region_best_of">%1$s · meilleur sur %2$s</string>
@@ -86,11 +88,10 @@
     <string name="subscription_none">Aucun abonnement actif</string>
     <string name="toggle_off">Désactivé</string>
     <string name="toggle_on">Activé</string>
-    <string name="transport_status_cloak">Obfuscation : Cloak</string>
-    <string name="transport_status_hysteria2">Obfuscation : Hysteria2</string>
+    <string name="transport_status_cloak">Cloak</string>
+    <string name="transport_status_hysteria2">Hysteria2</string>
     <string name="transport_status_none"></string>
-    <string name="transport_status_reality">Obfuscation : VLESS+REALITY</string>
-    <string name="transport_status_shadowsocks">Obfuscation : Shadowsocks</string>
-    <string name="transport_status_snowflake">Obfuscation : Snowflake</string>
-    <string name="tv_login_hint">Obtenez votre jeton sur pangeavpn.org/account</string>
+    <string name="transport_status_reality">VLESS+REALITY</string>
+    <string name="transport_status_shadowsocks">Shadowsocks</string>
+    <string name="transport_status_snowflake">Snowflake</string>
 </resources>

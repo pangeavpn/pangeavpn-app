@@ -33,9 +33,11 @@
     <string name="killswitch_body">يُسمح بحركة VPN فقط حتى تعيد الاتصال أو توقف مفتاح الإيقاف.</string>
     <string name="killswitch_open_settings">فتح إعدادات VPN</string>
     <string name="killswitch_title">مفتاح الإيقاف مفعّل</string>
+    <string name="login_hint">احصل على رمزك من pangeavpn.org/account</string>
     <string name="login_signin">تسجيل الدخول</string>
     <string name="login_subtitle">أدخل رمز الدخول للمتابعة.</string>
     <string name="login_title">تسجيل الدخول</string>
+    <string name="login_token_label">الرمز</string>
     <string name="login_token_placeholder">0000000000000000</string>
     <string name="region_auto_of">%1$s خوادم · تلقائي</string>
     <string name="region_best_of">%1$s · الأفضل من %2$s</string>
@@ -86,11 +88,10 @@
     <string name="subscription_none">لا يوجد اشتراك نشط</string>
     <string name="toggle_off">معطّل</string>
     <string name="toggle_on">مفعّل</string>
-    <string name="transport_status_cloak">التمويه: Cloak</string>
-    <string name="transport_status_hysteria2">التمويه: Hysteria2</string>
+    <string name="transport_status_cloak">Cloak</string>
+    <string name="transport_status_hysteria2">Hysteria2</string>
     <string name="transport_status_none"></string>
-    <string name="transport_status_reality">التمويه: VLESS+REALITY</string>
-    <string name="transport_status_shadowsocks">التمويه: Shadowsocks</string>
-    <string name="transport_status_snowflake">التمويه: Snowflake</string>
-    <string name="tv_login_hint">احصل على رمزك من pangeavpn.org/account</string>
+    <string name="transport_status_reality">VLESS+REALITY</string>
+    <string name="transport_status_shadowsocks">Shadowsocks</string>
+    <string name="transport_status_snowflake">Snowflake</string>
 </resources>

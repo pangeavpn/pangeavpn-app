@@ -33,9 +33,11 @@
     <string name="killswitch_body">Разрешён только VPN-трафик, пока вы не переподключитесь или не отключите Kill Switch.</string>
     <string name="killswitch_open_settings">Открыть настройки VPN</string>
     <string name="killswitch_title">Kill Switch включён</string>
+    <string name="login_hint">Получите токен на pangeavpn.org/account</string>
     <string name="login_signin">Войти</string>
     <string name="login_subtitle">Введите токен для входа, чтобы продолжить.</string>
     <string name="login_title">Войти</string>
+    <string name="login_token_label">Токен</string>
     <string name="login_token_placeholder">0000000000000000</string>
     <string name="region_auto_of">%1$s серверов · авто</string>
     <string name="region_best_of">%1$s · лучший из %2$s</string>
@@ -86,11 +88,10 @@
     <string name="subscription_none">Нет активной подписки</string>
     <string name="toggle_off">Выкл</string>
     <string name="toggle_on">Вкл</string>
-    <string name="transport_status_cloak">Обфускация: Cloak</string>
-    <string name="transport_status_hysteria2">Обфускация: Hysteria2</string>
+    <string name="transport_status_cloak">Cloak</string>
+    <string name="transport_status_hysteria2">Hysteria2</string>
     <string name="transport_status_none"></string>
-    <string name="transport_status_reality">Обфускация: VLESS+REALITY</string>
-    <string name="transport_status_shadowsocks">Обфускация: Shadowsocks</string>
-    <string name="transport_status_snowflake">Обфускация: Snowflake</string>
-    <string name="tv_login_hint">Получите токен на pangeavpn.org/account</string>
+    <string name="transport_status_reality">VLESS+REALITY</string>
+    <string name="transport_status_shadowsocks">Shadowsocks</string>
+    <string name="transport_status_snowflake">Snowflake</string>
 </resources>
