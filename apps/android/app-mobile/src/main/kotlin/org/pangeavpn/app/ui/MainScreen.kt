@@ -31,7 +31,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import org.pangeavpn.core.groupRegions
 import org.pangeavpn.core.model.ConnState
+import org.pangeavpn.core.pickNode
+import org.pangeavpn.core.regionLoad
+import org.pangeavpn.core.regionOfServer
 import org.pangeavpn.core.viewmodel.ConnectionViewModel
 import org.pangeavpn.ui.R
 import org.pangeavpn.ui.components.BrandLogo
@@ -145,15 +149,21 @@ fun MainScreen(
                     modifier = Modifier.padding(24.dp),
                 )
             } else {
+                // Grouped by region, like desktop: picking a region connects to
+                // its least loaded node rather than making the user compare them.
+                val regions = remember(uiState.servers) { groupRegions(uiState.servers) }
+                val selectedRegion = remember(regions, uiState.selectedServerId) {
+                    uiState.selectedServerId?.let { regionOfServer(regions, it) }?.key
+                }
                 LazyColumn(modifier = Modifier.padding(horizontal = 16.dp)) {
-                    items(uiState.servers, key = { it.id }) { server ->
+                    items(regions, key = { it.key }) { region ->
                         ServerRow(
-                            name = server.name,
-                            country = server.country,
-                            load = server.load,
-                            selected = server.id == uiState.selectedServerId,
+                            name = region.name,
+                            country = region.country,
+                            load = regionLoad(region),
+                            selected = region.key == selectedRegion,
                             onClick = {
-                                connectionViewModel.selectServer(server.id)
+                                connectionViewModel.selectServer(pickNode(region).id)
                                 showServerSheet = false
                             },
                             modifier = Modifier
