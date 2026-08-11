@@ -2,7 +2,7 @@ name: "CodeQL Advanced"
 
 on:
   push:
-    branches: [ "master" ]
+    branches: [ "master", "android" ]
     paths-ignore:
       - 'docs/**'
       - '**.md'
@@ -10,7 +10,7 @@ on:
       - '.gitignore'
       - '.gitattributes'
   pull_request:
-    branches: [ "master" ]
+    branches: [ "master", "android" ]
     paths-ignore:
       - 'docs/**'
       - '**.md'
@@ -72,6 +72,21 @@ jobs:
             runs-on: macos-latest
             goos: darwin
 
+          # daemon/mobile is entirely //go:build android, so the three desktop
+          # variants above never see it. Only ./mobile/... builds for android.
+          - language: go
+            build-mode: manual
+            runs-on: ubuntu-latest
+            goos: android
+            goarch: arm64
+            build-target: ./mobile/...
+
+          # apps/android Kotlin. build-mode none skips the Gradle/SDK/NDK setup
+          # and the gomobile AAR that a real build would need first.
+          - language: java-kotlin
+            build-mode: none
+            runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
@@ -107,10 +122,15 @@ jobs:
         working-directory: daemon
         env:
           GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          BUILD_TARGET: ${{ matrix.build-target }}
           CGO_ENABLED: 0
         run: |
-          echo "Building Go daemon for GOOS=$GOOS"
-          go build -trimpath -buildvcs=false ./...
+          # Empty is not a valid GOARCH, so let Go pick its own default.
+          [ -n "$GOARCH" ] || unset GOARCH
+          target="${BUILD_TARGET:-./...}"
+          echo "Building Go daemon for GOOS=$GOOS GOARCH=${GOARCH:-host} target=$target"
+          go build -trimpath -buildvcs=false "$target"
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v4
