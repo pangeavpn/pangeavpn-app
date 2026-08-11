@@ -768,129 +768,42 @@ func (s *Service) startSnowflakeTransport(ctx context.Context, profile *state.Pr
 // once the kill switch can permit the dynamic peer.
 const snowflakeReleaseGated = true
 
-// transportStartFn starts one transport's process/session and rebinds the
-// WireGuard endpoint to its loopback port. It is the transport-level half of a
-// bring-up; the WireGuard handshake in bringUpTransport is the tunnel-level
-// half. Matches the signature of startCloakTransport and friends.
-type transportStartFn func(ctx context.Context, profile *state.Profile, wireGuardProfile *state.WireGuardProfile) error
-
-type transportCandidate struct {
-	kind  string
-	start transportStartFn
-}
-
-// transportCandidates returns the ordered transports to attempt for the given
-// selection. "" / "auto" = the censorship-resistance cascade (see autoCascade).
-// A specific selection = just that transport, with an error if the profile has
-// no configuration for it.
-func (s *Service) transportCandidates(profile *state.Profile, preferredTransport string) ([]transportCandidate, error) {
-	switch preferredTransport {
-	case "", "auto":
-		return s.autoCascade(profile), nil
-	case "cloak":
-		return []transportCandidate{{"cloak", s.startCloakTransport}}, nil
-	case "naive":
-		if profile.Naive == nil {
-			return nil, errors.New("naive transport requested but this profile has no naive configuration")
-		}
-		return []transportCandidate{{"naive", s.startNaiveTransport}}, nil
-	case "reality":
-		if profile.Reality == nil {
-			return nil, errors.New("reality transport requested but this profile has no reality configuration")
-		}
-		return []transportCandidate{{"reality", s.startRealityTransport}}, nil
-	case "hysteria2":
-		if profile.Hysteria2 == nil {
-			return nil, errors.New("hysteria2 transport requested but this profile has no hysteria2 configuration")
-		}
-		return []transportCandidate{{"hysteria2", s.startHysteria2Transport}}, nil
-	case "shadowsocks":
-		if profile.Shadowsocks == nil {
-			return nil, errors.New("shadowsocks transport requested but this profile has no shadowsocks configuration")
-		}
-		return []transportCandidate{{"shadowsocks", s.startShadowsocksTransport}}, nil
-	case "snowflake":
-		// Gated off for this release (see snowflakeReleaseGated). Re-enable by
-		// removing this guard.
-		if snowflakeReleaseGated {
-			return nil, errors.New("snowflake transport is temporarily unavailable")
-		}
-		if profile.Snowflake == nil {
-			return nil, errors.New("snowflake transport requested but this profile has no snowflake configuration")
-		}
-		return []transportCandidate{{"snowflake", s.startSnowflakeTransport}}, nil
-	default:
-		return nil, fmt.Errorf("unknown transport %q", preferredTransport)
-	}
-}
-
-// autoCascadeOrder is the auto-mode fallback order, chosen for censorship
-// resistance rather than build history — because the transports hide in
-// different ways, a block that stops one often stops others that hide the same
-// way, so consecutive attempts favor a different mechanism:
-//
-//   - cloak: the reliable default (TLS obfuscation to a decoy cover site).
-//   - reality: the strongest TLS disguise — borrows a real site's TLS
-//     handshake, so active probing and SNI blocking see a genuine site.
-//   - shadowsocks: SS-2022, which presents no TLS at all on its own port, so it
-//     is the first attempt that shares nothing with a TLS block above it.
-//   - hysteria2: a different wire protocol (UDP/QUIC + Salamander), so a block
-//     that kills the TCP transports does not kill every attempt.
-//   - naive: real Chromium TLS+HTTP/2 — a different TLS fingerprint than
-//     reality, for when UDP is blocked and reality's approach was the problem.
-//   - snowflake: heavy-artillery last resort (WebRTC rendezvous, no fixed
-//     endpoint); currently gated off (see snowflakeReleaseGated).
-//
-// Per-network memory can still promote whatever last worked here ahead of this
-// default (see reorderByMemory).
-var autoCascadeOrder = []string{"cloak", "reality", "shadowsocks", "hysteria2", "naive", "snowflake"}
-
-// autoCascade builds the auto-mode candidate list in autoCascadeOrder, keeping
-// only the transports this profile actually configures.
-func (s *Service) autoCascade(profile *state.Profile) []transportCandidate {
-	candidates := make([]transportCandidate, 0, len(autoCascadeOrder))
-	for _, kind := range autoCascadeOrder {
-		if start, ok := s.transportStarter(profile, kind); ok {
-			candidates = append(candidates, transportCandidate{kind, start})
-		}
-	}
-	return candidates
-}
-
-// transportStarter returns the start func for kind if the profile can attempt
-// it: Cloak is always available; the others require their optional profile
-// block, and Snowflake is additionally gated off for this release.
-func (s *Service) transportStarter(profile *state.Profile, kind string) (transportStartFn, bool) {
+// StarterFor makes Service a transport.Starter: Cloak is always available, the
+// others need their profile block, and Snowflake is release-gated here.
+func (s *Service) StarterFor(profile *state.Profile, kind string) (transport.StartFn, transport.Availability) {
 	switch kind {
 	case "cloak":
-		return s.startCloakTransport, true
+		return s.startCloakTransport, transport.Available
 	case "reality":
 		if profile.Reality == nil {
-			return nil, false
+			return nil, transport.NotConfigured
 		}
-		return s.startRealityTransport, true
+		return s.startRealityTransport, transport.Available
 	case "hysteria2":
 		if profile.Hysteria2 == nil {
-			return nil, false
+			return nil, transport.NotConfigured
 		}
-		return s.startHysteria2Transport, true
+		return s.startHysteria2Transport, transport.Available
 	case "naive":
 		if profile.Naive == nil {
-			return nil, false
+			return nil, transport.NotConfigured
 		}
-		return s.startNaiveTransport, true
+		return s.startNaiveTransport, transport.Available
 	case "shadowsocks":
 		if profile.Shadowsocks == nil {
-			return nil, false
+			return nil, transport.NotConfigured
 		}
-		return s.startShadowsocksTransport, true
+		return s.startShadowsocksTransport, transport.Available
 	case "snowflake":
-		if snowflakeReleaseGated || profile.Snowflake == nil {
-			return nil, false
+		if snowflakeReleaseGated {
+			return nil, transport.Unavailable
 		}
-		return s.startSnowflakeTransport, true
+		if profile.Snowflake == nil {
+			return nil, transport.NotConfigured
+		}
+		return s.startSnowflakeTransport, transport.Available
 	default:
-		return nil, false
+		return nil, transport.NotConfigured
 	}
 }
 
@@ -903,8 +816,8 @@ func (s *Service) transportStarter(profile *state.Profile, kind string) (transpo
 // is the fallback chain; with a specific transport there is a single candidate
 // and no fallback.
 func (s *Service) startTransportWithHandshake(ctx context.Context, profile *state.Profile, wireGuardProfile *state.WireGuardProfile, preferredTransport, networkKey string) (string, error) {
-	autoMode := preferredTransport == "" || preferredTransport == "auto"
-	candidates, err := s.transportCandidates(profile, preferredTransport)
+	autoMode := transport.IsAuto(preferredTransport)
+	candidates, err := transport.Select(profile, preferredTransport, s)
 	if err != nil {
 		return "", err
 	}
@@ -912,19 +825,19 @@ func (s *Service) startTransportWithHandshake(ctx context.Context, profile *stat
 
 	var failures []string
 	for i, candidate := range candidates {
-		if err := s.bringUpTransport(ctx, profile, wireGuardProfile, candidate.kind, candidate.start); err != nil {
+		if err := s.bringUpTransport(ctx, profile, wireGuardProfile, candidate.Kind, candidate.Start); err != nil {
 			// A cancelled context means Disconnect interrupted us; stop trying.
 			if ctx.Err() != nil {
 				return "", ctx.Err()
 			}
 			failures = append(failures, err.Error())
-			s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("%s transport did not establish a tunnel: %v", candidate.kind, err))
+			s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("%s transport did not establish a tunnel: %v", candidate.Kind, err))
 			continue
 		}
 		if i > 0 {
-			s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("fell back to %s transport", candidate.kind))
+			s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("fell back to %s transport", candidate.Kind))
 		}
-		return candidate.kind, nil
+		return candidate.Kind, nil
 	}
 
 	if !autoMode && len(failures) == 1 {
@@ -943,37 +856,16 @@ func (s *Service) currentNetworkKey() string {
 	return s.networkKey()
 }
 
-// reorderByMemory moves the transport last known to work on this network to the
-// front of the auto-mode candidate list, so a repeat connect on a familiar
-// network tries the winner first instead of walking the whole cascade. Only
-// applies in auto mode; a specific-transport request is left untouched.
-func (s *Service) reorderByMemory(candidates []transportCandidate, preferredTransport, networkKey string) []transportCandidate {
-	if s.transportMemory == nil || len(candidates) < 2 {
+// reorderByMemory promotes the last-good transport for this network, logging
+// the promotion. Ordering itself lives in transport.ReorderByMemory.
+func (s *Service) reorderByMemory(candidates []transport.Candidate, preferredTransport, networkKey string) []transport.Candidate {
+	if s.transportMemory == nil {
 		return candidates
 	}
-	if preferredTransport != "" && preferredTransport != "auto" {
-		return candidates
+	reordered, promoted := transport.ReorderByMemory(candidates, preferredTransport, networkKey, s.transportMemory)
+	if promoted != "" {
+		s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("trying %s first (last worked on this network)", promoted))
 	}
-	remembered, ok := s.transportMemory.Lookup(networkKey)
-	if !ok {
-		return candidates
-	}
-	idx := -1
-	for i, candidate := range candidates {
-		if candidate.kind == remembered {
-			idx = i
-			break
-		}
-	}
-	if idx <= 0 {
-		// Not configured for this profile, or already first — nothing to do.
-		return candidates
-	}
-	reordered := make([]transportCandidate, 0, len(candidates))
-	reordered = append(reordered, candidates[idx])
-	reordered = append(reordered, candidates[:idx]...)
-	reordered = append(reordered, candidates[idx+1:]...)
-	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("trying %s first (last worked on this network)", remembered))
 	return reordered
 }
 
@@ -996,7 +888,7 @@ func (s *Service) rememberTransport(networkKey, kind string) {
 // (not a merely started process) the success criterion is what lets a dead
 // server fall through to the next transport, and what lets Cloak — which
 // cannot prove its own session at start time — be validated here instead.
-func (s *Service) bringUpTransport(ctx context.Context, profile *state.Profile, wireGuardProfile *state.WireGuardProfile, kind string, start transportStartFn) (err error) {
+func (s *Service) bringUpTransport(ctx context.Context, profile *state.Profile, wireGuardProfile *state.WireGuardProfile, kind string, start transport.StartFn) (err error) {
 	defer func() {
 		if err != nil {
 			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 2*time.Second)

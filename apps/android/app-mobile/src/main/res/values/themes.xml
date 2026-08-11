@@ -1,0 +1,3 @@
+<resources>
+    <style name="Theme.Pangea" parent="android:Theme.DeviceDefault.NoActionBar" />
+</resources>

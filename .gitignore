@@ -26,6 +26,7 @@ apps/android/.gradle/
 apps/android/.kotlin/
 apps/android/**/build/
 apps/android/local.properties
+daemon/internal/naive/android/
 apps/android/core/libs/*.aar
 apps/android/core/libs/*.jar
 
@@ -50,3 +51,6 @@ Thumbs.db
 # pnpm (not adopted yet — npm/package-lock.json is authoritative)
 pnpm-lock.yaml
 pnpm-workspace.yaml
+apps/android/keystore.properties
+apps/android/*.jks
+apps/android/*.keystore

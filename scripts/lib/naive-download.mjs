@@ -31,6 +31,10 @@ const ASSET_SHA256 = {
   }
 };
 
+// Empty until the Android asset ships in a tagged release; empty falls back
+// to HTTPS trust, same as the other platforms.
+const ANDROID_SHA256 = "";
+
 // ensurePangeaNaiveLib returns { libDir, headerDir, libName } for the pinned
 // prebuilt, downloading + caching under .cache on first use, or null if it
 // can't fetch.
@@ -40,13 +44,37 @@ export function ensurePangeaNaiveLib(goArch, rootDir) {
   if (!assetArch || !osAsset) {
     return null;
   }
+  return fetchPangeaNaive({
+    assetStem: `${osAsset.prefix}${assetArch}`,
+    libName: osAsset.libName,
+    expectedSha: (ASSET_SHA256[process.platform] ?? {})[assetArch],
+    label: goArch,
+    rootDir
+  });
+}
 
-  const assetStem = `${osAsset.prefix}${assetArch}`;
+// The Android engine is arm64-v8a only, so gomobile's other ABIs build the
+// unlinked variant and their cascade ends at Hysteria2.
+export const ANDROID_ABI = "arm64-v8a";
+
+// ensurePangeaNaiveAndroidLib caches the Android archive and returns its
+// directory, or null when it can't be fetched.
+export function ensurePangeaNaiveAndroidLib(rootDir) {
+  return fetchPangeaNaive({
+    assetStem: `pangea-naive-android-${ANDROID_ABI}`,
+    libName: "libpangea_naive.a",
+    expectedSha: ANDROID_SHA256,
+    label: `android/${ANDROID_ABI}`,
+    rootDir
+  });
+}
+
+function fetchPangeaNaive({ assetStem, libName, expectedSha, label, rootDir }) {
   const cacheDir = path.join(rootDir, ".cache", "pangea-naive", RELEASE_TAG, assetStem);
-  const libPath = path.join(cacheDir, osAsset.libName);
+  const libPath = path.join(cacheDir, libName);
   const headerPath = path.join(cacheDir, "pangea_naive_capi.h");
   if (fs.existsSync(libPath) && fs.existsSync(headerPath)) {
-    return { libDir: cacheDir, headerDir: cacheDir, libName: osAsset.libName };
+    return { libDir: cacheDir, headerDir: cacheDir, libName };
   }
 
   const asset = `${assetStem}.zip`;
@@ -60,11 +88,10 @@ export function ensurePangeaNaiveLib(goArch, rootDir) {
     shell: false
   });
   if (curl.error || (curl.status ?? 1) !== 0) {
-    console.warn(`naive_cgo: failed to download ${url}; naive transport falls back to the stub for ${goArch}.`);
+    console.warn(`naive_cgo: failed to download ${url}; naive transport falls back to the stub for ${label}.`);
     return null;
   }
 
-  const expectedSha = (ASSET_SHA256[process.platform] ?? {})[assetArch];
   if (expectedSha) {
     const actual = sha256File(zipPath);
     if (actual !== expectedSha) {
@@ -78,12 +105,12 @@ export function ensurePangeaNaiveLib(goArch, rootDir) {
 
   // The .zip holds a top <assetStem>/ dir.
   if (!extractZip(zipPath, cacheDir)) {
-    console.warn(`naive_cgo: failed to extract ${asset}; naive transport falls back to the stub for ${goArch}.`);
+    console.warn(`naive_cgo: failed to extract ${asset}; naive transport falls back to the stub for ${label}.`);
     return null;
   }
 
   const extractedDir = path.join(cacheDir, assetStem);
-  for (const name of [osAsset.libName, "pangea_naive_capi.h"]) {
+  for (const name of [libName, "pangea_naive_capi.h"]) {
     const src = path.join(extractedDir, name);
     const dst = path.join(cacheDir, name);
     if (fs.existsSync(src)) {
@@ -94,10 +121,10 @@ export function ensurePangeaNaiveLib(goArch, rootDir) {
   fs.rmSync(zipPath, { force: true });
 
   if (!fs.existsSync(libPath) || !fs.existsSync(headerPath)) {
-    console.warn(`naive_cgo: ${asset} did not contain the expected lib/header; falling back to the stub for ${goArch}.`);
+    console.warn(`naive_cgo: ${asset} did not contain the expected lib/header; falling back to the stub for ${label}.`);
     return null;
   }
-  return { libDir: cacheDir, headerDir: cacheDir, libName: osAsset.libName };
+  return { libDir: cacheDir, headerDir: cacheDir, libName };
 }
 
 function sha256File(filePath) {
@@ -106,11 +133,16 @@ function sha256File(filePath) {
   return hash.digest("hex");
 }
 
-// Extracts a .zip into destDir. Prefers tar (bsdtar handles zip; the default
-// tar on macOS and Windows), falls back to PowerShell Expand-Archive on
-// Windows — GNU tar (some Git-for-Windows shells) can't read zips. Returns
-// true on success.
-function extractZip(zipPath, destDir) {
+// Extracts a .zip into destDir. Three readers because none covers all hosts:
+// GNU tar cannot read zips at all, and Windows has no unzip.
+export function extractZip(zipPath, destDir) {
+  const unzip = spawnSync("unzip", ["-o", "-q", zipPath, "-d", destDir], {
+    stdio: "inherit",
+    shell: false
+  });
+  if (!unzip.error && (unzip.status ?? 1) === 0) {
+    return true;
+  }
   const bsd = spawnSync("tar", ["-xf", zipPath, "-C", destDir], { stdio: "inherit", shell: false });
   if (!bsd.error && (bsd.status ?? 1) === 0) {
     return true;

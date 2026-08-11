@@ -2,7 +2,7 @@ name: "CodeQL Advanced"
 
 on:
   push:
-    branches: [ "master" ]
+    branches: [ "master", "android" ]
     paths-ignore:
       - 'docs/**'
       - '**.md'
@@ -10,7 +10,7 @@ on:
       - '.gitignore'
       - '.gitattributes'
   pull_request:
-    branches: [ "master" ]
+    branches: [ "master", "android" ]
     paths-ignore:
       - 'docs/**'
       - '**.md'
@@ -29,11 +29,16 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  # Only used to build the AAR that Gradle needs to configure; naive is not
+  # linked here, so this need only track build-android.yml loosely.
+  ANDROID_NDK: '30.0.14904198'
+
 jobs:
   analyze:
     name: Analyze (${{ matrix.language }}${{ matrix.goos && format(', {0}', matrix.goos) || '' }})
     runs-on: ${{ matrix.runs-on }}
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     permissions:
       security-events: write
@@ -72,17 +77,66 @@ jobs:
             runs-on: macos-latest
             goos: darwin
 
+          # daemon/mobile is entirely //go:build android, so the three desktop
+          # variants above never see it. Only ./mobile/... builds for android.
+          - language: go
+            build-mode: manual
+            runs-on: ubuntu-latest
+            goos: android
+            goarch: arm64
+            build-target: ./mobile/...
+
+          # apps/android Kotlin. build-mode none extracts Java but not Kotlin,
+          # and this tree is all Kotlin, so it has to be a real Gradle compile.
+          - language: java-kotlin
+            build-mode: manual
+            runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
 
       - name: Set up Go
-        if: matrix.language == 'go'
+        if: matrix.language == 'go' || matrix.language == 'java-kotlin'
         uses: actions/setup-go@v7
         with:
           go-version-file: 'daemon/go.mod'
           cache: true
           cache-dependency-path: 'daemon/go.sum'
+
+      # :core resolves the gomobile AAR as a module, so Gradle cannot even
+      # configure without it. Built before init: it is Go, not Kotlin.
+      - name: Set up the Android build
+        if: matrix.language == 'java-kotlin'
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up the Android SDK
+        if: matrix.language == 'java-kotlin'
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+
+      # Keep in step with ANDROID_NDK in build-android.yml.
+      - name: Install the NDK
+        if: matrix.language == 'java-kotlin'
+        run: sdkmanager --install "ndk;${{ env.ANDROID_NDK }}"
+
+      - name: Build the gomobile AAR
+        if: matrix.language == 'java-kotlin'
+        working-directory: daemon
+        env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/${{ env.ANDROID_NDK }}
+        run: |
+          go install golang.org/x/mobile/cmd/gomobile@latest
+          go install golang.org/x/mobile/cmd/gobind@latest
+          gomobile init
+          mkdir -p ../apps/android/core/libs
+          gomobile bind -target=android/arm64 -androidapi 24 \
+            -javapkg=org.pangeavpn \
+            -ldflags=-checklinkname=0 \
+            -o ../apps/android/core/libs/pangeacore.aar \
+            ./mobile
 
       - name: Set up Node
         if: matrix.language == 'javascript-typescript'
@@ -107,10 +161,22 @@ jobs:
         working-directory: daemon
         env:
           GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          BUILD_TARGET: ${{ matrix.build-target }}
           CGO_ENABLED: 0
         run: |
-          echo "Building Go daemon for GOOS=$GOOS"
-          go build -trimpath -buildvcs=false ./...
+          # Empty is not a valid GOARCH, so let Go pick its own default.
+          [ -n "$GOARCH" ] || unset GOARCH
+          target="${BUILD_TARGET:-./...}"
+          echo "Building Go daemon for GOOS=$GOOS GOARCH=${GOARCH:-host} target=$target"
+          go build -trimpath -buildvcs=false "$target"
+
+      # compileDebugKotlin, not assemble: extraction needs the compiler to run,
+      # not an APK. Pulls in :core and :ui-common as dependencies.
+      - name: Compile Kotlin
+        if: matrix.language == 'java-kotlin'
+        working-directory: apps/android
+        run: ./gradlew --no-daemon :app-mobile:compileDebugKotlin :app-tv:compileDebugKotlin
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v4

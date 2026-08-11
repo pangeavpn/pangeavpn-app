@@ -256,8 +256,8 @@ The daemon's automatic preference is:
 Only transports configured in the selected profile are candidates. Cloak is
 required by the current profile model. Snowflake is implemented but removed
 from release candidates by `snowflakeReleaseGated`. NaiveProxy is available only
-when the daemon was built with its native CGO engine; otherwise a stub reports
-it as unavailable.
+when the build linked its native CGO engine — desktop when the native inputs
+resolve, Android on arm64-v8a only; otherwise a stub reports it as unavailable.
 
 A remembered last-good transport for the current network can be promoted to the
 front of the list. Every candidate must start successfully and complete a real
@@ -284,7 +284,7 @@ Application traffic
 | Cloak | [`daemon/internal/cloak`](../daemon/internal/cloak) using the Pangea Cloak Go module | Enabled; baseline transport |
 | VLESS + REALITY | [`daemon/internal/reality`](../daemon/internal/reality) using embedded sing-box/uTLS | Enabled when provisioned |
 | Hysteria2 | [`daemon/internal/hysteria2`](../daemon/internal/hysteria2) using embedded sing-box/QUIC | Enabled when provisioned |
-| NaiveProxy | [`daemon/internal/naive`](../daemon/internal/naive) with a CGO-linked native engine and in-process relay | Windows/macOS builds when native inputs resolve; release CI requires it |
+| NaiveProxy | [`daemon/internal/naive`](../daemon/internal/naive) with a CGO-linked native engine and in-process relay | Windows/macOS builds when native inputs resolve (release CI requires it); Android arm64-v8a |
 | Shadowsocks | [`daemon/internal/shadowsocks`](../daemon/internal/shadowsocks) using embedded sing-box (AEAD / SS-2022) | Enabled when provisioned |
 | Snowflake | [`daemon/internal/snowflake`](../daemon/internal/snowflake) using the Tor Snowflake library | Implemented but release-gated |
 

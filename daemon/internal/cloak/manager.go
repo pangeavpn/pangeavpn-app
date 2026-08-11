@@ -31,6 +31,12 @@ func NewManager(logs *state.LogStore) Manager {
 	return &inProcessManager{logs: logs}
 }
 
+// DialerControl, when non-nil, is installed as the Control func on the
+// net.Dialer used for outbound Cloak session dials. Mobile platforms use this
+// to route the dial's raw fd through a VPN socket-protect callback so the
+// dial itself doesn't get captured by the TUN. Desktop leaves this nil.
+var DialerControl func(network, address string, c syscall.RawConn) error
+
 type inProcessManager struct {
 	mu            sync.RWMutex
 	logs          *state.LogStore
@@ -145,7 +151,11 @@ func (m *inProcessManager) Start(ctx context.Context, profile state.CloakProfile
 	hook := &logStoreHook{logs: m.logs}
 	log.AddHook(hook)
 
-	dialer := &cancellableDialer{ctx: sessionCtx, dialer: &net.Dialer{}}
+	netDialer := &net.Dialer{}
+	if DialerControl != nil {
+		netDialer.Control = DialerControl
+	}
+	dialer := &cancellableDialer{ctx: sessionCtx, dialer: netDialer}
 
 	var sessionCounter uint32
 	newSession := func() *mux.Session {

@@ -102,6 +102,10 @@ type Manager struct {
 	generation uint64
 }
 
+// ProtectPath, when set, is the unix socket sing-box's dialer hands each new
+// outbound fd to. Mobile points it at VpnService.protect(); desktop leaves it "".
+var ProtectPath string
+
 func NewManager(logs *state.LogStore) *Manager {
 	return &Manager{logs: logs}
 }
@@ -273,6 +277,7 @@ func (m *Manager) Start(ctx context.Context, profile state.RealityProfile) error
 // registers option.VLESSOutboundOptions).
 func buildOutboundOptions(profile state.RealityProfile, remoteHost string, remotePort int, serverName string) *option.VLESSOutboundOptions {
 	return &option.VLESSOutboundOptions{
+		DialerOptions: option.DialerOptions{ProtectPath: ProtectPath},
 		ServerOptions: option.ServerOptions{Server: remoteHost, ServerPort: uint16(remotePort)},
 		UUID:          profile.UUID,
 		// This transport only relays WireGuard UDP. xtls-rprx-vision (and any
