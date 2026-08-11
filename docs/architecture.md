@@ -360,6 +360,31 @@ and kill switch. It can restart a stopped transport, mark the session errored
 when critical components disappear, or rebuild a session after a stale
 WireGuard handshake.
 
+Two further checks cover the ways a session can look healthy and not work.
+
+The first is host DNS. Windows gives an interface's resolvers to whoever wrote
+last and notifies nobody, so another VPN client's DNS enforcement — or a Windows
+component re-profiling the adapter — can take them over mid-session, and every
+name lookup on the machine fails while the tunnel itself is fine. Bring-up
+applying DNS once is not enough, so every health tick reads the tunnel
+interface's resolvers back and re-applies them if they no longer match. A
+correction is logged and then held off for 30s, which keeps two writers from
+trading writes every three seconds and leaves a readable trail when they are.
+
+The second is the data path. A live handshake is not proof: handshake packets are
+~150 bytes and the peer answers them from the node itself, so a relay that has
+stopped forwarding — or a path that has stopped passing anything full-sized —
+leaves the session rekeying every two minutes while nothing the user does works;
+a browser reports that as a DNS probe error on a connection the app still calls
+connected. So every 30s the loop also resolves over the tunnel, querying the
+session's own resolvers for the root NS set. That query is raw UDP and does not
+go through the OS resolver, so it tests the tunnel rather than host name
+resolution — the check above covers that. Any well-formed reply counts, including an error
+RCODE: the probe asks whether the round trip still happens, not whether the
+resolver liked the question. Three consecutive failed rounds rebuild the
+session, and a five-minute cooldown between probe-driven rebuilds keeps a node
+that answers handshakes but never carries traffic from being rebuilt on a loop.
+
 A rebuild that fails does not end the session. The health loop keeps retrying
 from `ERROR` on a 2s→60s backoff for as long as the profile is still the user's
 — `DISCONNECT` clears it, nothing else does — because the kill switch stays

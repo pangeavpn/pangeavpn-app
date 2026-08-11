@@ -284,3 +284,10 @@ func restoreDarwinDNSServers(overrides []darwinDNSOverride) error {
 	}
 	return nil
 }
+
+// ensureSessionDNS is Windows-only for now: there, interface DNS belongs to
+// whoever wrote last, so it has to be re-asserted. macOS holds the per-service
+// overrides applied at bring-up until they are restored.
+func ensureSessionDNS(_ *tunnelSession, _ []string) (bool, error) {
+	return false, nil
+}

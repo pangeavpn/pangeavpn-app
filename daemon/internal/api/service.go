@@ -146,6 +146,23 @@ type Service struct {
 	recoveryNextAt   time.Time
 	healthHoldUntil  time.Time
 
+	// dnsProbe* schedule the end-to-end data-path check: when the next round is
+	// due, how many consecutive rounds have failed, and the earliest a
+	// probe-driven rebuild may fire again. Guarded by recoveryMu.
+	dnsProbeNextAt     time.Time
+	dnsProbeFailures   int
+	dnsProbeQuietUntil time.Time
+
+	// dnsGuardNextAt is the earliest the DNS guard may run again. Zero means
+	// every health tick, which is the normal state; it is pushed out only after
+	// a correction. Guarded by recoveryMu.
+	dnsGuardNextAt time.Time
+
+	// probeResolver resolves over the live tunnel to prove it still carries
+	// traffic. Defaults to probeResolverOverUDP; tests stub it, and a nil value
+	// disables the check.
+	probeResolver func(ctx context.Context, server string) error
+
 	// recoveryDelays is the backoff between reconnect attempts; the last entry
 	// repeats for every attempt beyond it. Tests shorten it.
 	recoveryDelays []time.Duration
@@ -162,6 +179,13 @@ type wgPreflightChecker interface {
 
 type wgActiveInterfaceReporter interface {
 	ActiveInterfaceName(ctx context.Context, profile state.WireGuardProfile) (string, error)
+}
+
+// wgDNSGuard re-asserts the tunnel's resolvers when the host has stopped
+// pointing at them, reporting whether it corrected anything. Optional: a manager
+// that does not implement it leaves host DNS alone after bring-up.
+type wgDNSGuard interface {
+	EnsureDNS(ctx context.Context, profile state.WireGuardProfile) (bool, error)
 }
 
 var wgListenPortPattern = regexp.MustCompile(`(?im)^\s*ListenPort\s*=\s*(\d+)\s*$`)
@@ -229,6 +253,7 @@ func NewService(
 		handshakeTimeout: defaultWireGuardHandshakeTimeout,
 		networkKey:       currentNetworkKey,
 		recoveryDelays:   defaultRecoveryDelays,
+		probeResolver:    probeResolverOverUDP,
 	}
 }
 
@@ -1642,6 +1667,16 @@ func (s *Service) runHealthCheck(ctx context.Context) {
 		return
 	}
 
+	// Everything above says the session is up; these two ask whether it still
+	// works — whether the host still resolves through it, and whether the tunnel
+	// still carries anything.
+	s.ensureTunnelDNS(ctx, profile)
+
+	if s.dataPathIsDead(ctx, profile) {
+		s.attemptSessionRebuild(ctx, profile, "tunnel stopped carrying traffic")
+		return
+	}
+
 	s.resetRecovery()
 }
 
@@ -1786,6 +1821,10 @@ func (s *Service) holdHealthChecks(d time.Duration) {
 	s.healthHoldUntil = time.Now().Add(d)
 	s.recoveryAttempts = 0
 	s.recoveryNextAt = time.Time{}
+	// Rounds that failed while the host was asleep say nothing about the network
+	// it woke up on, and the first probe should land after it has settled.
+	s.dnsProbeFailures = 0
+	s.dnsProbeNextAt = time.Now().Add(d + dnsProbeInterval)
 }
 
 func (s *Service) healthHeld() bool {
@@ -2214,20 +2253,26 @@ func (s *Service) cloakStatusForProfile(ctx context.Context, profile state.Profi
 	return cloakStatus
 }
 
+// setCurrentProfile and clearCurrentProfile release profileMu before touching
+// the probe schedule: recoveryMu is taken on its own everywhere else, and
+// nesting it under profileMu here would be the only place with an ordering.
 func (s *Service) setCurrentProfile(profile state.Profile) {
 	s.profileMu.Lock()
-	defer s.profileMu.Unlock()
-
 	copyProfile := profile
 	copyProfile.WireGuard.DNS = append([]string(nil), profile.WireGuard.DNS...)
 	copyProfile.WireGuard.BypassHosts = append([]string(nil), profile.WireGuard.BypassHosts...)
 	s.currentProfile = &copyProfile
+	s.profileMu.Unlock()
+
+	s.resetDNSProbe()
 }
 
 func (s *Service) clearCurrentProfile() {
 	s.profileMu.Lock()
-	defer s.profileMu.Unlock()
 	s.currentProfile = nil
+	s.profileMu.Unlock()
+
+	s.endDNSProbeSession()
 }
 
 func (s *Service) setSessionOpts(opts ConnectOptions) {

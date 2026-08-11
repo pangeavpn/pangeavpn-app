@@ -433,6 +433,38 @@ func mergeDNSServers(configDNS []string, profileDNS []string) []string {
 	return uniqueStringsPreserveOrder(merged)
 }
 
+// EnsureDNS re-asserts the live session's resolvers on the host and reports
+// whether it had to correct anything. A tunnel can carry traffic perfectly and
+// still leave the user with nothing resolving, if the host stops pointing at the
+// resolvers bring-up gave it; the tunnel cannot see that from the inside.
+func (m *wireGuardGoManager) EnsureDNS(_ context.Context, profile state.WireGuardProfile) (bool, error) {
+	if strings.TrimSpace(profile.TunnelName) == "" {
+		return false, nil
+	}
+	session, ok := m.session(sanitizeTunnelName(profile.TunnelName))
+	if !ok || session == nil {
+		return false, nil
+	}
+
+	want := Resolvers(profile)
+	if len(want) == 0 {
+		return false, nil
+	}
+	return ensureSessionDNS(session, want)
+}
+
+// Resolvers reports the DNS servers a session brings the interface up with,
+// applying the same config-then-profile merge Start does. The health check uses
+// them to probe the tunnel end to end; an unparseable config falls back to the
+// profile's own list rather than reporting none.
+func Resolvers(profile state.WireGuardProfile) []string {
+	parsed, err := parseUserlandConfig(profile.ConfigText)
+	if err != nil {
+		return uniqueStringsPreserveOrder(profile.DNS)
+	}
+	return mergeDNSServers(parsed.dnsServers, profile.DNS)
+}
+
 func validateParsedIPv4Only(parsed parsedUserlandConfig) ([]string, error) {
 	if err := validateIPv4InterfaceAddresses(parsed.addresses); err != nil {
 		return nil, err

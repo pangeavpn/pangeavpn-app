@@ -9,6 +9,7 @@ import (
 	"math"
 	"net"
 	"net/netip"
+	"slices"
 	"strings"
 
 	"golang.org/x/sys/windows"
@@ -205,6 +206,55 @@ func applyWindowsDNSServers(luid winipcfg.LUID, dnsServers []string) error {
 	}
 
 	return errors.Join(errs...)
+}
+
+// ensureSessionDNS re-applies want to the tunnel interface when the host has
+// stopped pointing at exactly those resolvers, reporting whether it had to
+// correct anything.
+//
+// Windows hands interface DNS to whoever wrote last and tells nobody. Another
+// VPN client's DNS enforcement, or a Windows component re-profiling the adapter,
+// can take it over mid-session — and a tunnel carrying traffic perfectly still
+// leaves the user with no name resolution when that happens. Nothing inside the
+// tunnel can see it, so the health loop has to look.
+func ensureSessionDNS(session *tunnelSession, want []string) (bool, error) {
+	if session == nil || session.windowsLUID == 0 {
+		return false, nil
+	}
+	luid := winipcfg.LUID(session.windowsLUID)
+
+	wanted4, _, err := parseWindowsDNSAddrs(want)
+	if err != nil {
+		return false, err
+	}
+	if len(wanted4) == 0 {
+		return false, nil
+	}
+
+	current, err := luid.DNS()
+	if err != nil {
+		return false, fmt.Errorf("read interface DNS: %w", err)
+	}
+	if windowsDNSMatches(current, wanted4) {
+		return false, nil
+	}
+	if err := luid.SetDNS(windowsFamilyV4, wanted4, nil); err != nil {
+		return false, fmt.Errorf("re-apply IPv4 DNS: %w", err)
+	}
+	return true, nil
+}
+
+// windowsDNSMatches reports whether the interface's IPv4 resolvers are exactly
+// want, in order — order is preference, so a reordered list is a real change.
+// The v6 list is ignored: the tunnel is IPv4-only and bring-up clears it.
+func windowsDNSMatches(current []netip.Addr, want []netip.Addr) bool {
+	got := make([]netip.Addr, 0, len(want))
+	for _, addr := range current {
+		if unmapped := addr.Unmap(); unmapped.Is4() {
+			got = append(got, unmapped)
+		}
+	}
+	return slices.Equal(got, want)
 }
 
 func addWindowsEndpointRoutes(ctx context.Context, tunnelLUID uint64, endpointHosts []string) ([]windowsRouteSpec, error) {

@@ -385,6 +385,22 @@ type fakeWGManager struct {
 	// lastStartConfig is the config text of the most recent Start, for
 	// asserting the peer Endpoint the tunnel was actually brought up against.
 	lastStartConfig string
+
+	// DNS guard modeling. The method below is what makes fakeWGManager satisfy
+	// wgDNSGuard, so every connected health tick exercises the guard; the
+	// defaults report a host still pointing at the tunnel's resolvers.
+	dnsGuardCorrected bool
+	dnsGuardErr       error
+	dnsGuardCalls     int
+}
+
+// EnsureDNS models the host's interface DNS being checked, and corrected when
+// something else has taken it over.
+func (f *fakeWGManager) EnsureDNS(_ context.Context, _ state.WireGuardProfile) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.dnsGuardCalls++
+	return f.dnsGuardCorrected, f.dnsGuardErr
 }
 
 func (f *fakeWGManager) Start(_ context.Context, profile state.WireGuardProfile) error {

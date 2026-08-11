@@ -506,3 +506,11 @@ func restoreLinuxDNSServers(override *linuxDNSOverride) error {
 		return fmt.Errorf("unsupported DNS mode: %s", override.mode)
 	}
 }
+
+// ensureSessionDNS is Windows-only for now: there, interface DNS belongs to
+// whoever wrote last, so it has to be re-asserted. systemd-resolved and
+// resolv.conf hold what was written until something rewrites the file, and
+// re-asserting either would mean re-running the whole apply path.
+func ensureSessionDNS(_ *tunnelSession, _ []string) (bool, error) {
+	return false, nil
+}
