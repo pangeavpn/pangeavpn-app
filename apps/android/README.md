@@ -71,8 +71,12 @@ into `daemon/internal/naive/android/arm64-v8a/` (gitignored). Add `-tags
 naive_cgo` to the `gomobile bind` above to link it; without the tag, or on the
 other three ABIs, the cascade simply ends at Hysteria2.
 
-It is arm64-v8a only on purpose: the archive is ~15 MB of Chromium per ABI, and
-everything since 2019 is 64-bit ARM. Chromium opens its own sockets, so the
+It is arm64-v8a only on purpose. Measured on the debug APK, linking it takes
+`lib/arm64-v8a/libgojni.so` from 27.3 MB to 43.9 MB (+16.6 MB); the other three
+ABIs come out byte-identical. Everything since 2019 is 64-bit ARM, so the ABIs
+paying nothing are also the ones nobody ships to.
+
+Chromium opens its own sockets, so the
 engine is handed a protect callback (`naive.ProtectFD`) that reaches
 `VpnService.protect()`; without it naive would dial its server through the TUN
 it is establishing and hang rather than fail.

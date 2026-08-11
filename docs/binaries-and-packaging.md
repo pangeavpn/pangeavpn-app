@@ -108,7 +108,7 @@ unavailable.
 | Windows x64/arm64 | Native CGO engine when inputs and `clang-cl` resolve |
 | macOS x64/arm64 | Native CGO engine when the matching archive resolves |
 | Linux x64/arm64 | Stub; the current native resolver has no Linux implementation |
-| Android arm64-v8a | Native CGO engine, linked into the gomobile AAR |
+| Android arm64-v8a | Native CGO engine, linked into the gomobile AAR (+16.6 MB) |
 | Android arm/x86/x86_64 | Unlinked; the cascade ends at Hysteria2 |
 | Windows/macOS CI | `PANGEA_REQUIRE_NAIVE=1` makes missing native support a build failure |
 
