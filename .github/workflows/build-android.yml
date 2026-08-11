@@ -30,6 +30,9 @@ env:
   GO_VERSION: '1.25.0'
   JAVA_VERSION: '17'
   ANDROID_API: '24'
+  # r30 to match the NDK Chromium 150 bundles: the naive archive carries that
+  # NDK's libc++abi, whose PAuth relocations r27's lld cannot read.
+  ANDROID_NDK: '30.0.14904198'
 
 jobs:
   go:
@@ -93,7 +96,7 @@ jobs:
       - uses: android-actions/setup-android@v3
 
       - name: Install the NDK
-        run: sdkmanager --install "ndk;27.2.12479018"
+        run: sdkmanager --install "ndk;${{ env.ANDROID_NDK }}"
 
       - name: Install gomobile
         run: |
@@ -126,7 +129,7 @@ jobs:
       - name: Build pangeacore.aar
         working-directory: daemon
         run: |
-          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/27.2.12479018"
+          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/${{ env.ANDROID_NDK }}"
           mkdir -p ../apps/android/core/libs
           gomobile bind -target=android -androidapi ${{ env.ANDROID_API }} \
             -javapkg=org.pangeavpn \

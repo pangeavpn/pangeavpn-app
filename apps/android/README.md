@@ -22,7 +22,9 @@ The Go layer exposes a JSON API (`Login`, `ListServers`, `Prepare`, `Start(fd)`,
 ## Prerequisites
 
 - Android SDK (compileSdk 35) + platform-tools
-- Android NDK
+- Android NDK r30 (`ANDROID_NDK` in `.github/workflows/build-android.yml`). Older
+  NDKs are fine until you link the naive engine, whose libc++abi carries PAuth
+  relocations r27's lld rejects.
 - JDK 17
 - Go 1.25+ and `gomobile`:
   ```bash
