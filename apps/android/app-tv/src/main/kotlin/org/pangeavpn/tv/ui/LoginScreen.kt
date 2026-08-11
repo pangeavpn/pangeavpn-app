@@ -28,6 +28,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.tv.material3.Button
 import androidx.tv.material3.Text as TvText
+import org.pangeavpn.core.util.formatAccountNumberInput
 import org.pangeavpn.core.viewmodel.LoginViewModel
 import org.pangeavpn.ui.R
 import org.pangeavpn.ui.components.BrandLogo
@@ -77,7 +78,7 @@ fun LoginScreen(loginViewModel: LoginViewModel) {
 
         OutlinedTextField(
             value = token,
-            onValueChange = { token = it },
+            onValueChange = { token = formatAccountNumberInput(it) },
             placeholder = { Text(stringResource(R.string.login_token_placeholder)) },
             singleLine = true,
             isError = state.error != null,

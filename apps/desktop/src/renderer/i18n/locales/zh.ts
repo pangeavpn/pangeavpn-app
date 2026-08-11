@@ -19,15 +19,15 @@ export const zh = {
   "daemonRecovery.tryAgain": "重试",
 
   // ── Login screen ──────────────────────────────────────
-  "login.subtitle": "输入登录令牌以继续。",
-  "login.getToken": "获取您的令牌",
-  "login.tokenPlaceholder": "0000000000000000",
-  "login.tokenAriaLabel": "登录令牌",
+  "login.subtitle": "输入您的账号以继续。旧的登录令牌同样可用。",
+  "login.getToken": "查找您的账号",
+  "login.tokenPlaceholder": "ABCD-EFGH-JKMN-PQRS-TVWX-YZ01",
+  "login.tokenAriaLabel": "账号",
   "login.signIn": "登录",
-  "login.cachedTokenAriaLabel": "使用已保存的令牌登录",
-  "login.enterToken": "请输入您的 VPN 令牌。",
+  "login.cachedTokenAriaLabel": "使用已保存的账号登录",
+  "login.enterToken": "请输入您的账号。",
   "login.signingIn": "正在登录...",
-  "login.invalidToken": "VPN 令牌无效。",
+  "login.invalidToken": "账号无效。",
   "login.signInFailed": "登录失败。",
 
   // ── Device-limit screen ───────────────────────────────

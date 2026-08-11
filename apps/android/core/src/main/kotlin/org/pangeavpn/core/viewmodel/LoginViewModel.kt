@@ -43,7 +43,7 @@ class LoginViewModel(app: Application) : AndroidViewModel(app) {
 
     fun login(token: String) {
         if (token.isBlank()) {
-            _state.value = _state.value.copy(error = "Enter your access token")
+            _state.value = _state.value.copy(error = "Enter your account number")
             return
         }
         viewModelScope.launch {

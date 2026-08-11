@@ -38,7 +38,7 @@
     <string name="login_subtitle">Введите токен для входа, чтобы продолжить.</string>
     <string name="login_title">Войти</string>
     <string name="login_token_label">Токен</string>
-    <string name="login_token_placeholder">0000000000000000</string>
+    <string name="login_token_placeholder">ABCD-EFGH-JKMN-PQRS-TVWX-YZ01</string>
     <string name="region_auto_of">%1$s серверов · авто</string>
     <string name="region_best_of">%1$s · лучший из %2$s</string>
     <string name="region_more">ещё %1$s</string>

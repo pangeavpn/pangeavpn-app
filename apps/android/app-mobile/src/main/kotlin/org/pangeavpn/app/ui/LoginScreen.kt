@@ -37,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.pangeavpn.app.BuildConfig
 import org.pangeavpn.core.model.ConnState
+import org.pangeavpn.core.util.formatAccountNumberInput
 import org.pangeavpn.core.viewmodel.LoginUiState
 import org.pangeavpn.ui.R
 import org.pangeavpn.ui.components.DriftMap
@@ -52,15 +53,11 @@ import org.pangeavpn.ui.theme.StateError
 
 private const val ACCOUNT_URL = "https://pangeavpn.org/account"
 
-/**
- * Token sign-in, laid out on the same rhythm as [MainScreen] — map, kicker, headline,
- * then the labelled control and the accent pill — so the app looks like itself before
- * anyone has signed in. The map is drawn apart, which is exactly the state of things.
- *
- * On error it offers a way into [DeviceLimitScreen]: the hub error text for a device-limit
- * rejection isn't a distinct, guaranteed marker, so the affordance travels with any login
- * error rather than trying to pattern-match the message.
- */
+/** Account-number sign-in, on the same rhythm as [MainScreen] so the app looks like
+ *  itself before anyone signs in. The map is drawn apart, which is the state of things. */
+
+/** The [DeviceLimitScreen] affordance travels with any login error: the hub's
+ *  device-limit rejection carries no distinct marker to pattern-match. */
 @Composable
 fun LoginScreen(
     token: String,
@@ -121,7 +118,7 @@ fun LoginScreen(
                     )
                     TokenField(
                         value = token,
-                        onValueChange = onTokenChange,
+                        onValueChange = { onTokenChange(formatAccountNumberInput(it)) },
                         placeholder = stringResource(R.string.login_token_placeholder),
                         enabled = !uiState.loading,
                         isError = uiState.error != null,

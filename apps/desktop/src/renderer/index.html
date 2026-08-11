@@ -66,18 +66,16 @@
           </svg>
         </div>
         <h1 data-i18n="app.brand">Pangea VPN</h1>
-        <p class="login-subtitle"><span data-i18n="login.subtitle">Enter your sign-in token to continue.</span> <a class="login-link" id="loginDashboardLink" href="#" data-i18n="login.getToken">Get your token</a></p>
+        <p class="login-subtitle"><span data-i18n="login.subtitle">Enter your account number to continue. An older sign-in token still works.</span> <a class="login-link" id="loginDashboardLink" href="#" data-i18n="login.getToken">Find your account number</a></p>
         <input
           id="loginTokenInput"
           class="login-token-input"
           type="text"
-          inputmode="numeric"
-          maxlength="16"
-          placeholder="0000000000000000"
+          placeholder="ABCD-EFGH-JKMN-PQRS-TVWX-YZ01"
           data-i18n-placeholder="login.tokenPlaceholder"
           autocomplete="off"
           spellcheck="false"
-          aria-label="Sign-in token"
+          aria-label="Account number"
           data-i18n-aria-label="login.tokenAriaLabel"
         />
         <button id="cachedTokenBtn" class="cached-token-btn" type="button" hidden></button>

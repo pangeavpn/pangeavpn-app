@@ -38,7 +38,7 @@
     <string name="login_subtitle">Enter your sign-in token to continue.</string>
     <string name="login_title">Sign In</string>
     <string name="login_token_label">Token</string>
-    <string name="login_token_placeholder">0000000000000000</string>
+    <string name="login_token_placeholder">ABCD-EFGH-JKMN-PQRS-TVWX-YZ01</string>
     <string name="region_auto_of">%1$s servers · auto</string>
     <string name="region_best_of">%1$s · best of %2$s</string>
     <string name="region_more">%1$s more</string>

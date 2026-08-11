@@ -12,6 +12,7 @@ import { pickRandomServer, resolveSelection } from "./serverPick.js";
 import { buildDriftMap } from "./driftMap.js";
 import { dnsChoiceFor, dnsServersFor, type DnsChoice } from "./dnsPresets.js";
 import { buildFlag } from "./flags.js";
+import { formatAccountNumberInput, normalizeAccountNumber } from "./accountNumber.js";
 import {
   buildServerRetryOrder,
   groupRegions,
@@ -487,6 +488,15 @@ loginTokenInput.addEventListener("keydown", (e) => {
 });
 
 loginTokenInput.addEventListener("input", () => {
+  const formatted = formatAccountNumberInput(loginTokenInput.value);
+  if (formatted !== loginTokenInput.value) {
+    const caretAtEnd = loginTokenInput.selectionStart === loginTokenInput.value.length;
+    const caret = (loginTokenInput.selectionStart ?? 0) + (formatted.length - loginTokenInput.value.length);
+    loginTokenInput.value = formatted;
+    const position = caretAtEnd ? formatted.length : Math.max(0, caret);
+    loginTokenInput.setSelectionRange(position, position);
+  }
+
   const val = loginTokenInput.value.trim();
   if (val.length === 0) {
     loginTokenInput.style.borderColor = "";
@@ -784,7 +794,7 @@ menuDevicesBtn.addEventListener("click", () => {
 
 loginScreenBtn.addEventListener("click", async () => {
   if (!pangeaApi) return;
-  const token = loginTokenInput.value.trim();
+  const token = normalizeAccountNumber(loginTokenInput.value);
   if (!token) {
     loginScreenMessage.textContent = t("login.enterToken");
     return;

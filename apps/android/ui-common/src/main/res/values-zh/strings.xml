@@ -38,7 +38,7 @@
     <string name="login_subtitle">输入登录令牌以继续。</string>
     <string name="login_title">登录</string>
     <string name="login_token_label">令牌</string>
-    <string name="login_token_placeholder">0000000000000000</string>
+    <string name="login_token_placeholder">ABCD-EFGH-JKMN-PQRS-TVWX-YZ01</string>
     <string name="region_auto_of">%1$s 台服务器 · 自动</string>
     <string name="region_best_of">%1$s · %2$s 个中最优</string>
     <string name="region_more">还有 %1$s 个</string>

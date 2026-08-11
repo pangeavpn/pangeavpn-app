@@ -183,14 +183,14 @@ const MOBILE_ONLY = {
     zh: "打开 VPN 设置", ar: "فتح إعدادات VPN", fa: "باز کردن تنظیمات VPN"
   },
   tv_login_hint: {
-    en: "Get your token at pangeavpn.org/account",
-    es: "Obtén tu token en pangeavpn.org/account",
-    fr: "Obtenez votre jeton sur pangeavpn.org/account",
-    ru: "Получите токен на pangeavpn.org/account",
-    uk: "Отримайте токен на pangeavpn.org/account",
-    zh: "在 pangeavpn.org/account 获取您的令牌",
-    ar: "احصل على رمزك من pangeavpn.org/account",
-    fa: "توکن خود را در pangeavpn.org/account دریافت کنید"
+    en: "Find your account number at pangeavpn.org/account",
+    es: "Encuentra tu número de cuenta en pangeavpn.org/account",
+    fr: "Trouvez votre numéro de compte sur pangeavpn.org/account",
+    ru: "Номер аккаунта — на pangeavpn.org/account",
+    uk: "Номер акаунта — на pangeavpn.org/account",
+    zh: "在 pangeavpn.org/account 查找您的账号",
+    ar: "اعثر على رقم حسابك في pangeavpn.org/account",
+    fa: "شماره حساب خود را در pangeavpn.org/account پیدا کنید"
   },
   subscription_expires: {
     en: "Expires {date}", es: "Caduca el {date}", fr: "Expire le {date}",

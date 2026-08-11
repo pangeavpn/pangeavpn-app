@@ -8,6 +8,7 @@ import org.pangeavpn.core.model.Device
 import org.pangeavpn.core.model.Server
 import org.pangeavpn.core.model.Session
 import org.pangeavpn.core.model.Subscription
+import org.pangeavpn.core.util.normalizeAccountNumber
 
 /** Thin cache over [TunnelBridge] so screens share one session/server list. */
 object SessionRepository {
@@ -17,7 +18,7 @@ object SessionRepository {
     val servers: List<Server> get() = _session.value?.servers.orEmpty()
 
     suspend fun login(token: String): Session {
-        val result = TunnelBridge.login(token)
+        val result = TunnelBridge.login(normalizeAccountNumber(token))
         _session.value = result
         return result
     }

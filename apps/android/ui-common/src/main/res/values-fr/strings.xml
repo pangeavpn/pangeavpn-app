@@ -38,7 +38,7 @@
     <string name="login_subtitle">Saisissez votre jeton de connexion pour continuer.</string>
     <string name="login_title">Se connecter</string>
     <string name="login_token_label">Jeton</string>
-    <string name="login_token_placeholder">0000000000000000</string>
+    <string name="login_token_placeholder">ABCD-EFGH-JKMN-PQRS-TVWX-YZ01</string>
     <string name="region_auto_of">%1$s serveurs · auto</string>
     <string name="region_best_of">%1$s · meilleur sur %2$s</string>
     <string name="region_more">%1$s de plus</string>

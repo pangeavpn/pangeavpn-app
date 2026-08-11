@@ -19,15 +19,15 @@ export const en = {
   "daemonRecovery.tryAgain": "Try again",
 
   // ── Login screen ──────────────────────────────────────
-  "login.subtitle": "Enter your sign-in token to continue.",
-  "login.getToken": "Get your token",
-  "login.tokenPlaceholder": "0000000000000000",
-  "login.tokenAriaLabel": "Sign-in token",
+  "login.subtitle": "Enter your account number to continue. An older sign-in token still works.",
+  "login.getToken": "Find your account number",
+  "login.tokenPlaceholder": "ABCD-EFGH-JKMN-PQRS-TVWX-YZ01",
+  "login.tokenAriaLabel": "Account number",
   "login.signIn": "Sign In",
-  "login.cachedTokenAriaLabel": "Sign in with saved token",
-  "login.enterToken": "Please enter your VPN token.",
+  "login.cachedTokenAriaLabel": "Sign in with saved account number",
+  "login.enterToken": "Please enter your account number.",
   "login.signingIn": "Signing in...",
-  "login.invalidToken": "Invalid VPN token.",
+  "login.invalidToken": "Invalid account number.",
   "login.signInFailed": "Sign in failed.",
 
   // ── Device-limit screen ───────────────────────────────

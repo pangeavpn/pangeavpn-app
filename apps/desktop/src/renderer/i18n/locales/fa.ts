@@ -19,15 +19,15 @@ export const fa = {
   "daemonRecovery.tryAgain": "تلاش دوباره",
 
   // ── Login screen ──────────────────────────────────────
-  "login.subtitle": "برای ادامه، توکن ورود خود را وارد کنید.",
-  "login.getToken": "دریافت توکن",
-  "login.tokenPlaceholder": "0000000000000000",
-  "login.tokenAriaLabel": "توکن ورود",
+  "login.subtitle": "برای ادامه، شماره حساب خود را وارد کنید. توکن ورود قدیمی هم کار می‌کند.",
+  "login.getToken": "شماره حساب خود را پیدا کنید",
+  "login.tokenPlaceholder": "ABCD-EFGH-JKMN-PQRS-TVWX-YZ01",
+  "login.tokenAriaLabel": "شماره حساب",
   "login.signIn": "ورود",
-  "login.cachedTokenAriaLabel": "ورود با توکن ذخیره‌شده",
-  "login.enterToken": "لطفاً توکن VPN خود را وارد کنید.",
+  "login.cachedTokenAriaLabel": "ورود با شماره حساب ذخیره‌شده",
+  "login.enterToken": "لطفاً شماره حساب خود را وارد کنید.",
   "login.signingIn": "در حال ورود...",
-  "login.invalidToken": "توکن VPN نامعتبر است.",
+  "login.invalidToken": "شماره حساب نامعتبر است.",
   "login.signInFailed": "ورود ناموفق بود.",
 
   // ── Device-limit screen ───────────────────────────────
