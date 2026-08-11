@@ -26,12 +26,6 @@ android {
     buildFeatures {
         compose = true
     }
-
-    // lintVital bundles :core into an AAR, which AGP refuses while the gomobile
-    // AAR is a local file dependency. The apps still lint themselves.
-    lint {
-        checkReleaseBuilds = false
-    }
 }
 
 dependencies {
@@ -48,7 +42,7 @@ dependencies {
 
     // api, not implementation: TunnelBridge implements the AAR's StatusSink,
     // so consumers need that supertype on their classpath.
-    api(fileTree(mapOf("dir" to "libs", "include" to listOf("*.aar"))))
+    api(group = "", name = "pangeacore", ext = "aar")
 
     testImplementation(kotlin("test"))
 }
