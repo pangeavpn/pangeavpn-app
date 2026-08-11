@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">PangeaVPN</string>
+    <string name="devicelimit_back">رجوع</string>
     <string name="devicelimit_subtitle">وصل حسابك إلى الحد الأقصى لعدد الأجهزة. أزل جهازًا لمتابعة تسجيل الدخول.</string>
     <string name="devicelimit_title">تم بلوغ حد الأجهزة</string>
     <string name="devices_remove">إزالة</string>

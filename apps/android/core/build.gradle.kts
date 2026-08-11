@@ -26,6 +26,12 @@ android {
     buildFeatures {
         compose = true
     }
+
+    // lintVital bundles :core into an AAR, which AGP refuses while the gomobile
+    // AAR is a local file dependency. The apps still lint themselves.
+    lint {
+        checkReleaseBuilds = false
+    }
 }
 
 dependencies {

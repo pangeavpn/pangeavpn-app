@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">PangeaVPN</string>
+    <string name="devicelimit_back">Atrás</string>
     <string name="devicelimit_subtitle">Tu cuenta alcanzó el número máximo de dispositivos. Elimina uno para seguir con el inicio de sesión.</string>
     <string name="devicelimit_title">Límite de dispositivos alcanzado</string>
     <string name="devices_remove">Eliminar</string>

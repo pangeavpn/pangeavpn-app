@@ -1,10 +1,10 @@
 package org.pangeavpn.app.ui
 
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -12,7 +12,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -20,10 +19,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import org.pangeavpn.core.viewmodel.SplitTunnelViewModel
 import org.pangeavpn.ui.R
+import org.pangeavpn.ui.components.SwitchRow
 
 /** Per-app tunnel bypass. A switched-on app is excluded from the VPN. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -35,45 +37,49 @@ fun SplitTunnelSheet(
 ) {
     val state by viewModel.state.collectAsState()
 
-    ModalBottomSheet(onDismissRequest = onDismiss, modifier = modifier) {
-        Column(modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp)) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        modifier = modifier,
+        containerColor = MaterialTheme.colorScheme.background,
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 20.dp)) {
             Text(
                 text = stringResource(R.string.split_tunnel_title),
-                style = MaterialTheme.typography.headlineSmall,
+                color = MaterialTheme.colorScheme.onSurface,
+                fontSize = 26.sp,
+                fontWeight = FontWeight.Light,
+                letterSpacing = (-0.6).sp,
             )
-            Spacer(Modifier.height(4.dp))
             Text(
                 text = stringResource(R.string.split_tunnel_hint),
-                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(top = 6.dp, bottom = 14.dp),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontSize = 12.sp,
+                lineHeight = 17.sp,
             )
-            Spacer(Modifier.height(12.dp))
 
             if (state.loading) {
-                CircularProgressIndicator()
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 40.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                }
                 return@Column
             }
 
-            LazyColumn {
+            LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(9.dp),
+                contentPadding = PaddingValues(bottom = 28.dp),
+            ) {
                 items(state.apps, key = { it.packageName }) { app ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            text = app.label,
-                            modifier = Modifier
-                                .weight(1f)
-                                .padding(end = 12.dp),
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
-                        Switch(
-                            checked = app.excluded,
-                            onCheckedChange = { viewModel.toggle(app.packageName, it) },
-                        )
-                    }
+                    SwitchRow(
+                        title = app.label,
+                        checked = app.excluded,
+                        onCheckedChange = { viewModel.toggle(app.packageName, it) },
+                    )
                 }
             }
         }

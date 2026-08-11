@@ -1,5 +1,7 @@
 package org.pangeavpn.app.ui
 
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -7,19 +9,13 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.RadioButton
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -30,8 +26,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import org.pangeavpn.app.BuildConfig
 import org.pangeavpn.core.model.HUB_METHOD_CHOICES
@@ -39,12 +38,18 @@ import org.pangeavpn.core.model.TRANSPORT_CHOICES
 import org.pangeavpn.core.model.isEnabled
 import org.pangeavpn.core.viewmodel.SettingsViewModel
 import org.pangeavpn.ui.R
+import org.pangeavpn.ui.components.ChoiceRow
+import org.pangeavpn.ui.components.GhostButton
+import org.pangeavpn.ui.components.SectionLabel
+import org.pangeavpn.ui.components.SettingsField
+import org.pangeavpn.ui.components.SwitchRow
 import org.pangeavpn.ui.components.hubMethodHint
 import org.pangeavpn.ui.components.hubMethodTitle
 import org.pangeavpn.ui.components.transportChoiceLabel
+import org.pangeavpn.ui.theme.StateError
 
 /** Connection method, censorship bypass, network tuning, the kill-switch guide
- *  and sign out. Mirrors the desktop settings panel. */
+ *  and sign out, wearing the hero's cards rather than stock Material. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsSheet(
@@ -60,193 +65,187 @@ fun SettingsSheet(
         SplitTunnelSheet(onDismiss = { showSplitTunnel = false })
     }
 
-    ModalBottomSheet(onDismissRequest = onDismiss, modifier = modifier) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        modifier = modifier,
+        containerColor = MaterialTheme.colorScheme.background,
+    ) {
         Column(
             modifier = Modifier
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 24.dp, vertical = 16.dp),
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 28.dp),
         ) {
-            Text(stringResource(R.string.settings_title), style = MaterialTheme.typography.headlineSmall)
+            Text(
+                text = stringResource(R.string.settings_title),
+                color = MaterialTheme.colorScheme.onSurface,
+                fontSize = 26.sp,
+                fontWeight = FontWeight.Light,
+                letterSpacing = (-0.6).sp,
+            )
 
             state.error?.let { message ->
-                Spacer(Modifier.height(8.dp))
                 Text(
                     text = message,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(top = 10.dp),
+                    color = StateError,
+                    fontSize = 13.sp,
+                    lineHeight = 18.sp,
                 )
             }
 
-            SectionHeading(
+            Section(
                 title = stringResource(R.string.settings_transport_heading),
                 description = stringResource(R.string.settings_transport_description),
             )
-            TRANSPORT_CHOICES.forEach { choice ->
-                ChoiceRow(
-                    label = transportChoiceLabel(choice),
-                    selected = state.settings.preferredTransport == choice,
-                    onSelect = { settingsViewModel.setPreferredTransport(choice) },
-                )
+            Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                TRANSPORT_CHOICES.forEach { choice ->
+                    ChoiceRow(
+                        label = transportChoiceLabel(choice),
+                        selected = state.settings.preferredTransport == choice,
+                        onClick = { settingsViewModel.setPreferredTransport(choice) },
+                    )
+                }
             }
 
-            SectionHeading(
+            Section(
                 title = stringResource(R.string.settings_censorship_heading),
                 description = stringResource(R.string.settings_censorship_description),
             )
-            HUB_METHOD_CHOICES.forEach { method ->
-                ToggleRow(
-                    title = hubMethodTitle(method),
-                    hint = hubMethodHint(method),
-                    checked = state.settings.hubMethods.isEnabled(method),
-                    onCheckedChange = { settingsViewModel.setHubMethod(method, it) },
-                )
+            Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                HUB_METHOD_CHOICES.forEach { method ->
+                    SwitchRow(
+                        title = hubMethodTitle(method),
+                        hint = hubMethodHint(method),
+                        checked = state.settings.hubMethods.isEnabled(method),
+                        onCheckedChange = { settingsViewModel.setHubMethod(method, it) },
+                    )
+                }
             }
 
-            SectionHeading(
+            Section(
                 title = stringResource(R.string.settings_network_heading),
                 description = stringResource(R.string.settings_network_description),
             )
-            ToggleRow(
+            SwitchRow(
                 title = stringResource(R.string.settings_network_allowlan_title),
                 hint = stringResource(R.string.settings_network_allowlan_hint),
                 checked = state.settings.allowLan,
                 onCheckedChange = settingsViewModel::setAllowLan,
             )
-            DnsField(
+
+            CommittedField(
+                label = stringResource(R.string.settings_network_dns_title),
+                hint = stringResource(R.string.settings_network_dns_hint),
+                placeholder = stringResource(R.string.settings_network_dns_placeholder),
                 initial = state.settings.customDns.joinToString(", "),
                 onCommit = settingsViewModel::setCustomDns,
             )
-            MtuField(initial = state.settings.mtu, onCommit = settingsViewModel::setMtu)
-
-            Spacer(Modifier.height(16.dp))
-            OutlinedButton(onClick = { showSplitTunnel = true }, modifier = Modifier.fillMaxWidth()) {
-                Text(stringResource(R.string.split_tunnel_title))
-            }
-
-            Spacer(Modifier.height(24.dp))
-            HorizontalDivider()
-            Spacer(Modifier.height(16.dp))
-
-            Text(stringResource(R.string.killswitch_title), style = MaterialTheme.typography.titleMedium)
-            Spacer(Modifier.height(4.dp))
-            Text(
-                text = stringResource(R.string.killswitch_body),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            CommittedField(
+                label = stringResource(R.string.settings_network_mtu_title),
+                hint = stringResource(R.string.settings_network_mtu_hint),
+                placeholder = "",
+                initial = state.settings.mtu.toString(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                transform = { it.filter(Char::isDigit) },
+                onCommit = { value -> value.toIntOrNull()?.let(settingsViewModel::setMtu) },
             )
-            Spacer(Modifier.height(12.dp))
-            OutlinedButton(
+
+            Spacer(Modifier.height(20.dp))
+            GhostButton(
+                label = stringResource(R.string.split_tunnel_title),
+                onClick = { showSplitTunnel = true },
+            )
+
+            Spacer(Modifier.height(26.dp))
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+            Section(
+                title = stringResource(R.string.killswitch_title),
+                description = stringResource(R.string.killswitch_body),
+            )
+            GhostButton(
+                label = stringResource(R.string.killswitch_open_settings),
                 onClick = { context.startActivity(settingsViewModel.openVpnSettings()) },
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text(stringResource(R.string.killswitch_open_settings))
-            }
+            )
 
-            Spacer(Modifier.height(24.dp))
-            TextButton(onClick = { settingsViewModel.signOut() }, modifier = Modifier.fillMaxWidth()) {
-                Text(stringResource(R.string.settings_signout))
-            }
+            Spacer(Modifier.height(26.dp))
+            GhostButton(
+                label = stringResource(R.string.settings_signout),
+                onClick = { settingsViewModel.signOut() },
+                accent = StateError,
+            )
 
-            Spacer(Modifier.height(16.dp))
             Text(
                 text = "v${BuildConfig.VERSION_NAME}",
-                style = MaterialTheme.typography.labelSmall,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 18.dp),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontSize = 11.sp,
             )
-            Spacer(Modifier.height(24.dp))
         }
     }
 }
 
 @Composable
-private fun SectionHeading(title: String, description: String) {
-    Spacer(Modifier.height(24.dp))
-    Text(title, style = MaterialTheme.typography.titleMedium)
-    Spacer(Modifier.height(2.dp))
+private fun Section(title: String, description: String) {
+    Spacer(Modifier.height(26.dp))
+    SectionLabel(text = title)
     Text(
         text = description,
-        style = MaterialTheme.typography.bodySmall,
+        modifier = Modifier.padding(top = 6.dp, bottom = 11.dp),
         color = MaterialTheme.colorScheme.onSurfaceVariant,
+        fontSize = 12.sp,
+        lineHeight = 17.sp,
     )
-    Spacer(Modifier.height(8.dp))
-}
-
-@Composable
-private fun ChoiceRow(label: String, selected: Boolean, onSelect: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .selectable(selected = selected, onClick = onSelect)
-            .padding(vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        RadioButton(selected = selected, onClick = null)
-        Text(
-            text = label,
-            modifier = Modifier.padding(start = 8.dp),
-            style = MaterialTheme.typography.bodyMedium,
-        )
-    }
-}
-
-@Composable
-private fun ToggleRow(title: String, hint: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(
-            modifier = Modifier
-                .weight(1f)
-                .padding(end = 12.dp),
-        ) {
-            Text(title, style = MaterialTheme.typography.bodyMedium)
-            Text(
-                text = hint,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        Switch(checked = checked, onCheckedChange = onCheckedChange)
-    }
 }
 
 /** Committed on the button rather than per keystroke, so a half-typed address
- *  is never persisted. */
+ *  is never persisted. The button only appears once the value differs. */
 @Composable
-private fun DnsField(initial: String, onCommit: (String) -> Unit) {
+private fun CommittedField(
+    label: String,
+    hint: String,
+    placeholder: String,
+    initial: String,
+    onCommit: (String) -> Unit,
+    keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
+    transform: (String) -> String = { it },
+) {
     var text by remember(initial) { mutableStateOf(initial) }
-    Spacer(Modifier.height(8.dp))
-    OutlinedTextField(
-        value = text,
-        onValueChange = { text = it },
-        label = { Text(stringResource(R.string.settings_network_dns_title)) },
-        placeholder = { Text(stringResource(R.string.settings_network_dns_placeholder)) },
-        supportingText = { Text(stringResource(R.string.settings_network_dns_hint)) },
-        singleLine = true,
-        modifier = Modifier.fillMaxWidth(),
-    )
-    TextButton(onClick = { onCommit(text) }) {
-        Text(stringResource(R.string.settings_save))
-    }
-}
 
-@Composable
-private fun MtuField(initial: Int, onCommit: (Int) -> Unit) {
-    var text by remember(initial) { mutableStateOf(initial.toString()) }
-    Spacer(Modifier.height(8.dp))
-    OutlinedTextField(
-        value = text,
-        onValueChange = { value -> text = value.filter(Char::isDigit) },
-        label = { Text(stringResource(R.string.settings_network_mtu_title)) },
-        supportingText = { Text(stringResource(R.string.settings_network_mtu_hint)) },
-        singleLine = true,
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+    Spacer(Modifier.height(14.dp))
+    Row(
         modifier = Modifier.fillMaxWidth(),
-    )
-    TextButton(onClick = { text.toIntOrNull()?.let(onCommit) }) {
-        Text(stringResource(R.string.settings_save))
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        SectionLabel(text = label, modifier = Modifier.weight(1f))
+        if (text != initial) {
+            Text(
+                text = stringResource(R.string.settings_save),
+                // Padded out: the label alone is under the 24dp tap minimum.
+                modifier = Modifier
+                    .clickable(role = Role.Button) { onCommit(text) }
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                color = MaterialTheme.colorScheme.primary,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
     }
+    SettingsField(
+        value = text,
+        onValueChange = { text = transform(it) },
+        placeholder = placeholder,
+        modifier = Modifier.padding(top = 8.dp),
+        keyboardOptions = keyboardOptions,
+    )
+    Text(
+        text = hint,
+        modifier = Modifier.padding(top = 6.dp),
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        fontSize = 12.sp,
+        lineHeight = 16.sp,
+    )
 }

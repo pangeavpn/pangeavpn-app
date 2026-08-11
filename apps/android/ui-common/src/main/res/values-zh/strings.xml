@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">PangeaVPN</string>
+    <string name="devicelimit_back">返回</string>
     <string name="devicelimit_subtitle">您的账户已达到设备数量上限。请移除一台设备后继续登录。</string>
     <string name="devicelimit_title">已达设备上限</string>
     <string name="devices_remove">移除</string>

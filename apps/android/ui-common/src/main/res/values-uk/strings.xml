@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">PangeaVPN</string>
+    <string name="devicelimit_back">Назад</string>
     <string name="devicelimit_subtitle">Ваш обліковий запис досяг максимальної кількості пристроїв. Видаліть один, щоб продовжити вхід.</string>
     <string name="devicelimit_title">Досягнуто ліміту пристроїв</string>
     <string name="devices_remove">Видалити</string>

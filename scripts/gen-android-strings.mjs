@@ -188,6 +188,10 @@ const MOBILE_ONLY = {
     ru: "Открыть настройки VPN", uk: "Відкрити налаштування VPN",
     zh: "打开 VPN 设置", ar: "فتح إعدادات VPN", fa: "باز کردن تنظیمات VPN"
   },
+  devicelimit_back: {
+    en: "Back", es: "Atrás", fr: "Retour", ru: "Назад",
+    uk: "Назад", zh: "返回", ar: "رجوع", fa: "بازگشت"
+  },
   login_account_label: {
     en: "Account number", es: "Número de cuenta", fr: "Numéro de compte",
     ru: "Номер аккаунта", uk: "Номер акаунта",
