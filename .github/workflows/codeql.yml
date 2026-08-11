@@ -29,11 +29,16 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  # Only used to build the AAR that Gradle needs to configure; naive is not
+  # linked here, so this need only track build-android.yml loosely.
+  ANDROID_NDK: '30.0.14904198'
+
 jobs:
   analyze:
     name: Analyze (${{ matrix.language }}${{ matrix.goos && format(', {0}', matrix.goos) || '' }})
     runs-on: ${{ matrix.runs-on }}
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     permissions:
       security-events: write
@@ -81,10 +86,10 @@ jobs:
             goarch: arm64
             build-target: ./mobile/...
 
-          # apps/android Kotlin. build-mode none skips the Gradle/SDK/NDK setup
-          # and the gomobile AAR that a real build would need first.
+          # apps/android Kotlin. build-mode none extracts Java but not Kotlin,
+          # and this tree is all Kotlin, so it has to be a real Gradle compile.
           - language: java-kotlin
-            build-mode: none
+            build-mode: manual
             runs-on: ubuntu-latest
 
     steps:
@@ -92,12 +97,46 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Set up Go
-        if: matrix.language == 'go'
+        if: matrix.language == 'go' || matrix.language == 'java-kotlin'
         uses: actions/setup-go@v7
         with:
           go-version-file: 'daemon/go.mod'
           cache: true
           cache-dependency-path: 'daemon/go.sum'
+
+      # :core resolves the gomobile AAR as a module, so Gradle cannot even
+      # configure without it. Built before init: it is Go, not Kotlin.
+      - name: Set up the Android build
+        if: matrix.language == 'java-kotlin'
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up the Android SDK
+        if: matrix.language == 'java-kotlin'
+        uses: android-actions/setup-android@v3
+
+      # Keep in step with ANDROID_NDK in build-android.yml.
+      - name: Install the NDK
+        if: matrix.language == 'java-kotlin'
+        run: sdkmanager --install "ndk;${{ env.ANDROID_NDK }}"
+
+      - name: Build the gomobile AAR
+        if: matrix.language == 'java-kotlin'
+        working-directory: daemon
+        env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/${{ env.ANDROID_NDK }}
+        run: |
+          go install golang.org/x/mobile/cmd/gomobile@latest
+          go install golang.org/x/mobile/cmd/gobind@latest
+          gomobile init
+          mkdir -p ../apps/android/core/libs
+          gomobile bind -target=android/arm64 -androidapi 24 \
+            -javapkg=org.pangeavpn \
+            -ldflags=-checklinkname=0 \
+            -o ../apps/android/core/libs/pangeacore.aar \
+            ./mobile
 
       - name: Set up Node
         if: matrix.language == 'javascript-typescript'
@@ -131,6 +170,13 @@ jobs:
           target="${BUILD_TARGET:-./...}"
           echo "Building Go daemon for GOOS=$GOOS GOARCH=${GOARCH:-host} target=$target"
           go build -trimpath -buildvcs=false "$target"
+
+      # compileDebugKotlin, not assemble: extraction needs the compiler to run,
+      # not an APK. Pulls in :core and :ui-common as dependencies.
+      - name: Compile Kotlin
+        if: matrix.language == 'java-kotlin'
+        working-directory: apps/android
+        run: ./gradlew --no-daemon :app-mobile:compileDebugKotlin :app-tv:compileDebugKotlin
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v4
