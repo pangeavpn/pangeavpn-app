@@ -6,7 +6,7 @@
 package naive
 
 // #cgo CFLAGS: -I${SRCDIR}/android/arm64-v8a
-// #cgo LDFLAGS: -L${SRCDIR}/android/arm64-v8a -lpangea_naive -llog -lm -ldl -latomic
+// #cgo LDFLAGS: -L${SRCDIR}/android/arm64-v8a -lpangea_naive -landroid -llog -lm -ldl -latomic
 //
 // #include "pangea_naive_capi.h"
 //
