@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="notification_channel_name">Стан VPN</string>
     <string name="notification_connected">Підключено</string>
     <string name="notification_connecting">Підключення…</string>
     <string name="notification_disconnect">Відключитися</string>

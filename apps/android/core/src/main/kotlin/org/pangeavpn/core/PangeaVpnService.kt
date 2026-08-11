@@ -15,9 +15,13 @@ import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.pangeavpn.core.model.ConnState
 import org.pangeavpn.core.model.TunnelStatus
 import org.pangeavpn.core.util.runCatchingCancellable
@@ -28,16 +32,23 @@ private const val NOTIFICATION_ID = 1
 private const val BLACKHOLE_ADDRESS_V6 = "fd00::1"
 private const val BLACKHOLE_PREFIX_V6 = 128
 
+private const val REBUILD_SETTLE_MS = 1_500L
+private const val REBUILD_RETRY_MS = 3_000L
+private const val REBUILD_ATTEMPTS = 3
+
 class PangeaVpnService : VpnService() {
 
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var activeFd: ParcelFileDescriptor? = null
+    private var activeServerId: String? = null
+    private var rebuildJob: Job? = null
     @Volatile private var foregroundActive = false
 
     override fun onCreate() {
         super.onCreate()
         TunnelBridge.init(this)
         TunnelBridge.protector = { fd -> protect(fd.toInt()) }
+        watchNetwork()
 
         scope.launch {
             TunnelBridge.status.collect { status ->
@@ -68,25 +79,10 @@ class PangeaVpnService : VpnService() {
     }
 
     private fun startTunnel(serverId: String) {
+        activeServerId = serverId
         scope.launch {
             try {
-                val config = TunnelBridge.prepare(serverId)
-                val settings = TunnelBridge.getSettings()
-                val builder = Builder()
-                    .setSession("PangeaVPN")
-                    .addAddress(config.address, config.prefixLength)
-                tunnelRoutes(settings.allowLan).forEach { builder.addRoute(it.address, it.prefixLength) }
-                builder.blackholeIpv6(settings.allowLan)
-                config.dns.forEach { builder.addDnsServer(it) }
-                builder.setMtu(config.mtu)
-                builder.setBlocking(false)
-                applySplitTunnel(builder)
-
-                val pfd = builder.establish() ?: error("VPN permission not granted")
-                activeFd?.close()
-                activeFd = pfd
-
-                TunnelBridge.start(pfd.detachFd().toLong())
+                establish(serverId)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -97,10 +93,54 @@ class PangeaVpnService : VpnService() {
         }
     }
 
-    /** The peer only advertises 0.0.0.0/0, so captured IPv6 is dropped by
-     *  WireGuard rather than forwarded. Address and routes go in together or
-     *  not at all: routes alone send IPv6 out around the tunnel instead of
-     *  into it, and a device with IPv6 switched off rejects the address. */
+    private suspend fun establish(serverId: String) {
+        val config = TunnelBridge.prepare(serverId)
+        val settings = TunnelBridge.getSettings()
+        val builder = Builder()
+            .setSession("PangeaVPN")
+            .addAddress(config.address, config.prefixLength)
+        tunnelRoutes(settings.allowLan).forEach { builder.addRoute(it.address, it.prefixLength) }
+        builder.blackholeIpv6(settings.allowLan)
+        config.dns.forEach { builder.addDnsServer(it) }
+        builder.setMtu(config.mtu)
+        builder.setBlocking(false)
+        applySplitTunnel(builder)
+
+        val pfd = builder.establish() ?: error("VPN permission not granted")
+        activeFd?.close()
+        activeFd = pfd
+
+        TunnelBridge.start(pfd.detachFd().toLong())
+    }
+
+    /** The underlay moved, so the transport's socket is dead even though the
+     *  UI still reads connected. Rebuild over the network that replaced it. */
+    private fun watchNetwork() {
+        scope.launch {
+            NetworkMonitor(this@PangeaVpnService).changes().collect {
+                if (activeServerId != null) rebuild()
+            }
+        }
+    }
+
+    private fun rebuild() {
+        rebuildJob?.cancel()
+        rebuildJob = scope.launch {
+            // Settling first: a handover reports several times before it lands.
+            delay(REBUILD_SETTLE_MS)
+            val serverId = activeServerId ?: return@launch
+            for (attempt in 1..REBUILD_ATTEMPTS) {
+                withContext(NonCancellable) { runCatchingCancellable { TunnelBridge.stop() } }
+                val rebuilt = runCatchingCancellable { establish(serverId) }
+                if (rebuilt.isSuccess) return@launch
+                if (attempt < REBUILD_ATTEMPTS) delay(REBUILD_RETRY_MS * attempt)
+            }
+            TunnelBridge.setError("could not reconnect after the network changed")
+        }
+    }
+
+    /** Address and routes go in together or not at all: routes alone send IPv6
+     *  around the tunnel, and a device with IPv6 off rejects the address. */
     private fun Builder.blackholeIpv6(allowLan: Boolean) {
         val added = runCatching { addAddress(BLACKHOLE_ADDRESS_V6, BLACKHOLE_PREFIX_V6) }
         if (added.isFailure) return
@@ -122,14 +162,18 @@ class PangeaVpnService : VpnService() {
         }
     }
 
+    /** stopSelf only after the core has released the tunnel: onDestroy cancels
+     *  this scope, so stopping first could cancel the stop mid-flight. */
     private fun stopTunnel() {
+        activeServerId = null
+        rebuildJob?.cancel()
         scope.launch {
-            runCatchingCancellable { TunnelBridge.stop() }
+            withContext(NonCancellable) { runCatchingCancellable { TunnelBridge.stop() } }
             activeFd?.close()
             activeFd = null
+            endForeground()
+            stopSelf()
         }
-        endForeground()
-        stopSelf()
     }
 
     private fun endForeground() {
@@ -154,18 +198,32 @@ class PangeaVpnService : VpnService() {
 
     private fun ensureChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(CHANNEL_ID, "VPN", NotificationManager.IMPORTANCE_LOW)
+            val name = getString(R.string.notification_channel_name)
+            val channel = NotificationChannel(CHANNEL_ID, name, NotificationManager.IMPORTANCE_LOW)
             notificationManager().createNotificationChannel(channel)
         }
     }
 
+    /** Resolved from the package rather than a class literal, so the phone and
+     *  TV apps each open their own launcher activity from one service. */
+    private fun openAppIntent(): PendingIntent? {
+        val launch = packageManager.getLaunchIntentForPackage(packageName) ?: return null
+        launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        return PendingIntent.getActivity(
+            this,
+            0,
+            launch,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+    }
+
     private fun buildNotification(status: TunnelStatus): Notification {
         val title = when (status.state) {
-            ConnState.CONNECTED -> getString(org.pangeavpn.core.R.string.notification_connected)
-            ConnState.CONNECTING -> getString(org.pangeavpn.core.R.string.notification_connecting)
-            ConnState.DISCONNECTING -> getString(org.pangeavpn.core.R.string.notification_disconnecting)
-            ConnState.ERROR -> getString(org.pangeavpn.core.R.string.notification_error)
-            ConnState.DISCONNECTED -> getString(org.pangeavpn.core.R.string.notification_disconnected)
+            ConnState.CONNECTED -> getString(R.string.notification_connected)
+            ConnState.CONNECTING -> getString(R.string.notification_connecting)
+            ConnState.DISCONNECTING -> getString(R.string.notification_disconnecting)
+            ConnState.ERROR -> getString(R.string.notification_error)
+            ConnState.DISCONNECTED -> getString(R.string.notification_disconnected)
         }
         val disconnectIntent = PendingIntent.getService(
             this,
@@ -175,10 +233,11 @@ class PangeaVpnService : VpnService() {
         )
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(title)
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setSmallIcon(R.drawable.ic_stat_pangea)
+            .setContentIntent(openAppIntent())
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
-            .addAction(0, getString(org.pangeavpn.core.R.string.notification_disconnect), disconnectIntent)
+            .addAction(0, getString(R.string.notification_disconnect), disconnectIntent)
             .build()
     }
 

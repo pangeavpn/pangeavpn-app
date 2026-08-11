@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="notification_channel_name">VPN 状态</string>
     <string name="notification_connected">已连接</string>
     <string name="notification_connecting">连接中…</string>
     <string name="notification_disconnect">断开连接</string>

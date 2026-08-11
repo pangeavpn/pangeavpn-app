@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="notification_channel_name">Estado de la VPN</string>
     <string name="notification_connected">Conectado</string>
     <string name="notification_connecting">Conectando…</string>
     <string name="notification_disconnect">Desconectar</string>

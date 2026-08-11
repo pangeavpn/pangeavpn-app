@@ -110,3 +110,9 @@ Edit the key map / mobile-only strings in that script, not the generated XML.
   VPN*; the app deep-links to it and keeps the TUN up across reconnects (fail-closed).
 - Only sockets that egress the real network are `protect()`ed; the WireGuard↔Cloak
   hop is loopback and isn't captured by the TUN.
+- Wi-Fi↔mobile handovers are rebuilt, not roamed. WireGuard survives a changed
+  address but the TCP transport under it does not, so `NetworkMonitor` watches
+  the non-VPN networks (via the same fingerprint the cascade keys its memory on)
+  and `PangeaVpnService` re-establishes over the network that replaced it. The
+  `NOT_VPN` capability keeps our own tunnel from registering as a change, and
+  the first emission is the baseline rather than a rebuild trigger.

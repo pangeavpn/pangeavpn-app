@@ -17,7 +17,8 @@ const CORE_KEYS = new Set([
   "notification_disconnecting",
   "notification_disconnected",
   "notification_error",
-  "notification_disconnect"
+  "notification_disconnect",
+  "notification_channel_name"
 ]);
 
 // Notification titles reuse the state wording rather than translating it twice.
@@ -161,6 +162,11 @@ const MOBILE_ONLY = {
   notification_disconnect: {
     en: "Disconnect", es: "Desconectar", fr: "Se déconnecter", ru: "Отключить",
     uk: "Відключитися", zh: "断开连接", ar: "قطع الاتصال", fa: "قطع اتصال"
+  },
+  notification_channel_name: {
+    en: "VPN status", es: "Estado de la VPN", fr: "État du VPN",
+    ru: "Состояние VPN", uk: "Стан VPN",
+    zh: "VPN 状态", ar: "حالة VPN", fa: "وضعیت VPN"
   },
   killswitch_title: {
     en: "Kill Switch Active", es: "Kill Switch activo", fr: "Kill Switch actif",
