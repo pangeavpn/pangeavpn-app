@@ -10,6 +10,14 @@ on:
       - android
       - master
   workflow_dispatch:
+    inputs:
+      naive_run_id:
+        description: "pangeavpn/naiveproxy run id to take the naive engine from, instead of the pinned release"
+        type: string
+      require_naive:
+        description: "Fail the build if the naive engine cannot be linked"
+        type: boolean
+        default: false
 
 concurrency:
   group: build-android-${{ github.ref }}
@@ -101,6 +109,10 @@ jobs:
       # the cascade ends at Hysteria2 rather than the build failing.
       - name: Stage the naive engine
         id: naive
+        env:
+          PANGEA_NAIVE_ANDROID_RUN_ID: ${{ inputs.naive_run_id }}
+          PANGEA_REQUIRE_NAIVE: ${{ inputs.require_naive && '1' || '' }}
+          GH_TOKEN: ${{ secrets.NAIVEPROXY_RUN_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
           node scripts/fetch-naive-android.mjs
           if [ -f daemon/internal/naive/android/arm64-v8a/libpangea_naive.a ]; then

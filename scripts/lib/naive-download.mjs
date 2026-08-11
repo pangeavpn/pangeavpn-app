@@ -137,7 +137,7 @@ function sha256File(filePath) {
 // tar on macOS and Windows), falls back to PowerShell Expand-Archive on
 // Windows — GNU tar (some Git-for-Windows shells) can't read zips. Returns
 // true on success.
-function extractZip(zipPath, destDir) {
+export function extractZip(zipPath, destDir) {
   const bsd = spawnSync("tar", ["-xf", zipPath, "-C", destDir], { stdio: "inherit", shell: false });
   if (!bsd.error && (bsd.status ?? 1) === 0) {
     return true;
