@@ -20,6 +20,15 @@ docs/CLAUDE.md
 daemon/coverage.out
 coverage.out
 
+# Android / Gradle build outputs (mirrors apps/android/.gitignore, which only
+# exists on the android branch — these keep master's status clean too)
+apps/android/.gradle/
+apps/android/.kotlin/
+apps/android/**/build/
+apps/android/local.properties
+apps/android/core/libs/*.aar
+apps/android/core/libs/*.jar
+
 # Installer / packaging artifacts
 apps/desktop/release/
 apps/desktop/out/

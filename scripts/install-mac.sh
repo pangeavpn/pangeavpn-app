@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # ── Configuration ────────────────────────────────────────────────────────────
-VERSION="0.5.1"
+VERSION="0.5.2"
 
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'

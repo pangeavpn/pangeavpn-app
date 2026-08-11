@@ -154,7 +154,10 @@ export const StatusResponseSchema = z.object({
     bytesIn: z.number().default(0),
     bytesOut: z.number().default(0)
   }),
-  killSwitchActive: z.boolean().default(false)
+  killSwitchActive: z.boolean().default(false),
+  // An ERROR the daemon is still retrying by itself, after a session dropped
+  // on its own. Older daemons omit it.
+  reconnecting: z.boolean().default(false)
 });
 
 export const ConnectRequestSchema = z.object({
