@@ -7,7 +7,10 @@
         android:name="android.hardware.touchscreen"
         android:required="false" />
 
+    <!-- Restated from :core's manifest, which the merger folds in anyway:
+         nothing here should survive an adb backup or a device transfer. -->
     <application
+        android:allowBackup="false"
         android:label="@string/app_name"
         android:icon="@mipmap/ic_launcher"
         android:banner="@drawable/banner"

@@ -208,6 +208,9 @@ class PangeaVpnService : VpnService() {
      *  TV apps each open their own launcher activity from one service. */
     private fun openAppIntent(): PendingIntent? {
         val launch = packageManager.getLaunchIntentForPackage(packageName) ?: return null
+        // Pinned to our own package so the PendingIntent can never resolve
+        // anywhere else, whatever the launcher intent came back as.
+        launch.setPackage(packageName)
         launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
         return PendingIntent.getActivity(
             this,
