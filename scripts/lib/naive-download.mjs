@@ -133,11 +133,16 @@ function sha256File(filePath) {
   return hash.digest("hex");
 }
 
-// Extracts a .zip into destDir. Prefers tar (bsdtar handles zip; the default
-// tar on macOS and Windows), falls back to PowerShell Expand-Archive on
-// Windows — GNU tar (some Git-for-Windows shells) can't read zips. Returns
-// true on success.
+// Extracts a .zip into destDir. Three readers because none covers all hosts:
+// GNU tar cannot read zips at all, and Windows has no unzip.
 export function extractZip(zipPath, destDir) {
+  const unzip = spawnSync("unzip", ["-o", "-q", zipPath, "-d", destDir], {
+    stdio: "inherit",
+    shell: false
+  });
+  if (!unzip.error && (unzip.status ?? 1) === 0) {
+    return true;
+  }
   const bsd = spawnSync("tar", ["-xf", zipPath, "-C", destDir], { stdio: "inherit", shell: false });
   if (!bsd.error && (bsd.status ?? 1) === 0) {
     return true;
