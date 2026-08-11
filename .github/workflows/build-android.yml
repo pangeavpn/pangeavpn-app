@@ -107,6 +107,11 @@ jobs:
         working-directory: apps/android
         run: ./gradlew --no-daemon :app-mobile:assembleDebug :app-tv:assembleDebug
 
+      # Unsigned, but it is the only place R8 runs, so a missing keep shows here.
+      - name: Assemble release APKs
+        working-directory: apps/android
+        run: ./gradlew --no-daemon :app-mobile:assembleRelease :app-tv:assembleRelease
+
       - uses: actions/upload-artifact@v4
         with:
           name: android-debug-apks

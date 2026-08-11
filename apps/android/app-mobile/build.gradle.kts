@@ -4,6 +4,9 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
+@Suppress("UNCHECKED_CAST")
+val keystore = rootProject.extra["pangeaKeystore"] as Map<String, String>?
+
 android {
     namespace = "org.pangeavpn.app"
     compileSdk = 35
@@ -12,8 +15,28 @@ android {
         applicationId = "org.pangeavpn.app"
         minSdk = 24
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = rootProject.extra["pangeaVersionCode"] as Int
+        versionName = rootProject.extra["pangeaVersionName"] as String
+    }
+
+    signingConfigs {
+        keystore?.let { credentials ->
+            create("release") {
+                storeFile = file(credentials.getValue("storeFile"))
+                storePassword = credentials.getValue("storePassword")
+                keyAlias = credentials.getValue("keyAlias")
+                keyPassword = credentials.getValue("keyPassword")
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            signingConfig = signingConfigs.findByName("release")
+        }
     }
 
     compileOptions {

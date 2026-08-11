@@ -7,7 +7,11 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SYSTEM_EXEMPTED" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
-    <application>
+    <!-- Declared here rather than per-app: :core owns the credential store the
+         rules protect, and the merger folds these into both manifests. -->
+    <application
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/backup_rules">
         <service
             android:name=".PangeaVpnService"
             android:permission="android.permission.BIND_VPN_SERVICE"

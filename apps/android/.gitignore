@@ -3,3 +3,6 @@ build/
 local.properties
 core/libs/*.aar
 !core/libs/.gitkeep
+keystore.properties
+*.jks
+*.keystore

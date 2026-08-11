@@ -61,8 +61,37 @@ cd apps/android
 
 Debug: swap `assembleDebug`. Play App Bundle: `:app-mobile:bundleRelease`.
 
-Release signing is not configured here — add a `signingConfig` (keystore) before
-publishing.
+Release builds run R8 (`isMinifyEnabled`). The gomobile boundary is bound by
+name over JNI, so its keeps live in `core/consumer-rules.pro`.
+
+## Versioning
+
+`versionName` is read from the repo's root `package.json` by
+`apps/android/build.gradle.kts`, so the apps ride the desktop's version line.
+`versionCode` is derived from it (`0.5.2` → `502`); bump the version there.
+
+## Release signing
+
+Both app modules pick up a release `signingConfig` from a gitignored
+`apps/android/keystore.properties`, falling back to environment variables:
+
+```properties
+storeFile=/absolute/path/to/pangea-release.jks
+storePassword=...
+keyAlias=pangea
+keyPassword=...
+```
+
+Env equivalents: `PANGEA_KEYSTORE_FILE`, `PANGEA_KEYSTORE_PASSWORD`,
+`PANGEA_KEY_ALIAS`, `PANGEA_KEY_PASSWORD`. With none of them set the release
+build still runs and simply comes out unsigned, so CI needs no secrets.
+
+Generate the keystore once and keep it out of the repo:
+
+```bash
+keytool -genkeypair -v -keystore pangea-release.jks -alias pangea \
+  -keyalg RSA -keysize 4096 -validity 10000
+```
 
 ## Localization
 

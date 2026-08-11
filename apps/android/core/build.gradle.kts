@@ -11,6 +11,7 @@ android {
 
     defaultConfig {
         minSdk = 24
+        consumerProguardFiles("consumer-rules.pro")
     }
 
     compileOptions {
@@ -39,9 +40,8 @@ dependencies {
     implementation(libs.serialization.json)
     implementation(libs.security.crypto)
 
-    // pangeacore.aar is produced by the gomobile build and dropped here; not in
-    // source control. api, not implementation: TunnelBridge implements the
-    // AAR's StatusSink, so consumers need that supertype on their classpath.
+    // api, not implementation: TunnelBridge implements the AAR's StatusSink,
+    // so consumers need that supertype on their classpath.
     api(fileTree(mapOf("dir" to "libs", "include" to listOf("*.aar"))))
 
     testImplementation(kotlin("test"))
