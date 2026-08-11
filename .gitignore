@@ -26,6 +26,7 @@ apps/android/.gradle/
 apps/android/.kotlin/
 apps/android/**/build/
 apps/android/local.properties
+daemon/internal/naive/android/
 apps/android/core/libs/*.aar
 apps/android/core/libs/*.jar
 

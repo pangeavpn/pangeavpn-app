@@ -14,6 +14,8 @@ const hubServerJSON = `{
   "country": "GB",
   "load": 42,
   "cloak": {"remoteHost": "203.0.113.10", "uid": "uid-1", "publicKey": "ck-pub", "serverName": "www.example.com"},
+  "naive": {"remoteHost": "naive.example.net", "remoteIp": "203.0.113.15", "remotePort": 443,
+            "username": "nv-user", "password": "nv-pass"},
   "reality": {"remoteHost": "lon1.example.net", "remoteIp": "203.0.113.11", "remotePort": 8443,
               "uuid": "uuid-1", "publicKey": "re-pub", "shortId": "abcd", "flow": "xtls-rprx-vision",
               "serverName": "www.cloudflare.com"},
@@ -49,6 +51,19 @@ func TestBuildProfileMapsEveryTransport(t *testing.T) {
 	}
 	if profile.Cloak.EncryptionMethod != "plain" {
 		t.Fatalf("cloak encryption %q, want plain", profile.Cloak.EncryptionMethod)
+	}
+
+	if profile.Naive == nil {
+		t.Fatal("naive profile missing")
+	}
+	if profile.Naive.RemoteHost != "203.0.113.15" {
+		t.Fatalf("naive should dial the IP, got %q", profile.Naive.RemoteHost)
+	}
+	if profile.Naive.ServerName != "naive.example.net" {
+		t.Fatalf("naive SNI should stay the domain, got %q", profile.Naive.ServerName)
+	}
+	if profile.Naive.Username != "nv-user" || profile.Naive.Password != "nv-pass" {
+		t.Fatalf("naive credentials wrong: %+v", profile.Naive)
 	}
 
 	if profile.Reality == nil {
@@ -97,11 +112,61 @@ func TestBuildProfileLeavesAbsentTransportsNil(t *testing.T) {
 	profile := buildProfile(decodeServer(t, raw))
 
 	if profile.Reality != nil || profile.Hysteria2 != nil ||
-		profile.Shadowsocks != nil || profile.Snowflake != nil {
+		profile.Shadowsocks != nil || profile.Snowflake != nil || profile.Naive != nil {
 		t.Fatalf("absent transports should stay nil, got %+v", profile)
 	}
-	if profile.Naive != nil {
-		t.Fatal("naive must never be built on mobile")
+}
+
+// Ports the cases in apps/desktop/src/shared/naiveEndpoint.ts: the engine is
+// handed an address to dial plus the name to present, so it never resolves.
+func TestBuildNaiveEndpointSplit(t *testing.T) {
+	cases := []struct {
+		name       string
+		info       naiveInfo
+		nodeIP     string
+		wantHost   string
+		wantServer string
+	}{
+		{
+			name:       "per-transport ip wins",
+			info:       naiveInfo{RemoteHost: "naive.example.net", RemoteIP: "203.0.113.15"},
+			nodeIP:     "198.51.100.5",
+			wantHost:   "203.0.113.15",
+			wantServer: "naive.example.net",
+		},
+		{
+			name:       "literal remoteHost is dialled as given",
+			info:       naiveInfo{RemoteHost: "203.0.113.20"},
+			nodeIP:     "198.51.100.5",
+			wantHost:   "203.0.113.20",
+			wantServer: "203.0.113.20",
+		},
+		{
+			name:       "domain falls back to the node",
+			info:       naiveInfo{RemoteHost: "naive.example.net"},
+			nodeIP:     "198.51.100.5",
+			wantHost:   "198.51.100.5",
+			wantServer: "naive.example.net",
+		},
+		{
+			name:       "explicit serverName overrides the host",
+			info:       naiveInfo{RemoteHost: "naive.example.net", ServerName: "www.example.com"},
+			nodeIP:     "198.51.100.5",
+			wantHost:   "198.51.100.5",
+			wantServer: "www.example.com",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := buildNaive(&tc.info, tc.nodeIP)
+			if got.RemoteHost != tc.wantHost {
+				t.Errorf("remoteHost %q, want %q", got.RemoteHost, tc.wantHost)
+			}
+			if got.ServerName != tc.wantServer {
+				t.Errorf("serverName %q, want %q", got.ServerName, tc.wantServer)
+			}
+		})
 	}
 }
 

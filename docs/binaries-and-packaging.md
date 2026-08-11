@@ -108,12 +108,21 @@ unavailable.
 | Windows x64/arm64 | Native CGO engine when inputs and `clang-cl` resolve |
 | macOS x64/arm64 | Native CGO engine when the matching archive resolves |
 | Linux x64/arm64 | Stub; the current native resolver has no Linux implementation |
+| Android arm64-v8a | Native CGO engine, linked into the gomobile AAR |
+| Android arm/x86/x86_64 | Unlinked; the cascade ends at Hysteria2 |
 | Windows/macOS CI | `PANGEA_REQUIRE_NAIVE=1` makes missing native support a build failure |
 
 The native inputs can come from a local NaiveProxy checkout or the pinned cache
 under `.cache/pangea-naive/`. See
 [`scripts/lib/naive-cgo.mjs`](../scripts/lib/naive-cgo.mjs) and
 [`scripts/lib/naive-cgo-darwin.mjs`](../scripts/lib/naive-cgo-darwin.mjs).
+
+Android takes the pinned prebuilt only. `scripts/fetch-naive-android.mjs` stages
+`libpangea_naive.a` under `daemon/internal/naive/android/arm64-v8a/`, where the
+cgo directives in `cgo_android.go` expect it, and `gomobile bind` then gets
+`-tags naive_cgo`. Every socket Chromium opens is routed back through
+`VpnService.protect()` by the fork's `PangeaNaiveSetSocketProtector` hook;
+without it naive would dial its server through the TUN it is establishing.
 
 ## Runtime resources
 

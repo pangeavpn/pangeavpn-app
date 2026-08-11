@@ -12,6 +12,15 @@ type cloakInfo struct {
 
 // realityInfo and the transport structs below mirror ServerInfo in
 // apps/desktop/src/shared/ipc.ts, which is the contract with the hub.
+type naiveInfo struct {
+	RemoteHost string `json:"remoteHost"`
+	RemoteIP   string `json:"remoteIp,omitempty"`
+	RemotePort int    `json:"remotePort"`
+	Username   string `json:"username"`
+	Password   string `json:"password"`
+	ServerName string `json:"serverName,omitempty"`
+}
+
 type realityInfo struct {
 	RemoteHost string `json:"remoteHost"`
 	RemoteIP   string `json:"remoteIp,omitempty"`
@@ -69,6 +78,7 @@ type serverInfo struct {
 	Cloak   cloakInfo `json:"cloak"`
 	// Each is nil when the hub node has no listener for that transport,
 	// which is what makes StarterFor skip it.
+	Naive                   *naiveInfo                   `json:"naive,omitempty"`
 	Reality                 *realityInfo                 `json:"reality,omitempty"`
 	Hysteria2               *hysteria2Info               `json:"hysteria2,omitempty"`
 	Shadowsocks             *shadowsocksInfo             `json:"shadowsocks,omitempty"`

@@ -46,9 +46,8 @@ func newStarter(logs *state.LogStore) *starter {
 	return &starter{logs: logs}
 }
 
-// StarterFor reports what this build can attempt. NaiveProxy is permanently
-// unavailable on Android (cgo engine), and so is Snowflake: its WebRTC sockets
-// come from pion, which exposes no hook for VpnService.protect().
+// StarterFor reports what this build can attempt. Snowflake is permanently
+// unavailable: pion's WebRTC sockets expose no VpnService.protect() hook.
 func (s *starter) StarterFor(profile *state.Profile, kind string) (transport.StartFn, transport.Availability) {
 	switch kind {
 	case "cloak":
@@ -68,7 +67,15 @@ func (s *starter) StarterFor(profile *state.Profile, kind string) (transport.Sta
 			return nil, transport.NotConfigured
 		}
 		return s.startHysteria2, s.singBoxAvailability()
-	case "naive", "snowflake":
+	case "naive":
+		if !naiveLinked {
+			return nil, transport.Unavailable
+		}
+		if profile.Naive == nil {
+			return nil, transport.NotConfigured
+		}
+		return s.startNaive, transport.Available
+	case "snowflake":
 		return nil, transport.Unavailable
 	default:
 		return nil, transport.NotConfigured

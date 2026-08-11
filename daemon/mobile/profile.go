@@ -1,9 +1,9 @@
 package mobile
 
 // Ports the profile construction in apps/desktop/src/main/pangeaApiClient.ts.
-// NaiveProxy is absent: its engine is cgo and does not link on Android.
 
 import (
+	"net"
 	"strings"
 
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/state"
@@ -25,6 +25,7 @@ func buildProfile(server *serverInfo) *state.Profile {
 			EncryptionMethod: "plain",
 			ServerName:       server.Cloak.ServerName,
 		},
+		Naive:       buildNaive(server.Naive, nodeIP),
 		Reality:     buildReality(server.Reality, nodeIP),
 		Hysteria2:   buildHysteria2(server.Hysteria2, nodeIP),
 		Shadowsocks: buildShadowsocks(server.Shadowsocks, nodeIP),
@@ -39,6 +40,42 @@ func endpointHost(remoteIP, nodeIP string) string {
 		return trimmed
 	}
 	return nodeIP
+}
+
+// buildNaive ports apps/desktop/src/shared/naiveEndpoint.ts. The engine maps
+// serverName onto remoteHost itself, so splitting them keeps DNS out of it.
+func buildNaive(info *naiveInfo, nodeIP string) *state.NaiveProfile {
+	if info == nil {
+		return nil
+	}
+	host := strings.TrimSpace(info.RemoteHost)
+	serverName := host
+	if named := strings.TrimSpace(info.ServerName); named != "" {
+		serverName = named
+	}
+	return &state.NaiveProfile{
+		LocalPort:  0,
+		RemoteHost: naiveDialHost(info, host, nodeIP),
+		RemotePort: info.RemotePort,
+		Username:   info.Username,
+		Password:   info.Password,
+		ServerName: serverName,
+	}
+}
+
+// naiveDialHost picks the address to dial: a naive-specific one first, then
+// remoteHost when it is already a literal, then the shared node.
+func naiveDialHost(info *naiveInfo, host, nodeIP string) string {
+	if perTransport := strings.TrimSpace(info.RemoteIP); perTransport != "" {
+		return perTransport
+	}
+	if ip := net.ParseIP(host); ip != nil && ip.To4() != nil {
+		return host
+	}
+	if trimmed := strings.TrimSpace(nodeIP); trimmed != "" {
+		return trimmed
+	}
+	return host
 }
 
 func buildReality(info *realityInfo, nodeIP string) *state.RealityProfile {

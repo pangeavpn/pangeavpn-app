@@ -1,4 +1,4 @@
-//go:build naive_cgo
+//go:build naive_cgo && (!android || arm64)
 
 package naive
 
@@ -103,6 +103,8 @@ func (m *Manager) Start(ctx context.Context, profile state.NaiveProfile) error {
 		m.mu.Unlock()
 		return fmt.Errorf("LocalPort must be >= 0, got %d", profile.LocalPort)
 	}
+
+	installSocketProtector()
 
 	cfg := startConfig{
 		RemoteHost: remoteHost,

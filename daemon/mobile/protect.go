@@ -33,6 +33,7 @@ func startProtectServer(filesDir string, logs *state.LogStore) error {
 	}
 
 	protectServer = srv
+	bindNaiveProtector()
 	reality.ProtectPath = srv.Path()
 	shadowsocks.ProtectPath = srv.Path()
 	hysteria2.ProtectPath = srv.Path()

@@ -58,6 +58,23 @@ an AAR on release builds, and AGP rejects that outright when an `.aar` appears
 as a file dependency. A missing AAR now fails resolution instead of failing
 later at compilation.
 
+### 1b. Stage the NaiveProxy engine (optional, arm64-v8a only)
+
+```bash
+node scripts/fetch-naive-android.mjs   # from the repo root
+```
+
+This downloads the pinned `libpangea_naive.a` from the naiveproxy fork's release
+into `daemon/internal/naive/android/arm64-v8a/` (gitignored). Add `-tags
+naive_cgo` to the `gomobile bind` above to link it; without the tag, or on the
+other three ABIs, the cascade simply ends at Hysteria2.
+
+It is arm64-v8a only on purpose: the archive is ~15 MB of Chromium per ABI, and
+everything since 2019 is 64-bit ARM. Chromium opens its own sockets, so the
+engine is handed a protect callback (`naive.ProtectFD`) that reaches
+`VpnService.protect()`; without it naive would dial its server through the TUN
+it is establishing and hang rather than fail.
+
 ### 2. Build the apps
 
 ```bash
