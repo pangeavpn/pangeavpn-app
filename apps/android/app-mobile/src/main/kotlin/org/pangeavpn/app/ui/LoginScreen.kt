@@ -113,7 +113,7 @@ fun LoginScreen(
                     )
 
                     SectionLabel(
-                        text = stringResource(R.string.login_token_label),
+                        text = stringResource(R.string.login_account_label),
                         modifier = Modifier.padding(top = 20.dp, bottom = 9.dp),
                     )
                     TokenField(

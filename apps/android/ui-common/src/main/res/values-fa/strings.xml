@@ -33,11 +33,11 @@
     <string name="killswitch_body">تا زمانی که دوباره متصل شوید یا کلید قطع اضطراری را خاموش کنید، فقط ترافیک VPN مجاز است.</string>
     <string name="killswitch_open_settings">باز کردن تنظیمات VPN</string>
     <string name="killswitch_title">کلید قطع اضطراری فعال است</string>
-    <string name="login_hint">توکن خود را در pangeavpn.org/account دریافت کنید</string>
+    <string name="login_account_label">شماره حساب</string>
+    <string name="login_hint">شماره حساب خود را در pangeavpn.org/account پیدا کنید</string>
     <string name="login_signin">ورود</string>
-    <string name="login_subtitle">برای ادامه، توکن ورود خود را وارد کنید.</string>
+    <string name="login_subtitle">برای ادامه، شماره حساب خود را وارد کنید. توکن ورود قدیمی هم کار می‌کند.</string>
     <string name="login_title">ورود</string>
-    <string name="login_token_label">توکن</string>
     <string name="login_token_placeholder">ABCD-EFGH-JKMN-PQRS-TVWX-YZ01</string>
     <string name="region_auto_of">%1$s سرور · خودکار</string>
     <string name="region_best_of">%1$s · بهترین از %2$s</string>
@@ -88,10 +88,10 @@
     <string name="subscription_none">اشتراک فعالی وجود ندارد</string>
     <string name="toggle_off">خاموش</string>
     <string name="toggle_on">روشن</string>
-    <string name="transport_status_cloak">Cloak</string>
-    <string name="transport_status_hysteria2">Hysteria2</string>
+    <string name="transport_status_cloak">مبهم‌سازی: Cloak</string>
+    <string name="transport_status_hysteria2">مبهم‌سازی: Hysteria2</string>
     <string name="transport_status_none"></string>
-    <string name="transport_status_reality">VLESS+REALITY</string>
-    <string name="transport_status_shadowsocks">Shadowsocks</string>
-    <string name="transport_status_snowflake">Snowflake</string>
+    <string name="transport_status_reality">مبهم‌سازی: VLESS+REALITY</string>
+    <string name="transport_status_shadowsocks">مبهم‌سازی: Shadowsocks</string>
+    <string name="transport_status_snowflake">مبهم‌سازی: Snowflake</string>
 </resources>

@@ -182,7 +182,12 @@ const MOBILE_ONLY = {
     ru: "Открыть настройки VPN", uk: "Відкрити налаштування VPN",
     zh: "打开 VPN 设置", ar: "فتح إعدادات VPN", fa: "باز کردن تنظیمات VPN"
   },
-  tv_login_hint: {
+  login_account_label: {
+    en: "Account number", es: "Número de cuenta", fr: "Numéro de compte",
+    ru: "Номер аккаунта", uk: "Номер акаунта",
+    zh: "账号", ar: "رقم الحساب", fa: "شماره حساب"
+  },
+  login_hint: {
     en: "Find your account number at pangeavpn.org/account",
     es: "Encuentra tu número de cuenta en pangeavpn.org/account",
     fr: "Trouvez votre numéro de compte sur pangeavpn.org/account",
