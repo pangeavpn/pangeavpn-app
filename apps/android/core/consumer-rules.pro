@@ -9,3 +9,7 @@
 
 # Models cross the Go boundary as JSON, so R8 must not rename their fields.
 -keepclassmembers class org.pangeavpn.core.model.** { *; }
+
+# Tink, under security-crypto, references annotations that are compile-only.
+-dontwarn com.google.errorprone.annotations.**
+-dontwarn javax.annotation.**
