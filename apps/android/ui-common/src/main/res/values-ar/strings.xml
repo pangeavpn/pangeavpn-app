@@ -91,6 +91,7 @@
     <string name="toggle_on">مفعّل</string>
     <string name="transport_status_cloak">التمويه: Cloak</string>
     <string name="transport_status_hysteria2">التمويه: Hysteria2</string>
+    <string name="transport_status_naive">التمويه: NaiveProxy</string>
     <string name="transport_status_none"></string>
     <string name="transport_status_reality">التمويه: VLESS+REALITY</string>
     <string name="transport_status_shadowsocks">التمويه: Shadowsocks</string>

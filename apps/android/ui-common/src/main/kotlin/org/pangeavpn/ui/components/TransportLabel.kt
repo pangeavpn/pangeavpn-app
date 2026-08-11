@@ -13,6 +13,7 @@ fun transportStatusLabel(activeTransport: String): String = when (activeTranspor
     "shadowsocks" -> stringResource(R.string.transport_status_shadowsocks)
     "hysteria2" -> stringResource(R.string.transport_status_hysteria2)
     "snowflake" -> stringResource(R.string.transport_status_snowflake)
-    // NaiveProxy never runs here, but the hub may still name it.
+    // Only arm64-v8a links the naive engine; elsewhere it is never reported.
+    "naive" -> stringResource(R.string.transport_status_naive)
     else -> stringResource(R.string.transport_status_none)
 }

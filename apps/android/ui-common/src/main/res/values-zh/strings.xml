@@ -91,6 +91,7 @@
     <string name="toggle_on">开启</string>
     <string name="transport_status_cloak">混淆：Cloak</string>
     <string name="transport_status_hysteria2">混淆：Hysteria2</string>
+    <string name="transport_status_naive">混淆：NaiveProxy</string>
     <string name="transport_status_none"></string>
     <string name="transport_status_reality">混淆：VLESS+REALITY</string>
     <string name="transport_status_shadowsocks">混淆：Shadowsocks</string>

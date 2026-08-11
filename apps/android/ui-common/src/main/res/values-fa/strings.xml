@@ -91,6 +91,7 @@
     <string name="toggle_on">روشن</string>
     <string name="transport_status_cloak">مبهم‌سازی: Cloak</string>
     <string name="transport_status_hysteria2">مبهم‌سازی: Hysteria2</string>
+    <string name="transport_status_naive">مبهم‌سازی: NaiveProxy</string>
     <string name="transport_status_none"></string>
     <string name="transport_status_reality">مبهم‌سازی: VLESS+REALITY</string>
     <string name="transport_status_shadowsocks">مبهم‌سازی: Shadowsocks</string>

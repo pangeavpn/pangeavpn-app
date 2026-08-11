@@ -4,7 +4,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.res.stringResource
 import org.pangeavpn.ui.R
 
-/** Connection-method choices. NaiveProxy is absent: it cannot run on Android. */
+/** Connection-method choices. NaiveProxy is absent: see TRANSPORT_CHOICES. */
 @Composable
 fun transportChoiceLabel(kind: String): String = when (kind) {
     "auto" -> stringResource(R.string.settings_transport_auto)

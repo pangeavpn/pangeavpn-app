@@ -91,6 +91,7 @@
     <string name="toggle_on">Вкл</string>
     <string name="transport_status_cloak">Обфускация: Cloak</string>
     <string name="transport_status_hysteria2">Обфускация: Hysteria2</string>
+    <string name="transport_status_naive">Обфускация: NaiveProxy</string>
     <string name="transport_status_none"></string>
     <string name="transport_status_reality">Обфускация: VLESS+REALITY</string>
     <string name="transport_status_shadowsocks">Обфускация: Shadowsocks</string>

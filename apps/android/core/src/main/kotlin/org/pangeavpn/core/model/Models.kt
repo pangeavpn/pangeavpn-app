@@ -84,8 +84,8 @@ data class AppSettings(
     val hubMethods: HubMethods = HubMethods(),
 )
 
-/** Transports the Android build can actually run: NaiveProxy is cgo-only, and
- *  Snowflake's WebRTC sockets cannot be handed to VpnService.protect(). */
+/** Manual choices. NaiveProxy is reachable through "auto" but is not offered
+ *  here: only arm64-v8a links it. Snowflake cannot be protect()ed at all. */
 val TRANSPORT_CHOICES = listOf("auto", "cloak", "reality", "shadowsocks", "hysteria2")
 
 val HUB_METHOD_CHOICES = listOf("directIp", "shadowsocks", "fronted", "normal")

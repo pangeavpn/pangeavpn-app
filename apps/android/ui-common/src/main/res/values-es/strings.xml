@@ -91,6 +91,7 @@
     <string name="toggle_on">Activado</string>
     <string name="transport_status_cloak">Ofuscación: Cloak</string>
     <string name="transport_status_hysteria2">Ofuscación: Hysteria2</string>
+    <string name="transport_status_naive">Ofuscación: NaiveProxy</string>
     <string name="transport_status_none"></string>
     <string name="transport_status_reality">Ofuscación: VLESS+REALITY</string>
     <string name="transport_status_shadowsocks">Ofuscación: Shadowsocks</string>

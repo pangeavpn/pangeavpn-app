@@ -84,6 +84,7 @@ const KEY_MAP = {
   "status.transport.reality": "transport_status_reality",
   "status.transport.shadowsocks": "transport_status_shadowsocks",
   "status.transport.hysteria2": "transport_status_hysteria2",
+  "status.transport.naive": "transport_status_naive",
   "status.transport.snowflake": "transport_status_snowflake",
   "status.transport.none": "transport_status_none",
   "settings.transport.heading": "settings_transport_heading",

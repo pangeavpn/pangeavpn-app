@@ -91,6 +91,7 @@
     <string name="toggle_on">On</string>
     <string name="transport_status_cloak">Obfuscation: Cloak</string>
     <string name="transport_status_hysteria2">Obfuscation: Hysteria2</string>
+    <string name="transport_status_naive">Obfuscation: NaiveProxy</string>
     <string name="transport_status_none"></string>
     <string name="transport_status_reality">Obfuscation: VLESS+REALITY</string>
     <string name="transport_status_shadowsocks">Obfuscation: Shadowsocks</string>
