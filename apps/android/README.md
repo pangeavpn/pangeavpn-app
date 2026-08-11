@@ -49,7 +49,14 @@ gomobile bind -target=android -androidapi 24 -javapkg=org.pangeavpn \
 1.23+ rejects that push without the flag.
 
 This produces `org.pangeavpn.mobile.Mobile` and drops the AAR where `:core`
-consumes it (`core/libs/*.aar`). Re-run whenever `daemon/mobile` changes.
+consumes it. Re-run whenever `daemon/mobile` changes.
+
+The filename matters: `core/libs` is a `flatDir` repository declared in
+`settings.gradle.kts`, so `pangeacore.aar` resolves as the module `:pangeacore`
+rather than as a file. It has to be a module — `lintVital` bundles `:core` into
+an AAR on release builds, and AGP rejects that outright when an `.aar` appears
+as a file dependency. A missing AAR now fails resolution instead of failing
+later at compilation.
 
 ### 2. Build the apps
 
