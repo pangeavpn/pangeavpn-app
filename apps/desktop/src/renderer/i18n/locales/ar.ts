@@ -19,15 +19,15 @@ export const ar = {
   "daemonRecovery.tryAgain": "المحاولة مرة أخرى",
 
   // ── Login screen ──────────────────────────────────────
-  "login.subtitle": "أدخل رمز الدخول للمتابعة.",
-  "login.getToken": "احصل على رمزك",
-  "login.tokenPlaceholder": "0000000000000000",
-  "login.tokenAriaLabel": "رمز الدخول",
+  "login.subtitle": "أدخل رقم حسابك للمتابعة. رمز الدخول القديم ما زال يعمل.",
+  "login.getToken": "اعثر على رقم حسابك",
+  "login.tokenPlaceholder": "ABCD-EFGH-JKMN-PQRS-TVWX-YZ01",
+  "login.tokenAriaLabel": "رقم الحساب",
   "login.signIn": "تسجيل الدخول",
-  "login.cachedTokenAriaLabel": "تسجيل الدخول بالرمز المحفوظ",
-  "login.enterToken": "يرجى إدخال رمز VPN الخاص بك.",
+  "login.cachedTokenAriaLabel": "تسجيل الدخول برقم الحساب المحفوظ",
+  "login.enterToken": "يرجى إدخال رقم حسابك.",
   "login.signingIn": "جارٍ تسجيل الدخول...",
-  "login.invalidToken": "رمز VPN غير صالح.",
+  "login.invalidToken": "رقم الحساب غير صالح.",
   "login.signInFailed": "فشل تسجيل الدخول.",
 
   // ── Device-limit screen ───────────────────────────────
@@ -275,6 +275,7 @@ export const ar = {
   "status.transport.hysteria2": "التمويه: Hysteria2",
   "status.transport.snowflake": "التمويه: Snowflake",
   "status.transport.reality": "التمويه: VLESS+REALITY",
+  "status.transport.shadowsocks": "التمويه: Shadowsocks",
   "status.transport.none": "",
 
   // ── Generic error fallbacks ───────────────────────────

@@ -19,15 +19,15 @@ export const fr = {
   "daemonRecovery.tryAgain": "Réessayer",
 
   // ── Login screen ──────────────────────────────────────
-  "login.subtitle": "Saisissez votre jeton de connexion pour continuer.",
-  "login.getToken": "Obtenir votre jeton",
-  "login.tokenPlaceholder": "0000000000000000",
-  "login.tokenAriaLabel": "Jeton de connexion",
+  "login.subtitle": "Saisissez votre numéro de compte pour continuer. Un ancien jeton de connexion fonctionne toujours.",
+  "login.getToken": "Trouver votre numéro de compte",
+  "login.tokenPlaceholder": "ABCD-EFGH-JKMN-PQRS-TVWX-YZ01",
+  "login.tokenAriaLabel": "Numéro de compte",
   "login.signIn": "Se connecter",
-  "login.cachedTokenAriaLabel": "Se connecter avec le jeton enregistré",
-  "login.enterToken": "Veuillez saisir votre jeton VPN.",
+  "login.cachedTokenAriaLabel": "Se connecter avec le numéro enregistré",
+  "login.enterToken": "Veuillez saisir votre numéro de compte.",
   "login.signingIn": "Connexion...",
-  "login.invalidToken": "Jeton VPN invalide.",
+  "login.invalidToken": "Numéro de compte invalide.",
   "login.signInFailed": "Échec de la connexion.",
 
   // ── Device-limit screen ───────────────────────────────
@@ -275,6 +275,7 @@ export const fr = {
   "status.transport.hysteria2": "Obfuscation : Hysteria2",
   "status.transport.snowflake": "Obfuscation : Snowflake",
   "status.transport.reality": "Obfuscation : VLESS+REALITY",
+  "status.transport.shadowsocks": "Obfuscation : Shadowsocks",
   "status.transport.none": "",
 
   // ── Generic error fallbacks ───────────────────────────

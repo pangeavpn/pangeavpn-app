@@ -414,11 +414,12 @@ body {
 
 .login-token-input {
   margin-top: 16px;
-  width: 240px;
+  width: 330px;
+  max-width: 100%;
   padding: 12px 16px;
-  font-size: 1.1rem;
+  font-size: 1rem;
   font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
-  letter-spacing: 0.15em;
+  letter-spacing: 0.04em;
   text-align: center;
   border: 1px solid var(--border);
   border-radius: 14px;

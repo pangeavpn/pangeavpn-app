@@ -19,15 +19,15 @@ export const uk = {
   "daemonRecovery.tryAgain": "Спробувати ще раз",
 
   // ── Login screen ──────────────────────────────────────
-  "login.subtitle": "Введіть токен для входу, щоб продовжити.",
-  "login.getToken": "Отримати токен",
-  "login.tokenPlaceholder": "0000000000000000",
-  "login.tokenAriaLabel": "Токен для входу",
+  "login.subtitle": "Введіть номер акаунта, щоб продовжити. Старий токен для входу теж працює.",
+  "login.getToken": "Знайти номер акаунта",
+  "login.tokenPlaceholder": "ABCD-EFGH-JKMN-PQRS-TVWX-YZ01",
+  "login.tokenAriaLabel": "Номер акаунта",
   "login.signIn": "Увійти",
-  "login.cachedTokenAriaLabel": "Увійти зі збереженим токеном",
-  "login.enterToken": "Введіть свій токен VPN.",
+  "login.cachedTokenAriaLabel": "Увійти зі збереженим номером акаунта",
+  "login.enterToken": "Введіть номер акаунта.",
   "login.signingIn": "Вхід...",
-  "login.invalidToken": "Недійсний токен VPN.",
+  "login.invalidToken": "Недійсний номер акаунта.",
   "login.signInFailed": "Не вдалося увійти.",
 
   // ── Device-limit screen ───────────────────────────────
@@ -275,6 +275,7 @@ export const uk = {
   "status.transport.hysteria2": "Обфускація: Hysteria2",
   "status.transport.snowflake": "Обфускація: Snowflake",
   "status.transport.reality": "Обфускація: VLESS+REALITY",
+  "status.transport.shadowsocks": "Обфускація: Shadowsocks",
   "status.transport.none": "",
 
   // ── Generic error fallbacks ───────────────────────────

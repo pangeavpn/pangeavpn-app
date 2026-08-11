@@ -19,15 +19,15 @@ export const es = {
   "daemonRecovery.tryAgain": "Intentar de nuevo",
 
   // ── Login screen ──────────────────────────────────────
-  "login.subtitle": "Introduce tu token de acceso para continuar.",
-  "login.getToken": "Obtén tu token",
-  "login.tokenPlaceholder": "0000000000000000",
-  "login.tokenAriaLabel": "Token de acceso",
+  "login.subtitle": "Introduce tu número de cuenta para continuar. Un token de acceso antiguo también funciona.",
+  "login.getToken": "Encuentra tu número de cuenta",
+  "login.tokenPlaceholder": "ABCD-EFGH-JKMN-PQRS-TVWX-YZ01",
+  "login.tokenAriaLabel": "Número de cuenta",
   "login.signIn": "Iniciar sesión",
-  "login.cachedTokenAriaLabel": "Iniciar sesión con el token guardado",
-  "login.enterToken": "Introduce tu token de VPN.",
+  "login.cachedTokenAriaLabel": "Iniciar sesión con el número guardado",
+  "login.enterToken": "Introduce tu número de cuenta.",
   "login.signingIn": "Iniciando sesión...",
-  "login.invalidToken": "Token de VPN no válido.",
+  "login.invalidToken": "Número de cuenta no válido.",
   "login.signInFailed": "Error al iniciar sesión.",
 
   // ── Device-limit screen ───────────────────────────────
@@ -275,6 +275,7 @@ export const es = {
   "status.transport.hysteria2": "Ofuscación: Hysteria2",
   "status.transport.snowflake": "Ofuscación: Snowflake",
   "status.transport.reality": "Ofuscación: VLESS+REALITY",
+  "status.transport.shadowsocks": "Ofuscación: Shadowsocks",
   "status.transport.none": "",
 
   // ── Generic error fallbacks ───────────────────────────

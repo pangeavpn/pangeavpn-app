@@ -12,6 +12,7 @@ import { pickRandomServer, resolveSelection } from "./serverPick.js";
 import { buildDriftMap } from "./driftMap.js";
 import { dnsChoiceFor, dnsServersFor, type DnsChoice } from "./dnsPresets.js";
 import { buildFlag } from "./flags.js";
+import { formatAccountNumberInput, normalizeAccountNumber } from "./accountNumber.js";
 import {
   buildServerRetryOrder,
   groupRegions,
@@ -487,6 +488,15 @@ loginTokenInput.addEventListener("keydown", (e) => {
 });
 
 loginTokenInput.addEventListener("input", () => {
+  const formatted = formatAccountNumberInput(loginTokenInput.value);
+  if (formatted !== loginTokenInput.value) {
+    const caretAtEnd = loginTokenInput.selectionStart === loginTokenInput.value.length;
+    const caret = (loginTokenInput.selectionStart ?? 0) + (formatted.length - loginTokenInput.value.length);
+    loginTokenInput.value = formatted;
+    const position = caretAtEnd ? formatted.length : Math.max(0, caret);
+    loginTokenInput.setSelectionRange(position, position);
+  }
+
   const val = loginTokenInput.value.trim();
   if (val.length === 0) {
     loginTokenInput.style.borderColor = "";
@@ -784,7 +794,7 @@ menuDevicesBtn.addEventListener("click", () => {
 
 loginScreenBtn.addEventListener("click", async () => {
   if (!pangeaApi) return;
-  const token = loginTokenInput.value.trim();
+  const token = normalizeAccountNumber(loginTokenInput.value);
   if (!token) {
     loginScreenMessage.textContent = t("login.enterToken");
     return;
@@ -1934,6 +1944,7 @@ const TRANSPORT_LABELS: Record<string, string> = {
   cloak: "Cloak",
   naive: "NaiveProxy",
   reality: "VLESS+REALITY",
+  shadowsocks: "Shadowsocks",
   hysteria2: "Hysteria2",
   snowflake: "Snowflake",
 };
@@ -2008,15 +2019,11 @@ function renderStatus(status: StatusResponse): void {
   if (connectingVisual) {
     renderConnectingState();
   } else {
-    // A drop the daemon is still retrying is a connection in progress, not a
-    // dead one. The detail line keeps the daemon's own text, so the cause of
-    // the drop and the time to the next attempt stay visible.
-    const heroState = status.state === "ERROR" && status.reconnecting ? "CONNECTING" : status.state;
-    stateEl.textContent = t(("state." + heroState) as MessageKey);
+    stateEl.textContent = t(("state." + status.state) as MessageKey);
     detailEl.textContent = status.detail;
-    heroCard.dataset.state = heroState;
-    document.body.dataset.state = heroState;
-    setHeadline(heroState);
+    heroCard.dataset.state = status.state;
+    document.body.dataset.state = status.state;
+    setHeadline(status.state);
   }
 
   // Throughput stats
