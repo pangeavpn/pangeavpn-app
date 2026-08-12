@@ -292,9 +292,109 @@ func ensureSessionDNS(_ *tunnelSession, _ []string) (bool, error) {
 	return false, nil
 }
 
-// ensureSessionEndpointRoutes is Windows-only: there the bypass route is pinned
-// to a gateway that the OS can drop or move mid-session. The macOS route stays
-// as installed until teardown removes it.
-func ensureSessionEndpointRoutes(_ *tunnelSession, _ map[uint64]struct{}) (bool, error) {
-	return false, nil
+// darwinRoute is what `route -n get` reports for a destination: the entry the
+// kernel would actually use, which is a covering route when the host route we
+// installed has gone.
+type darwinRoute struct {
+	destination string
+	gateway     string
+	iface       string
+}
+
+// parseDarwinRouteGet reads `route -n get <dest>` output. An interface route
+// carries no gateway line, so an empty gateway is normal rather than a failure.
+func parseDarwinRouteGet(out string) darwinRoute {
+	var route darwinRoute
+	scanner := bufio.NewScanner(strings.NewReader(out))
+	for scanner.Scan() {
+		key, value, found := strings.Cut(strings.TrimSpace(scanner.Text()), ":")
+		if !found {
+			continue
+		}
+		value = strings.TrimSpace(value)
+		switch strings.TrimSpace(key) {
+		case "destination":
+			route.destination = value
+		case "gateway":
+			route.gateway = value
+		case "interface":
+			route.iface = value
+		}
+	}
+	return route
+}
+
+func darwinRouteFor(destination string) (darwinRoute, error) {
+	out, err := exec.Command("route", "-n", "get", destination).CombinedOutput()
+	if err != nil {
+		return darwinRoute{}, fmt.Errorf("query route to %s: %w (%s)", destination, err, strings.TrimSpace(string(out)))
+	}
+	return parseDarwinRouteGet(string(out)), nil
+}
+
+// endpointRouteNeedsRepair reports whether the bypass to destination has
+// stopped doing its job: replaced by a covering route because the host route
+// was dropped, pointing into the tunnel, or hanging off a gateway that moved.
+func endpointRouteNeedsRepair(destination string, current darwinRoute, tunnelInterface, gateway string) bool {
+	if current.destination != destination {
+		return true
+	}
+	if current.iface != "" && current.iface == tunnelInterface {
+		return true
+	}
+	return current.gateway != gateway
+}
+
+// ensureSessionEndpointRoutes re-pins the endpoint bypass routes to the host's
+// current default gateway, reporting whether it had to repair anything.
+//
+// macOS drops an interface's routes when the link goes down, and a roam or DHCP
+// renewal moves the gateway out from under them. Either way the endpoint falls
+// back to matching the tunnel's own 0.0.0.0/1 and WireGuard ends up routed into
+// the tunnel it is trying to establish.
+func ensureSessionEndpointRoutes(session *tunnelSession, _ map[uint64]struct{}) (bool, error) {
+	if session == nil || len(session.endpointRoutes) == 0 {
+		return false, nil
+	}
+
+	gateway, err := darwinDefaultGatewayV4()
+	if err != nil {
+		return false, fmt.Errorf("read default gateway: %w", err)
+	}
+
+	repaired := false
+	var errs []error
+	for _, route := range session.endpointRoutes {
+		if route.family != "inet" {
+			continue
+		}
+
+		current, err := darwinRouteFor(route.destination)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		if !endpointRouteNeedsRepair(route.destination, current, session.interfaceName, gateway) {
+			continue
+		}
+
+		// A plain add is enough when the host route is simply gone, and it can
+		// never rewrite the covering route the way `route change` might. Only a
+		// stale host route still in the table needs removing first, and that one
+		// already points somewhere useless.
+		if current.destination == route.destination {
+			if err := exec.Command("route", "-n", "delete", "-host", route.destination).Run(); err != nil {
+				errs = append(errs, fmt.Errorf("remove stale endpoint route %s: %w", route.destination, err))
+				continue
+			}
+		}
+		out, err := exec.Command("route", "-n", "add", "-host", route.destination, "-gateway", gateway).CombinedOutput()
+		if err != nil {
+			errs = append(errs, fmt.Errorf("re-pin endpoint route %s via %s: %w (%s)", route.destination, gateway, err, strings.TrimSpace(string(out))))
+			continue
+		}
+		repaired = true
+	}
+
+	return repaired, errors.Join(errs...)
 }
