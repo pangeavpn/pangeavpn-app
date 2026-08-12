@@ -301,7 +301,7 @@ func (m *wireGuardGoManager) ActiveTunnelLUID(_ context.Context, profile state.W
 // host's current default route, reporting whether it had to repair anything.
 // The lock is held throughout so the repair cannot race a teardown claiming the
 // same session.
-func (m *wireGuardGoManager) EnsureEndpointRoutes(_ context.Context, profile state.WireGuardProfile) (bool, error) {
+func (m *wireGuardGoManager) EnsureEndpointRoutes(ctx context.Context, profile state.WireGuardProfile) (bool, error) {
 	if strings.TrimSpace(profile.TunnelName) == "" {
 		return false, nil
 	}
@@ -321,7 +321,7 @@ func (m *wireGuardGoManager) EnsureEndpointRoutes(_ context.Context, profile sta
 			excludeLUIDs[s.windowsLUID] = struct{}{}
 		}
 	}
-	return ensureSessionEndpointRoutes(session, excludeLUIDs)
+	return ensureSessionEndpointRoutes(ctx, session, excludeLUIDs)
 }
 
 // ---------------------------------------------------------------------------

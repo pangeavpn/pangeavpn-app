@@ -2,106 +2,194 @@
 
 package wg
 
-import "testing"
+import (
+	"context"
+	"net/netip"
+	"testing"
+)
 
-// gatewayRouteOutput is what `route -n get` reports when the bypass is intact:
-// an exact host route out of the physical interface.
-const gatewayRouteOutput = `   route to: 203.0.113.9
-destination: 203.0.113.9
-    gateway: 192.168.1.1
-  interface: en0
-      flags: <UP,GATEWAY,HOST,DONE,STATIC>
- recvpipe  sendpipe  ssthresh  rtt,msec    rttvar  hopcount      mtu     expire
-       0         0         0         0         0         0      1500         0
-`
+const (
+	tunnelIfIndex   = 12
+	physicalIfIndex = 4
+)
 
-// tunnelRouteOutput is what it reports once the host route is gone and the
-// tunnel's own 0.0.0.0/1 covers the endpoint — no gateway line, because an
-// interface route has none. This is the state that black-holes the session.
-const tunnelRouteOutput = `   route to: 203.0.113.9
-destination: 0.0.0.0
-       mask: 128.0.0.0
-  interface: utun4
-      flags: <UP,DONE,CLONING,STATIC>
-`
+func addr(s string) netip.Addr { return netip.MustParseAddr(s) }
 
-func TestParseDarwinRouteGet(t *testing.T) {
-	intact := parseDarwinRouteGet(gatewayRouteOutput)
-	if intact.destination != "203.0.113.9" || intact.gateway != "192.168.1.1" || intact.iface != "en0" {
-		t.Errorf("parsed %+v, want destination 203.0.113.9 via 192.168.1.1 on en0", intact)
-	}
-
-	covering := parseDarwinRouteGet(tunnelRouteOutput)
-	if covering.destination != "0.0.0.0" || covering.iface != "utun4" {
-		t.Errorf("parsed %+v, want destination 0.0.0.0 on utun4", covering)
-	}
-	if covering.gateway != "" {
-		t.Errorf("gateway = %q, want empty — an interface route carries no gateway", covering.gateway)
+// physicalDefault is the real default route: 0.0.0.0/0 out of en0 via a
+// gateway address.
+func physicalDefault() darwinRouteEntry {
+	return darwinRouteEntry{
+		destination: addr("0.0.0.0"),
+		maskBits:    0,
+		gateway:     addr("192.168.1.1"),
+		ifIndex:     physicalIfIndex,
+		viaGateway:  true,
 	}
 }
 
-func TestEndpointRouteNeedsRepair(t *testing.T) {
-	const (
-		destination = "203.0.113.9"
-		tunnel      = "utun4"
-		gateway     = "192.168.1.1"
-	)
+// tunnelHalfDefault is what the tunnel installs: 0.0.0.0/1 scoped to the utun
+// with no gateway. It shares a destination with the real default, so only the
+// mask and the missing gateway tell them apart.
+func tunnelHalfDefault() darwinRouteEntry {
+	return darwinRouteEntry{
+		destination: addr("0.0.0.0"),
+		maskBits:    1,
+		ifIndex:     tunnelIfIndex,
+	}
+}
 
+// TestDarwinDefaultGateway_IgnoresTheTunnelsHalfDefault is the case that makes
+// the table scan necessary: asking the kernel which route serves 0.0.0.0 would
+// answer with the tunnel's 0.0.0.0/1, not the gateway the bypass needs.
+func TestDarwinDefaultGateway_IgnoresTheTunnelsHalfDefault(t *testing.T) {
+	entries := []darwinRouteEntry{tunnelHalfDefault(), physicalDefault()}
+
+	gateway, ok := darwinDefaultGateway(entries, tunnelIfIndex)
+	if !ok {
+		t.Fatal("no default gateway found with a physical default present")
+	}
+	if gateway != addr("192.168.1.1") {
+		t.Errorf("gateway = %s, want 192.168.1.1", gateway)
+	}
+}
+
+func TestDarwinDefaultGateway_Rejects(t *testing.T) {
 	tests := []struct {
 		name    string
-		current darwinRoute
-		repair  bool
+		entries []darwinRouteEntry
 	}{
 		{
-			name:    "intact bypass is left alone",
-			current: darwinRoute{destination: destination, gateway: gateway, iface: "en0"},
-			repair:  false,
+			name:    "only the tunnel's half-default",
+			entries: []darwinRouteEntry{tunnelHalfDefault()},
 		},
 		{
-			// The link flapped and took the host route with it. The endpoint now
-			// matches the tunnel's own 0.0.0.0/1, so WireGuard is routed into the
-			// tunnel it is trying to establish.
-			name:    "host route dropped, covered by the tunnel",
-			current: parseDarwinRouteGet(tunnelRouteOutput),
-			repair:  true,
+			// A default route on the tunnel itself: pinning to it is the loop.
+			name: "default route belongs to the tunnel",
+			entries: []darwinRouteEntry{{
+				destination: addr("0.0.0.0"), gateway: addr("10.0.0.1"),
+				ifIndex: tunnelIfIndex, viaGateway: true,
+			}},
 		},
 		{
-			// Roam or DHCP renewal onto a new gateway.
-			name:    "gateway moved",
-			current: darwinRoute{destination: destination, gateway: "10.20.0.1", iface: "en0"},
-			repair:  true,
+			// PPP/cellular style: no address to pin to.
+			name: "interface-scoped default has no gateway",
+			entries: []darwinRouteEntry{{
+				destination: addr("0.0.0.0"), ifIndex: physicalIfIndex,
+			}},
 		},
 		{
-			// Belt and braces: an exact host route that somehow points at the
-			// tunnel is the loop written down explicitly.
-			name:    "host route points into the tunnel",
-			current: darwinRoute{destination: destination, gateway: gateway, iface: tunnel},
-			repair:  true,
-		},
-		{
-			name:    "covered by a different route entirely",
-			current: darwinRoute{destination: "0.0.0.0", gateway: gateway, iface: "en0"},
-			repair:  true,
+			name:    "no default at all",
+			entries: []darwinRouteEntry{{destination: addr("10.0.0.0"), maskBits: 8, ifIndex: physicalIfIndex}},
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := endpointRouteNeedsRepair(destination, tc.current, tunnel, gateway); got != tc.repair {
-				t.Errorf("endpointRouteNeedsRepair(%+v) = %t, want %t", tc.current, got, tc.repair)
+			if _, ok := darwinDefaultGateway(tc.entries, tunnelIfIndex); ok {
+				t.Error("reported a usable gateway where there is none")
+			}
+		})
+	}
+}
+
+// TestDarwinDefaultGateway_TieBreakIsStable proves repeated elections agree, so
+// the guard cannot re-pin back and forth between two defaults every tick.
+func TestDarwinDefaultGateway_TieBreakIsStable(t *testing.T) {
+	high := darwinRouteEntry{destination: addr("0.0.0.0"), gateway: addr("10.0.0.1"), ifIndex: 9, viaGateway: true}
+	low := darwinRouteEntry{destination: addr("0.0.0.0"), gateway: addr("192.168.1.1"), ifIndex: 4, viaGateway: true}
+
+	forward, _ := darwinDefaultGateway([]darwinRouteEntry{high, low}, tunnelIfIndex)
+	reversed, _ := darwinDefaultGateway([]darwinRouteEntry{low, high}, tunnelIfIndex)
+	if forward != reversed {
+		t.Errorf("election depends on table order: %s vs %s", forward, reversed)
+	}
+}
+
+func TestEndpointRouteNeedsRepair(t *testing.T) {
+	gateway := addr("192.168.1.1")
+	endpoint := addr("203.0.113.9")
+
+	tests := []struct {
+		name    string
+		current darwinRouteEntry
+		found   bool
+		repair  bool
+	}{
+		{
+			name:    "intact bypass is left alone",
+			current: darwinRouteEntry{destination: endpoint, gateway: gateway, ifIndex: physicalIfIndex, host: true, viaGateway: true},
+			found:   true,
+			repair:  false,
+		},
+		{
+			// The link flapped and took the host route with it, so the endpoint
+			// now falls through to the tunnel's own half-default.
+			name:   "host route dropped",
+			found:  false,
+			repair: true,
+		},
+		{
+			name:    "gateway moved",
+			current: darwinRouteEntry{destination: endpoint, gateway: addr("10.20.0.1"), ifIndex: physicalIfIndex, host: true, viaGateway: true},
+			found:   true,
+			repair:  true,
+		},
+		{
+			name:    "host route points into the tunnel",
+			current: darwinRouteEntry{destination: endpoint, gateway: gateway, ifIndex: tunnelIfIndex, host: true, viaGateway: true},
+			found:   true,
+			repair:  true,
+		},
+		{
+			// A node on the local subnet is reached without a gateway. Re-pinning
+			// one would fight the kernel's own entry every tick.
+			name:    "on-link endpoint needs no gateway",
+			current: darwinRouteEntry{destination: endpoint, ifIndex: physicalIfIndex, host: true},
+			found:   true,
+			repair:  false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := endpointRouteNeedsRepair(tc.current, tc.found, tunnelIfIndex, gateway); got != tc.repair {
+				t.Errorf("endpointRouteNeedsRepair = %t, want %t", got, tc.repair)
 			}
 		})
 	}
 }
 
 // TestEnsureSessionEndpointRoutes_NoRoutesIsANoOp proves a session with nothing
-// recorded does not shell out at all — the guard runs on every health tick.
+// recorded never reaches the routing table; the guard runs on every tick.
 func TestEnsureSessionEndpointRoutes_NoRoutesIsANoOp(t *testing.T) {
-	repaired, err := ensureSessionEndpointRoutes(&tunnelSession{interfaceName: "utun4"}, nil)
+	repaired, err := ensureSessionEndpointRoutes(context.Background(), &tunnelSession{interfaceName: "utun4"}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if repaired {
 		t.Error("repaired = true with no recorded routes")
 	}
+}
+
+// TestDarwinIPv4Routes_ReadsTheLiveTable exercises the parse against whatever
+// the machine actually has, which is the part no fixture can stand in for.
+func TestDarwinIPv4Routes_ReadsTheLiveTable(t *testing.T) {
+	entries, err := darwinIPv4Routes()
+	if err != nil {
+		t.Fatalf("read routing table: %v", err)
+	}
+	if len(entries) == 0 {
+		t.Fatal("no IPv4 routes reported; the parse is not seeing the table")
+	}
+
+	var defaults int
+	for _, entry := range entries {
+		if !entry.host && entry.maskBits == 0 && entry.destination.IsUnspecified() {
+			defaults++
+		}
+		if !entry.destination.Is4() {
+			t.Errorf("non-IPv4 destination %s in an AF_INET scan", entry.destination)
+		}
+	}
+	t.Logf("parsed %d IPv4 routes, %d of them default", len(entries), defaults)
 }
