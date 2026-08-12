@@ -3,7 +3,7 @@ import type { Messages } from "../messages";
 
 export const ru = {
   // ── App shell / loading ───────────────────────────────
-  "app.brand": "Pangea VPN",
+  "app.brand": "PangeaVPN",
   "app.loading.starting": "Запуск PangeaVPN...",
   "app.loading.progress": "Идёт подготовка... ({remaining} с)",
   "app.loading.cantStart": "Не удалось запустить PangeaVPN. Перезапустите приложение.",
@@ -19,7 +19,7 @@ export const ru = {
   "daemonRecovery.tryAgain": "Повторить",
 
   // ── Login screen ──────────────────────────────────────
-  "login.subtitle": "Введите номер аккаунта, чтобы продолжить. Старый токен для входа тоже работает.",
+  "login.subtitle": "Войдите с кодом вашей учетной записи.",
   "login.getToken": "Найти номер аккаунта",
   "login.tokenPlaceholder": "ABCD-EFGH-JKMN-PQRS-TVWX-YZ01",
   "login.tokenAriaLabel": "Номер аккаунта",
@@ -54,7 +54,7 @@ export const ru = {
   "devices.noneRemaining": "Устройств не осталось.",
 
   // ── Header / menu ─────────────────────────────────────
-  "header.brandAriaLabel": "Pangea VPN",
+  "header.brandAriaLabel": "PangeaVPN",
   "header.signIn": "Войти",
   "header.toggleTheme": "Переключить тему",
   "header.menu": "Меню",

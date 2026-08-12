@@ -3,7 +3,7 @@ import type { Messages } from "../messages";
 
 export const fr = {
   // ── App shell / loading ───────────────────────────────
-  "app.brand": "Pangea VPN",
+  "app.brand": "PangeaVPN",
   "app.loading.starting": "Démarrage de PangeaVPN...",
   "app.loading.progress": "Préparation en cours... ({remaining} s)",
   "app.loading.cantStart": "PangeaVPN n'a pas pu démarrer. Veuillez redémarrer l'application.",
@@ -19,7 +19,7 @@ export const fr = {
   "daemonRecovery.tryAgain": "Réessayer",
 
   // ── Login screen ──────────────────────────────────────
-  "login.subtitle": "Saisissez votre numéro de compte pour continuer. Un ancien jeton de connexion fonctionne toujours.",
+  "login.subtitle": "Connectez-vous avec votre code de compte.",
   "login.getToken": "Trouver votre numéro de compte",
   "login.tokenPlaceholder": "ABCD-EFGH-JKMN-PQRS-TVWX-YZ01",
   "login.tokenAriaLabel": "Numéro de compte",
@@ -54,7 +54,7 @@ export const fr = {
   "devices.noneRemaining": "Aucun appareil restant.",
 
   // ── Header / menu ─────────────────────────────────────
-  "header.brandAriaLabel": "Pangea VPN",
+  "header.brandAriaLabel": "PangeaVPN",
   "header.signIn": "Se connecter",
   "header.toggleTheme": "Changer de thème",
   "header.menu": "Menu",

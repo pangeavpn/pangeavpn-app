@@ -3,7 +3,7 @@ import type { Messages } from "../messages";
 
 export const zh = {
   // ── App shell / loading ───────────────────────────────
-  "app.brand": "Pangea VPN",
+  "app.brand": "PangeaVPN",
   "app.loading.starting": "正在启动 PangeaVPN...",
   "app.loading.progress": "正在准备中... （{remaining} 秒）",
   "app.loading.cantStart": "PangeaVPN 无法启动，请重新启动应用。",
@@ -19,7 +19,7 @@ export const zh = {
   "daemonRecovery.tryAgain": "重试",
 
   // ── Login screen ──────────────────────────────────────
-  "login.subtitle": "输入您的账号以继续。旧的登录令牌同样可用。",
+  "login.subtitle": "使用您的账户代码登录。",
   "login.getToken": "查找您的账号",
   "login.tokenPlaceholder": "ABCD-EFGH-JKMN-PQRS-TVWX-YZ01",
   "login.tokenAriaLabel": "账号",
@@ -54,7 +54,7 @@ export const zh = {
   "devices.noneRemaining": "没有剩余设备。",
 
   // ── Header / menu ─────────────────────────────────────
-  "header.brandAriaLabel": "Pangea VPN",
+  "header.brandAriaLabel": "PangeaVPN",
   "header.signIn": "登录",
   "header.toggleTheme": "切换主题",
   "header.menu": "菜单",

@@ -755,7 +755,7 @@ loginTokenInput.addEventListener("paste", () => {
 const loginDashboardLink = document.getElementById("loginDashboardLink") as HTMLAnchorElement;
 loginDashboardLink.addEventListener("click", (e) => {
   e.preventDefault();
-  window.openExternal?.("https://pangeavpn.org/");
+  window.openExternal?.("https://pangeavpn.org/app");
 });
 
 // ── Device management screen (login-flow: device limit reached) ──

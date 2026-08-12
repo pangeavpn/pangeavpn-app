@@ -3,7 +3,7 @@
 
 export const en = {
   // ── App shell / loading ───────────────────────────────
-  "app.brand": "Pangea VPN",
+  "app.brand": "PangeaVPN",
   "app.loading.starting": "Starting PangeaVPN...",
   "app.loading.progress": "Getting things ready... ({remaining}s)",
   "app.loading.cantStart": "PangeaVPN couldn't start. Please restart the app.",
@@ -19,7 +19,7 @@ export const en = {
   "daemonRecovery.tryAgain": "Try again",
 
   // ── Login screen ──────────────────────────────────────
-  "login.subtitle": "Enter your account number to continue. An older sign-in token still works.",
+  "login.subtitle": "Login with your account code.",
   "login.getToken": "Find your account number",
   "login.tokenPlaceholder": "ABCD-EFGH-JKMN-PQRS-TVWX-YZ01",
   "login.tokenAriaLabel": "Account number",
@@ -54,7 +54,7 @@ export const en = {
   "devices.noneRemaining": "No devices remaining.",
 
   // ── Header / menu ─────────────────────────────────────
-  "header.brandAriaLabel": "Pangea VPN",
+  "header.brandAriaLabel": "PangeaVPN",
   "header.signIn": "Sign In",
   "header.toggleTheme": "Toggle theme",
   "header.menu": "Menu",

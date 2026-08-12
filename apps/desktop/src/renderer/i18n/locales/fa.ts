@@ -3,7 +3,7 @@ import type { Messages } from "../messages";
 
 export const fa = {
   // ── App shell / loading ───────────────────────────────
-  "app.brand": "Pangea VPN",
+  "app.brand": "PangeaVPN",
   "app.loading.starting": "در حال راه‌اندازی PangeaVPN...",
   "app.loading.progress": "در حال آماده‌سازی... ({remaining} ثانیه)",
   "app.loading.cantStart": "PangeaVPN نتوانست اجرا شود. لطفاً برنامه را دوباره اجرا کنید.",
@@ -19,7 +19,7 @@ export const fa = {
   "daemonRecovery.tryAgain": "تلاش دوباره",
 
   // ── Login screen ──────────────────────────────────────
-  "login.subtitle": "برای ادامه، شماره حساب خود را وارد کنید. توکن ورود قدیمی هم کار می‌کند.",
+  "login.subtitle": "با کد حساب خود وارد شوید.",
   "login.getToken": "شماره حساب خود را پیدا کنید",
   "login.tokenPlaceholder": "ABCD-EFGH-JKMN-PQRS-TVWX-YZ01",
   "login.tokenAriaLabel": "شماره حساب",
@@ -54,7 +54,7 @@ export const fa = {
   "devices.noneRemaining": "دستگاهی باقی نمانده است.",
 
   // ── Header / menu ─────────────────────────────────────
-  "header.brandAriaLabel": "Pangea VPN",
+  "header.brandAriaLabel": "PangeaVPN",
   "header.signIn": "ورود",
   "header.toggleTheme": "تغییر پوسته",
   "header.menu": "منو",

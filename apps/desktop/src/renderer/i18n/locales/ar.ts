@@ -3,7 +3,7 @@ import type { Messages } from "../messages";
 
 export const ar = {
   // ── App shell / loading ───────────────────────────────
-  "app.brand": "Pangea VPN",
+  "app.brand": "PangeaVPN",
   "app.loading.starting": "جارٍ تشغيل PangeaVPN...",
   "app.loading.progress": "جارٍ التجهيز... ({remaining}ث)",
   "app.loading.cantStart": "تعذّر تشغيل PangeaVPN. يرجى إعادة تشغيل التطبيق.",
@@ -19,7 +19,7 @@ export const ar = {
   "daemonRecovery.tryAgain": "المحاولة مرة أخرى",
 
   // ── Login screen ──────────────────────────────────────
-  "login.subtitle": "أدخل رقم حسابك للمتابعة. رمز الدخول القديم ما زال يعمل.",
+  "login.subtitle": "سجّل الدخول باستخدام رمز حسابك.",
   "login.getToken": "اعثر على رقم حسابك",
   "login.tokenPlaceholder": "ABCD-EFGH-JKMN-PQRS-TVWX-YZ01",
   "login.tokenAriaLabel": "رقم الحساب",
@@ -54,7 +54,7 @@ export const ar = {
   "devices.noneRemaining": "لم يتبقَّ أي جهاز.",
 
   // ── Header / menu ─────────────────────────────────────
-  "header.brandAriaLabel": "Pangea VPN",
+  "header.brandAriaLabel": "PangeaVPN",
   "header.signIn": "تسجيل الدخول",
   "header.toggleTheme": "تبديل المظهر",
   "header.menu": "القائمة",

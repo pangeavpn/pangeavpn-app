@@ -7,13 +7,13 @@
       http-equiv="Content-Security-Policy"
       content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' http://127.0.0.1:8787; object-src 'none'; base-uri 'none'; frame-src 'none'; form-action 'none'"
     />
-    <title>Pangea VPN</title>
+    <title>PangeaVPN</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
     <div id="loadingScreen" class="loading-screen">
       <div class="loading-content">
-        <h1 data-i18n="app.brand">Pangea VPN</h1>
+        <h1 data-i18n="app.brand">PangeaVPN</h1>
         <span class="spinner loading-spinner"></span>
         <p id="loadingMessage" data-i18n="app.loading.starting">Starting PangeaVPN...</p>
       </div>
@@ -57,6 +57,7 @@
     <div id="toastContainer" class="toast-container" role="status" aria-live="polite"></div>
 
     <div id="loginScreen" class="login-screen" hidden>
+      <span class="login-brand" role="img" aria-label="PangeaVPN" data-i18n-aria-label="header.brandAriaLabel"></span>
       <div class="login-tools">
         <button id="loginThemeToggleBtn" class="btn-icon theme-toggle" type="button" aria-pressed="false" aria-label="Toggle theme" data-i18n-aria-label="header.toggleTheme" title="Toggle theme" data-i18n-title="header.toggleTheme">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M20.2 14.2A8.2 8.2 0 0 1 9.8 3.8a8.2 8.2 0 1 0 10.4 10.4Z"/></svg>
@@ -66,15 +67,8 @@
         </button>
       </div>
       <div class="login-content">
-        <div class="login-logo">
-          <svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M24 4L6 14v12c0 11 8 18 18 20 10-2 18-9 18-20V14L24 4z" stroke="currentColor" stroke-width="2" fill="none" opacity="0.3"/>
-            <path d="M24 10L12 17v8c0 8 5.5 13 12 14.5 6.5-1.5 12-6.5 12-14.5v-8L24 10z" stroke="currentColor" stroke-width="1.5" fill="none" opacity="0.5"/>
-            <circle cx="24" cy="22" r="4" fill="currentColor" opacity="0.6"/>
-          </svg>
-        </div>
-        <h1 data-i18n="app.brand">Pangea VPN</h1>
-        <p class="login-subtitle"><span data-i18n="login.subtitle">Enter your account number to continue. An older sign-in token still works.</span> <a class="login-link" id="loginDashboardLink" href="#" data-i18n="login.getToken">Find your account number</a></p>
+        <h1 data-i18n="app.brand">PangeaVPN</h1>
+        <p class="login-subtitle"><span data-i18n="login.subtitle">Login with your account code.</span> <a class="login-link" id="loginDashboardLink" href="https://pangeavpn.org/app" data-i18n="login.getToken">Find your account number</a></p>
         <input
           id="loginTokenInput"
           class="login-token-input"
@@ -118,7 +112,7 @@
 
     <main class="shell" hidden>
       <header class="header">
-        <span class="brand-logo" role="img" aria-label="Pangea VPN" data-i18n-aria-label="header.brandAriaLabel"></span>
+        <span class="brand-logo" role="img" aria-label="PangeaVPN" data-i18n-aria-label="header.brandAriaLabel"></span>
         <span id="appVersion" class="app-version">v-</span>
         <span class="header-spacer"></span>
         <nav class="header-menu" aria-label="Account and settings">

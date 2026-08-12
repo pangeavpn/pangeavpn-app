@@ -394,6 +394,22 @@ body {
   gap: 4px;
 }
 
+.login-brand {
+  position: absolute;
+  top: 22px;
+  inset-inline-start: 22px;
+  display: block;
+  width: 28px;
+  height: 28px;
+  background-color: var(--accent);
+  -webkit-mask: url("./logo-africa.png") no-repeat center / contain;
+  mask: url("./logo-africa.png") no-repeat center / contain;
+}
+
+body[data-theme="light"] .login-brand {
+  background-color: #84847c;
+}
+
 .login-content {
   text-align: center;
   display: flex;
