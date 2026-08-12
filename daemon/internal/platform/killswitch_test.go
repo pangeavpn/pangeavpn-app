@@ -160,7 +160,7 @@ func TestNoopKillSwitch(t *testing.T) {
 	if err := ks.Enable(context.Background(), []string{"203.0.113.4"}, false, false); err != nil {
 		t.Errorf("enable should not fail: %v", err)
 	}
-	if err := ks.Update(context.Background(), "wg0"); err != nil {
+	if err := ks.Update(context.Background(), TunnelRef{Name: "wg0"}); err != nil {
 		t.Errorf("update should not fail: %v", err)
 	}
 	if err := ks.Clear(context.Background()); err != nil {

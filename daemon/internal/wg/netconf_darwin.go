@@ -291,3 +291,10 @@ func restoreDarwinDNSServers(overrides []darwinDNSOverride) error {
 func ensureSessionDNS(_ *tunnelSession, _ []string) (bool, error) {
 	return false, nil
 }
+
+// ensureSessionEndpointRoutes is Windows-only: there the bypass route is pinned
+// to a gateway that the OS can drop or move mid-session. The macOS route stays
+// as installed until teardown removes it.
+func ensureSessionEndpointRoutes(_ *tunnelSession, _ map[uint64]struct{}) (bool, error) {
+	return false, nil
+}

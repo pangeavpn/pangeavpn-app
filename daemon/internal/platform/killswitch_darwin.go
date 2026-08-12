@@ -71,7 +71,7 @@ func (ks *darwinKillSwitch) Enable(ctx context.Context, endpointHosts []string, 
 	return nil
 }
 
-func (ks *darwinKillSwitch) Update(ctx context.Context, tunnelInterface string) error {
+func (ks *darwinKillSwitch) Update(ctx context.Context, tunnel TunnelRef) error {
 	ks.mu.Lock()
 	defer ks.mu.Unlock()
 
@@ -79,7 +79,7 @@ func (ks *darwinKillSwitch) Update(ctx context.Context, tunnelInterface string) 
 		return fmt.Errorf("kill switch not active")
 	}
 
-	tunnelInterface = strings.TrimSpace(tunnelInterface)
+	tunnelInterface := strings.TrimSpace(tunnel.Name)
 	if tunnelInterface == "" {
 		return fmt.Errorf("empty tunnel interface name")
 	}

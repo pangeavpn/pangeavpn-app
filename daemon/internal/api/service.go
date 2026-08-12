@@ -158,6 +158,11 @@ type Service struct {
 	// a correction. Guarded by recoveryMu.
 	dnsGuardNextAt time.Time
 
+	// endpointRouteRepairs counts consecutive health checks that had to re-pin
+	// the tunnel's endpoint routes, so a route that never settles cannot hold
+	// off recovery forever. Guarded by recoveryMu.
+	endpointRouteRepairs int
+
 	// probeResolver resolves over the live tunnel to prove it still carries
 	// traffic. Defaults to probeResolverOverUDP; tests stub it, and a nil value
 	// disables the check.
@@ -179,6 +184,22 @@ type wgPreflightChecker interface {
 
 type wgActiveInterfaceReporter interface {
 	ActiveInterfaceName(ctx context.Context, profile state.WireGuardProfile) (string, error)
+}
+
+// wgTunnelLUIDReporter reports the Windows interface LUID of the live tunnel
+// device, which identifies the adapter exactly where its name does not.
+// Optional: a manager that does not implement it leaves the kill switch to
+// resolve the name itself.
+type wgTunnelLUIDReporter interface {
+	ActiveTunnelLUID(ctx context.Context, profile state.WireGuardProfile) (uint64, error)
+}
+
+// wgRouteGuard re-pins the tunnel's endpoint bypass routes when the host has
+// moved or dropped the default route they hang off, reporting whether it
+// corrected anything. Optional: a manager that does not implement it leaves the
+// routes as bring-up installed them.
+type wgRouteGuard interface {
+	EnsureEndpointRoutes(ctx context.Context, profile state.WireGuardProfile) (bool, error)
 }
 
 // wgDNSGuard re-asserts the tunnel's resolvers when the host has stopped
@@ -491,21 +512,45 @@ func (s *Service) bringUpAfterKillSwitch(ctx context.Context, profile state.Prof
 	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("%s tunnel established with wireguard handshake (%dms)", kind, time.Since(stepStart).Milliseconds()))
 
 	stepStart = time.Now()
-	tunnelInterface := s.resolveWireGuardInterfaceName(ctx, wireGuardProfile)
-	updateCh := make(chan error, 1)
-	go func() {
-		updateCh <- s.killSwitch.Update(ctx, tunnelInterface)
-	}()
-
-	if updateErr := <-updateCh; updateErr != nil {
-		s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("kill switch tunnel update failed: %v", updateErr))
+	tunnel := s.resolveTunnelRef(ctx, wireGuardProfile)
+	// The permit scoped to this tunnel is what lets application traffic out
+	// through the lock, so a session without it is connected and unusable —
+	// worth failing and rebuilding rather than reporting as healthy.
+	if err := s.killSwitch.Update(ctx, tunnel); err != nil {
+		s.tearDownFailedBringUp(wireGuardProfile)
+		s.setError(fmt.Sprintf("kill switch tunnel update failed: %v", err))
+		return err
 	}
-	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("kill switch updated (%dms)", time.Since(stepStart).Milliseconds()))
+	// The LUID says which adapter the permit actually names; without it a permit
+	// left on a destroyed adapter is indistinguishable in the log from a good one.
+	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf(
+		"kill switch updated (%dms), permitting %s (LUID %d)", time.Since(stepStart).Milliseconds(), tunnel.Name, tunnel.WindowsLUID))
 
 	s.setCurrentProfile(profile)
 	s.setSessionOpts(opts)
 	s.machine.Set(state.StateConnected, "tunnel active")
 	return nil
+}
+
+// tearDownFailedBringUp stops the tunnel a bring-up had running before it
+// failed, so the next Connect is not refused by a session nobody owns —
+// ensureNoRunningWireGuard would otherwise make the user disconnect by hand
+// first. The kill switch stays armed: a failed connect is fail-closed.
+func (s *Service) tearDownFailedBringUp(wireGuardProfile state.WireGuardProfile) {
+	// Not the caller's context: it may already be cancelled, and this cleanup
+	// still has to run.
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+
+	if err := s.wg.Stop(cleanupCtx, wireGuardProfile); err != nil {
+		s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("cleanup after failed bring-up: wireguard stop warning: %v", err))
+	}
+	if active := s.activeTransport(); active != nil {
+		if err := active.Stop(cleanupCtx); err != nil {
+			s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("cleanup after failed bring-up: transport stop warning: %v", err))
+		}
+	}
+	s.setActiveTransportKind("")
 }
 
 // rebindWireGuardEndpoint checks whether mgr bound a different local port
@@ -1729,7 +1774,14 @@ func (s *Service) runHealthCheck(ctx context.Context) {
 		s.setError(fmt.Sprintf("health check failed: wireguard tunnel is down (%s)", wgStatus.Detail))
 		return
 	}
-	if s.wireGuardHandshakeStale(wgStatus) {
+	// Checked before the silence detector because a lost bypass route is one of
+	// the things that silences a tunnel, and re-pinning it is far cheaper than
+	// the rebuild below. A repair earns the session this tick to handshake on
+	// the restored path; a route that needed no repair reports nothing, so a
+	// tunnel silent for another reason still reaches the rebuild.
+	routeRepaired := s.ensureEndpointRoutes(ctx, profile)
+
+	if !routeRepaired && s.wireGuardHandshakeStale(wgStatus) {
 		age := time.Since(time.Unix(wgStatus.LastHandshakeUnix, 0)).Round(time.Second)
 		s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("wireguard tunnel is silent (no handshake for %s); rebuilding session", age))
 		s.attemptSessionRebuild(ctx, profile, fmt.Sprintf("wireguard tunnel is silent (no handshake for %s)", age))
@@ -1738,6 +1790,12 @@ func (s *Service) runHealthCheck(ctx context.Context) {
 
 	if !s.killSwitch.Active() {
 		s.setError("health check failed: kill switch was cleared unexpectedly")
+		return
+	}
+
+	// A route that was just re-pinned has not had a round trip on it yet, so
+	// probing now would judge the session on the path it no longer uses.
+	if routeRepaired {
 		return
 	}
 
@@ -2103,6 +2161,31 @@ func (s *Service) recoverActiveTransport(ctx context.Context, profile state.Prof
 	default:
 		return fmt.Errorf("unknown active transport kind: %q", activeKind)
 	}
+}
+
+// resolveTunnelRef names the live tunnel for the kill switch. The LUID matters
+// most: it points at the device the manager actually created, where a name has
+// to be resolved back through the OS and can land on an adapter of the same name
+// that a rebuild is still tearing down.
+func (s *Service) resolveTunnelRef(ctx context.Context, profile state.WireGuardProfile) platform.TunnelRef {
+	return platform.TunnelRef{
+		Name:        s.resolveWireGuardInterfaceName(ctx, profile),
+		WindowsLUID: s.resolveTunnelLUID(ctx, profile),
+	}
+}
+
+func (s *Service) resolveTunnelLUID(ctx context.Context, profile state.WireGuardProfile) uint64 {
+	reporter, ok := s.wg.(wgTunnelLUIDReporter)
+	if !ok {
+		return 0
+	}
+
+	luid, err := reporter.ActiveTunnelLUID(ctx, profile)
+	if err != nil {
+		s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("wireguard tunnel LUID lookup failed; the kill switch will resolve the interface by name: %v", err))
+		return 0
+	}
+	return luid
 }
 
 func (s *Service) resolveWireGuardInterfaceName(ctx context.Context, profile state.WireGuardProfile) string {

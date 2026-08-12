@@ -228,6 +228,20 @@ func (m *wireGuardGoManager) removeSession(tunnelKey string) {
 	delete(m.sessions, tunnelKey)
 }
 
+// takeSession claims a session for teardown, dropping it from the map in the
+// same step. Guards that repair a live session hold the same lock, so a repair
+// either finishes before teardown claims the session or finds nothing left —
+// it can never re-install networking that teardown has just removed.
+func (m *wireGuardGoManager) takeSession(tunnelKey string) (*tunnelSession, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s, ok := m.sessions[tunnelKey]
+	if ok {
+		delete(m.sessions, tunnelKey)
+	}
+	return s, ok
+}
+
 func (m *wireGuardGoManager) hasActiveDevice(tunnelKey string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -264,6 +278,50 @@ func (m *wireGuardGoManager) ActiveInterfaceName(_ context.Context, profile stat
 	}
 
 	return interfaceName, nil
+}
+
+// ActiveTunnelLUID reports the Windows interface LUID of the live tunnel device.
+// It identifies the adapter exactly, where a name does not: a rebuild destroys
+// and recreates the adapter under the same name a second apart, so a name
+// resolved through the OS can still land on the one that is going away. Zero on
+// other platforms.
+func (m *wireGuardGoManager) ActiveTunnelLUID(_ context.Context, profile state.WireGuardProfile) (uint64, error) {
+	if strings.TrimSpace(profile.TunnelName) == "" {
+		return 0, errors.New("wireguard tunnelName is required")
+	}
+
+	session, ok := m.session(sanitizeTunnelName(profile.TunnelName))
+	if !ok || session == nil {
+		return 0, fmt.Errorf("wireguard tunnel %s is not running", profile.TunnelName)
+	}
+	return session.windowsLUID, nil
+}
+
+// EnsureEndpointRoutes re-pins the session's endpoint bypass routes to the
+// host's current default route, reporting whether it had to repair anything.
+// The lock is held throughout so the repair cannot race a teardown claiming the
+// same session.
+func (m *wireGuardGoManager) EnsureEndpointRoutes(_ context.Context, profile state.WireGuardProfile) (bool, error) {
+	if strings.TrimSpace(profile.TunnelName) == "" {
+		return false, nil
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	session, ok := m.sessions[sanitizeTunnelName(profile.TunnelName)]
+	if !ok || session == nil {
+		return false, nil
+	}
+
+	// Read directly rather than through ActiveLUIDs, which takes the lock this
+	// already holds. Every tunnel is off limits as a next hop, not just this one.
+	excludeLUIDs := make(map[uint64]struct{}, len(m.sessions))
+	for _, s := range m.sessions {
+		if s != nil && s.windowsLUID != 0 {
+			excludeLUIDs[s.windowsLUID] = struct{}{}
+		}
+	}
+	return ensureSessionEndpointRoutes(session, excludeLUIDs)
 }
 
 // ---------------------------------------------------------------------------

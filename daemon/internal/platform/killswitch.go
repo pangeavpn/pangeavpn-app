@@ -28,7 +28,7 @@ type KillSwitch interface {
 
 	// Update adds an allow rule for the active tunnel interface so that
 	// VPN-routed traffic can egress.
-	Update(ctx context.Context, tunnelInterface string) error
+	Update(ctx context.Context, tunnel TunnelRef) error
 
 	// Clear removes all kill-switch rules and restores the previous
 	// network policy. Returns an error if restoration fails.
@@ -36,6 +36,16 @@ type KillSwitch interface {
 
 	// Active reports whether the kill switch is currently engaged.
 	Active() bool
+}
+
+// TunnelRef identifies the tunnel adapter a permit is scoped to: Name is what
+// pf and nftables match on, WindowsLUID is the WFP condition. The LUID is
+// carried rather than resolved from Name because a rebuild recreates the
+// adapter under the same name a second after destroying it, and a lookup in
+// that window can still return the one on its way out.
+type TunnelRef struct {
+	Name        string
+	WindowsLUID uint64
 }
 
 // LANAllowPrefixes are the IPv4 ranges the kill switch permits when
@@ -101,7 +111,7 @@ func NewKillSwitch() KillSwitch {
 type noopKillSwitch struct{}
 
 func (n *noopKillSwitch) Enable(_ context.Context, _ []string, _ bool, _ bool) error { return nil }
-func (n *noopKillSwitch) Update(_ context.Context, _ string) error                   { return nil }
+func (n *noopKillSwitch) Update(_ context.Context, _ TunnelRef) error                { return nil }
 func (n *noopKillSwitch) Clear(_ context.Context) error                              { return nil }
 func (n *noopKillSwitch) Active() bool                                               { return false }
 
