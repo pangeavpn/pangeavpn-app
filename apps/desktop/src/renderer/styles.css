@@ -383,6 +383,17 @@ body {
   z-index: 900;
 }
 
+/* Theme and Settings before sign-in — the header carrying them lives in the
+   app shell, which is hidden until the user is authenticated. */
+.login-tools {
+  position: absolute;
+  top: 12px;
+  inset-inline-end: 12px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .login-content {
   text-align: center;
   display: flex;
@@ -1689,12 +1700,15 @@ body[data-theme="light"] .region-flag {
 
 /* ── Full-screen settings ─────────────────────────────────── */
 
+/* Two panes: a fixed nav rail on the inline-start edge, sections scrolling
+   beside it. The window is 640×440 and never resizes, so the layout is tuned
+   for a wide, short viewport rather than a phone-shaped column. */
 .settings-overlay {
   position: fixed;
   inset: 0;
   z-index: 1500;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   background: var(--bg-base);
   opacity: 0;
   transform: translateX(100%);
@@ -1711,27 +1725,39 @@ body[data-theme="light"] .region-flag {
   transition: opacity 250ms ease, transform 250ms ease, visibility 0s linear 0s;
 }
 
-.settings-overlay-header {
+.settings-rail {
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  width: 228px;
+  padding: 12px 10px;
+  gap: 10px;
+  background: var(--bg-surface);
+  border-inline-end: 1px solid var(--border-subtle);
+}
+
+.settings-rail-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 20px 24px;
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
+  gap: 8px;
+  flex: none;
+  padding: 0 4px;
 }
 
-.settings-overlay-title {
+.settings-rail-title {
   margin: 0;
-  font-size: 1.1rem;
+  font-size: 1.05rem;
   font-weight: 600;
+  letter-spacing: -0.01em;
   color: var(--text-primary);
 }
 
 .settings-overlay-close {
   position: relative;
-  width: 36px;
-  height: 36px;
+  width: 28px;
+  height: 28px;
+  flex: none;
   border: none;
   border-radius: 999px;
   background: var(--accent);
@@ -1774,41 +1800,43 @@ body[data-theme="light"] .region-flag {
   transform: translate(-50%, -50%) rotate(-45deg);
 }
 
-.settings-overlay-body {
+/* Scroll container for the section list; nav jumps target children of this. */
+.settings-pane {
+  position: relative;
   flex: 1;
+  min-width: 0;
   overflow-y: auto;
-  width: 100%;
-  max-width: 640px;
-  margin: 0 auto;
-  padding: 12px 18px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+  padding: 14px 18px 24px;
+  scroll-behavior: smooth;
   scrollbar-width: thin;
   scrollbar-color: var(--accent) transparent;
 }
 
-/* ── Account actions (foot of Settings) ───────────────────── */
+/* ── Account actions (foot of the rail) ───────────────────── */
 
 .settings-actions {
   display: flex;
   flex-direction: column;
-  flex-shrink: 0;
-  border: 1px solid var(--border-subtle);
-  border-radius: 14px;
-  background: var(--bg-surface);
-  overflow: hidden;
+  flex: none;
+  margin-top: auto;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-subtle);
 }
+
+/* Beats the display:flex above, which would otherwise defeat [hidden] — the
+   whole block is hidden while signed out. */
+.settings-actions[hidden] { display: none; }
 
 .settings-action {
   display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 13px;
+  flex-direction: column;
+  gap: 1px;
+  padding: 6px 10px;
   border: 0;
+  border-radius: 8px;
   background: none;
   font: inherit;
-  font-size: 0.82rem;
+  font-size: 0.78rem;
   font-weight: 600;
   color: var(--text-primary);
   text-align: left;
@@ -1817,17 +1845,15 @@ body[data-theme="light"] .region-flag {
   transition: background 0.14s ease;
 }
 
-.settings-action + .settings-action { border-top: 1px solid var(--border-subtle); }
 .settings-action:hover { background: var(--bg-elevated); }
 .settings-action:focus-visible { outline-offset: -3px; }
 .settings-action[hidden] { display: none; }
 .settings-action-danger { color: var(--danger); }
 
 .settings-action-value {
-  margin-inline-start: auto;
-  max-width: 240px;
+  max-width: 100%;
   font-family: "SF Mono", "Cascadia Mono", ui-monospace, monospace;
-  font-size: 0.62rem;
+  font-size: 0.6rem;
   font-weight: 400;
   color: var(--text-secondary);
   white-space: nowrap;
@@ -1980,7 +2006,7 @@ button:disabled {
 }
 
 .btn-primary,
-button:not(.btn-ghost):not(.btn-danger):not(.btn-icon):not(.secondary):not(.ghost):not(.collapse-toggle):not(.menu-item):not(.btn-quiet):not(.region-row):not(.region-more):not(.region-expand):not(.region-node):not(.settings-action) {
+button:not(.btn-ghost):not(.btn-danger):not(.btn-icon):not(.secondary):not(.ghost):not(.collapse-toggle):not(.menu-item):not(.btn-quiet):not(.region-row):not(.region-more):not(.region-expand):not(.region-node):not(.settings-action):not(.settings-nav-item):not(.settings-picker):not(.option-row):not(.subpane-back) {
   color: var(--accent-text);
   background: var(--accent);
   border-color: transparent;
@@ -1988,7 +2014,7 @@ button:not(.btn-ghost):not(.btn-danger):not(.btn-icon):not(.secondary):not(.ghos
 }
 
 .btn-primary:hover:not(:disabled),
-button:not(.btn-ghost):not(.btn-danger):not(.btn-icon):not(.secondary):not(.ghost):not(.collapse-toggle):not(.menu-item):not(.btn-quiet):not(.region-row):not(.region-more):not(.region-expand):not(.region-node):not(.settings-action):hover:not(:disabled) {
+button:not(.btn-ghost):not(.btn-danger):not(.btn-icon):not(.secondary):not(.ghost):not(.collapse-toggle):not(.menu-item):not(.btn-quiet):not(.region-row):not(.region-more):not(.region-expand):not(.region-node):not(.settings-action):not(.settings-nav-item):not(.settings-picker):not(.option-row):not(.subpane-back):hover:not(:disabled) {
   background: var(--accent-hover);
 }
 
@@ -2096,27 +2122,25 @@ button.ghost:hover:not(:disabled) {
 
 /* ── Settings ─────────────────────────────────────────────── */
 
-/* flex-shrink:0 — the body is a flex column, and a shrunk stack would clip its
-   last row against overflow:hidden rather than scroll. */
-.settings-stack {
+.settings-nav {
   display: flex;
   flex-direction: column;
-  flex-shrink: 0;
-  border: 1px solid var(--border-subtle);
-  border-radius: 14px;
-  background: var(--bg-surface);
-  overflow: hidden;
+  gap: 2px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
 }
 
-.settings-item + .settings-item { border-top: 1px solid var(--border-subtle); }
-
-.settings-item .collapse-toggle {
+.settings-nav-item {
   display: flex;
   align-items: center;
-  gap: 11px;
+  gap: 9px;
   width: 100%;
-  padding: 9px 13px;
+  padding: 7px 10px;
   border: 0;
+  border-radius: 9px;
   background: none;
   font: inherit;
   color: inherit;
@@ -2125,35 +2149,39 @@ button.ghost:hover:not(:disabled) {
   transition: background 0.14s ease;
 }
 
-.settings-item .collapse-toggle:hover { background: var(--bg-elevated); }
-.settings-item.is-open .collapse-toggle { background: var(--accent-glow); }
+.settings-nav-item:hover { background: var(--bg-elevated); }
+.settings-nav-item:focus-visible { outline-offset: -2px; }
+.settings-nav-item.is-active { background: var(--accent-glow); }
 
-/* Inset — the rounded card clips anything drawn outside the row. */
-.settings-item .collapse-toggle:focus-visible { outline-offset: -3px; }
+.settings-nav-copy {
+  display: grid;
+  min-width: 0;
+}
 
 .set-icon {
-  width: 19px;
-  height: 19px;
+  width: 18px;
+  height: 18px;
   flex: none;
   color: var(--text-muted);
   transition: color 0.14s ease;
 }
 
-.settings-item.is-open .set-icon { color: var(--accent); }
+.settings-nav-item.is-active .set-icon { color: var(--accent); }
 .set-icon svg { width: 100%; height: 100%; display: block; }
 
+/* Wraps rather than truncates — several translations of these headings are
+   too long for the rail on one line. */
 .set-title {
-  font-size: 0.82rem;
+  font-size: 0.8rem;
   font-weight: 600;
+  line-height: 1.25;
   color: var(--text-primary);
-  white-space: nowrap;
 }
 
+/* Current value under the label, so the rail doubles as a state summary. */
 .set-value {
-  margin-inline-start: auto;
-  max-width: 210px;
   font-family: "SF Mono", "Cascadia Mono", ui-monospace, monospace;
-  font-size: 0.62rem;
+  font-size: 0.6rem;
   color: var(--text-secondary);
   white-space: nowrap;
   overflow: hidden;
@@ -2161,23 +2189,156 @@ button.ghost:hover:not(:disabled) {
   transition: color 0.14s ease;
 }
 
-.settings-item.is-open .set-value { color: var(--accent); }
+.set-value:empty { display: none; }
+.settings-nav-item.is-active .set-value { color: var(--accent); }
 
-.set-chevron {
+.settings-section {
+  padding: 12px 14px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 14px;
+  background: var(--bg-surface);
+}
+
+.settings-section + .settings-section { margin-top: 10px; }
+
+/* Row that opens a full-pane picker instead of a native dropdown. */
+.settings-picker {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-base);
+  font: inherit;
+  font-size: 0.85rem;
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.14s ease, border-color 0.14s ease;
+}
+
+.settings-picker:hover { border-color: var(--accent); }
+.settings-picker-value { flex: 1; min-width: 0; }
+
+.settings-picker-chevron {
   width: 15px;
   height: 15px;
   flex: none;
   color: var(--text-muted);
-  transition: transform var(--collapse-duration) ease;
 }
 
-.settings-item.is-open .set-chevron { transform: rotate(180deg); }
-.set-chevron svg { width: 100%; height: 100%; display: block; }
+.settings-picker-chevron svg { width: 100%; height: 100%; display: block; }
 
-/* Indented to clear the row icon so expanded copy aligns under the title. */
-.set-body { padding: 2px 13px 14px 43px; }
+/* ── Full-pane option picker ──────────────────────────────── */
 
-.settings-item.is-open .collapse-content { opacity: 1; }
+.settings-subpane[hidden] { display: none; }
+
+.subpane-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.subpane-back {
+  width: 26px;
+  height: 26px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background 0.14s ease, color 0.14s ease;
+}
+
+.subpane-back:hover { background: var(--bg-elevated); color: var(--text-primary); }
+.subpane-back svg { width: 17px; height: 17px; display: block; }
+
+.subpane-title {
+  margin: 0;
+  font-size: 0.98rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
+}
+
+.option-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.option-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  background: var(--bg-surface);
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.14s ease, border-color 0.14s ease;
+}
+
+.option-row:hover { background: var(--bg-elevated); }
+.option-row[aria-checked="true"] { border-color: var(--accent); background: var(--accent-glow); }
+
+/* Multi-select variant: the switch carries the state, so the row itself never
+   takes the selected treatment. */
+.option-row-toggle { align-items: center; gap: 12px; }
+.option-row-toggle:has(.toggle-switch:checked) { border-color: var(--accent); }
+
+.option-copy {
+  flex: 1;
+  min-width: 0;
+}
+
+.option-title {
+  display: block;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.option-desc {
+  display: block;
+  margin-top: 3px;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+
+/* Reserves its width whether or not the row is the chosen one, so titles
+   don't shift sideways as the selection moves. */
+.option-check {
+  width: 17px;
+  height: 17px;
+  flex: none;
+  margin-top: 1px;
+  color: var(--accent);
+  opacity: 0;
+}
+
+.option-row[aria-checked="true"] .option-check { opacity: 1; }
+.option-check svg { width: 100%; height: 100%; display: block; }
+
+.settings-section-title {
+  margin: 0 0 6px;
+  font-size: 0.92rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
+}
 
 .settings-description {
   margin: 0 0 10px;
@@ -2449,8 +2610,18 @@ button.ghost:hover:not(:disabled) {
 [dir="rtl"] .device-item,
 [dir="rtl"] .menu-item,
 [dir="rtl"] .server-picker,
-[dir="rtl"] .collapse-toggle {
+[dir="rtl"] .collapse-toggle,
+[dir="rtl"] .settings-nav-item,
+[dir="rtl"] .settings-action,
+[dir="rtl"] .settings-picker,
+[dir="rtl"] .option-row {
   text-align: right;
+}
+
+/* Both arrows point along the reading direction, so both flip with it. */
+[dir="rtl"] .settings-picker-chevron svg,
+[dir="rtl"] .subpane-back svg {
+  transform: scaleX(-1);
 }
 
 [dir="rtl"] .device-current-badge,

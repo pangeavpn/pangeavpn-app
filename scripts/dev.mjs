@@ -53,15 +53,8 @@ children.push(desktop);
 
 function killDaemonSync() {
   if (isWin) {
-    try {
-      spawnSync("taskkill", ["/F", "/IM", "PangeaDaemon.exe"], {
-        stdio: "pipe",
-        shell: false,
-        timeout: 5000
-      });
-    } catch {
-      // best-effort
-    }
+    killPort8787();
+    return;
   } else {
     killPort8787();
   }
@@ -72,13 +65,38 @@ function killPort8787() {
     if (isWin) {
       const result = spawnSync("netstat", ["-ano", "-p", "TCP"], { stdio: "pipe", shell: false, timeout: 5000 });
       const output = (result.stdout ?? "").toString();
+      const pids = new Set();
       for (const line of output.split("\n")) {
-        if (line.includes("127.0.0.1:8787") && line.includes("LISTENING")) {
+        if (line.includes(":8787") && line.includes("LISTENING")) {
           const pid = line.trim().split(/\s+/).pop();
           if (pid && pid !== "0") {
-            spawnSync("taskkill", ["/F", "/PID", pid], { stdio: "pipe", shell: false, timeout: 5000 });
+            pids.add(pid);
           }
         }
+      }
+
+      for (const pid of pids) {
+        spawnSync("taskkill", ["/F", "/T", "/PID", pid], { stdio: "pipe", shell: false, timeout: 5000 });
+      }
+
+      // The daemon is elevated, so a normal taskkill can be denied. Retry the
+      // listener PIDs from an elevated PowerShell process when necessary.
+      if (pids.size > 0 && isPort8787ReachableSync()) {
+        const killCommand = [
+          "$ErrorActionPreference = 'SilentlyContinue'",
+          "Get-NetTCPConnection -LocalPort 8787 -State Listen | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }",
+          "Get-Process -Name 'PangeaDaemon' | Stop-Process -Force"
+        ].join("; ");
+        const encoded = psEncodedCommand(killCommand);
+        spawnSync("powershell.exe", [
+          "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command",
+          `Start-Process powershell.exe -Verb RunAs -Wait -WindowStyle Hidden -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-EncodedCommand','${encoded}'`
+        ], { stdio: "inherit", shell: false, timeout: 15000 });
+      }
+
+      const deadline = Date.now() + 5000;
+      while (Date.now() < deadline && isPort8787ReachableSync()) {
+        sleepSync(100);
       }
     } else {
       const result = spawnSync("lsof", ["-ti", "tcp:8787"], { stdio: "pipe", shell: false, timeout: 5000 });
@@ -89,6 +107,19 @@ function killPort8787() {
     }
   } catch {
     // best-effort
+  }
+}
+
+function isPort8787ReachableSync() {
+  const result = spawnSync("netstat", ["-ano", "-p", "TCP"], { stdio: "pipe", shell: false, timeout: 3000 });
+  return (result.stdout ?? "").toString().split("\n").some((line) => line.includes(":8787") && line.includes("LISTENING"));
+}
+
+function sleepSync(durationMs) {
+  const deadline = Date.now() + durationMs;
+  while (Date.now() < deadline) {
+    // Atomics.wait sleeps without spinning while keeping this lifecycle step synchronous.
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.min(50, deadline - Date.now()));
   }
 }
 

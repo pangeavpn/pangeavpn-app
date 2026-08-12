@@ -65,7 +65,8 @@ const factSessionEl = document.getElementById("factSession") as HTMLSpanElement;
 const factViaEl = document.getElementById("factVia") as HTMLSpanElement;
 const regionSlots = document.getElementById("regionSlots") as HTMLElement;
 const regionMoreCount = document.getElementById("regionMoreCount") as HTMLElement;
-const themeToggleBtn = document.getElementById("themeToggleBtn") as HTMLButtonElement;
+// One in the shell header, one on the sign-in screen — both stay in step.
+const themeToggleBtns = Array.from(document.querySelectorAll<HTMLButtonElement>(".theme-toggle"));
 const uiMessageEl = document.getElementById("uiMessage") as HTMLParagraphElement;
 const appVersionEl = document.getElementById("appVersion") as HTMLSpanElement;
 const copyDiagnosticsBtn = document.getElementById("copyDiagnosticsBtn") as HTMLButtonElement;
@@ -98,6 +99,7 @@ const preferredTransportSelect = document.getElementById("preferredTransportSele
 const launchAtStartupToggle = document.getElementById("launchAtStartupToggle") as HTMLInputElement;
 const alwaysConnectedToggle = document.getElementById("alwaysConnectedToggle") as HTMLInputElement;
 const loginScreen = document.getElementById("loginScreen") as HTMLElement;
+const loginSettingsBtn = document.getElementById("loginSettingsBtn") as HTMLButtonElement;
 const loginScreenBtn = document.getElementById("loginScreenBtn") as HTMLButtonElement;
 const loginScreenMessage = document.getElementById("loginScreenMessage") as HTMLParagraphElement;
 const heroCard = document.getElementById("heroCard") as HTMLElement;
@@ -107,8 +109,11 @@ const manageSubLink = document.getElementById("manageSubLink") as HTMLAnchorElem
 const menuSettingsBtn = document.getElementById("menuSettingsBtn") as HTMLButtonElement;
 const settingsOverlay = document.getElementById("settingsOverlay") as HTMLElement;
 const settingsOverlayCloseBtn = document.getElementById("settingsOverlayCloseBtn") as HTMLButtonElement;
+const settingsPane = document.getElementById("settingsPane") as HTMLElement;
+const settingsNav = document.getElementById("settingsNav") as HTMLElement;
+const settingsAccountActions = document.getElementById("settingsAccountActions") as HTMLElement;
 const accountSubscription = document.getElementById("accountSubscription") as HTMLSpanElement;
-const setCensorshipValue = document.getElementById("setCensorshipValue") as HTMLSpanElement;
+const setProvisioningValue = document.getElementById("setProvisioningValue") as HTMLSpanElement;
 const setTransportValue = document.getElementById("setTransportValue") as HTMLSpanElement;
 const setNetworkValue = document.getElementById("setNetworkValue") as HTMLSpanElement;
 const setStartupValue = document.getElementById("setStartupValue") as HTMLSpanElement;
@@ -148,10 +153,12 @@ const MTU_MIN = 1280;
 const MTU_MAX = 1420;
 const MTU_DEFAULT = 1380;
 
-themeToggleBtn.addEventListener("click", () => {
-  const nextTheme: ThemeMode = document.body.dataset.theme === "dark" ? "light" : "dark";
-  applyTheme(nextTheme);
-});
+for (const btn of themeToggleBtns) {
+  btn.addEventListener("click", () => {
+    const nextTheme: ThemeMode = document.body.dataset.theme === "dark" ? "light" : "dark";
+    applyTheme(nextTheme);
+  });
+}
 
 menuBtn.addEventListener("click", () => {
   const isOpen = menuDropdown.classList.contains("open");
@@ -178,15 +185,18 @@ manageSubLink.addEventListener("click", (e) => {
 function updateSettingsSummaries(): void {
   const off = t("settings.summary.off");
 
-  const censorship: string[] = [];
-  if (hubDirectIpToggle.checked) censorship.push(t("settings.censorship.directIp.title"));
-  if (hubShadowsocksToggle.checked) censorship.push(t("settings.censorship.hubShadowsocks.title"));
-  if (hubFrontedToggle.checked) censorship.push(t("settings.censorship.hubFronted.title"));
-  if (hubNormalToggle.checked) censorship.push(t("settings.censorship.hubNormal.title"));
-  setCensorshipValue.textContent = censorship.length ? censorship.join(" · ") : off;
+  const provisioning: string[] = [];
+  if (hubDirectIpToggle.checked) provisioning.push(t("settings.provisioning.directIp.title"));
+  if (hubShadowsocksToggle.checked) provisioning.push(t("settings.provisioning.hubShadowsocks.title"));
+  if (hubFrontedToggle.checked) provisioning.push(t("settings.provisioning.hubFronted.title"));
+  if (hubNormalToggle.checked) provisioning.push(t("settings.provisioning.hubNormal.title"));
+  const provisioningSummary = provisioning.length ? provisioning.join(" · ") : off;
+  setProvisioningValue.textContent = provisioningSummary;
+  provisioningPickerValue.textContent = provisioningSummary;
 
   const transport = preferredTransportSelect.selectedOptions[0];
   setTransportValue.textContent = transport ? transport.textContent : "";
+  syncTransportChoice();
 
   const network = [`MTU ${wireguardMtuInput.value || MTU_DEFAULT}`];
   const dnsChoice = dnsPresetSelect.selectedOptions[0];
@@ -276,21 +286,27 @@ async function refreshSubscription(): Promise<void> {
 
 // ── Overlay focus management ──────────────────────────────────
 
-// Overlays cover the shell but leave it in the tab order, so the shell goes
-// `inert` on open; focus moves in, and is restored on close.
+// Overlays cover what's underneath but leave it in the tab order, so the layer
+// below goes `inert` on open; focus moves in, and is restored on close. Settings
+// opens over the sign-in screen too, so that gets the same treatment.
 const overlayReturnFocus: Array<HTMLElement | null> = [];
+
+// A function, not a const: `shell` is declared further down the module.
+function overlayUnderlays(): HTMLElement[] {
+  return [shell, loginScreen];
+}
 
 function activateOverlay(overlay: HTMLElement): void {
   overlayReturnFocus.push(document.activeElement as HTMLElement | null);
-  shell.setAttribute("inert", "");
+  for (const el of overlayUnderlays()) el.setAttribute("inert", "");
   const focusTarget = overlay.querySelector<HTMLElement>("button:not([hidden]), [href], input, select, textarea");
   window.setTimeout(() => (focusTarget ?? overlay).focus(), 0);
 }
 
 function deactivateOverlay(): void {
-  // Only re-enable the shell once no full-screen overlay remains open.
+  // Only re-enable the layer below once no full-screen overlay remains open.
   if (!settingsOverlay.classList.contains("visible") && !serverPickerOverlay.classList.contains("visible")) {
-    shell.removeAttribute("inert");
+    for (const el of overlayUnderlays()) el.removeAttribute("inert");
   }
   const prev = overlayReturnFocus.pop();
   prev?.focus?.();
@@ -305,9 +321,18 @@ function isSubModalOpen(): boolean {
 function openSettings(): void {
   settingsOverlay.classList.add("visible");
   settingsOverlay.setAttribute("aria-hidden", "false");
+  // Always open on the section list, never on a picker left over from last time.
+  closeSubpane(false);
   settingsVersionEl.textContent = appVersionEl.textContent || t("common.dash");
   updateSettingsSummaries();
-  void refreshSubscription();
+  settingsSpyLockUntil = 0;
+  settingsPane.scrollTo({ top: 0, behavior: "auto" });
+  sizeSettingsTail();
+  syncSettingsNav();
+  // Signed out, the account rows have nothing to act on — Settings is still
+  // reachable from the sign-in screen for language, theme and bypass methods.
+  settingsAccountActions.hidden = !authState.authenticated;
+  if (authState.authenticated) void refreshSubscription();
   activateOverlay(settingsOverlay);
 }
 
@@ -323,14 +348,227 @@ menuSettingsBtn.addEventListener("click", () => {
   openSettings();
 });
 
+loginSettingsBtn.addEventListener("click", openSettings);
+
 settingsOverlayCloseBtn.addEventListener("click", closeSettings);
+
+// ── Settings nav rail ─────────────────────────────────────────
+
+const settingsNavItems = Array.from(settingsNav.querySelectorAll<HTMLButtonElement>(".settings-nav-item"));
+const settingsSections = settingsNavItems
+  .map((item) => document.getElementById(item.dataset.settingsTarget ?? ""))
+  .filter((el): el is HTMLElement => el !== null);
+
+// Distance below the pane's top edge at which a section counts as "current".
+const SETTINGS_JUMP_GUTTER = 14;
+// Muzzles the scroll spy while a click-driven smooth scroll is in flight, so
+// the rail doesn't flicker through every section the pane passes on the way.
+let settingsSpyLockUntil = 0;
+
+function markSettingsNav(sectionId: string): void {
+  for (const item of settingsNavItems) {
+    const active = item.dataset.settingsTarget === sectionId;
+    item.classList.toggle("is-active", active);
+    if (active) item.setAttribute("aria-current", "true");
+    else item.removeAttribute("aria-current");
+  }
+}
+
+/** Light up whichever section currently sits at the top of the pane. */
+function syncSettingsNav(): void {
+  if (Date.now() < settingsSpyLockUntil || settingsSections.length === 0) return;
+  const scrollTop = settingsPane.scrollTop;
+  if (scrollTop + settingsPane.clientHeight >= settingsPane.scrollHeight - 4) {
+    markSettingsNav(settingsSections[settingsSections.length - 1].id);
+    return;
+  }
+  let active = settingsSections[0];
+  for (const section of settingsSections) {
+    if (section.offsetTop - scrollTop <= SETTINGS_JUMP_GUTTER * 2) active = section;
+  }
+  markSettingsNav(active.id);
+}
+
+/** Tail room so the last (short) section can still scroll to the top of the
+ *  pane — otherwise its rail row could only ever light up at full scroll. */
+function sizeSettingsTail(): void {
+  const last = settingsSections[settingsSections.length - 1];
+  if (!last) return;
+  const room = settingsPane.clientHeight - last.offsetHeight - SETTINGS_JUMP_GUTTER * 2;
+  settingsPane.style.paddingBottom = `${Math.max(24, room)}px`;
+}
+
+for (const item of settingsNavItems) {
+  item.addEventListener("click", () => {
+    const target = document.getElementById(item.dataset.settingsTarget ?? "");
+    if (!target) return;
+    // The rail is also the way back out of a picker that took over the pane.
+    closeSubpane(false);
+    markSettingsNav(target.id);
+    settingsSpyLockUntil = Date.now() + 700;
+    // offsetTop is measured from the pane's padding edge, so subtracting the
+    // gutter leaves the section sitting where the pane's own padding puts it.
+    settingsPane.scrollTop = Math.max(0, target.offsetTop - SETTINGS_JUMP_GUTTER);
+  });
+}
+
+settingsPane.addEventListener("scroll", syncSettingsNav, { passive: true });
+
+// ── Connection method picker (full right pane) ────────────────
+
+const transportPane = document.getElementById("transportPane") as HTMLElement;
+const transportOptions = document.getElementById("transportOptions") as HTMLElement;
+const transportPickerBtn = document.getElementById("transportPickerBtn") as HTMLButtonElement;
+const transportPickerValue = document.getElementById("transportPickerValue") as HTMLElement;
+const transportBackBtn = document.getElementById("transportBackBtn") as HTMLButtonElement;
+
+// One line of explanation per method. Anything absent here just renders its
+// label, so a newly ungated option can ship before its copy does.
+const TRANSPORT_DESCRIPTIONS: Record<string, MessageKey> = {
+  auto: "settings.transport.auto.desc",
+  cloak: "settings.transport.cloak.desc",
+  naive: "settings.transport.naive.desc",
+  reality: "settings.transport.reality.desc",
+  hysteria2: "settings.transport.hysteria2.desc",
+  shadowsocks: "settings.transport.shadowsocks.desc",
+  wireguard: "settings.transport.wireguard.desc"
+};
+
+const CHECK_SVG =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7"/></svg>';
+
+/** Build one row per option in the (hidden) select that holds the real state. */
+function renderTransportOptions(): void {
+  transportOptions.replaceChildren();
+  for (const option of Array.from(preferredTransportSelect.options)) {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "option-row";
+    row.setAttribute("role", "radio");
+    row.dataset.value = option.value;
+
+    const copy = document.createElement("span");
+    copy.className = "option-copy";
+
+    const title = document.createElement("span");
+    title.className = "option-title";
+    title.textContent = option.textContent;
+    copy.appendChild(title);
+
+    const descKey = TRANSPORT_DESCRIPTIONS[option.value];
+    if (descKey) {
+      const desc = document.createElement("span");
+      desc.className = "option-desc";
+      desc.textContent = t(descKey);
+      copy.appendChild(desc);
+    }
+
+    const check = document.createElement("span");
+    check.className = "option-check";
+    check.innerHTML = CHECK_SVG;
+
+    row.append(copy, check);
+    row.addEventListener("click", () => selectTransport(option.value));
+    transportOptions.appendChild(row);
+  }
+  syncTransportChoice();
+}
+
+/** Mirror the select's current value onto the rows and the section button. */
+function syncTransportChoice(): void {
+  const current = preferredTransportSelect.value;
+  transportPickerValue.textContent = preferredTransportSelect.selectedOptions[0]?.textContent ?? "";
+  for (const row of Array.from(transportOptions.children)) {
+    row.setAttribute("aria-checked", String((row as HTMLElement).dataset.value === current));
+  }
+}
+
+/** Route the choice back through the select so every existing handler runs. */
+function selectTransport(value: string): void {
+  if (preferredTransportSelect.value === value) return;
+  preferredTransportSelect.value = value;
+  syncTransportChoice();
+  preferredTransportSelect.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+// ── Sub-panes ─────────────────────────────────────────────────
+
+// A section whose options are too wordy for the section list hands them a whole
+// pane instead. Each entry owns the pane, the row that opens it, and the rail
+// item that stays lit while it's up.
+interface Subpane {
+  pane: HTMLElement;
+  trigger: HTMLButtonElement;
+  back: HTMLButtonElement;
+  section: string;
+  render?: () => void;
+  initialFocus: () => HTMLElement | null;
+}
+
+const provisioningPane = document.getElementById("provisioningPane") as HTMLElement;
+const provisioningPickerBtn = document.getElementById("provisioningPickerBtn") as HTMLButtonElement;
+const provisioningPickerValue = document.getElementById("provisioningPickerValue") as HTMLElement;
+const provisioningBackBtn = document.getElementById("provisioningBackBtn") as HTMLButtonElement;
+
+const subpanes: Subpane[] = [
+  {
+    pane: transportPane,
+    trigger: transportPickerBtn,
+    back: transportBackBtn,
+    section: "secTransport",
+    render: renderTransportOptions,
+    initialFocus: () => transportOptions.querySelector<HTMLElement>('[aria-checked="true"]')
+  },
+  {
+    pane: provisioningPane,
+    trigger: provisioningPickerBtn,
+    back: provisioningBackBtn,
+    section: "secProvisioning",
+    initialFocus: () => provisioningPane.querySelector<HTMLElement>(".toggle-switch")
+  }
+];
+
+let activeSubpane: Subpane | null = null;
+
+function isSubpaneOpen(): boolean {
+  return activeSubpane !== null;
+}
+
+function openSubpane(entry: Subpane): void {
+  entry.render?.();
+  settingsPane.hidden = true;
+  for (const other of subpanes) other.pane.hidden = other !== entry;
+  entry.trigger.setAttribute("aria-expanded", "true");
+  activeSubpane = entry;
+  markSettingsNav(entry.section);
+  (entry.initialFocus() ?? entry.back).focus();
+}
+
+function closeSubpane(restoreFocus: boolean): void {
+  const entry = activeSubpane;
+  if (!entry) return;
+  entry.pane.hidden = true;
+  entry.trigger.setAttribute("aria-expanded", "false");
+  activeSubpane = null;
+  settingsPane.hidden = false;
+  syncSettingsNav();
+  if (restoreFocus) entry.trigger.focus();
+}
+
+for (const entry of subpanes) {
+  entry.trigger.addEventListener("click", () => openSubpane(entry));
+  entry.back.addEventListener("click", () => closeSubpane(true));
+}
 
 document.addEventListener("keydown", (e) => {
   // Defer to a stacked modal (Devices / Update) so Escape backs out one layer.
   if (e.key === "Escape" && settingsOverlay.classList.contains("visible") && !isSubModalOpen()) {
     e.preventDefault();
     e.stopPropagation();
-    closeSettings();
+    // A picker filling the pane is a layer of its own: back out to the sections
+    // first, and only close Settings on a second press.
+    if (isSubpaneOpen()) closeSubpane(true);
+    else closeSettings();
   }
 });
 
@@ -1024,10 +1262,10 @@ const hubMethodToggles: Record<HubMethodName, HTMLInputElement> = {
 };
 
 const hubMethodLabels: Record<HubMethodName, MessageKey> = {
-  directIp: "settings.censorship.directIp.title",
-  shadowsocks: "settings.censorship.hubShadowsocks.title",
-  fronted: "settings.censorship.hubFronted.title",
-  normal: "settings.censorship.hubNormal.title"
+  directIp: "settings.provisioning.directIp.title",
+  shadowsocks: "settings.provisioning.hubShadowsocks.title",
+  fronted: "settings.provisioning.hubFronted.title",
+  normal: "settings.provisioning.hubNormal.title"
 };
 
 /** Mirrors main-process state onto the switches, and locks the last one on so
@@ -1039,7 +1277,7 @@ function renderHubMethods(methods: HubMethodState): void {
     const toggle = hubMethodToggles[name];
     toggle.checked = methods[name];
     toggle.disabled = enabled.length === 1 && methods[name];
-    toggle.title = toggle.disabled ? t("settings.censorship.lastMethod") : "";
+    toggle.title = toggle.disabled ? t("settings.provisioning.lastMethod") : "";
   }
   updateSettingsSummaries();
 }
@@ -1052,7 +1290,7 @@ function wireHubMethodToggle(name: HubMethodName): void {
       const result = await pangeaApi.setHubMethod(name, requested);
       renderHubMethods(result.methods);
       if (!result.applied) {
-        showToast(t("settings.censorship.lastMethod"), 4000, true);
+        showToast(t("settings.provisioning.lastMethod"), 4000, true);
         return;
       }
       showToast(
@@ -1166,6 +1404,8 @@ preferredTransportSelect.addEventListener("change", async () => {
     showToast(t("toggle.preferredTransport.updated"), 4000, true);
   } catch (err) {
     preferredTransportSelect.value = previous;
+    // The revert lands after the change event, so the picker needs telling.
+    syncTransportChoice();
     showToast(reportError("preferredTransport", err, t("toggle.updateFailed")));
   }
 });
@@ -2079,8 +2319,10 @@ function initTheme(): void {
 function applyTheme(theme: ThemeMode): void {
   document.documentElement.dataset.theme = theme;
   document.body.dataset.theme = theme;
-  themeToggleBtn.textContent = theme === "dark" ? "\u2600" : "\u263D";
-  themeToggleBtn.setAttribute("aria-pressed", String(theme === "dark"));
+  for (const btn of themeToggleBtns) {
+    btn.textContent = theme === "dark" ? "\u2600" : "\u263D";
+    btn.setAttribute("aria-pressed", String(theme === "dark"));
+  }
 
   try {
     window.localStorage.setItem(THEME_STORAGE_KEY, theme);
