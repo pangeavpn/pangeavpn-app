@@ -195,6 +195,10 @@ var wgListenPortPattern = regexp.MustCompile(`(?im)^\s*ListenPort\s*=\s*(\d+)\s*
 // loopback UDP socket binds to an ephemeral port instead of the default.
 var wgLoopbackEndpointPattern = regexp.MustCompile(`(?im)^(\s*Endpoint\s*=\s*127\.0\.0\.1:)\d+(\s*)$`)
 
+// wgEndpointPattern matches an "Endpoint = <host:port>" line whatever it points
+// at, for repointing the tunnel at the node itself (see startDirectWireGuard).
+var wgEndpointPattern = regexp.MustCompile(`(?im)^(\s*Endpoint\s*=\s*)\S+(\s*)$`)
+
 // wgMTUPattern matches the "MTU = N" line in a WireGuard config's [Interface].
 var wgMTUPattern = regexp.MustCompile(`(?im)^(\s*MTU\s*=\s*)(\d+)(\s*)$`)
 
@@ -318,6 +322,9 @@ func (s *Service) managerForKind(kind string) transport.Manager {
 		return s.shadowsocks
 	case "snowflake":
 		return s.snowflake
+	case transportKindWireGuard:
+		// Nothing to manage: no transport is the point of the direct method.
+		return nil
 	default:
 		return nil
 	}
@@ -400,7 +407,7 @@ func (s *Service) Connect(ctx context.Context, profileID string, opts ConnectOpt
 
 	s.setSessionOpts(opts)
 
-	adopted, err := s.attachToRunningSession(ctx, profile)
+	adopted, err := s.attachToRunningSession(ctx, profile, opts.PreferredTransport)
 	if err != nil {
 		s.setError(err.Error())
 		return err
@@ -760,6 +767,51 @@ func (s *Service) startSnowflakeTransport(ctx context.Context, profile *state.Pr
 	return nil
 }
 
+// transportKindWireGuard names the direct method: WireGuard straight to the
+// node's own UDP listener, with nothing in front of it. It is a transport kind
+// only so the rest of the session machinery (status, health checks, recovery)
+// can name what is carrying the tunnel; there is no transport process.
+const transportKindWireGuard = "wireguard"
+
+// startDirectWireGuard points the tunnel at the node itself instead of a
+// loopback bridge. Nothing to start — the "transport" is the absence of one — so
+// all this does is rewrite the Endpoint line the other transports would have
+// bound a local port for. Faster and lower-overhead than every other method,
+// and trivially recognizable on the wire, which is why the user has to ask for
+// it by name (it is not in autoCascadeOrder).
+func (s *Service) startDirectWireGuard(_ context.Context, _ *state.Profile, wireGuardProfile *state.WireGuardProfile) error {
+	endpoint, err := validDirectEndpoint(wireGuardProfile.DirectEndpoint)
+	if err != nil {
+		return err
+	}
+	rewritten, replaced := rewriteWireGuardEndpoint(wireGuardProfile.ConfigText, endpoint)
+	if !replaced {
+		return errors.New("wireguard config has no Endpoint line to repoint at the node")
+	}
+	wireGuardProfile.ConfigText = rewritten
+	s.logs.Add(state.LogInfo, state.SourceWireGuard, fmt.Sprintf(
+		"connecting straight to %s with no transport in front of it", endpoint))
+	return nil
+}
+
+// validDirectEndpoint accepts a host:port with a numeric port, the shape a WireGuard
+// Endpoint line needs. Checked here so a malformed profile fails the connect
+// with something readable instead of producing a config WireGuard rejects.
+func validDirectEndpoint(endpoint string) (string, error) {
+	endpoint = strings.TrimSpace(endpoint)
+	if endpoint == "" {
+		return "", errors.New("this profile carries no direct wireguard endpoint")
+	}
+	host, port, err := net.SplitHostPort(endpoint)
+	if err != nil || strings.TrimSpace(host) == "" {
+		return "", fmt.Errorf("direct wireguard endpoint %q is not host:port", endpoint)
+	}
+	if portNum, err := strconv.Atoi(port); err != nil || portNum <= 0 || portNum > 65535 {
+		return "", fmt.Errorf("direct wireguard endpoint %q has no valid port", endpoint)
+	}
+	return endpoint, nil
+}
+
 // snowflakeReleaseGated disables the Snowflake transport for this release. Its
 // WebRTC data plane is dropped by the always-on kill switch: the negotiated
 // volunteer-proxy peer IP is discovered dynamically and is never permitted, so
@@ -789,6 +841,11 @@ func (s *Service) transportCandidates(profile *state.Profile, preferredTransport
 		return s.autoCascade(profile), nil
 	case "cloak":
 		return []transportCandidate{{"cloak", s.startCloakTransport}}, nil
+	case transportKindWireGuard:
+		if _, err := validDirectEndpoint(profile.WireGuard.DirectEndpoint); err != nil {
+			return nil, fmt.Errorf("plain wireguard requested but %w", err)
+		}
+		return []transportCandidate{{transportKindWireGuard, s.startDirectWireGuard}}, nil
 	case "naive":
 		if profile.Naive == nil {
 			return nil, errors.New("naive transport requested but this profile has no naive configuration")
@@ -829,9 +886,12 @@ func (s *Service) transportCandidates(profile *state.Profile, preferredTransport
 // different ways, a block that stops one often stops others that hide the same
 // way, so consecutive attempts favor a different mechanism:
 //
-//   - cloak: the reliable default (TLS obfuscation to a decoy cover site).
 //   - reality: the strongest TLS disguise — borrows a real site's TLS
-//     handshake, so active probing and SNI blocking see a genuine site.
+//     handshake, so active probing and SNI blocking see a genuine site. First
+//     because it survives the probing that catches the others.
+//   - cloak: the reliable fallback (TLS obfuscation to a decoy cover site), and
+//     the only transport every profile carries, so it is what auto mode lands
+//     on when reality is unprovisioned or blocked.
 //   - shadowsocks: SS-2022, which presents no TLS at all on its own port, so it
 //     is the first attempt that shares nothing with a TLS block above it.
 //   - hysteria2: a different wire protocol (UDP/QUIC + Salamander), so a block
@@ -841,9 +901,13 @@ func (s *Service) transportCandidates(profile *state.Profile, preferredTransport
 //   - snowflake: heavy-artillery last resort (WebRTC rendezvous, no fixed
 //     endpoint); currently gated off (see snowflakeReleaseGated).
 //
+// The direct wireguard method is deliberately absent: a bare WireGuard handshake
+// is the single easiest thing on this list for a censor to fingerprint and drop,
+// so auto mode never falls back to it — only an explicit request selects it.
+//
 // Per-network memory can still promote whatever last worked here ahead of this
 // default (see reorderByMemory).
-var autoCascadeOrder = []string{"cloak", "reality", "shadowsocks", "hysteria2", "naive", "snowflake"}
+var autoCascadeOrder = []string{"reality", "cloak", "shadowsocks", "hysteria2", "naive", "snowflake"}
 
 // autoCascade builds the auto-mode candidate list in autoCascadeOrder, keeping
 // only the transports this profile actually configures.
@@ -982,6 +1046,12 @@ func (s *Service) reorderByMemory(candidates []transportCandidate, preferredTran
 // store, empty key, or persist error only forfeits the optimization.
 func (s *Service) rememberTransport(networkKey, kind string) {
 	if s.transportMemory == nil || networkKey == "" || kind == "" {
+		return
+	}
+	// A direct connection says nothing about which obfuscated transport gets
+	// through here, and auto mode never offers it — recording it would only
+	// displace a memory that is useful.
+	if kind == transportKindWireGuard {
 		return
 	}
 	if err := s.transportMemory.Record(networkKey, kind); err != nil {
@@ -1636,6 +1706,10 @@ func (s *Service) runHealthCheck(ctx context.Context) {
 		transportRunning = s.shadowsocks.Status().Running
 	case "snowflake":
 		transportRunning = s.snowflake.Status().Running
+	case transportKindWireGuard:
+		// No transport process to be up; the WireGuard checks below are the whole
+		// health picture for a direct session.
+		transportRunning = true
 	}
 
 	if !transportRunning {
@@ -2131,7 +2205,9 @@ func (s *Service) reconcileStartup(ctx context.Context) {
 	}
 
 	active := runningProfiles[0]
-	adopted, err := s.attachToRunningSession(startupCtx, active)
+	// Nothing records which method built the tunnel we are adopting across a
+	// restart, so this keeps the long-standing assumption: Cloak.
+	adopted, err := s.attachToRunningSession(startupCtx, active, "")
 	if err != nil {
 		s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("startup tunnel recovery encountered an issue: %v", err))
 		return
@@ -2152,7 +2228,10 @@ func (s *Service) allConfiguredTunnelNames() []string {
 	return names
 }
 
-func (s *Service) attachToRunningSession(ctx context.Context, profile state.Profile) (bool, error) {
+// attachToRunningSession adopts a WireGuard tunnel that is already up rather
+// than rebuilding it. preferredTransport is what the user asked for, which
+// decides what the adopted session is taken to be running over.
+func (s *Service) attachToRunningSession(ctx context.Context, profile state.Profile, preferredTransport string) (bool, error) {
 	status, err := s.wg.Status(ctx, profile.WireGuard)
 	if err != nil {
 		s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("attach preflight status check failed for %s: %v", profile.WireGuard.TunnelName, err))
@@ -2164,6 +2243,15 @@ func (s *Service) attachToRunningSession(ctx context.Context, profile state.Prof
 
 	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("adopting existing wireguard tunnel %s", profile.WireGuard.TunnelName))
 	s.setCurrentProfile(profile)
+
+	// Asked for plain WireGuard: adopt the tunnel as-is. Starting Cloak here
+	// would run a bridge the tunnel is not pointed at.
+	if preferredTransport == transportKindWireGuard {
+		s.setActiveTransportKind(transportKindWireGuard)
+		s.machine.Set(state.StateConnected, "recovered active tunnel")
+		s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("adopted running tunnel %s", profile.WireGuard.TunnelName))
+		return true, nil
+	}
 
 	if !s.cloakStatusForProfile(ctx, profile).Running {
 		s.machine.Set(state.StateConnecting, "restoring cloak for active tunnel")
@@ -2350,6 +2438,24 @@ func rewriteLoopbackEndpointPort(configText string, newPort int) (string, bool) 
 	}
 	replacement := fmt.Sprintf("${1}%d${2}", newPort)
 	return wgLoopbackEndpointPattern.ReplaceAllString(configText, replacement), true
+}
+
+// rewriteWireGuardEndpoint repoints every "Endpoint =" line at endpoint.
+// Returns the rewritten text and whether there was a line to rewrite.
+// ReplaceAllStringFunc rather than ReplaceAllString so a "$" in endpoint is
+// never read as a capture-group reference.
+func rewriteWireGuardEndpoint(configText, endpoint string) (string, bool) {
+	if !wgEndpointPattern.MatchString(configText) {
+		return configText, false
+	}
+	rewritten := wgEndpointPattern.ReplaceAllStringFunc(configText, func(line string) string {
+		groups := wgEndpointPattern.FindStringSubmatch(line)
+		if len(groups) != 3 {
+			return line
+		}
+		return groups[1] + endpoint + groups[2]
+	})
+	return rewritten, true
 }
 
 // snowflakeHosts extracts the static hostnames Snowflake rendezvous touches

@@ -91,7 +91,14 @@ export const WireGuardProfileSchema = z.object({
   configText: z.string(),
   tunnelName: z.string().min(1),
   dns: z.array(z.string()),
-  bypassHosts: z.array(z.string()).optional()
+  bypassHosts: z.array(z.string()).optional(),
+  /**
+   * The node's own WireGuard listener as host:port. `configText` always points
+   * at a loopback transport bridge instead, so this is what the daemon rewrites
+   * the Endpoint line to when the user picks plain WireGuard. Absent means that
+   * method is unavailable for this profile.
+   */
+  directEndpoint: z.string().optional()
 });
 
 export const ProfileSchema = z.object({
@@ -122,7 +129,7 @@ export const StatusResponseSchema = z.object({
   state: DaemonStateSchema,
   detail: z.string(),
   activeTransport: z
-    .enum(["cloak", "naive", "reality", "hysteria2", "shadowsocks", "snowflake", ""])
+    .enum(["cloak", "naive", "reality", "hysteria2", "shadowsocks", "snowflake", "wireguard", ""])
     .default(""),
   cloak: z.object({
     running: z.boolean(),
@@ -162,8 +169,10 @@ export const StatusResponseSchema = z.object({
 
 export const ConnectRequestSchema = z.object({
   profileId: z.string().min(1),
+  // "wireguard" is the direct method: no transport, straight to the node. Only
+  // ever set when the user asks for it — the daemon's auto cascade never picks it.
   preferredTransport: z
-    .enum(["cloak", "naive", "reality", "hysteria2", "shadowsocks", "snowflake"])
+    .enum(["cloak", "naive", "reality", "hysteria2", "shadowsocks", "snowflake", "wireguard"])
     .optional()
 });
 

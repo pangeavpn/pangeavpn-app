@@ -146,6 +146,7 @@ export const ru = {
   "settings.transport.reality": "Только VLESS+REALITY",
   "settings.transport.hysteria2": "Только Hysteria2",
   "settings.transport.shadowsocks": "Только Shadowsocks",
+  "settings.transport.wireguard": "Только WireGuard (без маскировки)",
   "settings.transport.snowflake": "Только Snowflake",
   "settings.network.heading": "Сеть",
   "settings.network.description": "Исправления для сетей Wi-Fi с ограничениями.",

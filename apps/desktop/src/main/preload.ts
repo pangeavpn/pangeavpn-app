@@ -86,7 +86,7 @@ const pangeaApi = {
   getWireguardMtu: () => ipcRenderer.invoke(CH.getWireguardMtu),
   setCustomDns: (value: string) => ipcRenderer.invoke(CH.setCustomDns, value),
   getCustomDns: () => ipcRenderer.invoke(CH.getCustomDns),
-  setPreferredTransport: (value: "auto" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "snowflake") =>
+  setPreferredTransport: (value: "auto" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "snowflake" | "wireguard") =>
     ipcRenderer.invoke(CH.setPreferredTransport, value),
   getPreferredTransport: () => ipcRenderer.invoke(CH.getPreferredTransport),
   setLaunchAtStartup: (enabled: boolean) => ipcRenderer.invoke(CH.setLaunchAtStartup, enabled),

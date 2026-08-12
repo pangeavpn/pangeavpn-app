@@ -43,15 +43,15 @@ In auto mode the daemon walks this list until one establishes. You can also pin 
 
 | # | Transport | What the network sees |
 |---|---|---|
-| 1 | **Cloak** | A TLS session to an innocuous-looking web host |
-| 2 | **VLESS + REALITY** | A TLS handshake borrowing a real third-party site's certificate |
+| 1 | **VLESS + REALITY** | A TLS handshake borrowing a real third-party site's certificate |
+| 2 | **Cloak** | A TLS session to an innocuous-looking web host |
 | 3 | **Shadowsocks** | An encrypted stream on its own port, with no TLS shape at all — the first attempt that shares nothing with a block on the two above |
 | 4 | **Hysteria2** | QUIC / HTTP-3, hard to distinguish from modern web traffic |
 | 5 | **NaiveProxy** | Traffic carrying a genuine Chrome TLS fingerprint |
 
-Cloak is always available. The others activate when the hub provisions configuration for them, so the exact cascade depends on your account and the node you land on.
+Cloak is always available and backs up whatever precedes it. The others activate when the hub provisions configuration for them, so the exact cascade depends on your account and the node you land on.
 
-The client also remembers what worked on each network and promotes that transport to the front of the queue next time you connect there, so a network that blocks Cloak doesn't cost you the fallback delay twice.
+The client also remembers what worked on each network and promotes that transport to the front of the queue next time you connect there, so a network that blocks REALITY doesn't cost you the fallback delay twice.
 
 A **Snowflake** transport (WebRTC, as used by Tor) is implemented and wired up but disabled in current releases — see `snowflakeReleaseGated` in [`daemon/internal/api/service.go`](daemon/internal/api/service.go).
 

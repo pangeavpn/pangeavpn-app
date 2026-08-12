@@ -61,9 +61,9 @@ let connectionAttemptRunning = false;
 let allowLanEnabled = true;
 let launchAtStartupEnabled = false;
 let alwaysConnectedEnabled = false;
-// "auto" (cloak, then reality, shadowsocks, hysteria2, naive), or one of
+// "auto" (reality, then cloak, shadowsocks, hysteria2, naive), or one of
 // "cloak"/"naive"/"reality"/"hysteria2"/"shadowsocks"/"snowflake" only.
-let preferredTransport: "auto" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "snowflake" = "auto";
+let preferredTransport: "auto" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "snowflake" | "wireguard" = "auto";
 // Stored language preference: a locale code, or "system" to follow the OS.
 let localePref = "system";
 const hiddenLaunch = process.argv.some(isHiddenLaunchArg);
@@ -830,7 +830,7 @@ async function cancelConnectAttempt(): Promise<void> {
 function connectionOptions(): {
   allowLAN: boolean;
   lockdown: boolean;
-  preferredTransport?: "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "snowflake";
+  preferredTransport?: "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "snowflake" | "wireguard";
 } {
   return {
     allowLAN: allowLanEnabled,
@@ -1203,14 +1203,15 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.getCustomDns, async () => pangeaApiClient.getCustomDns());
 
-  ipcMain.handle(IPC_CHANNELS.setPreferredTransport, async (_event, value: "auto" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "snowflake") => {
+  ipcMain.handle(IPC_CHANNELS.setPreferredTransport, async (_event, value: "auto" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "snowflake" | "wireguard") => {
     preferredTransport =
       value === "cloak" ||
       value === "naive" ||
       value === "reality" ||
       value === "hysteria2" ||
       value === "shadowsocks" ||
-      value === "snowflake"
+      value === "snowflake" ||
+      value === "wireguard"
         ? value
         : "auto";
     try {
@@ -1583,7 +1584,8 @@ async function boot(): Promise<void> {
       settings.preferredTransport === "reality" ||
       settings.preferredTransport === "hysteria2" ||
       settings.preferredTransport === "shadowsocks" ||
-      settings.preferredTransport === "snowflake"
+      settings.preferredTransport === "snowflake" ||
+      settings.preferredTransport === "wireguard"
     ) {
       preferredTransport = settings.preferredTransport;
     }

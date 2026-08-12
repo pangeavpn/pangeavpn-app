@@ -6,6 +6,7 @@ import type { ServerInfo, SubscriptionInfo } from "../shared/ipc";
 import { normalizeCustomDns, resolveWireGuardDns } from "../shared/dns";
 import { MTU_DEFAULT, normalizeMtu, normalizeMtuOrDefault } from "../shared/mtu";
 import { resolveNaiveEndpoint } from "../shared/naiveEndpoint";
+import { parseNodeWireGuardEndpoint } from "../shared/wireguardEndpoint";
 import { buildShadowsocksProfile } from "../shared/shadowsocksProfile";
 import { DEFAULT_HUB_METHODS, type HubMethods } from "../shared/hubMethods";
 import {
@@ -89,6 +90,7 @@ interface TokenLoginResponse {
 
 interface RegisterResponse {
   serverPubkey: string;
+  /** The node's own WireGuard listener, host:port. */
   serverEndpoint: string;
   assignedIP: string;
   dns: string;
@@ -1249,9 +1251,14 @@ export class PangeaApiClient {
     // IPv4 literals only: the AllowedIPs split does integer arithmetic on these,
     // so an unvalidated hub hostname produced garbage CIDRs. A domain-only node
     // still gets its bypass route from the daemon at WireGuard start.
+    // The node's WireGuard listener needs the same treatment, because the direct
+    // method dials it rather than a loopback bridge. Normally it is the node
+    // address already on the list, and deduplicated away.
+    const wireguardEndpoint = parseNodeWireGuardEndpoint(reg.serverEndpoint);
     const nodeIp = server.cloak.remoteHost;
     const excludeIPs = uniqueNonEmpty([
       nodeIp,
+      wireguardEndpoint?.host,
       server.naive?.remoteIp,
       server.reality?.remoteIp,
       server.hysteria2?.remoteIp,
@@ -1348,6 +1355,9 @@ export class PangeaApiClient {
         configText,
         tunnelName: "pangeavpn",
         dns: dnsServers,
+        // Where the tunnel goes when the user picks plain WireGuard; configText
+        // itself always points at the loopback transport bridge.
+        ...(wireguardEndpoint ? { directEndpoint: wireguardEndpoint.endpoint } : {}),
         // The hub's IP, so the daemon keeps it reachable: outside the tunnel for
         // routing, and through the kill switch so re-provisioning during a
         // switch — and provisioning under a Lockdown lock — still works. Falls

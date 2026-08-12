@@ -154,8 +154,8 @@ declare global {
     /** Empty restores the DNS servers supplied by the VPN server. */
     setCustomDns: (value: string) => Promise<string[]>;
     getCustomDns: () => Promise<string[]>;
-    setPreferredTransport: (value: "auto" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "snowflake") => Promise<void>;
-    getPreferredTransport: () => Promise<"auto" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "snowflake">;
+    setPreferredTransport: (value: "auto" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "snowflake" | "wireguard") => Promise<void>;
+    getPreferredTransport: () => Promise<"auto" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "snowflake" | "wireguard">;
     setLaunchAtStartup: (enabled: boolean) => Promise<void>;
     getLaunchAtStartup: () => Promise<boolean>;
     setAlwaysConnected: (enabled: boolean) => Promise<void>;

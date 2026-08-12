@@ -146,6 +146,7 @@ export const en = {
   "settings.transport.reality": "VLESS+REALITY only",
   "settings.transport.hysteria2": "Hysteria2 only",
   "settings.transport.shadowsocks": "Shadowsocks only",
+  "settings.transport.wireguard": "WireGuard only (no disguise)",
   "settings.transport.snowflake": "Snowflake only",
   "settings.network.heading": "Network",
   "settings.network.description": "Fixes for restrictive Wi-Fi networks.",

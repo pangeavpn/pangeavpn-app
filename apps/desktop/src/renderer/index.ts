@@ -1157,7 +1157,7 @@ customDnsInput.addEventListener("change", async () => {
 preferredTransportSelect.addEventListener("change", async () => {
   if (!pangeaApi) return;
   const previous = preferredTransportSelect.dataset.previousValue ?? "auto";
-  const choice = preferredTransportSelect.value as "auto" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "snowflake";
+  const choice = preferredTransportSelect.value as TransportChoice;
   try {
     await pangeaApi.setPreferredTransport(choice);
     preferredTransportSelect.dataset.previousValue = choice;
@@ -1947,6 +1947,7 @@ const TRANSPORT_LABELS: Record<string, string> = {
   shadowsocks: "Shadowsocks",
   hysteria2: "Hysteria2",
   snowflake: "Snowflake",
+  wireguard: "WireGuard",
 };
 
 // The status block for whichever transport is currently active, so the pill
@@ -2215,10 +2216,19 @@ function buildLoadIndicator(load: number | null | undefined): HTMLElement | null
   return el;
 }
 
-type TransportChoice = "auto" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "snowflake";
+type TransportChoice =
+  | "auto"
+  | "cloak"
+  | "naive"
+  | "reality"
+  | "hysteria2"
+  | "shadowsocks"
+  | "snowflake"
+  | "wireguard";
 
 // Supported means the hub advertised that transport's block. cloak is always
 // present; "auto" matches every server and falls back across what it offers.
+// "wireguard" needs nothing advertised — every node listens for it.
 function serverSupportsTransport(server: ServerInfo, transport: TransportChoice): boolean {
   switch (transport) {
     case "naive":

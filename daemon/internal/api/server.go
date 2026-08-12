@@ -81,12 +81,13 @@ type connectRequest struct {
 	AllowLAN  bool   `json:"allowLAN,omitempty"`
 	Lockdown  bool   `json:"lockdown,omitempty"`
 	// PreferredTransport: "cloak", "reality", "hysteria2", "naive",
-	// "shadowsocks", "snowflake", or "" / "auto" (cascade in autoCascadeOrder:
-	// cloak, reality, shadowsocks, hysteria2, then naive; snowflake is gated
-	// off this release -- see snowflakeReleaseGated). Auto mode keeps only the transports this
-	// profile configures, then reorderByMemory may promote whatever last
-	// worked on this network. Service.startTransport dispatches on this value;
-	// unrecognized values fall through to auto.
+	// "shadowsocks", "snowflake", "wireguard" (straight to the node, no
+	// transport), or "" / "auto" (cascade in autoCascadeOrder: reality, cloak,
+	// shadowsocks, hysteria2, then naive; snowflake is gated off this release --
+	// see snowflakeReleaseGated, and "wireguard" is never in the cascade). Auto
+	// mode keeps only the transports this profile configures, then
+	// reorderByMemory may promote whatever last worked on this network.
+	// transportCandidates dispatches on this value and rejects anything else.
 	PreferredTransport string `json:"preferredTransport,omitempty"`
 }
 

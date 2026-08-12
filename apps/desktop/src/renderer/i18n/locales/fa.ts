@@ -146,6 +146,7 @@ export const fa = {
   "settings.transport.reality": "فقط VLESS+REALITY",
   "settings.transport.hysteria2": "فقط Hysteria2",
   "settings.transport.shadowsocks": "فقط Shadowsocks",
+  "settings.transport.wireguard": "فقط WireGuard (بدون استتار)",
   "settings.transport.snowflake": "فقط Snowflake",
   "settings.network.heading": "شبکه",
   "settings.network.description": "رفع مشکل برای شبکه‌های Wi-Fi محدودکننده.",

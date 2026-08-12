@@ -246,8 +246,8 @@ restore the original daemon profile snapshot. See
 
 The daemon's automatic preference is:
 
-1. Cloak
-2. VLESS + REALITY
+1. VLESS + REALITY
+2. Cloak
 3. Shadowsocks
 4. Hysteria2
 5. NaiveProxy
@@ -263,6 +263,20 @@ A remembered last-good transport for the current network can be promoted to the
 front of the list. Every candidate must start successfully and complete a real
 WireGuard handshake within the connection deadline. Failed candidates are torn
 down before the next one starts.
+
+The user may also select one transport instead of automatic mode, which disables
+fallback entirely: that transport is the only candidate, and a profile with no
+configuration for it is refused rather than downgraded.
+
+### Plain WireGuard
+
+Selecting `wireguard` connects with no transport at all. The profile's
+`wireguard.directEndpoint` (the node's own UDP listener, as the hub reported it)
+replaces the loopback `Endpoint` in the config text, and nothing else about the
+session changes — same kill switch, same handshake gate, same health checks and
+recovery. It is the fastest and lowest-overhead method and the only one that is
+recognizable on the wire as a VPN, so the automatic cascade never selects it and
+a direct session is never recorded as the network's last-good transport.
 
 The orchestration lives in
 [`daemon/internal/api/service.go`](../daemon/internal/api/service.go).
@@ -287,6 +301,7 @@ Application traffic
 | NaiveProxy | [`daemon/internal/naive`](../daemon/internal/naive) with a CGO-linked native engine and in-process relay | Windows/macOS builds when native inputs resolve; release CI requires it |
 | Shadowsocks | [`daemon/internal/shadowsocks`](../daemon/internal/shadowsocks) using embedded sing-box (AEAD / SS-2022) | Enabled when provisioned |
 | Snowflake | [`daemon/internal/snowflake`](../daemon/internal/snowflake) using the Tor Snowflake library | Implemented but release-gated |
+| Plain WireGuard | None — the tunnel dials the node directly, skipping the loopback listener above | Enabled on explicit user selection only |
 
 No separate `wg`, `wg-quick`, `wireguard-go`, Cloak, or NaiveProxy tunnel
 process is launched. "In-process" applies to tunnel engines, not every platform

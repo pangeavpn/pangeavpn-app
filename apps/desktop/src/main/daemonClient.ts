@@ -38,7 +38,7 @@ export class DaemonClient {
     opts?: {
       allowLAN?: boolean;
       lockdown?: boolean;
-      preferredTransport?: "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "snowflake";
+      preferredTransport?: "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "snowflake" | "wireguard";
     }
   ): Promise<OkResponse> {
     const body: Record<string, unknown> = { profileId };
@@ -115,7 +115,7 @@ export class DaemonClient {
     opts?: {
       allowLAN?: boolean;
       lockdown?: boolean;
-      preferredTransport?: "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "snowflake";
+      preferredTransport?: "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "snowflake" | "wireguard";
     }
   ): Promise<OkResponse> {
     const body: Record<string, unknown> = { profileId };

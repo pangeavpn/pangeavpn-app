@@ -65,7 +65,7 @@ type StatusResponse struct {
 	State  DaemonState `json:"state"`
 	Detail string      `json:"detail"`
 	// ActiveTransport is "cloak", "naive", "reality", "hysteria2", "shadowsocks",
-	// "snowflake", or "" when disconnected.
+	// "snowflake", "wireguard" (no transport at all), or "" when disconnected.
 	ActiveTransport  string          `json:"activeTransport"`
 	Cloak            CloakStatus     `json:"cloak"`
 	Naive            TransportStatus `json:"naive"`
@@ -202,6 +202,11 @@ type WireGuardProfile struct {
 	TunnelName  string   `json:"tunnelName"`
 	DNS         []string `json:"dns"`
 	BypassHosts []string `json:"bypassHosts,omitempty"`
+	// DirectEndpoint is the node's own WireGuard listener as host:port. ConfigText
+	// always points at a loopback transport bridge instead, so this is what the
+	// direct "wireguard" method rewrites the Endpoint line to. Empty means the
+	// profile cannot be connected without a transport in front of it.
+	DirectEndpoint string `json:"directEndpoint,omitempty"`
 }
 
 type Profile struct {

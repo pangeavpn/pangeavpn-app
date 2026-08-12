@@ -146,6 +146,7 @@ export const zh = {
   "settings.transport.reality": "仅 VLESS+REALITY",
   "settings.transport.hysteria2": "仅 Hysteria2",
   "settings.transport.shadowsocks": "仅 Shadowsocks",
+  "settings.transport.wireguard": "仅 WireGuard（不伪装）",
   "settings.transport.snowflake": "仅 Snowflake",
   "settings.network.heading": "网络",
   "settings.network.description": "针对受限 Wi-Fi 网络的修复。",

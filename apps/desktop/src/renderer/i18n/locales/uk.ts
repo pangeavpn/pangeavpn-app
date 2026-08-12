@@ -146,6 +146,7 @@ export const uk = {
   "settings.transport.reality": "Лише VLESS+REALITY",
   "settings.transport.hysteria2": "Лише Hysteria2",
   "settings.transport.shadowsocks": "Лише Shadowsocks",
+  "settings.transport.wireguard": "Лише WireGuard (без маскування)",
   "settings.transport.snowflake": "Лише Snowflake",
   "settings.network.heading": "Мережа",
   "settings.network.description": "Виправлення для обмежувальних мереж Wi-Fi.",

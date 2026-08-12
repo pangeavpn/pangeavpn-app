@@ -146,6 +146,7 @@ export const ar = {
   "settings.transport.reality": "VLESS+REALITY فقط",
   "settings.transport.hysteria2": "Hysteria2 فقط",
   "settings.transport.shadowsocks": "Shadowsocks فقط",
+  "settings.transport.wireguard": "WireGuard فقط (بدون تمويه)",
   "settings.transport.snowflake": "Snowflake فقط",
   "settings.network.heading": "الشبكة",
   "settings.network.description": "إصلاحات لشبكات Wi-Fi المقيّدة.",

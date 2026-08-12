@@ -1982,8 +1982,8 @@ func TestConnect_RecordsLastGoodTransportForNetwork(t *testing.T) {
 }
 
 // TestConnect_TriesRememberedTransportFirst proves the remembered transport is
-// attempted before the rest of the cascade: reality is remembered and works, so
-// cloak (normally first) is never even started.
+// attempted before the rest of the cascade: naive is remembered and works, so
+// neither reality (normally first) nor cloak is ever started.
 func TestConnect_TriesRememberedTransportFirst(t *testing.T) {
 	profile := transportMemoryProfile()
 	cloak := &fakeCloakManager{}
@@ -1991,7 +1991,7 @@ func TestConnect_TriesRememberedTransportFirst(t *testing.T) {
 	reality := &fakeRealityManager{}
 	wgMgr := &fakeWGManager{} // live tunnel: whichever transport is tried first handshakes
 	ks := &fakeKillSwitch{}
-	mem := &fakeTransportMemory{entries: map[string]string{"wifi-home": "reality"}}
+	mem := &fakeTransportMemory{entries: map[string]string{"wifi-home": "naive"}}
 	svc := newTestServiceWithReality(t, cloak, naive, reality, wgMgr, ks, profile)
 	svc.transportMemory = mem
 	svc.networkKey = func() string { return "wifi-home" }
@@ -1999,19 +1999,25 @@ func TestConnect_TriesRememberedTransportFirst(t *testing.T) {
 	if err := svc.Connect(context.Background(), "p1", ConnectOptions{}); err != nil {
 		t.Fatalf("connect failed: %v", err)
 	}
-	if svc.Status(context.Background()).ActiveTransport != "reality" {
-		t.Fatalf("ActiveTransport = %q, want reality (remembered)", svc.Status(context.Background()).ActiveTransport)
+	if svc.Status(context.Background()).ActiveTransport != "naive" {
+		t.Fatalf("ActiveTransport = %q, want naive (remembered)", svc.Status(context.Background()).ActiveTransport)
 	}
-	if cloak.startCalled {
-		t.Error("cloak should not be started when the remembered transport works first")
+	reality.mu.Lock()
+	realityStarted := reality.startCalled
+	reality.mu.Unlock()
+	if realityStarted || cloak.startCalled {
+		t.Error("no cascade transport should start when the remembered transport works first")
 	}
-	if !reality.startCalled {
-		t.Error("reality (remembered) should have been tried first")
+	naive.mu.Lock()
+	naiveStarted := naive.startCalled
+	naive.mu.Unlock()
+	if !naiveStarted {
+		t.Error("naive (remembered) should have been tried first")
 	}
 }
 
 // TestConnect_RememberedTransportFailsNow_FallsBackAndRerecords proves a stale
-// memory doesn't strand the connection: reality is remembered but no longer
+// memory doesn't strand the connection: naive is remembered but no longer
 // handshakes, so the daemon falls through the rest of the cascade and updates
 // the memory to the new winner.
 func TestConnect_RememberedTransportFailsNow_FallsBackAndRerecords(t *testing.T) {
@@ -2019,11 +2025,11 @@ func TestConnect_RememberedTransportFailsNow_FallsBackAndRerecords(t *testing.T)
 	cloak := &fakeCloakManager{}
 	naive := &fakeNaiveManager{}
 	reality := &fakeRealityManager{}
-	// Reordered cascade is [reality, cloak, naive]; only the 2nd WG bring-up
-	// (cloak) handshakes, so reality fails and cloak becomes the new winner.
+	// Reordered cascade is [naive, reality, cloak]; only the 2nd WG bring-up
+	// (reality) handshakes, so naive fails and reality becomes the new winner.
 	wgMgr := &fakeWGManager{handshakeOnStart: 2}
 	ks := &fakeKillSwitch{}
-	mem := &fakeTransportMemory{entries: map[string]string{"wifi-home": "reality"}}
+	mem := &fakeTransportMemory{entries: map[string]string{"wifi-home": "naive"}}
 	svc := newTestServiceWithReality(t, cloak, naive, reality, wgMgr, ks, profile)
 	svc.transportMemory = mem
 	svc.networkKey = func() string { return "wifi-home" }
@@ -2032,14 +2038,14 @@ func TestConnect_RememberedTransportFailsNow_FallsBackAndRerecords(t *testing.T)
 		t.Fatalf("connect failed: %v", err)
 	}
 	active := svc.Status(context.Background()).ActiveTransport
-	if active == "reality" {
+	if active == "naive" {
 		t.Fatal("expected to fall back off the stale remembered transport")
 	}
-	if active != "cloak" {
-		t.Fatalf("ActiveTransport = %q, want cloak (next in reordered cascade)", active)
+	if active != "reality" {
+		t.Fatalf("ActiveTransport = %q, want reality (next in reordered cascade)", active)
 	}
-	if got, _ := mem.Lookup("wifi-home"); got != "cloak" {
-		t.Fatalf("remembered transport = %q, want cloak after re-record", got)
+	if got, _ := mem.Lookup("wifi-home"); got != "reality" {
+		t.Fatalf("remembered transport = %q, want reality after re-record", got)
 	}
 }
 
@@ -2261,15 +2267,15 @@ func TestConnect_PreferredTransportReality_ErrorsWhenProfileHasNoRealityConfig(t
 	}
 }
 
-func TestConnect_CloakFails_FallsBackToRealityBeforeNaive(t *testing.T) {
-	// In the censorship-resistance cascade REALITY precedes NaiveProxy, so a
-	// cloak failure falls through to reality and naive is never reached.
+func TestConnect_RealityFails_FallsBackToCloakBeforeNaive(t *testing.T) {
+	// REALITY leads the censorship-resistance cascade and Cloak backs it up, so
+	// a reality failure falls through to cloak and naive is never reached.
 	profile := realityProfile()
 	profile.Naive = &state.NaiveProfile{RemoteHost: "naive.example.com", RemotePort: 8443, Username: "u", Password: "p"}
 
-	cloakMgr := &fakeCloakManager{startErr: errors.New("cloak boom")}
+	cloakMgr := &fakeCloakManager{}
 	naiveMgr := &fakeNaiveManager{}
-	realityMgr := &fakeRealityManager{}
+	realityMgr := &fakeRealityManager{startErr: errors.New("reality boom")}
 	wgMgr := &fakeWGManager{}
 	ks := &fakeKillSwitch{}
 	svc := newTestServiceWithReality(t, cloakMgr, naiveMgr, realityMgr, wgMgr, ks, profile)
@@ -2277,29 +2283,29 @@ func TestConnect_CloakFails_FallsBackToRealityBeforeNaive(t *testing.T) {
 	if err := svc.Connect(context.Background(), "p1", ConnectOptions{}); err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
-	if !cloakMgr.startCalled {
-		t.Fatal("expected cloak.Start to be attempted first")
-	}
-	status := svc.Status(context.Background())
-	if status.ActiveTransport != "reality" {
-		t.Fatalf("ActiveTransport = %q, want reality", status.ActiveTransport)
-	}
 	realityMgr.mu.Lock()
 	realityStarted := realityMgr.startCalled
 	realityMgr.mu.Unlock()
 	if !realityStarted {
-		t.Fatal("expected reality.Start to be attempted after cloak failed")
+		t.Fatal("expected reality.Start to be attempted first")
+	}
+	status := svc.Status(context.Background())
+	if status.ActiveTransport != "cloak" {
+		t.Fatalf("ActiveTransport = %q, want cloak", status.ActiveTransport)
+	}
+	if !cloakMgr.startCalled {
+		t.Fatal("expected cloak.Start to be attempted after reality failed")
 	}
 	naiveMgr.mu.Lock()
 	naiveStarted := naiveMgr.startCalled
 	naiveMgr.mu.Unlock()
 	if naiveStarted {
-		t.Fatal("naive should not be reached — reality precedes it in the cascade")
+		t.Fatal("naive should not be reached — cloak precedes it in the cascade")
 	}
 }
 
 // TestConnect_AutoCascadeAttemptsTransportsInCensorshipOrder pins the auto-mode
-// order: cloak, reality, shadowsocks, hysteria2, then naive (snowflake is gated
+// order: reality, cloak, shadowsocks, hysteria2, then naive (snowflake is gated
 // off). With every transport configured but none able to handshake, the
 // aggregated failure records the order they were attempted in.
 func TestConnect_AutoCascadeAttemptsTransportsInCensorshipOrder(t *testing.T) {
@@ -2329,7 +2335,7 @@ func TestConnect_AutoCascadeAttemptsTransportsInCensorshipOrder(t *testing.T) {
 	}
 	msg := err.Error()
 	lastIdx := -1
-	for _, kind := range []string{"cloak", "reality", "shadowsocks", "hysteria2", "naive"} {
+	for _, kind := range []string{"reality", "cloak", "shadowsocks", "hysteria2", "naive"} {
 		idx := strings.Index(msg, kind+":")
 		if idx < 0 {
 			t.Fatalf("error missing %s attempt: %v", kind, msg)
