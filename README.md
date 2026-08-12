@@ -118,7 +118,7 @@ What you can do instead of taking our word for it:
   ```
   ```powershell
   # Windows
-  Get-FileHash .\PangeaVPN-Setup-0.5.3-x64.exe -Algorithm SHA256
+  Get-FileHash .\PangeaVPN-Setup-0.5.4-x64.exe -Algorithm SHA256
   ```
 - **Check where it was built.** Every release artifact is produced by [GitHub Actions](.github/workflows/build-desktop.yml) from the tagged commit, in public, with public logs.
 - **Build it yourself.** See [Build from source](#build-from-source). You do not have to trust our binaries at all.
