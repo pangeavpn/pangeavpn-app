@@ -248,7 +248,7 @@ func (ks *windowsKillSwitch) Enable(ctx context.Context, endpointHosts []string,
 	return nil
 }
 
-func (ks *windowsKillSwitch) Update(ctx context.Context, tunnelInterface string) error {
+func (ks *windowsKillSwitch) Update(ctx context.Context, tunnel TunnelRef) error {
 	ks.mu.Lock()
 	defer ks.mu.Unlock()
 
@@ -256,19 +256,9 @@ func (ks *windowsKillSwitch) Update(ctx context.Context, tunnelInterface string)
 		return fmt.Errorf("kill switch not active")
 	}
 
-	tunnelInterface = strings.TrimSpace(tunnelInterface)
-	if tunnelInterface == "" {
-		return fmt.Errorf("empty tunnel interface name")
-	}
-
-	// Resolve the tunnel adapter's LUID so we can permit traffic through it.
-	iface, err := net.InterfaceByName(tunnelInterface)
+	luid, err := resolveTunnelLUID(tunnel)
 	if err != nil {
-		return fmt.Errorf("kill switch update: resolve interface %q: %w", tunnelInterface, err)
-	}
-	luid, err := winipcfg.LUIDFromIndex(uint32(iface.Index))
-	if err != nil {
-		return fmt.Errorf("kill switch update: LUID for %q: %w", tunnelInterface, err)
+		return fmt.Errorf("kill switch update: %w", err)
 	}
 
 	// Remove previous tunnel permit if we're being called again (e.g. reconnect).
@@ -281,17 +271,44 @@ func (ks *windowsKillSwitch) Update(ctx context.Context, tunnelInterface string)
 	// adapter. Without a permit scoped to the tunnel interface LUID, the
 	// block-all-outbound rule drops every packet at socket level — explaining
 	// "general failure" on ping even though the WireGuard handshake succeeds.
-	filterId, err := ks.engine.addPermitTunnelInterface(uint64(luid))
+	filterId, err := ks.engine.addPermitTunnelInterface(luid)
 	if err != nil {
 		return fmt.Errorf("kill switch update: permit tunnel interface: %w", err)
 	}
 	ks.tunnelFilterId = filterId
 
 	st, _ := loadKillSwitchState()
-	st.TunnelInterface = tunnelInterface
+	st.TunnelInterface = strings.TrimSpace(tunnel.Name)
 	_ = saveKillSwitchState(st)
 
 	return nil
+}
+
+// resolveTunnelLUID prefers the LUID the caller already holds for the live
+// device, falling back to a name lookup only when it has none.
+//
+// The fallback is what this exists to avoid: after a rebuild
+// GetAdaptersAddresses can still return the dying adapter's index, and a permit
+// naming an interface that no longer exists leaves block-all-outbound dropping
+// every application socket while WireGuard goes on handshaking.
+func resolveTunnelLUID(tunnel TunnelRef) (uint64, error) {
+	if tunnel.WindowsLUID != 0 {
+		return tunnel.WindowsLUID, nil
+	}
+
+	name := strings.TrimSpace(tunnel.Name)
+	if name == "" {
+		return 0, fmt.Errorf("tunnel has neither a LUID nor an interface name")
+	}
+	iface, err := net.InterfaceByName(name)
+	if err != nil {
+		return 0, fmt.Errorf("resolve interface %q: %w", name, err)
+	}
+	luid, err := winipcfg.LUIDFromIndex(uint32(iface.Index))
+	if err != nil {
+		return 0, fmt.Errorf("LUID for %q: %w", name, err)
+	}
+	return uint64(luid), nil
 }
 
 func (ks *windowsKillSwitch) Clear(ctx context.Context) error {

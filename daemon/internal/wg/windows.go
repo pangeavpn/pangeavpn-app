@@ -91,7 +91,12 @@ func (m *wireGuardGoManager) startWindows(ctx context.Context, profile state.Wir
 		return err
 	}
 
-	endpointRoutes, endpointErr := addWindowsEndpointRoutes(ctx, tunnelLUID, parsed.endpointHosts)
+	// Every tunnel on the box is off limits as a next hop for the bypass, not
+	// just this one: routing WireGuard through any of them is a loop.
+	excludeLUIDs := m.ActiveLUIDs()
+	excludeLUIDs[tunnelLUID] = struct{}{}
+
+	endpointRoutes, endpointErr := addWindowsEndpointRoutes(ctx, excludeLUIDs, parsed.endpointHosts)
 	if endpointErr != nil {
 		m.logs.Add(state.LogWarn, state.SourceWireGuard, fmt.Sprintf("endpoint bypass route setup warning: %v", endpointErr))
 	}
@@ -123,7 +128,7 @@ func (m *wireGuardGoManager) stopWindows(_ context.Context, profile state.WireGu
 	}
 
 	tunnelKey := sanitizeTunnelName(profile.TunnelName)
-	session, hasSession := m.session(tunnelKey)
+	session, hasSession := m.takeSession(tunnelKey)
 	if !hasSession || session == nil {
 		return nil
 	}
@@ -141,7 +146,6 @@ func (m *wireGuardGoManager) stopWindows(_ context.Context, profile state.WireGu
 	}
 
 	closeDevice(session.device)
-	m.removeSession(tunnelKey)
 	m.logs.Add(state.LogInfo, state.SourceWireGuard, fmt.Sprintf("wireguard stopped for %s (%s)", profile.TunnelName, session.interfaceName))
 	return nil
 }

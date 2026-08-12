@@ -85,7 +85,7 @@ func (ks *linuxKillSwitch) Enable(ctx context.Context, endpointHosts []string, a
 	return nil
 }
 
-func (ks *linuxKillSwitch) Update(ctx context.Context, tunnelInterface string) error {
+func (ks *linuxKillSwitch) Update(ctx context.Context, tunnel TunnelRef) error {
 	ks.mu.Lock()
 	defer ks.mu.Unlock()
 
@@ -93,7 +93,7 @@ func (ks *linuxKillSwitch) Update(ctx context.Context, tunnelInterface string) e
 		return fmt.Errorf("kill switch not active")
 	}
 
-	tunnelInterface = strings.TrimSpace(tunnelInterface)
+	tunnelInterface := strings.TrimSpace(tunnel.Name)
 	if tunnelInterface == "" {
 		return fmt.Errorf("empty tunnel interface name")
 	}

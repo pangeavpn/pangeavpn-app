@@ -5,6 +5,8 @@ package wg
 import (
 	"net/netip"
 	"testing"
+
+	"golang.zx2c4.com/wireguard/windows/tunnel/winipcfg"
 )
 
 func TestParseWindowsPrefixes_PreservesInterfaceHostBits(t *testing.T) {
@@ -38,6 +40,95 @@ func TestParseWindowsRoutePrefixes_MasksNetworks(t *testing.T) {
 	}
 	if got, want := v4[0].String(), "10.0.0.0/24"; got != want {
 		t.Fatalf("expected route prefix %q, got %q", want, got)
+	}
+}
+
+func TestPlannedEndpointRoute(t *testing.T) {
+	defaults := func(luid uint64, nextHop string) map[string]windowsDefaultRoute {
+		return map[string]windowsDefaultRoute{
+			"inet": {
+				interfaceLUID: winipcfg.LUID(luid),
+				nextHop:       netip.MustParseAddr(nextHop),
+			},
+		}
+	}
+	spec := windowsRouteSpec{interfaceLUID: 7, destination: "203.0.113.9/32", nextHop: "192.168.1.1"}
+
+	tests := []struct {
+		name     string
+		spec     windowsRouteSpec
+		defaults map[string]windowsDefaultRoute
+		want     windowsRouteSpec
+		ok       bool
+	}{
+		{
+			name:     "unchanged default route plans the same spec",
+			spec:     spec,
+			defaults: defaults(7, "192.168.1.1"),
+			want:     spec,
+			ok:       true,
+		},
+		{
+			// DHCP renewal onto a new gateway, or a roam to another subnet.
+			name:     "new gateway repoints the bypass",
+			spec:     spec,
+			defaults: defaults(7, "10.20.0.1"),
+			want:     windowsRouteSpec{interfaceLUID: 7, destination: "203.0.113.9/32", nextHop: "10.20.0.1"},
+			ok:       true,
+		},
+		{
+			// Wi-Fi to Ethernet, dock/undock, adapter power cycle.
+			name:     "new default interface repoints the bypass",
+			spec:     spec,
+			defaults: defaults(9, "192.168.1.1"),
+			want:     windowsRouteSpec{interfaceLUID: 9, destination: "203.0.113.9/32", nextHop: "192.168.1.1"},
+			ok:       true,
+		},
+		{
+			// Nothing to pin to yet: mid-roam, or the link is down. Leaving the
+			// recorded spec alone lets the next tick fix it once a route exists.
+			name:     "no default route leaves the spec alone",
+			spec:     spec,
+			defaults: map[string]windowsDefaultRoute{},
+			ok:       false,
+		},
+		{
+			name:     "unparseable destination is skipped",
+			spec:     windowsRouteSpec{interfaceLUID: 7, destination: "not-a-prefix", nextHop: "192.168.1.1"},
+			defaults: defaults(7, "192.168.1.1"),
+			ok:       false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := plannedEndpointRoute(tc.spec, tc.defaults)
+			if ok != tc.ok {
+				t.Fatalf("plannedEndpointRoute ok = %t, want %t", ok, tc.ok)
+			}
+			if ok && got != tc.want {
+				t.Errorf("plannedEndpointRoute = %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestPlannedEndpointRoute_IPv6SpecUsesTheIPv6Default proves the family split
+// keys off the destination rather than assuming IPv4.
+func TestPlannedEndpointRoute_IPv6SpecUsesTheIPv6Default(t *testing.T) {
+	defaults := map[string]windowsDefaultRoute{
+		"inet":  {interfaceLUID: 1, nextHop: netip.MustParseAddr("192.168.1.1")},
+		"inet6": {interfaceLUID: 2, nextHop: netip.MustParseAddr("fe80::1")},
+	}
+	spec := windowsRouteSpec{interfaceLUID: 9, destination: "2001:db8::1/128", nextHop: "fe80::9"}
+
+	got, ok := plannedEndpointRoute(spec, defaults)
+	if !ok {
+		t.Fatal("expected an IPv6 spec to plan against the IPv6 default route")
+	}
+	want := windowsRouteSpec{interfaceLUID: 2, destination: "2001:db8::1/128", nextHop: "fe80::1"}
+	if got != want {
+		t.Errorf("plannedEndpointRoute = %+v, want %+v", got, want)
 	}
 }
 

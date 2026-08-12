@@ -392,6 +392,18 @@ type fakeWGManager struct {
 	dnsGuardCorrected bool
 	dnsGuardErr       error
 	dnsGuardCalls     int
+
+	// Endpoint route guard modeling, the same shape as the DNS guard: the method
+	// below is what makes fakeWGManager satisfy wgRouteGuard, and the defaults
+	// report bypass routes still pointing where bring-up left them.
+	routeGuardRepaired bool
+	routeGuardErr      error
+	routeGuardCalls    int
+
+	// tunnelLUID is the adapter the kill switch should be scoped to; luidErr
+	// models a manager that cannot report one.
+	tunnelLUID uint64
+	luidErr    error
 }
 
 // EnsureDNS models the host's interface DNS being checked, and corrected when
@@ -401,6 +413,24 @@ func (f *fakeWGManager) EnsureDNS(_ context.Context, _ state.WireGuardProfile) (
 	defer f.mu.Unlock()
 	f.dnsGuardCalls++
 	return f.dnsGuardCorrected, f.dnsGuardErr
+}
+
+// EnsureEndpointRoutes models the tunnel's bypass routes being checked, and
+// re-pinned when the host's default route has moved or dropped them.
+func (f *fakeWGManager) EnsureEndpointRoutes(_ context.Context, _ state.WireGuardProfile) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.routeGuardCalls++
+	return f.routeGuardRepaired, f.routeGuardErr
+}
+
+func (f *fakeWGManager) ActiveTunnelLUID(_ context.Context, _ state.WireGuardProfile) (uint64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.luidErr != nil {
+		return 0, f.luidErr
+	}
+	return f.tunnelLUID, nil
 }
 
 func (f *fakeWGManager) Start(_ context.Context, profile state.WireGuardProfile) error {
@@ -502,7 +532,7 @@ type fakeKillSwitch struct {
 	enableEndpoints []string
 	enableAllowLAN  bool
 	enableLocked    bool
-	updateInterface string
+	updateTunnel    platform.TunnelRef
 	enableCount     int
 	updateCount     int
 	clearCount      int
@@ -525,11 +555,11 @@ func (f *fakeKillSwitch) Enable(_ context.Context, endpoints []string, allowLAN 
 	return nil
 }
 
-func (f *fakeKillSwitch) Update(_ context.Context, iface string) error {
+func (f *fakeKillSwitch) Update(_ context.Context, tunnel platform.TunnelRef) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.updateCount++
-	f.updateInterface = iface
+	f.updateTunnel = tunnel
 	if f.updateErr != nil {
 		return f.updateErr
 	}
@@ -691,8 +721,8 @@ func TestConnect_UpdateCalledAfterWGSuccess(t *testing.T) {
 	if ks.updateCount != 1 {
 		t.Errorf("expected update called once, got %d", ks.updateCount)
 	}
-	if ks.updateInterface != profile.WireGuard.TunnelName {
-		t.Errorf("expected update interface %q, got %q", profile.WireGuard.TunnelName, ks.updateInterface)
+	if ks.updateTunnel.Name != profile.WireGuard.TunnelName {
+		t.Errorf("expected update interface %q, got %q", profile.WireGuard.TunnelName, ks.updateTunnel.Name)
 	}
 }
 
@@ -714,8 +744,8 @@ func TestConnect_UsesReportedWireGuardInterfaceForKillSwitch(t *testing.T) {
 	if ks.updateCount != 1 {
 		t.Errorf("expected update called once, got %d", ks.updateCount)
 	}
-	if ks.updateInterface != wgMgr.interfaceName {
-		t.Errorf("expected update interface %q, got %q", wgMgr.interfaceName, ks.updateInterface)
+	if ks.updateTunnel.Name != wgMgr.interfaceName {
+		t.Errorf("expected update interface %q, got %q", wgMgr.interfaceName, ks.updateTunnel.Name)
 	}
 }
 
@@ -742,6 +772,65 @@ func TestConnect_WGFailure_KillSwitchStaysActive(t *testing.T) {
 	}
 	if !ks.active {
 		t.Error("expected kill switch to remain active after connect failure (fail-closed)")
+	}
+}
+
+// TestConnect_KillSwitchIsScopedToTheReportedTunnelLUID proves the permit that
+// lets application traffic through the lock is scoped to the device the manager
+// created, not to a name resolved back through the OS. A rebuild recreates the
+// adapter under the same name a second after destroying it, and a name lookup in
+// that window can still return the dead one — leaving the permit on an interface
+// that no longer exists and every application socket blocked.
+func TestConnect_KillSwitchIsScopedToTheReportedTunnelLUID(t *testing.T) {
+	profile := testProfile()
+	wgMgr := &fakeWGManager{interfaceName: "PangeaVPN Tunnel", tunnelLUID: 1688849860263936}
+	ks := &fakeKillSwitch{}
+	svc := newTestService(t, &fakeCloakManager{}, &fakeNaiveManager{}, wgMgr, ks, profile)
+
+	if err := svc.Connect(context.Background(), profile.ID, ConnectOptions{}); err != nil {
+		t.Fatalf("connect failed: %v", err)
+	}
+
+	ks.mu.Lock()
+	defer ks.mu.Unlock()
+	if ks.updateTunnel.WindowsLUID != wgMgr.tunnelLUID {
+		t.Errorf("kill switch tunnel LUID = %d, want %d", ks.updateTunnel.WindowsLUID, wgMgr.tunnelLUID)
+	}
+	if ks.updateTunnel.Name != wgMgr.interfaceName {
+		t.Errorf("kill switch tunnel name = %q, want %q", ks.updateTunnel.Name, wgMgr.interfaceName)
+	}
+}
+
+// TestConnect_KillSwitchUpdateFailureFailsTheConnect proves a session whose
+// permit never landed is not reported as connected. Without it the lock blocks
+// every application socket while WireGuard — permitted separately by endpoint
+// IP — goes on handshaking, so the tunnel looks healthy from every angle the
+// daemon checks while nothing on the machine works.
+func TestConnect_KillSwitchUpdateFailureFailsTheConnect(t *testing.T) {
+	profile := testProfile()
+	wgMgr := &fakeWGManager{}
+	ks := &fakeKillSwitch{updateErr: errors.New("permit tunnel interface: no such interface")}
+	svc := newTestService(t, &fakeCloakManager{}, &fakeNaiveManager{}, wgMgr, ks, profile)
+
+	if err := svc.Connect(context.Background(), profile.ID, ConnectOptions{}); err == nil {
+		t.Fatal("expected connect to fail when the tunnel permit could not be added")
+	}
+	if st := svc.Status(context.Background()).State; st != state.StateError {
+		t.Errorf("state = %q, want ERROR", st)
+	}
+	if !ks.Active() {
+		t.Error("expected the kill switch to stay armed — a failed connect must leave the device fail-closed")
+	}
+
+	// Left running, the tunnel belongs to nobody: no profile was ever recorded
+	// for the health loop to recover, and the next Connect is refused outright
+	// by ensureNoRunningWireGuard.
+	status, err := wgMgr.Status(context.Background(), profile.WireGuard)
+	if err != nil {
+		t.Fatalf("wireguard status failed: %v", err)
+	}
+	if status.Running {
+		t.Error("expected the tunnel to be torn down after the permit could not be added")
 	}
 }
 
