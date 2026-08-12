@@ -3,13 +3,13 @@
     "FileVersion": {
       "Major": 0,
       "Minor": 5,
-      "Patch": 2,
+       "Patch": 3,
       "Build": 0
     },
     "ProductVersion": {
       "Major": 0,
       "Minor": 5,
-      "Patch": 2,
+       "Patch": 3,
       "Build": 0
     },
     "FileFlagsMask": "3f",
@@ -22,13 +22,13 @@
     "Comments": "",
     "CompanyName": "PangeaVPN",
     "FileDescription": "PangeaVPN Daemon",
-    "FileVersion": "0.5.2.0",
+    "FileVersion": "0.5.3.0",
     "InternalName": "PangeaDaemon",
     "LegalCopyright": "Copyright (c) PangeaVPN",
     "OriginalFilename": "PangeaDaemon.exe",
     "PrivateBuild": "",
     "ProductName": "PangeaVPN",
-    "ProductVersion": "0.5.2.0",
+    "ProductVersion": "0.5.3.0",
     "SpecialBuild": ""
   },
   "VarFileInfo": {
