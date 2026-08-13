@@ -131,7 +131,7 @@ func (m *wireGuardGoManager) stopLinux(ctx context.Context, profile state.WireGu
 	}
 
 	tunnelKey := sanitizeTunnelName(profile.TunnelName)
-	session, hasSession := m.session(tunnelKey)
+	session, hasSession := m.takeSession(tunnelKey)
 	if !hasSession || session == nil {
 		return nil
 	}
@@ -159,7 +159,6 @@ func (m *wireGuardGoManager) stopLinux(ctx context.Context, profile state.WireGu
 	// The TUN device removal should also remove the interface, but ensure cleanup.
 	_ = deleteLinuxInterface(interfaceName)
 
-	m.removeSession(tunnelKey)
 	m.logs.Add(state.LogInfo, state.SourceWireGuard, fmt.Sprintf("wireguard stopped for %s (%s)", profile.TunnelName, interfaceName))
 	return nil
 }

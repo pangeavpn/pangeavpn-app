@@ -515,9 +515,108 @@ func ensureSessionDNS(_ *tunnelSession, _ []string) (bool, error) {
 	return false, nil
 }
 
-// ensureSessionEndpointRoutes is Windows-only: there the bypass route is pinned
-// to a gateway that the OS can drop or move mid-session. The Linux route stays
-// as installed until teardown removes it.
-func ensureSessionEndpointRoutes(_ context.Context, _ *tunnelSession, _ map[uint64]struct{}) (bool, error) {
-	return false, nil
+// linuxBypassGateway picks the next hop the endpoint bypass should hang off:
+// a default route with a real gateway address that is not the tunnel's own.
+//
+// Ties break on the lower interface index so repeated elections agree and the
+// guard cannot re-pin back and forth between two defaults every tick.
+func linuxBypassGateway(tunnelIndex int) (linuxGatewayInfo, bool, error) {
+	routes, err := netlink.RouteList(nil, netlink.FAMILY_V4)
+	if err != nil {
+		return linuxGatewayInfo{}, false, fmt.Errorf("list routes: %w", err)
+	}
+
+	var best linuxGatewayInfo
+	found := false
+	for _, route := range routes {
+		if !isDefaultDst(route.Dst) || route.LinkIndex == tunnelIndex {
+			continue
+		}
+		if route.Gw == nil || route.Gw.IsUnspecified() {
+			continue
+		}
+		if !found || route.LinkIndex < best.linkIndex {
+			best = linuxGatewayInfo{gw: route.Gw, linkIndex: route.LinkIndex}
+			found = true
+		}
+	}
+	return best, found, nil
+}
+
+// ensureLinuxBypassRoute points one table's host route at gateway, reporting
+// whether it had to change anything.
+//
+// RouteReplace is a single netlink message, so unlike a delete followed by an
+// add there is no window where the endpoint has no bypass and falls into the
+// tunnel.
+func ensureLinuxBypassRoute(destination *net.IPNet, gateway linuxGatewayInfo, table int) (bool, error) {
+	filter := &netlink.Route{Dst: destination, Table: table}
+	existing, err := netlink.RouteListFiltered(netlink.FAMILY_V4, filter, netlink.RT_FILTER_DST|netlink.RT_FILTER_TABLE)
+	if err != nil {
+		return false, fmt.Errorf("list route %s in table %d: %w", destination.String(), table, err)
+	}
+	for _, route := range existing {
+		if route.LinkIndex == gateway.linkIndex && route.Gw != nil && route.Gw.Equal(gateway.gw) {
+			return false, nil
+		}
+	}
+
+	replacement := &netlink.Route{Dst: destination, Gw: gateway.gw, LinkIndex: gateway.linkIndex, Table: table}
+	if err := netlink.RouteReplace(replacement); err != nil {
+		return false, fmt.Errorf("re-pin route %s in table %d: %w", destination.String(), table, err)
+	}
+	return true, nil
+}
+
+// ensureSessionEndpointRoutes re-pins the endpoint bypass routes to the host's
+// current default gateway, reporting whether it had to repair anything.
+//
+// Both tables carry the bypass and both can go wrong. WireGuard's own socket is
+// fwmarked onto the main table, where a host route left on a gateway that has
+// moved is more specific than the default and shadows it. The transports run
+// unmarked on table 51820, where everything not covered by the bypass goes into
+// the tunnel — so a dropped route there sends a transport's own connection to
+// the node through the tunnel it is carrying.
+func ensureSessionEndpointRoutes(_ context.Context, session *tunnelSession, _ map[uint64]struct{}) (bool, error) {
+	if session == nil || len(session.endpointRoutes) == 0 {
+		return false, nil
+	}
+
+	tunnelIndex := 0
+	if link, err := netlink.LinkByName(session.interfaceName); err == nil {
+		tunnelIndex = link.Attrs().Index
+	}
+	// No off-tunnel gateway to pin to right now: mid-roam, or the link is down.
+	// A quiet skip leaves it for a later tick instead of logging every 3s.
+	gateway, ok, err := linuxBypassGateway(tunnelIndex)
+	if err != nil {
+		return false, err
+	}
+	if !ok {
+		return false, nil
+	}
+
+	repaired := false
+	var errs []error
+	for _, endpointRoute := range session.endpointRoutes {
+		if endpointRoute.family != "inet" {
+			continue
+		}
+		ip := net.ParseIP(endpointRoute.destination)
+		if ip == nil {
+			continue
+		}
+		destination := &net.IPNet{IP: ip, Mask: net.CIDRMask(32, 32)}
+
+		for _, table := range []int{unix.RT_TABLE_MAIN, policyRoutingTable} {
+			changed, err := ensureLinuxBypassRoute(destination, gateway, table)
+			if err != nil {
+				errs = append(errs, err)
+				continue
+			}
+			repaired = repaired || changed
+		}
+	}
+
+	return repaired, errors.Join(errs...)
 }
