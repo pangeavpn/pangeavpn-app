@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -26,7 +27,16 @@ import (
 
 // The node-side bridge's fixed loopback address, reached via the
 // naive-server's SOCKS5 CONNECT once the TLS+HTTP2 tunnel is up.
-const bridgeAddr = "127.0.0.1:9000"
+// bridgeAddrFor is the node-side framed-UDP bridge this tunnel dials through
+// the CONNECT stream: one instance per exit under multihop, the default
+// otherwise. The node only listens on ports it generated, so an unconfigured
+// exit is refused there.
+func bridgeAddrFor(port int) string {
+	if port <= 0 {
+		port = state.DefaultNaiveBridgePort
+	}
+	return net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
+}
 
 // Manager wraps the cgo-linked NaiveProxy engine behind transport.Manager,
 // owning the loopback UDP listener WireGuard's peer Endpoint points at.
@@ -181,14 +191,14 @@ func (m *Manager) Start(ctx context.Context, profile state.NaiveProfile) error {
 	pid := os.Getpid()
 	m.logs.Add(state.LogInfo, state.SourceNaive, fmt.Sprintf("in-process naive started (pid=%d) listening on 127.0.0.1:%d, engine socks=127.0.0.1:%d", pid, boundPort, st.SocksPort))
 
-	go m.runSession(sessionCtx, generation, udpConn, st.SocksPort, done, session)
+	go m.runSession(sessionCtx, generation, udpConn, st.SocksPort, bridgeAddrFor(profile.BridgePort), done, session)
 
 	return nil
 }
 
 // runSession dials the SOCKS5 CONNECT tunnel, then relays datagrams until
 // either side breaks. Runs for one Start/Stop cycle.
-func (m *Manager) runSession(sessionCtx context.Context, generation uint64, udpConn *net.UDPConn, socksPort int, done, session chan struct{}) {
+func (m *Manager) runSession(sessionCtx context.Context, generation uint64, udpConn *net.UDPConn, socksPort int, bridgeAddr string, done, session chan struct{}) {
 	defer close(done)
 
 	socksAddr := fmt.Sprintf("127.0.0.1:%d", socksPort)
