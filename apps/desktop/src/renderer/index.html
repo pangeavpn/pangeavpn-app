@@ -177,6 +177,35 @@
         </section>
       </div>
 
+      <section id="subExpiredScreen" class="sub-expired" role="region" aria-labelledby="subExpiredTitle" hidden>
+        <div class="sub-expired-content">
+          <div class="sub-expired-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+          </div>
+          <h2 id="subExpiredTitle" class="sub-expired-title" data-i18n="subExpired.title">Your time is up</h2>
+          <p class="sub-expired-subtitle" data-i18n="subExpired.subtitle">Top up your account to reconnect. Your settings and devices stay exactly as they are.</p>
+          <dl class="sub-expired-facts">
+            <div class="sub-expired-fact">
+              <dt data-i18n="subExpired.account">Account</dt>
+              <dd id="subExpiredAccount">&mdash;</dd>
+            </div>
+            <div class="sub-expired-fact">
+              <dt data-i18n="subExpired.device">Device</dt>
+              <dd id="subExpiredDevice">&mdash;</dd>
+            </div>
+          </dl>
+          <button id="subExpiredTopUpBtn" class="btn-primary btn-lg sub-expired-topup" type="button">
+            <span data-i18n="subExpired.topUp">Get more time</span>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7M9 7h8v8"/></svg>
+          </button>
+          <div class="sub-expired-actions">
+            <button id="subExpiredRecheckBtn" class="btn-ghost" type="button" data-i18n="subExpired.recheck">I've topped up</button>
+            <button id="subExpiredSignOutBtn" class="btn-ghost" type="button" data-i18n="subExpired.signOut">Sign out</button>
+          </div>
+          <p id="subExpiredMessage" class="sub-expired-message" role="status" aria-live="polite"></p>
+        </div>
+      </section>
+
       <!-- Logs (gated behind the verbose-errors debug toggle) -->
       <section id="logsSection" class="panel logs-panel collapsible" data-collapsible hidden>
         <button class="collapse-toggle" type="button" aria-expanded="false" aria-controls="logsSectionContent">

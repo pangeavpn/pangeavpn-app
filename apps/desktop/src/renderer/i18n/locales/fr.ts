@@ -221,6 +221,17 @@ export const fr = {
   "sub.pastDue": "Paiement en retard",
   "sub.expired": "Abonnement expiré",
 
+  // ── Out-of-time screen ────────────────────────────────
+  "subExpired.title": "Votre temps est écoulé",
+  "subExpired.subtitle": "Rechargez votre compte pour vous reconnecter. Vos réglages et vos appareils restent inchangés.",
+  "subExpired.account": "Compte",
+  "subExpired.device": "Appareil",
+  "subExpired.topUp": "Obtenir plus de temps",
+  "subExpired.recheck": "J'ai rechargé",
+  "subExpired.checking": "Vérification de votre compte…",
+  "subExpired.stillExpired": "Ce compte n'a toujours pas de temps. Un paiement peut mettre un moment à arriver.",
+  "subExpired.signOut": "Se déconnecter",
+
   // ── Session / auth toasts ─────────────────────────────
   "auth.signedOutRetry": "Vous avez été déconnecté. Veuillez vous reconnecter.",
   "auth.signingOut": "Déconnexion...",

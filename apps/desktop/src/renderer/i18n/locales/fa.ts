@@ -221,6 +221,17 @@ export const fa = {
   "sub.pastDue": "پرداخت معوق",
   "sub.expired": "اشتراک منقضی شد",
 
+  // ── Out-of-time screen ────────────────────────────────
+  "subExpired.title": "زمان شما تمام شد",
+  "subExpired.subtitle": "برای اتصال دوباره حساب خود را شارژ کنید. تنظیمات و دستگاه‌های شما دست‌نخورده می‌مانند.",
+  "subExpired.account": "حساب",
+  "subExpired.device": "دستگاه",
+  "subExpired.topUp": "دریافت زمان بیشتر",
+  "subExpired.recheck": "شارژ کردم",
+  "subExpired.checking": "در حال بررسی حساب شما…",
+  "subExpired.stillExpired": "هنوز زمانی روی این حساب نیست. ثبت پرداخت ممکن است کمی طول بکشد.",
+  "subExpired.signOut": "خروج از حساب",
+
   // ── Session / auth toasts ─────────────────────────────
   "auth.signedOutRetry": "شما از حساب خارج شده‌اید. لطفاً دوباره وارد شوید.",
   "auth.signingOut": "در حال خروج...",

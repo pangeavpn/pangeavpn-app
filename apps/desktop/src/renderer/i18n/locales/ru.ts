@@ -221,6 +221,17 @@ export const ru = {
   "sub.pastDue": "Просрочен платёж",
   "sub.expired": "Подписка истекла",
 
+  // ── Out-of-time screen ────────────────────────────────
+  "subExpired.title": "Ваше время вышло",
+  "subExpired.subtitle": "Пополните счёт, чтобы подключиться снова. Настройки и устройства останутся прежними.",
+  "subExpired.account": "Аккаунт",
+  "subExpired.device": "Устройство",
+  "subExpired.topUp": "Получить больше времени",
+  "subExpired.recheck": "Я пополнил счёт",
+  "subExpired.checking": "Проверяем ваш аккаунт…",
+  "subExpired.stillExpired": "На этом аккаунте всё ещё нет времени. Платёж может дойти не сразу.",
+  "subExpired.signOut": "Выйти",
+
   // ── Session / auth toasts ─────────────────────────────
   "auth.signedOutRetry": "Вы вышли из системы. Войдите снова.",
   "auth.signingOut": "Выход...",

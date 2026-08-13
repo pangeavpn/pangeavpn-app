@@ -20,6 +20,7 @@ import { setLoginItemEnabled, isLoginItemEnabled, isHiddenLaunchArg } from "./lo
 import { startNetworkWatcher, onNetworkChange } from "./networkWatcher";
 import { mt, mtState, setMainLocale, resolveMainLocale } from "./i18n";
 import { sanitizeLog } from "./logSanitize";
+import { classifyHubFailure } from "../shared/entitlement";
 import { shouldShowTrayHint, trayHintBodyKey } from "./trayHint";
 import {
   applyHubMethod,
@@ -934,6 +935,34 @@ function generateFriendlyName(): string {
   return `${adj} ${noun}`;
 }
 
+// Deregister first: auth.logout() clears the keypair, so without this the hub
+// keeps an orphaned device row and one of the four slots is gone for good.
+async function signOutAndReleaseDevice(): Promise<void> {
+  try {
+    const identityKeys = await auth.loadIdentityKeyPair();
+    if (identityKeys && pangeaApiClient.getLicenseKey()) {
+      await pangeaApiClient.deregisterDevice(identityKeys.publicKey);
+    }
+  } catch {
+    // best-effort — server may be unreachable
+  }
+
+  pangeaApiClient.clearCache();
+  await auth.logout();
+}
+
+// Asks what the 403 really meant before anything is cleared — a lapsed account
+// keeps its session and gets the expired screen instead.
+async function handleAuthFailure(err: AuthError): Promise<void> {
+  const subscription = await pangeaApiClient.getSubscription();
+  if (classifyHubFailure({ status: err.status, body: err.body }, subscription) === "expired") {
+    mainWindow?.webContents.send("subscription:expired");
+    return;
+  }
+  await signOutAndReleaseDevice();
+  mainWindow?.webContents.send("auth:invalidated");
+}
+
 function registerIpcHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.getStatus, async () =>
     withDaemonRestartOnUnavailable(() => daemonClient.getStatus(), "status", { allowRestart: false })
@@ -1058,16 +1087,6 @@ function registerIpcHandlers(): void {
       // daemon may be unavailable
     }
 
-    // Best-effort deregister device from hub before clearing local state
-    try {
-      const identityKeys = await auth.loadIdentityKeyPair();
-      if (identityKeys && pangeaApiClient.getLicenseKey()) {
-        await pangeaApiClient.deregisterDevice(identityKeys.publicKey);
-      }
-    } catch {
-      // best-effort — server may be unreachable
-    }
-
     if (managedProfileId) {
       try {
         const config = await daemonClient.getConfig();
@@ -1079,8 +1098,7 @@ function registerIpcHandlers(): void {
       managedProfileId = null;
     }
 
-    pangeaApiClient.clearCache();
-    await auth.logout();
+    await signOutAndReleaseDevice();
     void refreshTrayStatus();
   });
 
@@ -1353,9 +1371,7 @@ function registerIpcHandlers(): void {
       return await pangeaApiClient.getServers();
     } catch (err) {
       if (err instanceof AuthError) {
-        pangeaApiClient.clearCache();
-        await auth.logout();
-        mainWindow?.webContents.send("auth:invalidated");
+        await handleAuthFailure(err);
         return [];
       }
       throw err;
@@ -1381,10 +1397,12 @@ function registerIpcHandlers(): void {
       return result;
     } catch (err) {
       if (err instanceof AuthError) {
-        pangeaApiClient.clearCache();
-        await auth.logout();
-        mainWindow?.webContents.send("auth:invalidated");
+        await handleAuthFailure(err);
         return { ok: false };
+      }
+      if (err instanceof SubscriptionExpiredError) {
+        mainWindow?.webContents.send("subscription:expired");
+        return { ok: false, error: "SUBSCRIPTION_EXPIRED" };
       }
       throw err;
     }
@@ -1401,10 +1419,12 @@ function registerIpcHandlers(): void {
       return result;
     } catch (err) {
       if (err instanceof AuthError) {
-        pangeaApiClient.clearCache();
-        await auth.logout();
-        mainWindow?.webContents.send("auth:invalidated");
+        await handleAuthFailure(err);
         return { ok: false };
+      }
+      if (err instanceof SubscriptionExpiredError) {
+        mainWindow?.webContents.send("subscription:expired");
+        return { ok: false, error: "SUBSCRIPTION_EXPIRED" };
       }
       throw err;
     }

@@ -221,6 +221,17 @@ export const zh = {
   "sub.pastDue": "付款逾期",
   "sub.expired": "订阅已到期",
 
+  // ── Out-of-time screen ────────────────────────────────
+  "subExpired.title": "您的时长已用完",
+  "subExpired.subtitle": "充值后即可重新连接。您的设置和设备将保持不变。",
+  "subExpired.account": "账户",
+  "subExpired.device": "设备",
+  "subExpired.topUp": "获取更多时长",
+  "subExpired.recheck": "我已充值",
+  "subExpired.checking": "正在检查您的账户…",
+  "subExpired.stillExpired": "该账户仍无可用时长。付款到账可能需要一点时间。",
+  "subExpired.signOut": "退出登录",
+
   // ── Session / auth toasts ─────────────────────────────
   "auth.signedOutRetry": "您已退出登录，请重新登录。",
   "auth.signingOut": "正在退出登录...",

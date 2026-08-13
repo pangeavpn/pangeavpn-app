@@ -221,6 +221,17 @@ export const ar = {
   "sub.pastDue": "الدفع متأخر",
   "sub.expired": "انتهى الاشتراك",
 
+  // ── Out-of-time screen ────────────────────────────────
+  "subExpired.title": "انتهى وقتك",
+  "subExpired.subtitle": "اشحن رصيد حسابك لإعادة الاتصال. ستبقى إعداداتك وأجهزتك كما هي تمامًا.",
+  "subExpired.account": "الحساب",
+  "subExpired.device": "الجهاز",
+  "subExpired.topUp": "احصل على وقت إضافي",
+  "subExpired.recheck": "لقد شحنت رصيدي",
+  "subExpired.checking": "جارٍ التحقق من حسابك…",
+  "subExpired.stillExpired": "لا يزال هذا الحساب بلا رصيد وقت. قد يستغرق وصول الدفعة لحظات.",
+  "subExpired.signOut": "تسجيل الخروج",
+
   // ── Session / auth toasts ─────────────────────────────
   "auth.signedOutRetry": "تم تسجيل خروجك. يرجى تسجيل الدخول مرة أخرى.",
   "auth.signingOut": "جارٍ تسجيل الخروج...",

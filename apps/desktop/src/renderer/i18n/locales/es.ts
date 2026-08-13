@@ -221,6 +221,17 @@ export const es = {
   "sub.pastDue": "Pago vencido",
   "sub.expired": "Suscripción vencida",
 
+  // ── Out-of-time screen ────────────────────────────────
+  "subExpired.title": "Tu tiempo se acabó",
+  "subExpired.subtitle": "Recarga tu cuenta para volver a conectarte. Tus ajustes y dispositivos se mantienen tal cual.",
+  "subExpired.account": "Cuenta",
+  "subExpired.device": "Dispositivo",
+  "subExpired.topUp": "Conseguir más tiempo",
+  "subExpired.recheck": "Ya he recargado",
+  "subExpired.checking": "Comprobando tu cuenta…",
+  "subExpired.stillExpired": "Esta cuenta sigue sin tiempo. Un pago puede tardar un momento en registrarse.",
+  "subExpired.signOut": "Cerrar sesión",
+
   // ── Session / auth toasts ─────────────────────────────
   "auth.signedOutRetry": "Se cerró tu sesión. Inicia sesión de nuevo.",
   "auth.signingOut": "Cerrando sesión...",

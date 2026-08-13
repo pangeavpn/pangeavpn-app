@@ -221,6 +221,17 @@ export const uk = {
   "sub.pastDue": "Прострочений платіж",
   "sub.expired": "Підписку завершено",
 
+  // ── Out-of-time screen ────────────────────────────────
+  "subExpired.title": "Ваш час вичерпано",
+  "subExpired.subtitle": "Поповніть рахунок, щоб підключитися знову. Ваші налаштування та пристрої залишаться без змін.",
+  "subExpired.account": "Обліковий запис",
+  "subExpired.device": "Пристрій",
+  "subExpired.topUp": "Отримати більше часу",
+  "subExpired.recheck": "Я поповнив рахунок",
+  "subExpired.checking": "Перевіряємо ваш обліковий запис…",
+  "subExpired.stillExpired": "На цьому рахунку досі немає часу. Платіж може дійти не одразу.",
+  "subExpired.signOut": "Вийти",
+
   // ── Session / auth toasts ─────────────────────────────
   "auth.signedOutRetry": "Ви вийшли із системи. Будь ласка, увійдіть знову.",
   "auth.signingOut": "Вихід...",

@@ -13,6 +13,7 @@ import { buildDriftMap } from "./driftMap.js";
 import { dnsChoiceFor, dnsServersFor, type DnsChoice } from "./dnsPresets.js";
 import { buildFlag } from "./flags.js";
 import { formatAccountNumberInput, normalizeAccountNumber } from "./accountNumber.js";
+import { shouldShowExpiredScreen } from "./expiredScreen.js";
 import {
   buildServerRetryOrder,
   groupRegions,
@@ -248,6 +249,7 @@ async function refreshEntitlement(): Promise<void> {
     showToast(t("connect.expired"), 8000);
   }
   updateServerControlStates();
+  applyEntitlementUI();
 }
 
 // Fetched fresh each time Settings opens so expiry/renewal is always current.
@@ -271,8 +273,65 @@ async function refreshSubscription(): Promise<void> {
   if (sub) {
     entitled = sub.entitled !== false;
     updateServerControlStates();
+    applyEntitlementUI();
   }
 }
+
+// ── Subscription expired screen ───────────────────────────────
+
+const stage = document.querySelector(".stage") as HTMLElement;
+const subExpiredScreen = document.getElementById("subExpiredScreen") as HTMLElement;
+const subExpiredAccount = document.getElementById("subExpiredAccount") as HTMLElement;
+const subExpiredDevice = document.getElementById("subExpiredDevice") as HTMLElement;
+const subExpiredTopUpBtn = document.getElementById("subExpiredTopUpBtn") as HTMLButtonElement;
+const subExpiredRecheckBtn = document.getElementById("subExpiredRecheckBtn") as HTMLButtonElement;
+const subExpiredSignOutBtn = document.getElementById("subExpiredSignOutBtn") as HTMLButtonElement;
+const subExpiredMessage = document.getElementById("subExpiredMessage") as HTMLElement;
+
+const TOP_UP_URL = "https://pangeavpn.org/app";
+
+// Masked like the cached-token button: enough to tell two accounts apart
+// without putting the whole credential on screen.
+function maskedAccountNumber(): string {
+  const cached = localStorage.getItem("pangea:lastToken");
+  if (!cached) return t("common.dash");
+  return cached.length > 4
+    ? cached.slice(0, 4) + "•".repeat(Math.min(cached.length - 4, 12))
+    : "•".repeat(cached.length);
+}
+
+// Swaps the stage for the expired screen. The header stays mounted, so theme
+// and settings remain reachable while the account is out of time.
+function applyEntitlementUI(): void {
+  const show = shouldShowExpiredScreen(entitled, currentDaemonState);
+  if (show && subExpiredScreen.hidden) {
+    subExpiredAccount.textContent = maskedAccountNumber();
+    subExpiredDevice.textContent = localStorage.getItem(MY_DEVICE_NAME_KEY) ?? t("common.dash");
+    subExpiredMessage.textContent = "";
+  }
+  subExpiredScreen.hidden = !show;
+  stage.hidden = show;
+}
+
+subExpiredTopUpBtn.addEventListener("click", () => {
+  window.openExternal?.(TOP_UP_URL);
+});
+
+subExpiredRecheckBtn.addEventListener("click", async () => {
+  subExpiredRecheckBtn.disabled = true;
+  subExpiredMessage.textContent = t("subExpired.checking");
+  try {
+    await refreshEntitlement();
+    // Still expired: say so, otherwise applyEntitlementUI has already left.
+    if (entitled === false) subExpiredMessage.textContent = t("subExpired.stillExpired");
+  } finally {
+    subExpiredRecheckBtn.disabled = false;
+  }
+});
+
+subExpiredSignOutBtn.addEventListener("click", () => {
+  logoutBtn.click();
+});
 
 // ── Overlay focus management ──────────────────────────────────
 
@@ -440,6 +499,8 @@ logoutBtn.addEventListener("click", async () => {
     await pangeaApi.logout();
     localStorage.removeItem(MY_DEVICE_NAME_KEY);
     authState = { authenticated: false, user: null };
+    entitled = null;
+    applyEntitlementUI();
     servers = [];
     updateAuthUI();
     renderServers();
@@ -1450,6 +1511,14 @@ async function init(): Promise<void> {
     showToast(t("auth.signedOutRetry"));
   });
 
+  // The hub refused this account for lack of time, not a bad identity — the
+  // session stays, the screen takes over.
+  window.onSubscriptionExpired?.(() => {
+    entitled = false;
+    updateServerControlStates();
+    applyEntitlementUI();
+  });
+
   initCollapsibleSections();
   await renderAppVersion();
   updateBusyIndicator();
@@ -2014,6 +2083,8 @@ function renderSessionClock(): void {
 function renderStatus(status: StatusResponse): void {
   latestStatus = status;
   currentDaemonState = status.state;
+  // A lapsed user who just disconnected is now safe to move onto the screen.
+  applyEntitlementUI();
 
   // A poll landing mid-switch must not yank the hero back off CONNECTING.
   if (connectingVisual) {

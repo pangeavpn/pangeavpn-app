@@ -134,3 +134,6 @@ contextBridge.exposeInMainWorld("openExternal", (url: string) => ipcRenderer.inv
 contextBridge.exposeInMainWorld("onAuthInvalidated", (callback: () => void) => {
   ipcRenderer.on("auth:invalidated", () => callback());
 });
+contextBridge.exposeInMainWorld("onSubscriptionExpired", (callback: () => void) => {
+  ipcRenderer.on("subscription:expired", () => callback());
+});

@@ -21,16 +21,20 @@ import {
   restoreFrontedEndpoints
 } from "../shared/frontedEndpoints";
 import { restoreCachedServers } from "../shared/cachedServers";
+import { isSubscriptionLapseBody } from "../shared/entitlement";
 import { encryptRequest, decryptResponse, type EncryptedResponse } from "./secureChannel";
 import { sanitizeLog } from "./logSanitize";
 import { fetchViaConnectProxy } from "./hubTransport";
 
 export class AuthError extends Error {
   status: number;
-  constructor(message: string, status: number) {
+  /** Raw response body, so callers can re-classify before clearing the session. */
+  body: string;
+  constructor(message: string, status: number, body = "") {
     super(message);
     this.name = "AuthError";
     this.status = status;
+    this.body = body;
   }
 }
 
@@ -1411,15 +1415,15 @@ export class PangeaApiClient {
 
       if (!response.ok) {
         const text = await response.text();
-        // Check this before the auth branch: an expired subscription is a 403,
-        // but it must not log the user out (see SubscriptionExpiredError).
-        if (text.includes("SUBSCRIPTION_EXPIRED")) {
+        // Check this before the auth branch: a lapsed account is a 403, but it
+        // must not log the user out (see SubscriptionExpiredError).
+        if (isSubscriptionLapseBody(text)) {
           throw new SubscriptionExpiredError(
             "Your subscription has expired. Top up or resubscribe to reconnect."
           );
         }
         if (response.status === 401 || response.status === 403 || text.includes("DEVICE_NOT_REGISTERED")) {
-          throw new AuthError(`Hub API auth error (${response.status}): ${text}`, response.status);
+          throw new AuthError(`Hub API auth error (${response.status}): ${text}`, response.status, text);
         }
         throw new Error(`Hub API error (${response.status}): ${text}`);
       }

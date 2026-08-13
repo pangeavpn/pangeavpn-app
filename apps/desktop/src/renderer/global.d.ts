@@ -190,6 +190,7 @@ declare global {
     appPlatform?: NodeJS.Platform;
     openExternal?: (url: string) => Promise<void>;
     onAuthInvalidated?: (callback: () => void) => void;
+    onSubscriptionExpired?: (callback: () => void) => void;
   }
 }
 

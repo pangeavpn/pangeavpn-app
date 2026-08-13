@@ -221,6 +221,17 @@ export const en = {
   "sub.pastDue": "Payment past due",
   "sub.expired": "Subscription expired",
 
+  // ── Out-of-time screen ────────────────────────────────
+  "subExpired.title": "Your time is up",
+  "subExpired.subtitle": "Top up your account to reconnect. Your settings and devices stay exactly as they are.",
+  "subExpired.account": "Account",
+  "subExpired.device": "Device",
+  "subExpired.topUp": "Get more time",
+  "subExpired.recheck": "I've topped up",
+  "subExpired.checking": "Checking your account…",
+  "subExpired.stillExpired": "Still no time on this account. A payment can take a moment to land.",
+  "subExpired.signOut": "Sign out",
+
   // ── Session / auth toasts ─────────────────────────────
   "auth.signedOutRetry": "You've been signed out. Please sign in again.",
   "auth.signingOut": "Signing out...",
