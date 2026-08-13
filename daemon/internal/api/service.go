@@ -356,6 +356,7 @@ func (s *Service) Connect(ctx context.Context, profileID string, opts ConnectOpt
 	if err := validateProfile(profile); err != nil {
 		return err
 	}
+	profile = state.ApplyHop(profile)
 
 	currentState, _ := s.machine.Get()
 	if currentState == state.StateConnecting || currentState == state.StateDisconnecting {
@@ -982,6 +983,7 @@ func (s *Service) Switch(ctx context.Context, newProfileID string, opts ConnectO
 	if err := validateProfile(newProfile); err != nil {
 		return err
 	}
+	newProfile = state.ApplyHop(newProfile)
 
 	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("switch requested: %s -> %s (kill switch stays active)", oldProfile.ID, newProfile.ID))
 
@@ -2151,6 +2153,11 @@ func (s *Service) getCurrentProfile() (state.Profile, bool) {
 func validateProfile(profile state.Profile) error {
 	if profile.ID == "" {
 		return errors.New("profile id is required")
+	}
+	// A half-specified hop would leave some transports pointed at the entry's
+	// own WireGuard listener, quietly egressing one hop early.
+	if err := state.ValidateHop(profile); err != nil {
+		return err
 	}
 	if profile.Cloak.LocalPort <= 0 {
 		return errors.New("cloak.localPort must be > 0")
