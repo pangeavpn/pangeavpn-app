@@ -142,9 +142,9 @@ func TestE2EClientToServerRoundTrip(t *testing.T) {
 	// Server forwards to the echo listener regardless of what destination
 	// the client requests (route.Final defaults to the sole "direct"
 	// outbound), so point the bridge's fixed relay target at it.
-	old := relayDestination
-	relayDestination = net.JoinHostPort("127.0.0.1", strconv.Itoa(echoPort))
-	defer func() { relayDestination = old }()
+	old := relayDestinationOverride
+	relayDestinationOverride = net.JoinHostPort("127.0.0.1", strconv.Itoa(echoPort))
+	defer func() { relayDestinationOverride = old }()
 
 	profile := state.Hysteria2Profile{
 		LocalPort:    0,

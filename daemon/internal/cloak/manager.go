@@ -466,9 +466,16 @@ func buildRawConfig(profile state.CloakProfile, remoteHost string) (*client.RawC
 		remotePort = "443"
 	}
 
+	// The server resolves this against its own ProxyBook, so an exit the node
+	// was not configured for is refused there rather than relayed.
+	proxyMethod := profile.ProxyMethod
+	if proxyMethod == "" {
+		proxyMethod = state.DefaultCloakProxyMethod
+	}
+
 	return &client.RawConfig{
 		ServerName:       serverName,
-		ProxyMethod:      "wireguard",
+		ProxyMethod:      proxyMethod,
 		EncryptionMethod: encMethod,
 		UID:              uid,
 		PublicKey:        pubKey,

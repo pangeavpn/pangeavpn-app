@@ -4,7 +4,9 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"net"
 	"net/netip"
+	"strconv"
 	"strings"
 
 	C "github.com/sagernet/sing-box/constant"
@@ -20,16 +22,23 @@ const (
 	obfsTypeSalamander   = "salamander"
 )
 
-// relayDestination is the fixed SOCKS5 UDP ASSOCIATE destination the bridge
-// requests through the tunnel. It is intentionally not part of
-// state.Hysteria2Profile: same convention as Cloak (ProxyMethod=wireguard)
-// and NaiveProxy — the real WireGuard endpoint is a server-side deployment
-// detail, not client config. A correctly deployed Hysteria2 server either
-// runs WireGuard co-located on this loopback port (the common case, in
-// which this address is simply correct) or overrides the destination via
-// its own route config, ignoring whatever the client requests. Same-package
-// tests reassign this to point at a fixed test destination.
-var relayDestination = "127.0.0.1:51820"
+// relayDestinationOverride replaces the derived destination when set.
+// Same-package tests point it at a local echo server.
+var relayDestinationOverride string
+
+// relayDestination is the SOCKS5 UDP ASSOCIATE destination requested through
+// the tunnel: the remote node's own WireGuard listener, or the entry node's
+// loopback hop port when the profile is multihop. The node allowlists which
+// of these it will honour, so an unconfigured port is refused server-side.
+func relayDestination(targetPort int) string {
+	if relayDestinationOverride != "" {
+		return relayDestinationOverride
+	}
+	if targetPort <= 0 {
+		targetPort = state.DefaultWireGuardPort
+	}
+	return net.JoinHostPort("127.0.0.1", strconv.Itoa(targetPort))
+}
 
 func validateProfile(profile state.Hysteria2Profile) error {
 	if strings.TrimSpace(profile.RemoteHost) == "" {
