@@ -121,7 +121,7 @@ func (m *wireGuardGoManager) stopDarwin(_ context.Context, profile state.WireGua
 	}
 
 	tunnelKey := sanitizeTunnelName(profile.TunnelName)
-	session, hasSession := m.session(tunnelKey)
+	session, hasSession := m.takeSession(tunnelKey)
 	if !hasSession || session == nil {
 		return nil
 	}
@@ -141,7 +141,6 @@ func (m *wireGuardGoManager) stopDarwin(_ context.Context, profile state.WireGua
 	// Close the WireGuard device (also closes TUN and removes interface).
 	closeDevice(session.device)
 
-	m.removeSession(tunnelKey)
 	m.logs.Add(state.LogInfo, state.SourceWireGuard, fmt.Sprintf("wireguard stopped for %s (%s)", profile.TunnelName, session.interfaceName))
 	return nil
 }

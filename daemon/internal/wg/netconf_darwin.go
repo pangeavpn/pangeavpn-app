@@ -9,9 +9,17 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/netip"
 	"os/exec"
 	"strings"
+	"syscall"
+	"time"
+
+	"golang.org/x/net/route"
 )
+
+// darwinRouteTimeout bounds one route(8) call made from the health tick.
+const darwinRouteTimeout = 5 * time.Second
 
 // ---------------------------------------------------------------------------
 // Interface configuration via ifconfig (non-cgo)
@@ -292,9 +300,208 @@ func ensureSessionDNS(_ *tunnelSession, _ []string) (bool, error) {
 	return false, nil
 }
 
-// ensureSessionEndpointRoutes is Windows-only: there the bypass route is pinned
-// to a gateway that the OS can drop or move mid-session. The macOS route stays
-// as installed until teardown removes it.
-func ensureSessionEndpointRoutes(_ *tunnelSession, _ map[uint64]struct{}) (bool, error) {
-	return false, nil
+// darwinRouteEntry is one IPv4 route as the kernel reports it.
+type darwinRouteEntry struct {
+	destination netip.Addr
+	maskBits    int
+	gateway     netip.Addr
+	ifIndex     int
+	host        bool
+	viaGateway  bool
+}
+
+// darwinIPv4Routes reads the kernel's IPv4 routing table.
+//
+// The table is scanned rather than asking `route get` which entry would be
+// used, because the tunnel's own 0.0.0.0/1 covers the addresses such a lookup
+// would be made against — including 0.0.0.0 itself. Matching prefixes here
+// keeps the default route and the tunnel's half-default distinguishable.
+func darwinIPv4Routes() ([]darwinRouteEntry, error) {
+	rib, err := route.FetchRIB(syscall.AF_INET, route.RIBTypeRoute, 0)
+	if err != nil {
+		return nil, fmt.Errorf("read routing table: %w", err)
+	}
+	messages, err := route.ParseRIB(route.RIBTypeRoute, rib)
+	if err != nil {
+		return nil, fmt.Errorf("parse routing table: %w", err)
+	}
+
+	entries := make([]darwinRouteEntry, 0, len(messages))
+	for _, message := range messages {
+		routeMessage, ok := message.(*route.RouteMessage)
+		if !ok || routeMessage.Flags&syscall.RTF_UP == 0 {
+			continue
+		}
+		destination, ok := darwinInet4Addr(routeMessage.Addrs, syscall.RTAX_DST)
+		if !ok {
+			continue
+		}
+
+		entry := darwinRouteEntry{
+			destination: destination,
+			maskBits:    darwinMaskBits(routeMessage.Addrs),
+			ifIndex:     routeMessage.Index,
+			host:        routeMessage.Flags&syscall.RTF_HOST != 0,
+			viaGateway:  routeMessage.Flags&syscall.RTF_GATEWAY != 0,
+		}
+		if gateway, ok := darwinInet4Addr(routeMessage.Addrs, syscall.RTAX_GATEWAY); ok {
+			entry.gateway = gateway
+		}
+		entries = append(entries, entry)
+	}
+	return entries, nil
+}
+
+func darwinInet4Addr(addrs []route.Addr, index int) (netip.Addr, bool) {
+	if index >= len(addrs) {
+		return netip.Addr{}, false
+	}
+	addr, ok := addrs[index].(*route.Inet4Addr)
+	if !ok {
+		return netip.Addr{}, false
+	}
+	return netip.AddrFrom4(addr.IP), true
+}
+
+// darwinMaskBits reads a prefix length, treating an absent mask as zero. Host
+// routes carry no mask and are identified by their flag instead.
+func darwinMaskBits(addrs []route.Addr) int {
+	mask, ok := darwinInet4Addr(addrs, syscall.RTAX_NETMASK)
+	if !ok {
+		return 0
+	}
+	ones, _ := net.IPMask(mask.AsSlice()).Size()
+	return ones
+}
+
+// darwinDefaultGateway picks the next hop the bypass should hang off: a real
+// 0.0.0.0/0 with a usable gateway address, never the tunnel's own.
+//
+// Interface-scoped defaults are skipped because they have no address to pin to,
+// which is also what a tunnel's half-default looks like. Ties break on the
+// lower interface index so repeated calls agree and the guard cannot re-pin
+// back and forth.
+func darwinDefaultGateway(entries []darwinRouteEntry, tunnelIndex int) (netip.Addr, bool) {
+	var best netip.Addr
+	bestIndex := 0
+	found := false
+
+	for _, entry := range entries {
+		if entry.host || entry.maskBits != 0 || !entry.destination.IsUnspecified() {
+			continue
+		}
+		if entry.ifIndex == tunnelIndex || !entry.viaGateway {
+			continue
+		}
+		if !entry.gateway.IsValid() || entry.gateway.IsUnspecified() {
+			continue
+		}
+		if !found || entry.ifIndex < bestIndex {
+			best, bestIndex, found = entry.gateway, entry.ifIndex, true
+		}
+	}
+	return best, found
+}
+
+func darwinHostRoute(entries []darwinRouteEntry, destination netip.Addr) (darwinRouteEntry, bool) {
+	for _, entry := range entries {
+		if entry.host && entry.destination == destination {
+			return entry, true
+		}
+	}
+	return darwinRouteEntry{}, false
+}
+
+// endpointRouteNeedsRepair reports whether the bypass has stopped doing its
+// job. An on-link entry counts as healthy: the endpoint is directly reachable,
+// so it needs no gateway and re-pinning one would fight the kernel's own ARP
+// entry every tick.
+func endpointRouteNeedsRepair(current darwinRouteEntry, found bool, tunnelIndex int, gateway netip.Addr) bool {
+	if !found {
+		return true
+	}
+	if current.ifIndex == tunnelIndex {
+		return true
+	}
+	if !current.viaGateway {
+		return false
+	}
+	return current.gateway != gateway
+}
+
+// ensureSessionEndpointRoutes re-pins the endpoint bypass routes to the host's
+// current default gateway, reporting whether it had to repair anything.
+//
+// macOS drops an interface's routes when the link goes down, and a roam or DHCP
+// renewal moves the gateway out from under them. Either way the endpoint falls
+// back to matching the tunnel's own 0.0.0.0/1 and WireGuard ends up routed into
+// the tunnel it is trying to establish.
+func ensureSessionEndpointRoutes(ctx context.Context, session *tunnelSession, _ map[uint64]struct{}) (bool, error) {
+	if session == nil || len(session.endpointRoutes) == 0 {
+		return false, nil
+	}
+
+	entries, err := darwinIPv4Routes()
+	if err != nil {
+		return false, err
+	}
+
+	tunnelIndex := 0
+	if iface, err := net.InterfaceByName(session.interfaceName); err == nil {
+		tunnelIndex = iface.Index
+	}
+	// No off-tunnel gateway to pin to right now: mid-roam, or the link is down.
+	// A quiet skip leaves it for a later tick instead of logging every 3s.
+	gateway, ok := darwinDefaultGateway(entries, tunnelIndex)
+	if !ok {
+		return false, nil
+	}
+
+	repaired := false
+	var errs []error
+	for _, endpointRoute := range session.endpointRoutes {
+		if endpointRoute.family != "inet" {
+			continue
+		}
+		destination, err := netip.ParseAddr(endpointRoute.destination)
+		if err != nil {
+			continue
+		}
+
+		current, found := darwinHostRoute(entries, destination)
+		if !endpointRouteNeedsRepair(current, found, tunnelIndex, gateway) {
+			continue
+		}
+
+		// Only an existing host route is removed, and only after it has been
+		// found in the table by exact address, so this can never take out the
+		// covering route the endpoint would otherwise fall back to.
+		if found {
+			if err := runDarwinRoute(ctx, "delete", "-host", endpointRoute.destination); err != nil {
+				errs = append(errs, err)
+				continue
+			}
+		}
+		if err := runDarwinRoute(ctx, "add", "-host", endpointRoute.destination, "-gateway", gateway.String()); err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		repaired = true
+	}
+
+	return repaired, errors.Join(errs...)
+}
+
+// runDarwinRoute runs one route(8) command under a deadline. The guard runs on
+// the health tick, so a wedged routing socket would otherwise stall silence
+// detection and every other recovery check behind it.
+func runDarwinRoute(ctx context.Context, args ...string) error {
+	commandCtx, cancel := context.WithTimeout(ctx, darwinRouteTimeout)
+	defer cancel()
+
+	out, err := exec.CommandContext(commandCtx, "route", append([]string{"-n"}, args...)...).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("route %s: %w (%s)", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }

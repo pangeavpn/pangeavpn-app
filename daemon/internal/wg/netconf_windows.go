@@ -304,7 +304,7 @@ func addWindowsEndpointRoutes(ctx context.Context, excludeLUIDs map[uint64]struc
 // renewal moves the gateway out from under them. Either way the node's address
 // falls back to matching the tunnel's own AllowedIPs and WireGuard ends up
 // routed into the tunnel it is trying to establish.
-func ensureSessionEndpointRoutes(session *tunnelSession, excludeLUIDs map[uint64]struct{}) (bool, error) {
+func ensureSessionEndpointRoutes(_ context.Context, session *tunnelSession, excludeLUIDs map[uint64]struct{}) (bool, error) {
 	if session == nil || session.windowsLUID == 0 || len(session.windowsRoutes) == 0 {
 		return false, nil
 	}
