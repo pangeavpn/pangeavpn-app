@@ -60,7 +60,11 @@ let lastServerId: string | null = null;
 let connectionAttemptRunning = false;
 let allowLanEnabled = true;
 let launchAtStartupEnabled = false;
-let alwaysConnectedEnabled = false;
+// Two independent settings: Lockdown is the kill switch that stays armed while
+// disconnected; auto-connect reconnects on launch and after drops. They shipped
+// as one "alwaysConnected" toggle, migrated on load below.
+let lockdownEnabled = false;
+let autoConnectEnabled = false;
 // "auto" (reality, then cloak, shadowsocks, hysteria2, naive), or one of
 // "cloak"/"naive"/"reality"/"hysteria2"/"shadowsocks"/"snowflake" only.
 let preferredTransport: "auto" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "snowflake" | "wireguard" = "auto";
@@ -68,9 +72,10 @@ let preferredTransport: "auto" | "cloak" | "naive" | "reality" | "hysteria2" | "
 let localePref = "system";
 const hiddenLaunch = process.argv.some(isHiddenLaunchArg);
 
-// Login item on if launch-at-startup or Lockdown is enabled — Lockdown needs the tray app on boot to reconnect.
+// Auto-connect needs the tray app on boot to reconnect; Lockdown needs it so the
+// user has a way to connect (or lift the lock) on a machine that boots blocked.
 async function applyLoginItem(): Promise<void> {
-  await setLoginItemEnabled(launchAtStartupEnabled || alwaysConnectedEnabled);
+  await setLoginItemEnabled(launchAtStartupEnabled || lockdownEnabled || autoConnectEnabled);
 }
 
 function getTaskbarPosition(): { x: number; y: number } {
@@ -470,7 +475,7 @@ async function recoverFromNetworkChange(): Promise<void> {
   if (networkRecoverInProgress || connectionAttemptRunning) return;
   const now = Date.now();
   if (now - lastNetworkRecoverAtMs < NETWORK_RECOVER_COOLDOWN_MS) return;
-  if (!alwaysConnectedEnabled) return;
+  if (!autoConnectEnabled) return;
   if (!lastConnectedProfileId) return;
 
   networkRecoverInProgress = true;
@@ -483,10 +488,10 @@ async function recoverFromNetworkChange(): Promise<void> {
       return;
     }
     console.log("network change detected — attempting reconnect");
-    // Tear down stale tunnel/firewall state without clearing the kill switch
-    // (we're in lockdown mode), then bring the tunnel back on the new network.
+    // Tear down stale tunnel/firewall state, keeping the kill switch when
+    // Lockdown is on, then bring the tunnel back on the new network.
     try {
-      await daemonClient.disconnect({ keepKillSwitch: true });
+      await daemonClient.disconnect({ keepKillSwitch: lockdownEnabled });
     } catch (err) {
       console.warn("network recover: disconnect failed", err);
     }
@@ -602,7 +607,7 @@ async function disconnectFromTray(): Promise<void> {
   updateTrayMenu();
   try {
     const result = await withDaemonRestartOnUnavailable(
-      () => daemonClient.disconnect({ keepKillSwitch: alwaysConnectedEnabled }),
+      () => daemonClient.disconnect({ keepKillSwitch: lockdownEnabled }),
       "tray disconnect"
     );
     if (!result.ok) {
@@ -640,7 +645,7 @@ async function resolveTrayServerPlan(excludedServerId: string | null = null): Pr
 /** Lockdown's lock blocks the hub we must reach to provision, so open the hub
  *  alone. Best-effort: a failure surfaces as the real network error. */
 async function permitHubThroughLockdown(): Promise<void> {
-  if (!alwaysConnectedEnabled) return;
+  if (!lockdownEnabled) return;
   const hubIp = pangeaApiClient.getHubIp();
   try {
     await daemonClient.permitHosts(hubIp ? [hubIp] : []);
@@ -723,7 +728,7 @@ async function provisionAcrossServers(serverIds: readonly string[], mode: "conne
         if (isCancelled(attempt)) {
           if (result.ok) {
             await daemonClient
-              .disconnect({ keepKillSwitch: alwaysConnectedEnabled })
+              .disconnect({ keepKillSwitch: lockdownEnabled })
               .catch((err) => console.warn("cancel: disconnect failed", sanitizeLog(err)));
           }
           throw new ConnectCancelledError();
@@ -744,7 +749,7 @@ async function provisionAcrossServers(serverIds: readonly string[], mode: "conne
       });
       if (isCancelled(attempt)) {
         await daemonClient
-          .disconnect({ keepKillSwitch: alwaysConnectedEnabled })
+          .disconnect({ keepKillSwitch: lockdownEnabled })
           .catch((error) => console.warn("cancel: disconnect after cleanup failed", sanitizeLog(error)));
         throw new ConnectCancelledError();
       }
@@ -819,7 +824,7 @@ async function cancelConnectAttempt(): Promise<void> {
   try {
     const status = await daemonClient.getStatus();
     if (status.state !== "DISCONNECTED") {
-      await daemonClient.disconnect({ keepKillSwitch: alwaysConnectedEnabled });
+      await daemonClient.disconnect({ keepKillSwitch: lockdownEnabled });
     }
   } catch (err) {
     console.warn("cancel: daemon teardown failed", sanitizeLog(err));
@@ -834,7 +839,7 @@ function connectionOptions(): {
 } {
   return {
     allowLAN: allowLanEnabled,
-    lockdown: alwaysConnectedEnabled,
+    lockdown: lockdownEnabled,
     ...(preferredTransport !== "auto" && { preferredTransport })
   };
 }
@@ -858,6 +863,19 @@ async function writeSettingsFile(settings: Record<string, unknown>): Promise<voi
   // First run can reach here before the daemon has created the directory.
   await fs.mkdir(dir, { recursive: true });
   await fs.writeFile(path.join(dir, "settings.json"), JSON.stringify(settings, null, 2));
+}
+
+/** Writes both flags together and drops the pre-split `alwaysConnected` key. */
+async function persistStartupSettings(): Promise<void> {
+  try {
+    const settings = await readSettingsFile();
+    settings.lockdown = lockdownEnabled;
+    settings.autoConnect = autoConnectEnabled;
+    delete settings.alwaysConnected;
+    await writeSettingsFile(settings);
+  } catch (err) {
+    console.warn("Failed to persist lockdown/auto-connect settings:", err);
+  }
 }
 
 async function persistHubIp(ip: string): Promise<void> {
@@ -949,7 +967,7 @@ function registerIpcHandlers(): void {
   });
   ipcMain.handle(IPC_CHANNELS.disconnect, async () => {
     const result = await withDaemonRestartOnUnavailable(
-      () => daemonClient.disconnect({ keepKillSwitch: alwaysConnectedEnabled }),
+      () => daemonClient.disconnect({ keepKillSwitch: lockdownEnabled }),
       "disconnect"
     );
     void refreshTrayStatus();
@@ -1242,8 +1260,9 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.handle(IPC_CHANNELS.getLaunchAtStartup, async () => {
-    // Lockdown forces the login item on, so return the stored preference rather than the OS state.
-    if (alwaysConnectedEnabled) {
+    // Lockdown and auto-connect force the login item on, so return the stored
+    // preference rather than the OS state.
+    if (lockdownEnabled || autoConnectEnabled) {
       return launchAtStartupEnabled;
     }
     // Self-heal: re-derive from OS in case the user toggled it elsewhere.
@@ -1256,22 +1275,16 @@ function registerIpcHandlers(): void {
     }
   });
 
-  ipcMain.handle(IPC_CHANNELS.setAlwaysConnected, async (_event, enabled: boolean) => {
-    const previouslyEnabled = alwaysConnectedEnabled;
-    alwaysConnectedEnabled = !!enabled;
-    try {
-      const settings = await readSettingsFile();
-      settings.alwaysConnected = alwaysConnectedEnabled;
-      await writeSettingsFile(settings);
-    } catch (err) {
-      console.warn("Failed to persist alwaysConnected setting:", err);
-    }
+  ipcMain.handle(IPC_CHANNELS.setLockdown, async (_event, enabled: boolean) => {
+    const previouslyEnabled = lockdownEnabled;
+    lockdownEnabled = !!enabled;
+    await persistStartupSettings();
     try {
       await applyLoginItem();
     } catch (err) {
       console.warn("Failed to apply login item for lockdown:", err);
     }
-    if (!previouslyEnabled && alwaysConnectedEnabled) {
+    if (!previouslyEnabled && lockdownEnabled) {
       // Sent unconditionally: while connected the daemon only records it as a
       // Lockdown lock, and skipping left Locked:false on disk, cleared as stale.
       try {
@@ -1282,7 +1295,7 @@ function registerIpcHandlers(): void {
       } catch (err) {
         console.warn("Failed to engage kill switch on lockdown on:", err);
       }
-    } else if (previouslyEnabled && !alwaysConnectedEnabled) {
+    } else if (previouslyEnabled && !lockdownEnabled) {
       try {
         const status = await daemonClient.getStatus();
         if (status.state !== "CONNECTED" && status.state !== "CONNECTING") {
@@ -1294,7 +1307,19 @@ function registerIpcHandlers(): void {
     }
   });
 
-  ipcMain.handle(IPC_CHANNELS.getAlwaysConnected, async () => alwaysConnectedEnabled);
+  ipcMain.handle(IPC_CHANNELS.getLockdown, async () => lockdownEnabled);
+
+  ipcMain.handle(IPC_CHANNELS.setAutoConnect, async (_event, enabled: boolean) => {
+    autoConnectEnabled = !!enabled;
+    await persistStartupSettings();
+    try {
+      await applyLoginItem();
+    } catch (err) {
+      console.warn("Failed to apply login item for auto-connect:", err);
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.getAutoConnect, async () => autoConnectEnabled);
 
   ipcMain.handle(IPC_CHANNELS.getLastServer, async () => ({
     lastServerId,
@@ -1592,8 +1617,19 @@ async function boot(): Promise<void> {
     if (typeof settings.launchAtStartup === "boolean") {
       launchAtStartupEnabled = settings.launchAtStartup;
     }
-    if (typeof settings.alwaysConnected === "boolean") {
-      alwaysConnectedEnabled = settings.alwaysConnected;
+    // `alwaysConnected` was both settings at once; installs that predate the
+    // split inherit it for each until the user changes one.
+    const legacyAlwaysConnected =
+      typeof settings.alwaysConnected === "boolean" ? settings.alwaysConnected : null;
+    if (typeof settings.lockdown === "boolean") {
+      lockdownEnabled = settings.lockdown;
+    } else if (legacyAlwaysConnected !== null) {
+      lockdownEnabled = legacyAlwaysConnected;
+    }
+    if (typeof settings.autoConnect === "boolean") {
+      autoConnectEnabled = settings.autoConnect;
+    } else if (legacyAlwaysConnected !== null) {
+      autoConnectEnabled = legacyAlwaysConnected;
     }
     // Last known good hub IP: the only way to reach the hub once a Lockdown
     // lock is engaged, since the lock permits that IP but blocks DNS and DoH.
@@ -1694,7 +1730,7 @@ async function boot(): Promise<void> {
     .then(async () => {
       // Covers the case where no lock state was persisted yet; the daemon
       // re-applies persisted locks itself. No-ops if already up or engaged.
-      if (!alwaysConnectedEnabled) return;
+      if (!lockdownEnabled) return;
       const status = await daemonClient.getStatus();
       if (status.state !== "CONNECTED" && status.state !== "CONNECTING") {
         await daemonClient.engageKillSwitch({

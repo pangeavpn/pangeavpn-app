@@ -45,8 +45,10 @@ export const IPC_CHANNELS = {
   getPreferredTransport: "settings:getPreferredTransport",
   setLaunchAtStartup: "settings:setLaunchAtStartup",
   getLaunchAtStartup: "settings:getLaunchAtStartup",
-  setAlwaysConnected: "settings:setAlwaysConnected",
-  getAlwaysConnected: "settings:getAlwaysConnected",
+  setLockdown: "settings:setLockdown",
+  getLockdown: "settings:getLockdown",
+  setAutoConnect: "settings:setAutoConnect",
+  getAutoConnect: "settings:getAutoConnect",
   getLastServer: "settings:getLastServer",
   clearLastServer: "settings:clearLastServer",
   getLocale: "settings:getLocale",
@@ -274,8 +276,12 @@ export interface PangeaApi {
   getPreferredTransport: () => Promise<"auto" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "snowflake" | "wireguard">;
   setLaunchAtStartup: (enabled: boolean) => Promise<void>;
   getLaunchAtStartup: () => Promise<boolean>;
-  setAlwaysConnected: (enabled: boolean) => Promise<void>;
-  getAlwaysConnected: () => Promise<boolean>;
+  /** Kill switch stays armed while disconnected. Independent of auto-connect. */
+  setLockdown: (enabled: boolean) => Promise<void>;
+  getLockdown: () => Promise<boolean>;
+  /** Reconnect to the last server on launch and after drops. Independent of lockdown. */
+  setAutoConnect: (enabled: boolean) => Promise<void>;
+  getAutoConnect: () => Promise<boolean>;
   getLastServer: () => Promise<{ lastServerId: string | null; lastProfileId: string | null }>;
   clearLastServer: () => Promise<void>;
   /** Stored language preference: a locale code, or "system" when unset. */

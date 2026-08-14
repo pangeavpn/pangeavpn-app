@@ -97,7 +97,8 @@ const customDnsInput = document.getElementById("customDnsInput") as HTMLInputEle
 const wireguardMtuInput = document.getElementById("wireguardMtuInput") as HTMLInputElement;
 const preferredTransportSelect = document.getElementById("preferredTransportSelect") as HTMLSelectElement;
 const launchAtStartupToggle = document.getElementById("launchAtStartupToggle") as HTMLInputElement;
-const alwaysConnectedToggle = document.getElementById("alwaysConnectedToggle") as HTMLInputElement;
+const autoConnectToggle = document.getElementById("autoConnectToggle") as HTMLInputElement;
+const lockdownToggle = document.getElementById("lockdownToggle") as HTMLInputElement;
 const loginScreen = document.getElementById("loginScreen") as HTMLElement;
 const loginSettingsBtn = document.getElementById("loginSettingsBtn") as HTMLButtonElement;
 const loginScreenBtn = document.getElementById("loginScreenBtn") as HTMLButtonElement;
@@ -134,7 +135,8 @@ let latestStatus: StatusResponse | null = null;
 let uiRefreshing = false;
 let uiWorking = false;
 let lastServerIdLocal: string | null = null;
-let alwaysConnectedLocal = false;
+let autoConnectLocal = false;
+let lockdownLocal = false;
 let logsCursor = 0;
 let logEntries: LogEntry[] = [];
 let authState: AuthState = { authenticated: false, user: null };
@@ -206,7 +208,8 @@ function updateSettingsSummaries(): void {
 
   const startup: string[] = [];
   if (launchAtStartupToggle.checked) startup.push(t("settings.startup.launch.title"));
-  if (alwaysConnectedToggle.checked) startup.push(t("settings.startup.lockdown.title"));
+  if (autoConnectToggle.checked) startup.push(t("settings.startup.autoConnect.title"));
+  if (lockdownToggle.checked) startup.push(t("settings.startup.lockdown.title"));
   setStartupValue.textContent = startup.length ? startup.join(" · ") : off;
 
   const language = languageSelect?.selectedOptions[0];
@@ -1423,24 +1426,38 @@ launchAtStartupToggle.addEventListener("change", async () => {
   }
 });
 
-alwaysConnectedToggle.addEventListener("change", async () => {
+autoConnectToggle.addEventListener("change", async () => {
   if (!pangeaApi) return;
-  alwaysConnectedLocal = alwaysConnectedToggle.checked;
+  autoConnectLocal = autoConnectToggle.checked;
   try {
-    await pangeaApi.setAlwaysConnected(alwaysConnectedLocal);
+    await pangeaApi.setAutoConnect(autoConnectLocal);
   } catch (err) {
-    alwaysConnectedLocal = !alwaysConnectedLocal;
-    alwaysConnectedToggle.checked = alwaysConnectedLocal;
+    autoConnectLocal = !autoConnectLocal;
+    autoConnectToggle.checked = autoConnectLocal;
+    showToast(reportError("autoConnect", err, t("toggle.autoConnect.failed")));
+    return;
+  }
+  notifyToggleChanged(autoConnectLocal);
+  if (autoConnectLocal) {
+    showToast(t("toggle.autoConnect.on"), 4000, true);
+    void attemptInitialAutoConnect();
+  } else {
+    showToast(t("toggle.autoConnect.off"), 4000, true);
+  }
+});
+
+lockdownToggle.addEventListener("change", async () => {
+  if (!pangeaApi) return;
+  lockdownLocal = lockdownToggle.checked;
+  try {
+    await pangeaApi.setLockdown(lockdownLocal);
+  } catch (err) {
+    lockdownLocal = !lockdownLocal;
+    lockdownToggle.checked = lockdownLocal;
     showToast(reportError("lockdown", err, t("toggle.lockdown.failed")));
     return;
   }
-  notifyToggleChanged(alwaysConnectedLocal);
-  if (alwaysConnectedLocal) {
-    showToast(t("toggle.lockdown.on"), 5000, true);
-    void attemptInitialAutoConnect();
-  } else {
-    showToast(t("toggle.lockdown.off"), 4000, true);
-  }
+  showToast(lockdownLocal ? t("toggle.lockdown.on") : t("toggle.lockdown.off"), 5000, true);
 });
 
 async function refreshLastServer(): Promise<void> {
@@ -1716,8 +1733,10 @@ async function init(): Promise<void> {
       } else {
         launchAtStartupToggle.checked = await pangeaApi.getLaunchAtStartup();
       }
-      alwaysConnectedLocal = await pangeaApi.getAlwaysConnected();
-      alwaysConnectedToggle.checked = alwaysConnectedLocal;
+      autoConnectLocal = await pangeaApi.getAutoConnect();
+      autoConnectToggle.checked = autoConnectLocal;
+      lockdownLocal = await pangeaApi.getLockdown();
+      lockdownToggle.checked = lockdownLocal;
       const last = await pangeaApi.getLastServer();
       lastServerIdLocal = last.lastServerId;
     } catch {
@@ -1725,7 +1744,7 @@ async function init(): Promise<void> {
     }
 
     initAutoConnect({
-      getEnabled: () => alwaysConnectedLocal,
+      getEnabled: () => autoConnectLocal,
       getAuthenticated: () => authState.authenticated,
       getDaemonState: () => currentDaemonState,
       getUserIntent,
@@ -1743,7 +1762,7 @@ async function init(): Promise<void> {
       await refreshServers();
     }
 
-    if (alwaysConnectedLocal && authState.authenticated) {
+    if (autoConnectLocal && authState.authenticated) {
       void attemptInitialAutoConnect();
     }
   }

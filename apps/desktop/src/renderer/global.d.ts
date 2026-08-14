@@ -158,8 +158,10 @@ declare global {
     getPreferredTransport: () => Promise<"auto" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "snowflake" | "wireguard">;
     setLaunchAtStartup: (enabled: boolean) => Promise<void>;
     getLaunchAtStartup: () => Promise<boolean>;
-    setAlwaysConnected: (enabled: boolean) => Promise<void>;
-    getAlwaysConnected: () => Promise<boolean>;
+    setLockdown: (enabled: boolean) => Promise<void>;
+    getLockdown: () => Promise<boolean>;
+    setAutoConnect: (enabled: boolean) => Promise<void>;
+    getAutoConnect: () => Promise<boolean>;
     getLastServer: () => Promise<{ lastServerId: string | null; lastProfileId: string | null }>;
     clearLastServer: () => Promise<void>;
     getLocale: () => Promise<string>;

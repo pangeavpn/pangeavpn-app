@@ -409,10 +409,17 @@
             </label>
             <label class="toggle-label">
               <span class="toggle-copy">
-                <span class="toggle-title" data-i18n="settings.startup.lockdown.title">Lockdown</span>
-                <span class="toggle-hint" data-i18n="settings.startup.lockdown.hint">Launches at startup hidden in the tray, reconnects to your last server, and keeps the kill switch on after you disconnect. Nothing but VPN traffic gets out until you turn this off.</span>
+                <span class="toggle-title" data-i18n="settings.startup.autoConnect.title">Auto-connect</span>
+                <span class="toggle-hint" data-i18n="settings.startup.autoConnect.hint">Connects to your last server when PangeaVPN starts, and reconnects if the tunnel drops. Stays off until you connect again if you disconnect yourself.</span>
               </span>
-              <input id="alwaysConnectedToggle" class="toggle-switch" type="checkbox" />
+              <input id="autoConnectToggle" class="toggle-switch" type="checkbox" />
+            </label>
+            <label class="toggle-label">
+              <span class="toggle-copy">
+                <span class="toggle-title" data-i18n="settings.startup.lockdown.title">Lockdown</span>
+                <span class="toggle-hint" data-i18n="settings.startup.lockdown.hint">Keeps the kill switch on even after you disconnect. Nothing but VPN traffic gets out until you turn this off — including right after your computer starts.</span>
+              </span>
+              <input id="lockdownToggle" class="toggle-switch" type="checkbox" />
             </label>
           </div>
         </section>
