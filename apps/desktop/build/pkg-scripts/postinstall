@@ -24,19 +24,18 @@ for candidate in "$candidate_a" "$candidate_b" "$candidate_c"; do
 done
 
 if [ -z "${app_path}" ]; then
+  # Read via a here-document rather than a pipe so the assignment survives:
+  # a piped `while` runs in a subshell, and world-writable /tmp is unsafe here.
   mdfind_output="$(/usr/bin/mdfind 'kMDItemCFBundleIdentifier == "com.pangea.pangeavpn"' 2>/dev/null || true)"
   if [ -n "${mdfind_output}" ]; then
-    echo "${mdfind_output}" | while IFS= read -r candidate; do
+    while IFS= read -r candidate; do
       if [ -n "${candidate}" ] && [ -x "${candidate}/Contents/Resources/daemon/daemon" ]; then
         app_path="${candidate}"
-        echo "${app_path}" > "/tmp/pangeavpn-app-path.$$"
         break
       fi
-    done
-    if [ -f "/tmp/pangeavpn-app-path.$$" ]; then
-      app_path="$(cat "/tmp/pangeavpn-app-path.$$" 2>/dev/null || true)"
-      rm -f "/tmp/pangeavpn-app-path.$$"
-    fi
+    done <<MDFIND
+${mdfind_output}
+MDFIND
   fi
 fi
 
@@ -48,9 +47,8 @@ daemon_src="${app_path}/Contents/Resources/daemon/daemon"
 
 /bin/mkdir -p "${SYSTEM_SUPPORT_DIR}"
 
-# Strip quarantine from source daemon before copying — downloaded .pkg files
-# propagate the com.apple.quarantine xattr to all extracted files and macOS
-# Gatekeeper will kill quarantined unsigned binaries on Apple Silicon.
+# A downloaded .pkg propagates com.apple.quarantine to everything it extracts,
+# and Gatekeeper kills quarantined unsigned binaries on Apple Silicon.
 /usr/bin/xattr -dr com.apple.quarantine "${app_path}" >/dev/null 2>&1 || true
 
 # WireGuard and Cloak run in-process inside the daemon, so only the daemon
@@ -59,15 +57,12 @@ daemon_src="${app_path}/Contents/Resources/daemon/daemon"
 /usr/sbin/chown root:wheel "${SYSTEM_SUPPORT_DIR}"
 /bin/chmod 755 "${SYSTEM_SUPPORT_DIR}"
 
-# Strip quarantine from installed daemon and re-sign with ad-hoc signature.
-# Apple Silicon requires all executables to carry a valid signature — copying
-# can invalidate the original ad-hoc signature so we force re-sign here.
+# Copying can invalidate the ad-hoc signature Apple Silicon requires, so the
+# installed daemon is stripped and re-signed here.
 /usr/bin/xattr -dr com.apple.quarantine "${SYSTEM_SUPPORT_DIR}" >/dev/null 2>&1 || true
 /usr/bin/codesign --force --sign - "${SYSTEM_DAEMON_PATH}" >/dev/null 2>&1 || true
 
-# Do NOT start the daemon here. The install-mac.sh script handles token
-# creation, plist registration, and daemon startup. Starting the daemon
-# from postinstall without a token causes a crash loop (KeepAlive=true)
-# and overwrites signed binaries when install-mac.sh copies them again.
+# Do NOT start the daemon here — install-mac.sh owns token creation, plist
+# registration, and startup. Starting it tokenless crash-loops under KeepAlive.
 
 exit 0

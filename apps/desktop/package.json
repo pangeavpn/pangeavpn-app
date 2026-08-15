@@ -1,6 +1,6 @@
 {
   "name": "@pangeavpn/desktop",
-  "version": "0.5.4",
+  "version": "0.5.5",
   "private": true,
   "author": {
     "name": "Pangea",
@@ -127,6 +127,8 @@
     },
     "mac": {
       "icon": "PangeaVPN.icns",
+      "identity": "-",
+      "hardenedRuntime": false,
       "target": [
         "pkg"
       ],

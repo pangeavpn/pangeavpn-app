@@ -318,6 +318,24 @@ function verifyPackagedMacAppBundle(appBundlePath, arch) {
       throw new Error(`Missing required file in ${arch} app bundle: ${filePath}`);
     }
   }
+
+  verifyAppBundleSignature(appBundlePath, arch);
+}
+
+function verifyAppBundleSignature(appBundlePath, arch) {
+  // Apple Silicon kills unsigned executables at exec, so an app bundle whose
+  // seal was broken by fuse flipping never opens for the user.
+  const result = spawnSync("codesign", ["--verify", "--deep", "--strict", appBundlePath], {
+    encoding: "utf8",
+    shell: false
+  });
+  if (result.status !== 0) {
+    const detail = (result.stderr || result.stdout || "").trim();
+    throw new Error(
+      `Code signature invalid for the ${arch} app bundle: ${appBundlePath}\n` +
+      `${detail}\nApple Silicon refuses to launch it. Ensure mac.identity is set so electron-builder signs after flipping fuses.`
+    );
+  }
 }
 
 async function copyArtifact(sourcePath, destinationPath, type, arch, goArch = null) {
