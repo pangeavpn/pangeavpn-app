@@ -598,7 +598,11 @@ serverPickerOverlayCloseBtn.addEventListener("click", closeServerPicker);
 // Keep the server list current whenever the app comes back into view — shown
 // from the tray, restored from minimize, or otherwise unhidden.
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible") void refreshServersWithRetry();
+  if (document.visibilityState !== "visible") return;
+  // Hidden drops to the idle cadence, so sample once straight away rather than
+  // showing whatever was true up to two seconds before the window reappeared.
+  pollNow();
+  void refreshServersWithRetry();
 });
 
 document.addEventListener("keydown", (e) => {
@@ -1780,24 +1784,6 @@ async function init(): Promise<void> {
   // Check for updates regardless of auth state.
   checkForUpdate();
 
-  // Status is what the hero reads off, so it polls fast enough that a state
-  // change looks instant. The daemon is on loopback; the cost is a local call.
-  let pollInterval = 250;
-  const pollMin = 250;
-  const pollMax = 10000;
-
-  function schedulePoll(): void {
-    setTimeout(async () => {
-      try {
-        await refreshStatus();
-        pollInterval = pollMin; // reset on success
-      } catch {
-        pollInterval = Math.min(pollInterval * 2, pollMax); // backoff on error
-      }
-      notifyStatusTick();
-      schedulePoll();
-    }, pollInterval);
-  }
   schedulePoll();
 
   // Logs stay slow deliberately: each pass re-renders the whole pane, and no
@@ -2253,6 +2239,73 @@ function setHeadline(state: StatusResponse["state"]): void {
 
 const MIN_CONNECTING_MS = 600;
 
+// 4Hz while a transition is in flight, so a state change lands on screen
+// almost immediately; 2s once things settle, so an idle app is not spinning.
+const POLL_FAST_MS = 250;
+const POLL_IDLE_MS = 2000;
+const POLL_MAX_MS = 10000;
+
+// The daemon reports CONNECTED before the last of the teardown/route work is
+// done, so the fast cadence outlives the transition that triggered it.
+const POLL_FAST_TRAILING_MS = 3000;
+
+let lastTransitionAt = 0;
+let pollTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** Is the connection moving, either really or as far as the user can see? */
+function inTransition(): boolean {
+  return (
+    connectingVisual ||
+    disconnectingVisual ||
+    connectInFlight ||
+    serverWorking ||
+    currentDaemonState === "CONNECTING" ||
+    currentDaemonState === "DISCONNECTING"
+  );
+}
+
+function nextPollDelay(): number {
+  // Hidden means the tray is the only thing on screen, and main polls that
+  // itself — visibilitychange forces a fresh sample the moment we come back.
+  if (document.hidden) return POLL_IDLE_MS;
+  if (inTransition()) {
+    lastTransitionAt = Date.now();
+    return POLL_FAST_MS;
+  }
+  return Date.now() - lastTransitionAt < POLL_FAST_TRAILING_MS ? POLL_FAST_MS : POLL_IDLE_MS;
+}
+
+// Fast only while something is actually moving. A settled tunnel changes state
+// when the user asks it to, so 4Hz idle polling buys nothing.
+let pollBackoff = 0;
+
+function schedulePoll(): void {
+  const delay = pollBackoff > 0 ? pollBackoff : nextPollDelay();
+  pollTimer = setTimeout(async () => {
+    pollTimer = null;
+    // refreshStatus swallows its own errors and reports null; treat that as the
+    // failure the backoff was always meant to respond to.
+    const status = await refreshStatus();
+    pollBackoff = status ? 0 : Math.min(Math.max(pollBackoff * 2, POLL_IDLE_MS), POLL_MAX_MS);
+    notifyStatusTick();
+    schedulePoll();
+  }, delay);
+}
+
+/** Collapses the wait when something has just changed, so a click is not left
+ *  sitting behind an idle-cadence timer that was scheduled before it. */
+function pollNow(): void {
+  lastTransitionAt = Date.now();
+  if (pollTimer === null) return;
+  clearTimeout(pollTimer);
+  pollTimer = null;
+  void (async () => {
+    await refreshStatus();
+    notifyStatusTick();
+    schedulePoll();
+  })();
+}
+
 // How long the UI will present a disconnect the daemon has not confirmed. Past
 // this the truth wins, however unwelcome — a lie that never expires is worse.
 const OPTIMISTIC_DISCONNECT_MS = 12000;
@@ -2265,6 +2318,7 @@ let disconnectRequestedAt = 0;
 function beginOptimisticDisconnect(): void {
   disconnectingVisual = true;
   disconnectRequestedAt = Date.now();
+  pollNow();
   connectingVisual = false;
   connectedSince = null;
   renderDisconnectedState();
@@ -2305,6 +2359,7 @@ function showConnectingState(): number {
   disconnectingVisual = false;
   connectingVisual = true;
   renderConnectingState();
+  pollNow();
   return Date.now();
 }
 

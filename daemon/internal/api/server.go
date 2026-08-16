@@ -137,8 +137,8 @@ func serviceErrorResponse(err error) okResponse {
 }
 
 func NewHandler(token string, service *Service) http.Handler {
-	// The 4Hz status poll alone is ~4/s; this leaves room for it plus a connect
-	// burst, and still stops a runaway client from spinning the daemon.
+	// Sized for the peak, not the average: the client polls status at 4Hz while
+	// connecting, on top of the config and kill-switch calls a connect makes.
 	limiter := newRateLimiter(2000, 33.3) // 2000 burst, refill ~33/s (~2000/min)
 	mux := http.NewServeMux()
 
