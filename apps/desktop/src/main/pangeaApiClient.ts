@@ -22,6 +22,11 @@ import {
   restoreFrontedEndpoints
 } from "../shared/frontedEndpoints";
 import { restoreCachedServers } from "../shared/cachedServers";
+import {
+  cachedEntitlement,
+  restoreCachedSubscription,
+  type CachedSubscription
+} from "../shared/cachedSubscription";
 import { encryptRequest, decryptResponse, type EncryptedResponse } from "./secureChannel";
 import { sanitizeLog } from "./logSanitize";
 import { fetchViaConnectProxy } from "./hubTransport";
@@ -61,6 +66,29 @@ export class ConnectCancelledError extends Error {
     super("Connect cancelled");
     this.name = "ConnectCancelledError";
   }
+}
+
+/** Every path to the hub failed. Thrown fast during the cooldown that follows,
+ *  instead of making each caller re-run the whole probe cascade. */
+export class HubUnreachableError extends Error {
+  constructor(retryInMs: number) {
+    super(`Hub unreachable; retrying in ${Math.ceil(retryInMs / 1000)}s`);
+    this.name = "HubUnreachableError";
+  }
+}
+
+// How long a fully failed cascade is believed before it is attempted again.
+const HUB_RETRY_COOLDOWN_MS = 20000;
+
+/** Settles as soon as `signal` aborts, however long `work` still has to run. */
+function raceAbort<T>(work: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return work;
+  if (signal.aborted) return Promise.reject(new ConnectCancelledError());
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = (): void => reject(new ConnectCancelledError());
+    signal.addEventListener("abort", onAbort, { once: true });
+    work.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort));
+  });
 }
 
 const HUB_HOSTNAME = "api.pangeavpn.org";
@@ -484,6 +512,16 @@ export class PangeaApiClient {
   // not the path in use.
   private frontedHost: string | null = null;
 
+  // Stands between an unreachable hub and a paying user being told they have
+  // no subscription. Restored from settings.json at startup.
+  private cachedSubscription: CachedSubscription | null = null;
+  private onSubscription: ((cached: CachedSubscription | null) => void) | null = null;
+
+  // One shared cascade, so concurrent callers don't each pay ensureHub's full
+  // probe sequence against a hub that is down.
+  private hubResolution: Promise<void> | null = null;
+  private hubResolutionFailedAtMs = 0;
+
   constructor() {
     this.timeoutMs = 15000;
   }
@@ -637,6 +675,9 @@ export class PangeaApiClient {
     this.dohResolvedIp = null;
     this.frontedHost = null;
     this.hubReady = false;
+    // Every caller of this is a deliberate change of plan, so the cooldown from
+    // the last failure must not hold the new one back.
+    this.hubResolutionFailedAtMs = 0;
     // Drop the proxy too: the next ensureHub re-decides whether to use it, and
     // leaving it running would keep a listener open for a path we abandoned.
     if (this.ssProxyPort !== null) {
@@ -741,7 +782,32 @@ export class PangeaApiClient {
     if (this.hubReady) {
       return;
     }
+    // Join the cascade already running instead of starting a second one.
+    if (this.hubResolution) {
+      return this.hubResolution;
+    }
+    const sinceFailure = Date.now() - this.hubResolutionFailedAtMs;
+    if (this.hubResolutionFailedAtMs > 0 && sinceFailure < HUB_RETRY_COOLDOWN_MS) {
+      throw new HubUnreachableError(HUB_RETRY_COOLDOWN_MS - sinceFailure);
+    }
 
+    this.hubResolution = this.resolveHubPath()
+      .then((confirmed) => {
+        // An unconfirmed path still gets this call's real request, but it opens
+        // the cooldown so the next caller fails fast instead of hanging again.
+        this.hubResolutionFailedAtMs = confirmed ? 0 : Date.now();
+      })
+      .catch((err: unknown) => {
+        this.hubResolutionFailedAtMs = Date.now();
+        throw err;
+      })
+      .finally(() => {
+        this.hubResolution = null;
+      });
+    return this.hubResolution;
+  }
+
+  private async resolveHubPath(): Promise<boolean> {
     console.log(`[HubURL] Finding working API connection...`);
 
     // 1. Last known good IP — no lookup, so it works under a lockdown lock.
@@ -751,7 +817,7 @@ export class PangeaApiClient {
       if (await this.trySecureProbeCurrentPath()) {
         console.log(`[HubURL] Cached hub IP works`);
         this.hubReady = true;
-        return;
+        return true;
       }
       console.log(`[HubURL] Cached hub IP failed`);
       this.dohResolvedIp = null;
@@ -767,7 +833,7 @@ export class PangeaApiClient {
           console.log(`[HubURL] DoH secure probe works`);
           this.rememberHubIp(resolvedIp);
           this.hubReady = true;
-          return;
+          return true;
         }
         console.log(`[HubURL] DoH secure probe failed`);
         this.dohResolvedIp = null;
@@ -780,7 +846,7 @@ export class PangeaApiClient {
       if (await this.tryShadowsocksHubPath()) {
         console.log(`[HubURL] Shadowsocks hub path works`);
         this.hubReady = true;
-        return;
+        return true;
       }
     }
 
@@ -790,7 +856,7 @@ export class PangeaApiClient {
       if (await this.tryFrontedPath()) {
         console.log(`[HubURL] Fronted relay works`);
         this.hubReady = true;
-        return;
+        return true;
       }
     }
 
@@ -802,7 +868,7 @@ export class PangeaApiClient {
       if (await this.trySecureProbeCurrentPath()) {
         console.log(`[HubURL] Direct domain secure probe works`);
         this.hubReady = true;
-        return;
+        return true;
       }
       console.log(`[HubURL] Direct domain failed`);
     }
@@ -816,8 +882,10 @@ export class PangeaApiClient {
       );
     }
 
+    // The probe is stricter than a real request (shorter timeout), so give the
+    // domain one genuine attempt — but do not record the path as confirmed.
     console.log(`[HubURL] All strategies failed, falling back to direct domain`);
-    this.hubReady = true;
+    return false;
   }
 
   /**
@@ -901,9 +969,14 @@ export class PangeaApiClient {
       headers?: Record<string, string>;
       body?: string;
       signal?: AbortSignal;
+      /** The caller's own cancel, undiluted by the request timeout composed
+       *  into `signal` — a slow cascade is not a cancelled one. */
+      cancelSignal?: AbortSignal;
     }
   ): Promise<Response> {
-    await this.ensureHub();
+    // Race, don't just await: the cascade is shared with other callers, so this
+    // one abandons it rather than cancelling it out from under them.
+    await raceAbort(this.ensureHub(), options.cancelSignal);
 
     const method = options.method ?? "GET";
     const headers = options.headers ?? {};
@@ -1167,14 +1240,54 @@ export class PangeaApiClient {
     await this.hubRequest<unknown>("POST", "/api/device/remove", { deviceId });
   }
 
+  /** Drops the post-failure cooldown. Pressing Connect is the user asking for
+   *  the cascade to be tried again, not to be told it failed a minute ago. */
+  retryHubNow(): void {
+    this.hubResolutionFailedAtMs = 0;
+  }
+
+  /** Restores the cached subscription at startup. */
+  setCachedSubscription(stored: unknown): void {
+    this.cachedSubscription = restoreCachedSubscription(stored);
+  }
+
+  getCachedSubscription(): CachedSubscription | null {
+    return this.cachedSubscription;
+  }
+
+  /** Called when a fresh answer arrives, so the caller can persist it. */
+  onSubscriptionResolved(fn: (cached: CachedSubscription | null) => void): void {
+    this.onSubscription = fn;
+  }
+
+  /** Falls back to the last answer the hub gave: unreachable must not read as
+   *  "no subscription" to a user who is paying for one. */
   async getSubscription(): Promise<SubscriptionInfo | null> {
     try {
       const data = await this.hubRequest<{ subscription: SubscriptionInfo | null }>("GET", "/api/client/subscription");
-      return data.subscription ?? null;
+      const subscription = data.subscription ?? null;
+      this.rememberSubscription(subscription);
+      return subscription;
     } catch (err) {
       console.warn("[getSubscription]", sanitizeLog(err));
-      return null;
+      const cached = this.cachedSubscription;
+      if (!cached) return null;
+      // Serve the cache with entitlement re-derived from the stored expiry, so
+      // a plan that has since lapsed does not read as still valid.
+      return { ...cached.subscription, entitled: cachedEntitlement(cached, Date.now()) };
     }
+  }
+
+  /** A null answer is cached too: the hub said this account has no plan. */
+  private rememberSubscription(subscription: SubscriptionInfo | null): void {
+    if (!subscription) {
+      this.cachedSubscription = null;
+      this.onSubscription?.(null);
+      return;
+    }
+    const cached: CachedSubscription = { subscription, cachedAt: Date.now() };
+    this.cachedSubscription = cached;
+    this.onSubscription?.(cached);
   }
 
 
@@ -1380,6 +1493,10 @@ export class PangeaApiClient {
     // credentials deliberately survive: they are how a signed-out client
     // reaches the hub to sign in again.
     this.onServers?.([]);
+    // Account-scoped like the node list: the next user of this machine must not
+    // inherit the last one's renewal date.
+    this.cachedSubscription = null;
+    this.onSubscription?.(null);
     this.resetHubResolution();
     this.identityPubkey = null;
   }
@@ -1416,7 +1533,8 @@ export class PangeaApiClient {
         method,
         headers,
         body: body ? JSON.stringify(body) : undefined,
-        signal: controller.signal
+        signal: controller.signal,
+        ...(externalSignal ? { cancelSignal: externalSignal } : {})
       });
 
       if (!response.ok) {
