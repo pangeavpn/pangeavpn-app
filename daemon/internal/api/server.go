@@ -62,7 +62,7 @@ func (rl *rateLimiter) allow() bool {
 	return true
 }
 
-// rateLimitMiddleware wraps a handler with rate limiting (~500 req/min).
+// rateLimitMiddleware wraps a handler with rate limiting (~2000 req/min).
 func rateLimitMiddleware(limiter *rateLimiter, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !limiter.allow() {
@@ -137,7 +137,9 @@ func serviceErrorResponse(err error) okResponse {
 }
 
 func NewHandler(token string, service *Service) http.Handler {
-	limiter := newRateLimiter(500, 8.33) // 500 burst, refill ~8.33/s (~500/min)
+	// Sized for the peak, not the average: the client polls status at 4Hz while
+	// connecting, on top of the config and kill-switch calls a connect makes.
+	limiter := newRateLimiter(2000, 33.3) // 2000 burst, refill ~33/s (~2000/min)
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/ping", func(w http.ResponseWriter, r *http.Request) {

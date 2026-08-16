@@ -14,6 +14,7 @@ import {
   SubscriptionExpiredError
 } from "./pangeaApiClient";
 import type { HubShadowsocksCreds } from "../shared/hubShadowsocksCreds";
+import type { CachedSubscription } from "../shared/cachedSubscription";
 import { beginAttempt, cancelAttempt, endAttempt, isCancelled } from "./connectAttempt";
 import { setupAutoUpdater, notifyConnectionStateChange } from "./autoUpdater";
 import { setLoginItemEnabled, isLoginItemEnabled, isHiddenLaunchArg } from "./loginItem";
@@ -692,6 +693,8 @@ async function provisionAcrossServers(serverIds: readonly string[], mode: "conne
     return { ok: false, error: "connect-in-progress" };
   }
   connectionAttemptRunning = true;
+  // A user-driven attempt outranks the cooldown from the last failed cascade.
+  pangeaApiClient.retryHubNow();
   const attempt = beginAttempt();
   const previousManagedProfileId = managedProfileId;
   let initialProfiles: Profile[] | null = null;
@@ -819,13 +822,10 @@ async function cancelConnectAttempt(): Promise<void> {
   const cancelled = cancelAttempt();
   if (!cancelled) return;
 
-  // The attempt may already have handed the daemon a connect. Ask it to stand
-  // down; the attempt's own guards handle the rest.
+  // Straight to disconnect, with no status round-trip first: the daemon
+  // interrupts its own in-flight connect, and a redundant one is a no-op there.
   try {
-    const status = await daemonClient.getStatus();
-    if (status.state !== "DISCONNECTED") {
-      await daemonClient.disconnect({ keepKillSwitch: lockdownEnabled });
-    }
+    await daemonClient.disconnect({ keepKillSwitch: lockdownEnabled });
   } catch (err) {
     console.warn("cancel: daemon teardown failed", sanitizeLog(err));
   }
@@ -924,6 +924,31 @@ async function persistServers(servers: ServerInfo[]): Promise<void> {
   }
 }
 
+/** The hub's last word on the plan, so an unreachable hub does not present a
+ *  paying user with "no subscription". Cleared on logout, which passes null. */
+async function persistSubscription(cached: CachedSubscription | null): Promise<void> {
+  try {
+    const settings = await readSettingsFile();
+    if (cached === null) {
+      delete settings.subscription;
+    } else {
+      settings.subscription = cached;
+    }
+    await writeSettingsFile(settings);
+  } catch (err) {
+    console.warn("Failed to persist subscription:", err);
+  }
+}
+
+/** Refreshes the cached subscription in the background; never throws. Called at
+ *  every point the answer could have changed: launch, sign-in, connect. */
+function refreshSubscriptionCache(reason: string): void {
+  if (!pangeaApiClient.getLicenseKey()) return;
+  void pangeaApiClient.getSubscription().catch((err: unknown) => {
+    console.warn(`subscription refresh (${reason}) failed:`, sanitizeLog(err));
+  });
+}
+
 async function persistLastConnection(): Promise<void> {
   try {
     const settings = await readSettingsFile();
@@ -961,6 +986,9 @@ function registerIpcHandlers(): void {
     if (result.ok) {
       lastConnectedProfileId = profileId;
       void persistLastConnection();
+      // The tunnel is up, so the hub is reachable through it even when it was
+      // not before — the most reliable point to re-cache the renewal date.
+      refreshSubscriptionCache("connect");
     }
     void refreshTrayStatus();
     return result;
@@ -1059,6 +1087,9 @@ function registerIpcHandlers(): void {
       pangeaApiClient.identityPubkey = identityPublicKey;
 
       const authState = await auth.loginWithToken(data.vpnAccessToken, data.user);
+      // The hub is demonstrably reachable right now — the cheapest moment this
+      // device will ever get to learn its renewal date.
+      refreshSubscriptionCache("sign-in");
       return { ...authState, friendlyName: effectiveFriendlyName };
     } catch (err) {
       console.warn("token login failed:", sanitizeLog(err));
@@ -1556,6 +1587,7 @@ async function boot(): Promise<void> {
   pangeaApiClient.onHubShadowsocksResolved((creds) => void persistHubShadowsocks(creds));
   pangeaApiClient.onFrontedEndpointsResolved((endpoints) => void persistFrontedEndpoints(endpoints));
   pangeaApiClient.onServersResolved((servers) => void persistServers(servers));
+  pangeaApiClient.onSubscriptionResolved((cached) => void persistSubscription(cached));
 
   // The daemon owns the proxy; the client only decides when to ask for it.
   pangeaApiClient.setShadowsocksHubProxy({
@@ -1641,6 +1673,7 @@ async function boot(): Promise<void> {
     // between a blocked hub and a client with nowhere left to go.
     pangeaApiClient.setCachedFrontedEndpoints(settings.frontedEndpoints);
     pangeaApiClient.setCachedServers(settings.servers);
+    pangeaApiClient.setCachedSubscription(settings.subscription);
     if (typeof settings.lastServerId === "string") {
       lastServerId = settings.lastServerId;
     }
@@ -1678,6 +1711,9 @@ async function boot(): Promise<void> {
   if (identityKeys) {
     pangeaApiClient.identityPubkey = identityKeys.publicKey;
   }
+
+  // Off the startup path: the window must not wait on a hub that may be blocked.
+  refreshSubscriptionCache("launch");
 
   const appMenu = Menu.buildFromTemplate([
     {
