@@ -1780,15 +1780,16 @@ async function init(): Promise<void> {
   // Check for updates regardless of auth state.
   checkForUpdate();
 
-  let pollInterval = 2000;
-  const pollMin = 2000;
+  // Status is what the hero reads off, so it polls fast enough that a state
+  // change looks instant. The daemon is on loopback; the cost is a local call.
+  let pollInterval = 250;
+  const pollMin = 250;
   const pollMax = 10000;
 
   function schedulePoll(): void {
     setTimeout(async () => {
       try {
         await refreshStatus();
-        await refreshLogs();
         pollInterval = pollMin; // reset on success
       } catch {
         pollInterval = Math.min(pollInterval * 2, pollMax); // backoff on error
@@ -1798,6 +1799,24 @@ async function init(): Promise<void> {
     }, pollInterval);
   }
   schedulePoll();
+
+  // Logs stay slow deliberately: each pass re-renders the whole pane, and no
+  // one reads a log tail four times a second.
+  let logsInterval = 2000;
+  const logsMax = 15000;
+
+  function scheduleLogsPoll(): void {
+    setTimeout(async () => {
+      try {
+        await refreshLogs();
+        logsInterval = 2000;
+      } catch {
+        logsInterval = Math.min(logsInterval * 2, logsMax);
+      }
+      scheduleLogsPoll();
+    }, logsInterval);
+  }
+  scheduleLogsPoll();
 }
 
 const updateOverlay = document.getElementById("updateOverlay") as HTMLElement;
