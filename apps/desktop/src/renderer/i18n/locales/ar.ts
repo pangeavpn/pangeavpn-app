@@ -191,6 +191,15 @@ export const ar = {
   "settings.language.description": "اختر لغة عرض التطبيق.",
   "settings.language.system": "الافتراضي للنظام",
   "settings.language.restartHint": "أعد تشغيل PangeaVPN لتطبيق اللغة الجديدة.",
+
+  "settings.appearance.heading": "المظهر",
+  "settings.appearance.description": "اختر لون التمييز المستخدم في التطبيق.",
+  "settings.appearance.accent": "لون التمييز",
+  "settings.appearance.color.terra": "تيرا",
+  "settings.appearance.color.purple": "أرجواني",
+  "settings.appearance.color.ocean": "محيطي",
+  "settings.appearance.color.emerald": "زمردي",
+  "settings.appearance.color.rose": "وردي",
   "settings.update.heading": "تحديث البرنامج",
   "settings.update.check": "التحقق من التحديثات",
 

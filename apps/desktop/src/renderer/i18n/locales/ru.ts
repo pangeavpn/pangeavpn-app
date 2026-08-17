@@ -191,6 +191,15 @@ export const ru = {
   "settings.language.description": "Выберите язык интерфейса приложения.",
   "settings.language.system": "Как в системе",
   "settings.language.restartHint": "Перезапустите PangeaVPN, чтобы применить новый язык.",
+
+  "settings.appearance.heading": "Оформление",
+  "settings.appearance.description": "Выберите акцентный цвет приложения.",
+  "settings.appearance.accent": "Акцентный цвет",
+  "settings.appearance.color.terra": "Терракота",
+  "settings.appearance.color.purple": "Фиолетовый",
+  "settings.appearance.color.ocean": "Океан",
+  "settings.appearance.color.emerald": "Изумруд",
+  "settings.appearance.color.rose": "Роза",
   "settings.update.heading": "Обновление ПО",
   "settings.update.check": "Проверить обновления",
 

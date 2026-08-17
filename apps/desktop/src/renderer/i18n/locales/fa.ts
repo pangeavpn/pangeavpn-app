@@ -191,6 +191,15 @@ export const fa = {
   "settings.language.description": "زبان نمایش برنامه را انتخاب کنید.",
   "settings.language.system": "پیش‌فرض سیستم",
   "settings.language.restartHint": "برای اعمال زبان جدید، PangeaVPN را دوباره راه‌اندازی کنید.",
+
+  "settings.appearance.heading": "ظاهر",
+  "settings.appearance.description": "رنگ تأکیدی مورد استفاده در برنامه را انتخاب کنید.",
+  "settings.appearance.accent": "رنگ تأکیدی",
+  "settings.appearance.color.terra": "تِرا",
+  "settings.appearance.color.purple": "بنفش",
+  "settings.appearance.color.ocean": "اقیانوسی",
+  "settings.appearance.color.emerald": "زمردی",
+  "settings.appearance.color.rose": "رز",
   "settings.update.heading": "به‌روزرسانی نرم‌افزار",
   "settings.update.check": "بررسی به‌روزرسانی‌ها",
 

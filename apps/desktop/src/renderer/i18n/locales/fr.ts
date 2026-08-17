@@ -191,6 +191,15 @@ export const fr = {
   "settings.language.description": "Choisissez la langue d'affichage de l'application.",
   "settings.language.system": "Par défaut du système",
   "settings.language.restartHint": "Redémarrez PangeaVPN pour appliquer la nouvelle langue.",
+
+  "settings.appearance.heading": "Apparence",
+  "settings.appearance.description": "Choisissez la couleur d'accent de l'application.",
+  "settings.appearance.accent": "Couleur d'accent",
+  "settings.appearance.color.terra": "Terracotta",
+  "settings.appearance.color.purple": "Violet",
+  "settings.appearance.color.ocean": "Océan",
+  "settings.appearance.color.emerald": "Émeraude",
+  "settings.appearance.color.rose": "Rose",
   "settings.update.heading": "Mise à jour du logiciel",
   "settings.update.check": "Rechercher des mises à jour",
 
