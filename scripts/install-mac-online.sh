@@ -62,6 +62,61 @@ SUDO_KEEPALIVE_PID=""
 TMPDIR_PANGEA=""
 MOUNT_POINT=""
 
+HTTP_STATUS=""
+
+# Everything below downloads from hosts that rate limit by source IP, and our
+# users share exit addresses — so a 429 is an expected condition, not a failure.
+RETRYABLE_STATUSES=" 000 408 425 429 500 502 503 504 "
+MAX_ATTEMPTS=4
+MAX_BACKOFF_SECONDS=60
+
+# Sets HTTP_STATUS so callers can tell a throttle apart from a block. Honours
+# Retry-After when the server sends one, otherwise backs off quadratically.
+http_fetch() {
+    local url="$1" dest="$2" mode="${3:-quiet}" max_attempts="${4:-$MAX_ATTEMPTS}"
+    local attempt=1 header_file code wait_for
+
+    # Falls back beside the destination: an unreadable header file would leave
+    # awk below reading stdin, which under `curl | bash` is the script itself.
+    header_file="$(mktemp -t pangea-hdr)" || header_file="${dest}.headers"
+
+    while :; do
+        # No -f: a 4xx/5xx must reach the status check below rather than being
+        # flattened into curl's exit code, which cannot tell 429 from 404.
+        if [[ "$mode" == "progress" ]]; then
+            code="$(curl -L --progress-bar -D "$header_file" -w '%{http_code}' -o "$dest" "$url")" || code="000"
+        else
+            code="$(curl -sSL --max-time 25 -D "$header_file" -w '%{http_code}' -o "$dest" "$url" 2>/dev/null)" || code="000"
+        fi
+        HTTP_STATUS="$code"
+
+        if [[ "$code" == 2* ]]; then
+            rm -f "$header_file"
+            return 0
+        fi
+        if [[ "$RETRYABLE_STATUSES" != *" $code "* || "$attempt" -ge "$max_attempts" ]]; then
+            rm -f "$header_file"
+            return 1
+        fi
+
+        wait_for="$(awk 'tolower($1) == "retry-after:" { print $2 }' < "$header_file" 2>/dev/null | tr -d '\r' | tail -1 || true)"
+        if [[ ! "$wait_for" =~ ^[0-9]+$ ]]; then
+            wait_for=$(( attempt * attempt * 2 ))
+        fi
+        if [[ "$wait_for" -gt "$MAX_BACKOFF_SECONDS" ]]; then
+            wait_for="$MAX_BACKOFF_SECONDS"
+        fi
+
+        if [[ "$code" == "429" ]]; then
+            warn "The download server is busy (too many installs from your network). Waiting ${wait_for}s, then trying again."
+        else
+            warn "Download server returned ${code}. Retrying in ${wait_for}s."
+        fi
+        sleep "$wait_for"
+        attempt=$(( attempt + 1 ))
+    done
+}
+
 cleanup() {
     if [[ -n "$SUDO_KEEPALIVE_PID" ]]; then
         kill "$SUDO_KEEPALIVE_PID" 2>/dev/null || true
@@ -116,13 +171,18 @@ main() {
     # Prefer the hub (censorship-resistant); fall back to GitHub if unreachable.
     log "Looking up the latest release..."
 
+    TMPDIR_PANGEA="$(mktemp -d -t pangeavpn-install)"
+    RELEASE_FILE="$TMPDIR_PANGEA/release.json"
     RELEASE_JSON=""
-    if RELEASE_JSON="$(curl -fsSL --max-time 8 "$HUB_LATEST_URL" 2>/dev/null)" && [[ -n "$RELEASE_JSON" ]]; then
-        : # got it from the hub
-    elif RELEASE_JSON="$(curl -fsSL --max-time 12 "$GITHUB_LATEST_URL" 2>/dev/null)"; then
-        : # GitHub fallback
+
+    if http_fetch "$HUB_LATEST_URL" "$RELEASE_FILE" && [[ -s "$RELEASE_FILE" ]]; then
+        RELEASE_JSON="$(cat "$RELEASE_FILE")"
+    elif http_fetch "$GITHUB_LATEST_URL" "$RELEASE_FILE" && [[ -s "$RELEASE_FILE" ]]; then
+        RELEASE_JSON="$(cat "$RELEASE_FILE")"
+    elif [[ "$HTTP_STATUS" == "429" || "$HTTP_STATUS" == "403" ]]; then
+        fail "The download server is refusing new requests from your network right now (HTTP ${HTTP_STATUS}) — usually because many people share your connection. Wait a few minutes and run this again, or download directly from ${DOWNLOAD_URL}"
     else
-        fail "Could not reach the download server. If the rest of your internet works, your network may be blocking it — try a different network, or get the installer from ${DOWNLOAD_URL}"
+        fail "Could not reach the download server (HTTP ${HTTP_STATUS}). If the rest of your internet works, your network may be blocking it — try a different network, or get the installer from ${DOWNLOAD_URL}"
     fi
 
     # Accepts the hub's "url" and GitHub's "browser_download_url" asset shapes.
@@ -147,18 +207,25 @@ main() {
     log "Downloading: $(basename "$DMG_URL")"
 
     # ── Download to a temp dir we own ───────────────────────────────────────
-    TMPDIR_PANGEA="$(mktemp -d -t pangeavpn-install)"
     DMG_PATH="$TMPDIR_PANGEA/PangeaVPN.dmg"
 
-    if ! curl -fL --progress-bar -o "$DMG_PATH" "$DMG_URL"; then
-        fail "Download failed. Check your connection and try again, or get the installer from ${DOWNLOAD_URL}"
+    if ! http_fetch "$DMG_URL" "$DMG_PATH" progress; then
+        if [[ "$HTTP_STATUS" == "429" ]]; then
+            fail "The download server is refusing new requests from your network right now — usually because many people share your connection. Wait a few minutes and run this again, or download directly from ${DOWNLOAD_URL}"
+        fi
+        fail "Download failed (HTTP ${HTTP_STATUS}). Check your connection and try again, or get the installer from ${DOWNLOAD_URL}"
     fi
 
     # ── Verify the download ─────────────────────────────────────────────────
     # Catches a truncated or altered file before it becomes a confusing failure.
     DMG_NAME="$(basename "$DMG_URL")"
     SUMS_URL="$(dirname "$DMG_URL")/SHA256SUMS.txt"
-    EXPECTED_SHA="$(curl -fsSL --max-time 15 "$SUMS_URL" 2>/dev/null | awk -v f="$DMG_NAME" '$2 == f { print $1; exit }')" || EXPECTED_SHA=""
+    SUMS_PATH="$TMPDIR_PANGEA/SHA256SUMS.txt"
+
+    EXPECTED_SHA=""
+    if http_fetch "$SUMS_URL" "$SUMS_PATH"; then
+        EXPECTED_SHA="$(awk -v f="$DMG_NAME" '$2 == f { print $1; exit }' "$SUMS_PATH")"
+    fi
 
     if [[ -n "$EXPECTED_SHA" ]]; then
         ACTUAL_SHA="$(shasum -a 256 "$DMG_PATH" | awk '{ print $1 }')"
