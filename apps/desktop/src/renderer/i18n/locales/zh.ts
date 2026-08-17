@@ -191,6 +191,15 @@ export const zh = {
   "settings.language.description": "选择应用的显示语言。",
   "settings.language.system": "系统默认",
   "settings.language.restartHint": "重新启动 PangeaVPN 以应用新语言。",
+
+  "settings.appearance.heading": "外观",
+  "settings.appearance.description": "选择应用中使用的强调色。",
+  "settings.appearance.accent": "强调色",
+  "settings.appearance.color.terra": "陶土色",
+  "settings.appearance.color.purple": "紫色",
+  "settings.appearance.color.ocean": "海洋蓝",
+  "settings.appearance.color.emerald": "翡翠绿",
+  "settings.appearance.color.rose": "玫瑰红",
   "settings.update.heading": "软件更新",
   "settings.update.check": "检查更新",
 

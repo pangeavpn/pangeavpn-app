@@ -275,6 +275,13 @@
               <span id="setLanguageValue" class="set-value"></span>
             </span>
           </button>
+          <button class="settings-nav-item" type="button" data-settings-target="secAppearance" aria-controls="secAppearance">
+            <span class="set-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a9 9 0 1 0 0 18h1.5a2 2 0 0 0 1.4-3.4 2 2 0 0 1 1.4-3.4H18a3 3 0 0 0 3-3 9 9 0 0 0-9-8.2Z"/><circle cx="8" cy="10" r="1.1"/><circle cx="12" cy="7.5" r="1.1"/><circle cx="16" cy="10" r="1.1"/></svg></span>
+            <span class="settings-nav-copy">
+              <span class="set-title" data-i18n="settings.appearance.heading">Appearance</span>
+              <span id="setAppearanceValue" class="set-value"></span>
+            </span>
+          </button>
           <button class="settings-nav-item" type="button" data-settings-target="secUpdate" aria-controls="secUpdate">
             <span class="set-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v10"/><path d="m8 11 4 4 4-4"/><path d="M5 19h14"/></svg></span>
             <span class="settings-nav-copy">
@@ -433,6 +440,12 @@
             <span class="select-chevron"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></span>
           </div>
           <p id="languageRestartHint" class="settings-description language-restart-hint" data-i18n="settings.language.restartHint" hidden>Restart PangeaVPN to apply the new language.</p>
+        </section>
+
+        <section id="secAppearance" class="settings-section">
+          <h3 class="settings-section-title" data-i18n="settings.appearance.heading">Appearance</h3>
+          <p class="settings-description" data-i18n="settings.appearance.description">Pick the accent colour used across the app.</p>
+          <div id="accentSwatches" class="accent-swatches" role="group" aria-label="Accent colour" data-i18n-aria-label="settings.appearance.accent"></div>
         </section>
 
         <!-- Software update -->

@@ -191,6 +191,15 @@ export const en = {
   "settings.language.description": "Choose the app's display language.",
   "settings.language.system": "System default",
   "settings.language.restartHint": "Restart PangeaVPN to apply the new language.",
+
+  "settings.appearance.heading": "Appearance",
+  "settings.appearance.description": "Pick the accent colour used across the app.",
+  "settings.appearance.accent": "Accent colour",
+  "settings.appearance.color.terra": "Terra",
+  "settings.appearance.color.purple": "Purple",
+  "settings.appearance.color.ocean": "Ocean",
+  "settings.appearance.color.emerald": "Emerald",
+  "settings.appearance.color.rose": "Rose",
   "settings.update.heading": "Software Update",
   "settings.update.check": "Check for Updates",
 

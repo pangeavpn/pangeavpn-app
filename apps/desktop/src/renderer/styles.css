@@ -19,10 +19,13 @@
   --text-secondary: #aea299;
   --text-muted: #84847c;
 
-  /* accent — terra #C3562B with salmon hover #C38F77 */
-  --accent: #c3562b;
+  /* accent — terra by default; accentThemes.ts restyles these two at boot */
+  --accent-rgb: 195 86 43;
   --accent-hover: #a84a25;
-  --accent-glow: rgba(195, 86, 43, 0.15);
+
+  --accent: rgb(var(--accent-rgb));
+  --accent-glow: rgb(var(--accent-rgb) / 0.15);
+  --accent-selection: rgb(var(--accent-rgb) / 0.4);
   --accent-text: #fbf9f2;
 
   /* semantic */
@@ -79,10 +82,8 @@ body[data-theme="light"] {
   --text-secondary: #5f5b53;
   --text-muted: #6d685f;
 
-  /* accent — same terra #C3562B */
-  --accent: #c3562b;
-  --accent-hover: #a84a25;
-  --accent-glow: rgba(195, 86, 43, 0.10);
+  /* accent — same hue as dark, softer glow against the cream surfaces */
+  --accent-glow: rgb(var(--accent-rgb) / 0.10);
   --accent-text: #fbf9f2;
 
   --success-glow: rgba(16, 185, 129, 0.08);
@@ -119,7 +120,7 @@ body[data-theme="light"] {
 }
 
 ::selection {
-  background: rgba(195, 86, 43, 0.4);
+  background: var(--accent-selection);
   color: var(--text-primary);
 }
 
@@ -1623,19 +1624,22 @@ body[data-theme="light"] .region-flag {
   background: transparent;
 }
 
-/* Rounded chevrons, to match the thumb's radius. */
-.server-picker-overlay-list::-webkit-scrollbar-button:vertical:decrement {
+/* Rounded chevrons, to match the thumb's radius. Masked rather than drawn so
+   they follow the chosen accent. */
+.server-picker-overlay-list::-webkit-scrollbar-button:vertical:decrement,
+.server-picker-overlay-list::-webkit-scrollbar-button:vertical:increment {
   height: 15px;
-  background-repeat: no-repeat;
-  background-position: center;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='7' viewBox='0 0 10 7'%3E%3Cpath d='M1.6 5.4 5 2l3.4 3.4' fill='none' stroke='%23c3562b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-color: var(--accent);
+  mask-repeat: no-repeat;
+  mask-position: center;
+}
+
+.server-picker-overlay-list::-webkit-scrollbar-button:vertical:decrement {
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='7' viewBox='0 0 10 7'%3E%3Cpath d='M1.6 5.4 5 2l3.4 3.4' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 }
 
 .server-picker-overlay-list::-webkit-scrollbar-button:vertical:increment {
-  height: 15px;
-  background-repeat: no-repeat;
-  background-position: center;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='7' viewBox='0 0 10 7'%3E%3Cpath d='M1.6 1.6 5 5l3.4-3.4' fill='none' stroke='%23c3562b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='7' viewBox='0 0 10 7'%3E%3Cpath d='M1.6 1.6 5 5l3.4-3.4' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 }
 
 /* Chromium reserves four button slots; hide the two inner ones. */
@@ -1716,9 +1720,8 @@ body[data-theme="light"] .region-flag {
 
 /* ── Full-screen settings ─────────────────────────────────── */
 
-/* Two panes: a fixed nav rail on the inline-start edge, sections scrolling
-   beside it. The window is 640×440 and never resizes, so the layout is tuned
-   for a wide, short viewport rather than a phone-shaped column. */
+/* Tuned for the fixed 640×440 window — a wide, short viewport, never a
+   phone-shaped column. */
 .settings-overlay {
   position: fixed;
   inset: 0;
@@ -2022,7 +2025,7 @@ button:disabled {
 }
 
 .btn-primary,
-button:not(.btn-ghost):not(.btn-danger):not(.btn-icon):not(.secondary):not(.ghost):not(.collapse-toggle):not(.menu-item):not(.btn-quiet):not(.region-row):not(.region-more):not(.region-expand):not(.region-node):not(.settings-action):not(.settings-nav-item):not(.settings-picker):not(.option-row):not(.subpane-back) {
+button:not(.btn-ghost):not(.btn-danger):not(.btn-icon):not(.secondary):not(.ghost):not(.collapse-toggle):not(.menu-item):not(.btn-quiet):not(.region-row):not(.region-more):not(.region-expand):not(.region-node):not(.settings-action):not(.settings-nav-item):not(.settings-picker):not(.option-row):not(.subpane-back):not(.accent-swatch) {
   color: var(--accent-text);
   background: var(--accent);
   border-color: transparent;
@@ -2030,7 +2033,7 @@ button:not(.btn-ghost):not(.btn-danger):not(.btn-icon):not(.secondary):not(.ghos
 }
 
 .btn-primary:hover:not(:disabled),
-button:not(.btn-ghost):not(.btn-danger):not(.btn-icon):not(.secondary):not(.ghost):not(.collapse-toggle):not(.menu-item):not(.btn-quiet):not(.region-row):not(.region-more):not(.region-expand):not(.region-node):not(.settings-action):not(.settings-nav-item):not(.settings-picker):not(.option-row):not(.subpane-back):hover:not(:disabled) {
+button:not(.btn-ghost):not(.btn-danger):not(.btn-icon):not(.secondary):not(.ghost):not(.collapse-toggle):not(.menu-item):not(.btn-quiet):not(.region-row):not(.region-more):not(.region-expand):not(.region-node):not(.settings-action):not(.settings-nav-item):not(.settings-picker):not(.option-row):not(.subpane-back):not(.accent-swatch):hover:not(:disabled) {
   background: var(--accent-hover);
 }
 
@@ -2365,6 +2368,32 @@ button.ghost:hover:not(:disabled) {
 
 .settings-toggles {
   display: grid;
+}
+
+.accent-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.accent-swatch {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--swatch);
+  cursor: pointer;
+  transition: transform 120ms ease, box-shadow 120ms ease;
+}
+
+.accent-swatch:hover {
+  transform: scale(1.08);
+}
+
+/* The ring sits outside the dot so the colour itself stays unobscured. */
+.accent-swatch[aria-pressed="true"] {
+  box-shadow: 0 0 0 2px var(--bg-surface), 0 0 0 4px var(--swatch);
 }
 
 .toggle-label {

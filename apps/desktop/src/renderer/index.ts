@@ -24,6 +24,13 @@ import {
 } from "./regions.js";
 import { scheduleConnectionMessages } from "./connectionProgress.js";
 import {
+  ACCENT_NAMES,
+  ACCENT_THEMES,
+  resolveAccent,
+  swatchColor,
+  type AccentName
+} from "./accentThemes.js";
+import {
   daemonHealthAfterFailure,
   daemonHealthAfterSuccess,
   initialDaemonHealth
@@ -120,6 +127,8 @@ const setNetworkValue = document.getElementById("setNetworkValue") as HTMLSpanEl
 const setStartupValue = document.getElementById("setStartupValue") as HTMLSpanElement;
 const setLanguageValue = document.getElementById("setLanguageValue") as HTMLSpanElement;
 const checkUpdatesBtn = document.getElementById("checkUpdatesBtn") as HTMLButtonElement;
+const setAppearanceValue = document.getElementById("setAppearanceValue") as HTMLSpanElement;
+const accentSwatches = document.getElementById("accentSwatches") as HTMLElement | null;
 const settingsVersionEl = document.getElementById("settingsVersion") as HTMLSpanElement;
 const serverPickerBtn = document.getElementById("serverPickerBtn") as HTMLButtonElement;
 const serverPickerOverlay = document.getElementById("serverPickerOverlay") as HTMLElement;
@@ -128,6 +137,7 @@ const serverPickerOverlayCloseBtn = document.getElementById("serverPickerOverlay
 
 type ThemeMode = "light" | "dark";
 const THEME_STORAGE_KEY = "pangea-vpn-theme";
+const ACCENT_STORAGE_KEY = "pangea-vpn-accent";
 const COLLAPSE_STATE_KEY = "pangea-vpn-collapse-state";
 
 let currentDaemonState: StatusResponse["state"] = "DISCONNECTED";
@@ -214,6 +224,8 @@ function updateSettingsSummaries(): void {
 
   const language = languageSelect?.selectedOptions[0];
   setLanguageValue.textContent = language ? language.textContent : "";
+
+  setAppearanceValue.textContent = accentLabel(currentAccent);
 }
 
 function formatSubscriptionDate(iso: string | null): string {
@@ -289,9 +301,8 @@ async function refreshSubscription(): Promise<void> {
 
 // ── Overlay focus management ──────────────────────────────────
 
-// Overlays cover what's underneath but leave it in the tab order, so the layer
-// below goes `inert` on open; focus moves in, and is restored on close. Settings
-// opens over the sign-in screen too, so that gets the same treatment.
+// Overlays leave the layer below in the tab order, so it goes `inert` on open;
+// focus moves in and is restored on close.
 const overlayReturnFocus: Array<HTMLElement | null> = [];
 
 // A function, not a const: `shell` is declared further down the module.
@@ -497,8 +508,7 @@ function selectTransport(value: string): void {
 // ── Sub-panes ─────────────────────────────────────────────────
 
 // A section whose options are too wordy for the section list hands them a whole
-// pane instead. Each entry owns the pane, the row that opens it, and the rail
-// item that stays lit while it's up.
+// pane instead, owning the pane, its opening row, and the rail item.
 interface Subpane {
   pane: HTMLElement;
   trigger: HTMLButtonElement;
@@ -1669,10 +1679,12 @@ function initLanguagePicker(): void {
 
 async function init(): Promise<void> {
   initTheme();
+  initAccent();
   mapHost.replaceChildren(buildDriftMap());
   setInterval(renderSessionClock, 1000);
   await applyStoredLocale();
   initLanguagePicker();
+  initAccentPicker();
 
   if (!daemonApi) {
     loadingMessage.textContent = t("app.loading.cantStart");
@@ -2486,6 +2498,63 @@ function applyTheme(theme: ThemeMode): void {
   }
 }
 
+let currentAccent: AccentName = resolveAccent(null);
+
+function accentLabel(name: AccentName): string {
+  return t(`settings.appearance.color.${name}`);
+}
+
+function initAccent(): void {
+  let stored: string | null = null;
+  try {
+    stored = window.localStorage.getItem(ACCENT_STORAGE_KEY);
+  } catch {
+    stored = null;
+  }
+
+  applyAccent(resolveAccent(stored));
+}
+
+// Overrides the :root defaults in styles.css; the per-theme alphas there are
+// derived from --accent-rgb, so they follow along.
+function applyAccent(accent: AccentName): void {
+  currentAccent = accent;
+  const { rgb, hover } = ACCENT_THEMES[accent];
+  document.documentElement.style.setProperty("--accent-rgb", rgb);
+  document.documentElement.style.setProperty("--accent-hover", hover);
+
+  for (const btn of accentSwatches?.querySelectorAll<HTMLButtonElement>(".accent-swatch") ?? []) {
+    btn.setAttribute("aria-pressed", String(btn.dataset.accent === accent));
+  }
+  setAppearanceValue.textContent = accentLabel(accent);
+
+  try {
+    window.localStorage.setItem(ACCENT_STORAGE_KEY, accent);
+  } catch {
+    // Ignore storage failures in restricted environments.
+  }
+}
+
+function initAccentPicker(): void {
+  if (!accentSwatches) return;
+  accentSwatches.replaceChildren();
+
+  for (const name of ACCENT_NAMES) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "accent-swatch";
+    btn.dataset.accent = name;
+    btn.style.setProperty("--swatch", swatchColor(name));
+    btn.setAttribute("aria-pressed", String(name === currentAccent));
+    btn.setAttribute("aria-label", accentLabel(name));
+    btn.title = accentLabel(name);
+    btn.addEventListener("click", () => applyAccent(name));
+    accentSwatches.append(btn);
+  }
+
+  setAppearanceValue.textContent = accentLabel(currentAccent);
+}
+
 function setUiMessage(message: string): void {
   uiMessageEl.textContent = message;
 }
@@ -2623,9 +2692,8 @@ type TransportChoice =
   | "snowflake"
   | "wireguard";
 
-// Supported means the hub advertised that transport's block. cloak is always
-// present; "auto" matches every server and falls back across what it offers.
-// "wireguard" needs nothing advertised — every node listens for it.
+// Supported means the hub advertised that transport's block — except
+// "wireguard", which every node listens for regardless.
 function serverSupportsTransport(server: ServerInfo, transport: TransportChoice): boolean {
   switch (transport) {
     case "naive":

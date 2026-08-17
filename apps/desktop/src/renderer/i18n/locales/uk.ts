@@ -191,6 +191,15 @@ export const uk = {
   "settings.language.description": "Виберіть мову інтерфейсу застосунку.",
   "settings.language.system": "Як у системі",
   "settings.language.restartHint": "Перезапустіть PangeaVPN, щоб застосувати нову мову.",
+
+  "settings.appearance.heading": "Оформлення",
+  "settings.appearance.description": "Виберіть акцентний колір застосунку.",
+  "settings.appearance.accent": "Акцентний колір",
+  "settings.appearance.color.terra": "Теракота",
+  "settings.appearance.color.purple": "Фіолетовий",
+  "settings.appearance.color.ocean": "Океан",
+  "settings.appearance.color.emerald": "Смарагд",
+  "settings.appearance.color.rose": "Троянда",
   "settings.update.heading": "Оновлення програми",
   "settings.update.check": "Перевірити оновлення",
 
