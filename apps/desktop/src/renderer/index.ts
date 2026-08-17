@@ -138,6 +138,7 @@ const serverPickerOverlayCloseBtn = document.getElementById("serverPickerOverlay
 type ThemeMode = "light" | "dark";
 const THEME_STORAGE_KEY = "pangea-vpn-theme";
 const ACCENT_STORAGE_KEY = "pangea-vpn-accent";
+const TOAST_HOVER_DISMISS_MS = 200;
 const COLLAPSE_STATE_KEY = "pangea-vpn-collapse-state";
 
 let currentDaemonState: StatusResponse["state"] = "DISCONNECTED";
@@ -2584,10 +2585,26 @@ function showToast(message: string, durationMs = 5000, success = false): void {
   toast.textContent = message;
   container.appendChild(toast);
 
-  setTimeout(() => {
+  let hoverTimer = 0;
+  let dismissed = false;
+
+  const dismiss = (): void => {
+    if (dismissed) return;
+    dismissed = true;
+    window.clearTimeout(autoTimer);
+    window.clearTimeout(hoverTimer);
     toast.classList.add("toast-out");
     toast.addEventListener("animationend", () => toast.remove(), { once: true });
-  }, durationMs);
+  };
+
+  const autoTimer = window.setTimeout(dismiss, durationMs);
+
+  // Reaching the toast means it has been read, so a brief dwell clears it out
+  // of the way rather than waiting out the full duration.
+  toast.addEventListener("pointerenter", () => {
+    hoverTimer = window.setTimeout(dismiss, TOAST_HOVER_DISMISS_MS);
+  });
+  toast.addEventListener("pointerleave", () => window.clearTimeout(hoverTimer));
 }
 
 function updateBusyIndicator(): void {
