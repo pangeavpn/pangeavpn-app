@@ -545,15 +545,18 @@ body[data-theme="light"] .login-brand {
   padding: 16px;
 }
 
+/* Never intercepts the pointer — the UI underneath stays clickable, and the
+   hover dismissal hit-tests the pointer position instead. */
 .toast {
-  pointer-events: auto;
+  pointer-events: none;
   padding: 10px 20px;
   border-radius: 999px;
   font-size: 0.85rem;
   font-weight: 500;
   color: #fff;
-  background: #dc2626;
-  box-shadow: 0 4px 24px rgba(220, 38, 38, 0.35);
+  background: rgba(220, 38, 38, 0.82);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 4px 24px rgba(220, 38, 38, 0.28);
   transform: translateY(-20px);
   opacity: 0;
   animation: toast-in 0.35s ease forwards;
@@ -723,8 +726,8 @@ body[data-theme="light"] .login-brand {
 }
 
 .toast.toast-success {
-  background: #16a34a;
-  box-shadow: 0 4px 24px rgba(22, 163, 74, 0.35);
+  background: rgba(22, 163, 74, 0.82);
+  box-shadow: 0 4px 24px rgba(22, 163, 74, 0.28);
 }
 
 /* ── Devices modal (from menu, logged-in) ───────────────────── */

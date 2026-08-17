@@ -2593,18 +2593,32 @@ function showToast(message: string, durationMs = 5000, success = false): void {
     dismissed = true;
     window.clearTimeout(autoTimer);
     window.clearTimeout(hoverTimer);
+    document.removeEventListener("pointermove", trackPointer);
     toast.classList.add("toast-out");
     toast.addEventListener("animationend", () => toast.remove(), { once: true });
   };
 
-  const autoTimer = window.setTimeout(dismiss, durationMs);
+  // The toast ignores the pointer so the UI underneath stays clickable, which
+  // rules out pointerenter — hit-test the pointer against its box instead.
+  const trackPointer = (event: PointerEvent): void => {
+    const box = toast.getBoundingClientRect();
+    const over =
+      event.clientX >= box.left &&
+      event.clientX <= box.right &&
+      event.clientY >= box.top &&
+      event.clientY <= box.bottom;
 
-  // Reaching the toast means it has been read, so a brief dwell clears it out
-  // of the way rather than waiting out the full duration.
-  toast.addEventListener("pointerenter", () => {
-    hoverTimer = window.setTimeout(dismiss, TOAST_HOVER_DISMISS_MS);
-  });
-  toast.addEventListener("pointerleave", () => window.clearTimeout(hoverTimer));
+    if (over) {
+      if (!hoverTimer) hoverTimer = window.setTimeout(dismiss, TOAST_HOVER_DISMISS_MS);
+      return;
+    }
+
+    window.clearTimeout(hoverTimer);
+    hoverTimer = 0;
+  };
+
+  const autoTimer = window.setTimeout(dismiss, durationMs);
+  document.addEventListener("pointermove", trackPointer);
 }
 
 function updateBusyIndicator(): void {
