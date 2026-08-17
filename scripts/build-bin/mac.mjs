@@ -3,6 +3,7 @@ import fsSync from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { spawnSync } from "node:child_process";
+import { setTimeout as delay } from "node:timers/promises";
 import { npmCmd, relPath, rootDir, runOrThrow, selectArchTargets, sha256File, writeJson } from "./shared.mjs";
 import { resolveNaiveCgoConfig } from "../lib/naive-cgo.mjs";
 
@@ -23,6 +24,8 @@ const installerDmgMinSizeBytes = 256 * mebibyte;
 const installerDmgPaddingBytes = 128 * mebibyte;
 const installerDmgAlignmentBytes = 32 * mebibyte;
 const installerDmgGrowthFactor = 1.25;
+const installerDmgAttempts = 3;
+const installerDmgRetryDelayMs = 5000;
 
 if (process.platform !== "darwin") {
   console.error("build-bin:mac must run on a macOS host.");
@@ -137,9 +140,8 @@ async function copyStandaloneMacTools() {
 }
 
 function buildDaemon(goArch, outPath) {
-  // with_utls is required by the VLESS+REALITY transport (sing-box compiles
-  // uTLS out by default). naive_cgo is added on top when the pangea_naive
-  // archive + toolchain resolve; otherwise the stub transport builds.
+  // with_utls is required by VLESS+REALITY (sing-box compiles uTLS out by
+  // default); naive_cgo goes on top only when the lib and toolchain resolve.
   const naiveCgo = resolveNaiveCgoConfig(goArch, rootDir);
   if (naiveCgo) {
     console.log(`naive_cgo: enabled for ${goArch} (pangea_naive lib found and toolchain resolved)`);
@@ -248,6 +250,32 @@ function getInstallerDmgSizeArg(payloadBytes) {
   return `${Math.ceil(roundUpToMultiple(estimatedBytes, installerDmgAlignmentBytes) / mebibyte)}m`;
 }
 
+// hdiutil's internal detach races the volume daemons, failing good release
+// builds with "Resource busy".
+async function createDmgWithRetry(volumeName, stagingDir, dmgSizeArg, dmgPath, arch) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      runOrThrow("hdiutil", [
+        "create",
+        "-volname", volumeName,
+        "-srcfolder", stagingDir,
+        "-ov",
+        "-format", "UDZO",
+        "-size", dmgSizeArg,
+        dmgPath
+      ], { cwd: rootDir, shell: false });
+      return;
+    } catch (error) {
+      if (attempt >= installerDmgAttempts) throw error;
+      console.warn(
+        `hdiutil create failed for ${arch} (attempt ${attempt}/${installerDmgAttempts}), retrying in ${installerDmgRetryDelayMs}ms: ${error.message}`
+      );
+      await fs.rm(dmgPath, { force: true }).catch(() => {});
+      await delay(installerDmgRetryDelayMs);
+    }
+  }
+}
+
 async function bundleInstallerDmg(pkgPath, pkgName, installerOut, arch) {
   const installScript = path.join(rootDir, "scripts", "install-mac.sh");
   if (!fsSync.existsSync(installScript)) {
@@ -272,15 +300,7 @@ async function bundleInstallerDmg(pkgPath, pkgName, installerOut, arch) {
   const dmgSizeArg = getInstallerDmgSizeArg(stagingSizeBytes);
 
   try {
-    runOrThrow("hdiutil", [
-      "create",
-      "-volname", volumeName,
-      "-srcfolder", stagingDir,
-      "-ov",
-      "-format", "UDZO",
-      "-size", dmgSizeArg,
-      dmgPath
-    ], { cwd: rootDir, shell: false });
+    await createDmgWithRetry(volumeName, stagingDir, dmgSizeArg, dmgPath, arch);
 
     const stat = await fs.stat(dmgPath);
     return {
