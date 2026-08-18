@@ -2343,6 +2343,7 @@ function renderDisconnectedState(): void {
   document.body.dataset.state = "DISCONNECTED";
   stateEl.textContent = t("state.DISCONNECTED");
   detailEl.textContent = "";
+  detailEl.title = "";
   setHeadline("DISCONNECTED");
   serverConnectBtn.hidden = false;
   serverDisconnectBtn.hidden = true;
@@ -2381,6 +2382,7 @@ function renderConnectingState(): void {
   document.body.dataset.state = "CONNECTING";
   stateEl.textContent = t("state.CONNECTING");
   detailEl.textContent = "";
+  detailEl.title = "";
   setHeadline("CONNECTING");
 }
 
@@ -2429,6 +2431,7 @@ function renderStatus(status: StatusResponse): void {
   } else {
     stateEl.textContent = t(("state." + status.state) as MessageKey);
     detailEl.textContent = status.detail;
+    detailEl.title = status.detail;
     heroCard.dataset.state = status.state;
     document.body.dataset.state = status.state;
     setHeadline(status.state);
@@ -3036,12 +3039,6 @@ function renderRegionPicker(ordered: readonly Region[]): void {
 }
 
 function updateServerControlStates(): void {
-  if (!authState.authenticated || servers.length === 0) {
-    serverConnectBtn.disabled = true;
-    serverDisconnectBtn.disabled = true;
-    return;
-  }
-
   const daemonBusy = currentDaemonState === "CONNECTING" || currentDaemonState === "DISCONNECTING";
   const busy = uiRefreshing || uiWorking || serverWorking || daemonBusy;
 
@@ -3049,15 +3046,17 @@ function updateServerControlStates(): void {
     ? latestStatus.state === "DISCONNECTED" && !latestStatus.cloak.running && !latestStatus.wireguard.running
     : true;
 
-  // Not hoisted into the guard above: that would also disable Disconnect and
-  // strand a connected user who switched to a transport no server supports.
   serverConnectBtn.disabled =
-    busy || !fullyDisconnected || getVisibleServers().length === 0 || entitled === false;
-  // Stop is live for the whole attempt — a hard cancel, no unsafe window.
-  // Outside an attempt the standard disabled-while-busy rule applies.
-  serverDisconnectBtn.disabled = connectInFlight
-    ? false
-    : !latestStatus || latestStatus.state === "DISCONNECTED" || latestStatus.state === "DISCONNECTING" || busy;
+    !authState.authenticated
+    || servers.length === 0
+    || busy
+    || !fullyDisconnected
+    || getVisibleServers().length === 0
+    || entitled === false;
+
+  // Disconnect is the escape hatch, so it is gated on one thing only: there is
+  // nothing left to tear down. Busy, signed-out and error states all keep it live.
+  serverDisconnectBtn.disabled = !connectInFlight && !disconnectingVisual && fullyDisconnected;
   serverDisconnectBtn.textContent = connectInFlight ? t("hero.stop") : t("hero.disconnect");
 }
 
