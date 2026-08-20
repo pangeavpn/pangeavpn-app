@@ -13,11 +13,25 @@ export function parseConnectStatus(head: string): number {
 }
 
 const MAX_CONNECT_HEAD = 8192;
+const MAX_RESPONSE_BODY = 25 * 1024 * 1024;
+
+// host:port or bare host, no CRLF/whitespace/control characters — used for
+// both the CONNECT target and the Host header, since an injected value in
+// either opens a tunnel to an arbitrary destination.
+const SAFE_HOST_PATTERN = /^[A-Za-z0-9.:_-]+$/;
+
+function isSafeHost(value: string): boolean {
+  return SAFE_HOST_PATTERN.test(value);
+}
 
 /** Sends CONNECT. Bytes after the head are unshifted back so the TLS handshake
  *  that follows keeps its first record. */
 function performConnect(socket: net.Socket, target: string): Promise<void> {
   return new Promise<void>((resolve, reject) => {
+    if (!isSafeHost(target)) {
+      reject(new Error("Invalid CONNECT target"));
+      return;
+    }
     let buf = Buffer.alloc(0);
 
     const cleanup = (): void => {
@@ -111,6 +125,11 @@ export function fetchViaConnectProxy(
       reject(err);
     };
 
+    if (!isSafeHost(hostname) || !isSafeHost(target)) {
+      reject(new Error("Invalid host"));
+      return;
+    }
+
     const timer = setTimeout(() => fail(new Error("Request timeout")), deadline);
 
     socket = net.connect(proxyPort, "127.0.0.1");
@@ -143,7 +162,16 @@ export function fetchViaConnectProxy(
             },
             (res) => {
               const chunks: Buffer[] = [];
-              res.on("data", (chunk: Buffer) => chunks.push(chunk));
+              let bodyLength = 0;
+              res.on("data", (chunk: Buffer) => {
+                bodyLength += chunk.length;
+                if (bodyLength > MAX_RESPONSE_BODY) {
+                  fail(new Error("Response body too large"));
+                  res.destroy();
+                  return;
+                }
+                chunks.push(chunk);
+              });
               res.on("end", () => {
                 if (settled) return;
                 settled = true;

@@ -5,11 +5,15 @@ const HUB_LATEST_URL = "https://api.pangeavpn.org/api/desktop/latest";
 const GITHUB_LATEST_URL = "https://api.github.com/repos/pangeavpn/pangeavpn-app/releases/latest";
 const FALLBACK_RELEASE_URL = "https://github.com/pangeavpn/pangeavpn-app/releases/latest";
 const CHECK_TIMEOUT_MS = 5000;
+const MANUAL_CHECK_MIN_INTERVAL_MS = 60_000;
 
 // How long we'll wait for the VPN to come up before falling back to the
 // stealthier GitHub-hosted API. Keeps the hub-first preference without
 // stranding users who never connect.
 const CONNECT_WAIT_MS = 5 * 60 * 1000;
+
+// Only these hosts (and their subdomains) may be opened as a release link.
+const ALLOWED_RELEASE_HOSTS = ["github.com", "pangeavpn.org"];
 
 interface LatestRelease {
   version: string;
@@ -19,25 +23,49 @@ interface LatestRelease {
   publishedAt: string;
 }
 
-function compareVersions(a: string, b: string): number {
-  const av = a.replace(/^v/, "").split(".").map((n) => parseInt(n, 10) || 0);
-  const bv = b.replace(/^v/, "").split(".").map((n) => parseInt(n, 10) || 0);
-  const len = Math.max(av.length, bv.length);
-  for (let i = 0; i < len; i++) {
-    const x = av[i] ?? 0;
-    const y = bv[i] ?? 0;
-    if (x !== y) return x - y;
+function isSafeReleaseUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return false;
+    return ALLOWED_RELEASE_HOSTS.some(
+      (host) => parsed.hostname === host || parsed.hostname.endsWith(`.${host}`)
+    );
+  } catch {
+    return false;
   }
-  return 0;
 }
 
-async function fetchJson<T>(url: string): Promise<T | null> {
+function parseVersion(v: string): { core: number[]; prerelease: string | null } {
+  const [core, ...pre] = v.replace(/^v/, "").split("-");
+  return {
+    core: core.split(".").map((n) => parseInt(n, 10) || 0),
+    prerelease: pre.length > 0 ? pre.join("-") : null,
+  };
+}
+
+// A prerelease (e.g. "0.6.0-rc.1") always sorts below its final release.
+function compareVersions(a: string, b: string): number {
+  const av = parseVersion(a);
+  const bv = parseVersion(b);
+  const len = Math.max(av.core.length, bv.core.length);
+  for (let i = 0; i < len; i++) {
+    const x = av.core[i] ?? 0;
+    const y = bv.core[i] ?? 0;
+    if (x !== y) return x - y;
+  }
+  if (av.prerelease === bv.prerelease) return 0;
+  if (av.prerelease === null) return 1;
+  if (bv.prerelease === null) return -1;
+  return av.prerelease < bv.prerelease ? -1 : 1;
+}
+
+async function fetchJson(url: string): Promise<unknown> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), CHECK_TIMEOUT_MS);
   try {
     const resp = await net.fetch(url, { signal: controller.signal });
     if (!resp.ok) return null;
-    return (await resp.json()) as T;
+    return await resp.json();
   } catch {
     return null;
   } finally {
@@ -45,86 +73,131 @@ async function fetchJson<T>(url: string): Promise<T | null> {
   }
 }
 
-async function fetchFromHub(): Promise<LatestRelease | null> {
-  const data = await fetchJson<LatestRelease>(HUB_LATEST_URL);
-  if (!data?.version) return null;
-  return data;
+function isNonEmptyString(v: unknown): v is string {
+  return typeof v === "string" && v.length > 0;
 }
 
-async function fetchFromGitHub(): Promise<LatestRelease | null> {
-  interface GhRelease {
-    tag_name?: string;
-    name?: string;
-    body?: string;
-    html_url?: string;
-    published_at?: string;
-  }
-  const data = await fetchJson<GhRelease>(GITHUB_LATEST_URL);
-  const tag = data?.tag_name;
-  if (!tag) return null;
+// Turns an untrusted hub reply into a LatestRelease, discarding anything
+// that isn't shaped right rather than trusting the server's types.
+function toLatestReleaseFromHub(data: unknown): LatestRelease | null {
+  if (typeof data !== "object" || data === null) return null;
+  const d = data as Record<string, unknown>;
+  if (!isNonEmptyString(d.version)) return null;
+  const releaseUrl = isNonEmptyString(d.releaseUrl) && isSafeReleaseUrl(d.releaseUrl)
+    ? d.releaseUrl
+    : FALLBACK_RELEASE_URL;
+  return {
+    version: d.version,
+    tagName: isNonEmptyString(d.tagName) ? d.tagName : d.version,
+    releaseUrl,
+    releaseNotes: typeof d.releaseNotes === "string" ? d.releaseNotes : "",
+    publishedAt: typeof d.publishedAt === "string" ? d.publishedAt : "",
+  };
+}
+
+function toLatestReleaseFromGitHub(data: unknown): LatestRelease | null {
+  if (typeof data !== "object" || data === null) return null;
+  const d = data as Record<string, unknown>;
+  if (!isNonEmptyString(d.tag_name)) return null;
+  const tag = d.tag_name;
+  const releaseUrl = isNonEmptyString(d.html_url) && isSafeReleaseUrl(d.html_url)
+    ? d.html_url
+    : FALLBACK_RELEASE_URL;
   return {
     version: tag.replace(/^v/, ""),
     tagName: tag,
-    releaseUrl: data?.html_url || FALLBACK_RELEASE_URL,
-    releaseNotes: data?.body || "",
-    publishedAt: data?.published_at || "",
+    releaseUrl,
+    releaseNotes: typeof d.body === "string" ? d.body : "",
+    publishedAt: typeof d.published_at === "string" ? d.published_at : "",
   };
+}
+
+async function fetchFromHub(): Promise<LatestRelease | null> {
+  return toLatestReleaseFromHub(await fetchJson(HUB_LATEST_URL));
+}
+
+async function fetchFromGitHub(): Promise<LatestRelease | null> {
+  return toLatestReleaseFromGitHub(await fetchJson(GITHUB_LATEST_URL));
 }
 
 let latestRelease: LatestRelease | null = null;
 let checkAttempted = false;
-let pendingMainWindow: BrowserWindow | null = null;
+let getMainWindow: (() => BrowserWindow | null) = () => null;
 let fallbackTimer: NodeJS.Timeout | null = null;
 let currentConnectionState = "";
 let pendingHubTimer: NodeJS.Timeout | null = null;
+let manualCheckInFlight: Promise<void> | null = null;
+let lastManualCheckAt = 0;
 
 function isMacOnlyRelease(): boolean {
   return process.platform === "darwin";
 }
 
+function armFallbackTimer(): void {
+  fallbackTimer = setTimeout(() => {
+    void performCheck("github").catch(() => {});
+  }, CONNECT_WAIT_MS);
+  if (typeof fallbackTimer.unref === "function") fallbackTimer.unref();
+}
+
 async function performCheck(via: "hub" | "github"): Promise<void> {
   if (checkAttempted) return;
   checkAttempted = true;
+  const hadFallbackTimer = fallbackTimer !== null;
   if (fallbackTimer) {
     clearTimeout(fallbackTimer);
     fallbackTimer = null;
   }
   const data = via === "hub" ? await fetchFromHub() : await fetchFromGitHub();
   if (!data) {
-    // If hub failed and we're connected, don't fall back — connected hub
-    // failure is a real signal. If hub failed because we never connected,
-    // the timeout path will run github separately. Reset so a manual check
-    // can try again.
+    // Re-allow future attempts, and re-arm the fallback we just consumed
+    // so a transient failure doesn't end update checks for the session.
     checkAttempted = false;
+    if (hadFallbackTimer) armFallbackTimer();
     return;
   }
   latestRelease = data;
-  if (!pendingMainWindow || pendingMainWindow.isDestroyed()) return;
+  const win = getMainWindow();
+  if (!win || win.isDestroyed()) return;
   if (compareVersions(data.version, app.getVersion()) > 0) {
-    pendingMainWindow.webContents.send(IPC_CHANNELS.updateAvailable, {
+    win.webContents.send(IPC_CHANNELS.updateAvailable, {
       version: data.version,
       releaseNotes: data.releaseNotes,
       macOnly: isMacOnlyRelease(),
     });
   } else {
-    pendingMainWindow.webContents.send(IPC_CHANNELS.updateNotAvailable);
+    win.webContents.send(IPC_CHANNELS.updateNotAvailable);
   }
 }
 
-export function setupAutoUpdater(mainWindow: BrowserWindow): void {
-  pendingMainWindow = mainWindow;
+// `windowResolver` is called at send time (not captured once) so a closed
+// and reopened main window still receives the update banner.
+export function setupAutoUpdater(windowResolver: () => BrowserWindow | null): void {
+  getMainWindow = windowResolver;
 
   ipcMain.handle(IPC_CHANNELS.checkForUpdates, async () => {
+    if (manualCheckInFlight) {
+      await manualCheckInFlight;
+      return latestRelease ? { version: latestRelease.version, releaseNotes: latestRelease.releaseNotes } : null;
+    }
+    const now = Date.now();
+    if (now - lastManualCheckAt < MANUAL_CHECK_MIN_INTERVAL_MS) {
+      return latestRelease ? { version: latestRelease.version, releaseNotes: latestRelease.releaseNotes } : null;
+    }
+    lastManualCheckAt = now;
     // Manual checks always go via GitHub so the user can refresh on demand
     // without leaking pangeavpn.org traffic off-tunnel.
     checkAttempted = false;
-    await performCheck("github");
+    manualCheckInFlight = performCheck("github").catch(() => {});
+    await manualCheckInFlight;
+    manualCheckInFlight = null;
     if (!latestRelease) return null;
     return { version: latestRelease.version, releaseNotes: latestRelease.releaseNotes };
   });
 
   ipcMain.handle(IPC_CHANNELS.downloadAppUpdate, async () => {
-    await shell.openExternal(latestRelease?.releaseUrl || FALLBACK_RELEASE_URL);
+    const url = latestRelease?.releaseUrl;
+    await shell.openExternal(url && isSafeReleaseUrl(url) ? url : FALLBACK_RELEASE_URL);
   });
 
   ipcMain.handle(IPC_CHANNELS.installUpdate, () => {
@@ -133,10 +206,7 @@ export function setupAutoUpdater(mainWindow: BrowserWindow): void {
 
   // Fallback: if VPN never comes up within CONNECT_WAIT_MS, ask GitHub
   // instead. Different domain, no pangeavpn.org call from a clear network.
-  fallbackTimer = setTimeout(() => {
-    void performCheck("github");
-  }, CONNECT_WAIT_MS);
-  if (typeof fallbackTimer.unref === "function") fallbackTimer.unref();
+  armFallbackTimer();
 }
 
 // Called from main.ts whenever the tray status refresh observes a state
@@ -158,7 +228,7 @@ export function notifyConnectionStateChange(state: string): void {
   pendingHubTimer = setTimeout(() => {
     pendingHubTimer = null;
     if (currentConnectionState !== "CONNECTED") return;
-    void performCheck("hub");
+    void performCheck("hub").catch(() => {});
   }, 1500);
   if (typeof pendingHubTimer.unref === "function") pendingHubTimer.unref();
 }
