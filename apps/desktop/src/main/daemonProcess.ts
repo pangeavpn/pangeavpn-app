@@ -6,6 +6,7 @@ import { app } from "electron";
 import { DaemonClient } from "./daemonClient";
 import { getBundledDaemonPath } from "./resourcePaths";
 import { ensureUserRuntimeFiles, getAppSupportDir } from "./platformPaths";
+import { DaemonNotReadyError } from "./runtimeFiles";
 
 function openDaemonLogStdio(): ["ignore", number, number] | "ignore" {
   try {
@@ -344,11 +345,10 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// platformPaths.ensureUserRuntimeFiles throws this shape (not an error code)
-// while the root daemon has not yet written its token; distinguishes it from
-// a real failure so callers can retry instead of swallowing it silently.
+// The root daemon has not written its token yet; a real failure must not be
+// mistaken for it, or callers swallow it instead of retrying.
 function isTokenNotReadyError(err: unknown): boolean {
-  return err instanceof Error && /background service.*(has not finished starting up|access token is not ready)/i.test(err.message);
+  return err instanceof DaemonNotReadyError;
 }
 
 type MacDaemonContext = {
