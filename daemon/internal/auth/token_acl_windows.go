@@ -110,9 +110,20 @@ func verifyTrustedTokenOwner(path string) error {
 		return fmt.Errorf("token file has no DACL")
 	}
 
-	const writeMask = windows.FILE_GENERIC_WRITE | windows.FILE_WRITE_DATA |
-		windows.GENERIC_WRITE | windows.GENERIC_ALL | windows.WRITE_DAC | windows.WRITE_OWNER
+	return daclGrantsNonAdminWrite(dacl)
+}
 
+// tokenWriteMask names the specific write rights only. FILE_GENERIC_WRITE
+// cannot be used: it shares READ_CONTROL and SYNCHRONIZE with FILE_GENERIC_READ.
+const tokenWriteMask = windows.FILE_WRITE_DATA | windows.FILE_APPEND_DATA |
+	windows.FILE_WRITE_EA | windows.FILE_WRITE_ATTRIBUTES | windows.DELETE |
+	windows.WRITE_DAC | windows.WRITE_OWNER |
+	windows.GENERIC_WRITE | windows.GENERIC_ALL
+
+// daclGrantsNonAdminWrite errors when any principal other than SYSTEM or
+// Administrators can modify the file; a pure read grant is fine, and is what
+// lets the desktop read the token at all.
+func daclGrantsNonAdminWrite(dacl *windows.ACL) error {
 	for i := uint32(0); i < uint32(dacl.AceCount); i++ {
 		var ace *windows.ACCESS_ALLOWED_ACE
 		if err := windows.GetAce(dacl, i, &ace); err != nil {
@@ -125,8 +136,8 @@ func verifyTrustedTokenOwner(path string) error {
 		if isTrustedTokenPrincipal(sid) {
 			continue
 		}
-		if ace.Mask&writeMask != 0 {
-			return fmt.Errorf("token file grants write access to a non-admin principal")
+		if ace.Mask&tokenWriteMask != 0 {
+			return fmt.Errorf("token file grants write access to a non-admin principal (%s)", sid.String())
 		}
 	}
 
