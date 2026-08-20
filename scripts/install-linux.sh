@@ -105,6 +105,21 @@ if systemctl is-active --quiet pangea-daemon 2>/dev/null; then
   sudo systemctl stop pangea-daemon
 fi
 
+# The root daemon writes its token file group-readable by "pangeavpn" so the
+# desktop app (running as the ordinary user) can read it without world access.
+if ! getent group pangeavpn &>/dev/null; then
+  info "Creating pangeavpn group..."
+  sudo groupadd --system pangeavpn
+fi
+
+RUNTIME_USER="${SUDO_USER:-}"
+if [ -n "$RUNTIME_USER" ] && [ "$RUNTIME_USER" != "root" ]; then
+  info "Adding $RUNTIME_USER to the pangeavpn group..."
+  sudo usermod -aG pangeavpn "$RUNTIME_USER"
+else
+  warn "Could not detect the installing user — add them to the pangeavpn group manually, e.g.: sudo usermod -aG pangeavpn <your-username>, then log out and back in."
+fi
+
 DAEMON_SRC="$REPO_ROOT/daemon/bin/daemon"
 if [ ! -f "$DAEMON_SRC" ]; then
   fail "Daemon binary not found at $DAEMON_SRC — build may have failed."
@@ -161,3 +176,6 @@ sudo chmod 644 "$DESKTOP_FILE"
 
 info "PangeaVPN installed successfully!"
 info "Launch from your application menu or run: $INSTALL_DIR/PangeaVPN.AppImage"
+if [ -n "$RUNTIME_USER" ] && [ "$RUNTIME_USER" != "root" ]; then
+  warn "Log out and back in (or reboot) so your pangeavpn group membership takes effect — required before the app can reach the daemon."
+fi

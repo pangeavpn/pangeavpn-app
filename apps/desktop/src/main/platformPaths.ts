@@ -8,6 +8,7 @@ const APP_FOLDER = "pangeavpn-desktop";
 const WINDOWS_SERVICE_FOLDER = "PangeaVPN";
 const MAC_SYSTEM_FOLDER = "PangeaVPN";
 const MAC_LAUNCH_DAEMON_PLIST = "/Library/LaunchDaemons/com.pangea.pangeavpn.daemon.plist";
+const TOKEN_SHAPE_PATTERN = /^[0-9a-f]{64}$/;
 
 export function getAppSupportDir(): string {
   if (process.platform === "win32") {
@@ -50,13 +51,23 @@ export async function ensureUserRuntimeFiles(): Promise<void> {
   const configPath = path.join(appDir, "config.json");
 
   await fs.mkdir(appDir, { recursive: true });
-  await ensureTokenFile(tokenPath);
+
+  // The root daemon owns and creates the token in its system directory; the
+  // desktop only reads it there instead of racing it with its own token.
+  if (shouldUseMacSystemSupportDir()) {
+    await ensureTokenFileReadable(tokenPath);
+  } else {
+    await ensureTokenFile(tokenPath);
+  }
+
   await ensureConfigFile(configPath);
 }
 
 function getWindowsServiceSupportDir(): string {
-  const programData = process.env.ProgramData?.trim() || "C:\\ProgramData";
-  return path.join(programData, WINDOWS_SERVICE_FOLDER);
+  // process.env.ProgramData is user-settable via HKCU\Environment with no
+  // admin rights; SystemDrive plus the fixed folder name is not.
+  const systemDrive = process.env.SystemDrive?.trim() || "C:";
+  return path.join(systemDrive, "ProgramData", WINDOWS_SERVICE_FOLDER);
 }
 
 function shouldUseMacSystemSupportDir(): boolean {
@@ -101,6 +112,29 @@ function daemonTokenCandidates(): string[] {
   return candidates;
 }
 
+// The system-directory token is owned and rotated by the root daemon; this
+// only confirms it exists and is well-formed, never (re)creating it, so the
+// desktop never hands the daemon a token it will refuse to trust.
+async function ensureTokenFileReadable(tokenPath: string): Promise<void> {
+  let token = "";
+  try {
+    token = (await fs.readFile(tokenPath, "utf8")).trim();
+  } catch (error) {
+    if (isNotFound(error)) {
+      throw new Error(
+        "PangeaVPN's background service has not finished starting up yet. Please wait a moment and try again."
+      );
+    }
+    throw error;
+  }
+
+  if (!TOKEN_SHAPE_PATTERN.test(token)) {
+    throw new Error(
+      "PangeaVPN's background service access token is not ready yet. Please wait a moment and try again."
+    );
+  }
+}
+
 async function ensureTokenFile(tokenPath: string): Promise<void> {
   let token = "";
 
@@ -108,8 +142,13 @@ async function ensureTokenFile(tokenPath: string): Promise<void> {
     token = (await fs.readFile(tokenPath, "utf8")).trim();
   } catch (error) {
     if (!isNotFound(error)) {
-      await tryRemoveFile(tokenPath);
+      throw error;
     }
+  }
+
+  if (token && !TOKEN_SHAPE_PATTERN.test(token)) {
+    await tryRemoveFile(tokenPath);
+    token = "";
   }
 
   if (!token) {
@@ -121,13 +160,21 @@ async function ensureTokenFile(tokenPath: string): Promise<void> {
 }
 
 async function ensureConfigFile(configPath: string): Promise<void> {
+  let content = "";
+
   try {
-    const content = await fs.readFile(configPath, "utf8");
-    if (content.trim()) {
-      return;
-    }
+    content = await fs.readFile(configPath, "utf8");
   } catch (error) {
     if (!isNotFound(error)) {
+      throw error;
+    }
+  }
+
+  if (content.trim()) {
+    try {
+      JSON.parse(content);
+      return;
+    } catch {
       await tryRemoveFile(configPath);
     }
   }

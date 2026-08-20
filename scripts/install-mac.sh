@@ -265,8 +265,9 @@ if ! sudo codesign --force --sign - "$SUPPORT_DIR/PangeaDaemon"; then
     fail "Could not prepare the background service. Please try installing again, or contact ${SUPPORT_URL}"
 fi
 
-# ── Create shared auth token ────────────────────────────────────────────────
-# The root service would otherwise create it root-only and lock the app out.
+# ── Auth token ───────────────────────────────────────────────────────────
+# The daemon creates its own token on first start, owned root:admin, mode
+# 640 — any pre-created file here would just be overwritten and discarded.
 REAL_USER="${SUDO_USER:-}"
 if [[ -z "$REAL_USER" || "$REAL_USER" == "root" ]]; then
     REAL_USER="$(id -un)"
@@ -274,12 +275,6 @@ fi
 if [[ "$REAL_USER" == "root" ]]; then
     warn "No login user detected. Run this installer from your normal admin account rather than as root, or the app will not be able to reach its background service."
 fi
-
-TOKEN_FILE="$SUPPORT_DIR/daemon-token.txt"
-log "Securing the link between the app and its service..."
-openssl rand -hex 32 | sudo tee "$TOKEN_FILE" > /dev/null
-sudo chown "$REAL_USER" "$TOKEN_FILE"
-sudo chmod 600 "$TOKEN_FILE"
 
 # ── Register the service with macOS ─────────────────────────────────────────
 log "Setting the service to start automatically..."
