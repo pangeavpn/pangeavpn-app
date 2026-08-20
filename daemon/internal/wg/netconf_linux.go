@@ -267,8 +267,11 @@ func incrementLinuxPolicyRouteRef(prefix string) {
 func decrementLinuxPolicyRouteRef(prefix string) bool {
 	linuxPolicyRouteMu.Lock()
 	defer linuxPolicyRouteMu.Unlock()
-	n := linuxPolicyRouteRefs[prefix]
-	if n <= 1 {
+	n, held := linuxPolicyRouteRefs[prefix]
+	if !held || n <= 0 {
+		return false
+	}
+	if n == 1 {
 		delete(linuxPolicyRouteRefs, prefix)
 		return true
 	}

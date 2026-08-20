@@ -4,6 +4,7 @@ package auth
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -43,6 +44,10 @@ func ensureTokenReadACL(path string) error {
 		return nil
 	}
 	if err := f.Chown(0, gid); err != nil {
+		if errors.Is(err, syscall.EPERM) {
+			log.Printf("auth: not privileged to grant group %q read access; token file left owner-only (0600)", groupName)
+			return nil
+		}
 		return fmt.Errorf("chown token file to %s: %w", groupName, err)
 	}
 	if err := f.Chmod(0o640); err != nil {

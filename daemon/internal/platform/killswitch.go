@@ -126,7 +126,16 @@ func (n *noopKillSwitch) Active() bool                                          
 
 var stateMu sync.Mutex
 
+// killSwitchStatePathFn is replaced by tests. AppSupportDir ignores its env
+// override when privileged, which would leave an elevated test run sharing the
+// real installation's state file.
+var killSwitchStatePathFn = defaultKillSwitchStatePath
+
 func killSwitchStatePath() (string, error) {
+	return killSwitchStatePathFn()
+}
+
+func defaultKillSwitchStatePath() (string, error) {
 	dir, err := AppSupportDir()
 	if err != nil {
 		return "", err

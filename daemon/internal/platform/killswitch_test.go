@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -249,7 +250,10 @@ func TestNoopKillSwitch(t *testing.T) {
 // start clear the lock as stale.
 func isolateStateDir(t *testing.T) {
 	t.Helper()
-	t.Setenv(appSupportDirOverrideEnv, t.TempDir())
+	path := filepath.Join(t.TempDir(), killSwitchStateFile)
+	previous := killSwitchStatePathFn
+	killSwitchStatePathFn = func() (string, error) { return path, nil }
+	t.Cleanup(func() { killSwitchStatePathFn = previous })
 }
 
 func TestKillSwitchStatePersistence(t *testing.T) {
