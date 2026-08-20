@@ -52,3 +52,11 @@ test("blank custom DNS falls back to the VPN server DNS", () => {
     configValue: "10.0.0.1, 10.0.0.2"
   });
 });
+
+// Finding 8: an empty array means "use the server default", not "no DNS".
+test("an empty custom DNS array falls back to the VPN server DNS", () => {
+  assert.deepEqual(resolveWireGuardDns("10.0.0.1, 10.0.0.2", []), {
+    servers: ["10.0.0.1", "10.0.0.2"],
+    configValue: "10.0.0.1, 10.0.0.2"
+  });
+});

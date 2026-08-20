@@ -15,11 +15,19 @@ export interface NodeWireGuardEndpoint {
 }
 
 const IPV4_LITERAL = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
+const PORT = /^\d{1,5}$/;
 
-// Local copy: shared/ must not import from main/.
-function isIPv4Literal(host: string): boolean {
+// Local copy: shared/ must not import from main/. Returns the normalized
+// dotted form so an ambiguous literal (e.g. a leading zero) never flows
+// through verbatim — Go's net.ParseIP would reject it as an IP outright.
+function parseIPv4Literal(host: string): string | null {
   const match = IPV4_LITERAL.exec(host);
-  return match !== null && match.slice(1, 5).every((octet) => Number(octet) <= 255);
+  if (match === null) return null;
+  const octets = match.slice(1, 5);
+  const valid = octets.every(
+    (octet) => octet === "0" || (!octet.startsWith("0") && Number(octet) <= 255)
+  );
+  return valid ? octets.map(Number).join(".") : null;
 }
 
 /**
@@ -33,10 +41,11 @@ export function parseNodeWireGuardEndpoint(value: unknown): NodeWireGuardEndpoin
   const separator = endpoint.lastIndexOf(":");
   if (separator <= 0) return null;
 
-  const host = endpoint.slice(0, separator);
-  const port = Number(endpoint.slice(separator + 1));
-  if (!isIPv4Literal(host)) return null;
-  if (!Number.isInteger(port) || port <= 0 || port > 65535) return null;
+  const host = parseIPv4Literal(endpoint.slice(0, separator));
+  const portText = endpoint.slice(separator + 1);
+  if (host === null || !PORT.test(portText)) return null;
+  const port = Number(portText);
+  if (port <= 0 || port > 65535) return null;
 
   return { endpoint: `${host}:${port}`, host };
 }

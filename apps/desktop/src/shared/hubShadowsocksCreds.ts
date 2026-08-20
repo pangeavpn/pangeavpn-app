@@ -7,6 +7,19 @@ export interface HubShadowsocksCreds {
   password: string;
 }
 
+// sing-shadowsocks2's shadowaead and shadowaead_2022 families; the legacy
+// shadowstream ciphers are unauthenticated, so the daemon rejects them too.
+const SUPPORTED_METHODS = new Set([
+  "aes-128-gcm",
+  "aes-192-gcm",
+  "aes-256-gcm",
+  "chacha20-ietf-poly1305",
+  "xchacha20-ietf-poly1305",
+  "2022-blake3-aes-128-gcm",
+  "2022-blake3-aes-256-gcm",
+  "2022-blake3-chacha20-poly1305"
+]);
+
 export function isHubShadowsocksCreds(value: unknown): value is HubShadowsocksCreds {
   const c = value as Partial<HubShadowsocksCreds> | null;
   return (
@@ -18,10 +31,21 @@ export function isHubShadowsocksCreds(value: unknown): value is HubShadowsocksCr
     c.remotePort > 0 &&
     c.remotePort <= 65535 &&
     typeof c.method === "string" &&
-    c.method.trim().length > 0 &&
+    SUPPORTED_METHODS.has(c.method.trim()) &&
     typeof c.password === "string" &&
-    c.password.length > 0
+    c.password.trim().length > 0
   );
+}
+
+/** Trims the strings a validated candidate carries, so padding or a stray
+ *  newline from the hub never lands in the cache or reaches proxy.start(). */
+function normalizeHubShadowsocksCreds(candidate: HubShadowsocksCreds): HubShadowsocksCreds {
+  return {
+    remoteHost: candidate.remoteHost.trim(),
+    remotePort: candidate.remotePort,
+    method: candidate.method.trim(),
+    password: candidate.password.trim()
+  };
 }
 
 export function sameHubShadowsocks(a: HubShadowsocksCreds, b: HubShadowsocksCreds): boolean {
@@ -45,8 +69,9 @@ export function mergeAdvertisedCreds(
   const next: HubShadowsocksCreds[] = [];
   for (const candidate of advertised) {
     if (!isHubShadowsocksCreds(candidate)) continue;
-    if (next.some((c) => sameHubShadowsocks(c, candidate))) continue;
-    next.push({ ...candidate });
+    const normalized = normalizeHubShadowsocksCreds(candidate);
+    if (next.some((c) => sameHubShadowsocks(c, normalized))) continue;
+    next.push(normalized);
   }
   if (next.length === 0) return null;
 
@@ -103,8 +128,9 @@ export function restoreCachedCreds(stored: unknown): HubShadowsocksCreds[] {
   const out: HubShadowsocksCreds[] = [];
   for (const candidate of list) {
     if (!isHubShadowsocksCreds(candidate)) continue;
-    if (out.some((c) => sameHubShadowsocks(c, candidate))) continue;
-    out.push({ ...candidate });
+    const normalized = normalizeHubShadowsocksCreds(candidate);
+    if (out.some((c) => sameHubShadowsocks(c, normalized))) continue;
+    out.push(normalized);
   }
   return out;
 }

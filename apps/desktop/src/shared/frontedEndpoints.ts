@@ -8,6 +8,9 @@
 
 const MAX_HOSTNAME_LENGTH = 253;
 const LABEL = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
+// All-numeric labels also match LABEL, so a dotted-quad IP would otherwise
+// pass as four valid labels; reject it explicitly.
+const IPV4_LIKE = /^\d{1,3}(\.\d{1,3}){3}$/;
 
 /**
  * A public DNS name, lowercased. Rejects anything without a dot: the relay is
@@ -18,6 +21,7 @@ export function normalizeFrontedEndpoint(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const host = value.trim().toLowerCase();
   if (host.length === 0 || host.length > MAX_HOSTNAME_LENGTH) return null;
+  if (IPV4_LIKE.test(host)) return null;
   const labels = host.split(".");
   if (labels.length < 2) return null;
   if (!labels.every((label) => LABEL.test(label))) return null;

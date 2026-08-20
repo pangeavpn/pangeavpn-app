@@ -35,6 +35,12 @@ test("malformed labels are rejected", () => {
   assert.equal(normalizeFrontedEndpoint("   "), null);
 });
 
+// Finding 5: a dotted-quad IP splits into four valid labels and must not pass.
+test("an IPv4 literal is rejected even though every octet is a valid label", () => {
+  assert.equal(normalizeFrontedEndpoint("192.168.1.7"), null);
+  assert.equal(normalizeFrontedEndpoint("8.8.8.8"), null);
+});
+
 test("a hostname over the DNS length limit is rejected", () => {
   const tooLong = `${Array.from({ length: 26 }, () => "a".repeat(9)).join(".")}.com`;
   assert.ok(tooLong.length > 253);

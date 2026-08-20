@@ -109,7 +109,8 @@ test("normalizeHubMethods rescues a hand-edited all-off file", () => {
       normal: false,
       rev: HUB_METHODS_REV
     }),
-    { directIp: true, shadowsocks: false, fronted: false, normal: false }
+    DEFAULT_HUB_METHODS,
+    "directIp alone cannot produce a request without a cached IP or DoH"
   );
 });
 
@@ -210,6 +211,6 @@ test("migration never yields an unusable all-off state", () => {
       normal: false,
       rev: HUB_METHODS_REV
     }),
-    { directIp: true, shadowsocks: false, fronted: false, normal: false }
+    DEFAULT_HUB_METHODS
   );
 });

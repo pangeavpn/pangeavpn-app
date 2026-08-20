@@ -39,6 +39,26 @@ test("isHubShadowsocksCreds rejects incomplete or malformed blocks", () => {
   }
 });
 
+// Finding 6: a padded or unknown-cipher block must not reach proxy.start() as-is.
+test("isHubShadowsocksCreds rejects an unknown cipher", () => {
+  assert.equal(isHubShadowsocksCreds({ ...node("192.0.2.10"), method: "rc4-md5" }), false);
+});
+
+test("mergeAdvertisedCreds trims padded fields so dedup and caching see the clean form", () => {
+  const padded = { ...node("192.0.2.10"), remoteHost: " 192.0.2.10\n", password: " MTIzNDU2Nzg5MGFiY2RlZg==\t" };
+  const merged = mergeAdvertisedCreds([], [padded]);
+  assert.equal(merged?.[0].remoteHost, "192.0.2.10");
+  assert.equal(merged?.[0].password, "MTIzNDU2Nzg5MGFiY2RlZg==");
+});
+
+test("mergeAdvertisedCreds dedupes a padded duplicate against the clean form", () => {
+  const merged = mergeAdvertisedCreds(
+    [],
+    [node("192.0.2.10"), { ...node("192.0.2.10"), remoteHost: " 192.0.2.10 " }]
+  );
+  assert.equal(merged?.length, 1);
+});
+
 // The whole point: one node's rotated key must not strand the client.
 test("mergeAdvertisedCreds keeps every node the hub named, not just the first", () => {
   const merged = mergeAdvertisedCreds(

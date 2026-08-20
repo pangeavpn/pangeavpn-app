@@ -75,3 +75,31 @@ test("remoteIp outranks an address already sitting in remoteHost", () => {
   );
   assert.equal(ep.remoteHost, "203.0.113.44");
 });
+
+// Finding 1: a non-address remoteIp must not become the dial target.
+test("ignores a remoteIp that is not an address", () => {
+  const ep = resolveNaiveEndpoint(
+    { remoteHost: NAIVE_HOST, remoteIp: "not-an-ip.example.com" },
+    NODE_IP
+  );
+  assert.equal(ep.remoteHost, NODE_IP);
+});
+
+// Finding 2: no domain and no per-transport IP must not yield a blank SNI.
+test("falls back to the node address for the SNI when nothing else is named", () => {
+  const ep = resolveNaiveEndpoint({ remoteHost: "", remoteIp: "203.0.113.44" }, NODE_IP);
+  assert.equal(ep.serverName, NODE_IP);
+  assert.notEqual(ep.serverName, "");
+});
+
+// Finding 3: an IPv6 remoteHost must be dialed as given, not swapped for the node.
+test("dials an IPv6 address given in remoteHost rather than substituting the node", () => {
+  const ep = resolveNaiveEndpoint({ remoteHost: "2001:db8::1" }, NODE_IP);
+  assert.equal(ep.remoteHost, "2001:db8::1");
+});
+
+// Finding 4: Go's net.ParseIP rejects leading-zero octets as an IP.
+test("does not treat a leading-zero octet as an address", () => {
+  const ep = resolveNaiveEndpoint({ remoteHost: "01.2.3.4" }, NODE_IP);
+  assert.equal(ep.remoteHost, NODE_IP);
+});

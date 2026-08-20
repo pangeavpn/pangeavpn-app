@@ -36,8 +36,9 @@ export function resolveWireGuardDns(
   serverDns: string,
   customDns: readonly string[] | null
 ): { servers: string[]; configValue: string } {
-  const servers = customDns
-    ? [...customDns]
-    : serverDns.split(",").map((value) => value.trim()).filter(Boolean);
+  const servers =
+    customDns && customDns.length > 0
+      ? [...customDns]
+      : serverDns.split(",").map((value) => value.trim()).filter(Boolean);
   return { servers, configValue: servers.join(", ") };
 }

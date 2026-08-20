@@ -159,7 +159,9 @@ export const StatusResponseSchema = z.object({
     running: z.boolean(),
     detail: z.string(),
     bytesIn: z.number().default(0),
-    bytesOut: z.number().default(0)
+    bytesOut: z.number().default(0),
+    // Connection readiness gates on this; older daemons omit it.
+    lastHandshakeUnix: z.number().optional()
   }),
   killSwitchActive: z.boolean().default(false),
   // An ERROR the daemon is still retrying by itself, after a session dropped
@@ -173,7 +175,9 @@ export const ConnectRequestSchema = z.object({
   // ever set when the user asks for it — the daemon's auto cascade never picks it.
   preferredTransport: z
     .enum(["cloak", "naive", "reality", "hysteria2", "shadowsocks", "snowflake", "wireguard"])
-    .optional()
+    .optional(),
+  allowLAN: z.boolean().optional(),
+  lockdown: z.boolean().optional()
 });
 
 export const OkResponseSchema = z.object({

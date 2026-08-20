@@ -97,8 +97,10 @@ export function normalizeHubMethods(raw: unknown): HubMethods {
     };
   }
 
+  // directIp alone cannot produce a request without a cached hub IP or DoH, so
+  // an all-off rescue restores the full default set rather than just one method.
   if (enabledHubMethods(methods).length === 0) {
-    return { ...methods, directIp: true };
+    return { ...DEFAULT_HUB_METHODS };
   }
   return methods;
 }
