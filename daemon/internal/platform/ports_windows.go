@@ -5,12 +5,19 @@ package platform
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"sort"
 	"strconv"
 	"strings"
 )
+
+// ErrUDPPortOwnersUnsupported mirrors ports_other.go's sentinel so
+// cross-platform callers can reference it unconditionally with errors.Is; the
+// Windows implementations below never return it, since the lookup here is
+// actually supported.
+var ErrUDPPortOwnersUnsupported = errors.New("udp port owner lookup unsupported on this platform")
 
 // taskkillProcessNotFoundExitCode is what taskkill.exe returns when the PID
 // is already gone; locale-independent, unlike its stdout/stderr text.

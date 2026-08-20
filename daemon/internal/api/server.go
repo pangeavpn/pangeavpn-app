@@ -158,9 +158,11 @@ type ssProxyStartRequest struct {
 }
 
 type ssProxyStartResponse struct {
-	OK    bool   `json:"ok"`
-	Port  int    `json:"port,omitempty"`
-	Error string `json:"error,omitempty"`
+	OK            bool   `json:"ok"`
+	Port          int    `json:"port,omitempty"`
+	ProxyUsername string `json:"proxyUsername,omitempty"`
+	ProxyPassword string `json:"proxyPassword,omitempty"`
+	Error         string `json:"error,omitempty"`
 }
 
 // ssProxySupportedMethods mirrors shadowsocks.supportedMethods: the AEAD and
@@ -364,7 +366,8 @@ func NewHandler(token string, service *Service) http.Handler {
 			return
 		}
 
-		writeJSON(w, http.StatusOK, ssProxyStartResponse{OK: true, Port: port})
+		user, pass := service.ShadowsocksProxyCredentials()
+		writeJSON(w, http.StatusOK, ssProxyStartResponse{OK: true, Port: port, ProxyUsername: user, ProxyPassword: pass})
 	}))
 
 	mux.Handle("/ssproxy/stop", withAuthAndLimit(token, limiter, func(w http.ResponseWriter, r *http.Request) {
