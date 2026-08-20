@@ -3,6 +3,7 @@ package platform
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 )
 
 // KillSwitch enforces a network lock that blocks all outbound traffic except
@@ -48,10 +50,9 @@ type TunnelRef struct {
 	WindowsLUID uint64
 }
 
-// LANAllowPrefixes are the IPv4 ranges the kill switch permits when
-// allowLAN is set. Keep in sync with wg.LANExcludePrefixes — traffic that
-// leaves the tunnel (because AllowedIPs excludes these) must also be
-// allowed by the firewall.
+// LANAllowPrefixes are the ranges the kill switch permits when allowLAN is
+// set. Keep in sync with wg.LANExcludePrefixes — traffic that leaves the
+// tunnel must also be allowed by the firewall.
 var LANAllowPrefixes = []string{
 	"10.0.0.0/8",
 	"172.16.0.0/12",
@@ -59,6 +60,10 @@ var LANAllowPrefixes = []string{
 	"169.254.0.0/16",
 	"224.0.0.0/4",
 	"255.255.255.255/32",
+	"100.64.0.0/10",
+	"fe80::/10",
+	"ff02::/16",
+	"fc00::/7",
 }
 
 // KillSwitchState is persisted to disk so that crash/startup reconciliation
@@ -143,16 +148,43 @@ func saveKillSwitchState(st KillSwitchState) error {
 		return fmt.Errorf("marshal kill switch state: %w", err)
 	}
 
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+	dir := filepath.Dir(path)
+	tmp := filepath.Join(dir, fmt.Sprintf(".%s.%d.%d.tmp", killSwitchStateFile, os.Getpid(), time.Now().UnixNano()))
+	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return fmt.Errorf("create kill switch state temp file: %w", err)
+	}
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		os.Remove(tmp)
 		return fmt.Errorf("write kill switch state: %w", err)
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		os.Remove(tmp)
+		return fmt.Errorf("sync kill switch state: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(tmp)
+		return fmt.Errorf("close kill switch state: %w", err)
 	}
 	if err := os.Rename(tmp, path); err != nil {
 		os.Remove(tmp)
 		return fmt.Errorf("rename kill switch state: %w", err)
 	}
+	// Best-effort: fsyncing the directory entry isn't supported on Windows.
+	if dirFile, err := os.Open(dir); err == nil {
+		_ = dirFile.Sync()
+		_ = dirFile.Close()
+	}
 	return nil
 }
+
+// ErrKillSwitchStateUnreadable distinguishes "state file absent" (nil error,
+// zero value — nothing was ever engaged) from "state file present but could
+// not be read" (this sentinel) so callers don't treat the latter as a clean
+// slate: a stuck lock may still be live on the platform and needs probing.
+var ErrKillSwitchStateUnreadable = errors.New("kill switch state file exists but could not be read")
 
 func loadKillSwitchState() (KillSwitchState, error) {
 	stateMu.Lock()
@@ -168,12 +200,12 @@ func loadKillSwitchState() (KillSwitchState, error) {
 		if os.IsNotExist(err) {
 			return KillSwitchState{}, nil
 		}
-		return KillSwitchState{}, fmt.Errorf("read kill switch state: %w", err)
+		return KillSwitchState{}, fmt.Errorf("%w: %v", ErrKillSwitchStateUnreadable, err)
 	}
 
 	var st KillSwitchState
 	if err := json.Unmarshal(data, &st); err != nil {
-		return KillSwitchState{}, fmt.Errorf("unmarshal kill switch state: %w", err)
+		return KillSwitchState{}, fmt.Errorf("%w: unmarshal: %v", ErrKillSwitchStateUnreadable, err)
 	}
 	return st, nil
 }
@@ -199,18 +231,34 @@ func LoadKillSwitchStatePublic() (KillSwitchState, error) {
 	return loadKillSwitchState()
 }
 
-// Records a Lockdown re-arm when the rules need no change. Without it the flag
-// never reaches disk and reconcileStartup clears the lock as crash leftover.
-// Raise-only.
+// persistLockedUpgrade records a Lockdown flag change on a re-arm that needs
+// no rule change. Callers pass the caller's actual desired Locked state (not
+// a value echoed from disk), so raising and lowering are both intentional.
 func persistLockedUpgrade(prev KillSwitchState, locked bool) error {
-	if !locked || prev.Locked {
+	if prev.Locked == locked {
 		return nil
 	}
-	prev.Locked = true
+	prev.Locked = locked
 	if err := saveKillSwitchState(prev); err != nil {
 		return fmt.Errorf("kill switch enable: record lockdown: %w", err)
 	}
 	return nil
+}
+
+// updateTunnelInterfaceState records the tunnel interface permitted through an
+// already-engaged kill switch. Callers that then re-apply rules from the
+// returned state must check err — a fallback to a stale/empty
+// TunnelInterface silently drops the tunnel's permit.
+func updateTunnelInterfaceState(tunnel string) (KillSwitchState, error) {
+	prev, err := loadKillSwitchState()
+	if err != nil {
+		return KillSwitchState{}, fmt.Errorf("read kill switch state before tunnel update: %w", err)
+	}
+	prev.TunnelInterface = tunnel
+	if err := saveKillSwitchState(prev); err != nil {
+		return KillSwitchState{}, err
+	}
+	return prev, nil
 }
 
 func stringSlicesEqual(a, b []string) bool {
@@ -225,16 +273,8 @@ func stringSlicesEqual(a, b []string) bool {
 	return true
 }
 
-// resolveEndpointHosts resolves each entry to IPs, dedups and sorts. An
-// entry that is already an IP literal contributes itself without a DNS lookup.
-//
-// A host that fails to resolve is skipped rather than failing the whole call:
-// the kill switch blocks DNS while it is engaged, so every hostname permit
-// (the naive/reality/hysteria2/snowflake endpoints — cloak's is always an IP
-// literal) fails to resolve when Connect re-arms an already-active lockdown
-// lock. Failing there would leave the lock permanently un-armable and the
-// device stuck offline. Skipped hosts are reported via EndpointResolveWarn;
-// only a wholesale failure (nothing resolved at all) is an error.
+// resolveEndpointHosts resolves each host to IPs, dedups and sorts, skipping
+// (and warning on) failures — falling back to/unioning with the persisted set.
 func resolveEndpointHosts(ctx context.Context, hosts []string) ([]string, error) {
 	if len(hosts) == 0 {
 		// No endpoints to permit: caller wants a pure block-all lock
@@ -243,9 +283,11 @@ func resolveEndpointHosts(ctx context.Context, hosts []string) ([]string, error)
 	}
 	seen := make(map[string]struct{}, len(hosts))
 	out := make([]string, 0, len(hosts))
+	anyFailed := false
 	for _, host := range hosts {
 		ips, err := resolveEndpointIPs(ctx, host)
 		if err != nil {
+			anyFailed = true
 			if warn := EndpointResolveWarn; warn != nil {
 				warn(host, err)
 			}
@@ -259,15 +301,31 @@ func resolveEndpointHosts(ctx context.Context, hosts []string) ([]string, error)
 			out = append(out, ip)
 		}
 	}
+	if !anyFailed {
+		sort.Strings(out)
+		return out, nil
+	}
+
+	prev, _ := loadKillSwitchState()
 	if len(out) == 0 {
-		return nil, fmt.Errorf("no IPs resolved from endpoint hosts %v", hosts)
+		if len(prev.EndpointIPs) == 0 {
+			return nil, fmt.Errorf("no IPs resolved from endpoint hosts %v", hosts)
+		}
+		return append([]string(nil), prev.EndpointIPs...), nil
+	}
+	for _, ip := range prev.EndpointIPs {
+		if _, ok := seen[ip]; ok {
+			continue
+		}
+		seen[ip] = struct{}{}
+		out = append(out, ip)
 	}
 	sort.Strings(out)
 	return out, nil
 }
 
-// resolveEndpointIPs resolves a hostname or IP string to a deduplicated,
-// sorted list of IP strings suitable for firewall rules.
+// resolveEndpointIPs resolves a hostname or IP string (v4 or v6) to a
+// deduplicated, sorted list of IP strings suitable for firewall rules.
 func resolveEndpointIPs(ctx context.Context, host string) ([]string, error) {
 	host = strings.TrimSpace(host)
 	if host == "" {
@@ -275,28 +333,21 @@ func resolveEndpointIPs(ctx context.Context, host string) ([]string, error) {
 	}
 
 	if ip := net.ParseIP(host); ip != nil {
-		if v4 := ip.To4(); v4 != nil {
-			return []string{v4.String()}, nil
-		}
-		return nil, fmt.Errorf("endpoint %s is IPv6; only IPv4 endpoints are supported", host)
+		return []string{canonicalIPString(ip)}, nil
 	}
 
-	ips, err := lookupResolverIP(ctx, "ip4", host)
+	ips, err := lookupResolverIP(ctx, "ip", host)
 	if err != nil {
 		return nil, fmt.Errorf("resolve endpoint %s: %w", host, err)
 	}
 	if len(ips) == 0 {
-		return nil, fmt.Errorf("endpoint %s resolved to no IPv4 addresses", host)
+		return nil, fmt.Errorf("endpoint %s resolved to no addresses", host)
 	}
 
 	seen := make(map[string]struct{}, len(ips))
 	out := make([]string, 0, len(ips))
 	for _, ip := range ips {
-		v4 := ip.To4()
-		if v4 == nil {
-			continue
-		}
-		s := v4.String()
+		s := canonicalIPString(ip)
 		if _, ok := seen[s]; ok {
 			continue
 		}
@@ -304,8 +355,17 @@ func resolveEndpointIPs(ctx context.Context, host string) ([]string, error) {
 		out = append(out, s)
 	}
 	if len(out) == 0 {
-		return nil, fmt.Errorf("endpoint %s resolved to no IPv4 addresses", host)
+		return nil, fmt.Errorf("endpoint %s resolved to no addresses", host)
 	}
 	sort.Strings(out)
 	return out, nil
+}
+
+// canonicalIPString renders an IPv4-mapped address in dotted form rather
+// than the ::ffff:a.b.c.d form net.IP.String() would otherwise produce.
+func canonicalIPString(ip net.IP) string {
+	if v4 := ip.To4(); v4 != nil {
+		return v4.String()
+	}
+	return ip.String()
 }
