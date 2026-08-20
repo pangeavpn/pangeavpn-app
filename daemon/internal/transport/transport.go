@@ -31,3 +31,6 @@ type SessionWaiter interface {
 type BoundPortReporter interface {
 	BoundLocalPort() int
 }
+
+// Managers implementing these should add `var _ transport.SessionWaiter =
+// (*Manager)(nil)` locally so signature drift fails the build, not the assertion.

@@ -4,15 +4,20 @@ package wg
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/godbus/dbus/v5"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
+
+	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/platform"
 )
 
 // ---------------------------------------------------------------------------
@@ -84,19 +89,35 @@ func setLinuxMTU(interfaceName string, mtu int) error {
 // Route management via netlink
 // ---------------------------------------------------------------------------
 
-// addLinuxEndpointRoutes installs /32 bypass routes for cloak/hub IPs in
-// both the main table and the policy routing table (51820), so traffic from
-// non-fwmarked processes also escapes the tunnel.
-func addLinuxEndpointRoutes(ctx context.Context, endpointHosts []string) ([]routeSpec, error) {
-	routes := resolveEndpointRoutes(ctx, endpointHosts)
+// routeOwnership records whether this process created a bypass route's entry
+// in each table (vs. finding it via EEXIST); only owned entries get deleted.
+type routeOwnership struct {
+	ownsMain   bool
+	ownsPolicy bool
+}
+
+func routeOwnershipKey(route routeSpec) string {
+	return route.family + "|" + route.destination
+}
+
+// addLinuxEndpointRoutes installs /32 bypass routes for cloak/hub IPs in both
+// tables independently, so one table's failure never skips the other.
+func addLinuxEndpointRoutes(ctx context.Context, endpointHosts []string) ([]routeSpec, map[string]routeOwnership, error) {
+	routes, resolveErr := resolveEndpointRoutes(ctx, endpointHosts)
+	if resolveErr != nil {
+		return nil, nil, fmt.Errorf("resolve endpoint hosts: %w", resolveErr)
+	}
 	if len(routes) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	added := make([]routeSpec, 0, len(routes))
+	ownership := make(map[string]routeOwnership, len(routes))
+	var errs []error
 	for _, route := range routes {
 		gwRoute, err := linuxDefaultGateway(route.family)
 		if err != nil {
+			errs = append(errs, err)
 			continue
 		}
 
@@ -107,45 +128,55 @@ func addLinuxEndpointRoutes(ctx context.Context, endpointHosts []string) ([]rout
 		dst := &net.IPNet{IP: net.ParseIP(route.destination), Mask: mask}
 
 		mainRoute := &netlink.Route{Dst: dst, Gw: gwRoute.gw, LinkIndex: gwRoute.linkIndex}
-		if err := netlink.RouteAdd(mainRoute); err != nil && !errors.Is(err, os.ErrExist) {
+		mainErr := netlink.RouteAdd(mainRoute)
+
+		policyRoute := &netlink.Route{Dst: dst, Gw: gwRoute.gw, LinkIndex: gwRoute.linkIndex, Table: policyRoutingTable}
+		policyErr := netlink.RouteAdd(policyRoute)
+
+		mainOK := mainErr == nil || errors.Is(mainErr, os.ErrExist)
+		policyOK := policyErr == nil || errors.Is(policyErr, os.ErrExist)
+		if !mainOK && !policyOK {
+			errs = append(errs, mainErr, policyErr)
 			continue
 		}
 
-		policyRoute := &netlink.Route{Dst: dst, Gw: gwRoute.gw, LinkIndex: gwRoute.linkIndex, Table: policyRoutingTable}
-		_ = netlink.RouteAdd(policyRoute)
-
 		added = append(added, route)
+		ownership[routeOwnershipKey(route)] = routeOwnership{ownsMain: mainErr == nil, ownsPolicy: policyErr == nil}
 	}
-	return added, nil
+	return added, ownership, errors.Join(errs...)
 }
 
-func removeLinuxEndpointRoutes(routes []routeSpec) {
+// removeLinuxEndpointRoutes deletes only routes ownership marks as ours; a
+// missing entry may belong to the host admin, another VPN, or a leaked session.
+func removeLinuxEndpointRoutes(routes []routeSpec, ownership map[string]routeOwnership) {
 	for _, route := range routes {
 		mask := net.CIDRMask(32, 32)
 		if route.family == "inet6" {
 			mask = net.CIDRMask(128, 128)
 		}
 		dst := &net.IPNet{IP: net.ParseIP(route.destination), Mask: mask}
-		_ = netlink.RouteDel(&netlink.Route{Dst: dst})
-		_ = netlink.RouteDel(&netlink.Route{Dst: dst, Table: policyRoutingTable})
+
+		own := ownership[routeOwnershipKey(route)]
+		if own.ownsMain {
+			_ = netlink.RouteDel(&netlink.Route{Dst: dst})
+		}
+		if own.ownsPolicy {
+			_ = netlink.RouteDel(&netlink.Route{Dst: dst, Table: policyRoutingTable})
+		}
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Policy routing (replaces simple main-table /1 routes)
-//
-// NetworkManager binds connectivity probes to the physical interface via
-// SO_BINDTODEVICE. Simple /1 routes in the main table don't override that,
-// so NM's probes bypass the tunnel, get blocked by the kill switch, and the
-// desktop reports "no internet."
-//
-// The fix mirrors wg-quick's approach:
-//   1. Add tunnel routes to a dedicated routing table (51820).
-//   2. ip rule: all traffic without fwmark 51820 → use table 51820.
-//   3. ip rule: suppress default route in main table so it can't compete.
-//   4. WireGuard's own UDP socket is marked with fwmark 51820, so its
-//      packets use the real default route and don't loop.
-// ---------------------------------------------------------------------------
+// Policy routing mirrors wg-quick's table 51820 + fwmark + suppress rule.
+
+// The table and its ip rules are shared kernel state: two tunnel sessions in
+// the same daemon reuse them, so refcounts gate installing/tearing them down.
+var (
+	linuxPolicyMu       sync.Mutex
+	linuxPolicyRefCount int
+
+	linuxPolicyRouteMu   sync.Mutex
+	linuxPolicyRouteRefs = map[string]int{}
+)
 
 // addLinuxPolicyRouting sets up the custom routing table, routes, and ip rules.
 func addLinuxPolicyRouting(interfaceName string, allowedIPs []string) error {
@@ -154,7 +185,6 @@ func addLinuxPolicyRouting(interfaceName string, allowedIPs []string) error {
 		return fmt.Errorf("lookup interface %s for routes: %w", interfaceName, err)
 	}
 
-	// Add routes to the custom table.
 	for _, prefix := range allowedIPs {
 		routePrefixes, _, err := normalizedRoutesForPrefix(prefix)
 		if err != nil {
@@ -173,11 +203,84 @@ func addLinuxPolicyRouting(interfaceName string, allowedIPs []string) error {
 			if err := netlink.RouteAdd(nlRoute); err != nil && !errors.Is(err, os.ErrExist) {
 				return fmt.Errorf("add route %s to table %d: %w", rp, policyRoutingTable, err)
 			}
+			incrementLinuxPolicyRouteRef(rp)
 		}
 	}
 
-	// ip rule: packets without our fwmark use the custom table.
+	linuxPolicyMu.Lock()
+	defer linuxPolicyMu.Unlock()
+	if linuxPolicyRefCount == 0 {
+		if err := installLinuxPolicyRules(); err != nil {
+			return err
+		}
+	}
+	linuxPolicyRefCount++
+	return nil
+}
+
+// removeLinuxPolicyRouting releases this session's share of the shared table
+// and rules, tearing them down only once no session still needs them.
+func removeLinuxPolicyRouting(_ string, allowedIPs []string) {
+	removeLinuxSessionPolicyRoutes(allowedIPs)
+
+	linuxPolicyMu.Lock()
+	defer linuxPolicyMu.Unlock()
+	if linuxPolicyRefCount > 0 {
+		linuxPolicyRefCount--
+	}
+	if linuxPolicyRefCount > 0 {
+		return
+	}
+	removeLinuxPolicyRules()
+	flushPolicyRoutingTable()
+}
+
+// removeLinuxSessionPolicyRoutes deletes a prefix only once this is the last
+// session still holding a reference to it.
+func removeLinuxSessionPolicyRoutes(allowedIPs []string) {
+	for _, prefix := range allowedIPs {
+		routePrefixes, _, err := normalizedRoutesForPrefix(prefix)
+		if err != nil {
+			continue
+		}
+		for _, rp := range routePrefixes {
+			if !decrementLinuxPolicyRouteRef(rp) {
+				continue
+			}
+			_, dst, parseErr := net.ParseCIDR(rp)
+			if parseErr != nil {
+				continue
+			}
+			_ = netlink.RouteDel(&netlink.Route{Dst: dst, Table: policyRoutingTable})
+		}
+	}
+}
+
+func incrementLinuxPolicyRouteRef(prefix string) {
+	linuxPolicyRouteMu.Lock()
+	defer linuxPolicyRouteMu.Unlock()
+	linuxPolicyRouteRefs[prefix]++
+}
+
+// decrementLinuxPolicyRouteRef reports whether the caller just released the
+// last reference to prefix, meaning it is now safe to delete from the kernel.
+func decrementLinuxPolicyRouteRef(prefix string) bool {
+	linuxPolicyRouteMu.Lock()
+	defer linuxPolicyRouteMu.Unlock()
+	n := linuxPolicyRouteRefs[prefix]
+	if n <= 1 {
+		delete(linuxPolicyRouteRefs, prefix)
+		return true
+	}
+	linuxPolicyRouteRefs[prefix] = n - 1
+	return false
+}
+
+// installLinuxPolicyRules adds the shared ip rules, plus an IPv6 blackhole
+// since AllowedIPs is v4-only and v6 must not silently bypass the tunnel.
+func installLinuxPolicyRules() error {
 	fwmask := uint32(policyRoutingFwmark)
+
 	notRule := netlink.NewRule()
 	notRule.Invert = true
 	notRule.Mark = policyRoutingFwmark
@@ -189,8 +292,6 @@ func addLinuxPolicyRouting(interfaceName string, allowedIPs []string) error {
 		return fmt.Errorf("add fwmark ip rule: %w", err)
 	}
 
-	// ip rule: suppress the main table's default route so it can't compete
-	// with the custom table's routes.
 	suppressRule := netlink.NewRule()
 	suppressRule.Table = unix.RT_TABLE_MAIN
 	suppressRule.SuppressPrefixlen = 0
@@ -200,17 +301,34 @@ func addLinuxPolicyRouting(interfaceName string, allowedIPs []string) error {
 		return fmt.Errorf("add suppress ip rule: %w", err)
 	}
 
+	blackhole6 := &netlink.Route{
+		Table: policyRoutingTable,
+		Dst:   &net.IPNet{IP: net.IPv6zero, Mask: net.CIDRMask(0, 128)},
+		Type:  unix.RTN_UNREACHABLE,
+	}
+	if err := netlink.RouteAdd(blackhole6); err != nil && !errors.Is(err, os.ErrExist) {
+		return fmt.Errorf("add ipv6 blackhole route: %w", err)
+	}
+
+	notRule6 := netlink.NewRule()
+	notRule6.Invert = true
+	notRule6.Mark = policyRoutingFwmark
+	notRule6.Mask = &fwmask
+	notRule6.Table = policyRoutingTable
+	notRule6.Priority = policyRulePriority
+	notRule6.Family = unix.AF_INET6
+	if err := netlink.RuleAdd(notRule6); err != nil && !errors.Is(err, os.ErrExist) {
+		return fmt.Errorf("add ipv6 fwmark ip rule: %w", err)
+	}
+
 	return nil
 }
 
-// removeLinuxPolicyRouting tears down the ip rules and FLUSHES the entire
-// policy routing table. We own table 51820 exclusively, so the simplest
-// correct teardown is to drop every route in it — selective per-prefix
-// RouteDel calls were silently failing across switches and leaving stale
-// chunks behind. interfaceName and allowedIPs are unused but kept for
-// signature stability.
-func removeLinuxPolicyRouting(_ string, _ []string) {
+// removeLinuxPolicyRules removes the shared ip rules. Must only be called
+// once no session still relies on them.
+func removeLinuxPolicyRules() {
 	fwmask := uint32(policyRoutingFwmark)
+
 	notRule := netlink.NewRule()
 	notRule.Invert = true
 	notRule.Mark = policyRoutingFwmark
@@ -227,11 +345,18 @@ func removeLinuxPolicyRouting(_ string, _ []string) {
 	suppressRule.Family = unix.AF_INET
 	_ = netlink.RuleDel(suppressRule)
 
-	flushPolicyRoutingTable()
+	notRule6 := netlink.NewRule()
+	notRule6.Invert = true
+	notRule6.Mark = policyRoutingFwmark
+	notRule6.Mask = &fwmask
+	notRule6.Table = policyRoutingTable
+	notRule6.Priority = policyRulePriority
+	notRule6.Family = unix.AF_INET6
+	_ = netlink.RuleDel(notRule6)
 }
 
-// flushPolicyRoutingTable deletes every route currently in table 51820 for
-// both v4 and v6. Used on stop so a subsequent start gets a clean slate.
+// flushPolicyRoutingTable deletes every route in table 51820, v4 and v6,
+// once the last session releases it.
 func flushPolicyRoutingTable() {
 	for _, family := range []int{netlink.FAMILY_V4, netlink.FAMILY_V6} {
 		filter := &netlink.Route{Table: policyRoutingTable}
@@ -243,6 +368,9 @@ func flushPolicyRoutingTable() {
 			_ = netlink.RouteDel(&routes[i])
 		}
 	}
+	linuxPolicyRouteMu.Lock()
+	linuxPolicyRouteRefs = map[string]int{}
+	linuxPolicyRouteMu.Unlock()
 }
 
 type linuxGatewayInfo struct {
@@ -277,9 +405,8 @@ func linuxDefaultGateway(family string) (linuxGatewayInfo, error) {
 	return linuxGatewayInfo{}, errors.New("default gateway not found")
 }
 
-// isDefaultDst reports whether dst represents 0.0.0.0/0 or ::/0. netlink
-// returns either nil or an explicit zero CIDR depending on kernel/library
-// version, so handle both.
+// isDefaultDst reports whether dst is 0.0.0.0/0 or ::/0; netlink returns
+// either nil or an explicit zero CIDR depending on kernel/library version.
 func isDefaultDst(dst *net.IPNet) bool {
 	if dst == nil {
 		return true
@@ -301,30 +428,36 @@ func deleteLinuxInterface(interfaceName string) error {
 // DNS management via D-Bus (systemd-resolved) or resolv.conf fallback
 // ---------------------------------------------------------------------------
 
-// applyLinuxDNSServers configures DNS servers for the tunnel interface.
-// It first attempts systemd-resolved via D-Bus; if that fails, it falls
-// back to editing /etc/resolv.conf.
-func applyLinuxDNSServers(interfaceName string, dnsServers []string) (*linuxDNSOverride, error) {
+// linuxResolvSymlinkBackup records whether /etc/resolv.conf was a symlink and
+// where it pointed; tracked in linuxExtra since linuxDNSOverride has no field.
+type linuxResolvSymlinkBackup struct {
+	wasSymlink bool
+	target     string
+}
+
+// applyLinuxDNSServers tries systemd-resolved via D-Bus first, falling back
+// to editing /etc/resolv.conf.
+func applyLinuxDNSServers(interfaceName string, dnsServers []string) (*linuxDNSOverride, linuxResolvSymlinkBackup, error) {
 	if strings.TrimSpace(interfaceName) == "" {
-		return nil, errors.New("interface name required for DNS")
+		return nil, linuxResolvSymlinkBackup{}, errors.New("interface name required for DNS")
 	}
 
 	normalized := uniqueStringsPreserveOrder(dnsServers)
 	if len(normalized) == 0 {
-		return nil, nil
+		return nil, linuxResolvSymlinkBackup{}, nil
 	}
 
 	override, err := applyLinuxDNSResolved(interfaceName, normalized)
 	if err == nil {
-		return override, nil
+		return override, linuxResolvSymlinkBackup{}, nil
 	}
 
-	override, fallbackErr := applyLinuxDNSResolvConf(normalized)
+	override, backup, fallbackErr := applyLinuxDNSResolvConf(normalized)
 	if fallbackErr == nil {
-		return override, nil
+		return override, backup, nil
 	}
 
-	return nil, fmt.Errorf(
+	return nil, linuxResolvSymlinkBackup{}, fmt.Errorf(
 		"DNS setup failed via resolved (%v) and resolv.conf (%v)",
 		err, fallbackErr,
 	)
@@ -376,7 +509,7 @@ func applyLinuxDNSResolved(interfaceName string, dnsServers []string) (*linuxDNS
 
 	// Set routing domain "~." so all queries go through this link.
 	type domainEntry struct {
-		Domain    string
+		Domain      string
 		RoutingOnly bool
 	}
 	domains := []domainEntry{{Domain: ".", RoutingOnly: true}}
@@ -394,8 +527,9 @@ func applyLinuxDNSResolved(interfaceName string, dnsServers []string) (*linuxDNS
 	}, nil
 }
 
-// applyLinuxDNSResolvConf directly edits /etc/resolv.conf as a fallback.
-func applyLinuxDNSResolvConf(dnsServers []string) (*linuxDNSOverride, error) {
+// applyLinuxDNSResolvConf replaces /etc/resolv.conf via rename rather than
+// following a generator's symlink (systemd-resolved, resolvconf) through to its target.
+func applyLinuxDNSResolvConf(dnsServers []string) (*linuxDNSOverride, linuxResolvSymlinkBackup, error) {
 	const resolvConfPath = "/etc/resolv.conf"
 
 	override := &linuxDNSOverride{
@@ -403,29 +537,76 @@ func applyLinuxDNSResolvConf(dnsServers []string) (*linuxDNSOverride, error) {
 		resolvConfPath: resolvConfPath,
 		resolvConfMode: 0o644,
 	}
+	var backup linuxResolvSymlinkBackup
 
-	stat, statErr := os.Stat(resolvConfPath)
+	lst, lstatErr := os.Lstat(resolvConfPath)
 	switch {
-	case statErr == nil:
+	case lstatErr == nil && lst.Mode()&os.ModeSymlink != 0:
+		target, readErr := os.Readlink(resolvConfPath)
+		if readErr != nil {
+			return nil, backup, fmt.Errorf("readlink %s: %w", resolvConfPath, readErr)
+		}
 		override.resolvConfHad = true
-		override.resolvConfMode = stat.Mode().Perm()
+		backup.wasSymlink = true
+		backup.target = target
+		if existing, readErr := os.ReadFile(resolvConfPath); readErr == nil {
+			override.resolvConfData = existing
+		} else if !errors.Is(readErr, os.ErrNotExist) {
+			return nil, backup, fmt.Errorf("read %s: %w", resolvConfPath, readErr)
+		}
+	case lstatErr == nil:
+		override.resolvConfHad = true
+		override.resolvConfMode = lst.Mode().Perm()
 		existing, readErr := os.ReadFile(resolvConfPath)
 		if readErr != nil {
-			return nil, fmt.Errorf("read %s: %w", resolvConfPath, readErr)
+			return nil, backup, fmt.Errorf("read %s: %w", resolvConfPath, readErr)
 		}
 		override.resolvConfData = existing
-	case errors.Is(statErr, os.ErrNotExist):
+	case errors.Is(lstatErr, os.ErrNotExist):
 		override.resolvConfHad = false
 	default:
-		return nil, fmt.Errorf("stat %s: %w", resolvConfPath, statErr)
+		return nil, backup, fmt.Errorf("lstat %s: %w", resolvConfPath, lstatErr)
 	}
 
 	rendered := renderResolvConf(override.resolvConfData, dnsServers)
-	if err := os.WriteFile(resolvConfPath, rendered, override.resolvConfMode); err != nil {
-		return nil, fmt.Errorf("write %s: %w", resolvConfPath, err)
+	if err := atomicReplaceFile(resolvConfPath, rendered, override.resolvConfMode); err != nil {
+		return nil, backup, fmt.Errorf("write %s: %w", resolvConfPath, err)
 	}
 
-	return override, nil
+	return override, backup, nil
+}
+
+// atomicReplaceFile renames a temp file over path, replacing the directory
+// entry itself rather than following a symlink the way os.WriteFile does.
+func atomicReplaceFile(path string, data []byte, mode os.FileMode) error {
+	if mode == 0 {
+		mode = 0o644
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".resolv.conf.pangea-*")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+
+	_, writeErr := tmp.Write(data)
+	closeErr := tmp.Close()
+	if writeErr != nil {
+		os.Remove(tmpPath)
+		return writeErr
+	}
+	if closeErr != nil {
+		os.Remove(tmpPath)
+		return closeErr
+	}
+	if err := os.Chmod(tmpPath, mode); err != nil {
+		os.Remove(tmpPath)
+		return err
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		os.Remove(tmpPath)
+		return err
+	}
+	return nil
 }
 
 func renderResolvConf(previous []byte, dnsServers []string) []byte {
@@ -457,7 +638,7 @@ func renderResolvConf(previous []byte, dnsServers []string) []byte {
 }
 
 // restoreLinuxDNSServers reverses the DNS changes made by applyLinuxDNSServers.
-func restoreLinuxDNSServers(override *linuxDNSOverride) error {
+func restoreLinuxDNSServers(override *linuxDNSOverride, backup linuxResolvSymlinkBackup) error {
 	if override == nil {
 		return nil
 	}
@@ -490,12 +671,39 @@ func restoreLinuxDNSServers(override *linuxDNSOverride) error {
 		if path == "" {
 			path = "/etc/resolv.conf"
 		}
+
+		if backup.wasSymlink {
+			// Put the generator's symlink back rather than writing stale
+			// captured content over whatever it has since regenerated.
+			_ = os.Remove(path)
+			if backup.target == "" {
+				return nil
+			}
+			if err := os.Symlink(backup.target, path); err != nil {
+				return fmt.Errorf("restore resolv.conf symlink: %w", err)
+			}
+			return nil
+		}
+
 		if override.resolvConfHad {
 			mode := override.resolvConfMode
 			if mode == 0 {
 				mode = 0o644
 			}
-			return os.WriteFile(path, override.resolvConfData, mode)
+			return atomicReplaceFile(path, override.resolvConfData, mode)
+		}
+
+		// Nothing existed before. Lstat first: if a generator has since put
+		// its own symlink back, it is not ours to remove.
+		info, statErr := os.Lstat(path)
+		if statErr != nil {
+			if errors.Is(statErr, os.ErrNotExist) {
+				return nil
+			}
+			return fmt.Errorf("lstat %s: %w", path, statErr)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return nil
 		}
 		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return fmt.Errorf("remove %s: %w", path, err)
@@ -507,19 +715,14 @@ func restoreLinuxDNSServers(override *linuxDNSOverride) error {
 	}
 }
 
-// ensureSessionDNS is Windows-only for now: there, interface DNS belongs to
-// whoever wrote last, so it has to be re-asserted. systemd-resolved and
-// resolv.conf hold what was written until something rewrites the file, and
-// re-asserting either would mean re-running the whole apply path.
+// ensureSessionDNS is Windows-only: Linux DNS state (resolved link, or a
+// file we own) holds until something else rewrites it, so nothing to re-assert.
 func ensureSessionDNS(_ *tunnelSession, _ []string) (bool, error) {
 	return false, nil
 }
 
-// linuxBypassGateway picks the next hop the endpoint bypass should hang off:
-// a default route with a real gateway address that is not the tunnel's own.
-//
-// Ties break on the lower interface index so repeated elections agree and the
-// guard cannot re-pin back and forth between two defaults every tick.
+// linuxBypassGateway picks a non-tunnel default gateway, accepting a
+// link-scope one with no gateway address to match linuxDefaultGateway.
 func linuxBypassGateway(tunnelIndex int) (linuxGatewayInfo, bool, error) {
 	routes, err := netlink.RouteList(nil, netlink.FAMILY_V4)
 	if err != nil {
@@ -529,26 +732,36 @@ func linuxBypassGateway(tunnelIndex int) (linuxGatewayInfo, bool, error) {
 	var best linuxGatewayInfo
 	found := false
 	for _, route := range routes {
-		if !isDefaultDst(route.Dst) || route.LinkIndex == tunnelIndex {
+		if !isDefaultDst(route.Dst) || route.LinkIndex == tunnelIndex || route.LinkIndex <= 0 {
 			continue
 		}
-		if route.Gw == nil || route.Gw.IsUnspecified() {
+		if route.Gw != nil && route.Gw.IsUnspecified() {
 			continue
 		}
-		if !found || route.LinkIndex < best.linkIndex {
-			best = linuxGatewayInfo{gw: route.Gw, linkIndex: route.LinkIndex}
+
+		candidate := linuxGatewayInfo{linkIndex: route.LinkIndex}
+		if route.Gw != nil {
+			candidate.gw = route.Gw
+		}
+		if !found || candidate.linkIndex < best.linkIndex {
+			best = candidate
 			found = true
 		}
 	}
 	return best, found, nil
 }
 
-// ensureLinuxBypassRoute points one table's host route at gateway, reporting
-// whether it had to change anything.
-//
-// RouteReplace is a single netlink message, so unlike a delete followed by an
-// add there is no window where the endpoint has no bypass and falls into the
-// tunnel.
+// gatewaysEqual compares two possibly-nil gateway addresses; nil means a
+// link-scope default with no gateway of its own.
+func gatewaysEqual(a, b net.IP) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return a.Equal(b)
+}
+
+// ensureLinuxBypassRoute points one table's host route at gateway. It uses
+// RouteReplace (one netlink message) so there is no delete/add gap.
 func ensureLinuxBypassRoute(destination *net.IPNet, gateway linuxGatewayInfo, table int) (bool, error) {
 	filter := &netlink.Route{Dst: destination, Table: table}
 	existing, err := netlink.RouteListFiltered(netlink.FAMILY_V4, filter, netlink.RT_FILTER_DST|netlink.RT_FILTER_TABLE)
@@ -556,7 +769,7 @@ func ensureLinuxBypassRoute(destination *net.IPNet, gateway linuxGatewayInfo, ta
 		return false, fmt.Errorf("list route %s in table %d: %w", destination.String(), table, err)
 	}
 	for _, route := range existing {
-		if route.LinkIndex == gateway.linkIndex && route.Gw != nil && route.Gw.Equal(gateway.gw) {
+		if route.LinkIndex == gateway.linkIndex && gatewaysEqual(route.Gw, gateway.gw) {
 			return false, nil
 		}
 	}
@@ -569,14 +782,7 @@ func ensureLinuxBypassRoute(destination *net.IPNet, gateway linuxGatewayInfo, ta
 }
 
 // ensureSessionEndpointRoutes re-pins the endpoint bypass routes to the host's
-// current default gateway, reporting whether it had to repair anything.
-//
-// Both tables carry the bypass and both can go wrong. WireGuard's own socket is
-// fwmarked onto the main table, where a host route left on a gateway that has
-// moved is more specific than the default and shadows it. The transports run
-// unmarked on table 51820, where everything not covered by the bypass goes into
-// the tunnel — so a dropped route there sends a transport's own connection to
-// the node through the tunnel it is carrying.
+// current default gateway in both tables, reporting whether it repaired anything.
 func ensureSessionEndpointRoutes(_ context.Context, session *tunnelSession, _ map[uint64]struct{}) (bool, error) {
 	if session == nil || len(session.endpointRoutes) == 0 {
 		return false, nil
@@ -619,4 +825,175 @@ func ensureSessionEndpointRoutes(_ context.Context, session *tunnelSession, _ ma
 	}
 
 	return repaired, errors.Join(errs...)
+}
+
+// Crash recovery: persist pre-state so a fresh daemon can undo it.
+
+type linuxPersistedRoute struct {
+	Family      string `json:"family"`
+	Destination string `json:"destination"`
+	OwnsMain    bool   `json:"ownsMain"`
+	OwnsPolicy  bool   `json:"ownsPolicy"`
+}
+
+type linuxPersistedDNS struct {
+	Mode                    string `json:"mode"`
+	InterfaceName           string `json:"interfaceName"`
+	ResolvConfPath          string `json:"resolvConfPath"`
+	ResolvConfData          []byte `json:"resolvConfData"`
+	ResolvConfMode          uint32 `json:"resolvConfMode"`
+	ResolvConfHad           bool   `json:"resolvConfHad"`
+	ResolvConfWasSymlink    bool   `json:"resolvConfWasSymlink"`
+	ResolvConfSymlinkTarget string `json:"resolvConfSymlinkTarget"`
+}
+
+func newLinuxPersistedDNS(override *linuxDNSOverride, backup linuxResolvSymlinkBackup) *linuxPersistedDNS {
+	if override == nil {
+		return nil
+	}
+	return &linuxPersistedDNS{
+		Mode:                    string(override.mode),
+		InterfaceName:           override.interfaceName,
+		ResolvConfPath:          override.resolvConfPath,
+		ResolvConfData:          override.resolvConfData,
+		ResolvConfMode:          uint32(override.resolvConfMode),
+		ResolvConfHad:           override.resolvConfHad,
+		ResolvConfWasSymlink:    backup.wasSymlink,
+		ResolvConfSymlinkTarget: backup.target,
+	}
+}
+
+func (d *linuxPersistedDNS) toOverride() (*linuxDNSOverride, linuxResolvSymlinkBackup) {
+	override := &linuxDNSOverride{
+		mode:           linuxDNSMode(d.Mode),
+		interfaceName:  d.InterfaceName,
+		resolvConfPath: d.ResolvConfPath,
+		resolvConfData: d.ResolvConfData,
+		resolvConfMode: os.FileMode(d.ResolvConfMode),
+		resolvConfHad:  d.ResolvConfHad,
+	}
+	backup := linuxResolvSymlinkBackup{wasSymlink: d.ResolvConfWasSymlink, target: d.ResolvConfSymlinkTarget}
+	return override, backup
+}
+
+type linuxPersistedSession struct {
+	InterfaceName  string                `json:"interfaceName"`
+	AllowedIPs     []string              `json:"allowedIPs"`
+	EndpointRoutes []linuxPersistedRoute `json:"endpointRoutes"`
+	DNS            *linuxPersistedDNS    `json:"dns,omitempty"`
+}
+
+func newLinuxPersistedSession(interfaceName string, allowedIPs []string, endpointRoutes []routeSpec, ownership map[string]routeOwnership, dnsOverride *linuxDNSOverride, backup linuxResolvSymlinkBackup) *linuxPersistedSession {
+	routes := make([]linuxPersistedRoute, 0, len(endpointRoutes))
+	for _, r := range endpointRoutes {
+		own := ownership[routeOwnershipKey(r)]
+		routes = append(routes, linuxPersistedRoute{
+			Family: r.family, Destination: r.destination,
+			OwnsMain: own.ownsMain, OwnsPolicy: own.ownsPolicy,
+		})
+	}
+	return &linuxPersistedSession{
+		InterfaceName:  interfaceName,
+		AllowedIPs:     allowedIPs,
+		EndpointRoutes: routes,
+		DNS:            newLinuxPersistedDNS(dnsOverride, backup),
+	}
+}
+
+func linuxSessionStateDir() (string, error) {
+	dir, err := platform.AppSupportDir()
+	if err != nil {
+		return "", err
+	}
+	stateDir := filepath.Join(dir, "wg-linux-sessions")
+	if err := os.MkdirAll(stateDir, 0o700); err != nil {
+		return "", fmt.Errorf("create linux session state dir: %w", err)
+	}
+	return stateDir, nil
+}
+
+func linuxSessionStateFile(tunnelKey string) (string, error) {
+	dir, err := linuxSessionStateDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, tunnelKey+".json"), nil
+}
+
+// persistLinuxSessionState writes the network pre-state to disk so a fresh
+// daemon can undo it if this process dies before Stop runs.
+func persistLinuxSessionState(tunnelKey string, session *linuxPersistedSession) error {
+	path, err := linuxSessionStateFile(tunnelKey)
+	if err != nil {
+		return err
+	}
+	data, err := json.Marshal(session)
+	if err != nil {
+		return fmt.Errorf("marshal linux session state: %w", err)
+	}
+	return os.WriteFile(path, data, 0o600)
+}
+
+// clearLinuxSessionState removes the persisted pre-state after a normal stop
+// or a completed startup restore.
+func clearLinuxSessionState(tunnelKey string) {
+	path, err := linuxSessionStateFile(tunnelKey)
+	if err != nil {
+		return
+	}
+	_ = os.Remove(path)
+}
+
+// restoreOrphanedLinuxNetworkState undoes network changes left behind by a
+// daemon process that died before Stop ran, using state persisted at Start.
+func restoreOrphanedLinuxNetworkState() {
+	dir, err := linuxSessionStateDir()
+	if err != nil {
+		return
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil || len(entries) == 0 {
+		return
+	}
+
+	recovered := false
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
+			continue
+		}
+		path := filepath.Join(dir, entry.Name())
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			continue
+		}
+		var persisted linuxPersistedSession
+		if err := json.Unmarshal(data, &persisted); err != nil {
+			_ = os.Remove(path)
+			continue
+		}
+		recovered = true
+
+		if persisted.DNS != nil {
+			override, backup := persisted.DNS.toOverride()
+			_ = restoreLinuxDNSServers(override, backup)
+		}
+
+		routes := make([]routeSpec, 0, len(persisted.EndpointRoutes))
+		ownership := make(map[string]routeOwnership, len(persisted.EndpointRoutes))
+		for _, r := range persisted.EndpointRoutes {
+			route := routeSpec{family: r.Family, destination: r.Destination}
+			routes = append(routes, route)
+			ownership[routeOwnershipKey(route)] = routeOwnership{ownsMain: r.OwnsMain, ownsPolicy: r.OwnsPolicy}
+		}
+		removeLinuxEndpointRoutes(routes, ownership)
+
+		_ = os.Remove(path)
+	}
+
+	// A fresh process owns no live sessions, so a full teardown of the
+	// shared rules/table is always correct here, independent of ref counts.
+	if recovered {
+		removeLinuxPolicyRules()
+		flushPolicyRoutingTable()
+	}
 }

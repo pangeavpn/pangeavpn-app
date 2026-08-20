@@ -171,6 +171,51 @@ func TestEnsureSessionEndpointRoutes_NoRoutesIsANoOp(t *testing.T) {
 	}
 }
 
+func TestAllowedIPsHaveIPv6(t *testing.T) {
+	if allowedIPsHaveIPv6([]string{"0.0.0.0/0", "10.0.0.0/8"}) {
+		t.Error("v4-only allowed ips reported as having ipv6")
+	}
+	if !allowedIPsHaveIPv6([]string{"0.0.0.0/0", "::/0"}) {
+		t.Error("::/0 not detected as ipv6")
+	}
+	if !allowedIPsHaveIPv6([]string{"2001:db8::/32"}) {
+		t.Error("v6 prefix not detected as ipv6")
+	}
+}
+
+func TestDarwinDNSListsEqual(t *testing.T) {
+	if !darwinDNSListsEqual([]string{"1.1.1.1", "9.9.9.9"}, []string{"1.1.1.1", "9.9.9.9"}) {
+		t.Error("identical lists reported unequal")
+	}
+	if darwinDNSListsEqual([]string{"1.1.1.1"}, []string{"9.9.9.9"}) {
+		t.Error("different lists reported equal")
+	}
+	if darwinDNSListsEqual([]string{"1.1.1.1"}, nil) {
+		t.Error("list vs nil reported equal")
+	}
+}
+
+func TestIsDarwinDNSUnknown(t *testing.T) {
+	if !isDarwinDNSUnknown([]string{darwinDNSUnknownMarker}) {
+		t.Error("unknown marker not recognized")
+	}
+	if isDarwinDNSUnknown(nil) {
+		t.Error("nil (automatic) treated as unknown")
+	}
+	if isDarwinDNSUnknown([]string{"1.1.1.1"}) {
+		t.Error("real server list treated as unknown")
+	}
+}
+
+func TestIsDarwinRouteExists(t *testing.T) {
+	if !isDarwinRouteExists([]byte("add host 1.2.3.4: gateway 1.2.3.1 fails File exists")) {
+		t.Error("did not recognize a File exists failure")
+	}
+	if isDarwinRouteExists([]byte("add host 1.2.3.4: network is unreachable")) {
+		t.Error("misclassified an unrelated route failure as already-exists")
+	}
+}
+
 // TestDarwinIPv4Routes_ReadsTheLiveTable exercises the parse against whatever
 // the machine actually has, which is the part no fixture can stand in for.
 func TestDarwinIPv4Routes_ReadsTheLiveTable(t *testing.T) {

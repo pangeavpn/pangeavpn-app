@@ -108,12 +108,25 @@ AllowedIPs = 0.0.0.0/0
 	}
 }
 
-func TestResolveEndpointRoutes_IPv4OnlyFromLiterals(t *testing.T) {
-	routes := resolveEndpointRoutes(context.Background(), []string{"198.51.100.10", "2001:db8::1"})
-	if len(routes) != 1 {
-		t.Fatalf("expected exactly one IPv4 endpoint route, got %d: %#v", len(routes), routes)
+func TestResolveEndpointRoutes_MixedFamilyFromLiterals(t *testing.T) {
+	routes, err := resolveEndpointRoutes(context.Background(), []string{"198.51.100.10", "2001:db8::1"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(routes) != 2 {
+		t.Fatalf("expected one IPv4 and one IPv6 endpoint route, got %d: %#v", len(routes), routes)
 	}
 	if routes[0].family != "inet" || routes[0].destination != "198.51.100.10" {
-		t.Fatalf("unexpected route: %#v", routes[0])
+		t.Fatalf("unexpected inet route: %#v", routes[0])
+	}
+	if routes[1].family != "inet6" || routes[1].destination != "2001:db8::1" {
+		t.Fatalf("unexpected inet6 route: %#v", routes[1])
+	}
+}
+
+func TestResolveEndpointRoutes_LookupFailureReturnsError(t *testing.T) {
+	_, err := resolveEndpointRoutes(context.Background(), []string{"this-host-does-not-resolve.invalid"})
+	if err == nil {
+		t.Fatal("expected a resolution error, got nil")
 	}
 }

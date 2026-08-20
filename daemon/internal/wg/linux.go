@@ -8,11 +8,44 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 
 	"golang.zx2c4.com/wireguard/tun"
 
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/state"
 )
+
+// linuxSessionExtra holds per-session linux state that tunnelSession (a type
+// shared across platforms) has no field for.
+type linuxSessionExtra struct {
+	dnsSymlinkBackup       linuxResolvSymlinkBackup
+	endpointRouteOwnership map[string]routeOwnership
+}
+
+var (
+	linuxExtraMu sync.Mutex
+	linuxExtra   = map[string]*linuxSessionExtra{}
+)
+
+func storeLinuxExtra(tunnelKey string, extra *linuxSessionExtra) {
+	linuxExtraMu.Lock()
+	defer linuxExtraMu.Unlock()
+	linuxExtra[tunnelKey] = extra
+}
+
+func takeLinuxExtra(tunnelKey string) *linuxSessionExtra {
+	linuxExtraMu.Lock()
+	defer linuxExtraMu.Unlock()
+	extra := linuxExtra[tunnelKey]
+	delete(linuxExtra, tunnelKey)
+	return extra
+}
+
+func init() {
+	// A previous daemon process may have died mid-session, leaving DNS,
+	// policy routes, and ip rules pointing at a now-unreachable tunnel.
+	restoreOrphanedLinuxNetworkState()
+}
 
 func (m *wireGuardGoManager) Start(ctx context.Context, profile state.WireGuardProfile) error {
 	return m.startLinux(ctx, profile)
@@ -85,29 +118,35 @@ func (m *wireGuardGoManager) startLinux(ctx context.Context, profile state.WireG
 		return fmt.Errorf("bring interface up: %w", err)
 	}
 
-	// Add endpoint bypass routes via netlink.
-	endpointRoutes, _ := addLinuxEndpointRoutes(ctx, parsed.endpointHosts)
+	// Add endpoint bypass routes via netlink; ownership tracks which table(s)
+	// we actually created so teardown never deletes a route we don't own.
+	endpointRoutes, routeOwnership, epErr := addLinuxEndpointRoutes(ctx, parsed.endpointHosts)
+	if epErr != nil {
+		m.logs.Add(state.LogWarn, state.SourceWireGuard, fmt.Sprintf("endpoint bypass routes incomplete: %v", epErr))
+	}
 
 	// Set up policy routing (custom table + ip rules) so that all traffic,
 	// including SO_BINDTODEVICE probes from NetworkManager, goes through
 	// the tunnel.
 	if err := addLinuxPolicyRouting(interfaceName, allowedIPs); err != nil {
-		removeLinuxEndpointRoutes(endpointRoutes)
+		removeLinuxEndpointRoutes(endpointRoutes, routeOwnership)
 		closeDevice(dev)
 		return fmt.Errorf("add policy routing: %w", err)
 	}
 
 	// Configure DNS via D-Bus (systemd-resolved) or resolv.conf fallback.
 	var linuxDNS *linuxDNSOverride
+	var symlinkBackup linuxResolvSymlinkBackup
 	if len(parsed.dnsServers) > 0 {
-		override, dnsErr := applyLinuxDNSServers(interfaceName, parsed.dnsServers)
+		override, backup, dnsErr := applyLinuxDNSServers(interfaceName, parsed.dnsServers)
 		if dnsErr != nil {
 			removeLinuxPolicyRouting(interfaceName, allowedIPs)
-			removeLinuxEndpointRoutes(endpointRoutes)
+			removeLinuxEndpointRoutes(endpointRoutes, routeOwnership)
 			closeDevice(dev)
 			return fmt.Errorf("apply DNS: %w", dnsErr)
 		}
 		linuxDNS = override
+		symlinkBackup = backup
 		m.logs.Add(state.LogInfo, state.SourceWireGuard, fmt.Sprintf("applied DNS servers %s via %s", strings.Join(parsed.dnsServers, ", "), override.mode))
 	}
 
@@ -119,6 +158,15 @@ func (m *wireGuardGoManager) startLinux(ctx context.Context, profile state.WireG
 		linuxDNSOverride: linuxDNS,
 		linuxAllowedIPs:  allowedIPs,
 	})
+	storeLinuxExtra(tunnelKey, &linuxSessionExtra{
+		dnsSymlinkBackup:       symlinkBackup,
+		endpointRouteOwnership: routeOwnership,
+	})
+
+	persisted := newLinuxPersistedSession(interfaceName, allowedIPs, endpointRoutes, routeOwnership, linuxDNS, symlinkBackup)
+	if perr := persistLinuxSessionState(tunnelKey, persisted); perr != nil {
+		m.logs.Add(state.LogWarn, state.SourceWireGuard, fmt.Sprintf("persist network pre-state failed: %v", perr))
+	}
 
 	m.logs.Add(state.LogInfo, state.SourceWireGuard, fmt.Sprintf("wireguard started for %s on %s (in-process)", profile.TunnelName, interfaceName))
 	return nil
@@ -132,7 +180,9 @@ func (m *wireGuardGoManager) stopLinux(ctx context.Context, profile state.WireGu
 
 	tunnelKey := sanitizeTunnelName(profile.TunnelName)
 	session, hasSession := m.takeSession(tunnelKey)
+	extra := takeLinuxExtra(tunnelKey)
 	if !hasSession || session == nil {
+		clearLinuxSessionState(tunnelKey)
 		return nil
 	}
 
@@ -140,24 +190,35 @@ func (m *wireGuardGoManager) stopLinux(ctx context.Context, profile state.WireGu
 
 	// Restore DNS.
 	if session.linuxDNSOverride != nil {
-		if err := restoreLinuxDNSServers(session.linuxDNSOverride); err != nil {
+		var backup linuxResolvSymlinkBackup
+		if extra != nil {
+			backup = extra.dnsSymlinkBackup
+		}
+		if err := restoreLinuxDNSServers(session.linuxDNSOverride, backup); err != nil {
 			m.logs.Add(state.LogWarn, state.SourceWireGuard, fmt.Sprintf("restore DNS failed: %v", err))
 		} else {
 			m.logs.Add(state.LogInfo, state.SourceWireGuard, fmt.Sprintf("restored DNS settings (%s)", session.linuxDNSOverride.mode))
 		}
 	}
 
-	// Remove policy routing (ip rules + custom table routes).
+	// Remove policy routing (ip rules + custom table routes), scoped so a
+	// still-running second session keeps its own share.
 	removeLinuxPolicyRouting(interfaceName, session.linuxAllowedIPs)
 
-	// Remove endpoint routes.
-	removeLinuxEndpointRoutes(session.endpointRoutes)
+	// Remove endpoint routes we own.
+	var ownership map[string]routeOwnership
+	if extra != nil {
+		ownership = extra.endpointRouteOwnership
+	}
+	removeLinuxEndpointRoutes(session.endpointRoutes, ownership)
 
 	// Close the WireGuard device (also closes TUN).
 	closeDevice(session.device)
 
 	// The TUN device removal should also remove the interface, but ensure cleanup.
 	_ = deleteLinuxInterface(interfaceName)
+
+	clearLinuxSessionState(tunnelKey)
 
 	m.logs.Add(state.LogInfo, state.SourceWireGuard, fmt.Sprintf("wireguard stopped for %s (%s)", profile.TunnelName, interfaceName))
 	return nil
@@ -169,9 +230,11 @@ func (m *wireGuardGoManager) statusLinux(_ context.Context, profile state.WireGu
 	}
 
 	tunnelKey := sanitizeTunnelName(profile.TunnelName)
-	if m.hasActiveDevice(tunnelKey) {
-		session, _ := m.session(tunnelKey)
-		rxBytes, txBytes, lastHandshake := peerStats(session.device)
+	if session, ok := m.session(tunnelKey); ok && session != nil && session.device != nil {
+		rxBytes, txBytes, lastHandshake, statsErr := peerStats(session.device)
+		if statsErr != nil {
+			m.logs.Add(state.LogWarn, state.SourceWireGuard, fmt.Sprintf("read wireguard stats failed: %v", statsErr))
+		}
 		return state.WireGuardStatus{
 			Running:           true,
 			Detail:            fmt.Sprintf("interface %s running (in-process)", session.interfaceName),

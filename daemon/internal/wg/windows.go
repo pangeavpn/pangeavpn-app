@@ -98,7 +98,9 @@ func (m *wireGuardGoManager) startWindows(ctx context.Context, profile state.Wir
 
 	endpointRoutes, endpointErr := addWindowsEndpointRoutes(ctx, excludeLUIDs, parsed.endpointHosts)
 	if endpointErr != nil {
-		m.logs.Add(state.LogWarn, state.SourceWireGuard, fmt.Sprintf("endpoint bypass route setup warning: %v", endpointErr))
+		_ = removeWindowsEndpointRoutes(endpointRoutes)
+		closeDevice(dev)
+		return fmt.Errorf("endpoint bypass route setup: %w", endpointErr)
 	}
 
 	if err := configureWindowsInterface(tunnelLUID, parsed.addresses, allowedIPs, parsed.dnsServers, parsed.mtu); err != nil {
@@ -156,12 +158,18 @@ func (m *wireGuardGoManager) statusWindows(_ context.Context, profile state.Wire
 	}
 
 	tunnelKey := sanitizeTunnelName(profile.TunnelName)
-	if m.hasActiveDevice(tunnelKey) {
-		session, _ := m.session(tunnelKey)
-		rxBytes, txBytes, lastHandshake := peerStats(session.device)
+	rxBytes, txBytes, lastHandshake, active, err := m.sessionStats(tunnelKey)
+	if err != nil {
+		return state.WireGuardStatus{}, fmt.Errorf("read wireguard status: %w", err)
+	}
+	if active {
+		interfaceName := profile.TunnelName
+		if session, ok := m.session(tunnelKey); ok && session != nil {
+			interfaceName = session.interfaceName
+		}
 		return state.WireGuardStatus{
 			Running:           true,
-			Detail:            fmt.Sprintf("interface %s running (in-process)", session.interfaceName),
+			Detail:            fmt.Sprintf("interface %s running (in-process)", interfaceName),
 			BytesIn:           rxBytes,
 			BytesOut:          txBytes,
 			LastHandshakeUnix: lastHandshake,

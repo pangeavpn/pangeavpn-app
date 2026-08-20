@@ -180,12 +180,12 @@ func TestWindowsDNSMatches(t *testing.T) {
 			match:   false,
 		},
 		{
-			// The tunnel is IPv4-only and bring-up clears the v6 list; a v6
-			// entry reported alongside ours must not force a pointless rewrite.
-			name:    "IPv6 entries are ignored",
+			// The tunnel is IPv4-only, so a stray v6 resolver picked up
+			// mid-session (another VPN, a re-profile) is itself a change.
+			name:    "unexpected IPv6 entry forces a correction",
 			current: append(addrs("1.1.1.1", "1.0.0.1"), netip.MustParseAddr("fe80::1")),
 			want:    addrs("1.1.1.1", "1.0.0.1"),
-			match:   true,
+			match:   false,
 		},
 		{
 			// GetAdaptersAddresses can report a v4 address in v4-mapped form.
@@ -198,7 +198,7 @@ func TestWindowsDNSMatches(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := windowsDNSMatches(tc.current, tc.want); got != tc.match {
+			if got := windowsDNSMatches(tc.current, tc.want, nil); got != tc.match {
 				t.Errorf("windowsDNSMatches(%v, %v) = %t, want %t", tc.current, tc.want, got, tc.match)
 			}
 		})

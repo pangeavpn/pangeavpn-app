@@ -11,6 +11,7 @@ import (
 	"net/netip"
 	"slices"
 	"strings"
+	"time"
 
 	"golang.org/x/sys/windows"
 	"golang.zx2c4.com/wireguard/windows/tunnel/winipcfg"
@@ -79,17 +80,19 @@ func configureWindowsInterface(luidValue uint64, addresses []string, allowedIPs 
 	}
 
 	var errs []error
-	if err := luid.SetRoutesForFamily(windowsFamilyV4, routes4); err != nil {
-		errs = append(errs, fmt.Errorf("set IPv4 routes: %w", err))
-	}
-	if err := luid.SetRoutesForFamily(windowsFamilyV6, routes6); err != nil {
-		errs = append(errs, fmt.Errorf("set IPv6 routes: %w", err))
-	}
 	if err := luid.SetIPAddressesForFamily(windowsFamilyV4, addresses4); err != nil {
 		errs = append(errs, fmt.Errorf("set IPv4 addresses: %w", err))
 	}
 	if err := luid.SetIPAddressesForFamily(windowsFamilyV6, addresses6); err != nil {
 		errs = append(errs, fmt.Errorf("set IPv6 addresses: %w", err))
+	}
+	// Addresses first: an on-link default route can fail ERROR_NOT_FOUND on an
+	// interface with no address configured yet.
+	if err := luid.SetRoutesForFamily(windowsFamilyV4, routes4); err != nil {
+		errs = append(errs, fmt.Errorf("set IPv4 routes: %w", err))
+	}
+	if err := luid.SetRoutesForFamily(windowsFamilyV6, routes6); err != nil {
+		errs = append(errs, fmt.Errorf("set IPv6 routes: %w", err))
 	}
 	if err := configureWindowsIPInterface(luid, mtu); err != nil {
 		errs = append(errs, err)
@@ -144,13 +147,27 @@ func configureWindowsIPInterface(luid winipcfg.LUID, mtu int) error {
 	return errors.Join(errs...)
 }
 
+const windowsIPInterfaceRetries = 20
+const windowsIPInterfaceRetryDelay = 50 * time.Millisecond
+
+// tuneWindowsIPInterface waits for the family's MIB_IPINTERFACE_ROW to be
+// published — it is often missing immediately after adapter creation — then
+// forces the metric to 0 and confirms the write actually took.
 func tuneWindowsIPInterface(luid winipcfg.LUID, family winipcfg.AddressFamily, mtu int) error {
-	row, err := luid.IPInterface(family)
-	if err != nil {
-		if errors.Is(err, windows.ERROR_NOT_FOUND) {
-			return nil
+	var row *winipcfg.MibIPInterfaceRow
+	var err error
+	for attempt := 0; attempt < windowsIPInterfaceRetries; attempt++ {
+		row, err = luid.IPInterface(family)
+		if err == nil {
+			break
 		}
-		return err
+		if !errors.Is(err, windows.ERROR_NOT_FOUND) {
+			return err
+		}
+		time.Sleep(windowsIPInterfaceRetryDelay)
+	}
+	if err != nil {
+		return fmt.Errorf("wait for ip interface: %w", err)
 	}
 
 	row.RouterDiscoveryBehavior = winipcfg.RouterDiscoveryDisabled
@@ -166,7 +183,18 @@ func tuneWindowsIPInterface(luid winipcfg.LUID, family winipcfg.AddressFamily, m
 	// adapters instead of decisively ahead.
 	row.UseAutomaticMetric = false
 	row.Metric = 0
-	return row.Set()
+	if err := row.Set(); err != nil {
+		return err
+	}
+
+	verify, err := luid.IPInterface(family)
+	if err != nil {
+		return fmt.Errorf("verify ip interface metric: %w", err)
+	}
+	if verify.UseAutomaticMetric || verify.Metric != 0 {
+		return fmt.Errorf("ip interface metric did not take (automatic=%v metric=%d)", verify.UseAutomaticMetric, verify.Metric)
+	}
+	return nil
 }
 
 func applyWindowsDNSServers(luid winipcfg.LUID, dnsServers []string) error {
@@ -216,7 +244,7 @@ func ensureSessionDNS(session *tunnelSession, want []string) (bool, error) {
 	}
 	luid := winipcfg.LUID(session.windowsLUID)
 
-	wanted4, _, err := parseWindowsDNSAddrs(want)
+	wanted4, wanted6, err := parseWindowsDNSAddrs(want)
 	if err != nil {
 		return false, err
 	}
@@ -228,30 +256,42 @@ func ensureSessionDNS(session *tunnelSession, want []string) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("read interface DNS: %w", err)
 	}
-	if windowsDNSMatches(current, wanted4) {
+	if windowsDNSMatches(current, wanted4, wanted6) {
 		return false, nil
 	}
 	if err := luid.SetDNS(windowsFamilyV4, wanted4, nil); err != nil {
 		return false, fmt.Errorf("re-apply IPv4 DNS: %w", err)
 	}
+	// The tunnel is IPv4-only: any IPv6 resolvers Windows picked up mid-session
+	// must be wiped, not just outnumbered, or it keeps preferring them.
+	if err := luid.SetDNS(windowsFamilyV6, wanted6, nil); err != nil && !errors.Is(err, windows.ERROR_NOT_FOUND) {
+		return false, fmt.Errorf("re-apply IPv6 DNS: %w", err)
+	}
 	return true, nil
 }
 
-// windowsDNSMatches reports whether the interface's IPv4 resolvers are exactly
-// want, in order — order is preference, so a reordered list is a real change.
-// The v6 list is ignored: the tunnel is IPv4-only and bring-up clears it.
-func windowsDNSMatches(current []netip.Addr, want []netip.Addr) bool {
-	got := make([]netip.Addr, 0, len(want))
+// windowsDNSMatches reports whether the interface's resolvers are exactly
+// want4 followed by want6, in order — order is preference, so a reordered
+// list is a real change, and a stray v6 resolver from elsewhere is too.
+func windowsDNSMatches(current []netip.Addr, want4, want6 []netip.Addr) bool {
+	got4 := make([]netip.Addr, 0, len(want4))
+	got6 := make([]netip.Addr, 0, len(want6))
 	for _, addr := range current {
-		if unmapped := addr.Unmap(); unmapped.Is4() {
-			got = append(got, unmapped)
+		unmapped := addr.Unmap()
+		if unmapped.Is4() {
+			got4 = append(got4, unmapped)
+		} else {
+			got6 = append(got6, unmapped)
 		}
 	}
-	return slices.Equal(got, want)
+	return slices.Equal(got4, want4) && slices.Equal(got6, want6)
 }
 
 func addWindowsEndpointRoutes(ctx context.Context, excludeLUIDs map[uint64]struct{}, endpointHosts []string) ([]windowsRouteSpec, error) {
-	routes := resolveEndpointRoutes(ctx, endpointHosts)
+	routes, resolveErr := resolveEndpointRoutes(ctx, endpointHosts)
+	if resolveErr != nil {
+		return nil, resolveErr
+	}
 	if len(routes) == 0 {
 		return nil, nil
 	}
@@ -283,15 +323,13 @@ func addWindowsEndpointRoutes(ctx context.Context, excludeLUIDs map[uint64]struc
 			destination:   netip.PrefixFrom(addr, bits).Masked().String(),
 			nextHop:       defaultRoute.nextHop.String(),
 		}
-		created, err := addWindowsRoute(spec)
-		if err != nil {
+		if _, err := addWindowsRoute(spec); err != nil {
 			errs = append(errs, err)
 			continue
 		}
-		// A route that was already there is not ours to remove at teardown.
-		if created {
-			added = append(added, spec)
-		}
+		// Adopt a pre-existing route too — most likely left by a crashed prior
+		// session — so this session's teardown cleans it up either way.
+		added = append(added, spec)
 	}
 
 	return added, errors.Join(errs...)
@@ -316,6 +354,7 @@ func ensureSessionEndpointRoutes(_ context.Context, session *tunnelSession, excl
 
 	repaired := false
 	var errs []error
+	var stale []windowsRouteSpec
 	for i := range session.windowsRoutes {
 		current := session.windowsRoutes[i]
 		want, ok := plannedEndpointRoute(current, defaultRoutes)
@@ -343,11 +382,17 @@ func ensureSessionEndpointRoutes(_ context.Context, session *tunnelSession, excl
 		}
 		if want != current {
 			if err := removeWindowsEndpointRoutes([]windowsRouteSpec{current}); err != nil {
+				// Removal failed, so the stale route is still on the host. Keep it
+				// tracked separately so stopWindows still deletes it later.
 				errs = append(errs, err)
+				stale = append(stale, current)
 			}
 		}
 		session.windowsRoutes[i] = want
 		repaired = true
+	}
+	if len(stale) > 0 {
+		session.windowsRoutes = append(session.windowsRoutes, stale...)
 	}
 
 	return repaired, errors.Join(errs...)
