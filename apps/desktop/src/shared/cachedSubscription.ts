@@ -40,14 +40,24 @@ export function restoreCachedSubscription(stored: unknown): CachedSubscription |
   return { subscription: blob.subscription, cachedAt: blob.cachedAt };
 }
 
+const MAX_OFFLINE_GRACE_MS = 14 * 24 * 60 * 60 * 1000;
+const RENEWAL_GRACE_MS = 3 * 24 * 60 * 60 * 1000;
+const ENTITLED_STATUSES = new Set(["trialing", "active"]);
+
 /** An unreachable hub is not evidence that a paid account stopped being paid,
- *  so only a date already past revokes a cached entitlement. */
+ *  but the benefit of the doubt is bounded: a renewing sub survives a missed
+ *  renewal by RENEWAL_GRACE_MS, and any cache older than MAX_OFFLINE_GRACE_MS
+ *  stops granting entitlement outright. */
 export function cachedEntitlement(cached: CachedSubscription, nowMs: number): boolean {
-  const { subscription } = cached;
+  const { subscription, cachedAt } = cached;
+  if (nowMs - cachedAt > MAX_OFFLINE_GRACE_MS) return false;
   if (subscription.entitled === false) return false;
   if (subscription.expiresAt) {
     const expiry = Date.parse(subscription.expiresAt);
-    if (Number.isFinite(expiry) && expiry <= nowMs) return false;
+    if (Number.isFinite(expiry) && expiry <= nowMs) {
+      const graceDeadline = subscription.renews ? expiry + RENEWAL_GRACE_MS : expiry;
+      if (nowMs > graceDeadline) return false;
+    }
   }
-  return subscription.entitled !== undefined ? subscription.entitled : subscription.status !== "none";
+  return subscription.entitled !== undefined ? subscription.entitled : ENTITLED_STATUSES.has(subscription.status);
 }

@@ -18,7 +18,11 @@ function isNonEmptyString(value: unknown): value is string {
 }
 
 function isOptionalBlock(value: unknown): boolean {
-  return value === undefined || (typeof value === "object" && value !== null && !Array.isArray(value));
+  return (
+    value === undefined ||
+    value === null ||
+    (typeof value === "object" && !Array.isArray(value))
+  );
 }
 
 export function isCachedServer(value: unknown): value is ServerInfo {

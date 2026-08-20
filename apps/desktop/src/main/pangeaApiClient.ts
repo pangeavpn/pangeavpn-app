@@ -21,7 +21,7 @@ import {
   promoteFrontedEndpoint,
   restoreFrontedEndpoints
 } from "../shared/frontedEndpoints";
-import { restoreCachedServers } from "../shared/cachedServers";
+import { isCachedServer, restoreCachedServers } from "../shared/cachedServers";
 import {
   cachedEntitlement,
   restoreCachedSubscription,
@@ -79,6 +79,9 @@ export class HubUnreachableError extends Error {
 
 // How long a fully failed cascade is believed before it is attempted again.
 const HUB_RETRY_COOLDOWN_MS = 20000;
+// Consecutive hubFetch failures tolerated on a resolved path before it is
+// invalidated and the connection cascade is forced to re-run.
+const HUB_FAILURE_LIMIT = 2;
 
 /** Settles as soon as `signal` aborts, however long `work` still has to run. */
 function raceAbort<T>(work: Promise<T>, signal?: AbortSignal): Promise<T> {
@@ -126,12 +129,17 @@ interface RegisterResponse {
 }
 
 interface DohAnswer {
+  type: number;
   data: string;
 }
 
 interface DohResponse {
   Answer?: DohAnswer[];
 }
+
+// DNS record types this client trusts as a resolved address, not a further
+// name to chase (A, AAAA) — a CNAME in the same array must never be used.
+const DOH_ADDRESS_RECORD_TYPES = new Set([1, 28]);
 
 /** Try a single DoH provider */
 async function tryDoHProvider(providerUrl: string, accept: string, hostname: string): Promise<string | null> {
@@ -148,12 +156,12 @@ async function tryDoHProvider(providerUrl: string, accept: string, hostname: str
       return null;
     }
     const data = (await response.json()) as DohResponse;
-    const answers = data.Answer?.filter((a) => a.data) ?? [];
+    const answers = data.Answer?.filter((a) => a.data && DOH_ADDRESS_RECORD_TYPES.has(a.type) && isIPv4Literal(a.data)) ?? [];
     if (answers.length > 0) {
       console.log(`[DoH] ${providerUrl} resolved ${hostname} → ${sanitizeLog(answers[0].data)}`);
       return answers[0].data;
     }
-    console.log(`[DoH] ${providerUrl} returned no answers for ${hostname}`);
+    console.log(`[DoH] ${providerUrl} returned no usable A/AAAA answers for ${hostname}`);
     return null;
   } catch (err) {
     console.log(`[DoH] ${providerUrl} failed: ${sanitizeLog(err)}`);
@@ -188,11 +196,17 @@ function uniqueNonEmpty(values: (string | undefined | null)[]): string[] {
   return out;
 }
 
+// Bounds how much an unauthenticated-until-decrypted peer can stream into the
+// main process before this client gives up on it.
+const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
+
 /**
- * Make an HTTPS request to a DoH-resolved IP with correct SNI for Cloudflare.
- * Uses node:https so we can set servername (SNI) independently from the IP.
- * Uses an external setTimeout for a reliable connection timeout (node:https
- * timeout option only fires after the socket connects).
+ * Make an HTTPS request to a DoH-resolved IP, with the real hub hostname as
+ * SNI so the certificate still validates — SNI-hiding is not the point here,
+ * only avoiding the system resolver is. Uses node:https so we can set
+ * servername independently from the dial target. Uses an external setTimeout
+ * for a reliable connection timeout (node:https timeout option only fires
+ * after the socket connects).
  */
 function fetchDohResolved(
   ip: string,
@@ -203,18 +217,30 @@ function fetchDohResolved(
     headers?: Record<string, string>;
     body?: string;
     timeoutMs?: number;
+    signal?: AbortSignal;
   }
 ): Promise<Response> {
   const deadline = options.timeoutMs ?? 15000;
   return new Promise<Response>((resolve, reject) => {
     let settled = false;
-    const timer = setTimeout(() => {
-      if (!settled) {
-        settled = true;
-        req.destroy();
-        reject(new Error("Request timeout"));
+    const fail = (err: Error): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      options.signal?.removeEventListener("abort", onAbort);
+      req.destroy();
+      reject(err);
+    };
+    const timer = setTimeout(() => fail(new Error("Request timeout")), deadline);
+    const onAbort = (): void => fail(new Error("Request aborted"));
+    if (options.signal) {
+      if (options.signal.aborted) {
+        // req isn't defined yet; queue the abort for right after construction.
+        queueMicrotask(() => fail(new Error("Request aborted")));
+      } else {
+        options.signal.addEventListener("abort", onAbort, { once: true });
       }
-    }, deadline);
+    }
 
     const req = https.request(
       {
@@ -226,16 +252,24 @@ function fetchDohResolved(
           ...options.headers,
           Host: hostname
         },
-        servername: "",
-        rejectUnauthorized: false
+        servername: hostname
       },
       (res) => {
         const chunks: Buffer[] = [];
-        res.on("data", (chunk: Buffer) => chunks.push(chunk));
+        let received = 0;
+        res.on("data", (chunk: Buffer) => {
+          received += chunk.length;
+          if (received > MAX_RESPONSE_BYTES) {
+            fail(new Error("Response too large"));
+            return;
+          }
+          chunks.push(chunk);
+        });
         res.on("end", () => {
           if (settled) return;
           settled = true;
           clearTimeout(timer);
+          options.signal?.removeEventListener("abort", onAbort);
           const body = Buffer.concat(chunks).toString("utf8");
           const headers = new Headers();
           for (const [key, value] of Object.entries(res.headers)) {
@@ -248,13 +282,7 @@ function fetchDohResolved(
       }
     );
 
-    req.on("error", (err) => {
-      if (!settled) {
-        settled = true;
-        clearTimeout(timer);
-        reject(err);
-      }
-    });
+    req.on("error", fail);
 
     if (options.body) {
       req.write(options.body);
@@ -284,6 +312,9 @@ function fetchFronted(
     signal?: AbortSignal;
   }
 ): Promise<Response> {
+  if (options.signal?.aborted) {
+    return Promise.reject(new ConnectCancelledError());
+  }
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? 15000);
   const onExternalAbort = () => controller.abort();
@@ -521,6 +552,10 @@ export class PangeaApiClient {
   // probe sequence against a hub that is down.
   private hubResolution: Promise<void> | null = null;
   private hubResolutionFailedAtMs = 0;
+  // Consecutive hubFetch failures on the currently-resolved path. Once this
+  // hits HUB_FAILURE_LIMIT the path is presumed stale (IP rotation, moved
+  // network) and hubReady is cleared so ensureHub re-runs the cascade.
+  private hubFailureStreak = 0;
 
   constructor() {
     this.timeoutMs = 15000;
@@ -667,6 +702,16 @@ export class PangeaApiClient {
     this.licenseKey = key.trim();
   }
 
+  /** Rejects a hub response that reports success but omits a usable token,
+   *  rather than silently downgrading every later call to unauthenticated. */
+  private acceptLicenseKey(vpnAccessToken: unknown, context: string): string {
+    if (typeof vpnAccessToken !== "string" || vpnAccessToken.trim().length === 0) {
+      throw new Error(`${context} returned no usable access token`);
+    }
+    this.licenseKey = vpnAccessToken;
+    return vpnAccessToken;
+  }
+
   getLicenseKey(): string | null {
     return this.licenseKey;
   }
@@ -753,7 +798,8 @@ export class PangeaApiClient {
       const encryptedResponse = JSON.parse(responseText) as EncryptedResponse;
       decryptResponse(aesKey, encryptedResponse);
       return true;
-    } catch {
+    } catch (err) {
+      console.log(`[HubURL] Secure probe failed: ${sanitizeLog(err)}`);
       return false;
     }
   }
@@ -978,6 +1024,41 @@ export class PangeaApiClient {
     // one abandons it rather than cancelling it out from under them.
     await raceAbort(this.ensureHub(), options.cancelSignal);
 
+    try {
+      const response = await this.sendHubFetch(path, options);
+      this.hubFailureStreak = 0;
+      this.hubResolutionFailedAtMs = 0;
+      return response;
+    } catch (err) {
+      if (err instanceof ConnectCancelledError) throw err;
+      this.hubFailureStreak++;
+      if (this.hubFailureStreak >= HUB_FAILURE_LIMIT) {
+        console.log("[hubFetch] Path failed repeatedly, forcing hub re-resolution");
+        this.hubFailureStreak = 0;
+        this.hubReady = false;
+        this.dohResolvedIp = null;
+        this.frontedHost = null;
+        if (this.ssProxyPort !== null) {
+          this.ssProxyPort = null;
+          this.shadowsocksHubProxy?.stop().catch(() => {
+            // best-effort teardown
+          });
+        }
+      }
+      throw err;
+    }
+  }
+
+  private async sendHubFetch(
+    path: string,
+    options: {
+      method?: string;
+      headers?: Record<string, string>;
+      body?: string;
+      signal?: AbortSignal;
+      cancelSignal?: AbortSignal;
+    }
+  ): Promise<Response> {
     const method = options.method ?? "GET";
     const headers = options.headers ?? {};
     const bodyObj = options.body ? JSON.parse(options.body) : undefined;
@@ -990,7 +1071,8 @@ export class PangeaApiClient {
     let rawResponse: Response;
     if (this.ssProxyPort) {
       // CONNECT names the hub by hostname: the node resolves it, so a client
-      // with no cached IP still gets through.
+      // with no cached IP still gets through. Signal is not forwarded here —
+      // fetchViaConnectProxy (hubTransport.ts) takes no abort signal.
       rawResponse = await fetchViaConnectProxy(this.ssProxyPort, HUB_HOSTNAME, HUB_HOSTNAME, "/v1/secure", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1010,7 +1092,8 @@ export class PangeaApiClient {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: envelopeJson,
-        timeoutMs: this.timeoutMs
+        timeoutMs: this.timeoutMs,
+        signal: options.signal
       });
     } else if (!this.hubMethods.normal) {
       // Defensive: ensureHub() should already have thrown when the cleartext
@@ -1019,6 +1102,11 @@ export class PangeaApiClient {
     } else {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+      const onExternalAbort = () => controller.abort();
+      if (options.signal) {
+        if (options.signal.aborted) controller.abort();
+        else options.signal.addEventListener("abort", onExternalAbort, { once: true });
+      }
       try {
         rawResponse = await net.fetch(`${HUB_API_BASE}/v1/secure`, {
           method: "POST",
@@ -1053,6 +1141,7 @@ export class PangeaApiClient {
         }
       } finally {
         clearTimeout(timer);
+        options.signal?.removeEventListener("abort", onExternalAbort);
       }
     }
 
@@ -1070,10 +1159,16 @@ export class PangeaApiClient {
         const resolvedIp = await resolveViaDoH(HUB_HOSTNAME);
         if (resolvedIp) {
           this.dohResolvedIp = resolvedIp;
-          // A relay that answers with an error page is being intercepted just
-          // as surely as the domain would be; drop it so the branch order in
-          // this method actually reaches the DoH path we just resolved.
+          // A relay or proxy that answers with an error page is being
+          // intercepted just as surely as the domain would be; drop both so
+          // the branch order in this method reaches the DoH path just resolved.
           this.frontedHost = null;
+          if (this.ssProxyPort !== null) {
+            this.ssProxyPort = null;
+            this.shadowsocksHubProxy?.stop().catch(() => {
+              // best-effort teardown
+            });
+          }
           const retryResponse = await fetchDohResolved(resolvedIp, HUB_HOSTNAME, "/v1/secure", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -1135,7 +1230,7 @@ export class PangeaApiClient {
       }
 
       const data = (await response.json()) as TokenLoginResponse;
-      this.licenseKey = data.vpnAccessToken;
+      this.acceptLicenseKey(data.vpnAccessToken, "Token login");
       this.rememberServers(data.servers);
       this.rememberHubShadowsocks(data.servers);
       this.rememberFrontedEndpoints(data.frontedEndpoints);
@@ -1167,7 +1262,7 @@ export class PangeaApiClient {
       }
 
       const data = (await response.json()) as BootstrapResponse;
-      this.licenseKey = data.vpnAccessToken;
+      this.acceptLicenseKey(data.vpnAccessToken, "Bootstrap");
       this.rememberServers(data.servers);
       this.rememberHubShadowsocks(data.servers);
       this.rememberFrontedEndpoints(data.frontedEndpoints);
@@ -1269,6 +1364,8 @@ export class PangeaApiClient {
       this.rememberSubscription(subscription);
       return subscription;
     } catch (err) {
+      // A definitive hub "no" must revoke, not fall through to the cache.
+      if (err instanceof AuthError || err instanceof SubscriptionExpiredError) throw err;
       console.warn("[getSubscription]", sanitizeLog(err));
       const cached = this.cachedSubscription;
       if (!cached) return null;
@@ -1302,8 +1399,12 @@ export class PangeaApiClient {
    */
   private rememberServers(servers: ServerInfo[]): void {
     if (!Array.isArray(servers) || servers.length === 0) return;
-    this.cachedServers = servers;
-    this.onServers?.(servers);
+    // Same shape check the disk cache enforces, so a malformed hub entry is
+    // dropped here instead of reaching provision() as a bad profile.
+    const valid = servers.filter(isCachedServer);
+    if (valid.length === 0) return;
+    this.cachedServers = valid;
+    this.onServers?.(valid);
   }
 
   private rememberFrontedEndpoints(advertised: unknown): void {
@@ -1314,6 +1415,7 @@ export class PangeaApiClient {
   }
 
   private rememberHubShadowsocks(servers: ServerInfo[]): void {
+    if (!Array.isArray(servers)) return;
     const merged = mergeAdvertisedCreds(
       this.hubShadowsocks,
       servers.map((s) => s.controlPlaneShadowsocks)
@@ -1372,7 +1474,9 @@ export class PangeaApiClient {
     const excludeIPs = uniqueNonEmpty([
       nodeIp,
       wireguardEndpoint?.host,
-      server.naive?.remoteIp,
+      // resolveNaiveEndpoint dials remoteHost when remoteIp is absent, so
+      // that address needs excluding too whenever it happens to be a literal.
+      server.naive?.remoteIp ?? server.naive?.remoteHost,
       server.reality?.remoteIp,
       server.hysteria2?.remoteIp,
       server.shadowsocks?.remoteIp
