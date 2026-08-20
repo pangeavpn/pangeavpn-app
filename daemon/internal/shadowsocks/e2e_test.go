@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"fmt"
 	"net"
 	"net/netip"
@@ -328,7 +329,9 @@ func TestE2EProxyCarriesHTTPConnect(t *testing.T) {
 	conn.SetDeadline(time.Now().Add(10 * time.Second))
 
 	target := net.JoinHostPort("127.0.0.1", strconv.Itoa(originPort))
-	fmt.Fprintf(conn, "CONNECT %s HTTP/1.1\r\nHost: %s\r\n\r\n", target, target)
+	user, pass := mgr.Credentials()
+	creds := base64.StdEncoding.EncodeToString([]byte(user + ":" + pass))
+	fmt.Fprintf(conn, "CONNECT %s HTTP/1.1\r\nHost: %s\r\nProxy-Authorization: Basic %s\r\n\r\n", target, target, creds)
 
 	reader := bufio.NewReader(conn)
 	statusLine, err := reader.ReadString('\n')

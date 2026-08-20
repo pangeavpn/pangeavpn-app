@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"context"
 	"crypto/tls"
+	"encoding/base64"
 	"fmt"
 	"net"
 	"net/http"
@@ -26,7 +27,7 @@ func liveEnv(t *testing.T) (node, key, hub string) {
 	return
 }
 
-func startLiveProxy(t *testing.T, node, key string) int {
+func startLiveProxy(t *testing.T, node, key string) (int, string, string) {
 	t.Helper()
 	pm := NewProxyManager(state.NewLogStore(200))
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -42,17 +43,19 @@ func startLiveProxy(t *testing.T, node, key string) int {
 		t.Fatalf("start ss proxy: %v", err)
 	}
 	t.Cleanup(func() { pm.Stop(context.Background()) })
-	return port
+	user, pass := pm.Credentials()
+	return port, user, pass
 }
 
-func connectThrough(t *testing.T, proxyPort int, hub string, deadline time.Duration) (net.Conn, *bufio.Reader, error) {
+func connectThrough(t *testing.T, proxyPort int, proxyUser, proxyPass, hub string, deadline time.Duration) (net.Conn, *bufio.Reader, error) {
 	t.Helper()
 	raw, err := net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(proxyPort)), 10*time.Second)
 	if err != nil {
 		t.Fatalf("dial local proxy: %v", err)
 	}
 	raw.SetDeadline(time.Now().Add(deadline))
-	fmt.Fprintf(raw, "CONNECT %s:443 HTTP/1.1\r\nHost: %s:443\r\n\r\n", hub, hub)
+	creds := base64.StdEncoding.EncodeToString([]byte(proxyUser + ":" + proxyPass))
+	fmt.Fprintf(raw, "CONNECT %s:443 HTTP/1.1\r\nHost: %s:443\r\nProxy-Authorization: Basic %s\r\n\r\n", hub, hub, creds)
 	br := bufio.NewReader(raw)
 	status, err := br.ReadString('\n')
 	if err != nil {
@@ -78,7 +81,8 @@ func TestLiveControlPlaneListener(t *testing.T) {
 		t.Skip("set SS_HUB_KEY")
 	}
 
-	raw, _, err := connectThrough(t, startLiveProxy(t, node, key), hub, 25*time.Second)
+	port, user, pass := startLiveProxy(t, node, key)
+	raw, _, err := connectThrough(t, port, user, pass, hub, 25*time.Second)
 	if err != nil {
 		t.Fatalf("CONNECT through the relay (a wrong key looks exactly like this): %v", err)
 	}
@@ -108,7 +112,8 @@ func TestLiveControlPlaneListener(t *testing.T) {
 func TestLiveControlPlaneRejectsAWrongKey(t *testing.T) {
 	node, _, hub := liveEnv(t)
 
-	raw, _, err := connectThrough(t, startLiveProxy(t, node, "AAAAAAAAAAAAAAAAAAAAAA=="), hub, 15*time.Second)
+	port, user, pass := startLiveProxy(t, node, "AAAAAAAAAAAAAAAAAAAAAA==")
+	raw, _, err := connectThrough(t, port, user, pass, hub, 15*time.Second)
 	if raw != nil {
 		defer raw.Close()
 	}

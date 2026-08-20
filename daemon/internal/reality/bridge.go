@@ -16,8 +16,13 @@ import (
 // local WireGuard listener) every datagram is addressed to on the wire.
 //
 // Returns nil on a clean shutdown (ctx cancelled or a socket closed as part
-// of Stop), or the first unexpected I/O error otherwise.
+// of Stop), or the first unexpected I/O error otherwise. Closes both local
+// and remote on every return path, so a blocked reader on the other goroutine
+// is always kicked loose instead of leaking.
 func bridgeUDP(ctx context.Context, local *net.UDPConn, remote net.PacketConn, remoteAddr net.Addr) error {
+	defer local.Close()
+	defer remote.Close()
+
 	errCh := make(chan error, 2)
 	var peer atomic.Pointer[net.UDPAddr]
 
@@ -29,7 +34,9 @@ func bridgeUDP(ctx context.Context, local *net.UDPConn, remote net.PacketConn, r
 				errCh <- err
 				return
 			}
-			peer.Store(addr)
+			if !acceptFromPeer(&peer, addr) {
+				continue
+			}
 			if _, err := remote.WriteTo(buf[:n], remoteAddr); err != nil {
 				errCh <- err
 				return
@@ -65,4 +72,16 @@ func bridgeUDP(ctx context.Context, local *net.UDPConn, remote net.PacketConn, r
 		}
 		return err
 	}
+}
+
+// acceptFromPeer pins the loopback reply peer to whichever address sends the
+// first datagram (WireGuard, immediately after Start), then rejects any
+// other local source — otherwise any process on the box could send one
+// packet to 127.0.0.1:boundPort and hijack the decrypted WireGuard stream.
+func acceptFromPeer(peer *atomic.Pointer[net.UDPAddr], addr *net.UDPAddr) bool {
+	if peer.CompareAndSwap(nil, addr) {
+		return true
+	}
+	pinned := peer.Load()
+	return pinned != nil && pinned.IP.Equal(addr.IP) && pinned.Port == addr.Port
 }

@@ -72,6 +72,8 @@ const utlsFingerprint = "chrome"
 const defaultCoverSNI = "www.microsoft.com"
 
 var _ transport.Manager = (*Manager)(nil)
+var _ transport.SessionWaiter = (*Manager)(nil)
+var _ transport.BoundPortReporter = (*Manager)(nil)
 
 // Manager satisfies transport.Manager (+ SessionWaiter, BoundPortReporter),
 // mirroring cloak.inProcessManager's field shape: a loopback UDP listener
@@ -81,10 +83,17 @@ type Manager struct {
 	logs    *state.LogStore
 	running bool
 
-	engine    *box.Box
-	localConn *net.UDPConn
-	remote    net.PacketConn
-	cancel    context.CancelFunc
+	// starting guards the window where Start has released mu to run the
+	// slow engine/handshake setup, so a second concurrent Start can't race
+	// past the running check while the first is still in flight.
+	starting bool
+	profile  state.RealityProfile
+
+	engine      *box.Box
+	engineClose *sync.Once
+	localConn   *net.UDPConn
+	remote      net.PacketConn
+	cancel      context.CancelFunc
 
 	// boundLocalPort is the actual loopback UDP port bound. Differs from
 	// profile.LocalPort when the caller requested dynamic allocation
@@ -113,29 +122,41 @@ func NewManager(logs *state.LogStore) *Manager {
 func (m *Manager) Start(ctx context.Context, profile state.RealityProfile) error {
 	_ = ctx
 
-	m.mu.Lock()
-	if m.running {
-		m.mu.Unlock()
-		return nil
-	}
-
 	remoteHost := strings.TrimSpace(profile.RemoteHost)
 	if remoteHost == "" {
-		m.mu.Unlock()
 		return errors.New("reality remote host is required")
 	}
 	if strings.TrimSpace(profile.UUID) == "" {
-		m.mu.Unlock()
 		return errors.New("reality uuid is required")
 	}
 	if strings.TrimSpace(profile.PublicKey) == "" {
-		m.mu.Unlock()
 		return errors.New("reality public key is required")
 	}
-	if profile.LocalPort < 0 {
-		m.mu.Unlock()
-		return fmt.Errorf("LocalPort must be >= 0, got %d", profile.LocalPort)
+	if profile.LocalPort < 0 || profile.LocalPort > 65535 {
+		return fmt.Errorf("LocalPort must be between 0 and 65535, got %d", profile.LocalPort)
 	}
+	if profile.RemotePort < 0 || profile.RemotePort > 65535 {
+		return fmt.Errorf("RemotePort must be between 0 and 65535, got %d", profile.RemotePort)
+	}
+	if profile.TargetPort < 0 || profile.TargetPort > 65535 {
+		return fmt.Errorf("TargetPort must be between 0 and 65535, got %d", profile.TargetPort)
+	}
+
+	m.mu.Lock()
+	if m.running {
+		alreadyCurrent := m.profile == profile
+		m.mu.Unlock()
+		if alreadyCurrent {
+			return nil
+		}
+		return errors.New("reality: already running with a different profile; call Stop first")
+	}
+	if m.starting {
+		m.mu.Unlock()
+		return errors.New("reality: start already in progress")
+	}
+	m.starting = true
+	m.mu.Unlock()
 
 	remotePort := profile.RemotePort
 	if remotePort <= 0 {
@@ -166,12 +187,12 @@ func (m *Manager) Start(ctx context.Context, profile state.RealityProfile) error
 	})
 	if err != nil {
 		cancel()
-		m.mu.Unlock()
+		m.clearStarting()
 		return fmt.Errorf("reality: build engine: %w", err)
 	}
 	if err := engine.Start(); err != nil {
 		cancel()
-		m.mu.Unlock()
+		m.clearStarting()
 		return fmt.Errorf("reality: start engine: %w", err)
 	}
 
@@ -179,7 +200,7 @@ func (m *Manager) Start(ctx context.Context, profile state.RealityProfile) error
 	if !loaded {
 		engine.Close()
 		cancel()
-		m.mu.Unlock()
+		m.clearStarting()
 		return errors.New("reality: outbound not registered")
 	}
 
@@ -190,7 +211,7 @@ func (m *Manager) Start(ctx context.Context, profile state.RealityProfile) error
 	if err != nil {
 		engine.Close()
 		cancel()
-		m.mu.Unlock()
+		m.clearStarting()
 		return fmt.Errorf("reality: handshake: %w", annotateHandshakeError(err))
 	}
 
@@ -199,7 +220,7 @@ func (m *Manager) Start(ctx context.Context, profile state.RealityProfile) error
 		remote.Close()
 		engine.Close()
 		cancel()
-		m.mu.Unlock()
+		m.clearStarting()
 		return fmt.Errorf("reality: resolve local addr: %w", err)
 	}
 	localConn, err := net.ListenUDP("udp", localAddr)
@@ -207,7 +228,7 @@ func (m *Manager) Start(ctx context.Context, profile state.RealityProfile) error
 		remote.Close()
 		engine.Close()
 		cancel()
-		m.mu.Unlock()
+		m.clearStarting()
 		return fmt.Errorf("reality: listen local udp: %w", err)
 	}
 
@@ -219,15 +240,20 @@ func (m *Manager) Start(ctx context.Context, profile state.RealityProfile) error
 	done := make(chan struct{})
 	session := make(chan struct{})
 	close(session) // ListenPacket above already completed the REALITY handshake
+	engineClose := &sync.Once{}
 
+	m.mu.Lock()
 	m.generation++
 	generation := m.generation
+	m.profile = profile
 	m.engine = engine
+	m.engineClose = engineClose
 	m.localConn = localConn
 	m.remote = remote
 	m.cancel = cancel
 	m.boundLocalPort = boundPort
 	m.running = true
+	m.starting = false
 	m.done = done
 	m.session = session
 	m.hasSession = true
@@ -245,6 +271,7 @@ func (m *Manager) Start(ctx context.Context, profile state.RealityProfile) error
 		if m.generation == generation {
 			m.running = false
 			m.engine = nil
+			m.engineClose = nil
 			m.localConn = nil
 			m.remote = nil
 			m.cancel = nil
@@ -260,11 +287,20 @@ func (m *Manager) Start(ctx context.Context, profile state.RealityProfile) error
 		} else {
 			m.logs.Add(state.LogInfo, state.SourceDaemon, "reality stopped")
 		}
-		engine.Close()
+		engineClose.Do(func() { engine.Close() })
 		close(done)
 	}()
 
 	return nil
+}
+
+// clearStarting rolls back the in-flight guard set at the top of Start when
+// engine setup fails before commit, so a subsequent Start isn't rejected by
+// a stale "start already in progress".
+func (m *Manager) clearStarting() {
+	m.mu.Lock()
+	m.starting = false
+	m.mu.Unlock()
 }
 
 // buildOutboundOptions constructs the VLESS+REALITY outbound sing-box's
@@ -360,6 +396,8 @@ func (m *Manager) Stop(ctx context.Context) error {
 		m.mu.Unlock()
 		return nil
 	}
+	engine := m.engine
+	engineClose := m.engineClose
 	localConn := m.localConn
 	remote := m.remote
 	cancel := m.cancel
@@ -386,24 +424,25 @@ func (m *Manager) Stop(ctx context.Context) error {
 	case <-done:
 		return nil
 	case <-timer.C:
-		m.forceResetStateLocked()
+		m.forceResetStateLocked(engine, engineClose)
 		m.logs.Add(state.LogWarn, state.SourceDaemon, "reality stop timed out; forced shutdown")
 		return nil
 	case <-ctx.Done():
-		m.forceResetStateLocked()
+		m.forceResetStateLocked(engine, engineClose)
 		return nil
 	}
 }
 
 // forceResetStateLocked drops shared state to a stopped configuration even
-// if the bridge goroutine has not finished. Safe to call when Stop's wait
-// has timed out; the goroutine's generation check prevents it from later
-// clobbering a fresh Start.
-func (m *Manager) forceResetStateLocked() {
+// if the bridge goroutine has not finished, and closes the engine itself so
+// a wedged goroutine can't leave it relaying after Stop reports success. The
+// sockets are already closed by the caller; engineClose is shared with the
+// bridge goroutine's own cleanup so the engine is never closed twice.
+func (m *Manager) forceResetStateLocked(engine *box.Box, engineClose *sync.Once) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	m.running = false
 	m.engine = nil
+	m.engineClose = nil
 	m.localConn = nil
 	m.remote = nil
 	m.cancel = nil
@@ -412,4 +451,9 @@ func (m *Manager) forceResetStateLocked() {
 	m.session = nil
 	m.hasSession = false
 	m.generation++
+	m.mu.Unlock()
+
+	if engine != nil && engineClose != nil {
+		engineClose.Do(func() { engine.Close() })
+	}
 }

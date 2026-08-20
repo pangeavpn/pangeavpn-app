@@ -6,22 +6,22 @@ import (
 	"io"
 )
 
-// WriteFrame writes payload as a [2-byte big-endian length][payload] frame,
-// the wire contract this design shares with the node-side bridge (see
-// the naiveproxy transport design, "Wire
-// contract"). Max payload is 65535 bytes, well above WireGuard's ~1420-byte
-// typical datagram size.
+// maxSaneFramePayload catches a desynced stream (e.g. plaintext HTTP from a
+// failed CONNECT) fast instead of blocking on a length that never arrives;
+// real payloads are WireGuard datagrams, ~1420 bytes.
+const maxSaneFramePayload = 4096
+
+// WriteFrame writes one [2-byte big-endian length][payload] frame in a single
+// Write call. Callers must serialize writes; concurrent use corrupts the stream.
 func WriteFrame(w io.Writer, payload []byte) error {
 	if len(payload) > 65535 {
 		return fmt.Errorf("naive: frame payload too large: %d bytes (max 65535)", len(payload))
 	}
-	var header [2]byte
-	binary.BigEndian.PutUint16(header[:], uint16(len(payload)))
-	if _, err := w.Write(header[:]); err != nil {
-		return fmt.Errorf("naive: write frame header: %w", err)
-	}
-	if _, err := w.Write(payload); err != nil {
-		return fmt.Errorf("naive: write frame payload: %w", err)
+	frame := make([]byte, 2+len(payload))
+	binary.BigEndian.PutUint16(frame[:2], uint16(len(payload)))
+	copy(frame[2:], payload)
+	if _, err := w.Write(frame); err != nil {
+		return fmt.Errorf("naive: write frame: %w", err)
 	}
 	return nil
 }
@@ -33,6 +33,9 @@ func ReadFrame(r io.Reader) ([]byte, error) {
 		return nil, fmt.Errorf("naive: read frame header: %w", err)
 	}
 	length := binary.BigEndian.Uint16(header[:])
+	if length > maxSaneFramePayload {
+		return nil, fmt.Errorf("naive: frame length %d exceeds sane max %d bytes; stream likely desynced", length, maxSaneFramePayload)
+	}
 	payload := make([]byte, length)
 	if _, err := io.ReadFull(r, payload); err != nil {
 		return nil, fmt.Errorf("naive: read frame payload: %w", err)

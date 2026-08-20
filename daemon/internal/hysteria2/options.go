@@ -35,8 +35,8 @@ func validateProfile(profile state.Hysteria2Profile) error {
 	if strings.TrimSpace(profile.RemoteHost) == "" {
 		return errors.New("hysteria2 remoteHost is required")
 	}
-	if profile.RemotePort <= 0 {
-		return errors.New("hysteria2 remotePort must be > 0")
+	if profile.RemotePort <= 0 || profile.RemotePort > 65535 {
+		return errors.New("hysteria2 remotePort must be between 1 and 65535")
 	}
 	if profile.Password == "" {
 		return errors.New("hysteria2 password is required")
@@ -46,6 +46,16 @@ func validateProfile(profile state.Hysteria2Profile) error {
 	}
 	if profile.LocalPort < 0 {
 		return errors.New("hysteria2 localPort must be >= 0")
+	}
+	if profile.UpMbps < 0 {
+		return errors.New("hysteria2 upMbps must be >= 0")
+	}
+	if profile.DownMbps < 0 {
+		return errors.New("hysteria2 downMbps must be >= 0")
+	}
+	// Insecure without a pin lets an on-path attacker terminate TLS unnoticed.
+	if profile.Insecure && profile.PinSHA256 == "" {
+		return errors.New("hysteria2 insecure requires pinSha256 to be set")
 	}
 	return nil
 }

@@ -55,10 +55,21 @@ type Manager struct {
 	boundLocalPort int
 	generation     uint64
 	cancel         context.CancelFunc
+
+	startProfile state.SnowflakeProfile
 }
 
 func NewManager(logs *state.LogStore) *Manager {
 	return &Manager{logs: logs}
+}
+
+// snowflakeProfilesEqual reports whether two profiles would produce the
+// same running session, so a redundant Start (e.g. a health-check restart)
+// can no-op instead of masking a config change as still-running.
+func snowflakeProfilesEqual(a, b state.SnowflakeProfile) bool {
+	return a.BrokerURL == b.BrokerURL &&
+		a.LocalPort == b.LocalPort &&
+		a.BridgeFingerprint == b.BridgeFingerprint
 }
 
 // newSnowflakeClient is overridable in tests so Start can be exercised
@@ -68,12 +79,17 @@ var newSnowflakeClient = func(cfg sf.ClientConfig) (snowflakeTransport, error) {
 }
 
 func (m *Manager) Start(ctx context.Context, profile state.SnowflakeProfile) error {
-	_ = ctx
-
 	m.mu.Lock()
 	if m.running {
+		if snowflakeProfilesEqual(m.startProfile, profile) {
+			m.mu.Unlock()
+			return nil
+		}
 		m.mu.Unlock()
-		return nil
+		if err := m.Stop(ctx); err != nil {
+			return err
+		}
+		return m.Start(ctx, profile)
 	}
 
 	brokerURL := strings.TrimSpace(profile.BrokerURL)
@@ -84,6 +100,10 @@ func (m *Manager) Start(ctx context.Context, profile state.SnowflakeProfile) err
 	if profile.LocalPort < 0 {
 		m.mu.Unlock()
 		return fmt.Errorf("LocalPort must be >= 0, got %d", profile.LocalPort)
+	}
+	if len(profile.ICEServers) == 0 && !profile.KeepLocalAddresses {
+		m.mu.Unlock()
+		return errors.New("snowflake requires at least one ICE (STUN/TURN) server unless keepLocalAddresses is set")
 	}
 
 	localAddr := net.JoinHostPort("127.0.0.1", fmt.Sprintf("%d", profile.LocalPort))
@@ -119,7 +139,7 @@ func (m *Manager) Start(ctx context.Context, profile state.SnowflakeProfile) err
 		return fmt.Errorf("build snowflake client: %w", err)
 	}
 
-	runCtx, cancel := context.WithCancel(context.Background())
+	runCtx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
 	session := make(chan struct{})
 	m.generation++
@@ -132,6 +152,7 @@ func (m *Manager) Start(ctx context.Context, profile state.SnowflakeProfile) err
 	m.hasSession = false
 	m.boundLocalPort = boundPort
 	m.cancel = cancel
+	m.startProfile = profile
 	m.mu.Unlock()
 
 	m.logs.Add(state.LogInfo, state.SourceSnowflake, fmt.Sprintf("snowflake started, listening on 127.0.0.1:%d", boundPort))
@@ -154,7 +175,10 @@ func (m *Manager) run(ctx context.Context, generation uint64, udpConn *net.UDPCo
 		m.mu.RLock()
 		stopping := m.stopping
 		m.mu.RUnlock()
-		if !stopping {
+		switch {
+		case errors.Is(err, context.Canceled) && stopping:
+			m.logs.Add(state.LogWarn, state.SourceSnowflake, "snowflake stopped before rendezvous finished; broker/WebRTC session may linger in the background until it resolves")
+		case !stopping:
 			m.logs.Add(state.LogError, state.SourceSnowflake, fmt.Sprintf("snowflake dial failed: %v", err))
 		}
 		udpConn.Close()
@@ -171,7 +195,7 @@ func (m *Manager) run(ctx context.Context, generation uint64, udpConn *net.UDPCo
 	m.stream = stream
 	m.mu.Unlock()
 
-	m.markSessionEstablished()
+	m.markSessionEstablished(generation)
 	m.logs.Add(state.LogInfo, state.SourceSnowflake, "snowflake stream established")
 
 	var peer atomic.Pointer[net.UDPAddr]
@@ -282,6 +306,7 @@ func (m *Manager) cleanup(generation uint64) {
 		return
 	}
 	done := m.done
+	session := m.session
 	m.running = false
 	m.stopping = false
 	m.udpConn = nil
@@ -290,15 +315,18 @@ func (m *Manager) cleanup(generation uint64) {
 	m.session = nil
 	m.boundLocalPort = 0
 	m.cancel = nil
+	if session != nil {
+		close(session)
+	}
 	if done != nil {
 		close(done)
 	}
 }
 
-func (m *Manager) markSessionEstablished() {
+func (m *Manager) markSessionEstablished(generation uint64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.hasSession {
+	if m.generation != generation || m.hasSession {
 		return
 	}
 	m.hasSession = true
@@ -323,6 +351,7 @@ func (m *Manager) WaitForSession(ctx context.Context, timeout time.Duration) err
 		return nil
 	}
 	session := m.session
+	generation := m.generation
 	m.mu.RUnlock()
 
 	if session == nil {
@@ -338,6 +367,12 @@ func (m *Manager) WaitForSession(ctx context.Context, timeout time.Duration) err
 
 	select {
 	case <-session:
+		m.mu.RLock()
+		established := m.generation == generation && m.hasSession
+		m.mu.RUnlock()
+		if !established {
+			return errors.New("snowflake stopped before a session was established")
+		}
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
@@ -399,6 +434,7 @@ func (m *Manager) Stop(ctx context.Context) error {
 func (m *Manager) forceReset() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	session := m.session
 	m.running = false
 	m.stopping = false
 	m.udpConn = nil
@@ -408,6 +444,9 @@ func (m *Manager) forceReset() {
 	m.boundLocalPort = 0
 	m.cancel = nil
 	m.generation++
+	if session != nil {
+		close(session)
+	}
 }
 
 func (m *Manager) Status() state.TransportStatus {

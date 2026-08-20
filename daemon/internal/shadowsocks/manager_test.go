@@ -77,17 +77,38 @@ func TestManager_StartBindsLocalPortAndStops(t *testing.T) {
 
 func TestManager_DoubleStartIsNoOp(t *testing.T) {
 	mgr := testManager(t)
+	profile := startableProfile(t)
+	if err := mgr.Start(context.Background(), profile); err != nil {
+		t.Fatalf("first Start: %v", err)
+	}
+	t.Cleanup(func() { mgr.Stop(context.Background()) })
+
+	first := mgr.BoundLocalPort()
+	if err := mgr.Start(context.Background(), profile); err != nil {
+		t.Fatalf("second Start: %v", err)
+	}
+	if second := mgr.BoundLocalPort(); second != first {
+		t.Fatalf("BoundLocalPort() = %d after the second Start, want the first run's %d", second, first)
+	}
+}
+
+// A Start with a different profile while running is a server switch: it must
+// tear down the old session and bind a fresh one, not silently no-op.
+func TestManager_StartWithDifferentProfileSwitchesSession(t *testing.T) {
+	mgr := testManager(t)
 	if err := mgr.Start(context.Background(), startableProfile(t)); err != nil {
 		t.Fatalf("first Start: %v", err)
 	}
 	t.Cleanup(func() { mgr.Stop(context.Background()) })
 
 	first := mgr.BoundLocalPort()
-	if err := mgr.Start(context.Background(), startableProfile(t)); err != nil {
+	next := startableProfile(t)
+	next.LocalPort = pickFreeLoopbackUDPPort(t)
+	if err := mgr.Start(context.Background(), next); err != nil {
 		t.Fatalf("second Start: %v", err)
 	}
-	if second := mgr.BoundLocalPort(); second != first {
-		t.Fatalf("BoundLocalPort() = %d after the second Start, want the first run's %d", second, first)
+	if got := mgr.BoundLocalPort(); got != next.LocalPort {
+		t.Fatalf("BoundLocalPort() = %d, want the new profile's requested %d (first run's was %d)", got, next.LocalPort, first)
 	}
 }
 

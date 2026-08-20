@@ -74,17 +74,17 @@ func validateProfile(profile state.ShadowsocksProfile) error {
 	if strings.TrimSpace(profile.RemoteHost) == "" {
 		return errors.New("shadowsocks remoteHost is required")
 	}
-	if profile.RemotePort <= 0 {
-		return errors.New("shadowsocks remotePort must be > 0")
+	if profile.RemotePort <= 0 || profile.RemotePort > 65535 {
+		return errors.New("shadowsocks remotePort must be > 0 and <= 65535")
 	}
 	if profile.Password == "" {
 		return errors.New("shadowsocks password is required")
 	}
-	if profile.LocalPort < 0 {
-		return errors.New("shadowsocks localPort must be >= 0")
+	if profile.LocalPort < 0 || profile.LocalPort > 65535 {
+		return errors.New("shadowsocks localPort must be >= 0 and <= 65535")
 	}
-	if profile.TargetPort < 0 {
-		return errors.New("shadowsocks targetPort must be >= 0")
+	if profile.TargetPort < 0 || profile.TargetPort > 65535 {
+		return errors.New("shadowsocks targetPort must be >= 0 and <= 65535")
 	}
 	if method := strings.TrimSpace(profile.Method); method != "" && !slices.Contains(supportedMethods, method) {
 		return fmt.Errorf("shadowsocks method %q is not supported (allowed: %s)", method, strings.Join(supportedMethods, ", "))
