@@ -33,6 +33,7 @@ import {
   replaceManagedProfile,
   runServerFallback
 } from "./serverFallback";
+import { ConfigUpdateRequestSchema } from "@pangeavpn/shared-types";
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -40,7 +41,7 @@ let isQuitting = false;
 let trayStatusState: StatusResponse["state"] = "DISCONNECTED";
 let trayStatusDetail = "idle";
 let trayActionInProgress = false;
-let trayStatusRefreshInProgress = false;
+let trayStatusRefreshPromise: Promise<void> | null = null;
 let trayStatusTimer: NodeJS.Timeout | null = null;
 let lastConnectedProfileId: string | null = null;
 let trayDefaultImage: NativeImage | null = null;
@@ -118,7 +119,13 @@ function createWindow(): void {
     }
   });
 
-  mainWindow.loadFile(path.join(__dirname, "../renderer/index.html"));
+  mainWindow.loadFile(path.join(__dirname, "../renderer/index.html")).catch((err) => {
+    console.error("failed to load renderer:", err);
+  });
+
+  mainWindow.webContents.on("render-process-gone", (_event, details) => {
+    console.error("renderer process gone:", details.reason);
+  });
 
   mainWindow.on("close", (event) => {
     if (isQuitting || !tray) {
@@ -144,7 +151,11 @@ function createWindow(): void {
           checkAndHide();
         }
       }, 30);
-      setTimeout(() => clearInterval(poll), 500); // safety
+      // Safety: if the show animation never finishes, hide anyway.
+      setTimeout(() => {
+        clearInterval(poll);
+        checkAndHide();
+      }, 500);
     } else {
       setTimeout(checkAndHide, 30);
     }
@@ -174,6 +185,8 @@ let hiding = false;
 function showMainWindow(): void {
   if (!mainWindow) {
     createWindow();
+    // createWindow leaves the window hidden (show:false); finish the job.
+    showMainWindow();
     return;
   }
   if (showing) return;
@@ -280,13 +293,9 @@ async function maybeShowTrayHint(fromTrayClick: boolean): Promise<void> {
   notification.on("click", () => showMainWindow());
   notification.show();
 
-  try {
-    const settings = await readSettingsFile();
+  await updateSettings((settings) => {
     settings.trayHintShown = true;
-    await writeSettingsFile(settings);
-  } catch (err) {
-    console.warn("failed to persist tray hint flag:", sanitizeLog(err));
-  }
+  }, "tray hint flag");
 }
 
 function toggleMainWindowVisibility(): void {
@@ -449,23 +458,29 @@ function stopTrayStatusPolling(): void {
 }
 
 async function refreshTrayStatus(): Promise<void> {
-  if (!tray || trayStatusRefreshInProgress) {
-    return;
+  // Dedupe concurrent callers onto the same in-flight refresh instead of one
+  // returning immediately with a stale value while another is still fetching.
+  if (trayStatusRefreshPromise) {
+    return trayStatusRefreshPromise;
   }
 
-  trayStatusRefreshInProgress = true;
-  try {
-    const status = await withDaemonRestartOnUnavailable(() => daemonClient.getStatus(), "tray status", { allowRestart: false });
-    trayStatusState = status.state;
-    trayStatusDetail = status.detail;
-  } catch {
-    trayStatusState = "ERROR";
-    trayStatusDetail = "daemon unavailable";
-  } finally {
-    trayStatusRefreshInProgress = false;
-    updateTrayMenu();
-    notifyConnectionStateChange(trayStatusState);
-  }
+  const run = (async () => {
+    try {
+      const status = await withDaemonRestartOnUnavailable(() => daemonClient.getStatus(), "tray status", { allowRestart: false });
+      trayStatusState = status.state;
+      trayStatusDetail = status.detail;
+    } catch {
+      trayStatusState = "ERROR";
+      trayStatusDetail = "daemon unavailable";
+    } finally {
+      updateTrayMenu();
+      notifyConnectionStateChange(trayStatusState);
+    }
+  })();
+  trayStatusRefreshPromise = run.finally(() => {
+    trayStatusRefreshPromise = null;
+  });
+  return trayStatusRefreshPromise;
 }
 
 let networkRecoverInProgress = false;
@@ -482,25 +497,33 @@ async function recoverFromNetworkChange(): Promise<void> {
   networkRecoverInProgress = true;
   connectionAttemptRunning = true;
   lastNetworkRecoverAtMs = now;
+  // Tracked as a cancellable attempt so a user Disconnect (which calls
+  // cancelAttempt) can interrupt this cascade instead of racing past it.
+  const attempt = beginAttempt();
   try {
     // Refresh status first so we don't fire over an already-healthy tunnel.
     await refreshTrayStatus();
     if (trayStatusState === "CONNECTED" || trayStatusState === "CONNECTING") {
       return;
     }
+    if (isCancelled(attempt)) return;
     console.log("network change detected — attempting reconnect");
     // Tear down stale tunnel/firewall state, keeping the kill switch when
     // Lockdown is on, then bring the tunnel back on the new network.
     try {
       await daemonClient.disconnect({ keepKillSwitch: lockdownEnabled });
     } catch (err) {
-      console.warn("network recover: disconnect failed", err);
+      console.warn("network recover: disconnect failed", sanitizeLog(err));
     }
+    if (isCancelled(attempt)) return;
     const result = await connectWithRecovery(lastConnectedProfileId);
     if (!result.ok) {
-      console.warn("network recover: reconnect failed", (result as { error?: string }).error);
+      console.warn("network recover: reconnect failed", sanitizeLog((result as { error?: string }).error));
     }
+  } catch (err) {
+    console.warn("network recover: unexpected error", sanitizeLog(err));
   } finally {
+    endAttempt(attempt);
     networkRecoverInProgress = false;
     connectionAttemptRunning = false;
     await refreshTrayStatus();
@@ -568,7 +591,15 @@ async function connectFromTray(): Promise<void> {
 
   trayActionInProgress = true;
   updateTrayMenu();
+  // Tracks whether we set ERROR ourselves, so the finally below doesn't let
+  // a daemon refresh silently overwrite it with a normal idle state.
+  let explicitFailure = false;
   try {
+    if (connectionAttemptRunning) {
+      // A cascade already owns the connect; don't fall through into a
+      // doomed provision attempt and report a failure that never happened.
+      return;
+    }
     let exhaustedServerId: string | null = null;
     try {
       if (await reconnectExistingProfile()) return;
@@ -581,6 +612,7 @@ async function connectFromTray(): Promise<void> {
     if (!serverPlan) {
       trayStatusState = "ERROR";
       trayStatusDetail = "no server available";
+      explicitFailure = true;
       return;
     }
 
@@ -588,14 +620,20 @@ async function connectFromTray(): Promise<void> {
     if (!result.ok) {
       trayStatusState = "ERROR";
       trayStatusDetail = "connect request failed";
+      explicitFailure = true;
     }
   } catch (error) {
     console.warn("tray connect failed", sanitizeLog(error));
     trayStatusState = "ERROR";
     trayStatusDetail = "connect failed";
+    explicitFailure = true;
   } finally {
     trayActionInProgress = false;
-    await refreshTrayStatus();
+    if (explicitFailure) {
+      updateTrayMenu();
+    } else {
+      await refreshTrayStatus();
+    }
   }
 }
 
@@ -606,6 +644,7 @@ async function disconnectFromTray(): Promise<void> {
 
   trayActionInProgress = true;
   updateTrayMenu();
+  let explicitFailure = false;
   try {
     const result = await withDaemonRestartOnUnavailable(
       () => daemonClient.disconnect({ keepKillSwitch: lockdownEnabled }),
@@ -614,14 +653,20 @@ async function disconnectFromTray(): Promise<void> {
     if (!result.ok) {
       trayStatusState = "ERROR";
       trayStatusDetail = "disconnect request failed";
+      explicitFailure = true;
     }
   } catch (error) {
-    console.warn("tray disconnect failed", error);
+    console.warn("tray disconnect failed", sanitizeLog(error));
     trayStatusState = "ERROR";
     trayStatusDetail = "disconnect failed";
+    explicitFailure = true;
   } finally {
     trayActionInProgress = false;
-    await refreshTrayStatus();
+    if (explicitFailure) {
+      updateTrayMenu();
+    } else {
+      await refreshTrayStatus();
+    }
   }
 }
 
@@ -845,14 +890,25 @@ function connectionOptions(): {
 }
 
 async function readSettingsFile(): Promise<Record<string, unknown>> {
+  const filePath = path.join(
+    (await import("./platformPaths")).getAppSupportDir(),
+    "settings.json"
+  );
+  const fs = (await import("node:fs/promises")).default;
+  let raw: string;
   try {
-    const filePath = path.join(
-      (await import("./platformPaths")).getAppSupportDir(),
-      "settings.json"
-    );
-    const fs = (await import("node:fs/promises")).default;
-    return JSON.parse(await fs.readFile(filePath, "utf8")) as Record<string, unknown>;
+    raw = await fs.readFile(filePath, "utf8");
   } catch {
+    // No file yet — a genuinely fresh install, not corruption.
+    return {};
+  }
+  try {
+    return JSON.parse(raw) as Record<string, unknown>;
+  } catch (err) {
+    // Corrupt, not missing: don't let the caller's write-back treat this as
+    // "no settings yet" and silently erase everything that was in it.
+    console.error("settings.json is corrupt; preserving it as .corrupt and starting fresh:", sanitizeLog(err));
+    await fs.rename(filePath, `${filePath}.corrupt-${Date.now()}`).catch(() => {});
     return {};
   }
 }
@@ -862,82 +918,82 @@ async function writeSettingsFile(settings: Record<string, unknown>): Promise<voi
   const fs = (await import("node:fs/promises")).default;
   // First run can reach here before the daemon has created the directory.
   await fs.mkdir(dir, { recursive: true });
-  await fs.writeFile(path.join(dir, "settings.json"), JSON.stringify(settings, null, 2));
+  const finalPath = path.join(dir, "settings.json");
+  const tmpPath = `${finalPath}.tmp-${process.pid}-${Date.now()}`;
+  // Write-then-rename: a crash or power loss mid-write leaves the old file
+  // intact instead of a truncated one, since rename is atomic on both OSes.
+  await fs.writeFile(tmpPath, JSON.stringify(settings, null, 2));
+  await fs.rename(tmpPath, finalPath);
+}
+
+let settingsWriteChain: Promise<void> = Promise.resolve();
+
+// Serializes every settings.json read-modify-write behind one queue, so two
+// unserialized writers can't interleave and resurrect a key the other deleted.
+function updateSettings(mutate: (settings: Record<string, unknown>) => void, label: string): Promise<void> {
+  const run = settingsWriteChain
+    .catch(() => {})
+    .then(async () => {
+      const settings = await readSettingsFile();
+      mutate(settings);
+      await writeSettingsFile(settings);
+    })
+    .catch((err) => {
+      console.warn(`Failed to persist ${label}:`, sanitizeLog(err));
+    });
+  settingsWriteChain = run;
+  return run;
 }
 
 /** Writes both flags together and drops the pre-split `alwaysConnected` key. */
 async function persistStartupSettings(): Promise<void> {
-  try {
-    const settings = await readSettingsFile();
+  await updateSettings((settings) => {
     settings.lockdown = lockdownEnabled;
     settings.autoConnect = autoConnectEnabled;
     delete settings.alwaysConnected;
-    await writeSettingsFile(settings);
-  } catch (err) {
-    console.warn("Failed to persist lockdown/auto-connect settings:", err);
-  }
+  }, "lockdown/auto-connect settings");
 }
 
 async function persistHubIp(ip: string): Promise<void> {
-  try {
-    const settings = await readSettingsFile();
+  await updateSettings((settings) => {
     settings.hubIp = ip;
-    await writeSettingsFile(settings);
-  } catch (err) {
-    console.warn("Failed to persist hub IP:", err);
-  }
+  }, "hub IP");
 }
 
 async function persistHubShadowsocks(creds: HubShadowsocksCreds[]): Promise<void> {
-  try {
-    const settings = await readSettingsFile();
+  await updateSettings((settings) => {
     settings.hubShadowsocks = creds;
-    await writeSettingsFile(settings);
-  } catch (err) {
-    console.warn("Failed to persist hub Shadowsocks credentials:", err);
-  }
+  }, "hub Shadowsocks credentials");
 }
 
 async function persistFrontedEndpoints(endpoints: string[]): Promise<void> {
-  try {
-    const settings = await readSettingsFile();
+  await updateSettings((settings) => {
     settings.frontedEndpoints = endpoints;
-    await writeSettingsFile(settings);
-  } catch (err) {
-    console.warn("Failed to persist fronted endpoints:", err);
-  }
+  }, "fronted endpoints");
 }
 
 /** The node list, so a client that cannot reach the hub still knows where the
  *  servers are. Cleared on logout, which passes an empty list. */
 async function persistServers(servers: ServerInfo[]): Promise<void> {
-  try {
-    const settings = await readSettingsFile();
+  await updateSettings((settings) => {
     if (servers.length === 0) {
       delete settings.servers;
     } else {
       settings.servers = servers;
     }
-    await writeSettingsFile(settings);
-  } catch (err) {
-    console.warn("Failed to persist server list:", err);
-  }
+  }, "server list");
 }
 
 /** The hub's last word on the plan, so an unreachable hub does not present a
  *  paying user with "no subscription". Cleared on logout, which passes null. */
 async function persistSubscription(cached: CachedSubscription | null): Promise<void> {
-  try {
-    const settings = await readSettingsFile();
+  await updateSettings((settings) => {
     if (cached === null) {
       delete settings.subscription;
     } else {
       settings.subscription = cached;
     }
-    await writeSettingsFile(settings);
-  } catch (err) {
-    console.warn("Failed to persist subscription:", err);
-  }
+  }, "subscription");
 }
 
 /** Refreshes the cached subscription in the background; never throws. Called at
@@ -950,14 +1006,10 @@ function refreshSubscriptionCache(reason: string): void {
 }
 
 async function persistLastConnection(): Promise<void> {
-  try {
-    const settings = await readSettingsFile();
+  await updateSettings((settings) => {
     settings.lastServerId = lastServerId;
     settings.lastProfileId = lastConnectedProfileId;
-    await writeSettingsFile(settings);
-  } catch (err) {
-    console.warn("Failed to persist last connection:", err);
-  }
+  }, "last connection");
 }
 
 const FRIENDLY_ADJECTIVES = [
@@ -981,19 +1033,48 @@ function registerIpcHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.getStatus, async () =>
     withDaemonRestartOnUnavailable(() => daemonClient.getStatus(), "status", { allowRestart: false })
   );
-  ipcMain.handle(IPC_CHANNELS.connect, async (_event, profileId: string) => {
-    const result = await connectWithRecovery(profileId);
-    if (result.ok) {
-      lastConnectedProfileId = profileId;
-      void persistLastConnection();
-      // The tunnel is up, so the hub is reachable through it even when it was
-      // not before — the most reliable point to re-cache the renewal date.
-      refreshSubscriptionCache("connect");
+  ipcMain.handle(IPC_CHANNELS.connect, async (_event, profileId: unknown) => {
+    if (typeof profileId !== "string" || profileId.trim() === "") {
+      return { ok: false };
     }
-    void refreshTrayStatus();
-    return result;
+    if (connectionAttemptRunning) {
+      return { ok: false };
+    }
+    connectionAttemptRunning = true;
+    const attempt = beginAttempt();
+    try {
+      // The daemon is the authority on which profiles exist; refuse to chase
+      // a profileId it doesn't recognize.
+      const config = await withDaemonRestartOnUnavailable(
+        () => daemonClient.getConfig(),
+        "connect-profile-check",
+        { allowRestart: false }
+      );
+      if (!config.profiles.some((profile) => profile.id === profileId)) {
+        return { ok: false };
+      }
+      if (isCancelled(attempt)) {
+        return { ok: false };
+      }
+      const result = await connectWithRecovery(profileId);
+      if (result.ok && !isCancelled(attempt)) {
+        lastConnectedProfileId = profileId;
+        void persistLastConnection();
+        // The tunnel is up, so the hub is reachable through it even when it was
+        // not before — the most reliable point to re-cache the renewal date.
+        refreshSubscriptionCache("connect");
+      }
+      return result;
+    } finally {
+      endAttempt(attempt);
+      connectionAttemptRunning = false;
+      void refreshTrayStatus();
+    }
   });
   ipcMain.handle(IPC_CHANNELS.disconnect, async () => {
+    // Stop any main-process cascade (network recovery, launch auto-connect)
+    // so it can't silently reconnect moments after the user's Disconnect.
+    cancelAttempt();
     const result = await withDaemonRestartOnUnavailable(
       () => daemonClient.disconnect({ keepKillSwitch: lockdownEnabled }),
       "disconnect"
@@ -1007,9 +1088,16 @@ function registerIpcHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.getConfig, async () =>
     withDaemonRestartOnUnavailable(() => daemonClient.getConfig(), "config", { allowRestart: false })
   );
-  ipcMain.handle(IPC_CHANNELS.setConfig, async (_event, profiles: Profile[]) =>
-    withDaemonRestartOnUnavailable(() => daemonClient.setConfig(profiles), "setConfig")
-  );
+  ipcMain.handle(IPC_CHANNELS.setConfig, async (event, profiles: unknown) => {
+    if (!event.senderFrame || !event.senderFrame.url.startsWith("file://")) {
+      throw new Error("setConfig: untrusted sender");
+    }
+    const parsed = ConfigUpdateRequestSchema.safeParse({ profiles });
+    if (!parsed.success) {
+      throw new Error("Invalid profiles payload");
+    }
+    return withDaemonRestartOnUnavailable(() => daemonClient.setConfig(parsed.data.profiles), "setConfig");
+  });
   ipcMain.handle(IPC_CHANNELS.restartDaemon, async () => {
     daemonRecoveryInProgress = true;
     try {
@@ -1082,15 +1170,24 @@ function registerIpcHandlers(): void {
         return { authenticated: false, user: null, error: message };
       }
 
-      // Registration succeeded — persist identity keypair and set on API client
-      await auth.saveIdentityKeyPair({ privateKey: identityPrivateKey, publicKey: identityPublicKey });
-      pangeaApiClient.identityPubkey = identityPublicKey;
+      // Registration succeeded — persist identity keypair and set on API client.
+      // A failure past this point must not leave the hub's device slot orphaned.
+      try {
+        await auth.saveIdentityKeyPair({ privateKey: identityPrivateKey, publicKey: identityPublicKey });
+        pangeaApiClient.identityPubkey = identityPublicKey;
 
-      const authState = await auth.loginWithToken(data.vpnAccessToken, data.user);
-      // The hub is demonstrably reachable right now — the cheapest moment this
-      // device will ever get to learn its renewal date.
-      refreshSubscriptionCache("sign-in");
-      return { ...authState, friendlyName: effectiveFriendlyName };
+        const authState = await auth.loginWithToken(data.vpnAccessToken, data.user);
+        // The hub is demonstrably reachable right now — the cheapest moment this
+        // device will ever get to learn its renewal date.
+        refreshSubscriptionCache("sign-in");
+        return { ...authState, friendlyName: effectiveFriendlyName };
+      } catch (postRegErr) {
+        console.warn("post-registration setup failed:", sanitizeLog(postRegErr));
+        await pangeaApiClient.deregisterDevice(identityPublicKey).catch(() => {});
+        await auth.clearLicenseKey();
+        pangeaApiClient.clearCache();
+        return { authenticated: false, user: null };
+      }
     } catch (err) {
       console.warn("token login failed:", sanitizeLog(err));
       return { authenticated: false, user: null };
@@ -1098,10 +1195,14 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.handle(IPC_CHANNELS.authLogout, async () => {
+    // Stop any in-flight cascade first, or it can resume after we've cleared
+    // the license key and claim a managed profile for the wrong account.
+    cancelAttempt();
+
     try {
       const status = await daemonClient.getStatus();
       if (status.state === "CONNECTED" || status.state === "CONNECTING") {
-        await daemonClient.disconnect();
+        await daemonClient.disconnect({ keepKillSwitch: lockdownEnabled });
       }
     } catch {
       // daemon may be unavailable
@@ -1147,23 +1248,9 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.setDoh, async (_event, enabled: boolean) => {
     pangeaApiClient.setDohEnabled(enabled);
-    try {
-      const filePath = (await import("node:path")).join(
-        (await import("./platformPaths")).getAppSupportDir(),
-        "settings.json"
-      );
-      const fs = (await import("node:fs/promises")).default;
-      let settings: Record<string, unknown> = {};
-      try {
-        settings = JSON.parse(await fs.readFile(filePath, "utf8"));
-      } catch {
-        // no existing file
-      }
+    await updateSettings((settings) => {
       settings.dohEnabled = enabled;
-      await fs.writeFile(filePath, JSON.stringify(settings, null, 2));
-    } catch {
-      // best-effort persistence
-    }
+    }, "DoH setting");
   });
 
   ipcMain.handle(IPC_CHANNELS.getDoh, async () => pangeaApiClient.isDohEnabled());
@@ -1181,24 +1268,14 @@ function registerIpcHandlers(): void {
       return { methods: current, applied: false };
     }
     pangeaApiClient.setHubMethods(methods);
-    try {
-      const settingsPath = (await import("node:path")).join(
-        (await import("./platformPaths")).getAppSupportDir(),
-        "settings.json"
-      );
-      const fs = (await import("node:fs/promises")).default;
-      const raw = await fs.readFile(settingsPath, "utf8").catch(() => "{}");
-      const settings = JSON.parse(raw) as Record<string, unknown>;
+    await updateSettings((settings) => {
       // Stamped with the rev, so this deliberate choice is not overwritten by
       // the next default change the way a pre-rev file's would be.
       settings.hubMethods = persistableHubMethods(methods);
       // Drop the keys this replaced so a later downgrade cannot resurrect them.
       delete settings.directIpEnabled;
       delete settings.directIpOnly;
-      await fs.writeFile(settingsPath, JSON.stringify(settings, null, 2));
-    } catch (err) {
-      console.warn("Failed to persist hubMethods setting:", err);
-    }
+    }, "hubMethods setting");
     return { methods, applied: true };
   });
 
@@ -1206,18 +1283,9 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.setAllowLan, async (_event, enabled: boolean) => {
     allowLanEnabled = !!enabled;
-    try {
-      const settingsPath = (await import("node:path")).join(
-        (await import("./platformPaths")).getAppSupportDir(),
-        "settings.json"
-      );
-      const raw = await (await import("node:fs/promises")).default.readFile(settingsPath, "utf8").catch(() => "{}");
-      const settings = JSON.parse(raw) as Record<string, unknown>;
+    await updateSettings((settings) => {
       settings.allowLan = allowLanEnabled;
-      await (await import("node:fs/promises")).default.writeFile(settingsPath, JSON.stringify(settings, null, 2));
-    } catch (err) {
-      console.warn("Failed to persist allowLan setting:", err);
-    }
+    }, "allowLan setting");
   });
 
   ipcMain.handle(IPC_CHANNELS.getAllowLan, async () => allowLanEnabled);
@@ -1226,13 +1294,9 @@ function registerIpcHandlers(): void {
   // rejected — the renderer uses that mismatch to flag invalid input.
   ipcMain.handle(IPC_CHANNELS.setWireguardMtu, async (_event, mtu: unknown) => {
     const stored = pangeaApiClient.setWireguardMtu(mtu);
-    try {
-      const settings = await readSettingsFile();
+    await updateSettings((settings) => {
       settings.wireguardMtu = stored;
-      await writeSettingsFile(settings);
-    } catch (err) {
-      console.warn("Failed to persist wireguardMtu setting:", err);
-    }
+    }, "wireguardMtu setting");
     return stored;
   });
 
@@ -1240,13 +1304,9 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.setCustomDns, async (_event, value: unknown) => {
     const stored = pangeaApiClient.setCustomDns(value);
-    try {
-      const settings = await readSettingsFile();
+    await updateSettings((settings) => {
       settings.customDns = stored;
-      await writeSettingsFile(settings);
-    } catch (err) {
-      console.warn("Failed to persist customDns setting:", err);
-    }
+    }, "customDns setting");
     return stored;
   });
 
@@ -1263,26 +1323,18 @@ function registerIpcHandlers(): void {
       value === "wireguard"
         ? value
         : "auto";
-    try {
-      const settings = await readSettingsFile();
+    await updateSettings((settings) => {
       settings.preferredTransport = preferredTransport;
-      await writeSettingsFile(settings);
-    } catch (err) {
-      console.warn("Failed to persist preferredTransport setting:", err);
-    }
+    }, "preferredTransport setting");
   });
 
   ipcMain.handle(IPC_CHANNELS.getPreferredTransport, async () => preferredTransport);
 
   ipcMain.handle(IPC_CHANNELS.setLaunchAtStartup, async (_event, enabled: boolean) => {
     launchAtStartupEnabled = !!enabled;
-    try {
-      const settings = await readSettingsFile();
+    await updateSettings((settings) => {
       settings.launchAtStartup = launchAtStartupEnabled;
-      await writeSettingsFile(settings);
-    } catch (err) {
-      console.warn("Failed to persist launchAtStartup setting:", err);
-    }
+    }, "launchAtStartup setting");
     try {
       await applyLoginItem();
     } catch (err) {
@@ -1296,10 +1348,16 @@ function registerIpcHandlers(): void {
     if (lockdownEnabled || autoConnectEnabled) {
       return launchAtStartupEnabled;
     }
-    // Self-heal: re-derive from OS in case the user toggled it elsewhere.
+    // Self-heal: re-derive from OS in case the user toggled it elsewhere, and
+    // persist the correction so a relaunch doesn't resurrect the stale value.
     try {
       const live = await isLoginItemEnabled();
-      launchAtStartupEnabled = live;
+      if (live !== launchAtStartupEnabled) {
+        launchAtStartupEnabled = live;
+        await updateSettings((settings) => {
+          settings.launchAtStartup = live;
+        }, "launchAtStartup setting");
+      }
       return live;
     } catch {
       return launchAtStartupEnabled;
@@ -1369,13 +1427,9 @@ function registerIpcHandlers(): void {
     // Persist only — the change is applied on next launch (both the renderer
     // and the tray/menu read the locale once at startup).
     localePref = typeof locale === "string" && locale.length > 0 ? locale : "system";
-    try {
-      const settings = await readSettingsFile();
+    await updateSettings((settings) => {
       settings.locale = localePref;
-      await writeSettingsFile(settings);
-    } catch (err) {
-      console.warn("Failed to persist locale setting:", err);
-    }
+    }, "locale setting");
   });
 
   ipcMain.handle(IPC_CHANNELS.getIsPackaged, async () => app.isPackaged);
@@ -1393,15 +1447,20 @@ function registerIpcHandlers(): void {
     }
   });
 
-  ipcMain.handle(IPC_CHANNELS.cacheServers, async (_event, servers: unknown[]) => {
+  ipcMain.handle(IPC_CHANNELS.cacheServers, async (_event, servers: unknown) => {
+    if (!Array.isArray(servers) || servers.length > 4096) {
+      return;
+    }
     try {
-      const cachePath = (await import("node:path")).join(
-        (await import("./platformPaths")).getAppSupportDir(),
-        "server-cache.json"
-      );
-      await (await import("node:fs/promises")).default.writeFile(cachePath, JSON.stringify(servers), "utf8");
-    } catch {
-      // best-effort
+      const dir = (await import("./platformPaths")).getAppSupportDir();
+      const fs = (await import("node:fs/promises")).default;
+      await fs.mkdir(dir, { recursive: true });
+      const finalPath = path.join(dir, "server-cache.json");
+      const tmpPath = `${finalPath}.tmp-${process.pid}-${Date.now()}`;
+      await fs.writeFile(tmpPath, JSON.stringify(servers), "utf8");
+      await fs.rename(tmpPath, finalPath);
+    } catch (err) {
+      console.warn("Failed to persist server cache:", sanitizeLog(err));
     }
   });
 
@@ -1754,9 +1813,8 @@ async function boot(): Promise<void> {
 
   registerIpcHandlers();
   createWindow();
-  if (mainWindow) {
-    setupAutoUpdater(mainWindow);
-  }
+  // A resolver, not a snapshot, so this stays correct across window recreates.
+  setupAutoUpdater(() => mainWindow);
   createTray();
   if (!hiddenLaunch) {
     showMainWindow();
@@ -1776,12 +1834,22 @@ async function boot(): Promise<void> {
       }
     })
     .catch((err) => {
-      console.error("failed to ensure daemon / engage lockdown on startup", err);
+      console.error("failed to ensure daemon / engage lockdown on startup", sanitizeLog(err));
+      // Lockdown could not be confirmed engaged — surface it rather than let
+      // the UI keep reporting the kill switch as active while traffic flows.
+      if (lockdownEnabled) {
+        trayStatusState = "ERROR";
+        trayStatusDetail = "lockdown failed to engage";
+        updateTrayMenu();
+        mainWindow?.webContents.send("lockdown:engage-failed");
+      }
     });
 
   startNetworkWatcher();
   onNetworkChange(() => {
-    void recoverFromNetworkChange();
+    recoverFromNetworkChange().catch((err) => {
+      console.warn("network recovery failed:", sanitizeLog(err));
+    });
   });
 }
 
@@ -1792,21 +1860,37 @@ app.on("window-all-closed", () => {
 });
 
 app.on("activate", () => {
-  if (BrowserWindow.getAllWindows().length === 0) {
-    createWindow();
-    return;
-  }
   showMainWindow();
 });
 
-app.on("before-quit", () => {
+let quitCleanupDone = false;
+
+app.on("before-quit", (event) => {
+  if (quitCleanupDone) return;
+  event.preventDefault();
   isQuitting = true;
   stopTrayStatusPolling();
   tray?.destroy();
   tray = null;
   trayDefaultImage = null;
   trayConnectedImage = null;
-  daemonProcess.stop();
+
+  // Disconnect first (preserving the kill switch if armed) — otherwise quit
+  // SIGTERMs the daemon mid-tunnel and leaves routes/DNS/Lockdown behind.
+  void (async () => {
+    try {
+      const status = await daemonClient.getStatus();
+      if (status.state === "CONNECTED" || status.state === "CONNECTING") {
+        await daemonClient.disconnect({ keepKillSwitch: lockdownEnabled });
+      }
+    } catch (err) {
+      console.warn("quit: clean disconnect failed", sanitizeLog(err));
+    } finally {
+      daemonProcess.stop();
+      quitCleanupDone = true;
+      app.quit();
+    }
+  })();
 });
 
 // Ensure only one instance of the app is running (Windows especially)
