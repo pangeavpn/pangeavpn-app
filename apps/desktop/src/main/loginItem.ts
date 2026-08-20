@@ -16,6 +16,13 @@ function linuxAutostartPath(): string {
   return path.join(linuxAutostartDir(), LINUX_AUTOSTART_FILENAME);
 }
 
+// AppImage runs process.execPath from a run-scoped squashfs mount that's gone
+// after reboot; APPIMAGE is the stable path to the .AppImage file itself.
+function linuxExecPath(): string {
+  const appImage = process.env.APPIMAGE;
+  return appImage && appImage.trim().length > 0 ? appImage : process.execPath;
+}
+
 function buildDesktopFile(execPath: string): string {
   const quoted = execPath.includes(" ") ? `"${execPath}"` : execPath;
   return [
@@ -53,7 +60,7 @@ export async function setLoginItemEnabled(enabled: boolean): Promise<void> {
     const filePath = linuxAutostartPath();
     if (enabled) {
       await fs.mkdir(linuxAutostartDir(), { recursive: true });
-      await fs.writeFile(filePath, buildDesktopFile(process.execPath), { encoding: "utf8", mode: 0o600 });
+      await fs.writeFile(filePath, buildDesktopFile(linuxExecPath()), { encoding: "utf8", mode: 0o600 });
     } else {
       await fs.rm(filePath, { force: true });
     }

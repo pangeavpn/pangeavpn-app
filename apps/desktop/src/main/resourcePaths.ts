@@ -28,10 +28,7 @@ export function getWindowsAppIconPath(mainModuleDir: string): string | undefined
         path.join(process.resourcesPath, "build", windowsIconName),
         path.join(process.resourcesPath, windowsIconName)
       ]
-    : [
-        path.resolve(mainModuleDir, "..", "..", "build", windowsIconName),
-        path.resolve(process.cwd(), "apps", "desktop", "build", windowsIconName)
-      ];
+    : [path.resolve(mainModuleDir, "..", "..", "build", windowsIconName)];
 
   return candidates.find((candidate) => fs.existsSync(candidate));
 }
@@ -50,10 +47,7 @@ export function getTrayIconPath(mainModuleDir: string): string | undefined {
             path.join(process.resourcesPath, "build", linuxPngIconName),
             path.join(process.resourcesPath, linuxPngIconName)
           ]
-        : [
-            path.resolve(mainModuleDir, "..", "..", "build", linuxPngIconName),
-            path.resolve(process.cwd(), "apps", "desktop", "build", linuxPngIconName)
-          ])
+        : [path.resolve(mainModuleDir, "..", "..", "build", linuxPngIconName)])
     : [];
 
   const candidates = [
@@ -71,15 +65,10 @@ export function getTrayIconPath(mainModuleDir: string): string | undefined {
         ]
       : [
           path.resolve(mainModuleDir, "..", "..", "build", macPngIconName),
-          path.resolve(process.cwd(), "apps", "desktop", "build", macPngIconName),
           path.resolve(mainModuleDir, "..", "..", "build", "PangeaVPNTemplate.png"),
-          path.resolve(process.cwd(), "apps", "desktop", "build", "PangeaVPNTemplate.png"),
           path.resolve(mainModuleDir, "..", "..", "build", macIconName),
           path.resolve(mainModuleDir, "..", "..", "built", "pangeavpn.icns"),
-          path.resolve(process.cwd(), "apps", "desktop", "build", macIconName),
-          path.resolve(process.cwd(), "apps", "desktop", "built", "pangeavpn.icns"),
-          path.resolve(mainModuleDir, "..", "..", "build", macIcoFallbackName),
-          path.resolve(process.cwd(), "apps", "desktop", "build", macIcoFallbackName)
+          path.resolve(mainModuleDir, "..", "..", "build", macIcoFallbackName)
         ])
   ];
 
@@ -93,10 +82,7 @@ export function getConnectedTrayIconPath(mainModuleDir: string): string | undefi
           path.join(process.resourcesPath, "build", windowsConnectedIconName),
           path.join(process.resourcesPath, windowsConnectedIconName)
         ]
-      : [
-          path.resolve(mainModuleDir, "..", "..", "build", windowsConnectedIconName),
-          path.resolve(process.cwd(), "apps", "desktop", "build", windowsConnectedIconName)
-        ];
+      : [path.resolve(mainModuleDir, "..", "..", "build", windowsConnectedIconName)];
 
     return candidates.find((candidate) => fs.existsSync(candidate));
   }
@@ -110,10 +96,7 @@ export function getConnectedTrayIconPath(mainModuleDir: string): string | undefi
             path.join(process.resourcesPath, "build", linuxConnectedPngIconName),
             path.join(process.resourcesPath, linuxConnectedPngIconName)
           ]
-        : [
-            path.resolve(mainModuleDir, "..", "..", "build", linuxConnectedPngIconName),
-            path.resolve(process.cwd(), "apps", "desktop", "build", linuxConnectedPngIconName)
-          ])
+        : [path.resolve(mainModuleDir, "..", "..", "build", linuxConnectedPngIconName)])
     : [];
 
   const candidates = [
@@ -131,15 +114,10 @@ export function getConnectedTrayIconPath(mainModuleDir: string): string | undefi
         ]
       : [
           path.resolve(mainModuleDir, "..", "..", "build", macConnectedPngIconName),
-          path.resolve(process.cwd(), "apps", "desktop", "build", macConnectedPngIconName),
           path.resolve(mainModuleDir, "..", "..", "build", "PangeaVPN_connectedTemplate.png"),
-          path.resolve(process.cwd(), "apps", "desktop", "build", "PangeaVPN_connectedTemplate.png"),
           path.resolve(mainModuleDir, "..", "..", "build", macConnectedIconName),
           path.resolve(mainModuleDir, "..", "..", "built", "pangeavpn_connected.icns"),
-          path.resolve(process.cwd(), "apps", "desktop", "build", macConnectedIconName),
-          path.resolve(process.cwd(), "apps", "desktop", "built", "pangeavpn_connected.icns"),
-          path.resolve(mainModuleDir, "..", "..", "build", macConnectedIcoFallbackName),
-          path.resolve(process.cwd(), "apps", "desktop", "build", macConnectedIcoFallbackName)
+          path.resolve(mainModuleDir, "..", "..", "build", macConnectedIcoFallbackName)
         ])
   ];
 
