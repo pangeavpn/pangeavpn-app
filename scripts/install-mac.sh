@@ -5,16 +5,23 @@
 set -euo pipefail
 
 # Colour only when writing to a terminal, so piped output stays readable.
+# ACCENT is the nearest 256-colour match to the app's terra accent (#c3562b).
 if [[ -t 1 ]]; then
+    if [[ "$(tput colors 2>/dev/null || echo 0)" -ge 256 ]]; then
+        ACCENT='\033[38;5;166m'
+    else
+        ACCENT='\033[0;33m'
+    fi
     GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; NC='\033[0m'
 else
-    GREEN=''; YELLOW=''; RED=''; NC=''
+    ACCENT=''; GREEN=''; YELLOW=''; RED=''; NC=''
 fi
 
 SUPPORT_URL="https://pangeavpn.org/contact"
 DOWNLOAD_URL="https://pangeavpn.org/download"
 
-log()  { printf "${GREEN}==> %s${NC}\n" "$1"; }
+log()  { printf "${ACCENT}==> %s${NC}\n" "$1"; }
+ok()   { printf "${GREEN}==> %s${NC}\n" "$1"; }
 warn() { printf "${YELLOW}Warning: %s${NC}\n" "$1"; }
 fail() {
     printf "${RED}Error: %s${NC}\n" "$1" >&2
@@ -35,7 +42,7 @@ banner() {
         return 0
     fi
     echo ""
-    printf "%b" "$GREEN"
+    printf "%b" "$ACCENT"
     cat <<'ART'
       ▄███████▄
     ▄████████████████▄
@@ -53,6 +60,48 @@ banner() {
 ART
     printf "%b" "$NC"
     echo ""
+}
+
+# Mach-O headers are parsed by hand because lipo and file ship with the Xcode
+# command line tools, whose installer pops up when they are missing.
+macho_hex4() {
+    od -An -j "$2" -N 4 -t x1 "$1" 2>/dev/null | tr -d ' \n'
+}
+
+macho_cputype_name() {
+    case "$1" in
+        0100000c) printf "arm64" ;;
+        01000007) printf "x86_64" ;;
+    esac
+}
+
+# Prints the architectures a Mach-O file can run on, space separated.
+macho_archs() {
+    local file="$1" magic stride count index le archs=""
+    magic="$(macho_hex4 "$file" 0)"
+
+    case "$magic" in
+        cafebabe|cafebabf)
+            stride=20
+            if [[ "$magic" == "cafebabf" ]]; then
+                stride=32
+            fi
+            count="$(macho_hex4 "$file" 4)"
+            count=$(( 16#${count:-0} ))
+            if [[ "$count" -gt 32 ]]; then
+                count=32
+            fi
+            for (( index = 0; index < count; index++ )); do
+                archs="$archs $(macho_cputype_name "$(macho_hex4 "$file" $(( 8 + index * stride )))")"
+            done
+            ;;
+        cffaedfe|cefaedfe)
+            le="$(macho_hex4 "$file" 4)"
+            archs=" $(macho_cputype_name "${le:6:2}${le:4:2}${le:2:2}${le:0:2}")"
+            ;;
+    esac
+
+    printf "%s" "$archs" | tr -s ' ' | sed -e 's/^ //' -e 's/ $//'
 }
 
 APP_PATH="/Applications/PangeaVPN.app"
@@ -95,7 +144,7 @@ fi
 # stderr stays open so sudo's own prompt is visible if there is no tty.
 if ! sudo -n true 2>/dev/null; then
     log "PangeaVPN installs a background service, which needs your Mac login password."
-    log "You'll be asked once, now. Typing won't show on screen — that's normal."
+    log "You'll be asked once, now. Typing won't show on screen - that's normal."
 fi
 if ! sudo -v; then
     fail "Could not get administrator access. If you mistyped your password, run the installer again. Otherwise use an admin account."
@@ -163,11 +212,11 @@ sleep 1
 # ── Run the PKG installer ───────────────────────────────────────────────────
 log "Installing PangeaVPN (this can take a minute)..."
 if ! sudo installer -pkg "$STAGED_PKG" -target / ; then
-    fail "Installation failed. The installer file may be damaged — download it again from ${DOWNLOAD_URL}"
+    fail "Installation failed. The installer file may be damaged - download it again from ${DOWNLOAD_URL}"
 fi
 
 if [[ ! -d "$APP_PATH" ]]; then
-    fail "The installer finished but PangeaVPN is not in your Applications folder. The download may be incomplete — get it again from ${DOWNLOAD_URL}"
+    fail "The installer finished but PangeaVPN is not in your Applications folder. The download may be incomplete - get it again from ${DOWNLOAD_URL}"
 fi
 
 # ── Clear quarantine from the app bundle ────────────────────────────────────
@@ -196,7 +245,7 @@ fi
 
 # Authoritative arch check. The filename guard above is only a hint, so undo
 # the part-finished install rather than leaving a Mac that cannot run it.
-DAEMON_ARCHS="$(lipo -archs "$DAEMON_SRC" 2>/dev/null || true)"
+DAEMON_ARCHS="$(macho_archs "$DAEMON_SRC" || true)"
 if [[ -n "$DAEMON_ARCHS" && " $DAEMON_ARCHS " != *" $HOST_ARCH "* ]]; then
     sudo rm -rf "$APP_PATH" "$SUPPORT_DIR/PangeaDaemon" 2>/dev/null || true
     fail "This installer is for a different kind of Mac (${DAEMON_ARCHS// /, }), but this Mac needs ${PKG_ARCH}. Nothing was left installed. Get the right version at ${DOWNLOAD_URL}"
@@ -275,6 +324,7 @@ sudo launchctl kickstart -k "system/$DAEMON_LABEL" >/dev/null 2>&1 || true
 # ── Verify ──────────────────────────────────────────────────────────────────
 log "Waiting for the service to start (up to 20 seconds)..."
 DAEMON_OK=false
+DOTTED=false
 for _ in $(seq 1 40); do
     if curl -sf --max-time 2 "$DAEMON_PING_URL" >/dev/null 2>&1; then
         DAEMON_OK=true
@@ -282,10 +332,11 @@ for _ in $(seq 1 40); do
     fi
     if [[ -t 1 ]]; then
         printf "."
+        DOTTED=true
     fi
     sleep 0.5
 done
-if [[ -t 1 ]]; then
+if $DOTTED; then
     printf "\n"
 fi
 
@@ -297,26 +348,26 @@ fi
 
 echo ""
 if $DAEMON_OK; then
-    log "PangeaVPN${VERSION_LABEL} is installed and its background service is running."
+    ok "PangeaVPN${VERSION_LABEL} is installed and its background service is running."
     echo ""
-    echo "       Open PangeaVPN from your Applications folder, or press Cmd+Space and type PangeaVPN."
-    echo "       The first time you connect, macOS may ask you to allow it — choose Allow."
+    echo "  Open PangeaVPN from your Applications folder, or press Cmd+Space and type PangeaVPN."
+    echo "  The first time you connect, macOS may ask you to allow it - choose Allow."
     echo ""
 else
-    warn "PangeaVPN${VERSION_LABEL} is installed, but its background service hasn't reported in yet."
-    warn "This is usually harmless — macOS sometimes shows a network permission popup that delays it."
+    warn "PangeaVPN${VERSION_LABEL} is installed, but its background service has not reported in yet."
+    warn "This is usually harmless - macOS sometimes shows a network permission popup that delays it."
     echo ""
     echo "  What to do now:"
-    echo "  1. Open PangeaVPN from your Applications folder — it often finishes starting on its own."
-    echo "  2. If it says it can't connect, restart your Mac and open it again."
-    echo "  3. Still stuck? Go to ${SUPPORT_URL} and include the details below."
+    echo "    1. Open PangeaVPN from your Applications folder - it often finishes starting on its own."
+    echo "    2. If it says it cannot connect, restart your Mac and open it again."
+    echo "    3. Still stuck? Go to ${SUPPORT_URL} and include the details below."
     echo ""
     echo "  Technical details for support:"
     if [[ -n "$LAUNCHCTL_ERR" ]]; then
-        echo "  launchctl: $LAUNCHCTL_ERR"
+        echo "    launchctl: $LAUNCHCTL_ERR"
     fi
     if sudo test -s "$DAEMON_LOG"; then
-        sudo tail -n 15 "$DAEMON_LOG" 2>/dev/null | sed 's/^/  /' || true
+        sudo tail -n 15 "$DAEMON_LOG" 2>/dev/null | sed 's/^/    /' || true
     fi
     echo ""
 fi

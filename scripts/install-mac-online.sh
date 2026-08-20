@@ -5,16 +5,22 @@
 set -euo pipefail
 
 # Colour only when writing to a terminal, so piped output stays readable.
+# ACCENT is the nearest 256-colour match to the app's terra accent (#c3562b).
 if [[ -t 1 ]]; then
-    GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; NC='\033[0m'
+    if [[ "$(tput colors 2>/dev/null || echo 0)" -ge 256 ]]; then
+        ACCENT='\033[38;5;166m'
+    else
+        ACCENT='\033[0;33m'
+    fi
+    YELLOW='\033[1;33m'; RED='\033[0;31m'; NC='\033[0m'
 else
-    GREEN=''; YELLOW=''; RED=''; NC=''
+    ACCENT=''; YELLOW=''; RED=''; NC=''
 fi
 
 SUPPORT_URL="https://pangeavpn.org/contact"
 DOWNLOAD_URL="https://pangeavpn.org/download"
 
-log()  { printf "${GREEN}==> %s${NC}\n" "$1"; }
+log()  { printf "${ACCENT}==> %s${NC}\n" "$1"; }
 warn() { printf "${YELLOW}Warning: %s${NC}\n" "$1"; }
 fail() {
     printf "${RED}Error: %s${NC}\n" "$1" >&2
@@ -35,7 +41,7 @@ banner() {
         return 0
     fi
     echo ""
-    printf "%b" "$GREEN"
+    printf "%b" "$ACCENT"
     cat <<'ART'
       ▄███████▄
     ▄████████████████▄
@@ -157,7 +163,7 @@ main() {
     # Prompting before the download avoids stalling on a password mid-install.
     if ! sudo -n true 2>/dev/null; then
         log "PangeaVPN installs a background service, which needs your Mac login password."
-        log "You'll be asked once, now. Typing won't show on screen — that's normal."
+        log "You'll be asked once, now. Typing won't show on screen - that's normal."
     fi
     if ! sudo -v; then
         fail "Could not get administrator access. If you mistyped your password, run the installer again. Otherwise use an admin account."
@@ -180,9 +186,9 @@ main() {
     elif http_fetch "$GITHUB_LATEST_URL" "$RELEASE_FILE" && [[ -s "$RELEASE_FILE" ]]; then
         RELEASE_JSON="$(cat "$RELEASE_FILE")"
     elif [[ "$HTTP_STATUS" == "429" || "$HTTP_STATUS" == "403" ]]; then
-        fail "The download server is refusing new requests from your network right now (HTTP ${HTTP_STATUS}) — usually because many people share your connection. Wait a few minutes and run this again, or download directly from ${DOWNLOAD_URL}"
+        fail "The download server is refusing new requests from your network right now (HTTP ${HTTP_STATUS}) - usually because many people share your connection. Wait a few minutes and run this again, or download directly from ${DOWNLOAD_URL}"
     else
-        fail "Could not reach the download server (HTTP ${HTTP_STATUS}). If the rest of your internet works, your network may be blocking it — try a different network, or get the installer from ${DOWNLOAD_URL}"
+        fail "Could not reach the download server (HTTP ${HTTP_STATUS}). If the rest of your internet works, your network may be blocking it - try a different network, or get the installer from ${DOWNLOAD_URL}"
     fi
 
     # Accepts the hub's "url" and GitHub's "browser_download_url" asset shapes.
@@ -197,7 +203,7 @@ main() {
     )"
 
     if [[ -z "$DMG_URL" ]]; then
-        fail "The latest release has no download for this Mac yet. It may still be uploading — try again in a few minutes, or see ${DOWNLOAD_URL}"
+        fail "The latest release has no download for this Mac yet. It may still be uploading - try again in a few minutes, or see ${DOWNLOAD_URL}"
     fi
 
     VERSION="$(printf "%s" "$RELEASE_JSON" | grep -Eo '"(version|tag_name)":[[:space:]]*"[^"]+"' | head -1 | sed -E 's/.*"([^"]+)"$/\1/' | sed 's/^v//' || true)"
@@ -211,7 +217,7 @@ main() {
 
     if ! http_fetch "$DMG_URL" "$DMG_PATH" progress; then
         if [[ "$HTTP_STATUS" == "429" ]]; then
-            fail "The download server is refusing new requests from your network right now — usually because many people share your connection. Wait a few minutes and run this again, or download directly from ${DOWNLOAD_URL}"
+            fail "The download server is refusing new requests from your network right now - usually because many people share your connection. Wait a few minutes and run this again, or download directly from ${DOWNLOAD_URL}"
         fi
         fail "Download failed (HTTP ${HTTP_STATUS}). Check your connection and try again, or get the installer from ${DOWNLOAD_URL}"
     fi
@@ -230,11 +236,11 @@ main() {
     if [[ -n "$EXPECTED_SHA" ]]; then
         ACTUAL_SHA="$(shasum -a 256 "$DMG_PATH" | awk '{ print $1 }')"
         if [[ "$ACTUAL_SHA" != "$EXPECTED_SHA" ]]; then
-            fail "The download failed its integrity check — the file is damaged or was altered in transit. Do not install it. Try again; if this keeps happening, your network may be interfering."
+            fail "The download failed its integrity check - the file is damaged or was altered in transit. Do not install it. Try again; if this keeps happening, your network may be interfering."
         fi
         log "Download verified."
     else
-        warn "Couldn't reach the file used to verify this download. Continuing — the download itself completed normally."
+        warn "Couldn't reach the file used to verify this download. Continuing - the download itself completed normally."
     fi
 
     log "Preparing the download..."
@@ -243,14 +249,14 @@ main() {
     # ── Open the disk image ─────────────────────────────────────────────────
     log "Opening the installer..."
     MOUNT_OUTPUT="$(hdiutil attach "$DMG_PATH" -nobrowse -readonly -noverify -plist 2>/dev/null)" \
-        || fail "Could not open the downloaded installer. It may be damaged — try running this again."
+        || fail "Could not open the downloaded installer. It may be damaged - try running this again."
     MOUNT_POINT="$(printf "%s" "$MOUNT_OUTPUT" \
         | grep -E '<string>/Volumes/' \
         | head -1 \
         | sed -E 's@.*<string>(/Volumes/[^<]+)</string>.*@\1@' \
         || true)"
     if [[ -z "$MOUNT_POINT" || ! -d "$MOUNT_POINT" ]]; then
-        fail "Could not open the downloaded installer. It may be damaged — try running this again."
+        fail "Could not open the downloaded installer. It may be damaged - try running this again."
     fi
 
     # ── Delegate to the install-mac.sh inside the DMG ───────────────────────
