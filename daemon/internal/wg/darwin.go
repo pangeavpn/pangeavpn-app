@@ -41,9 +41,9 @@ func takeDarwinExtra(tunnelKey string) *darwinSessionExtra {
 	return extra
 }
 
-func init() {
-	// A previous daemon process may have died mid-session, leaving every
-	// network service pinned to a now-unreachable tunnel DNS server.
+// RestoreOrphanedState undoes network state left by a crashed prior daemon.
+// Callers invoke it explicitly at startup; it is no longer an import side effect.
+func RestoreOrphanedState() {
 	restoreOrphanedDarwinDNSState()
 }
 
@@ -82,13 +82,14 @@ func (m *wireGuardGoManager) startDarwin(ctx context.Context, profile state.Wire
 	}
 
 	tunnelKey := sanitizeTunnelName(profile.TunnelName)
-	if m.hasActiveDevice(tunnelKey) {
-		return fmt.Errorf("wireguard tunnel %s is already running", profile.TunnelName)
+	if err := m.reserveSession(tunnelKey); err != nil {
+		return err
 	}
 
 	// Create in-process TUN device (utun) and WireGuard device.
 	dev, tunDev, err := m.createInProcessDeviceWithFactory("utun", parsed.mtu, parsed.wgConfig, tun.CreateTUN)
 	if err != nil {
+		m.removeSession(tunnelKey)
 		return err
 	}
 
@@ -96,6 +97,7 @@ func (m *wireGuardGoManager) startDarwin(ctx context.Context, profile state.Wire
 	interfaceName, nameErr := tunDev.Name()
 	if nameErr != nil || interfaceName == "" {
 		closeDevice(dev)
+		m.removeSession(tunnelKey)
 		return fmt.Errorf("get utun interface name: %w", nameErr)
 	}
 	m.logs.Add(state.LogInfo, state.SourceWireGuard, fmt.Sprintf("in-process wireguard device created on %s", interfaceName))
@@ -103,12 +105,14 @@ func (m *wireGuardGoManager) startDarwin(ctx context.Context, profile state.Wire
 	// Configure addresses via ioctl.
 	if err := configureDarwinAddresses(interfaceName, parsed.addresses); err != nil {
 		closeDevice(dev)
+		m.removeSession(tunnelKey)
 		return fmt.Errorf("configure addresses: %w", err)
 	}
 
 	// Bring the interface up via ioctl.
 	if err := bringDarwinInterfaceUp(interfaceName); err != nil {
 		closeDevice(dev)
+		m.removeSession(tunnelKey)
 		return fmt.Errorf("bring interface up: %w", err)
 	}
 
@@ -116,6 +120,7 @@ func (m *wireGuardGoManager) startDarwin(ctx context.Context, profile state.Wire
 	endpointRoutes, err := addDarwinEndpointRoutes(ctx, parsed.endpointHosts)
 	if err != nil {
 		closeDevice(dev)
+		m.removeSession(tunnelKey)
 		return fmt.Errorf("add endpoint bypass routes: %w", err)
 	}
 
@@ -123,6 +128,7 @@ func (m *wireGuardGoManager) startDarwin(ctx context.Context, profile state.Wire
 	if err := addDarwinAllowedIPRoutes(interfaceName, allowedIPs); err != nil {
 		removeDarwinEndpointRoutes(endpointRoutes)
 		closeDevice(dev)
+		m.removeSession(tunnelKey)
 		return fmt.Errorf("add allowed-ip routes: %w", err)
 	}
 
@@ -135,6 +141,7 @@ func (m *wireGuardGoManager) startDarwin(ctx context.Context, profile state.Wire
 			removeDarwinAllowedIPRoutes(interfaceName, allowedIPs)
 			removeDarwinEndpointRoutes(endpointRoutes)
 			closeDevice(dev)
+			m.removeSession(tunnelKey)
 			return fmt.Errorf("disable ipv6 for session: %w", ipv6Err)
 		}
 		ipv6States = states
@@ -150,6 +157,7 @@ func (m *wireGuardGoManager) startDarwin(ctx context.Context, profile state.Wire
 			removeDarwinAllowedIPRoutes(interfaceName, allowedIPs)
 			removeDarwinEndpointRoutes(endpointRoutes)
 			closeDevice(dev)
+			m.removeSession(tunnelKey)
 			return fmt.Errorf("apply DNS: %w", dnsErr)
 		}
 		dnsOverrides = overrides

@@ -340,14 +340,8 @@ func (ks *windowsKillSwitch) Update(ctx context.Context, tunnel TunnelRef) error
 
 	// A failed reload must not clobber Active/Locked with the zero value, so
 	// skip the save rather than risk reporting a live lock as cleared.
-	st, err := loadKillSwitchState()
-	if err != nil {
+	if _, err := updateTunnelInterfaceState(strings.TrimSpace(tunnel.Name)); err != nil {
 		KillSwitchWarn("kill switch update: state reload failed, leaving persisted state untouched: %v", err)
-		return nil
-	}
-	st.TunnelInterface = strings.TrimSpace(tunnel.Name)
-	if err := saveKillSwitchState(st); err != nil {
-		KillSwitchWarn("kill switch update: save state failed: %v", err)
 	}
 
 	return nil

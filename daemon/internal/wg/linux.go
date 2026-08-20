@@ -41,9 +41,9 @@ func takeLinuxExtra(tunnelKey string) *linuxSessionExtra {
 	return extra
 }
 
-func init() {
-	// A previous daemon process may have died mid-session, leaving DNS,
-	// policy routes, and ip rules pointing at a now-unreachable tunnel.
+// RestoreOrphanedState undoes network state left by a crashed prior daemon.
+// Callers invoke it explicitly at startup; it is no longer an import side effect.
+func RestoreOrphanedState() {
 	restoreOrphanedLinuxNetworkState()
 }
 
@@ -84,8 +84,8 @@ func (m *wireGuardGoManager) startLinux(ctx context.Context, profile state.WireG
 	tunnelKey := sanitizeTunnelName(profile.TunnelName)
 	interfaceName := linuxInterfaceName(tunnelKey)
 
-	if m.hasActiveDevice(tunnelKey) {
-		return fmt.Errorf("wireguard tunnel %s is already running", profile.TunnelName)
+	if err := m.reserveSession(tunnelKey); err != nil {
+		return err
 	}
 
 	// Inject FwMark into the WireGuard config so the device's UDP socket is
@@ -96,6 +96,7 @@ func (m *wireGuardGoManager) startLinux(ctx context.Context, profile state.WireG
 	// Create in-process TUN device and WireGuard device.
 	dev, tunDev, err := m.createInProcessDeviceWithFactory(interfaceName, parsed.mtu, parsed.wgConfig, tun.CreateTUN)
 	if err != nil {
+		m.removeSession(tunnelKey)
 		return err
 	}
 
@@ -109,12 +110,14 @@ func (m *wireGuardGoManager) startLinux(ctx context.Context, profile state.WireG
 	// Configure addresses via netlink.
 	if err := configureLinuxAddresses(interfaceName, parsed.addresses); err != nil {
 		closeDevice(dev)
+		m.removeSession(tunnelKey)
 		return fmt.Errorf("configure addresses: %w", err)
 	}
 
 	// Bring the interface up via netlink.
 	if err := bringLinuxInterfaceUp(interfaceName); err != nil {
 		closeDevice(dev)
+		m.removeSession(tunnelKey)
 		return fmt.Errorf("bring interface up: %w", err)
 	}
 
@@ -131,6 +134,7 @@ func (m *wireGuardGoManager) startLinux(ctx context.Context, profile state.WireG
 	if err := addLinuxPolicyRouting(interfaceName, allowedIPs); err != nil {
 		removeLinuxEndpointRoutes(endpointRoutes, routeOwnership)
 		closeDevice(dev)
+		m.removeSession(tunnelKey)
 		return fmt.Errorf("add policy routing: %w", err)
 	}
 
@@ -143,6 +147,7 @@ func (m *wireGuardGoManager) startLinux(ctx context.Context, profile state.WireG
 			removeLinuxPolicyRouting(interfaceName, allowedIPs)
 			removeLinuxEndpointRoutes(endpointRoutes, routeOwnership)
 			closeDevice(dev)
+			m.removeSession(tunnelKey)
 			return fmt.Errorf("apply DNS: %w", dnsErr)
 		}
 		linuxDNS = override

@@ -14,6 +14,10 @@ import (
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/state"
 )
 
+// RestoreOrphanedState is a no-op on Windows: WFP filters and routes don't
+// survive process exit the way darwin/linux network config files do.
+func RestoreOrphanedState() {}
+
 func (m *wireGuardGoManager) Start(ctx context.Context, profile state.WireGuardProfile) error {
 	return m.startWindows(ctx, profile)
 }
@@ -61,8 +65,8 @@ func (m *wireGuardGoManager) startWindows(ctx context.Context, profile state.Wir
 	m.logs.Add(state.LogDebug, state.SourceWireGuard, fmt.Sprintf("wireguard allowed IPv4 route entries: %d", len(allowedIPs)))
 
 	tunnelKey := sanitizeTunnelName(profile.TunnelName)
-	if m.hasActiveDevice(tunnelKey) {
-		return fmt.Errorf("wireguard tunnel %s is already running", profile.TunnelName)
+	if err := m.reserveSession(tunnelKey); err != nil {
+		return err
 	}
 
 	requestedName := strings.TrimSpace(profile.TunnelName)
@@ -76,6 +80,7 @@ func (m *wireGuardGoManager) startWindows(ctx context.Context, profile state.Wir
 		},
 	)
 	if err != nil {
+		m.removeSession(tunnelKey)
 		return err
 	}
 
@@ -88,6 +93,7 @@ func (m *wireGuardGoManager) startWindows(ctx context.Context, profile state.Wir
 	tunnelLUID, err := windowsInterfaceLUID(tunDev, interfaceName)
 	if err != nil {
 		closeDevice(dev)
+		m.removeSession(tunnelKey)
 		return err
 	}
 
@@ -100,12 +106,14 @@ func (m *wireGuardGoManager) startWindows(ctx context.Context, profile state.Wir
 	if endpointErr != nil {
 		_ = removeWindowsEndpointRoutes(endpointRoutes)
 		closeDevice(dev)
+		m.removeSession(tunnelKey)
 		return fmt.Errorf("endpoint bypass route setup: %w", endpointErr)
 	}
 
 	if err := configureWindowsInterface(tunnelLUID, parsed.addresses, allowedIPs, parsed.dnsServers, parsed.mtu); err != nil {
 		_ = removeWindowsEndpointRoutes(endpointRoutes)
 		closeDevice(dev)
+		m.removeSession(tunnelKey)
 		return fmt.Errorf("configure windows interface: %w", err)
 	}
 	if len(parsed.dnsServers) > 0 {

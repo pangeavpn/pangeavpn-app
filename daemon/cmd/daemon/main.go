@@ -29,8 +29,10 @@ import (
 const (
 	daemonAddr            = "127.0.0.1:8787"
 	shutdownTimeout       = 12 * time.Second
+	shutdownGraceTimeout  = 30 * time.Second
 	readHeaderTimeout     = 5 * time.Second
 	requestReadTimeout    = 15 * time.Second
+	writeTimeout          = 30 * time.Second
 	idleConnectionTimeout = 60 * time.Second
 )
 
@@ -85,15 +87,33 @@ func stopDaemonRuntime(ctx context.Context, runtime *daemonRuntime) error {
 	go func() {
 		done <- runtime.Stop(ctx)
 	}()
+
 	select {
 	case err := <-done:
 		return err
 	case <-ctx.Done():
-		return ctx.Err()
+	}
+
+	// Teardown (kill switch rules, routes, tun adapter) may still be mid-flight
+	// in the goroutine above; exiting now would abandon it, not just cancel it.
+	log.Printf("daemon shutdown exceeded %s, waiting up to %s more for teardown to finish", shutdownTimeout, shutdownGraceTimeout)
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(shutdownGraceTimeout):
+		return fmt.Errorf("daemon shutdown abandoned after %s: kill switch/routes/tun adapter teardown may be incomplete", shutdownTimeout+shutdownGraceTimeout)
 	}
 }
 
 func startDaemonRuntime() (*daemonRuntime, error) {
+	// Attached before anything that can fail (token/config resolution), so the
+	// most common startup errors land in daemon.log/crash log, not a
+	// --service-mode stderr that doesn't exist.
+	logs := state.NewLogStore(4000)
+	attachLogFile(logs)
+	log.SetOutput(os.Stderr)
+	logs.Add(state.LogInfo, state.SourceDaemon, "daemon booting")
+
 	tokenPath, err := platform.TokenPath()
 	if err != nil {
 		return nil, fmt.Errorf("resolve token path: %w", err)
@@ -109,9 +129,9 @@ func startDaemonRuntime() (*daemonRuntime, error) {
 		return nil, fmt.Errorf("load token: %w", err)
 	}
 
-	logs := state.NewLogStore(4000)
-	attachLogFile(logs)
-	logs.Add(state.LogInfo, state.SourceDaemon, "daemon booting")
+	// A previous daemon process may have died mid-session; restore whatever
+	// network state it left behind before serving any new requests.
+	wg.RestoreOrphanedState()
 
 	machine := state.NewMachine()
 	configStore, err := state.NewConfigStore(configPath)
@@ -159,6 +179,7 @@ func startDaemonRuntime() (*daemonRuntime, error) {
 		Handler:           handler,
 		ReadHeaderTimeout: readHeaderTimeout,
 		ReadTimeout:       requestReadTimeout,
+		WriteTimeout:      writeTimeout,
 		IdleTimeout:       idleConnectionTimeout,
 		MaxHeaderBytes:    16 << 10,
 	}
