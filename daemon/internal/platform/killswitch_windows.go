@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 
+	"golang.org/x/sys/windows"
 	"golang.zx2c4.com/wireguard/windows/tunnel/winipcfg"
 )
 
@@ -21,13 +22,22 @@ func init() {
 type windowsKillSwitch struct {
 	mu             sync.Mutex
 	active         bool
-	engine         *wfpEngine // dynamic session — closing handle removes all filters
+	engine         *wfpEngine // static session — block filters are persistent and outlive this handle
 	tunnelFilterId uint64     // WFP filter ID for the tunnel interface permit
 
 	// Per-arm permit filter IDs so a re-arm can retire the previous set instead
 	// of stacking. Without this every node visited stays permitted until Clear.
 	endpointFilterIds []uint64
 	lanFilterIds      []uint64
+
+	// What endpointFilterIds/lanFilterIds actually enforce. The re-arm fast
+	// path compares against these, not disk, which can be missing/corrupt.
+	lastEndpointIPs []string
+	lastAllowLAN    bool
+
+	// Tunnel permit IDs a previous Update failed to delete; Clear retries them
+	// so a reassigned LUID can't inherit a stale permit.
+	staleTunnelFilterIds []uint64
 }
 
 func (ks *windowsKillSwitch) Enable(ctx context.Context, endpointHosts []string, allowLAN bool, locked bool) error {
@@ -42,10 +52,19 @@ func (ks *windowsKillSwitch) Enable(ctx context.Context, endpointHosts []string,
 	// Re-entry: swap the permit set in one transaction — new permits in before
 	// old ones out, so the lock is never wider than old ∪ new nor too narrow.
 	if ks.active && ks.engine != nil {
-		prev, _ := loadKillSwitchState()
-		if stringSlicesEqual(prev.EndpointIPs, ips) && prev.AllowLAN == allowLAN {
+		prev, err := loadKillSwitchState()
+		if err != nil {
+			KillSwitchWarn("kill switch re-arm: state reload failed, reconstructing from live filters: %v", err)
+		}
+
+		// Against live engine state, not disk: a corrupt/missing state file
+		// must never read as "filters already match" unverified.
+		if stringSlicesEqual(ks.lastEndpointIPs, ips) && ks.lastAllowLAN == allowLAN {
 			// Filters already match, but a caller re-arming an existing lock as a
 			// Lockdown lock still has to be recorded — see persistLockedUpgrade.
+			prev.Active = true
+			prev.EndpointIPs = ips
+			prev.AllowLAN = allowLAN
 			return persistLockedUpgrade(prev, locked)
 		}
 
@@ -91,6 +110,8 @@ func (ks *windowsKillSwitch) Enable(ctx context.Context, endpointHosts []string,
 		}
 		ks.endpointFilterIds = endpointIds
 		ks.lanFilterIds = lanIds
+		ks.lastEndpointIPs = ips
+		ks.lastAllowLAN = allowLAN
 		if len(staleDeletes) > 0 {
 			// Lock is intact, but a departing server's permit survives until Clear.
 			KillSwitchWarn("kill switch re-arm could not retire stale permits (%s)", strings.Join(staleDeletes, "; "))
@@ -99,8 +120,12 @@ func (ks *windowsKillSwitch) Enable(ctx context.Context, endpointHosts []string,
 		prev.Active = true // the load above may have failed; rules are live
 		prev.EndpointIPs = ips
 		prev.AllowLAN = allowLAN
-		prev.Locked = locked
-		_ = saveKillSwitchState(prev)
+		// Raise-only, same as persistLockedUpgrade: a plain reconnect (locked
+		// false) must never clear a Lockdown marker a crash could still need.
+		prev.Locked = prev.Locked || locked
+		if err := saveKillSwitchState(prev); err != nil {
+			KillSwitchWarn("kill switch re-arm: save state failed: %v", err)
+		}
 		return nil
 	}
 
@@ -142,7 +167,22 @@ func (ks *windowsKillSwitch) Enable(ctx context.Context, endpointHosts []string,
 		return fmt.Errorf("kill switch enable: %w", err)
 	}
 
+	// Symmetric with the IPv6 blocks below — otherwise inbound on the
+	// physical NIC is still accepted while "locked".
+	if _, err := engine.addBlockAllInbound(); err != nil {
+		engine.abortTransaction()
+		engine.close()
+		_ = removeKillSwitchState()
+		return fmt.Errorf("kill switch enable: %w", err)
+	}
+
 	if _, err := engine.addPermitLoopback(); err != nil {
+		engine.abortTransaction()
+		engine.close()
+		_ = removeKillSwitchState()
+		return fmt.Errorf("kill switch enable: %w", err)
+	}
+	if _, err := engine.addPermitLoopbackInboundV4(); err != nil {
 		engine.abortTransaction()
 		engine.close()
 		_ = removeKillSwitchState()
@@ -153,6 +193,12 @@ func (ks *windowsKillSwitch) Enable(ctx context.Context, endpointHosts []string,
 	// not reliably set for fresh inter-process TCP connects, and the local
 	// daemon API (127.0.0.1:8787) must never be blocked.
 	if _, err := engine.addPermitLoopbackSubnet(); err != nil {
+		engine.abortTransaction()
+		engine.close()
+		_ = removeKillSwitchState()
+		return fmt.Errorf("kill switch enable: %w", err)
+	}
+	if _, err := engine.addPermitLoopbackSubnetInboundV4(); err != nil {
 		engine.abortTransaction()
 		engine.close()
 		_ = removeKillSwitchState()
@@ -171,8 +217,16 @@ func (ks *windowsKillSwitch) Enable(ctx context.Context, endpointHosts []string,
 		endpointIds = append(endpointIds, id)
 	}
 
-	// DHCP best-effort — ALE layer may not see broadcast DHCP traffic.
-	_, _ = engine.addPermitDHCP()
+	// DHCP best-effort, only when the user opted into LAN access, scoped to
+	// the ranges already trusted for "Allow LAN" — see addPermitDHCP.
+	if allowLAN {
+		for _, cidr := range LANAllowPrefixes {
+			if cidr == "224.0.0.0/4" {
+				continue // multicast — not a DHCP server/relay address
+			}
+			_, _ = engine.addPermitDHCP(cidr)
+		}
+	}
 
 	// Permit LAN ranges so captive portals / gateway probes / mDNS work on
 	// restrictive WiFi. Only applied when the user opts in — fail-open would
@@ -245,6 +299,8 @@ func (ks *windowsKillSwitch) Enable(ctx context.Context, endpointHosts []string,
 	ks.active = true
 	ks.endpointFilterIds = endpointIds
 	ks.lanFilterIds = lanIds
+	ks.lastEndpointIPs = ips
+	ks.lastAllowLAN = allowLAN
 	return nil
 }
 
@@ -261,11 +317,16 @@ func (ks *windowsKillSwitch) Update(ctx context.Context, tunnel TunnelRef) error
 		return fmt.Errorf("kill switch update: %w", err)
 	}
 
-	// Remove previous tunnel permit if we're being called again (e.g. reconnect).
+	// Retire the previous tunnel permit (e.g. reconnect). Keep the ID on a
+	// failed delete: a reassigned LUID could inherit an orphaned permit.
 	if ks.tunnelFilterId != 0 {
-		_ = ks.engine.deleteFilter(ks.tunnelFilterId)
+		if err := ks.engine.deleteFilter(ks.tunnelFilterId); err != nil {
+			KillSwitchWarn("kill switch update could not retire previous tunnel permit %d: %v", ks.tunnelFilterId, err)
+			ks.staleTunnelFilterIds = append(ks.staleTunnelFilterIds, ks.tunnelFilterId)
+		}
 		ks.tunnelFilterId = 0
 	}
+	ks.retireStaleTunnelFilters()
 
 	// App traffic hits the WFP ALE_AUTH_CONNECT layer before reaching the TUN
 	// adapter. Without a permit scoped to the tunnel interface LUID, the
@@ -277,11 +338,31 @@ func (ks *windowsKillSwitch) Update(ctx context.Context, tunnel TunnelRef) error
 	}
 	ks.tunnelFilterId = filterId
 
-	st, _ := loadKillSwitchState()
+	// A failed reload must not clobber Active/Locked with the zero value, so
+	// skip the save rather than risk reporting a live lock as cleared.
+	st, err := loadKillSwitchState()
+	if err != nil {
+		KillSwitchWarn("kill switch update: state reload failed, leaving persisted state untouched: %v", err)
+		return nil
+	}
 	st.TunnelInterface = strings.TrimSpace(tunnel.Name)
-	_ = saveKillSwitchState(st)
+	if err := saveKillSwitchState(st); err != nil {
+		KillSwitchWarn("kill switch update: save state failed: %v", err)
+	}
 
 	return nil
+}
+
+// retireStaleTunnelFilters retries deleting tunnel permits that a previous
+// call could not remove. Called with ks.mu held.
+func (ks *windowsKillSwitch) retireStaleTunnelFilters() {
+	remaining := ks.staleTunnelFilterIds[:0]
+	for _, id := range ks.staleTunnelFilterIds {
+		if err := ks.engine.deleteFilter(id); err != nil {
+			remaining = append(remaining, id)
+		}
+	}
+	ks.staleTunnelFilterIds = remaining
 }
 
 // resolveTunnelLUID prefers the LUID the caller already holds for the live
@@ -311,21 +392,75 @@ func resolveTunnelLUID(tunnel TunnelRef) (uint64, error) {
 	return uint64(luid), nil
 }
 
+// pangeaBlockFilterKeys are the well-known keys for the persistent block-all
+// filters — closing a static session's engine handle does not remove them.
+var pangeaBlockFilterKeys = []windows.GUID{
+	pangeaBlockAllOutboundV4FilterKey,
+	pangeaBlockAllInboundV4FilterKey,
+	pangeaBlockAllOutboundV6FilterKey,
+	pangeaBlockAllInboundV6FilterKey,
+}
+
 func (ks *windowsKillSwitch) Clear(ctx context.Context) error {
 	ks.mu.Lock()
 	defer ks.mu.Unlock()
 
-	// Dynamic session: closing the engine handle removes all filters + sublayer.
+	var errs []string
+
 	if ks.engine != nil {
-		ks.engine.close()
-		ks.engine = nil
+		for _, id := range ks.endpointFilterIds {
+			if err := ks.engine.deleteFilter(id); err != nil {
+				errs = append(errs, fmt.Sprintf("endpoint permit %d: %v", id, err))
+			}
+		}
+		for _, id := range ks.lanFilterIds {
+			if err := ks.engine.deleteFilter(id); err != nil {
+				errs = append(errs, fmt.Sprintf("lan permit %d: %v", id, err))
+			}
+		}
+		if ks.tunnelFilterId != 0 {
+			if err := ks.engine.deleteFilter(ks.tunnelFilterId); err != nil {
+				errs = append(errs, fmt.Sprintf("tunnel permit %d: %v", ks.tunnelFilterId, err))
+			}
+		}
+		for _, id := range ks.staleTunnelFilterIds {
+			if err := ks.engine.deleteFilter(id); err != nil {
+				errs = append(errs, fmt.Sprintf("stale tunnel permit %d: %v", id, err))
+			}
+		}
+		for _, key := range pangeaBlockFilterKeys {
+			if err := ks.engine.deleteFilterByKey(key); err != nil {
+				errs = append(errs, fmt.Sprintf("block filter %v: %v", key, err))
+			}
+		}
+		if err := ks.engine.deleteSublayerByKey(pangeaVPNSublayerKey); err != nil {
+			errs = append(errs, fmt.Sprintf("sublayer: %v", err))
+		}
+
+		if err := ks.engine.close(); err != nil {
+			errs = append(errs, fmt.Sprintf("engine close: %v", err))
+		} else {
+			ks.engine = nil
+		}
 	}
 
-	_ = removeKillSwitchState()
+	// A partial teardown must not report the lock as cleared: leave Active
+	// alone so a retry, or reconciliation after a crash here, still locks.
+	if len(errs) > 0 {
+		return fmt.Errorf("kill switch clear: %s", strings.Join(errs, "; "))
+	}
+
 	ks.active = false
 	ks.endpointFilterIds = nil
 	ks.lanFilterIds = nil
+	ks.lastEndpointIPs = nil
+	ks.lastAllowLAN = false
 	ks.tunnelFilterId = 0
+	ks.staleTunnelFilterIds = nil
+
+	if err := removeKillSwitchState(); err != nil {
+		return fmt.Errorf("kill switch clear: remove state: %w", err)
+	}
 	return nil
 }
 

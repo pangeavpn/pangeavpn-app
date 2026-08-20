@@ -18,14 +18,16 @@ import (
 var (
 	modFwpuclnt = windows.NewLazySystemDLL("fwpuclnt.dll")
 
-	procFwpmEngineOpen0        = modFwpuclnt.NewProc("FwpmEngineOpen0")
-	procFwpmEngineClose0       = modFwpuclnt.NewProc("FwpmEngineClose0")
-	procFwpmTransactionBegin0  = modFwpuclnt.NewProc("FwpmTransactionBegin0")
-	procFwpmTransactionCommit0 = modFwpuclnt.NewProc("FwpmTransactionCommit0")
-	procFwpmTransactionAbort0  = modFwpuclnt.NewProc("FwpmTransactionAbort0")
-	procFwpmSubLayerAdd0       = modFwpuclnt.NewProc("FwpmSubLayerAdd0")
-	procFwpmFilterAdd0         = modFwpuclnt.NewProc("FwpmFilterAdd0")
-	procFwpmFilterDeleteById0  = modFwpuclnt.NewProc("FwpmFilterDeleteById0")
+	procFwpmEngineOpen0          = modFwpuclnt.NewProc("FwpmEngineOpen0")
+	procFwpmEngineClose0         = modFwpuclnt.NewProc("FwpmEngineClose0")
+	procFwpmTransactionBegin0    = modFwpuclnt.NewProc("FwpmTransactionBegin0")
+	procFwpmTransactionCommit0   = modFwpuclnt.NewProc("FwpmTransactionCommit0")
+	procFwpmTransactionAbort0    = modFwpuclnt.NewProc("FwpmTransactionAbort0")
+	procFwpmSubLayerAdd0         = modFwpuclnt.NewProc("FwpmSubLayerAdd0")
+	procFwpmSubLayerDeleteByKey0 = modFwpuclnt.NewProc("FwpmSubLayerDeleteByKey0")
+	procFwpmFilterAdd0           = modFwpuclnt.NewProc("FwpmFilterAdd0")
+	procFwpmFilterDeleteById0    = modFwpuclnt.NewProc("FwpmFilterDeleteById0")
+	procFwpmFilterDeleteByKey0   = modFwpuclnt.NewProc("FwpmFilterDeleteByKey0")
 )
 
 // ---------------------------------------------------------------------------
@@ -48,7 +50,10 @@ const (
 
 	fwpConditionFlagIsLoopback uint32 = 0x00000001
 
-	fwpmSessionFlagDynamic uint32 = 0x00000001 // auto-cleanup on handle close / process exit
+	// Static-session objects outlive this process; PERSISTENT also survives a
+	// reboot, so the lock stays engaged until explicitly cleared.
+	fwpmSublayerFlagPersistent uint16 = 0x0001
+	fwpmFilterFlagPersistent   uint32 = 0x00020000
 
 	fwpEAlreadyExists uint32 = 0x80320009 // FWP_E_ALREADY_EXISTS
 
@@ -60,6 +65,7 @@ const (
 var (
 	fwpmLayerAleAuthConnectV4    = windows.GUID{Data1: 0xc38d57d1, Data2: 0x05a7, Data3: 0x4c33, Data4: [8]byte{0x90, 0x4f, 0x7f, 0xbc, 0xee, 0xe6, 0x0e, 0x82}}
 	fwpmLayerAleAuthConnectV6    = windows.GUID{Data1: 0x4a72393b, Data2: 0x319f, Data3: 0x44bc, Data4: [8]byte{0x84, 0xc3, 0xba, 0x54, 0xdc, 0xb3, 0xb6, 0xb4}}
+	fwpmLayerAleAuthRecvAcceptV4 = windows.GUID{Data1: 0xe1cd9fe7, Data2: 0xf4b5, Data3: 0x4273, Data4: [8]byte{0x96, 0xc0, 0x59, 0x2e, 0x48, 0x7b, 0x86, 0x50}}
 	fwpmLayerAleAuthRecvAcceptV6 = windows.GUID{Data1: 0xa3b42c97, Data2: 0x9f04, Data3: 0x4672, Data4: [8]byte{0xb8, 0x7e, 0xce, 0xe9, 0xc4, 0x83, 0x25, 0x7f}}
 )
 
@@ -75,6 +81,15 @@ var (
 
 // PangeaVPN sublayer GUID — deterministic, unique to this application.
 var pangeaVPNSublayerKey = windows.GUID{Data1: 0xa9d3e8f1, Data2: 0x4b7c, Data3: 0x4d2a, Data4: [8]byte{0x9e, 0x6f, 0x1a, 0x2b, 0x3c, 0x4d, 0x5e, 0x6f}}
+
+// Deterministic filter keys so a later process can find and delete these
+// filters without a filter ID from the dead process that added them.
+var (
+	pangeaBlockAllOutboundV4FilterKey = windows.GUID{Data1: 0xa9d3e8f2, Data2: 0x4b7c, Data3: 0x4d2a, Data4: [8]byte{0x9e, 0x6f, 0x1a, 0x2b, 0x3c, 0x4d, 0x5e, 0x70}}
+	pangeaBlockAllInboundV4FilterKey  = windows.GUID{Data1: 0xa9d3e8f3, Data2: 0x4b7c, Data3: 0x4d2a, Data4: [8]byte{0x9e, 0x6f, 0x1a, 0x2b, 0x3c, 0x4d, 0x5e, 0x71}}
+	pangeaBlockAllOutboundV6FilterKey = windows.GUID{Data1: 0xa9d3e8f4, Data2: 0x4b7c, Data3: 0x4d2a, Data4: [8]byte{0x9e, 0x6f, 0x1a, 0x2b, 0x3c, 0x4d, 0x5e, 0x72}}
+	pangeaBlockAllInboundV6FilterKey  = windows.GUID{Data1: 0xa9d3e8f5, Data2: 0x4b7c, Data3: 0x4d2a, Data4: [8]byte{0x9e, 0x6f, 0x1a, 0x2b, 0x3c, 0x4d, 0x5e, 0x73}}
+)
 
 // ---------------------------------------------------------------------------
 // WFP struct definitions — must match C ABI on 64-bit Windows
@@ -174,11 +189,14 @@ type wfpEngine struct {
 }
 
 func wfpOpen() (*wfpEngine, error) {
-	name, _ := windows.UTF16PtrFromString("PangeaVPN Kill Switch")
-
-	session := fwpmSession0{
-		flags: fwpmSessionFlagDynamic, // auto-cleanup on handle close / crash
+	name, err := windows.UTF16PtrFromString("PangeaVPN Kill Switch")
+	if err != nil {
+		return nil, fmt.Errorf("session display name: %w", err)
 	}
+
+	// Static (non-dynamic) session: filters survive this process dying, so a
+	// crash/kill/OOM doesn't silently open the firewall.
+	session := fwpmSession0{}
 	session.displayData.name = uintptr(unsafe.Pointer(name))
 
 	var handle windows.Handle
@@ -198,11 +216,16 @@ func wfpOpen() (*wfpEngine, error) {
 	return &wfpEngine{handle: handle}, nil
 }
 
-func (e *wfpEngine) close() {
-	if e.handle != 0 {
-		procFwpmEngineClose0.Call(uintptr(e.handle))
-		e.handle = 0
+func (e *wfpEngine) close() error {
+	if e.handle == 0 {
+		return nil
 	}
+	r, _, _ := procFwpmEngineClose0.Call(uintptr(e.handle))
+	e.handle = 0
+	if r != 0 {
+		return fmt.Errorf("FwpmEngineClose0: %w", windows.Errno(r))
+	}
+	return nil
 }
 
 func (e *wfpEngine) beginTransaction() error {
@@ -226,8 +249,14 @@ func (e *wfpEngine) abortTransaction() {
 }
 
 func (e *wfpEngine) addSublayer() error {
-	name, _ := windows.UTF16PtrFromString("PangeaVPN Kill Switch")
-	desc, _ := windows.UTF16PtrFromString("Blocks non-VPN traffic")
+	name, err := windows.UTF16PtrFromString("PangeaVPN Kill Switch")
+	if err != nil {
+		return fmt.Errorf("sublayer display name: %w", err)
+	}
+	desc, err := windows.UTF16PtrFromString("Blocks non-VPN traffic")
+	if err != nil {
+		return fmt.Errorf("sublayer description: %w", err)
+	}
 
 	sublayer := fwpmSublayer0{
 		subLayerKey: pangeaVPNSublayerKey,
@@ -235,6 +264,7 @@ func (e *wfpEngine) addSublayer() error {
 			name:        uintptr(unsafe.Pointer(name)),
 			description: uintptr(unsafe.Pointer(desc)),
 		},
+		flags:  fwpmSublayerFlagPersistent,
 		weight: 0xFFFF, // highest priority sublayer
 	}
 
@@ -255,13 +285,37 @@ func (e *wfpEngine) addSublayer() error {
 	return nil
 }
 
+func (e *wfpEngine) deleteSublayerByKey(key windows.GUID) error {
+	r, _, _ := procFwpmSubLayerDeleteByKey0.Call(
+		uintptr(e.handle),
+		uintptr(unsafe.Pointer(&key)),
+	)
+	if r != 0 {
+		return fmt.Errorf("FwpmSubLayerDeleteByKey0: %w", windows.Errno(r))
+	}
+	return nil
+}
+
+// addFilter adds an ephemeral, engine-assigned-key filter. See addFilterKeyed
+// for filters that must be idempotent and outlive this process.
 func (e *wfpEngine) addFilter(layer windows.GUID, filterName string, weight uint8, action uint32, conditions []fwpmFilterCondition0) (uint64, error) {
-	namePtr, _ := windows.UTF16PtrFromString(filterName)
+	return e.addFilterKeyed(layer, windows.GUID{}, filterName, weight, action, 0, conditions)
+}
+
+// addFilterKeyed adds a filter under a caller-chosen key so a later process
+// can find/delete it by that key. Re-adding an existing key returns (0, nil).
+func (e *wfpEngine) addFilterKeyed(layer, filterKey windows.GUID, filterName string, weight uint8, action, flags uint32, conditions []fwpmFilterCondition0) (uint64, error) {
+	namePtr, err := windows.UTF16PtrFromString(filterName)
+	if err != nil {
+		return 0, fmt.Errorf("filter name %q: %w", filterName, err)
+	}
 
 	filter := fwpmFilter0{
+		filterKey: filterKey,
 		displayData: fwpmDisplayData0{
 			name: uintptr(unsafe.Pointer(namePtr)),
 		},
+		flags:       flags,
 		layerKey:    layer,
 		subLayerKey: pangeaVPNSublayerKey,
 		weight: fwpValue0{
@@ -289,9 +343,23 @@ func (e *wfpEngine) addFilter(layer windows.GUID, filterName string, weight uint
 	runtime.KeepAlive(&filter)
 	runtime.KeepAlive(conditions)
 	if r != 0 {
+		if uint32(r) == fwpEAlreadyExists {
+			return 0, nil
+		}
 		return 0, fmt.Errorf("FwpmFilterAdd0 (%s): %w", filterName, windows.Errno(r))
 	}
 	return filterId, nil
+}
+
+func (e *wfpEngine) deleteFilterByKey(key windows.GUID) error {
+	r, _, _ := procFwpmFilterDeleteByKey0.Call(
+		uintptr(e.handle),
+		uintptr(unsafe.Pointer(&key)),
+	)
+	if r != 0 {
+		return fmt.Errorf("FwpmFilterDeleteByKey0: %w", windows.Errno(r))
+	}
+	return nil
 }
 
 func (e *wfpEngine) deleteFilter(filterId uint64) error {
@@ -309,11 +377,17 @@ func (e *wfpEngine) deleteFilter(filterId uint64) error {
 // Kill switch filter builders
 // ---------------------------------------------------------------------------
 
+// addBlockAllOutbound and its inbound/IPv6 counterparts are persistent: they
+// are the fail-closed lock itself and must outlive this process.
 func (e *wfpEngine) addBlockAllOutbound() (uint64, error) {
-	return e.addFilter(fwpmLayerAleAuthConnectV4, "PangeaVPN Block All Outbound", 1, fwpActionBlock, nil)
+	return e.addFilterKeyed(fwpmLayerAleAuthConnectV4, pangeaBlockAllOutboundV4FilterKey, "PangeaVPN Block All Outbound", 1, fwpActionBlock, fwpmFilterFlagPersistent, nil)
 }
 
-func (e *wfpEngine) addPermitLoopback() (uint64, error) {
+func (e *wfpEngine) addBlockAllInbound() (uint64, error) {
+	return e.addFilterKeyed(fwpmLayerAleAuthRecvAcceptV4, pangeaBlockAllInboundV4FilterKey, "PangeaVPN Block All Inbound", 1, fwpActionBlock, fwpmFilterFlagPersistent, nil)
+}
+
+func (e *wfpEngine) addPermitLoopbackAt(layer windows.GUID, filterName string) (uint64, error) {
 	conditions := []fwpmFilterCondition0{
 		{
 			fieldKey:  fwpmConditionFlags,
@@ -324,15 +398,22 @@ func (e *wfpEngine) addPermitLoopback() (uint64, error) {
 			},
 		},
 	}
-	return e.addFilter(fwpmLayerAleAuthConnectV4, "PangeaVPN Allow Loopback", 10, fwpActionPermit, conditions)
+	return e.addFilter(layer, filterName, 10, fwpActionPermit, conditions)
 }
 
-// addPermitLoopbackSubnet permits all outbound to 127.0.0.0/8 by address. This
-// complements the IS_LOOPBACK flag permit, which is not reliably set for fresh
-// inter-process TCP connects at ALE_AUTH_CONNECT — without it the block-all can
-// drop the local daemon API channel (127.0.0.1:8787). Loopback is non-routable,
-// so there is no leak risk.
-func (e *wfpEngine) addPermitLoopbackSubnet() (uint64, error) {
+func (e *wfpEngine) addPermitLoopback() (uint64, error) {
+	return e.addPermitLoopbackAt(fwpmLayerAleAuthConnectV4, "PangeaVPN Allow Loopback")
+}
+
+// addPermitLoopbackInboundV4 mirrors addPermitLoopbackInboundV6: without it
+// the inbound block drops the server side of every 127.0.0.1 connection.
+func (e *wfpEngine) addPermitLoopbackInboundV4() (uint64, error) {
+	return e.addPermitLoopbackAt(fwpmLayerAleAuthRecvAcceptV4, "PangeaVPN Allow Loopback Inbound")
+}
+
+// addPermitLoopbackSubnetAt permits 127.0.0.0/8 by address on the given
+// layer — the IS_LOOPBACK flag alone misses fresh inter-process connects.
+func (e *wfpEngine) addPermitLoopbackSubnetAt(layer windows.GUID, filterName string) (uint64, error) {
 	addrMask := fwpV4AddrAndMask{
 		addr: uint32(127) << 24,
 		mask: 0xFF000000, // /8
@@ -347,9 +428,17 @@ func (e *wfpEngine) addPermitLoopbackSubnet() (uint64, error) {
 			},
 		},
 	}
-	id, err := e.addFilter(fwpmLayerAleAuthConnectV4, "PangeaVPN Allow Loopback Subnet", 10, fwpActionPermit, conditions)
+	id, err := e.addFilter(layer, filterName, 10, fwpActionPermit, conditions)
 	runtime.KeepAlive(&addrMask)
 	return id, err
+}
+
+func (e *wfpEngine) addPermitLoopbackSubnet() (uint64, error) {
+	return e.addPermitLoopbackSubnetAt(fwpmLayerAleAuthConnectV4, "PangeaVPN Allow Loopback Subnet")
+}
+
+func (e *wfpEngine) addPermitLoopbackSubnetInboundV4() (uint64, error) {
+	return e.addPermitLoopbackSubnetAt(fwpmLayerAleAuthRecvAcceptV4, "PangeaVPN Allow Loopback Subnet Inbound")
 }
 
 func (e *wfpEngine) addPermitEndpointIP(ipStr string) (uint64, error) {
@@ -378,22 +467,20 @@ func (e *wfpEngine) addPermitEndpointIP(ipStr string) (uint64, error) {
 	return id, err
 }
 
-// addPermitIPv4Subnet permits outbound traffic to the given IPv4 CIDR.
-// Used for the "Allow LAN" option — permits RFC1918, link-local, and
-// multicast ranges so captive portals and gateway probes work on
-// restrictive WiFi.
-func (e *wfpEngine) addPermitIPv4Subnet(cidr string) (uint64, error) {
+// parseV4CIDRAddrMask converts an IPv4 CIDR string to the WFP condition's
+// host-byte-order address/mask pair.
+func parseV4CIDRAddrMask(cidr string) (fwpV4AddrAndMask, error) {
 	_, network, err := net.ParseCIDR(cidr)
 	if err != nil {
-		return 0, fmt.Errorf("invalid CIDR %s: %w", cidr, err)
+		return fwpV4AddrAndMask{}, fmt.Errorf("invalid CIDR %s: %w", cidr, err)
 	}
 	ip := network.IP.To4()
 	if ip == nil {
-		return 0, fmt.Errorf("CIDR %s is not IPv4", cidr)
+		return fwpV4AddrAndMask{}, fmt.Errorf("CIDR %s is not IPv4", cidr)
 	}
 	ones, bits := network.Mask.Size()
 	if bits != 32 {
-		return 0, fmt.Errorf("CIDR %s has non-IPv4 mask", cidr)
+		return fwpV4AddrAndMask{}, fmt.Errorf("CIDR %s has non-IPv4 mask", cidr)
 	}
 	var maskUint uint32
 	if ones == 0 {
@@ -401,10 +488,17 @@ func (e *wfpEngine) addPermitIPv4Subnet(cidr string) (uint64, error) {
 	} else {
 		maskUint = uint32(0xFFFFFFFF) << uint32(32-ones)
 	}
-
-	addrMask := fwpV4AddrAndMask{
+	return fwpV4AddrAndMask{
 		addr: uint32(ip[0])<<24 | uint32(ip[1])<<16 | uint32(ip[2])<<8 | uint32(ip[3]),
 		mask: maskUint,
+	}, nil
+}
+
+// addPermitIPv4Subnet permits outbound to cidr — used for "Allow LAN".
+func (e *wfpEngine) addPermitIPv4Subnet(cidr string) (uint64, error) {
+	addrMask, err := parseV4CIDRAddrMask(cidr)
+	if err != nil {
+		return 0, err
 	}
 
 	conditions := []fwpmFilterCondition0{
@@ -422,7 +516,13 @@ func (e *wfpEngine) addPermitIPv4Subnet(cidr string) (uint64, error) {
 	return id, err
 }
 
-func (e *wfpEngine) addPermitDHCP() (uint64, error) {
+// addPermitDHCP permits UDP 68->67 scoped to remoteCIDR. Unscoped, this
+// outranks block-all for ANY remote IP on port 67 — must stay scoped.
+func (e *wfpEngine) addPermitDHCP(remoteCIDR string) (uint64, error) {
+	addrMask, err := parseV4CIDRAddrMask(remoteCIDR)
+	if err != nil {
+		return 0, err
+	}
 	conditions := []fwpmFilterCondition0{
 		{
 			fieldKey:  fwpmConditionIpProtocol,
@@ -430,6 +530,14 @@ func (e *wfpEngine) addPermitDHCP() (uint64, error) {
 			conditionValue: fwpValue0{
 				valueType: fwpUint8,
 				value:     uintptr(ipprotoUDP),
+			},
+		},
+		{
+			fieldKey:  fwpmConditionIpRemoteAddress,
+			matchType: fwpMatchEqual,
+			conditionValue: fwpValue0{
+				valueType: fwpV4AddrMask,
+				value:     uintptr(unsafe.Pointer(&addrMask)),
 			},
 		},
 		{
@@ -449,7 +557,9 @@ func (e *wfpEngine) addPermitDHCP() (uint64, error) {
 			},
 		},
 	}
-	return e.addFilter(fwpmLayerAleAuthConnectV4, "PangeaVPN Allow DHCP", 10, fwpActionPermit, conditions)
+	id, err := e.addFilter(fwpmLayerAleAuthConnectV4, "PangeaVPN Allow DHCP "+remoteCIDR, 10, fwpActionPermit, conditions)
+	runtime.KeepAlive(&addrMask)
+	return id, err
 }
 
 func (e *wfpEngine) addPermitTunnelInterface(luid uint64) (uint64, error) {
@@ -469,11 +579,11 @@ func (e *wfpEngine) addPermitTunnelInterface(luid uint64) (uint64, error) {
 }
 
 func (e *wfpEngine) addBlockAllOutboundV6() (uint64, error) {
-	return e.addFilter(fwpmLayerAleAuthConnectV6, "PangeaVPN Block All Outbound IPv6", 1, fwpActionBlock, nil)
+	return e.addFilterKeyed(fwpmLayerAleAuthConnectV6, pangeaBlockAllOutboundV6FilterKey, "PangeaVPN Block All Outbound IPv6", 1, fwpActionBlock, fwpmFilterFlagPersistent, nil)
 }
 
 func (e *wfpEngine) addBlockAllInboundV6() (uint64, error) {
-	return e.addFilter(fwpmLayerAleAuthRecvAcceptV6, "PangeaVPN Block All Inbound IPv6", 1, fwpActionBlock, nil)
+	return e.addFilterKeyed(fwpmLayerAleAuthRecvAcceptV6, pangeaBlockAllInboundV6FilterKey, "PangeaVPN Block All Inbound IPv6", 1, fwpActionBlock, fwpmFilterFlagPersistent, nil)
 }
 
 func (e *wfpEngine) addPermitLoopbackV6() (uint64, error) {
