@@ -1,12 +1,17 @@
 package state
 
 import (
+	"fmt"
+	"os"
 	"sync"
 	"time"
 )
 
 type LogStore struct {
-	mu         sync.RWMutex
+	mu sync.RWMutex
+	// writeMu serialises Add end-to-end (append + sink write) so concurrent
+	// callers can't interleave and write the file out of append order.
+	writeMu    sync.Mutex
 	entries    []LogEntry
 	maxEntries int
 	sink       *fileSink
@@ -20,18 +25,24 @@ func (s *LogStore) AttachFile(path string, maxSize int64, keep int) error {
 		return err
 	}
 
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
 	s.mu.Lock()
 	previous := s.sink
 	s.sink = sink
 	s.mu.Unlock()
 
 	if previous != nil {
-		previous.Close()
+		return previous.Close()
 	}
 	return nil
 }
 
 func (s *LogStore) CloseFile() error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
 	s.mu.Lock()
 	sink := s.sink
 	s.sink = nil
@@ -62,17 +73,25 @@ func (s *LogStore) Add(level LogLevel, source LogSource, msg string) {
 		Msg:    msg,
 	}
 
+	// Held across both the append and the sink write so the two stay in the
+	// same order across goroutines instead of racing between them.
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
 	s.mu.Lock()
 	s.entries = append(s.entries, entry)
 	if len(s.entries) > s.maxEntries {
 		delta := len(s.entries) - s.maxEntries
-		s.entries = append([]LogEntry(nil), s.entries[delta:]...)
+		copy(s.entries, s.entries[delta:])
+		s.entries = s.entries[:s.maxEntries]
 	}
 	sink := s.sink
 	s.mu.Unlock()
 
 	if sink != nil {
-		sink.write(entry)
+		if err := sink.write(entry); err != nil {
+			fmt.Fprintf(os.Stderr, "log store: mirror to file failed: %v\n", err)
+		}
 	}
 }
 

@@ -16,6 +16,7 @@ type fileSink struct {
 	size    int64
 	maxSize int64
 	keep    int
+	closed  bool
 }
 
 func newFileSink(path string, maxSize int64, keep int) (*fileSink, error) {
@@ -26,47 +27,74 @@ func newFileSink(path string, maxSize int64, keep int) (*fileSink, error) {
 		keep = 0
 	}
 
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-	if err != nil {
+	s := &fileSink{path: path, maxSize: maxSize, keep: keep}
+	if err := s.openLocked(); err != nil {
 		return nil, fmt.Errorf("open log file %s: %w", path, err)
 	}
-
-	info, err := f.Stat()
-	if err != nil {
-		// Nothing written yet, so a close error has no data behind it.
-		_ = f.Close()
-		return nil, fmt.Errorf("stat log file %s: %w", path, err)
-	}
-
-	return &fileSink{f: f, path: path, size: info.Size(), maxSize: maxSize, keep: keep}, nil
+	return s, nil
 }
 
-func (s *fileSink) write(entry LogEntry) {
+// openLocked (re)opens s.path and syncs s.size to what is actually on disk,
+// rather than assuming a fresh file — callers may be recovering from a
+// rotation that failed to move the old file out of the way.
+func (s *fileSink) openLocked() error {
+	f, err := os.OpenFile(s.path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return err
+	}
+	info, err := f.Stat()
+	if err != nil {
+		_ = f.Close()
+		return err
+	}
+	s.f = f
+	s.size = info.Size()
+	return nil
+}
+
+func (s *fileSink) write(entry LogEntry) error {
 	line, err := json.Marshal(entry)
 	if err != nil {
-		return
+		return fmt.Errorf("marshal log entry: %w", err)
 	}
 	line = append(line, '\n')
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	if s.closed {
+		return nil
+	}
 	if s.f == nil {
-		return
+		if err := s.openLocked(); err != nil {
+			return fmt.Errorf("reopen log file %s: %w", s.path, err)
+		}
 	}
 	if s.size+int64(len(line)) > s.maxSize {
-		s.rotateLocked()
+		if err := s.rotateLocked(); err != nil {
+			fmt.Fprintf(os.Stderr, "log rotation: %s: %v\n", s.path, err)
+		}
+		if s.f == nil {
+			return fmt.Errorf("log file %s unavailable after failed rotation", s.path)
+		}
 	}
-	n, err := s.f.Write(line)
-	if err != nil {
-		return
-	}
+
+	n, werr := s.f.Write(line)
 	s.size += int64(n)
+	if werr != nil {
+		return fmt.Errorf("write log entry to %s: %w", s.path, werr)
+	}
+	return nil
 }
 
-// rotateLocked shifts daemon.log -> .1 -> .2, dropping anything past keep.
-func (s *fileSink) rotateLocked() {
+// rotateLocked shifts daemon.log -> .1 -> .2, dropping anything past keep. It
+// always leaves s.f pointing at a real, size-accounted file: if a rename step
+// fails (locked handle, cross-device, permissions), the original file stays
+// at s.path and gets reopened with its true size, so the caller keeps
+// retrying rotation instead of silently re-arming the cap against stale data.
+func (s *fileSink) rotateLocked() error {
 	if s.f == nil {
-		return
+		return nil
 	}
 	// This handle has log lines behind it, so a close error means entries were
 	// lost. Report to stderr, which the daemon points at its crash log — writing
@@ -76,27 +104,38 @@ func (s *fileSink) rotateLocked() {
 	}
 	s.f = nil
 
+	var rotateErr error
 	if s.keep == 0 {
-		os.Remove(s.path)
+		if err := os.Remove(s.path); err != nil && !os.IsNotExist(err) {
+			rotateErr = fmt.Errorf("remove %s: %w", s.path, err)
+		}
 	} else {
 		os.Remove(fmt.Sprintf("%s.%d", s.path, s.keep))
 		for i := s.keep - 1; i >= 1; i-- {
-			os.Rename(fmt.Sprintf("%s.%d", s.path, i), fmt.Sprintf("%s.%d", s.path, i+1))
+			src := fmt.Sprintf("%s.%d", s.path, i)
+			dst := fmt.Sprintf("%s.%d", s.path, i+1)
+			if err := os.Rename(src, dst); err != nil && !os.IsNotExist(err) {
+				rotateErr = fmt.Errorf("rename %s to %s: %w", src, dst, err)
+			}
 		}
-		os.Rename(s.path, s.path+".1")
+		if err := os.Rename(s.path, s.path+".1"); err != nil {
+			rotateErr = fmt.Errorf("rename %s to %s.1: %w", s.path, s.path, err)
+		}
 	}
 
-	f, err := os.OpenFile(s.path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-	if err != nil {
-		return
+	if err := s.openLocked(); err != nil {
+		if rotateErr != nil {
+			return fmt.Errorf("%v; reopen after rotation: %w", rotateErr, err)
+		}
+		return fmt.Errorf("reopen after rotation: %w", err)
 	}
-	s.f = f
-	s.size = 0
+	return rotateErr
 }
 
 func (s *fileSink) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.closed = true
 	if s.f == nil {
 		return nil
 	}

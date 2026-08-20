@@ -1,10 +1,27 @@
 package state_test
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/state"
 )
+
+func testProfile(id string) state.Profile {
+	return state.Profile{
+		ID:   id,
+		Name: "Test",
+		Cloak: state.CloakProfile{
+			RemoteHost: "example.com",
+			RemotePort: 443,
+			LocalPort:  51820,
+		},
+		WireGuard: state.WireGuardProfile{
+			ConfigText: "[Interface]\nPrivateKey=x\n",
+		},
+	}
+}
 
 // TestFindProfile_ClonesNaiveProfile is the regression test for the
 // cloneProfile aliasing bug: cloneProfile deep-copies WireGuard.DNS and
@@ -33,6 +50,7 @@ func TestFindProfile_ClonesNaiveProfile(t *testing.T) {
 		Cloak: state.CloakProfile{
 			RemoteHost: "example.com",
 			RemotePort: 443,
+			LocalPort:  51820,
 		},
 		Naive: &state.NaiveProfile{
 			RemoteHost: "example.com",
@@ -40,6 +58,9 @@ func TestFindProfile_ClonesNaiveProfile(t *testing.T) {
 			Username:   "u",
 			Password:   "p",
 			LocalPort:  origLocalPort,
+		},
+		WireGuard: state.WireGuardProfile{
+			ConfigText: "[Interface]\nPrivateKey=x\n",
 		},
 	}
 	if err := cs.Set(state.Config{Profiles: []state.Profile{profile}}); err != nil {
@@ -100,6 +121,9 @@ func TestGet_ClonesTransportProfiles(t *testing.T) {
 		ID:                   "p1",
 		Name:                 "Test",
 		TransportEndpointIPs: []string{origEndpointIP},
+		WireGuard: state.WireGuardProfile{
+			ConfigText: "[Interface]\nPrivateKey=x\n",
+		},
 		Reality: &state.RealityProfile{
 			RemoteHost: "example.com",
 			RemotePort: 443,
@@ -185,5 +209,132 @@ func TestGet_ClonesTransportProfiles(t *testing.T) {
 	if sp.TransportEndpointIPs[0] != origEndpointIP {
 		t.Errorf("TransportEndpointIPs[0] = %q, want unchanged %q (slice aliased into store) — these drive kill-switch permits",
 			sp.TransportEndpointIPs[0], origEndpointIP)
+	}
+}
+
+// TestNewConfigStore_RecoversFromBackupWhenPrimaryMissing simulates a crash
+// that lost config.json entirely (the old code's window between renaming it
+// away and renaming the temp file into place) but left a good
+// config.json.bak on disk. The store must recover the saved profile instead
+// of silently starting from DefaultConfig.
+func TestNewConfigStore_RecoversFromBackupWhenPrimaryMissing(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+
+	cs1, err := state.NewConfigStore(path)
+	if err != nil {
+		t.Fatalf("NewConfigStore: %v", err)
+	}
+	if err := cs1.Set(state.Config{Profiles: []state.Profile{testProfile("p1")}}); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+
+	// A second Set produces a config.json.bak holding the first write.
+	second := testProfile("p2")
+	second.Cloak.LocalPort = 51821
+	if err := cs1.Set(state.Config{Profiles: []state.Profile{testProfile("p1"), second}}); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	if _, err := os.Stat(path + ".bak"); err != nil {
+		t.Fatalf("expected backup file to exist: %v", err)
+	}
+
+	if err := os.Remove(path); err != nil {
+		t.Fatalf("simulate crash by removing primary config: %v", err)
+	}
+
+	cs2, err := state.NewConfigStore(path)
+	if err != nil {
+		t.Fatalf("NewConfigStore should recover from backup, got error: %v", err)
+	}
+	cfg := cs2.Get()
+	if len(cfg.Profiles) == 0 {
+		t.Fatal("expected recovered config to carry profiles from the backup, got none")
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("expected recovery to rewrite the primary config: %v", err)
+	}
+}
+
+// TestNewConfigStore_EmptyFileRecoversOrErrors covers the destructive-reset
+// bug: an empty config.json (the most likely crash outcome of a
+// non-fsynced write) must never be treated as "no config yet". With a
+// backup present it recovers; with no backup it must fail loudly instead of
+// silently writing an empty profile list.
+func TestNewConfigStore_EmptyFileRecoversOrErrors(t *testing.T) {
+	t.Run("with backup", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "config.json")
+
+		cs1, err := state.NewConfigStore(path)
+		if err != nil {
+			t.Fatalf("NewConfigStore: %v", err)
+		}
+		if err := cs1.Set(state.Config{Profiles: []state.Profile{testProfile("p1")}}); err != nil {
+			t.Fatalf("Set: %v", err)
+		}
+		if err := cs1.Set(state.Config{Profiles: []state.Profile{testProfile("p1")}}); err != nil {
+			t.Fatalf("Set: %v", err)
+		}
+		if _, err := os.Stat(path + ".bak"); err != nil {
+			t.Fatalf("expected backup file to exist: %v", err)
+		}
+
+		if err := os.WriteFile(path, nil, 0o600); err != nil {
+			t.Fatalf("truncate config to simulate a crashed write: %v", err)
+		}
+
+		cs2, err := state.NewConfigStore(path)
+		if err != nil {
+			t.Fatalf("NewConfigStore should recover from backup, got error: %v", err)
+		}
+		if len(cs2.Get().Profiles) == 0 {
+			t.Fatal("expected recovered config to carry profiles from the backup, got none")
+		}
+	})
+
+	t.Run("without backup", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "config.json")
+
+		if err := os.WriteFile(path, nil, 0o600); err != nil {
+			t.Fatalf("write empty config: %v", err)
+		}
+
+		if _, err := state.NewConfigStore(path); err == nil {
+			t.Fatal("expected NewConfigStore to fail on an empty config with no backup, got nil error")
+		}
+	})
+}
+
+// TestNewConfigStore_CleansUpStaleTempFile covers a temp file left behind
+// by a persist that crashed before its rename: it must not stop the daemon
+// from starting, and must not be mistaken for the real config.
+func TestNewConfigStore_CleansUpStaleTempFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+
+	cs1, err := state.NewConfigStore(path)
+	if err != nil {
+		t.Fatalf("NewConfigStore: %v", err)
+	}
+	if err := cs1.Set(state.Config{Profiles: []state.Profile{testProfile("p1")}}); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+
+	stalePath := path + ".tmp-stale12345"
+	if err := os.WriteFile(stalePath, []byte("garbage, half-written"), 0o600); err != nil {
+		t.Fatalf("write stale tmp file: %v", err)
+	}
+
+	cs2, err := state.NewConfigStore(path)
+	if err != nil {
+		t.Fatalf("NewConfigStore: %v", err)
+	}
+	if len(cs2.Get().Profiles) != 1 {
+		t.Fatalf("expected the real config to load unaffected, got %d profiles", len(cs2.Get().Profiles))
+	}
+	if _, err := os.Stat(stalePath); !os.IsNotExist(err) {
+		t.Fatalf("expected stale tmp file to be cleaned up, stat err = %v", err)
 	}
 }
