@@ -3,6 +3,7 @@
 package auth
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"unsafe"
@@ -101,7 +102,7 @@ func verifyTrustedTokenOwner(path string) error {
 		return fmt.Errorf("token file is not owned by SYSTEM or Administrators")
 	}
 
-	dacl, present, err := sd.DACL()
+	dacl, present, err := readTokenDACL(sd)
 	if err != nil {
 		return fmt.Errorf("read token file DACL: %w", err)
 	}
@@ -130,6 +131,19 @@ func verifyTrustedTokenOwner(path string) error {
 	}
 
 	return nil
+}
+
+// readTokenDACL reports absence as present=false; x/sys signals it through
+// ERROR_OBJECT_NOT_FOUND, and its second return is "defaulted", not "present".
+func readTokenDACL(sd *windows.SECURITY_DESCRIPTOR) (*windows.ACL, bool, error) {
+	dacl, _, err := sd.DACL()
+	if errors.Is(err, windows.ERROR_OBJECT_NOT_FOUND) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	return dacl, dacl != nil, nil
 }
 
 func isTrustedTokenPrincipal(sid *windows.SID) bool {

@@ -5,6 +5,7 @@ package platform
 import (
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -54,6 +55,10 @@ func AppSupportDir() (string, error) {
 	}
 
 	return appDir, nil
+}
+
+func appSupportDirOverridden() bool {
+	return strings.TrimSpace(os.Getenv(appSupportDirOverrideEnv)) != ""
 }
 
 func TokenPath() (string, error) {
@@ -116,6 +121,12 @@ func isPrivilegedProcess() bool {
 // Administrators, or, if it already exists, verifies it still is — refusing
 // to trust a pre-existing directory an unprivileged user could have planted.
 func ensureDataDir(path string) error {
+	// An unprivileged dev/test run redirected by the override owns nothing
+	// SYSTEM-grade; the admin-only regime would only lock it out of its own dir.
+	if appSupportDirOverridden() && !isPrivilegedProcess() {
+		return os.MkdirAll(path, 0o700)
+	}
+
 	info, err := os.Lstat(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return createSecureDir(path)
@@ -153,9 +164,9 @@ func createSecureDir(path string) error {
 	return nil
 }
 
-// adminOnlySecurityDescriptor builds a protected (non-inherited-from-parent)
-// DACL granting SYSTEM and Administrators full control, inheritable by children.
-func adminOnlySecurityDescriptor() (*windows.SECURITY_DESCRIPTOR, error) {
+// adminOnlyDACL grants SYSTEM and Administrators full control, inheritable by
+// children, and nobody else.
+func adminOnlyDACL() (*windows.ACL, error) {
 	systemSid, err := windows.CreateWellKnownSid(windows.WinLocalSystemSid)
 	if err != nil {
 		return nil, fmt.Errorf("resolve SYSTEM sid: %w", err)
@@ -191,6 +202,21 @@ func adminOnlySecurityDescriptor() (*windows.SECURITY_DESCRIPTOR, error) {
 	if err != nil {
 		return nil, fmt.Errorf("build dacl: %w", err)
 	}
+	return dacl, nil
+}
+
+// adminOnlySecurityDescriptor wraps that DACL in a protected security
+// descriptor owned by SYSTEM.
+func adminOnlySecurityDescriptor() (*windows.SECURITY_DESCRIPTOR, error) {
+	dacl, err := adminOnlyDACL()
+	if err != nil {
+		return nil, err
+	}
+
+	adminSid, err := windows.CreateWellKnownSid(windows.WinBuiltinAdministratorsSid)
+	if err != nil {
+		return nil, fmt.Errorf("resolve Administrators sid: %w", err)
+	}
 
 	sd, err := windows.NewSecurityDescriptor()
 	if err != nil {
@@ -199,44 +225,37 @@ func adminOnlySecurityDescriptor() (*windows.SECURITY_DESCRIPTOR, error) {
 	if err := sd.SetDACL(dacl, true, false); err != nil {
 		return nil, fmt.Errorf("set dacl: %w", err)
 	}
-	// Owner is set to the caller's own identity (SYSTEM or an elevated
-	// admin), which never requires SeRestorePrivilege to assign.
-	if err := sd.SetOwner(systemSid, false); err != nil {
+	// Administrators is the one trusted owner both SYSTEM and an elevated
+	// admin can assign; SYSTEM needs SeRestorePrivilege they may not hold.
+	if err := sd.SetOwner(adminSid, false); err != nil {
 		return nil, fmt.Errorf("set owner: %w", err)
 	}
 
 	return sd.ToSelfRelative()
 }
 
-// verifySecureDir hard-fails unless an already-existing directory is owned by
-// SYSTEM or Administrators and its DACL grants no access to anyone else.
-func verifySecureDir(path string) error {
-	sd, err := windows.GetNamedSecurityInfo(path, windows.SE_FILE_OBJECT,
-		windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION)
-	if err != nil {
-		return fmt.Errorf("read security info for %s: %w", path, err)
-	}
+type dirSecurityVerdict int
 
-	owner, _, err := sd.Owner()
-	if err != nil {
-		return fmt.Errorf("read owner of %s: %w", path, err)
-	}
-	if !owner.IsWellKnown(windows.WinLocalSystemSid) && !owner.IsWellKnown(windows.WinBuiltinAdministratorsSid) {
-		return fmt.Errorf("%s is not owned by SYSTEM or Administrators", path)
-	}
+const (
+	dirSecurityOK dirSecurityVerdict = iota
+	dirSecurityRepairable
+	dirSecurityUntrusted
+)
 
-	dacl, present, err := sd.DACL()
-	if err != nil {
-		return fmt.Errorf("read DACL of %s: %w", path, err)
+// classifyDirSecurity separates a directory an unprivileged user could have
+// planted (untrusted) from an admin-created one whose DACL is merely too wide.
+func classifyDirSecurity(owner *windows.SID, dacl *windows.ACL, daclPresent bool) (dirSecurityVerdict, error) {
+	if owner == nil || (!owner.IsWellKnown(windows.WinLocalSystemSid) && !owner.IsWellKnown(windows.WinBuiltinAdministratorsSid)) {
+		return dirSecurityUntrusted, errors.New("not owned by SYSTEM or Administrators")
 	}
-	if !present || dacl == nil {
-		return fmt.Errorf("%s has no DACL", path)
+	if !daclPresent || dacl == nil {
+		return dirSecurityRepairable, errors.New("no readable DACL")
 	}
 
 	for i := uint16(0); i < dacl.AceCount; i++ {
 		var ace *windows.ACCESS_ALLOWED_ACE
 		if err := windows.GetAce(dacl, uint32(i), &ace); err != nil {
-			return fmt.Errorf("read ACE %d of %s: %w", i, path, err)
+			return dirSecurityUntrusted, fmt.Errorf("read ACE %d: %w", i, err)
 		}
 		if ace.Header.AceType != windows.ACCESS_ALLOWED_ACE_TYPE {
 			continue
@@ -245,8 +264,81 @@ func verifySecureDir(path string) error {
 		if sid.IsWellKnown(windows.WinLocalSystemSid) || sid.IsWellKnown(windows.WinBuiltinAdministratorsSid) {
 			continue
 		}
-		return fmt.Errorf("%s grants access to a non-admin principal (%s)", path, sid.String())
+		return dirSecurityRepairable, fmt.Errorf("grants access to a non-admin principal (%s)", sid.String())
 	}
 
+	return dirSecurityOK, nil
+}
+
+// readDACL reports absence as present=false; x/sys signals it through
+// ERROR_OBJECT_NOT_FOUND, and its second return is "defaulted", not "present".
+func readDACL(sd *windows.SECURITY_DESCRIPTOR) (*windows.ACL, bool, error) {
+	dacl, _, err := sd.DACL()
+	if errors.Is(err, windows.ERROR_OBJECT_NOT_FOUND) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	return dacl, dacl != nil, nil
+}
+
+func inspectDirSecurity(path string) (dirSecurityVerdict, error) {
+	sd, err := windows.GetNamedSecurityInfo(path, windows.SE_FILE_OBJECT,
+		windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION)
+	if err != nil {
+		return dirSecurityUntrusted, fmt.Errorf("read security info for %s: %w", path, err)
+	}
+
+	owner, _, err := sd.Owner()
+	if err != nil {
+		return dirSecurityUntrusted, fmt.Errorf("read owner of %s: %w", path, err)
+	}
+	dacl, present, err := readDACL(sd)
+	if err != nil {
+		return dirSecurityUntrusted, fmt.Errorf("read DACL of %s: %w", path, err)
+	}
+
+	verdict, reason := classifyDirSecurity(owner, dacl, present)
+	if reason != nil {
+		reason = fmt.Errorf("%s %w", path, reason)
+	}
+	return verdict, reason
+}
+
+// verifySecureDir tightens an admin-owned directory that predates the
+// lockdown instead of refusing it, and only fails when it cannot be trusted.
+func verifySecureDir(path string) error {
+	verdict, reason := inspectDirSecurity(path)
+	switch verdict {
+	case dirSecurityOK:
+		return nil
+	case dirSecurityRepairable:
+		if !isPrivilegedProcess() {
+			return fmt.Errorf("%w; re-run elevated or set %s", reason, appSupportDirOverrideEnv)
+		}
+		log.Printf("platform: re-securing %s (%v)", path, reason)
+		if err := applyAdminOnlyDACL(path); err != nil {
+			return err
+		}
+		if verdict, reason := inspectDirSecurity(path); verdict != dirSecurityOK {
+			return fmt.Errorf("still not secure after re-securing: %w", reason)
+		}
+		return nil
+	default:
+		return reason
+	}
+}
+
+func applyAdminOnlyDACL(path string) error {
+	dacl, err := adminOnlyDACL()
+	if err != nil {
+		return err
+	}
+	if err := windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT,
+		windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION,
+		nil, nil, dacl, nil); err != nil {
+		return fmt.Errorf("re-secure %s: %w", path, err)
+	}
 	return nil
 }
