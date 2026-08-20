@@ -24,10 +24,13 @@ const iptWaitSeconds = "5"
 // BestEffort commands may fail (clearing leftovers, retiring a chain that may
 // not exist); everything else aborts the apply.
 type iptablesCommand struct {
-	Binary     string
-	Args       []string
-	BestEffort bool
-	Purpose    string
+	Binary         string
+	Args           []string
+	BestEffort     bool
+	// TolerateExists survives a create racing a leftover chain a prior -X
+	// couldn't remove because a duplicate jump still referenced it.
+	TolerateExists bool
+	Purpose        string
 }
 
 func withWait(args []string) []string {
@@ -48,6 +51,14 @@ func ipt6(purpose string, args ...string) iptablesCommand {
 
 func ipt6Optional(args ...string) iptablesCommand {
 	return iptablesCommand{Binary: "ip6tables", Args: withWait(args), BestEffort: true}
+}
+
+func ipt4Create(purpose string, args ...string) iptablesCommand {
+	return iptablesCommand{Binary: "iptables", Args: withWait(args), Purpose: purpose, TolerateExists: true}
+}
+
+func ipt6Create(purpose string, args ...string) iptablesCommand {
+	return iptablesCommand{Binary: "ip6tables", Args: withWait(args), Purpose: purpose, TolerateExists: true}
 }
 
 func iptablesStagingChain(live string) string {
@@ -86,7 +97,7 @@ func iptablesApplyPlan(
 		ipt6Optional("-D", "OUTPUT", "-j", staging6),
 		ipt6Optional("-F", staging6),
 		ipt6Optional("-X", staging6),
-		ipt6("create IPv6 chain", "-N", staging6),
+		ipt6Create("create IPv6 chain", "-N", staging6),
 		ipt6("allow IPv6 loopback", "-A", staging6, "-o", "lo", "-j", "ACCEPT"),
 		ipt6("add IPv6 drop rule", "-A", staging6, "-j", "DROP"),
 		ipt6("insert IPv6 jump", "-I", "OUTPUT", "1", "-j", staging6),
@@ -106,9 +117,11 @@ func iptablesApplyPlan(
 		ipt4Optional("-D", "OUTPUT", "-j", staging),
 		ipt4Optional("-F", staging),
 		ipt4Optional("-X", staging),
-		ipt4("create chain", "-N", staging),
+		ipt4Create("create chain", "-N", staging),
 		ipt4("allow loopback", "-A", staging, "-o", "lo", "-j", "ACCEPT"),
-		ipt4("allow DHCP", "-A", staging, "-p", "udp", "--sport", "68", "--dport", "67", "-j", "ACCEPT"),
+		// Scoped to broadcast so it can't be used to reach an arbitrary remote
+		// host on udp/67.
+		ipt4("allow DHCP", "-A", staging, "-p", "udp", "--sport", "68", "--dport", "67", "-d", "255.255.255.255", "-j", "ACCEPT"),
 	)
 
 	for _, ip := range endpointIPs {
@@ -204,9 +217,13 @@ func applyIPTablesRules(ctx context.Context, endpointIPs []string, tunnelInterfa
 	)
 	for _, cmd := range plan {
 		err := runIPTablesCommand(ctx, cmd.Binary, cmd.Args...)
-		if err != nil && !cmd.BestEffort {
-			return fmt.Errorf("%s: %w", cmd.Purpose, err)
+		if err == nil || cmd.BestEffort {
+			continue
 		}
+		if cmd.TolerateExists && strings.Contains(strings.ToLower(err.Error()), "exist") {
+			continue
+		}
+		return fmt.Errorf("%s: %w", cmd.Purpose, err)
 	}
 	return nil
 }

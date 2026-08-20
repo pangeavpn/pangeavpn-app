@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"regexp"
 	"strings"
 	"sync"
 )
@@ -14,6 +15,10 @@ const (
 	nftTableName = "pangeavpn_killswitch"
 	nftFamily    = "inet"
 )
+
+// Matches iptables/nft interface name constraints; rejected names are never
+// interpolated into the nft script text.
+var validTunnelInterfaceName = regexp.MustCompile(`^[a-zA-Z0-9_.-]+$`).MatchString
 
 func init() {
 	newPlatformKillSwitch = func() KillSwitch {
@@ -40,23 +45,25 @@ func (ks *linuxKillSwitch) Enable(ctx context.Context, endpointHosts []string, a
 	var tunnelInterface string
 	if ks.active {
 		prev, _ := loadKillSwitchState()
-		if stringSlicesEqual(prev.EndpointIPs, ips) && prev.AllowLAN == allowLAN {
-			// Rules match; still record a Lockdown re-arm.
-			return persistLockedUpgrade(prev, locked)
-		}
 		tunnelInterface = prev.TunnelInterface
+		if prev.Locked {
+			// Never let a re-arm silently drop a previously recorded Lockdown.
+			locked = true
+		}
 	}
 
+	// Re-apply unconditionally rather than trusting in-memory state: an
+	// external actor (firewalld reload, manual flush) can remove the live
+	// rules without this process knowing. Both apply paths are idempotent.
+	useNFT := false
 	if hasNFT(ctx) {
-		ks.useNFT = true
-		if err := applyNFTRules(ctx, ips, tunnelInterface, allowLAN); err != nil {
-			if !ks.active {
-				_ = removeNFTRules(ctx)
-			}
-			return fmt.Errorf("kill switch enable (nft): %w", err)
+		if err := applyNFTRules(ctx, ips, tunnelInterface, allowLAN); err == nil {
+			useNFT = true
+		} else if !ks.active {
+			_ = removeNFTRules(ctx)
 		}
-	} else {
-		ks.useNFT = false
+	}
+	if !useNFT {
 		if err := applyIPTablesRules(ctx, ips, tunnelInterface, allowLAN); err != nil {
 			if !ks.active {
 				_ = removeIPTablesRules(ctx)
@@ -64,6 +71,7 @@ func (ks *linuxKillSwitch) Enable(ctx context.Context, endpointHosts []string, a
 			return fmt.Errorf("kill switch enable (iptables): %w", err)
 		}
 	}
+	ks.useNFT = useNFT
 
 	// Rules are live from here. Marking active before the save means a save
 	// failure still leaves them trackable by Clear.
@@ -98,9 +106,10 @@ func (ks *linuxKillSwitch) Update(ctx context.Context, tunnel TunnelRef) error {
 		return fmt.Errorf("empty tunnel interface name")
 	}
 
-	st, _ := loadKillSwitchState()
-	st.TunnelInterface = tunnelInterface
-	_ = saveKillSwitchState(st)
+	st, err := loadKillSwitchState()
+	if err != nil {
+		return fmt.Errorf("kill switch update: load state: %w", err)
+	}
 
 	if ks.useNFT {
 		if err := applyNFTRules(ctx, st.EndpointIPs, tunnelInterface, ks.allowLAN); err != nil {
@@ -112,6 +121,12 @@ func (ks *linuxKillSwitch) Update(ctx context.Context, tunnel TunnelRef) error {
 		}
 	}
 
+	// Persisted only after the rules land, so state never claims a permit
+	// that a failed apply never installed.
+	st.TunnelInterface = tunnelInterface
+	if err := saveKillSwitchState(st); err != nil {
+		return fmt.Errorf("kill switch update: save state: %w", err)
+	}
 	return nil
 }
 
@@ -119,23 +134,25 @@ func (ks *linuxKillSwitch) Clear(ctx context.Context) error {
 	ks.mu.Lock()
 	defer ks.mu.Unlock()
 
+	// Tear down both backends unconditionally: which one is actually live
+	// cannot be trusted after a crash/restart (useNFT is in-memory only,
+	// never persisted), and each removal is a no-op when its backend is absent.
 	var errs []string
-
-	if ks.useNFT {
-		if err := removeNFTRules(ctx); err != nil {
-			errs = append(errs, fmt.Sprintf("remove nft rules: %v", err))
-		}
-	} else {
-		if err := removeIPTablesRules(ctx); err != nil {
-			errs = append(errs, fmt.Sprintf("remove iptables rules: %v", err))
-		}
+	if err := removeNFTRules(ctx); err != nil {
+		errs = append(errs, fmt.Sprintf("remove nft rules: %v", err))
+	}
+	if err := removeIPTablesRules(ctx); err != nil {
+		errs = append(errs, fmt.Sprintf("remove iptables rules: %v", err))
+	}
+	if len(errs) > 0 {
+		// Leave active + persisted state untouched so a half-removed chain
+		// keeps Active() true and gets retried instead of stranding silently.
+		return fmt.Errorf("kill switch clear incomplete: %s", strings.Join(errs, "; "))
 	}
 
-	_ = removeKillSwitchState()
 	ks.active = false
-
-	if len(errs) > 0 {
-		return fmt.Errorf("kill switch clear incomplete: %s", strings.Join(errs, "; "))
+	if err := removeKillSwitchState(); err != nil {
+		return fmt.Errorf("kill switch clear: remove state: %w", err)
 	}
 	return nil
 }
@@ -167,8 +184,9 @@ func buildNFTRuleset(endpointIPs []string, tunnelInterface string, allowLAN bool
 	// Allow loopback.
 	fmt.Fprintf(&b, "    oifname \"lo\" accept\n")
 
-	// Allow DHCP.
-	fmt.Fprintf(&b, "    udp sport 68 udp dport 67 accept\n")
+	// Allow DHCP, scoped to broadcast so it can't be used to reach an
+	// arbitrary remote host on udp/67, and to IPv4 only.
+	fmt.Fprintf(&b, "    meta nfproto ipv4 udp sport 68 udp dport 67 ip daddr 255.255.255.255 accept\n")
 
 	// Allow traffic to endpoint IPs.
 	for _, ip := range endpointIPs {
@@ -198,6 +216,10 @@ func buildNFTRuleset(endpointIPs []string, tunnelInterface string, allowLAN bool
 }
 
 func applyNFTRules(ctx context.Context, endpointIPs []string, tunnelInterface string, allowLAN bool) error {
+	if tunnelInterface != "" && !validTunnelInterfaceName(tunnelInterface) {
+		return fmt.Errorf("invalid tunnel interface name %q", tunnelInterface)
+	}
+
 	// Replace rules atomically. nft -f processes the whole script as a single
 	// kernel transaction: `add table` is a no-op if it exists, `delete table`
 	// drops the old version, and the new `table {...}` block installs the
