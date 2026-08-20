@@ -40,8 +40,10 @@ const macElevationRetryBackoffMs = 10000;
 
 export class DaemonProcessManager {
   private child: ChildProcess | null = null;
+  private childGeneration = 0;
   private readonly client: DaemonClient;
   private ensureInFlight: Promise<void> | null = null;
+  private ensureInFlightForceRestart = false;
   private lastMacElevationFailureAtMs = 0;
 
   constructor(client: DaemonClient) {
@@ -49,12 +51,19 @@ export class DaemonProcessManager {
   }
 
   async ensureRunning(options: EnsureDaemonOptions = {}): Promise<void> {
+    const forceRestart = options.forceRestart === true;
     if (this.ensureInFlight) {
+      // A pending non-force run can't be trusted to have restarted anything; wait, then retry for real.
+      if (forceRestart && !this.ensureInFlightForceRestart) {
+        return this.ensureInFlight.catch(() => {}).then(() => this.ensureRunning(options));
+      }
       return this.ensureInFlight;
     }
 
+    this.ensureInFlightForceRestart = forceRestart;
     const task = this.ensureRunningInternal(options).finally(() => {
       this.ensureInFlight = null;
+      this.ensureInFlightForceRestart = false;
     });
     this.ensureInFlight = task;
     return task;
@@ -161,6 +170,7 @@ export class DaemonProcessManager {
         return;
       }
 
+      const generation = ++this.childGeneration;
       this.child = spawn(daemonPath, [], {
         windowsHide: true,
         stdio: openDaemonLogStdio()
@@ -168,7 +178,9 @@ export class DaemonProcessManager {
 
       attachExitLogger(this.child, "linux");
       this.child.on("exit", () => {
-        this.child = null;
+        if (generation === this.childGeneration) {
+          this.child = null;
+        }
       });
     }
 
@@ -204,23 +216,30 @@ export class DaemonProcessManager {
     }
 
     const allowUnelevatedFallback = shouldUseUnelevatedMacFallback(daemonPath);
-    if (!allowUnelevatedFallback && Date.now() - this.lastMacElevationFailureAtMs < macElevationRetryBackoffMs) {
+    const backoffActive = Date.now() - this.lastMacElevationFailureAtMs < macElevationRetryBackoffMs;
+    if (backoffActive && !allowUnelevatedFallback) {
       throw new Error("Previous daemon elevation failed. Wait a few seconds and retry.");
     }
 
     const context = resolveMacUserContext(daemonPath);
     if (typeof process.getuid === "function" && process.getuid() === 0) {
       this.startMacDaemonChild(daemonPath, context);
+    } else if (backoffActive && allowUnelevatedFallback) {
+      // Recently declined/failed; don't re-prompt the user, just fall back.
+      console.warn("skipping repeated admin prompt after a recent elevation failure; starting non-root daemon fallback");
+      this.startMacDaemonChild(daemonPath, context);
+      await this.waitForReachable();
+      return;
     } else {
       const elevate = await restartProcessElevatedMac(daemonPath, context);
       if (!elevate.ok) {
+        this.lastMacElevationFailureAtMs = Date.now();
         if (allowUnelevatedFallback) {
           console.warn(`daemon elevation failed (${elevate.message}); starting non-root daemon fallback`);
           this.startMacDaemonChild(daemonPath, context);
           await this.waitForReachable();
           return;
         }
-        this.lastMacElevationFailureAtMs = Date.now();
         throw new Error(elevate.message);
       }
       this.lastMacElevationFailureAtMs = 0;
@@ -231,6 +250,7 @@ export class DaemonProcessManager {
 
   private startMacDaemonChild(daemonPath: string, context: MacDaemonContext): void {
     this.child?.kill();
+    const generation = ++this.childGeneration;
     this.child = spawn(daemonPath, [], {
       windowsHide: true,
       stdio: openDaemonLogStdio(),
@@ -244,11 +264,14 @@ export class DaemonProcessManager {
     });
     attachExitLogger(this.child, "mac-child");
     this.child.on("exit", () => {
-      this.child = null;
+      if (generation === this.childGeneration) {
+        this.child = null;
+      }
     });
   }
 
   stop(): void {
+    this.childGeneration += 1;
     if (this.child) {
       this.child.kill();
       this.child = null;
@@ -284,10 +307,19 @@ export class DaemonProcessManager {
 
     const candidates: string[] = [];
     if (process.platform === "win32") {
-      candidates.push(
+      // app.getAppPath() is fixed by Electron, not by the process's (attacker-controllable) cwd.
+      const trustedRoot = path.resolve(app.getAppPath(), "..", "..");
+      const cwdCandidates = [
         path.resolve(process.cwd(), "..", "..", "daemon", "bin", "PangeaDaemon.exe"),
-        path.resolve(process.cwd(), "daemon", "bin", "PangeaDaemon.exe"),
-        path.resolve(app.getAppPath(), "..", "..", "daemon", "bin", "PangeaDaemon.exe")
+        path.resolve(process.cwd(), "daemon", "bin", "PangeaDaemon.exe")
+      ].filter((candidate) => {
+        const relative = path.relative(trustedRoot, candidate);
+        return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+      });
+
+      candidates.push(
+        path.resolve(app.getAppPath(), "..", "..", "daemon", "bin", "PangeaDaemon.exe"),
+        ...cwdCandidates
       );
     }
 
@@ -342,7 +374,50 @@ function stripMacQuarantine(daemonPath: string): void {
   }
 }
 
+function macTeamIdentifier(target: string): string | null {
+  const result = spawnSync("/usr/bin/codesign", ["-dv", "--verbose=4", target], {
+    stdio: "pipe",
+    shell: false
+  });
+  const match = combineOutput(result).match(/TeamIdentifier=([A-Za-z0-9]+)/);
+  return match ? match[1] : null;
+}
+
+// Refuses to elevate a binary whose signature, signer, or location we can't trust.
+function verifyMacDaemonBinaryForElevation(daemonPath: string): { ok: boolean; message: string } {
+  let stat: fs.Stats;
+  try {
+    stat = fs.lstatSync(daemonPath);
+  } catch {
+    return { ok: false, message: "Daemon binary could not be inspected. Reinstall PangeaVPN." };
+  }
+  if (stat.isSymbolicLink() || (stat.mode & 0o022) !== 0) {
+    return { ok: false, message: "Daemon binary location is not secure. Reinstall PangeaVPN." };
+  }
+
+  const verify = spawnSync("/usr/bin/codesign", ["--verify", "--strict", daemonPath], {
+    stdio: "ignore",
+    shell: false
+  });
+  if (verify.status !== 0) {
+    return { ok: false, message: "Daemon binary failed code signature verification. Reinstall PangeaVPN." };
+  }
+
+  const daemonTeam = macTeamIdentifier(daemonPath);
+  const appTeam = macTeamIdentifier(process.execPath);
+  if (!daemonTeam || !appTeam || daemonTeam !== appTeam) {
+    return { ok: false, message: "Daemon binary signing identity does not match the app. Reinstall PangeaVPN." };
+  }
+
+  return { ok: true, message: "" };
+}
+
 async function restartProcessElevatedMac(filePath: string, context: MacDaemonContext): Promise<{ ok: boolean; message: string }> {
+  const verification = verifyMacDaemonBinaryForElevation(filePath);
+  if (!verification.ok) {
+    return verification;
+  }
+
   const daemonPath = shSingleQuoteMac(filePath);
   const resourcesDir = shSingleQuoteMac(path.resolve(path.dirname(filePath), ".."));
   const appSupportDir = shSingleQuoteMac(context.appSupportDir);
@@ -359,7 +434,12 @@ async function restartProcessElevatedMac(filePath: string, context: MacDaemonCon
     `CONFIG_PATH=${configPath}`,
     `TARGET_USER=${targetUser}`,
     `TARGET_HOME=${targetHome}`,
-    `/bin/mkdir -p "$APP_SUPPORT_DIR"`,
+    `LOG_DIR="/Library/Application Support/PangeaVPN"`,
+    `LOG_PATH="$LOG_DIR/daemon-elevated.log"`,
+    `/bin/mkdir -p "$APP_SUPPORT_DIR" "$LOG_DIR"`,
+    // rm -f unlinks any pre-planted symlink; the redirect below then creates a fresh root-owned file.
+    `/bin/rm -f "$LOG_PATH"`,
+    `/bin/chmod 700 "$LOG_DIR" >/dev/null 2>&1 || true`,
     `if [ ! -s "$TOKEN_PATH" ]; then /usr/bin/openssl rand -hex 32 > "$TOKEN_PATH"; fi`,
     `if [ ! -s "$CONFIG_PATH" ]; then /usr/bin/printf '{\\n  "profiles": []\\n}\\n' > "$CONFIG_PATH"; fi`,
     `/usr/sbin/chown "$TARGET_USER" "$APP_SUPPORT_DIR" "$TOKEN_PATH" "$CONFIG_PATH" >/dev/null 2>&1 || true`,
@@ -367,7 +447,7 @@ async function restartProcessElevatedMac(filePath: string, context: MacDaemonCon
     `/bin/chmod 600 "$TOKEN_PATH" "$CONFIG_PATH" >/dev/null 2>&1 || true`,
     `for daemon_pid in $(/usr/sbin/lsof -tiTCP:8787 -sTCP:LISTEN 2>/dev/null); do /bin/kill -TERM "$daemon_pid" >/dev/null 2>&1 || true; done`,
     "/bin/sleep 0.2",
-    `/usr/bin/nohup /usr/bin/env HOME="$TARGET_HOME" USER="$TARGET_USER" LOGNAME="$TARGET_USER" PANGEA_APP_SUPPORT_DIR="$APP_SUPPORT_DIR" ${daemonPath} >/tmp/pangeavpn-daemon.log 2>&1 &`
+    `/usr/bin/nohup /usr/bin/env HOME="$TARGET_HOME" USER="$TARGET_USER" LOGNAME="$TARGET_USER" PANGEA_APP_SUPPORT_DIR="$APP_SUPPORT_DIR" ${daemonPath} >"$LOG_PATH" 2>&1 &`
   ].join("; ");
 
   const appleScript = `do shell script ${appleScriptString(shellCommand)} with administrator privileges`;
@@ -488,11 +568,15 @@ async function startProcessElevatedWindows(filePath: string, args: string[]): Pr
   ].join("; ");
   const encodedInner = psEncodedCommand(innerCommand);
   const command = [
-    "Start-Process -FilePath 'powershell.exe' -Verb RunAs -WindowStyle Hidden -ArgumentList @(",
-    "  '-NoProfile',",
-    "  '-ExecutionPolicy', 'Bypass',",
-    `  '-EncodedCommand', '${encodedInner}'`,
-    ")"
+    "$ErrorActionPreference = 'Stop'",
+    "try {",
+    "  $process = Start-Process -FilePath 'powershell.exe' -Verb RunAs -WindowStyle Hidden -Wait -PassThru -ArgumentList @(",
+    "    '-NoProfile',",
+    "    '-ExecutionPolicy', 'Bypass',",
+    `    '-EncodedCommand', '${encodedInner}'`,
+    "  )",
+    "  exit $process.ExitCode",
+    "} catch { exit 1 }"
   ].join("\n");
   const encodedOuter = psEncodedCommand(command);
 
@@ -508,7 +592,7 @@ async function startProcessElevatedWindows(filePath: string, args: string[]): Pr
     return { ok: false, message: `Failed to request daemon elevation: ${result.error.message}` };
   }
   if (result.status !== 0) {
-    return { ok: false, message: "Daemon elevation was cancelled or failed." };
+    return { ok: false, message: "Administrator approval was cancelled or the daemon could not be started." };
   }
   return { ok: true, message: "" };
 }
@@ -736,7 +820,13 @@ function validateWindowsDaemonServiceInstallation(): { ok: boolean; message: str
   }
   if ((qc.status ?? 1) === 0) {
     const configuredExecutable = parseServiceExecutablePath(qcOutput);
-    if (configuredExecutable && !sameWindowsPath(configuredExecutable, expectedExecutable)) {
+    if (!configuredExecutable) {
+      return {
+        ok: false,
+        message: "PangeaDaemon service path could not be verified. Run installer repair as administrator."
+      };
+    }
+    if (!sameWindowsPath(configuredExecutable, expectedExecutable)) {
       return {
         ok: false,
         message: `PangeaDaemon service path is ${configuredExecutable}, expected ${expectedExecutable}. Run installer repair as administrator.`
@@ -767,10 +857,12 @@ function parseServiceExecutablePath(scQcOutput: string): string | null {
     if (end > 1) {
       return raw.slice(1, end);
     }
+    return null;
   }
 
-  const token = raw.split(/\s+/)[0];
-  return token || null;
+  // Unquoted BINARY_PATH_NAME has no reliable delimiter for a path containing
+  // spaces, so trust the whole remainder rather than truncate at the first one.
+  return raw || null;
 }
 
 function sameWindowsPath(a: string, b: string): boolean {
