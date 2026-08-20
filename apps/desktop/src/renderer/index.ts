@@ -256,16 +256,21 @@ function subscriptionText(sub: SubscriptionInfo | null): { text: string; warn: b
   return { text: t("sub.none"), warn: false };
 }
 
+// Guards against a slow earlier call overwriting a newer one's verdict.
+let entitlementGeneration = 0;
+
 /** Ask the hub whether this account may connect. Toasts once per transition
  *  into expired — the only notice a lapsed prepaid customer ever gets. */
 async function refreshEntitlement(): Promise<void> {
   if (!pangeaApi) return;
+  const gen = ++entitlementGeneration;
   let sub: SubscriptionInfo | null = null;
   try {
     sub = await pangeaApi.getSubscription();
   } catch {
     return; // offline or hub down — leave the previous verdict alone
   }
+  if (gen !== entitlementGeneration) return; // superseded by a newer check
   // Absent on older hubs: assume entitled rather than locking someone out.
   const next = sub === null ? null : sub.entitled !== false;
   const wasEntitled = entitled;
@@ -617,7 +622,9 @@ document.addEventListener("visibilitychange", () => {
 });
 
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape" && serverPickerOverlay.classList.contains("visible")) {
+  // Defer to a stacked modal (Devices / Update) the same way Settings does —
+  // stopPropagation doesn't stop a sibling listener on the same document.
+  if (e.key === "Escape" && serverPickerOverlay.classList.contains("visible") && !isSubModalOpen()) {
     e.preventDefault();
     e.stopPropagation();
     closeServerPicker();
@@ -856,19 +863,24 @@ function renderDevicesModalList(devices: DeviceInfo[]): void {
   }
   devicesModalMessage.textContent = "";
 
-  // Match the stored local name against the list to identify "this device".
+  // Names come from a small fallback pool, so two devices can collide on the
+  // same name — pick only the most recently added match as "this device".
   const myName = localStorage.getItem(MY_DEVICE_NAME_KEY);
+  const myMatches = myName !== null ? devices.filter((d) => d.friendlyName === myName) : [];
+  const myDeviceId = myMatches.length > 0
+    ? myMatches.reduce((latest, d) => (d.createdAt > latest.createdAt ? d : latest)).id
+    : null;
   // Put "this device" at the top so the user sees it first.
   const sorted = [...devices].sort((a, b) => {
-    const aMine = myName !== null && a.friendlyName === myName;
-    const bMine = myName !== null && b.friendlyName === myName;
+    const aMine = a.id === myDeviceId;
+    const bMine = b.id === myDeviceId;
     if (aMine === bMine) return 0;
     return aMine ? -1 : 1;
   });
 
   for (const device of sorted) {
     const name = device.friendlyName || generateFallbackName();
-    const isMine = myName !== null && device.friendlyName === myName;
+    const isMine = device.id === myDeviceId;
     const dateStr = formatDeviceDate(device.createdAt);
     const item = document.createElement("div");
     item.className = "device-item";
@@ -1122,7 +1134,11 @@ serverConnectBtn.addEventListener("click", async () => {
   try {
     const result = await pangeaApi.provisionAndConnect(serverRetryPlan(serverId));
     clearProgressMessages();
-    if (result.ok) {
+    if (result.ok && getUserIntent() === "disconnected") {
+      // Stop landed after the tunnel came up and main couldn't cancel it — the
+      // disconnect handler is tearing it down; don't resurrect "connected".
+      setUiMessage(t("connect.cancelled"));
+    } else if (result.ok) {
       applyConnectedServer(result.serverId);
       setUiMessage(t("connect.connected"));
       notifyUserConnected();
@@ -1181,7 +1197,9 @@ async function switchToServer(serverId: string): Promise<void> {
   try {
     const result = await pangeaApi.provisionAndSwitch(serverRetryPlan(serverId));
     clearProgressMessages();
-    if (result.ok) {
+    if (result.ok && getUserIntent() === "disconnected") {
+      setUiMessage(t("connect.cancelled"));
+    } else if (result.ok) {
       applyConnectedServer(result.serverId);
       setUiMessage(t("connect.connected"));
       notifyUserConnected();
@@ -1239,7 +1257,10 @@ serverDisconnectBtn.addEventListener("click", () => {
   void (async () => {
     try {
       if (stoppingAttempt) {
+        // cancelConnect() is a no-op once main has committed the attempt, so
+        // follow with an explicit teardown — a redundant disconnect is a no-op.
         await pangeaApi?.cancelConnect();
+        await daemonApi.disconnect();
       } else {
         const result = await daemonApi.disconnect();
         if (!result.ok) setUiMessage(t("connect.disconnectFailed"));
@@ -1257,11 +1278,12 @@ serverDisconnectBtn.addEventListener("click", () => {
 async function reconcileDisconnect(): Promise<void> {
   for (let attempt = 0; attempt < 6; attempt += 1) {
     const status = await refreshStatus();
+    // A newer Connect supersedes this Stop — bail before touching its message.
+    if (!disconnectingVisual) return;
     if (!status || status.state === "DISCONNECTED") {
       if (status) setUiMessage(t("connect.disconnected"));
       return;
     }
-    if (!disconnectingVisual) return;
     await new Promise((resolve) => setTimeout(resolve, 750));
   }
 }
@@ -1609,22 +1631,36 @@ async function hideLoadingScreen(): Promise<void> {
   loadingScreen.style.display = "none";
 }
 
+// Bumped on every shell/login-screen swap so a stale animateOut().then() from
+// a superseded call can't remove a screen that was shown again in the meantime.
+let shellLoginGeneration = 0;
+
 function showAppShell(): void {
+  const gen = ++shellLoginGeneration;
   if (loginScreen.parentNode) {
     const ls = loginScreen;
-    animateOut(ls).then(() => ls.remove());
+    void animateOut(ls).then(() => {
+      if (gen === shellLoginGeneration && ls.parentNode) ls.remove();
+    });
   }
   shell.removeAttribute("hidden");
   shell.style.display = "";
+  // The shell is becoming the primary screen — never leave it stuck from a
+  // stale overlay close (see deactivateOverlay's guard on other overlays).
+  shell.removeAttribute("inert");
 }
 
 function showLoginScreen(): void {
+  shellLoginGeneration++;
   shell.setAttribute("hidden", "");
   // Hide device limit screen if it was showing
   const dlScreen = document.getElementById("deviceLimitScreen");
   if (dlScreen) dlScreen.hidden = true;
   if (!loginScreen.parentNode) document.body.insertBefore(loginScreen, shell);
   loginScreen.hidden = false;
+  // Same reasoning as shell above: this screen must always be interactive
+  // when shown, regardless of any overlay's inert bookkeeping.
+  loginScreen.removeAttribute("inert");
   loginScreen.style.opacity = "";
   loginScreen.style.transform = "";
   refreshCachedTokenBtn();
@@ -1665,12 +1701,16 @@ function initLanguagePicker(): void {
     languageSelect.append(option);
   }
 
-  // Reflect the stored preference (System default vs. a pinned language).
+  // Reflect the stored preference (System default vs. a pinned language),
+  // unless the user already picked one while this round-trip was in flight.
+  let userChangedLanguage = false;
   void readStoredLocale().then((stored) => {
+    if (userChangedLanguage) return;
     languageSelect.value = stored && stored.length > 0 ? stored : LANGUAGE_SYSTEM;
   });
 
   languageSelect.addEventListener("change", () => {
+    userChangedLanguage = true;
     const choice = languageSelect.value;
     void pangeaApi?.setLocale?.(choice).catch(() => {});
     if (languageRestartHint) languageRestartHint.hidden = false;
@@ -1778,10 +1818,22 @@ async function init(): Promise<void> {
       getConnectionInFlight: () => connectInFlight,
       getLastServerId: () => lastServerIdLocal,
       getFallbackServerId: () => pickRandomServer(getVisibleServers())?.id ?? null,
-      provisionAndSwitch: (serverId: string) => pangeaApi.provisionAndConnect(serverRetryPlan(serverId)),
+      // Marks the attempt in-flight so Stop can find and cancel it — otherwise
+      // an auto-connect is invisible to the button and cannot be interrupted.
+      provisionAndSwitch: (serverId: string) => {
+        connectInFlight = true;
+        updateServerControlStates();
+        return pangeaApi.provisionAndConnect(serverRetryPlan(serverId)).finally(() => {
+          connectInFlight = false;
+          updateServerControlStates();
+        });
+      },
       // Pull the server auto-connect settled on into the picker, so it can't sit
       // on "Select server" while we're actually connected.
-      onConnected: () => void refreshLastServer().then(renderServers)
+      onConnected: () => void refreshLastServer().then(() => {
+        if (pinnedNodeId && pinnedNodeId !== lastServerIdLocal) pinnedNodeId = null;
+        renderServers();
+      })
     });
 
     await loadCachedServers();
@@ -1938,9 +1990,9 @@ checkUpdatesBtn.addEventListener("click", async () => {
   try {
     const info = await updater.checkForUpdates();
     if (info && isNewerVersion(info.version, currentAppVersion)) {
-      // Open the update modal directly so it's actionable from Settings, even if
-      // this version was dismissed earlier (which would otherwise suppress it).
-      pendingUpdate = pendingUpdate ?? { version: info.version };
+      // Open the modal even if this version was dismissed earlier, and always
+      // take the version just reported — a stale pending one would be wrong.
+      pendingUpdate = { version: info.version };
       localStorage.removeItem(UPDATE_DISMISSED_KEY);
       showUpdateModal();
     } else if (info) {
@@ -2203,12 +2255,12 @@ async function refreshLogs(): Promise<void> {
   try {
     const since = logsCursor > 0 ? logsCursor + 1 : 0;
     const entries = await daemonApi.getLogs(since);
-    if (entries.length > 0) {
-      logsCursor = entries[entries.length - 1].ts;
-      logEntries = [...logEntries, ...entries];
-      if (logEntries.length > 4000) {
-        logEntries = logEntries.slice(-4000);
-      }
+    if (entries.length === 0) return;
+    // A batch is not guaranteed ascending; trust the max, not the last entry.
+    logsCursor = entries.reduce((max, e) => Math.max(max, e.ts), logsCursor);
+    logEntries = [...logEntries, ...entries];
+    if (logEntries.length > 4000) {
+      logEntries = logEntries.slice(-4000);
     }
     renderLogs(logEntries);
   } catch (error) {
@@ -2372,6 +2424,9 @@ function showConnectingState(): number {
   // A new Connect supersedes any Stop still waiting on its daemon confirmation.
   disconnectingVisual = false;
   connectingVisual = true;
+  // Switching servers starts a brand-new session — don't carry over the old
+  // elapsed time while the new one connects.
+  connectedSince = null;
   renderConnectingState();
   pollNow();
   return Date.now();
@@ -2466,13 +2521,16 @@ function renderStatus(status: StatusResponse): void {
 }
 
 function renderLogs(entries: LogEntry[]): void {
+  // Only follow the tail if the user was already reading it — otherwise a
+  // 2s poll yanks them away from whatever they scrolled back to see.
+  const wasNearBottom = logsEl.scrollHeight - logsEl.scrollTop - logsEl.clientHeight < 40;
   const lines = entries.slice(-300).map((entry) => {
     const date = new Date(entry.ts).toLocaleTimeString(localeTag());
     return `[${date}] ${entry.level.toUpperCase()} ${entry.source}: ${entry.msg}`;
   });
 
   logsEl.textContent = lines.join("\n");
-  logsEl.scrollTop = logsEl.scrollHeight;
+  if (wasNearBottom) logsEl.scrollTop = logsEl.scrollHeight;
 }
 
 function initTheme(): void {
@@ -2598,7 +2656,10 @@ function showToast(message: string, durationMs = 5000, success = false): void {
     window.clearTimeout(hoverTimer);
     document.removeEventListener("pointermove", trackPointer);
     toast.classList.add("toast-out");
-    toast.addEventListener("animationend", () => toast.remove(), { once: true });
+    const remove = (): void => toast.remove();
+    toast.addEventListener("animationend", remove, { once: true });
+    // Fallback: a backgrounded/throttled renderer may never fire animationend.
+    window.setTimeout(remove, 500);
   };
 
   // The toast ignores the pointer so the UI underneath stays clickable, which
@@ -2635,11 +2696,16 @@ function updateAuthUI(): void {
     menuDevicesBtn.hidden = false;
     serverPanel.hidden = false;
   } else {
+    // Close any overlay left open over the sign-in screen — otherwise it stays
+    // visible on top, and deactivateOverlay never gets to clear inert either.
+    if (settingsOverlay.classList.contains("visible")) closeSettings();
+    if (serverPickerOverlay.classList.contains("visible")) closeServerPicker();
     showLoginScreen();
     loginBtn.hidden = !pangeaApi;
     menuDevicesBtn.hidden = true;
-    closeSettings();
     serverPanel.hidden = true;
+    // A lapsed account must not keep looking entitled through the next sign-in.
+    entitled = null;
   }
   updateServerControlStates();
 }
@@ -2762,6 +2828,9 @@ function serverRetryPlan(initialServerId: string): string[] {
 function applyConnectedServer(serverId: string | undefined): void {
   if (!serverId) return;
   lastServerIdLocal = serverId;
+  // A pin that no longer names the active node is stale — don't let it label
+  // a region the user never pinned.
+  if (pinnedNodeId && pinnedNodeId !== serverId) pinnedNodeId = null;
   serverSelect.value = serverId;
   syncServerPicker();
 }
@@ -2816,7 +2885,12 @@ function activateRegion(region: Region, nodeId: string | null): void {
 
   // Only commit the selection when an action will actually run, so the slots
   // can't drift out of sync with the connected node.
-  if (currentDaemonState === "CONNECTED") {
+  if (disconnectingVisual) {
+    // A disconnect is still pending confirmation — CONNECTED here just means
+    // no poll has caught up yet, so switching would resurrect the tunnel.
+    serverSelect.value = target.id;
+    syncServerPicker();
+  } else if (currentDaemonState === "CONNECTED") {
     serverSelect.value = target.id;
     syncServerPicker();
     void switchToServer(target.id);
@@ -2827,6 +2901,10 @@ function activateRegion(region: Region, nodeId: string | null): void {
   } else {
     serverSelect.value = target.id;
     syncServerPicker();
+    if (entitled === false) {
+      showToast(t("connect.expired"));
+      setUiMessage(t("sub.expired"));
+    }
   }
 }
 
@@ -3067,7 +3145,10 @@ function updateControlStates(): void {
 function loadCollapseStates(): Record<string, boolean> {
   try {
     const raw = localStorage.getItem(COLLAPSE_STATE_KEY);
-    return raw ? JSON.parse(raw) : {};
+    const parsed: unknown = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, boolean>)
+      : {};
   } catch {
     return {};
   }
@@ -3076,7 +3157,11 @@ function loadCollapseStates(): Record<string, boolean> {
 function saveCollapseState(key: string, open: boolean): void {
   const states = loadCollapseStates();
   states[key] = open;
-  localStorage.setItem(COLLAPSE_STATE_KEY, JSON.stringify(states));
+  try {
+    localStorage.setItem(COLLAPSE_STATE_KEY, JSON.stringify(states));
+  } catch {
+    // Ignore storage failures in restricted environments.
+  }
 }
 
 function initCollapsibleSections(): void {

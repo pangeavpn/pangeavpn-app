@@ -1,4 +1,4 @@
-import type { OkResponse, StatusResponse } from "@pangeavpn/shared-types";
+import type { StatusResponse } from "@pangeavpn/shared-types";
 
 export type AutoConnectDeps = {
   getEnabled: () => boolean;
@@ -6,12 +6,19 @@ export type AutoConnectDeps = {
   getDaemonState: () => StatusResponse["state"];
   getUserIntent: () => "connected" | "disconnected";
   getConnectionInFlight: () => boolean;
+  /** Reports the attempt's own busy state to the rest of the UI, so a manual
+   *  Disconnect click can reach `cancelConnect()` instead of a plain disconnect,
+   *  and a manual Connect click can see an auto-connect attempt in progress. */
+  setConnectionInFlight?: (inFlight: boolean) => void;
   getLastServerId: () => string | null;
   /** Server to use when nothing has been connected to yet. Re-rolled per attempt. */
   getFallbackServerId: () => string | null;
-  provisionAndSwitch: (serverId: string) => Promise<OkResponse>;
+  /** Servers eligible under the current transport choice; validates a stored
+   *  lastServerId that may have been decommissioned or filtered out. */
+  getVisibleServers?: () => readonly ServerInfo[];
+  provisionAndSwitch: (serverId: string) => Promise<ConnectResult>;
   /** Lets the UI catch up with a server auto-connect chose on the user's behalf. */
-  onConnected?: () => void;
+  onConnected?: (serverId?: string) => void;
 };
 
 // Backoff between retries. Caps at 60s and never gives up — the user asked for "always connected".
@@ -53,10 +60,17 @@ export function notifyToggleChanged(enabled: boolean): void {
 
 // Last connected server, or a fresh random one when there isn't one yet. Each
 // call re-rolls the fallback, so a fresh install that hits a dead node moves on
-// instead of retrying it forever.
+// instead of retrying it forever. A stored id that dropped out of the visible
+// set (decommissioned, or unsupported by the current transport) is treated the
+// same as having none, so it doesn't saturate backoff on a dead target.
 function resolveServerId(): string | null {
   if (!deps) return null;
-  return deps.getLastServerId() ?? deps.getFallbackServerId();
+  const lastId = deps.getLastServerId();
+  if (lastId) {
+    const visible = deps.getVisibleServers?.();
+    if (!visible || visible.some((server) => server.id === lastId)) return lastId;
+  }
+  return deps.getFallbackServerId();
 }
 
 function shouldAttempt(): boolean {
@@ -78,19 +92,26 @@ async function runAttempt(): Promise<void> {
   const serverId = resolveServerId();
   if (!serverId) return;
   inFlight = true;
+  deps.setConnectionInFlight?.(true);
   try {
     const result = await deps.provisionAndSwitch(serverId);
+    // The user may have hit Disconnect while this was in flight; don't
+    // override their intent by committing a connected state now.
+    if (userIntent !== "connected") return;
     if (result && result.ok) {
       consecutiveFailures = 0;
-      nextAttemptAtMs = 0;
-      deps.onConnected?.();
-    } else {
+      // A short cooldown even on success, so a tunnel that drops right back
+      // to DISCONNECTED/ERROR doesn't refire on every poll tick.
+      nextAttemptAtMs = Date.now() + BACKOFF_MS[0];
+      deps.onConnected?.(result.serverId);
+    } else if (result?.error !== "cancelled") {
       bumpBackoff();
     }
   } catch {
-    bumpBackoff();
+    if (userIntent === "connected") bumpBackoff();
   } finally {
     inFlight = false;
+    deps.setConnectionInFlight?.(false);
   }
 }
 

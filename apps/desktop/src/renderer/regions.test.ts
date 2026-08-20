@@ -49,6 +49,31 @@ test("groupRegions falls back to the key when a node has no name", () => {
   assert.equal(region.name, "eu-central");
 });
 
+test("groupRegions strips the node ordinal from the region's display name", () => {
+  const [region] = groupRegions([
+    server("eu-central-1", "Amsterdam 1"),
+    server("eu-central-2", "Amsterdam 2")
+  ]);
+  assert.equal(region.name, "Amsterdam");
+});
+
+test("groupRegions takes the country from any sibling that reports one", () => {
+  const [region] = groupRegions([
+    server("eu-central-1", "Amsterdam", 0, ""),
+    server("eu-central-2", "Amsterdam", 0, "NL")
+  ]);
+  assert.equal(region.country, "NL");
+});
+
+test("groupRegions country holds even when the reporting node isn't first", () => {
+  const [region] = groupRegions([
+    server("eu-central-3", "Amsterdam", 0, ""),
+    server("eu-central-1", "Amsterdam", 0, ""),
+    server("eu-central-2", "Amsterdam", 0, "NL")
+  ]);
+  assert.equal(region.country, "NL");
+});
+
 test("pickNode returns the lowest-load node", () => {
   const [region] = groupRegions([
     server("eu-central-1", "Amsterdam", 61),
@@ -134,8 +159,17 @@ test("buildServerRetryOrder exhausts the selected region before later regions", 
   ]);
 });
 
-test("buildServerRetryOrder keeps the requested server when it is not in the snapshot", () => {
-  assert.deepEqual(buildServerRetryOrder([server("eu-west-1", "London")], "gone-1"), ["gone-1"]);
+test("buildServerRetryOrder cascades through every server when the requested one is gone", () => {
+  const servers = [
+    server("eu-west-1", "London", 20),
+    server("eu-west-2", "London", 5),
+    server("us-east-1", "New York", 10)
+  ];
+  assert.deepEqual(buildServerRetryOrder(servers, "gone-1"), ["eu-west-2", "eu-west-1", "us-east-1"]);
+});
+
+test("buildServerRetryOrder returns an empty plan when there are no servers at all", () => {
+  assert.deepEqual(buildServerRetryOrder([], "gone-1"), []);
 });
 
 test("buildServerRetryOrder continues with the next region and wraps around", () => {

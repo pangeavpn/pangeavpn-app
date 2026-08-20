@@ -15,6 +15,19 @@ export function regionKeyOf(server: ServerInfo): string {
   return server.id.replace(SUFFIX, "");
 }
 
+/** First node in the group with a name, ordinal suffix stripped — avoids a
+ *  region being labelled with just one of its nodes ("Amsterdam 1"). */
+function regionNameOf(key: string, nodes: readonly ServerInfo[]): string {
+  const named = nodes.find((node) => node.name)?.name;
+  return named ? named.replace(/\s+\d+$/, "") : key;
+}
+
+/** First node in the group that actually reports a country, so one node
+ *  missing it doesn't blank out a flag the rest of the region has. */
+function regionCountryOf(nodes: readonly ServerInfo[]): string {
+  return nodes.find((node) => node.country)?.country ?? "";
+}
+
 /** Groups servers into regions, preserving the order they first appear in. */
 export function groupRegions(servers: readonly ServerInfo[]): Region[] {
   const byKey = new Map<string, Region>();
@@ -25,9 +38,13 @@ export function groupRegions(servers: readonly ServerInfo[]): Region[] {
       existing.nodes = [...existing.nodes, server];
       continue;
     }
-    byKey.set(key, { key, name: server.name || key, country: server.country || "", nodes: [server] });
+    byKey.set(key, { key, name: key, country: "", nodes: [server] });
   }
-  return [...byKey.values()];
+  return [...byKey.values()].map((region) => ({
+    ...region,
+    name: regionNameOf(region.key, region.nodes),
+    country: regionCountryOf(region.nodes)
+  }));
 }
 
 /** Lowest-load node in the region. Nodes with no load report sort last. */
@@ -57,11 +74,16 @@ export function regionOfServer(regions: readonly Region[], serverId: string): Re
 /** Selected node, then its siblings by load, then every later region in hub order. */
 export function buildServerRetryOrder(servers: readonly ServerInfo[], initialServerId: string): string[] {
   const regions = groupRegions(servers);
-  const initialRegion = regionOfServer(regions, initialServerId);
-  if (!initialRegion) return [initialServerId];
-
   const byLoad = (nodes: readonly ServerInfo[]): ServerInfo[] =>
     [...nodes].sort((a, b) => loadOf(a) - loadOf(b));
+
+  const initialRegion = regionOfServer(regions, initialServerId);
+  if (!initialRegion) {
+    // The persisted server's region is gone (decommissioned, or filtered out
+    // by transport) — fall back to every healthy server instead of a dead end.
+    return regions.flatMap((region) => byLoad(region.nodes).map((node) => node.id));
+  }
+
   const sameRegion = byLoad(initialRegion.nodes)
     .filter((node) => node.id !== initialServerId)
     .map((node) => node.id);
