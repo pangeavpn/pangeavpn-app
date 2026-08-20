@@ -1,8 +1,9 @@
-import { app, safeStorage } from "electron";
+import { app } from "electron";
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { AuthState, AuthUser } from "../shared/ipc";
 import { getAppSupportDir } from "./platformPaths";
+import { readSecret, writeSecret } from "./secureStore";
 
 /**
  * User-writable directory for auth files (session, license key, identity keys).
@@ -34,37 +35,16 @@ function getSessionFilePath(): string {
 
 async function saveSession(session: StoredSession): Promise<void> {
   await ensureUserAuthDir();
-  const json = JSON.stringify(session);
-  const filePath = getSessionFilePath();
-
-  if (safeStorage.isEncryptionAvailable()) {
-    const encrypted = safeStorage.encryptString(json);
-    await fs.writeFile(filePath, encrypted);
-  } else {
-    console.warn("OS keychain unavailable; session stored unencrypted (file permissions 0600)");
-    await fs.writeFile(filePath, json, { mode: 0o600 });
-  }
-
+  await writeSecret(getSessionFilePath(), JSON.stringify(session));
   cachedSession = session;
 }
 
 async function loadSession(): Promise<StoredSession | null> {
   if (cachedSession) return cachedSession;
 
-  const filePath = getSessionFilePath();
   try {
-    const data = await fs.readFile(filePath);
-    let json: string;
-
-    if (safeStorage.isEncryptionAvailable()) {
-      try {
-        json = safeStorage.decryptString(data);
-      } catch {
-        json = data.toString("utf8");
-      }
-    } else {
-      json = data.toString("utf8");
-    }
+    const json = await readSecret(getSessionFilePath());
+    if (!json) return null;
 
     const session = JSON.parse(json) as StoredSession;
     cachedSession = session;
@@ -111,7 +91,7 @@ export async function logout(): Promise<void> {
   }
 }
 
-// --- License key persistence (encrypted at rest via safeStorage) ---
+// --- License key persistence (encrypted at rest) ---
 
 function getLicenseKeyPath(): string {
   return path.join(getUserAuthDir(), "license-key.dat");
@@ -119,32 +99,13 @@ function getLicenseKeyPath(): string {
 
 export async function saveLicenseKey(key: string): Promise<void> {
   await ensureUserAuthDir();
-  const filePath = getLicenseKeyPath();
-  if (safeStorage.isEncryptionAvailable()) {
-    const encrypted = safeStorage.encryptString(key);
-    await fs.writeFile(filePath, encrypted);
-  } else {
-    await fs.writeFile(filePath, key, { mode: 0o600 });
-  }
+  await writeSecret(getLicenseKeyPath(), key);
 }
 
 export async function loadLicenseKey(): Promise<string | null> {
-  const filePath = getLicenseKeyPath();
   try {
-    const data = await fs.readFile(filePath);
-    let key: string;
-
-    if (safeStorage.isEncryptionAvailable()) {
-      try {
-        key = safeStorage.decryptString(data);
-      } catch {
-        key = data.toString("utf8");
-      }
-    } else {
-      key = data.toString("utf8");
-    }
-
-    return key.trim() || null;
+    const key = await readSecret(getLicenseKeyPath());
+    return key?.trim() || null;
   } catch {
     return null;
   }
@@ -176,30 +137,13 @@ function getLegacyWgKeyPath(): string {
 
 export async function saveIdentityKeyPair(keys: IdentityKeyPair): Promise<void> {
   await ensureUserAuthDir();
-  const json = JSON.stringify(keys);
-  const filePath = getIdentityKeyPath();
-  if (safeStorage.isEncryptionAvailable()) {
-    const encrypted = safeStorage.encryptString(json);
-    await fs.writeFile(filePath, encrypted);
-  } else {
-    await fs.writeFile(filePath, json, { mode: 0o600 });
-  }
+  await writeSecret(getIdentityKeyPath(), JSON.stringify(keys));
 }
 
 export async function loadIdentityKeyPair(): Promise<IdentityKeyPair | null> {
-  const filePath = getIdentityKeyPath();
   try {
-    const data = await fs.readFile(filePath);
-    let json: string;
-    if (safeStorage.isEncryptionAvailable()) {
-      try {
-        json = safeStorage.decryptString(data);
-      } catch {
-        json = data.toString("utf8");
-      }
-    } else {
-      json = data.toString("utf8");
-    }
+    const json = await readSecret(getIdentityKeyPath());
+    if (!json) throw new Error("no identity key stored");
     const keys = JSON.parse(json) as IdentityKeyPair;
     if (keys.privateKey && keys.publicKey) return keys;
     return null;
@@ -210,17 +154,8 @@ export async function loadIdentityKeyPair(): Promise<IdentityKeyPair | null> {
   // Migration: load from old path, save to new path, delete old file
   const legacyPath = getLegacyWgKeyPath();
   try {
-    const data = await fs.readFile(legacyPath);
-    let json: string;
-    if (safeStorage.isEncryptionAvailable()) {
-      try {
-        json = safeStorage.decryptString(data);
-      } catch {
-        json = data.toString("utf8");
-      }
-    } else {
-      json = data.toString("utf8");
-    }
+    const json = await readSecret(legacyPath);
+    if (!json) return null;
     const keys = JSON.parse(json) as IdentityKeyPair;
     if (keys.privateKey && keys.publicKey) {
       await saveIdentityKeyPair(keys);
