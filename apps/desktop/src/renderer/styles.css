@@ -384,6 +384,10 @@ body {
   z-index: 900;
 }
 
+/* Beats the display:flex above, which would otherwise defeat [hidden] — see
+   settings-actions[hidden] below for the same pattern. */
+.login-screen[hidden] { display: none; }
+
 /* Theme and Settings before sign-in — the header carrying them lives in the
    app shell, which is hidden until the user is authenticated. */
 .login-tools {
@@ -591,8 +595,9 @@ body[data-theme="light"] .login-brand {
   inset: 0;
   z-index: 950;
   display: flex;
-  align-items: center;
+  align-items: safe center;
   justify-content: center;
+  overflow-y: auto;
   background: var(--bg-base);
 }
 
@@ -774,6 +779,10 @@ body[data-theme="light"] .login-brand {
   flex-direction: column;
   overflow: hidden;
 }
+
+/* Beats the display:flex above, which would otherwise defeat [hidden] — see
+   settings-actions[hidden] below for the same pattern. */
+.shell[hidden] { display: none; }
 
 .shell::-webkit-scrollbar { width: 0; height: 0; }
 
@@ -1099,14 +1108,17 @@ body[data-theme="light"] .brand-logo {
   box-shadow: var(--card-shadow);
   opacity: 0;
   transform: translateY(-8px);
-  transition: opacity 150ms ease, transform 150ms ease;
+  transition: opacity 150ms ease, transform 150ms ease, visibility 0s linear 150ms;
   pointer-events: none;
+  visibility: hidden;
 }
 
 .menu-dropdown.open {
   opacity: 1;
   transform: translateY(0);
   pointer-events: auto;
+  visibility: visible;
+  transition: opacity 150ms ease, transform 150ms ease, visibility 0s linear 0s;
 }
 
 body[data-theme="light"] .menu-dropdown {
@@ -1160,11 +1172,11 @@ body[data-theme="light"] .menu-dropdown {
 }
 
 .hero-kicker strong {
-  font-size: 0.56rem;
+  font-size: 0.66rem;
   font-weight: 700;
   letter-spacing: 0.16em;
   text-transform: uppercase;
-  color: var(--text-muted);
+  color: var(--text-secondary);
   transition: color 0.4s ease;
 }
 
@@ -1252,11 +1264,11 @@ body[data-theme="light"] .menu-dropdown {
 
 .fact-key {
   display: block;
-  font-size: 0.5rem;
+  font-size: 0.64rem;
   font-weight: 700;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: var(--text-muted);
+  color: var(--text-secondary);
 }
 
 .fact-value {
@@ -1357,8 +1369,8 @@ body[data-theme="light"] .region-flag {
 .region-sub {
   margin-top: 1px;
   font-family: "SF Mono", "Cascadia Mono", ui-monospace, monospace;
-  font-size: 0.56rem;
-  color: var(--text-muted);
+  font-size: 0.66rem;
+  color: var(--text-secondary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1418,8 +1430,8 @@ body[data-theme="light"] .region-flag {
 .region-more-count {
   margin-left: auto;
   font-family: "SF Mono", "Cascadia Mono", ui-monospace, monospace;
-  font-size: 0.58rem;
-  color: var(--text-muted);
+  font-size: 0.66rem;
+  color: var(--text-secondary);
 }
 
 /* ── Region disclosure (picker only) ──────────────────────── */
@@ -1990,15 +2002,23 @@ body[data-theme="light"] .region-flag {
   opacity: 0;
   padding-top: 0;
   overflow: hidden;
+  visibility: hidden;
   transition:
     max-height var(--collapse-duration) ease,
     opacity var(--collapse-duration) ease,
-    padding-top var(--collapse-duration) ease;
+    padding-top var(--collapse-duration) ease,
+    visibility 0s linear var(--collapse-duration);
 }
 
 .collapsible.is-open .collapse-content {
   opacity: 1;
   padding-top: 12px;
+  visibility: visible;
+  transition:
+    max-height var(--collapse-duration) ease,
+    opacity var(--collapse-duration) ease,
+    padding-top var(--collapse-duration) ease,
+    visibility 0s linear 0s;
 }
 
 /* ── Form elements ────────────────────────────────────────── */
@@ -2219,7 +2239,7 @@ button.ghost:hover:not(:disabled) {
 /* Current value under the label, so the rail doubles as a state summary. */
 .set-value {
   font-family: "SF Mono", "Cascadia Mono", ui-monospace, monospace;
-  font-size: 0.6rem;
+  font-size: 0.68rem;
   color: var(--text-secondary);
   white-space: nowrap;
   overflow: hidden;
@@ -2653,6 +2673,11 @@ button.ghost:hover:not(:disabled) {
 [dir="rtl"] .update-close {
   right: auto;
   left: 8px;
+}
+
+[dir="rtl"] .hero-message {
+  left: auto;
+  right: 14px;
 }
 
 /* Numerals stay logically LTR in Arabic/Persian; only the alignment flips. */
