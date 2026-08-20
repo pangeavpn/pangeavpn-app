@@ -1,5 +1,5 @@
 // French (fr) — machine translation, pending native review.
-import type { Messages } from "../messages";
+import type { Messages } from "../messages.js";
 
 export const fr = {
   // ── App shell / loading ───────────────────────────────
@@ -66,10 +66,7 @@ export const fr = {
   "hero.refreshServers": "Actualiser les serveurs",
   "hero.connect": "Se connecter",
   "hero.disconnect": "Se déconnecter",
-  "hero.provisioning": "Provisionnement...",
-  "hero.disconnecting": "Déconnexion...",
   "hero.stop": "Arrêter",
-  "hero.stopping": "Arrêt...",
   "hero.noServers": "Aucun serveur disponible",
   "hero.noServersForTransport": "Aucun serveur ne prend en charge ce transport",
   "hero.region": "Région",
@@ -217,7 +214,7 @@ export const fr = {
   "update.title": "Mise à jour disponible",
   "update.current": "Actuelle",
   "update.latest": "Dernière",
-  "update.macStep": "Ouvrez Terminal (appuyez sur ⌘ + Espace, tapez Terminal, appuyez sur Entrée), puis collez cette commande et appuyez sur Entrée :",
+  "update.macStep": "Ouvrez <strong>Terminal</strong> (appuyez sur ⌘ + Espace, tapez <em>Terminal</em>, appuyez sur Entrée), puis collez cette commande et appuyez sur Entrée :",
   "update.download": "Télécharger la mise à jour",
   "update.copyCommand": "Copier la commande d'installation",
   "update.copied": "Copié !",
@@ -291,15 +288,6 @@ export const fr = {
   "common.loading": "Chargement...",
   "common.retrying": "Une erreur s'est produite. Nouvelle tentative...",
   "common.dash": "—",
-
-  // ── Daemon status values (technical, kept short) ──────
-  "status.transport.cloak": "Obfuscation : Cloak",
-  "status.transport.naive": "Obfuscation : NaiveProxy",
-  "status.transport.hysteria2": "Obfuscation : Hysteria2",
-  "status.transport.snowflake": "Obfuscation : Snowflake",
-  "status.transport.reality": "Obfuscation : VLESS+REALITY",
-  "status.transport.shadowsocks": "Obfuscation : Shadowsocks",
-  "status.transport.none": "",
 
   // ── Generic error fallbacks ───────────────────────────
   "error.network": "Veuillez vérifier votre connexion Internet et réessayer.",

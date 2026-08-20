@@ -1,5 +1,5 @@
 // Ukrainian (uk) — machine translation, pending native review.
-import type { Messages } from "../messages";
+import type { Messages } from "../messages.js";
 
 export const uk = {
   // ── App shell / loading ───────────────────────────────
@@ -66,10 +66,7 @@ export const uk = {
   "hero.refreshServers": "Оновити сервери",
   "hero.connect": "Підключитися",
   "hero.disconnect": "Відключитися",
-  "hero.provisioning": "Підготовка...",
-  "hero.disconnecting": "Відключення...",
   "hero.stop": "Зупинити",
-  "hero.stopping": "Зупинення...",
   "hero.noServers": "Немає доступних серверів",
   "hero.noServersForTransport": "Немає серверів із підтримкою цього транспорту",
   "hero.region": "Регіон",
@@ -96,7 +93,7 @@ export const uk = {
   // ── Region rows ───────────────────────────────────────
   "region.more": "ще {count}",
   "region.bestOf": "{node} · найкращий з {count}",
-  "region.autoOf": "{count} серверів · авто",
+  "region.autoOf": "@plural:one={count} сервер · авто|few={count} сервери · авто|many={count} серверів · авто|other={count} серверів · авто",
   "region.pinned": "{node} · закріплено",
   "region.showServers": "Показати сервери в регіоні {region}",
   "region.badgeBest": "Найкращий",
@@ -217,7 +214,7 @@ export const uk = {
   "update.title": "Доступне оновлення",
   "update.current": "Поточна",
   "update.latest": "Остання",
-  "update.macStep": "Відкрийте Terminal (натисніть ⌘ + Space, введіть Terminal, натисніть Enter), потім вставте цю команду й натисніть Enter:",
+  "update.macStep": "Відкрийте <strong>Terminal</strong> (натисніть ⌘ + Space, введіть <em>Terminal</em>, натисніть Enter), потім вставте цю команду й натисніть Enter:",
   "update.download": "Завантажити оновлення",
   "update.copyCommand": "Копіювати команду встановлення",
   "update.copied": "Скопійовано!",
@@ -291,15 +288,6 @@ export const uk = {
   "common.loading": "Завантаження...",
   "common.retrying": "Щось пішло не так. Повторна спроба...",
   "common.dash": "—",
-
-  // ── Daemon status values (technical, kept short) ──────
-  "status.transport.cloak": "Обфускація: Cloak",
-  "status.transport.naive": "Обфускація: NaiveProxy",
-  "status.transport.hysteria2": "Обфускація: Hysteria2",
-  "status.transport.snowflake": "Обфускація: Snowflake",
-  "status.transport.reality": "Обфускація: VLESS+REALITY",
-  "status.transport.shadowsocks": "Обфускація: Shadowsocks",
-  "status.transport.none": "",
 
   // ── Generic error fallbacks ───────────────────────────
   "error.network": "Перевірте підключення до інтернету та спробуйте ще раз.",

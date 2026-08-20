@@ -1,5 +1,5 @@
 // Persian/Farsi (fa) — machine translation, pending native review. RTL.
-import type { Messages } from "../messages";
+import type { Messages } from "../messages.js";
 
 export const fa = {
   // ── App shell / loading ───────────────────────────────
@@ -66,10 +66,7 @@ export const fa = {
   "hero.refreshServers": "به‌روزرسانی سرورها",
   "hero.connect": "اتصال",
   "hero.disconnect": "قطع اتصال",
-  "hero.provisioning": "در حال آماده‌سازی...",
-  "hero.disconnecting": "در حال قطع اتصال...",
   "hero.stop": "توقف",
-  "hero.stopping": "در حال توقف...",
   "hero.noServers": "سروری در دسترس نیست",
   "hero.noServersForTransport": "هیچ سروری از این انتقال پشتیبانی نمی‌کند",
   "hero.region": "منطقه",
@@ -217,7 +214,7 @@ export const fa = {
   "update.title": "به‌روزرسانی موجود است",
   "update.current": "فعلی",
   "update.latest": "جدیدترین",
-  "update.macStep": "Terminal را باز کنید (⌘ + Space را فشار دهید، Terminal را تایپ کنید، Enter را بزنید)، سپس این دستور را جای‌گذاری کنید و Enter را بزنید:",
+  "update.macStep": "<strong>Terminal</strong> را باز کنید (⌘ + Space را فشار دهید، <em>Terminal</em> را تایپ کنید، Enter را بزنید)، سپس این دستور را جای‌گذاری کنید و Enter را بزنید:",
   "update.download": "دانلود به‌روزرسانی",
   "update.copyCommand": "کپی دستور نصب",
   "update.copied": "کپی شد!",
@@ -291,15 +288,6 @@ export const fa = {
   "common.loading": "در حال بارگذاری...",
   "common.retrying": "مشکلی پیش آمد. در حال تلاش مجدد...",
   "common.dash": "—",
-
-  // ── Daemon status values (technical, kept short) ──────
-  "status.transport.cloak": "مبهم‌سازی: Cloak",
-  "status.transport.naive": "مبهم‌سازی: NaiveProxy",
-  "status.transport.hysteria2": "مبهم‌سازی: Hysteria2",
-  "status.transport.snowflake": "مبهم‌سازی: Snowflake",
-  "status.transport.reality": "مبهم‌سازی: VLESS+REALITY",
-  "status.transport.shadowsocks": "مبهم‌سازی: Shadowsocks",
-  "status.transport.none": "",
 
   // ── Generic error fallbacks ───────────────────────────
   "error.network": "لطفاً اتصال اینترنت خود را بررسی کنید و دوباره تلاش کنید.",

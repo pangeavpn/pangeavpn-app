@@ -1,5 +1,5 @@
 // Russian (ru) — machine translation, pending native review.
-import type { Messages } from "../messages";
+import type { Messages } from "../messages.js";
 
 export const ru = {
   // ── App shell / loading ───────────────────────────────
@@ -66,10 +66,7 @@ export const ru = {
   "hero.refreshServers": "Обновить серверы",
   "hero.connect": "Подключить",
   "hero.disconnect": "Отключить",
-  "hero.provisioning": "Подготовка...",
-  "hero.disconnecting": "Отключение...",
   "hero.stop": "Остановить",
-  "hero.stopping": "Остановка...",
   "hero.noServers": "Нет доступных серверов",
   "hero.noServersForTransport": "Нет серверов с поддержкой этого транспорта",
   "hero.region": "Регион",
@@ -96,7 +93,7 @@ export const ru = {
   // ── Region rows ───────────────────────────────────────
   "region.more": "ещё {count}",
   "region.bestOf": "{node} · лучший из {count}",
-  "region.autoOf": "{count} серверов · авто",
+  "region.autoOf": "@plural:one={count} сервер · авто|few={count} сервера · авто|many={count} серверов · авто|other={count} серверов · авто",
   "region.pinned": "{node} · закреплён",
   "region.showServers": "Показать серверы в регионе {region}",
   "region.badgeBest": "Лучший",
@@ -217,7 +214,7 @@ export const ru = {
   "update.title": "Доступно обновление",
   "update.current": "Текущая",
   "update.latest": "Последняя",
-  "update.macStep": "Откройте Terminal (нажмите ⌘ + Space, введите Terminal, нажмите Enter), затем вставьте эту команду и нажмите Enter:",
+  "update.macStep": "Откройте <strong>Terminal</strong> (нажмите ⌘ + Space, введите <em>Terminal</em>, нажмите Enter), затем вставьте эту команду и нажмите Enter:",
   "update.download": "Скачать обновление",
   "update.copyCommand": "Копировать команду установки",
   "update.copied": "Скопировано!",
@@ -291,15 +288,6 @@ export const ru = {
   "common.loading": "Загрузка...",
   "common.retrying": "Что-то пошло не так. Повторная попытка...",
   "common.dash": "—",
-
-  // ── Daemon status values (technical, kept short) ──────
-  "status.transport.cloak": "Обфускация: Cloak",
-  "status.transport.naive": "Обфускация: NaiveProxy",
-  "status.transport.hysteria2": "Обфускация: Hysteria2",
-  "status.transport.snowflake": "Обфускация: Snowflake",
-  "status.transport.reality": "Обфускация: VLESS+REALITY",
-  "status.transport.shadowsocks": "Обфускация: Shadowsocks",
-  "status.transport.none": "",
 
   // ── Generic error fallbacks ───────────────────────────
   "error.network": "Проверьте подключение к интернету и попробуйте ещё раз.",

@@ -1,5 +1,5 @@
 // Chinese, Simplified (zh) — machine translation, pending native review.
-import type { Messages } from "../messages";
+import type { Messages } from "../messages.js";
 
 export const zh = {
   // ── App shell / loading ───────────────────────────────
@@ -66,10 +66,7 @@ export const zh = {
   "hero.refreshServers": "刷新服务器",
   "hero.connect": "连接",
   "hero.disconnect": "断开连接",
-  "hero.provisioning": "正在配置...",
-  "hero.disconnecting": "正在断开...",
   "hero.stop": "停止",
-  "hero.stopping": "正在停止…",
   "hero.noServers": "没有可用的服务器",
   "hero.noServersForTransport": "没有服务器支持此传输方式",
   "hero.region": "区域",
@@ -217,7 +214,7 @@ export const zh = {
   "update.title": "有可用更新",
   "update.current": "当前",
   "update.latest": "最新",
-  "update.macStep": "打开 Terminal（按 ⌘ + 空格键，输入 Terminal，按回车键），然后粘贴此命令并按回车键：",
+  "update.macStep": "打开 <strong>Terminal</strong>（按 ⌘ + 空格键，输入 <em>Terminal</em>，按回车键），然后粘贴此命令并按回车键：",
   "update.download": "下载更新",
   "update.copyCommand": "复制安装命令",
   "update.copied": "已复制！",
@@ -291,15 +288,6 @@ export const zh = {
   "common.loading": "正在加载...",
   "common.retrying": "出了点问题，正在重试...",
   "common.dash": "—",
-
-  // ── Daemon status values (technical, kept short) ──────
-  "status.transport.cloak": "混淆：Cloak",
-  "status.transport.naive": "混淆：NaiveProxy",
-  "status.transport.hysteria2": "混淆：Hysteria2",
-  "status.transport.snowflake": "混淆：Snowflake",
-  "status.transport.reality": "混淆：VLESS+REALITY",
-  "status.transport.shadowsocks": "混淆：Shadowsocks",
-  "status.transport.none": "",
 
   // ── Generic error fallbacks ───────────────────────────
   "error.network": "请检查您的互联网连接后重试。",

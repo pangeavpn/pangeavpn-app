@@ -66,10 +66,7 @@ export const en = {
   "hero.refreshServers": "Refresh servers",
   "hero.connect": "Connect",
   "hero.disconnect": "Disconnect",
-  "hero.provisioning": "Provisioning...",
-  "hero.disconnecting": "Disconnecting...",
   "hero.stop": "Stop",
-  "hero.stopping": "Stopping...",
   "hero.noServers": "No servers available",
   "hero.noServersForTransport": "No servers support this transport",
   "hero.region": "Region",
@@ -217,7 +214,7 @@ export const en = {
   "update.title": "Update Available",
   "update.current": "Current",
   "update.latest": "Latest",
-  "update.macStep": "Open Terminal (press ⌘ + Space, type Terminal, press Enter), then paste this command and press Enter:",
+  "update.macStep": "Open <strong>Terminal</strong> (press ⌘ + Space, type <em>Terminal</em>, press Enter), then paste this command and press Enter:",
   "update.download": "Download Update",
   "update.copyCommand": "Copy Install Command",
   "update.copied": "Copied!",
@@ -291,15 +288,6 @@ export const en = {
   "common.loading": "Loading...",
   "common.retrying": "Something went wrong. Retrying...",
   "common.dash": "—",
-
-  // ── Daemon status values (technical, kept short) ──────
-  "status.transport.cloak": "Obfuscation: Cloak",
-  "status.transport.naive": "Obfuscation: NaiveProxy",
-  "status.transport.hysteria2": "Obfuscation: Hysteria2",
-  "status.transport.snowflake": "Obfuscation: Snowflake",
-  "status.transport.reality": "Obfuscation: VLESS+REALITY",
-  "status.transport.shadowsocks": "Obfuscation: Shadowsocks",
-  "status.transport.none": "",
 
   // ── Generic error fallbacks ───────────────────────────
   "error.network": "Please check your internet connection and try again.",

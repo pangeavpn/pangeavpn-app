@@ -1,5 +1,5 @@
 // Arabic (ar) — machine translation, pending native review. RTL.
-import type { Messages } from "../messages";
+import type { Messages } from "../messages.js";
 
 export const ar = {
   // ── App shell / loading ───────────────────────────────
@@ -66,10 +66,7 @@ export const ar = {
   "hero.refreshServers": "تحديث الخوادم",
   "hero.connect": "اتصال",
   "hero.disconnect": "قطع الاتصال",
-  "hero.provisioning": "جارٍ التجهيز...",
-  "hero.disconnecting": "جارٍ قطع الاتصال...",
   "hero.stop": "إيقاف",
-  "hero.stopping": "جارٍ الإيقاف...",
   "hero.noServers": "لا توجد خوادم متاحة",
   "hero.noServersForTransport": "لا توجد خوادم تدعم هذا النقل",
   "hero.region": "المنطقة",
@@ -96,7 +93,7 @@ export const ar = {
   // ── Region rows ───────────────────────────────────────
   "region.more": "{count} أخرى",
   "region.bestOf": "{node} · الأفضل من {count}",
-  "region.autoOf": "{count} خوادم · تلقائي",
+  "region.autoOf": "@plural:zero=بدون خوادم · تلقائي|one=خادم واحد · تلقائي|two=خادمان · تلقائي|few={count} خوادم · تلقائي|many={count} خادمًا · تلقائي|other={count} خادم · تلقائي",
   "region.pinned": "{node} · مثبّت",
   "region.showServers": "عرض خوادم {region}",
   "region.badgeBest": "الأفضل",
@@ -217,7 +214,7 @@ export const ar = {
   "update.title": "يتوفّر تحديث",
   "update.current": "الحالي",
   "update.latest": "الأحدث",
-  "update.macStep": "افتح Terminal (اضغط ⌘ + المسافة، اكتب Terminal، ثم اضغط Enter)، ثم الصق هذا الأمر واضغط Enter:",
+  "update.macStep": "افتح <strong>Terminal</strong> (اضغط ⌘ + المسافة، اكتب <em>Terminal</em>، ثم اضغط Enter)، ثم الصق هذا الأمر واضغط Enter:",
   "update.download": "تنزيل التحديث",
   "update.copyCommand": "نسخ أمر التثبيت",
   "update.copied": "تم النسخ!",
@@ -291,15 +288,6 @@ export const ar = {
   "common.loading": "جارٍ التحميل...",
   "common.retrying": "حدث خطأ ما. جارٍ إعادة المحاولة...",
   "common.dash": "—",
-
-  // ── Daemon status values (technical, kept short) ──────
-  "status.transport.cloak": "التمويه: Cloak",
-  "status.transport.naive": "التمويه: NaiveProxy",
-  "status.transport.hysteria2": "التمويه: Hysteria2",
-  "status.transport.snowflake": "التمويه: Snowflake",
-  "status.transport.reality": "التمويه: VLESS+REALITY",
-  "status.transport.shadowsocks": "التمويه: Shadowsocks",
-  "status.transport.none": "",
 
   // ── Generic error fallbacks ───────────────────────────
   "error.network": "يرجى التحقق من اتصالك بالإنترنت والمحاولة مرة أخرى.",

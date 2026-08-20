@@ -1,7 +1,9 @@
-// Separate from the renderer catalogue: CommonJS here can't import its ESM.
+// Separate from the renderer catalogue: CommonJS here can't import its ESM
+// at runtime, but a type-only import is erased and stays a compile-time link.
 // Non-English values are machine translations pending native review.
+import type { Locale } from "../../renderer/i18n/messages.js";
 
-export type MainLocale = "en" | "es" | "fr" | "ru" | "uk" | "zh" | "ar" | "fa";
+export type MainLocale = Locale;
 
 export type MainMessages = Record<
   | "tray.status"

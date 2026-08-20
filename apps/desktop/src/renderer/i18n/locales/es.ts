@@ -1,5 +1,5 @@
 // Spanish (es) — machine translation, pending native review.
-import type { Messages } from "../messages";
+import type { Messages } from "../messages.js";
 
 export const es = {
   // ── App shell / loading ───────────────────────────────
@@ -66,10 +66,7 @@ export const es = {
   "hero.refreshServers": "Actualizar servidores",
   "hero.connect": "Conectar",
   "hero.disconnect": "Desconectar",
-  "hero.provisioning": "Aprovisionando...",
-  "hero.disconnecting": "Desconectando...",
   "hero.stop": "Detener",
-  "hero.stopping": "Deteniendo...",
   "hero.noServers": "No hay servidores disponibles",
   "hero.noServersForTransport": "Ningún servidor admite este transporte",
   "hero.region": "Región",
@@ -217,7 +214,7 @@ export const es = {
   "update.title": "Actualización disponible",
   "update.current": "Actual",
   "update.latest": "Última",
-  "update.macStep": "Abre Terminal (pulsa ⌘ + Espacio, escribe Terminal y pulsa Intro), luego pega este comando y pulsa Intro:",
+  "update.macStep": "Abre <strong>Terminal</strong> (pulsa ⌘ + Espacio, escribe <em>Terminal</em> y pulsa Intro), luego pega este comando y pulsa Intro:",
   "update.download": "Descargar actualización",
   "update.copyCommand": "Copiar comando de instalación",
   "update.copied": "¡Copiado!",
@@ -291,15 +288,6 @@ export const es = {
   "common.loading": "Cargando...",
   "common.retrying": "Algo salió mal. Reintentando...",
   "common.dash": "—",
-
-  // ── Daemon status values (technical, kept short) ──────
-  "status.transport.cloak": "Ofuscación: Cloak",
-  "status.transport.naive": "Ofuscación: NaiveProxy",
-  "status.transport.hysteria2": "Ofuscación: Hysteria2",
-  "status.transport.snowflake": "Ofuscación: Snowflake",
-  "status.transport.reality": "Ofuscación: VLESS+REALITY",
-  "status.transport.shadowsocks": "Ofuscación: Shadowsocks",
-  "status.transport.none": "",
 
   // ── Generic error fallbacks ───────────────────────────
   "error.network": "Comprueba tu conexión a internet e inténtalo de nuevo.",
