@@ -12,6 +12,13 @@ export function parseConnectStatus(head: string): number {
   return Number(match[1]);
 }
 
+// The DoH direct-IP path carries a sealed /v1/secure envelope, so TLS is
+// carrier only: empty SNI hides the hub, and validation buys nothing.
+export const DOH_TLS_OPTIONS = {
+  servername: "",
+  rejectUnauthorized: false
+} as const;
+
 const MAX_CONNECT_HEAD = 8192;
 const MAX_RESPONSE_BODY = 25 * 1024 * 1024;
 

@@ -29,7 +29,7 @@ import {
 } from "../shared/cachedSubscription";
 import { encryptRequest, decryptResponse, type EncryptedResponse } from "./secureChannel";
 import { sanitizeLog } from "./logSanitize";
-import { fetchViaConnectProxy } from "./hubTransport";
+import { DOH_TLS_OPTIONS, fetchViaConnectProxy } from "./hubTransport";
 
 export class AuthError extends Error {
   status: number;
@@ -200,14 +200,8 @@ function uniqueNonEmpty(values: (string | undefined | null)[]): string[] {
 // main process before this client gives up on it.
 const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 
-/**
- * Make an HTTPS request to a DoH-resolved IP, with the real hub hostname as
- * SNI so the certificate still validates — SNI-hiding is not the point here,
- * only avoiding the system resolver is. Uses node:https so we can set
- * servername independently from the dial target. Uses an external setTimeout
- * for a reliable connection timeout (node:https timeout option only fires
- * after the socket connects).
- */
+// Empty SNI and no cert check are deliberate: every call posts a sealed
+// /v1/secure envelope, so TLS is carrier only. Do not "harden" this.
 function fetchDohResolved(
   ip: string,
   hostname: string,
@@ -252,7 +246,7 @@ function fetchDohResolved(
           ...options.headers,
           Host: hostname
         },
-        servername: hostname
+        ...DOH_TLS_OPTIONS
       },
       (res) => {
         const chunks: Buffer[] = [];

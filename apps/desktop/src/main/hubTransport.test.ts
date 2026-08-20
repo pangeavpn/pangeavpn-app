@@ -3,7 +3,7 @@ import test from "node:test";
 import net from "node:net";
 import https from "node:https";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { fetchViaConnectProxy, parseConnectStatus } from "./hubTransport.ts";
+import { DOH_TLS_OPTIONS, fetchViaConnectProxy, parseConnectStatus } from "./hubTransport.ts";
 
 test("parseConnectStatus reads the status code", () => {
   assert.equal(parseConnectStatus("HTTP/1.1 200 Connection established"), 200);
@@ -338,4 +338,11 @@ test("rejects a certificate valid for a different host", async () => {
     await proxy.close();
     await origin.close();
   }
+});
+
+test("the DoH path keeps its empty SNI and skips certificate validation", () => {
+  // Regression: 6299892 set real SNI and restored validation, which put the
+  // hub name on the wire and let any TLS middlebox veto the path.
+  assert.equal(DOH_TLS_OPTIONS.servername, "");
+  assert.equal(DOH_TLS_OPTIONS.rejectUnauthorized, false);
 });
