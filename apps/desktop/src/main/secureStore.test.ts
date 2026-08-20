@@ -64,3 +64,50 @@ test("readSecret rejects a tampered ciphertext", async () => {
 
   assert.equal(await readSecret(file), null);
 });
+
+test("readSecret rejects a managed file replaced wholesale with plaintext", async () => {
+  const dir = await tempDir();
+  const file = path.join(dir, "auth-session.dat");
+  await writeSecret(file, JSON.stringify({ user: { id: "real" }, vpnAccessToken: "real-token" }));
+
+  await fs.writeFile(file, JSON.stringify({ user: { id: "attacker" }, vpnAccessToken: "forged" }));
+
+  assert.equal(await readSecret(file), null);
+});
+
+test("readSecret migrates legacy plaintext once, then rejects future plaintext", async () => {
+  const dir = await tempDir();
+  const file = path.join(dir, "legacy.dat");
+  await fs.writeFile(file, "plain-token", { mode: 0o600 });
+
+  assert.equal(await readSecret(file), "plain-token");
+
+  await fs.writeFile(file, "forged-token", { mode: 0o600 });
+  assert.equal(await readSecret(file), null);
+});
+
+test("readSecret does not mint a new key when storage-key.bin is missing", async () => {
+  const dir = await tempDir();
+  const file = path.join(dir, "session.dat");
+  await writeSecret(file, "sensitive");
+
+  await fs.rm(path.join(dir, "storage-key.bin"), { force: true });
+
+  assert.equal(await readSecret(file), null);
+  assert.equal(
+    await fs.access(path.join(dir, "storage-key.bin")).then(() => true).catch(() => false),
+    false
+  );
+});
+
+test("writeSecret self-heals a corrupt storage key instead of failing forever", async () => {
+  const dir = await tempDir();
+  const keyFile = path.join(dir, "storage-key.bin");
+  await fs.mkdir(dir, { recursive: true });
+  await fs.writeFile(keyFile, Buffer.from("too-short"));
+
+  const file = path.join(dir, "session.dat");
+  await writeSecret(file, "value-after-heal");
+
+  assert.equal(await readSecret(file), "value-after-heal");
+});

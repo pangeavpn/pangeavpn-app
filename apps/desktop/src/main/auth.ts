@@ -17,7 +17,10 @@ function getUserAuthDir(): string {
 }
 
 async function ensureUserAuthDir(): Promise<void> {
-  await fs.mkdir(getUserAuthDir(), { recursive: true });
+  const dir = getUserAuthDir();
+  await fs.mkdir(dir, { recursive: true, mode: 0o700 });
+  // mkdir's mode is a no-op on a dir that already existed with looser perms.
+  await fs.chmod(dir, 0o700).catch(() => {});
 }
 
 // --- Auth session persistence (stores user info from token login) ---
