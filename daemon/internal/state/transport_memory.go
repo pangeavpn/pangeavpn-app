@@ -80,6 +80,15 @@ func (s *TransportMemoryStore) Record(networkKey, transport string) error {
 	return s.persistLocked()
 }
 
+// Clear forgets every network. The desktop calls this at startup so a new app
+// session never inherits the last one's cascade order.
+func (s *TransportMemoryStore) Clear() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.data = transportMemoryData{Networks: map[string]TransportMemoryEntry{}}
+	return s.persistLocked()
+}
+
 func (s *TransportMemoryStore) pruneLocked() {
 	if len(s.data.Networks) <= maxTransportMemoryEntries {
 		return

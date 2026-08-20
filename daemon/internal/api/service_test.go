@@ -516,6 +516,13 @@ func (f *fakeTransportMemory) Lookup(networkKey string) (string, bool) {
 	return transport, ok && transport != ""
 }
 
+func (f *fakeTransportMemory) Clear() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.entries = map[string]string{}
+	return nil
+}
+
 func (f *fakeTransportMemory) Record(networkKey, transport string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()

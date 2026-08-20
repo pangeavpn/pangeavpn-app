@@ -107,3 +107,47 @@ func TestTransportMemory_CorruptFileResetsToEmpty(t *testing.T) {
 		t.Fatalf("Lookup = (%q, %v), want (hysteria2, true)", got, ok)
 	}
 }
+
+func TestTransportMemory_ClearForgetsEverything(t *testing.T) {
+	store, path := newTestMemoryStore(t)
+
+	if err := store.Record("wifi-a", "reality"); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+	if err := store.Record("wifi-b", "hysteria2"); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+	if err := store.Clear(); err != nil {
+		t.Fatalf("Clear: %v", err)
+	}
+
+	for _, key := range []string{"wifi-a", "wifi-b"} {
+		if got, ok := store.Lookup(key); ok {
+			t.Fatalf("Lookup(%q) = %q after Clear, want a miss", key, got)
+		}
+	}
+
+	// Reopening proves the file was rewritten, not just the in-memory map:
+	// otherwise a daemon restart mid-session resurrects what we just forgot.
+	reopened, err := NewTransportMemoryStore(path)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	if got, ok := reopened.Lookup("wifi-a"); ok {
+		t.Fatalf("reopened Lookup = %q, want a miss", got)
+	}
+}
+
+func TestTransportMemory_ClearIsUsableAfterwards(t *testing.T) {
+	store, _ := newTestMemoryStore(t)
+
+	if err := store.Clear(); err != nil {
+		t.Fatalf("Clear on empty store: %v", err)
+	}
+	if err := store.Record("wifi-a", "reality"); err != nil {
+		t.Fatalf("Record after Clear: %v", err)
+	}
+	if got, ok := store.Lookup("wifi-a"); !ok || got != "reality" {
+		t.Fatalf("Lookup = (%q, %v), want (reality, true)", got, ok)
+	}
+}

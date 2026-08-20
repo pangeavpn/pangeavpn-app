@@ -1954,6 +1954,14 @@ async function boot(): Promise<void> {
   daemonProcess
     .ensureRunning()
     .then(async () => {
+      // The daemon outlives the app, so its transport memory has to be dropped
+      // here rather than on quit, which a crash or force-kill never reaches.
+      try {
+        await daemonClient.clearTransportMemory();
+      } catch (err) {
+        console.warn("failed to clear transport memory on startup", sanitizeLog(err));
+      }
+
       // Covers the case where no lock state was persisted yet; the daemon
       // re-applies persisted locks itself. No-ops if already up or engaged.
       if (!lockdownEnabled) return;

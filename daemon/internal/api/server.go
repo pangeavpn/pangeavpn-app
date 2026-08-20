@@ -293,6 +293,20 @@ func NewHandler(token string, service *Service) http.Handler {
 		writeJSON(w, http.StatusOK, okResponse{OK: true})
 	}))
 
+	mux.Handle("/transport-memory/clear", withAuthAndLimit(token, limiter, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+
+		if err := service.ClearTransportMemory(); err != nil {
+			writeJSON(w, http.StatusInternalServerError, okResponse{OK: false})
+			return
+		}
+
+		writeJSON(w, http.StatusOK, okResponse{OK: true})
+	}))
+
 	mux.Handle("/killswitch/engage", withAuthAndLimit(token, limiter, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")

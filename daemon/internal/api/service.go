@@ -99,6 +99,7 @@ type snowflakeManager interface {
 type transportMemory interface {
 	Lookup(networkKey string) (string, bool)
 	Record(networkKey, transport string) error
+	Clear() error
 }
 
 type Service struct {
@@ -302,6 +303,15 @@ func NewService(
 // off, in which case connects always walk the full cascade.
 func (s *Service) SetTransportMemory(store transportMemory) {
 	s.transportMemory = store
+}
+
+// ClearTransportMemory forgets every remembered network. No-op when the cache
+// is not wired, since then there is nothing to forget.
+func (s *Service) ClearTransportMemory() error {
+	if s.transportMemory == nil {
+		return nil
+	}
+	return s.transportMemory.Clear()
 }
 
 // SetShadowsocksProxy wires the hub proxy; nil makes /ssproxy/* report it

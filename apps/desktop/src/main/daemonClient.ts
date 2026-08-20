@@ -84,6 +84,12 @@ export class DaemonClient {
     return this.request<OkResponse>("POST", "/disconnect", body, this.disconnectTimeoutMs, signal);
   }
 
+  // Forgets the daemon's per-network last-good-transport cache. Called at
+  // startup so a new app session never inherits the last one's cascade order.
+  async clearTransportMemory(): Promise<OkResponse> {
+    return this.request<OkResponse>("POST", "/transport-memory/clear");
+  }
+
   async clearKillSwitch(): Promise<OkResponse> {
     // Kill-switch ops hold opMu and touch WFP; allow more than the 5s default
     // so a busy daemon isn't falsely reported unreachable.
