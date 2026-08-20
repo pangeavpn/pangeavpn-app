@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   beginAttempt,
   cancelAttempt,
+  commitAttempt,
   endAttempt,
   hasActiveAttempt,
   isCancelled,
@@ -92,6 +93,24 @@ test("a stale cancel cannot kill a newer attempt", () => {
 
   assert.equal(isCancelled(second), false);
   assert.equal(hasActiveAttempt(), true);
+});
+
+test("a committed attempt can no longer be cancelled — Stop can't tear down a connection that just landed", () => {
+  const attempt = beginAttempt();
+  commitAttempt(attempt);
+
+  assert.equal(cancelAttempt(), null);
+  assert.equal(isCancelled(attempt), false);
+  assert.equal(attempt.controller.signal.aborted, false);
+});
+
+test("committing a stale attempt does not affect the current one", () => {
+  const first = beginAttempt();
+  const second = beginAttempt();
+  commitAttempt(first); // late commit of the superseded attempt
+
+  assert.equal(cancelAttempt(), second);
+  assert.equal(isCancelled(second), true);
 });
 
 test("ids are monotonic so a later attempt is always distinguishable", () => {

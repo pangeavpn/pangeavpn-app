@@ -91,6 +91,26 @@ test("buildServerRetryOrder keeps siblings together before cycling regions", () 
   ]);
 });
 
+test("buildServerRetryOrder falls back to the full healthy set when the persisted server's region is gone", () => {
+  const servers = [
+    { id: "eu-west-1", load: 20 },
+    { id: "us-east-1", load: 80 },
+    { id: "us-east-2", load: 10 }
+  ];
+
+  assert.deepEqual(buildServerRetryOrder(servers, "ap-south-1"), ["eu-west-1", "us-east-2", "us-east-1"]);
+});
+
+test("buildServerRetryOrder dedupes a hub response that repeats a node id", () => {
+  const servers = [
+    { id: "us-east-1", load: 80 },
+    { id: "us-east-2", load: 10 },
+    { id: "us-east-1", load: 80 }
+  ];
+
+  assert.deepEqual(buildServerRetryOrder(servers, "us-east-1"), ["us-east-1", "us-east-2"]);
+});
+
 test("replaceManagedProfile preserves unrelated profiles and installs only the winner", () => {
   const previous = { id: "auto-old" };
   const unrelated = { id: "manual" };

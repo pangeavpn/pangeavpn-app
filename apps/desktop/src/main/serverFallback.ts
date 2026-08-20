@@ -19,20 +19,32 @@ export function buildServerRetryOrder(servers: readonly RetryServer[], initialSe
     if (!nodesByRegion.has(key)) regionKeys.push(key);
     nodesByRegion.set(key, [...(nodesByRegion.get(key) ?? []), server]);
   }
+  const dedupe = (ids: string[]): string[] => [...new Set(ids)];
+
   const initialRegion = regionKeyOf(initialServerId);
   const initialRegionIndex = regionKeys.indexOf(initialRegion);
-  if (initialRegionIndex < 0) return [initialServerId];
+  if (initialRegionIndex < 0) {
+    // The persisted server's region no longer exists (decommissioned) — fall
+    // back to every healthy server instead of a single dead-end candidate.
+    return dedupe(
+      regionKeys.flatMap((key) =>
+        [...(nodesByRegion.get(key) ?? [])].sort((a, b) => loadOf(a) - loadOf(b)).map((node) => node.id)
+      )
+    );
+  }
 
   const orderedRegions = [
     initialRegion,
     ...regionKeys.slice(initialRegionIndex + 1),
     ...regionKeys.slice(0, initialRegionIndex)
   ];
-  return orderedRegions.flatMap((key, regionIndex) => {
-    const nodes = [...(nodesByRegion.get(key) ?? [])].sort((a, b) => loadOf(a) - loadOf(b));
-    if (regionIndex !== 0) return nodes.map((node) => node.id);
-    return [initialServerId, ...nodes.filter((node) => node.id !== initialServerId).map((node) => node.id)];
-  });
+  return dedupe(
+    orderedRegions.flatMap((key, regionIndex) => {
+      const nodes = [...(nodesByRegion.get(key) ?? [])].sort((a, b) => loadOf(a) - loadOf(b));
+      if (regionIndex !== 0) return nodes.map((node) => node.id);
+      return [initialServerId, ...nodes.filter((node) => node.id !== initialServerId).map((node) => node.id)];
+    })
+  );
 }
 
 export function replaceManagedProfile<T extends Identified>(

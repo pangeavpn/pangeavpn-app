@@ -20,6 +20,8 @@ export interface ConnectAttempt {
   /** Aborts the attempt's in-flight HTTP requests. */
   readonly controller: AbortController;
   cancelled: boolean;
+  /** Past the point where tearing the tunnel down would be wrong. */
+  committed: boolean;
 }
 
 let current: ConnectAttempt | null = null;
@@ -33,17 +35,29 @@ export const beginAttempt = (): ConnectAttempt => {
   if (current && !current.cancelled) {
     cancelAttempt();
   }
-  current = { id: nextId++, controller: new AbortController(), cancelled: false };
+  current = { id: nextId++, controller: new AbortController(), cancelled: false, committed: false };
   return current;
+};
+
+/**
+ * Mark the attempt past its point of no return: once the tunnel is actually
+ * up, Stop must disconnect explicitly rather than race a cancel that assumes
+ * nothing landed yet. Only the attempt that owns the slot can commit it.
+ */
+export const commitAttempt = (attempt: ConnectAttempt): void => {
+  if (current && current.id === attempt.id) {
+    current.committed = true;
+  }
 };
 
 /**
  * Cancel the in-flight attempt, if any. Returns the attempt that was
  * cancelled so the caller knows whether there was anything to stop (and can
- * decide whether to tear a tunnel down).
+ * decide whether to tear a tunnel down). A committed attempt can no longer be
+ * cancelled this way — the caller must disconnect explicitly instead.
  */
 export const cancelAttempt = (): ConnectAttempt | null => {
-  if (!current || current.cancelled) return null;
+  if (!current || current.cancelled || current.committed) return null;
   current.cancelled = true;
   // Abort AFTER marking cancelled: an abort listener that re-reads the flag
   // must never observe a live attempt whose requests are already dead.

@@ -39,7 +39,8 @@ export class DaemonClient {
       allowLAN?: boolean;
       lockdown?: boolean;
       preferredTransport?: "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "snowflake" | "wireguard";
-    }
+    },
+    signal?: AbortSignal
   ): Promise<OkResponse> {
     const body: Record<string, unknown> = { profileId };
     if (opts?.allowLAN) {
@@ -51,7 +52,7 @@ export class DaemonClient {
     if (opts?.preferredTransport) {
       body.preferredTransport = opts.preferredTransport;
     }
-    return this.request<OkResponse>("POST", "/connect", body, this.connectTimeoutMs);
+    return this.request<OkResponse>("POST", "/connect", body, this.connectTimeoutMs, signal);
   }
 
   /** Starts the hub Shadowsocks proxy; resolves to its loopback port. */
@@ -76,9 +77,9 @@ export class DaemonClient {
     return this.request<OkResponse>("POST", "/ssproxy/stop");
   }
 
-  async disconnect(opts?: { keepKillSwitch?: boolean }): Promise<OkResponse> {
+  async disconnect(opts?: { keepKillSwitch?: boolean }, signal?: AbortSignal): Promise<OkResponse> {
     const body = opts?.keepKillSwitch ? { keepKillSwitch: true } : undefined;
-    return this.request<OkResponse>("POST", "/disconnect", body, this.disconnectTimeoutMs);
+    return this.request<OkResponse>("POST", "/disconnect", body, this.disconnectTimeoutMs, signal);
   }
 
   async clearKillSwitch(): Promise<OkResponse> {
@@ -116,7 +117,8 @@ export class DaemonClient {
       allowLAN?: boolean;
       lockdown?: boolean;
       preferredTransport?: "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "snowflake" | "wireguard";
-    }
+    },
+    signal?: AbortSignal
   ): Promise<OkResponse> {
     const body: Record<string, unknown> = { profileId };
     if (opts?.allowLAN) {
@@ -128,7 +130,7 @@ export class DaemonClient {
     if (opts?.preferredTransport) {
       body.preferredTransport = opts.preferredTransport;
     }
-    return this.request<OkResponse>("POST", "/switch", body, this.connectTimeoutMs);
+    return this.request<OkResponse>("POST", "/switch", body, this.connectTimeoutMs, signal);
   }
 
   async getLogs(since?: number): Promise<LogEntry[]> {
@@ -160,7 +162,13 @@ export class DaemonClient {
     }
   }
 
-  private async request<T>(method: string, route: string, body?: unknown, timeoutMs?: number): Promise<T> {
+  private async request<T>(
+    method: string,
+    route: string,
+    body?: unknown,
+    timeoutMs?: number,
+    signal?: AbortSignal
+  ): Promise<T> {
     const rawTokens = await this.tokenProvider();
     const tokens = (Array.isArray(rawTokens) ? rawTokens : [rawTokens])
       .map((token) => token.trim())
@@ -173,10 +181,13 @@ export class DaemonClient {
     for (const token of tokens) {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs ?? this.defaultRequestTimeoutMs);
+      const forwardAbort = () => controller.abort();
+      signal?.addEventListener("abort", forwardAbort);
 
-      let response: Response;
+      // Timer stays armed through the whole response read, not just fetch()
+      // itself — a daemon that stalls mid-body must still be interruptible.
       try {
-        response = await fetch(`${this.baseUrl}${route}`, {
+        const response = await fetch(`${this.baseUrl}${route}`, {
           method,
           headers: {
             "Content-Type": "application/json",
@@ -185,33 +196,40 @@ export class DaemonClient {
           body: body === undefined ? undefined : JSON.stringify(body),
           signal: controller.signal
         });
+
+        if (response.status === 401) {
+          // Drain the body so the socket is released before the next candidate
+          // token restarts fetch, instead of holding it open until GC.
+          await response.text().catch(() => undefined);
+          continue;
+        }
+
+        if (!response.ok) {
+          const text = await response.text();
+          try {
+            const payload = JSON.parse(text) as { error?: unknown };
+            if (payload.error === "transport_exhausted") {
+              throw new TransportExhaustedError();
+            }
+          } catch (error) {
+            if (error instanceof TransportExhaustedError) throw error;
+          }
+          throw new Error(`daemon request failed (${response.status}): ${text}`);
+        }
+
+        return (await response.json()) as T;
       } catch (error) {
         if (error instanceof Error && error.name === "AbortError") {
+          if (signal?.aborted) {
+            throw new Error(`daemon request cancelled (${method} ${route})`);
+          }
           throw new Error(`daemon request timeout (${method} ${route})`);
         }
         throw error;
       } finally {
         clearTimeout(timer);
+        signal?.removeEventListener("abort", forwardAbort);
       }
-
-      if (response.status === 401) {
-        continue;
-      }
-
-      if (!response.ok) {
-        const text = await response.text();
-        try {
-          const payload = JSON.parse(text) as { error?: unknown };
-          if (payload.error === "transport_exhausted") {
-            throw new TransportExhaustedError();
-          }
-        } catch (error) {
-          if (error instanceof TransportExhaustedError) throw error;
-        }
-        throw new Error(`daemon request failed (${response.status}): ${text}`);
-      }
-
-      return (await response.json()) as T;
     }
 
     throw new Error("daemon unauthorized (token mismatch)");
