@@ -55,22 +55,24 @@ export class DaemonClient {
     return this.request<OkResponse>("POST", "/connect", body, this.connectTimeoutMs, signal);
   }
 
-  /** Starts the hub Shadowsocks proxy; resolves to its loopback port. */
+  /** Starts the hub Shadowsocks proxy; resolves to its loopback port and CONNECT auth. */
   async startSsProxy(profile: {
     remoteHost: string;
     remotePort: number;
     method: string;
     password: string;
-  }): Promise<number> {
-    const res = await this.request<{ ok: boolean; port?: number; error?: string }>(
-      "POST",
-      "/ssproxy/start",
-      profile
-    );
-    if (!res.ok || !res.port) {
+  }): Promise<{ port: number; proxyUsername: string; proxyPassword: string }> {
+    const res = await this.request<{
+      ok: boolean;
+      port?: number;
+      proxyUsername?: string;
+      proxyPassword?: string;
+      error?: string;
+    }>("POST", "/ssproxy/start", profile);
+    if (!res.ok || !res.port || !res.proxyUsername || !res.proxyPassword) {
       throw new Error(res.error || "shadowsocks proxy failed to start");
     }
-    return res.port;
+    return { port: res.port, proxyUsername: res.proxyUsername, proxyPassword: res.proxyPassword };
   }
 
   async stopSsProxy(): Promise<OkResponse> {

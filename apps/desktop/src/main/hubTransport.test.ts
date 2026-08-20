@@ -110,15 +110,17 @@ interface Started {
  */
 async function startProxy(
   opts: { status?: number; dialPort?: number } = {}
-): Promise<Started & { seen: string[] }> {
+): Promise<Started & { seen: string[]; heads: string[] }> {
   const status = opts.status ?? 200;
   const seen: string[] = [];
+  const heads: string[] = [];
   let track: ReturnType<typeof tracker>;
 
   const server = net.createServer((client) => {
     client.once("data", (chunk) => {
       const head = chunk.toString("latin1");
       seen.push(head.split("\r\n")[0]);
+      heads.push(head);
       if (status !== 200) {
         client.end(`HTTP/1.1 ${status} Denied\r\n\r\n`);
         return;
@@ -139,7 +141,7 @@ async function startProxy(
 
   track = tracker(server);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  return { port: (server.address() as net.AddressInfo).port, close: () => track.close(), seen };
+  return { port: (server.address() as net.AddressInfo).port, close: () => track.close(), seen, heads };
 }
 
 async function startTlsOrigin(
@@ -275,6 +277,48 @@ test("rejects a certificate that does not chain to the supplied trust anchor", a
   } finally {
     await proxy.close();
     await origin.close();
+  }
+});
+
+test("sends Proxy-Authorization when credentials are supplied", async () => {
+  const origin = await startTlsOrigin((_req, res) => res.end("ok"));
+  const proxy = await startProxy({ dialPort: origin.port });
+  try {
+    await fetchViaConnectProxy(proxy.port, "203.0.113.9", "localhost", "/v1/secure", {
+      timeoutMs: 8000,
+      ca: TEST_CERT,
+      proxyUsername: "user",
+      proxyPassword: "pass"
+    });
+    const expected = `Basic ${Buffer.from("user:pass").toString("base64")}`;
+    assert.match(proxy.heads[0], new RegExp(`Proxy-Authorization: ${expected}`));
+  } finally {
+    await proxy.close();
+    await origin.close();
+  }
+});
+
+test("aborts the in-flight request via signal", async () => {
+  const server = net.createServer(() => {
+    // accept, say nothing, so the request stays pending until aborted
+  });
+  const track = tracker(server);
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = (server.address() as net.AddressInfo).port;
+  const controller = new AbortController();
+  try {
+    const pending = assert.rejects(
+      fetchViaConnectProxy(port, "203.0.113.9", "localhost", "/v1/secure", {
+        timeoutMs: 8000,
+        ca: TEST_CERT,
+        signal: controller.signal
+      }),
+      /aborted/i
+    );
+    controller.abort();
+    await pending;
+  } finally {
+    await track.close();
   }
 });
 

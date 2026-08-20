@@ -26,7 +26,7 @@ function isSafeHost(value: string): boolean {
 
 /** Sends CONNECT. Bytes after the head are unshifted back so the TLS handshake
  *  that follows keeps its first record. */
-function performConnect(socket: net.Socket, target: string): Promise<void> {
+function performConnect(socket: net.Socket, target: string, proxyAuthHeader?: string): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     if (!isSafeHost(target)) {
       reject(new Error("Invalid CONNECT target"));
@@ -83,8 +83,16 @@ function performConnect(socket: net.Socket, target: string): Promise<void> {
     socket.on("error", onError);
     socket.on("end", onEnd);
 
-    socket.write(`CONNECT ${target} HTTP/1.1\r\nHost: ${target}\r\n\r\n`);
+    const authLine = proxyAuthHeader ? `Proxy-Authorization: ${proxyAuthHeader}\r\n` : "";
+    socket.write(`CONNECT ${target} HTTP/1.1\r\nHost: ${target}\r\n${authLine}\r\n`);
   });
+}
+
+function buildProxyAuthHeader(username?: string, password?: string): string | undefined {
+  if (!username || !password) {
+    return undefined;
+  }
+  return `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`;
 }
 
 export interface ConnectProxyOptions {
@@ -95,6 +103,10 @@ export interface ConnectProxyOptions {
   /** Extra trust anchor. Tests supply their self-signed cert; production
    *  passes nothing and validates against the system store. */
   ca?: string;
+  signal?: AbortSignal;
+  /** Basic-auth credentials for the daemon's mixed-inbound CONNECT proxy. */
+  proxyUsername?: string;
+  proxyPassword?: string;
 }
 
 /** HTTPS to `target` (hostname or IP) through a local CONNECT proxy. Unlike
@@ -110,6 +122,7 @@ export function fetchViaConnectProxy(
 ): Promise<Response> {
   const deadline = options.timeoutMs ?? 15000;
   const target = `${ip}:443`;
+  const proxyAuthHeader = buildProxyAuthHeader(options.proxyUsername, options.proxyPassword);
 
   return new Promise<Response>((resolve, reject) => {
     let settled = false;
@@ -120,14 +133,25 @@ export function fetchViaConnectProxy(
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      options.signal?.removeEventListener("abort", onAbort);
       tlsSocket?.destroy();
       socket?.destroy();
       reject(err);
     };
 
+    const onAbort = (): void => fail(new Error("Request aborted"));
+
     if (!isSafeHost(hostname) || !isSafeHost(target)) {
       reject(new Error("Invalid host"));
       return;
+    }
+
+    if (options.signal) {
+      if (options.signal.aborted) {
+        reject(new Error("Request aborted"));
+        return;
+      }
+      options.signal.addEventListener("abort", onAbort, { once: true });
     }
 
     const timer = setTimeout(() => fail(new Error("Request timeout")), deadline);
@@ -136,7 +160,7 @@ export function fetchViaConnectProxy(
     socket.once("error", fail);
 
     socket.once("connect", () => {
-      performConnect(socket as net.Socket, target)
+      performConnect(socket as net.Socket, target, proxyAuthHeader)
         .then(() => {
           if (settled) return;
           tlsSocket = tls.connect({
@@ -176,6 +200,7 @@ export function fetchViaConnectProxy(
                 if (settled) return;
                 settled = true;
                 clearTimeout(timer);
+                options.signal?.removeEventListener("abort", onAbort);
                 const headers = new Headers();
                 for (const [key, value] of Object.entries(res.headers)) {
                   if (value) {

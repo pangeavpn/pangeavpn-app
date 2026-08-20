@@ -209,7 +209,15 @@ export class DaemonProcessManager {
       return;
     }
 
-    await ensureUserRuntimeFiles().catch(() => {});
+    try {
+      await ensureUserRuntimeFiles();
+    } catch (err) {
+      // Token not readable yet is expected right after boot; anything else
+      // (permissions, corrupt config) is a real failure the caller must see.
+      if (!isTokenNotReadyError(err)) {
+        throw err;
+      }
+    }
     const online = await this.safeApiReady();
     if (!forceRestart && online) {
       return;
@@ -334,6 +342,13 @@ export class DaemonProcessManager {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// platformPaths.ensureUserRuntimeFiles throws this shape (not an error code)
+// while the root daemon has not yet written its token; distinguishes it from
+// a real failure so callers can retry instead of swallowing it silently.
+function isTokenNotReadyError(err: unknown): boolean {
+  return err instanceof Error && /background service.*(has not finished starting up|access token is not ready)/i.test(err.message);
 }
 
 type MacDaemonContext = {
