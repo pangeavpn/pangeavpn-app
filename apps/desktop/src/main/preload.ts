@@ -52,8 +52,11 @@ const CH = {
   updateAvailable: "app:updateAvailable",
   updateNotAvailable: "app:updateNotAvailable",
   updateError: "app:updateError",
-  updateDownloadProgress: "app:updateDownloadProgress",
-  updateDownloaded: "app:updateDownloaded",
+  openExternal: "app:openExternal",
+  authInvalidated: "auth:invalidated",
+  rememberAccountNumber: "auth:rememberAccountNumber",
+  getRememberedAccountNumber: "auth:getRememberedAccountNumber",
+  clearRememberedAccountNumber: "auth:clearRememberedAccountNumber",
 } as const;
 
 const daemonApi = {
@@ -107,26 +110,31 @@ const pangeaApi = {
   listDevices: () => ipcRenderer.invoke(CH.listDevices),
   removeDevice: (deviceId: string) => ipcRenderer.invoke(CH.removeDevice, deviceId),
   getSubscription: () => ipcRenderer.invoke(CH.getSubscription),
+  rememberAccountNumber: (accountNumber: string) =>
+    ipcRenderer.invoke(CH.rememberAccountNumber, accountNumber),
+  getRememberedAccountNumber: () => ipcRenderer.invoke(CH.getRememberedAccountNumber),
+  clearRememberedAccountNumber: () => ipcRenderer.invoke(CH.clearRememberedAccountNumber),
 };
 
 const autoUpdaterApi = {
   checkForUpdates: () => ipcRenderer.invoke(CH.checkForUpdates),
   downloadUpdate: () => ipcRenderer.invoke(CH.downloadAppUpdate),
   installUpdate: () => ipcRenderer.invoke(CH.installUpdate),
-  onUpdateAvailable: (callback: (info: { version: string; releaseNotes?: string }) => void) => {
-    ipcRenderer.on(CH.updateAvailable, (_event, info) => callback(info));
+  onUpdateAvailable: (callback: (info: { version: string; releaseNotes?: string; macOnly?: boolean }) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, info: { version: string; releaseNotes?: string; macOnly?: boolean }) =>
+      callback(info);
+    ipcRenderer.on(CH.updateAvailable, listener);
+    return () => ipcRenderer.removeListener(CH.updateAvailable, listener);
   },
   onUpdateNotAvailable: (callback: () => void) => {
-    ipcRenderer.on(CH.updateNotAvailable, () => callback());
+    const listener = () => callback();
+    ipcRenderer.on(CH.updateNotAvailable, listener);
+    return () => ipcRenderer.removeListener(CH.updateNotAvailable, listener);
   },
   onUpdateError: (callback: (message: string) => void) => {
-    ipcRenderer.on(CH.updateError, (_event, message: string) => callback(message));
-  },
-  onDownloadProgress: (callback: (percent: number) => void) => {
-    ipcRenderer.on(CH.updateDownloadProgress, (_event, percent: number) => callback(percent));
-  },
-  onUpdateDownloaded: (callback: () => void) => {
-    ipcRenderer.on(CH.updateDownloaded, () => callback());
+    const listener = (_event: Electron.IpcRendererEvent, message: string) => callback(message);
+    ipcRenderer.on(CH.updateError, listener);
+    return () => ipcRenderer.removeListener(CH.updateError, listener);
   },
 };
 
@@ -134,7 +142,9 @@ contextBridge.exposeInMainWorld("daemonApi", daemonApi);
 contextBridge.exposeInMainWorld("pangeaApi", pangeaApi);
 contextBridge.exposeInMainWorld("autoUpdater", autoUpdaterApi);
 contextBridge.exposeInMainWorld("appPlatform", process.platform);
-contextBridge.exposeInMainWorld("openExternal", (url: string) => ipcRenderer.invoke("app:openExternal", url));
+contextBridge.exposeInMainWorld("openExternal", (url: string) => ipcRenderer.invoke(CH.openExternal, url));
 contextBridge.exposeInMainWorld("onAuthInvalidated", (callback: () => void) => {
-  ipcRenderer.on("auth:invalidated", () => callback());
+  const listener = () => callback();
+  ipcRenderer.on(CH.authInvalidated, listener);
+  return () => ipcRenderer.removeListener(CH.authInvalidated, listener);
 });

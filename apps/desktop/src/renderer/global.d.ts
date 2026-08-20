@@ -27,67 +27,26 @@ declare global {
     friendlyName?: string | null;
   }
 
+  /**
+   * Renderer-facing view of a server: display fields plus per-transport
+   * booleans, none of the node credentials. Mirrors PublicServerInfo in
+   * shared/ipc.ts — the renderer never receives the full credential-bearing
+   * shape, which stays in the main process.
+   */
   interface ServerInfo {
     id: string;
     name: string;
     region: string;
     country: string;
     load?: number | null;
-    cloak: {
-      remoteHost: string;
-      uid: string;
-      publicKey: string;
-    };
-    // Optional per-node transport blocks — present only when the hub node has
-    // that transport configured. Mirrors ServerInfo in shared/ipc.ts; the
-    // renderer uses their presence to filter the server list per transport.
-    naive?: {
-      remoteHost: string;
-      remotePort: number;
-      username: string;
-      password: string;
-      serverName?: string;
-    };
-    reality?: {
-      remoteHost: string;
-      remotePort: number;
-      uuid: string;
-      publicKey: string;
-      shortId: string;
-      flow?: string;
-      serverName?: string;
-    };
-    hysteria2?: {
-      remoteHost: string;
-      remotePort: number;
-      password: string;
-      obfsPassword: string;
-      serverName?: string;
-      pinSha256?: string;
-    };
-    shadowsocks?: {
-      remoteHost: string;
-      remoteIp?: string;
-      remotePort: number;
-      method: string;
-      password: string;
-      targetHost?: string;
-      targetPort?: number;
-      udpOverTcp?: boolean;
-    };
-    controlPlaneShadowsocks?: {
-      remoteHost: string;
-      remotePort: number;
-      method: string;
-      password: string;
-    };
-    snowflake?: {
-      brokerURL: string;
-      bridgeFingerprint: string;
-      frontDomains?: string[];
-      ampCacheURL?: string;
-      iceServers?: string[];
-    };
+    // Never populated by the main process (kept optional only so older test
+    // mocks built against the pre-redaction shape still type-check).
+    cloak?: { remoteHost: string; uid: string; publicKey: string };
+    naive?: boolean;
+    reality?: boolean;
+    hysteria2?: boolean;
+    shadowsocks?: boolean;
+    snowflake?: boolean;
   }
 
   interface DaemonApi {
@@ -172,17 +131,19 @@ declare global {
     listDevices: () => Promise<DeviceInfo[]>;
     removeDevice: (deviceId: string) => Promise<void>;
     getSubscription: () => Promise<SubscriptionInfo | null>;
+    /** Backed by the main-process secure store — never localStorage. */
+    rememberAccountNumber: (accountNumber: string) => Promise<void>;
+    getRememberedAccountNumber: () => Promise<string | null>;
+    clearRememberedAccountNumber: () => Promise<void>;
   }
 
   interface AutoUpdaterApi {
     checkForUpdates: () => Promise<{ version: string; releaseNotes?: string } | null>;
     downloadUpdate: () => Promise<void>;
     installUpdate: () => void;
-    onUpdateAvailable: (callback: (info: { version: string; releaseNotes?: string; macOnly?: boolean }) => void) => void;
-    onUpdateNotAvailable: (callback: () => void) => void;
-    onUpdateError: (callback: (message: string) => void) => void;
-    onDownloadProgress: (callback: (percent: number) => void) => void;
-    onUpdateDownloaded: (callback: () => void) => void;
+    onUpdateAvailable: (callback: (info: { version: string; releaseNotes?: string; macOnly?: boolean }) => void) => () => void;
+    onUpdateNotAvailable: (callback: () => void) => () => void;
+    onUpdateError: (callback: (message: string) => void) => () => void;
   }
 
   interface Window {
@@ -191,7 +152,7 @@ declare global {
     autoUpdater?: AutoUpdaterApi;
     appPlatform?: NodeJS.Platform;
     openExternal?: (url: string) => Promise<void>;
-    onAuthInvalidated?: (callback: () => void) => void;
+    onAuthInvalidated?: (callback: () => void) => () => void;
   }
 }
 

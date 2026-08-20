@@ -65,8 +65,11 @@ export const IPC_CHANNELS = {
   updateAvailable: "app:updateAvailable",
   updateNotAvailable: "app:updateNotAvailable",
   updateError: "app:updateError",
-  updateDownloadProgress: "app:updateDownloadProgress",
-  updateDownloaded: "app:updateDownloaded"
+  openExternal: "app:openExternal",
+  authInvalidated: "auth:invalidated",
+  rememberAccountNumber: "auth:rememberAccountNumber",
+  getRememberedAccountNumber: "auth:getRememberedAccountNumber",
+  clearRememberedAccountNumber: "auth:clearRememberedAccountNumber"
 } as const;
 
 export interface DaemonApi {
@@ -211,6 +214,40 @@ export interface ServerInfo {
   };
 }
 
+/**
+ * Renderer-facing view of ServerInfo: display fields plus per-transport
+ * booleans, none of the credentials the daemon needs to build a profile.
+ * Cloak is omitted — every node has it, so its presence carries no signal.
+ */
+export interface PublicServerInfo {
+  id: string;
+  name: string;
+  region: string;
+  country: string;
+  load?: number | null;
+  naive?: boolean;
+  reality?: boolean;
+  hysteria2?: boolean;
+  shadowsocks?: boolean;
+  snowflake?: boolean;
+}
+
+/** Strips per-node transport credentials before a server list crosses into the renderer. */
+export function toPublicServerInfo(server: ServerInfo): PublicServerInfo {
+  return {
+    id: server.id,
+    name: server.name,
+    region: server.region,
+    country: server.country,
+    load: server.load,
+    naive: Boolean(server.naive),
+    reality: Boolean(server.reality),
+    hysteria2: Boolean(server.hysteria2),
+    shadowsocks: Boolean(server.shadowsocks),
+    snowflake: Boolean(server.snowflake)
+  };
+}
+
 export interface DeviceInfo {
   id: string;
   friendlyName: string | null;
@@ -249,7 +286,7 @@ export interface PangeaApi {
   login: (vpnToken: string) => Promise<AuthState>;
   logout: () => Promise<void>;
   getAuthState: () => Promise<AuthState>;
-  getServers: () => Promise<ServerInfo[]>;
+  getServers: () => Promise<PublicServerInfo[]>;
   provisionAndConnect: (serverIds: string[]) => Promise<ConnectResult>;
   /** Stop the in-flight connect attempt. No-op when nothing is connecting. */
   cancelConnect: () => Promise<void>;
@@ -288,9 +325,13 @@ export interface PangeaApi {
   getLocale: () => Promise<string>;
   setLocale: (locale: string) => Promise<void>;
   getIsPackaged: () => Promise<boolean>;
-  getCachedServers: () => Promise<ServerInfo[]>;
-  cacheServers: (servers: ServerInfo[]) => Promise<void>;
+  getCachedServers: () => Promise<PublicServerInfo[]>;
+  cacheServers: (servers: PublicServerInfo[]) => Promise<void>;
   listDevices: () => Promise<DeviceInfo[]>;
   removeDevice: (deviceId: string) => Promise<void>;
   getSubscription: () => Promise<SubscriptionInfo | null>;
+  /** Backed by the main-process secure store — never localStorage. */
+  rememberAccountNumber: (accountNumber: string) => Promise<void>;
+  getRememberedAccountNumber: () => Promise<string | null>;
+  clearRememberedAccountNumber: () => Promise<void>;
 }

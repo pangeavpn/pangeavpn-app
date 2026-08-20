@@ -1,12 +1,19 @@
 import { Menu, Notification, Tray, app, BrowserWindow, ipcMain, nativeImage, session, shell, type NativeImage } from "electron";
 import path from "node:path";
-import type { OkResponse, Profile, StatusResponse } from "@pangeavpn/shared-types";
+import type { ConfigResponse, OkResponse, Profile, StatusResponse } from "@pangeavpn/shared-types";
 import { DaemonClient, TransportExhaustedError } from "./daemonClient";
 import { DaemonProcessManager } from "./daemonProcess";
 import { readDaemonTokens } from "./platformPaths";
 import { getConnectedTrayIconPath, getTrayIconPath, getWindowsAppIconPath } from "./resourcePaths";
-import { IPC_CHANNELS, type ConnectResult, type ServerInfo } from "../shared/ipc";
+import {
+  IPC_CHANNELS,
+  toPublicServerInfo,
+  type ConnectResult,
+  type PublicServerInfo,
+  type ServerInfo
+} from "../shared/ipc";
 import * as auth from "./auth";
+import { readSecret, writeSecret } from "./secureStore";
 import {
   PangeaApiClient,
   AuthError,
@@ -15,7 +22,7 @@ import {
 } from "./pangeaApiClient";
 import type { HubShadowsocksCreds } from "../shared/hubShadowsocksCreds";
 import type { CachedSubscription } from "../shared/cachedSubscription";
-import { beginAttempt, cancelAttempt, endAttempt, isCancelled } from "./connectAttempt";
+import { beginAttempt, cancelAttempt, commitAttempt, endAttempt, isCancelled } from "./connectAttempt";
 import { setupAutoUpdater, notifyConnectionStateChange } from "./autoUpdater";
 import { setLoginItemEnabled, isLoginItemEnabled, isHiddenLaunchArg } from "./loginItem";
 import { startNetworkWatcher, onNetworkChange } from "./networkWatcher";
@@ -802,6 +809,7 @@ async function provisionAcrossServers(serverIds: readonly string[], mode: "conne
         throw new ConnectCancelledError();
       }
       committed = true;
+      commitAttempt(attempt);
       managedProfileId = outcome.value.profile.id;
       lastServerId = outcome.serverId;
       lastConnectedProfileId = outcome.value.profile.id;
@@ -984,6 +992,79 @@ async function persistServers(servers: ServerInfo[]): Promise<void> {
   }, "server list");
 }
 
+/** Reconstructs a clean object from known-safe fields only, so stray
+ *  properties (e.g. leftover credentials from an older cache format) can
+ *  never survive a read or write of the renderer-facing server cache. */
+function sanitizePublicServer(candidate: unknown): PublicServerInfo | null {
+  const s = candidate as Partial<PublicServerInfo> | null;
+  if (!s || typeof s !== "object" || Array.isArray(s)) return null;
+  if (typeof s.id !== "string" || s.id.trim().length === 0) return null;
+  if (typeof s.name !== "string" || s.name.trim().length === 0) return null;
+  if (typeof s.region !== "string" || typeof s.country !== "string") return null;
+  return {
+    id: s.id,
+    name: s.name,
+    region: s.region,
+    country: s.country,
+    load: typeof s.load === "number" ? s.load : null,
+    naive: Boolean(s.naive),
+    reality: Boolean(s.reality),
+    hysteria2: Boolean(s.hysteria2),
+    shadowsocks: Boolean(s.shadowsocks),
+    snowflake: Boolean(s.snowflake)
+  };
+}
+
+/** Validated, deduplicated (by id, order preserved) list for the on-disk
+ *  renderer-facing server cache — never trust a user-writable file blind. */
+function sanitizePublicServers(stored: unknown): PublicServerInfo[] {
+  if (!Array.isArray(stored)) return [];
+  const out: PublicServerInfo[] = [];
+  for (const candidate of stored) {
+    const safe = sanitizePublicServer(candidate);
+    if (!safe) continue;
+    if (out.some((s) => s.id === safe.id)) continue;
+    out.push(safe);
+  }
+  return out;
+}
+
+/** Blanks WireGuard keys and per-transport passwords before a daemon config
+ *  crosses into the renderer, which only ever displays it in diagnostics. */
+function redactConfigForRenderer(config: ConfigResponse): ConfigResponse {
+  return {
+    ...config,
+    profiles: config.profiles.map((profile) => ({
+      ...profile,
+      cloak: { ...profile.cloak, uid: "<redacted>", password: "<redacted>" },
+      naive: profile.naive ? { ...profile.naive, password: "<redacted>" } : profile.naive,
+      reality: profile.reality
+        ? { ...profile.reality, uuid: "<redacted>", shortId: "<redacted>" }
+        : profile.reality,
+      hysteria2: profile.hysteria2
+        ? { ...profile.hysteria2, password: "<redacted>", obfsPassword: "<redacted>" }
+        : profile.hysteria2,
+      shadowsocks: profile.shadowsocks
+        ? { ...profile.shadowsocks, password: "<redacted>" }
+        : profile.shadowsocks,
+      wireguard: { ...profile.wireguard, configText: redactWireGuardKeys(profile.wireguard.configText) }
+    }))
+  };
+}
+
+function redactWireGuardKeys(configText: string): string {
+  return configText
+    .split(/\r?\n/)
+    .map((line) => {
+      if (/^\s*PrivateKey\s*=/.test(line) || /^\s*PresharedKey\s*=/.test(line)) {
+        const separator = line.includes("=") ? "=" : " =";
+        return `${line.split("=")[0]?.trim() ?? "Key"} ${separator} <redacted>`;
+      }
+      return line;
+    })
+    .join("\n");
+}
+
 /** The hub's last word on the plan, so an unreachable hub does not present a
  *  paying user with "no subscription". Cleared on logout, which passes null. */
 async function persistSubscription(cached: CachedSubscription | null): Promise<void> {
@@ -1085,9 +1166,10 @@ function registerIpcHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.getLogs, async (_event, since?: number) =>
     withDaemonRestartOnUnavailable(() => daemonClient.getLogs(since), "logs", { allowRestart: false })
   );
-  ipcMain.handle(IPC_CHANNELS.getConfig, async () =>
-    withDaemonRestartOnUnavailable(() => daemonClient.getConfig(), "config", { allowRestart: false })
-  );
+  ipcMain.handle(IPC_CHANNELS.getConfig, async () => {
+    const config = await withDaemonRestartOnUnavailable(() => daemonClient.getConfig(), "config", { allowRestart: false });
+    return redactConfigForRenderer(config);
+  });
   ipcMain.handle(IPC_CHANNELS.setConfig, async (event, profiles: unknown) => {
     if (!event.senderFrame || !event.senderFrame.url.startsWith("file://")) {
       throw new Error("setConfig: untrusted sender");
@@ -1116,7 +1198,7 @@ function registerIpcHandlers(): void {
   });
   ipcMain.handle(IPC_CHANNELS.getAppVersion, async () => app.getVersion());
 
-  ipcMain.handle("app:openExternal", async (_event, url: string) => {
+  ipcMain.handle(IPC_CHANNELS.openExternal, async (_event, url: string) => {
     const { shell } = await import("electron");
     if (typeof url === "string" && (url.startsWith("https://") || url.startsWith("http://"))) {
       await shell.openExternal(url);
@@ -1441,7 +1523,7 @@ function registerIpcHandlers(): void {
         "server-cache.json"
       );
       const raw = await (await import("node:fs/promises")).default.readFile(cachePath, "utf8");
-      return JSON.parse(raw);
+      return sanitizePublicServers(JSON.parse(raw));
     } catch {
       return [];
     }
@@ -1451,13 +1533,14 @@ function registerIpcHandlers(): void {
     if (!Array.isArray(servers) || servers.length > 4096) {
       return;
     }
+    const safe = sanitizePublicServers(servers);
     try {
       const dir = (await import("./platformPaths")).getAppSupportDir();
       const fs = (await import("node:fs/promises")).default;
       await fs.mkdir(dir, { recursive: true });
       const finalPath = path.join(dir, "server-cache.json");
       const tmpPath = `${finalPath}.tmp-${process.pid}-${Date.now()}`;
-      await fs.writeFile(tmpPath, JSON.stringify(servers), "utf8");
+      await fs.writeFile(tmpPath, JSON.stringify(safe), "utf8");
       await fs.rename(tmpPath, finalPath);
     } catch (err) {
       console.warn("Failed to persist server cache:", sanitizeLog(err));
@@ -1466,15 +1549,41 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.getServers, async () => {
     try {
-      return await pangeaApiClient.getServers();
+      const servers = await pangeaApiClient.getServers();
+      return servers.map(toPublicServerInfo);
     } catch (err) {
       if (err instanceof AuthError) {
         pangeaApiClient.clearCache();
         await auth.logout();
-        mainWindow?.webContents.send("auth:invalidated");
+        mainWindow?.webContents.send(IPC_CHANNELS.authInvalidated);
         return [];
       }
       throw err;
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.rememberAccountNumber, async (_event, accountNumber: unknown) => {
+    if (typeof accountNumber !== "string" || accountNumber.trim().length === 0) return;
+    const dir = path.join(app.getPath("appData"), "pangeavpn-desktop");
+    await (await import("node:fs/promises")).default.mkdir(dir, { recursive: true, mode: 0o700 });
+    await writeSecret(path.join(dir, "remembered-account.dat"), accountNumber.trim());
+  });
+
+  ipcMain.handle(IPC_CHANNELS.getRememberedAccountNumber, async () => {
+    try {
+      const dir = path.join(app.getPath("appData"), "pangeavpn-desktop");
+      return await readSecret(path.join(dir, "remembered-account.dat"));
+    } catch {
+      return null;
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.clearRememberedAccountNumber, async () => {
+    try {
+      const dir = path.join(app.getPath("appData"), "pangeavpn-desktop");
+      await (await import("node:fs/promises")).default.rm(path.join(dir, "remembered-account.dat"), { force: true });
+    } catch {
+      // best-effort
     }
   });
 
@@ -1499,7 +1608,7 @@ function registerIpcHandlers(): void {
       if (err instanceof AuthError) {
         pangeaApiClient.clearCache();
         await auth.logout();
-        mainWindow?.webContents.send("auth:invalidated");
+        mainWindow?.webContents.send(IPC_CHANNELS.authInvalidated);
         return { ok: false };
       }
       throw err;
@@ -1519,7 +1628,7 @@ function registerIpcHandlers(): void {
       if (err instanceof AuthError) {
         pangeaApiClient.clearCache();
         await auth.logout();
-        mainWindow?.webContents.send("auth:invalidated");
+        mainWindow?.webContents.send(IPC_CHANNELS.authInvalidated);
         return { ok: false };
       }
       throw err;
@@ -1572,7 +1681,8 @@ function isDaemonUnavailableError(error: unknown): boolean {
     message.includes("failed to fetch") ||
     message.includes("econnrefused") ||
     message.includes("socket hang up") ||
-    message.includes("daemon token not found")
+    message.includes("daemon token not found") ||
+    message.includes("daemon unauthorized")
   );
 }
 

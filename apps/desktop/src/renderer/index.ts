@@ -718,10 +718,25 @@ logoutBtn.addEventListener("click", async () => {
 const loginTokenInput = document.getElementById("loginTokenInput") as HTMLInputElement;
 const cachedTokenBtn = document.getElementById("cachedTokenBtn") as HTMLButtonElement;
 
-// Show cached token button if a previous token exists. The token is masked (the
-// click handler reads the real value from storage) to match the Settings viewer.
-function refreshCachedTokenBtn(): void {
-  const cached = localStorage.getItem("pangea:lastToken");
+// One-time migration off the old cleartext localStorage account number, now
+// that it's kept in the main-process secure store instead.
+async function migrateLegacyLastToken(): Promise<void> {
+  if (!pangeaApi) return;
+  const legacy = localStorage.getItem("pangea:lastToken");
+  if (!legacy) return;
+  localStorage.removeItem("pangea:lastToken");
+  try {
+    await pangeaApi.rememberAccountNumber(legacy);
+  } catch {
+    // best-effort — worst case the user re-enters it once
+  }
+}
+
+// Show cached token button if a previous account number exists. The value is
+// masked (the click handler reads the real value from storage) to match the
+// Settings viewer.
+async function refreshCachedTokenBtn(): Promise<void> {
+  const cached = pangeaApi ? await pangeaApi.getRememberedAccountNumber().catch(() => null) : null;
   if (cached) {
     const masked = cached.length > 4
       ? cached.slice(0, 4) + "•".repeat(Math.min(cached.length - 4, 12))
@@ -733,10 +748,10 @@ function refreshCachedTokenBtn(): void {
     cachedTokenBtn.hidden = true;
   }
 }
-refreshCachedTokenBtn();
+void migrateLegacyLastToken().then(refreshCachedTokenBtn);
 
-cachedTokenBtn.addEventListener("click", () => {
-  const cached = localStorage.getItem("pangea:lastToken");
+cachedTokenBtn.addEventListener("click", async () => {
+  const cached = pangeaApi ? await pangeaApi.getRememberedAccountNumber().catch(() => null) : null;
   if (cached) {
     loginTokenInput.value = cached;
     loginTokenInput.dispatchEvent(new Event("input"));
@@ -1000,7 +1015,7 @@ deviceLimitContinueBtn.addEventListener("click", async () => {
   try {
     authState = await pangeaApi.login(pendingLoginToken);
     if (authState.authenticated) {
-      localStorage.setItem("pangea:lastToken", pendingLoginToken);
+      pangeaApi.rememberAccountNumber(pendingLoginToken).catch(() => {});
       pendingLoginToken = null;
       deviceLimitScreen.hidden = true;
       loginScreenMessage.textContent = "";
@@ -1073,7 +1088,7 @@ loginScreenBtn.addEventListener("click", async () => {
   try {
     authState = await pangeaApi.login(token);
     if (authState.authenticated) {
-      localStorage.setItem("pangea:lastToken", token);
+      pangeaApi.rememberAccountNumber(token).catch(() => {});
       loginScreenMessage.textContent = "";
       loginTokenInput.value = "";
       updateAuthUI();
@@ -1816,8 +1831,13 @@ async function init(): Promise<void> {
       getDaemonState: () => currentDaemonState,
       getUserIntent,
       getConnectionInFlight: () => connectInFlight,
+      setConnectionInFlight: (inFlight: boolean) => {
+        connectInFlight = inFlight;
+        updateServerControlStates();
+      },
       getLastServerId: () => lastServerIdLocal,
       getFallbackServerId: () => pickRandomServer(getVisibleServers())?.id ?? null,
+      getVisibleServers: () => getVisibleServers(),
       // Marks the attempt in-flight so Stop can find and cancel it — otherwise
       // an auto-connect is invisible to the button and cannot be interrupted.
       provisionAndSwitch: (serverId: string) => {
@@ -1885,7 +1905,6 @@ const MAC_INSTALL_COMMAND = "curl -fsSL https://pangeavpn.org/install-mac.sh | b
 const isMacPlatform = window.appPlatform === "darwin";
 
 let pendingUpdate: { version: string; macOnly?: boolean } | null = null;
-let updateDownloaded = false;
 let currentAppVersion = "";
 const UPDATE_DISMISSED_KEY = "pangea-vpn-update-dismissed";
 const updater = window.autoUpdater;
@@ -1910,13 +1929,8 @@ function showUpdateModal(): void {
     updateMessageEl.textContent = "";
   } else {
     updateMacInstall.hidden = true;
-    if (updateDownloaded) {
-      updateDownloadBtn.textContent = t("update.restartToUpdate");
-      updateMessageEl.textContent = t("update.readyToInstall");
-    } else {
-      updateDownloadBtn.textContent = t("update.download");
-      updateMessageEl.textContent = "";
-    }
+    updateDownloadBtn.textContent = t("update.download");
+    updateMessageEl.textContent = "";
   }
   updateOverlay.classList.add("visible");
 }
@@ -1933,13 +1947,6 @@ if (updater) {
     menuBadge.hidden = false;
     menuUpdateBtn.hidden = false;
     showUpdateModal();
-  });
-
-  updater.onUpdateDownloaded(() => {
-    updateDownloaded = true;
-    updateDownloadBtn.disabled = false;
-    updateDownloadBtn.textContent = t("update.restartToUpdate");
-    updateMessageEl.textContent = t("update.readyToInstall");
   });
 
   updater.onUpdateError((message) => {
@@ -2034,11 +2041,6 @@ updateDownloadBtn.addEventListener("click", async () => {
   }
 
   if (!updater) return;
-
-  if (updateDownloaded) {
-    updater.installUpdate();
-    return;
-  }
 
   updateDownloadBtn.disabled = true;
   updateDownloadBtn.textContent = t("update.opening");

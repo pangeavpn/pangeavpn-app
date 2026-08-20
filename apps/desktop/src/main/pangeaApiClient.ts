@@ -488,8 +488,8 @@ export interface DeviceInfo {
  * through. Injected so the client keeps no daemon dependency of its own.
  */
 export interface ShadowsocksHubProxy {
-  /** Resolves to the proxy's loopback port, or null when unavailable. */
-  start(creds: HubShadowsocksCreds): Promise<number | null>;
+  /** Resolves to the proxy's loopback port and CONNECT auth, or null when unavailable. */
+  start(creds: HubShadowsocksCreds): Promise<{ port: number; proxyUsername: string; proxyPassword: string } | null>;
   stop(): Promise<void>;
 }
 
@@ -525,6 +525,8 @@ export class PangeaApiClient {
   // Loopback port of the daemon's Shadowsocks hub proxy while it is carrying
   // our traffic; null when that method is off or not currently in use.
   private ssProxyPort: number | null = null;
+  private ssProxyUsername: string | null = null;
+  private ssProxyPassword: string | null = null;
   private shadowsocksHubProxy: ShadowsocksHubProxy | null = null;
   // Control-plane credentials from the last good /api/client/regions, restored
   // from settings.json at startup — a cold install behind a block has none.
@@ -727,6 +729,8 @@ export class PangeaApiClient {
     // leaving it running would keep a listener open for a path we abandoned.
     if (this.ssProxyPort !== null) {
       this.ssProxyPort = null;
+      this.ssProxyUsername = null;
+      this.ssProxyPassword = null;
       this.shadowsocksHubProxy?.stop().catch(() => {
         // best-effort teardown
       });
@@ -755,7 +759,9 @@ export class PangeaApiClient {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: envelopeJson,
-          timeoutMs: 8000
+          timeoutMs: 8000,
+          proxyUsername: this.ssProxyUsername ?? undefined,
+          proxyPassword: this.ssProxyPassword ?? undefined
         });
       } else if (this.frontedHost) {
         rawResponse = await fetchFronted(this.frontedHost, "/v1/secure", {
@@ -947,17 +953,23 @@ export class PangeaApiClient {
     const won = await firstWorkingCreds(
       this.hubShadowsocks,
       async (creds) => {
-        const port = await proxy.start(creds);
-        if (!port) return null;
-        this.ssProxyPort = port;
-        if (await this.trySecureProbeCurrentPath()) return port;
+        const started = await proxy.start(creds);
+        if (!started) return null;
+        this.ssProxyPort = started.port;
+        this.ssProxyUsername = started.proxyUsername;
+        this.ssProxyPassword = started.proxyPassword;
+        if (await this.trySecureProbeCurrentPath()) return started.port;
         this.ssProxyPort = null;
+        this.ssProxyUsername = null;
+        this.ssProxyPassword = null;
         await proxy.stop();
         return null;
       },
       (err, index) => {
         console.warn(`[HubURL] Shadowsocks hub node ${index + 1} failed:`, sanitizeLog(err));
         this.ssProxyPort = null;
+        this.ssProxyUsername = null;
+        this.ssProxyPassword = null;
       }
     );
     if (!won) return false;
@@ -1040,6 +1052,8 @@ export class PangeaApiClient {
         this.frontedHost = null;
         if (this.ssProxyPort !== null) {
           this.ssProxyPort = null;
+          this.ssProxyUsername = null;
+          this.ssProxyPassword = null;
           this.shadowsocksHubProxy?.stop().catch(() => {
             // best-effort teardown
           });
@@ -1071,13 +1085,15 @@ export class PangeaApiClient {
     let rawResponse: Response;
     if (this.ssProxyPort) {
       // CONNECT names the hub by hostname: the node resolves it, so a client
-      // with no cached IP still gets through. Signal is not forwarded here —
-      // fetchViaConnectProxy (hubTransport.ts) takes no abort signal.
+      // with no cached IP still gets through.
       rawResponse = await fetchViaConnectProxy(this.ssProxyPort, HUB_HOSTNAME, HUB_HOSTNAME, "/v1/secure", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: envelopeJson,
-        timeoutMs: this.timeoutMs
+        timeoutMs: this.timeoutMs,
+        signal: options.signal,
+        proxyUsername: this.ssProxyUsername ?? undefined,
+        proxyPassword: this.ssProxyPassword ?? undefined
       });
     } else if (this.frontedHost) {
       rawResponse = await fetchFronted(this.frontedHost, "/v1/secure", {
@@ -1165,6 +1181,8 @@ export class PangeaApiClient {
           this.frontedHost = null;
           if (this.ssProxyPort !== null) {
             this.ssProxyPort = null;
+            this.ssProxyUsername = null;
+            this.ssProxyPassword = null;
             this.shadowsocksHubProxy?.stop().catch(() => {
               // best-effort teardown
             });
