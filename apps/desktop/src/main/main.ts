@@ -40,7 +40,6 @@ import {
   replaceManagedProfile,
   runServerFallback
 } from "./serverFallback";
-import { ConfigUpdateRequestSchema } from "@pangeavpn/shared-types";
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -995,6 +994,8 @@ async function persistServers(servers: ServerInfo[]): Promise<void> {
 /** Reconstructs a clean object from known-safe fields only, so stray
  *  properties (e.g. leftover credentials from an older cache format) can
  *  never survive a read or write of the renderer-facing server cache. */
+const maxSetConfigProfiles = 64;
+
 function sanitizePublicServer(candidate: unknown): PublicServerInfo | null {
   const s = candidate as Partial<PublicServerInfo> | null;
   if (!s || typeof s !== "object" || Array.isArray(s)) return null;
@@ -1031,6 +1032,27 @@ function sanitizePublicServers(stored: unknown): PublicServerInfo[] {
 
 /** Blanks WireGuard keys and per-transport passwords before a daemon config
  *  crosses into the renderer, which only ever displays it in diagnostics. */
+// The renderer is untrusted input to a privileged daemon, so validate the
+// shape here; shared-types is ESM and cannot be required from CommonJS main.
+function asProfilePayload(value: unknown): Profile[] | null {
+  if (!Array.isArray(value) || value.length > maxSetConfigProfiles) {
+    return null;
+  }
+  for (const entry of value) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      return null;
+    }
+    const candidate = entry as { id?: unknown; name?: unknown };
+    if (typeof candidate.id !== "string" || candidate.id.length === 0) {
+      return null;
+    }
+    if (typeof candidate.name !== "string" || candidate.name.length === 0) {
+      return null;
+    }
+  }
+  return value as Profile[];
+}
+
 function redactConfigForRenderer(config: ConfigResponse): ConfigResponse {
   return {
     ...config,
@@ -1174,11 +1196,11 @@ function registerIpcHandlers(): void {
     if (!event.senderFrame || !event.senderFrame.url.startsWith("file://")) {
       throw new Error("setConfig: untrusted sender");
     }
-    const parsed = ConfigUpdateRequestSchema.safeParse({ profiles });
-    if (!parsed.success) {
+    const parsed = asProfilePayload(profiles);
+    if (!parsed) {
       throw new Error("Invalid profiles payload");
     }
-    return withDaemonRestartOnUnavailable(() => daemonClient.setConfig(parsed.data.profiles), "setConfig");
+    return withDaemonRestartOnUnavailable(() => daemonClient.setConfig(parsed), "setConfig");
   });
   ipcMain.handle(IPC_CHANNELS.restartDaemon, async () => {
     daemonRecoveryInProgress = true;
