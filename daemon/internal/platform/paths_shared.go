@@ -2,7 +2,6 @@ package platform
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 )
 
@@ -14,7 +13,7 @@ func LogDir() (string, error) {
 		return "", err
 	}
 	dir := filepath.Join(appDir, "logs")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := ensureDataDir(dir); err != nil {
 		return "", fmt.Errorf("create log dir: %w", err)
 	}
 	return dir, nil
