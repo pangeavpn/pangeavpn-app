@@ -87,12 +87,12 @@ func createTokenFile(path, token string) error {
 	}
 
 	if err := ensureTokenReadACL(tmpPath); err != nil {
-		f.Close()
+		_ = f.Close()
 		_ = os.Remove(tmpPath)
 		return fmt.Errorf("protect token file: %w", err)
 	}
 	if _, err := f.WriteString(token); err != nil {
-		f.Close()
+		_ = f.Close()
 		_ = os.Remove(tmpPath)
 		return fmt.Errorf("write token file: %w", err)
 	}

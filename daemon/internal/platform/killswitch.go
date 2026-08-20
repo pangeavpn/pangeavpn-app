@@ -164,12 +164,12 @@ func saveKillSwitchState(st KillSwitchState) error {
 		return fmt.Errorf("create kill switch state temp file: %w", err)
 	}
 	if _, err := f.Write(data); err != nil {
-		f.Close()
+		_ = f.Close()
 		os.Remove(tmp)
 		return fmt.Errorf("write kill switch state: %w", err)
 	}
 	if err := f.Sync(); err != nil {
-		f.Close()
+		_ = f.Close()
 		os.Remove(tmp)
 		return fmt.Errorf("sync kill switch state: %w", err)
 	}
