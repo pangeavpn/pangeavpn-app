@@ -160,3 +160,55 @@ func TestHealthCheck_RouteGuardErrorDoesNotDropTheSession(t *testing.T) {
 		t.Error("expected the guard error to be logged")
 	}
 }
+
+// TestHealthCheck_RouteGuardErrorsAccumulateAndEscalate proves an error tick
+// is not treated as settled: repeated errors keep booking against the
+// deferral counter instead of resetting it, so a guard that cannot read the
+// routing table every tick eventually escalates rather than warning forever
+// with no other signal.
+func TestHealthCheck_RouteGuardErrorsAccumulateAndEscalate(t *testing.T) {
+	svc, wgMgr, _ := connectedRouteGuardService(t)
+
+	wgMgr.mu.Lock()
+	wgMgr.routeGuardErr = errors.New("read default routes: access denied")
+	wgMgr.mu.Unlock()
+
+	for range maxEndpointRouteRepairDeferrals + 1 {
+		svc.runHealthCheck(context.Background())
+	}
+
+	var escalated bool
+	for _, entry := range svc.Logs(0) {
+		if strings.Contains(entry.Msg, "failed verification") {
+			escalated = true
+		}
+	}
+	if !escalated {
+		t.Error("expected repeated guard errors to escalate instead of resetting the deferral counter each tick")
+	}
+}
+
+// TestHealthCheck_PartialRepairDoesNotSkipTheRebuild proves a repair that
+// only partly worked (e.g. the IPv4 route was re-pinned but the IPv6 one
+// failed) is not treated as a clean success: the session must still reach
+// the silence detector and rebuild, not be given a tick to handshake on a
+// path that is still partly broken.
+func TestHealthCheck_PartialRepairDoesNotSkipTheRebuild(t *testing.T) {
+	svc, wgMgr, _ := connectedRouteGuardService(t)
+
+	wgMgr.mu.Lock()
+	startsAfterConnect := wgMgr.startCount
+	wgMgr.routeGuardRepaired = true
+	wgMgr.routeGuardErr = errors.New("add ipv6 endpoint route: operation not permitted")
+	wgMgr.mu.Unlock()
+
+	goSilent(wgMgr)
+	svc.runHealthCheck(context.Background())
+
+	wgMgr.mu.Lock()
+	restarts := wgMgr.startCount - startsAfterConnect
+	wgMgr.mu.Unlock()
+	if restarts != 1 {
+		t.Errorf("wireguard restarts = %d, want 1 — a repair reported alongside an error is not a clean repair", restarts)
+	}
+}

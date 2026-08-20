@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"net"
 	"strings"
 	"sync"
@@ -285,6 +286,109 @@ func TestHoldHealthChecks_ClearsProbeFailures(t *testing.T) {
 	}
 }
 
+// TestHealthCheck_ConnRefusedProvesTheTunnelIsLive proves an ICMP
+// port-unreachable arriving as ECONNRESET/ECONNREFUSED on the connected
+// socket is not booked as a failure: the round trip happened, which is the
+// evidence the probe exists to gather.
+func TestHealthCheck_ConnRefusedProvesTheTunnelIsLive(t *testing.T) {
+	svc, _, _, wgMgr, _ := dataPathTestService(t)
+
+	wgMgr.mu.Lock()
+	startsAfterConnect := wgMgr.startCount
+	wgMgr.mu.Unlock()
+
+	svc.probeResolver = func(context.Context, string) error { return errDNSProbeConnRefused }
+	runProbedHealthChecks(svc, dnsProbeFailuresBeforeRebuild*2)
+
+	wgMgr.mu.Lock()
+	restarts := wgMgr.startCount - startsAfterConnect
+	wgMgr.mu.Unlock()
+	if restarts != 0 {
+		t.Errorf("wireguard restarts = %d, want 0 — ECONNRESET proves the tunnel carried the round trip", restarts)
+	}
+}
+
+// TestHealthCheck_InconclusiveRoundIsNotBookedEitherWay proves a round that
+// could not complete — its context cancelled by a Switch/Disconnect in
+// flight — is neither a success nor a failure.
+func TestHealthCheck_InconclusiveRoundIsNotBookedEitherWay(t *testing.T) {
+	svc, _, _, wgMgr, _ := dataPathTestService(t)
+
+	wgMgr.mu.Lock()
+	startsAfterConnect := wgMgr.startCount
+	wgMgr.mu.Unlock()
+
+	svc.probeResolver = func(context.Context, string) error {
+		return fmt.Errorf("%w: context canceled", errDNSProbeInconclusive)
+	}
+	runProbedHealthChecks(svc, dnsProbeFailuresBeforeRebuild*3)
+
+	svc.recoveryMu.Lock()
+	failures := svc.dnsProbeFailures
+	svc.recoveryMu.Unlock()
+	if failures != 0 {
+		t.Errorf("dnsProbeFailures = %d, want 0 — an inconclusive round must not be booked as a failure", failures)
+	}
+	wgMgr.mu.Lock()
+	restarts := wgMgr.startCount - startsAfterConnect
+	wgMgr.mu.Unlock()
+	if restarts != 0 {
+		t.Errorf("wireguard restarts = %d, want 0", restarts)
+	}
+}
+
+// TestHealthCheck_SessionChangedMidRoundIsNotBooked proves a failure is not
+// recorded against a session that changed while the round was in flight — the
+// resolver list a slow round just tried may belong to a profile that is no
+// longer the live one.
+func TestHealthCheck_SessionChangedMidRoundIsNotBooked(t *testing.T) {
+	svc, _, _, wgMgr, _ := dataPathTestService(t)
+
+	wgMgr.mu.Lock()
+	startsAfterConnect := wgMgr.startCount
+	wgMgr.mu.Unlock()
+
+	swaps := 0
+	svc.probeResolver = func(context.Context, string) error {
+		swaps++
+		other := deadDataPathProfile()
+		other.ID = fmt.Sprintf("some-other-profile-%d", swaps)
+		svc.profileMu.Lock()
+		svc.currentProfile = &other
+		svc.profileMu.Unlock()
+		return errors.New("i/o timeout")
+	}
+	runProbedHealthChecks(svc, dnsProbeFailuresBeforeRebuild)
+
+	svc.recoveryMu.Lock()
+	failures := svc.dnsProbeFailures
+	svc.recoveryMu.Unlock()
+	if failures != 0 {
+		t.Errorf("dnsProbeFailures = %d, want 0 — the round belonged to a profile that is no longer live", failures)
+	}
+	wgMgr.mu.Lock()
+	restarts := wgMgr.startCount - startsAfterConnect
+	wgMgr.mu.Unlock()
+	if restarts != 0 {
+		t.Errorf("wireguard restarts = %d, want 0", restarts)
+	}
+}
+
+// TestRecordDNSProbeFailure_CountNeverExceedsTheThreshold proves the counter
+// resets as soon as it reaches the threshold even inside the rebuild cooldown,
+// so the log never reports an attempt past dnsProbeFailuresBeforeRebuild and
+// the round after the cooldown expires gets a fresh three-round debounce.
+func TestRecordDNSProbeFailure_CountNeverExceedsTheThreshold(t *testing.T) {
+	svc, _, _, _, _ := dataPathTestService(t)
+
+	for i := 0; i < dnsProbeFailuresBeforeRebuild*3; i++ {
+		failures, _ := svc.recordDNSProbeFailure()
+		if failures > dnsProbeFailuresBeforeRebuild {
+			t.Fatalf("recordDNSProbeFailure returned %d, want at most %d", failures, dnsProbeFailuresBeforeRebuild)
+		}
+	}
+}
+
 // TestHealthCheck_DNSGuardChecksEveryTick proves the host's interface DNS is
 // verified continuously rather than only at bring-up. On Windows the setting
 // belongs to whoever wrote last, so nothing keeps it ours for the life of a
@@ -382,7 +486,7 @@ func TestProbeResolverOverUDP_AcceptsAnyReply(t *testing.T) {
 	})
 	defer stop()
 
-	if err := probeResolverOverUDP(context.Background(), server); err != nil {
+	if err := probeResolverWithDialer(context.Background(), &net.Dialer{}, server); err != nil {
 		t.Errorf("probe failed against a responding resolver: %v", err)
 	}
 }
@@ -401,7 +505,7 @@ func TestProbeResolverOverUDP_IgnoresAForeignReply(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
-	if err := probeResolverOverUDP(ctx, server); err == nil {
+	if err := probeResolverWithDialer(ctx, &net.Dialer{}, server); err == nil {
 		t.Error("expected the probe to reject a reply with a foreign transaction ID")
 	}
 }
@@ -414,14 +518,37 @@ func TestProbeResolverOverUDP_FailsWhenNothingAnswers(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 	defer cancel()
-	if err := probeResolverOverUDP(ctx, server); err == nil {
+	if err := probeResolverWithDialer(ctx, &net.Dialer{}, server); err == nil {
 		t.Error("expected the probe to fail when the resolver never answers")
+	}
+}
+
+// TestProbeResolverOverUDP_IgnoresAWrongQuestion proves the reply must echo
+// back the question we asked, not just carry our transaction ID — a same-IP
+// LAN responder that guesses or replays an ID cannot forge the question too.
+func TestProbeResolverOverUDP_IgnoresAWrongQuestion(t *testing.T) {
+	server, stop := stubDNSServer(t, func(query []byte) []byte {
+		reply := make([]byte, len(query))
+		copy(reply, query)
+		reply[2] = 0x80              // QR
+		reply[len(reply)-1] = 0x0f // QCLASS changed from IN(1) to CH(15)
+		return reply
+	})
+	defer stop()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	if err := probeResolverWithDialer(ctx, &net.Dialer{}, server); err == nil {
+		t.Error("expected the probe to reject a reply whose question section does not match")
 	}
 }
 
 // TestRootNSQuery proves the query is a well-formed `. IN NS` request.
 func TestRootNSQuery(t *testing.T) {
-	msg, id := rootNSQuery()
+	msg, id, err := rootNSQuery()
+	if err != nil {
+		t.Fatalf("rootNSQuery: %v", err)
+	}
 
 	if len(msg) != 17 {
 		t.Fatalf("query length = %d, want 17", len(msg))
@@ -445,33 +572,47 @@ func TestRootNSQuery(t *testing.T) {
 		t.Errorf("QCLASS = %d, want 1 (IN)", got)
 	}
 
-	_, second := rootNSQuery()
+	// A repeat is possible by chance (1/65536), but a constant ID would make
+	// the probe trivially spoofable by any stale datagram on the port.
+	_, second, err := rootNSQuery()
+	if err != nil {
+		t.Fatalf("rootNSQuery: %v", err)
+	}
 	if second == id {
-		// Not impossible, but a constant ID would make the probe trivially
-		// spoofable by any stale datagram on the port.
-		t.Log("two queries drew the same transaction ID; re-run to confirm it is chance")
+		t.Error("two queries drew the same transaction ID")
 	}
 }
 
 func TestIsDNSReplyTo(t *testing.T) {
-	header := func(id uint16, flags byte) []byte {
-		msg := make([]byte, 12)
-		binary.BigEndian.PutUint16(msg[0:2], id)
+	query, id, err := rootNSQuery()
+	if err != nil {
+		t.Fatalf("rootNSQuery: %v", err)
+	}
+
+	reply := func(flags byte, mutate func([]byte)) []byte {
+		msg := make([]byte, len(query))
+		copy(msg, query)
 		msg[2] = flags
+		if mutate != nil {
+			mutate(msg)
+		}
 		return msg
 	}
 
-	if !isDNSReplyTo(header(0x1234, 0x80), 0x1234) {
-		t.Error("a response carrying our ID should match")
+	if !isDNSReplyTo(reply(0x80, nil), query, id) {
+		t.Error("a response carrying our ID and question should match")
 	}
-	if isDNSReplyTo(header(0x1234, 0x00), 0x1234) {
+	if isDNSReplyTo(reply(0x00, nil), query, id) {
 		t.Error("a query (QR unset) is not a reply")
 	}
-	if isDNSReplyTo(header(0x9999, 0x80), 0x1234) {
+	if isDNSReplyTo(reply(0x80, func(m []byte) { binary.BigEndian.PutUint16(m[0:2], id+1) }), query, id) {
 		t.Error("a response carrying a foreign ID should not match")
 	}
-	if isDNSReplyTo(make([]byte, 11), 0x1234) {
-		t.Error("a datagram shorter than a DNS header should not match")
+	if isDNSReplyTo(reply(0x80, func(m []byte) { m[len(m)-1] = 0x0f }), query, id) {
+		t.Error("a response whose question section does not match ours should not match")
+	}
+	if isDNSReplyTo(make([]byte, 11), query, id) {
+		t.Error("a datagram shorter than the query should not match")
 	}
 }
 
@@ -492,9 +633,9 @@ func stubDNSServer(t *testing.T, respond func(query []byte) []byte) (string, fun
 		conn.Close()
 		t.Fatalf("split stub resolver address: %v", err)
 	}
-	previous := dnsProbePort
-	dnsProbePort = port
-	t.Cleanup(func() { dnsProbePort = previous })
+	previous := currentDNSProbePort()
+	dnsProbePort.Store(port)
+	t.Cleanup(func() { dnsProbePort.Store(previous) })
 
 	go func() {
 		buf := make([]byte, 1500)

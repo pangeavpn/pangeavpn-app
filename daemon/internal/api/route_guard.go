@@ -28,8 +28,16 @@ func (s *Service) ensureEndpointRoutes(ctx context.Context, profile state.Profil
 	}
 
 	repaired, err := guard.EnsureEndpointRoutes(ctx, profile.WireGuard)
+	// An error — even alongside repaired=true, e.g. one address family's route
+	// re-pinned but the other's add/remove failed — means the routes are not
+	// verified. Neither settles the counter nor earns the caller a skip tick.
 	if err != nil {
 		s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("could not verify the tunnel's endpoint routes: %v", err))
+		if repairs := s.recordEndpointRouteRepair(); repairs > maxEndpointRouteRepairDeferrals {
+			s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf(
+				"the tunnel's endpoint routes have failed verification %d health checks running; letting the usual recovery run", repairs))
+		}
+		return false
 	}
 	if !repaired {
 		s.recordEndpointRoutesSettled()
@@ -55,6 +63,14 @@ func (s *Service) recordEndpointRouteRepair() int {
 }
 
 func (s *Service) recordEndpointRoutesSettled() {
+	s.resetEndpointRouteRepairs()
+}
+
+// resetEndpointRouteRepairs clears the deferral counter for a new session.
+// service.go's resetRecovery, Connect and Disconnect should call this too —
+// otherwise a session torn down above maxEndpointRouteRepairDeferrals leaves
+// the next session's first genuine repair refused its settle tick.
+func (s *Service) resetEndpointRouteRepairs() {
 	s.recoveryMu.Lock()
 	defer s.recoveryMu.Unlock()
 	s.endpointRouteRepairs = 0
