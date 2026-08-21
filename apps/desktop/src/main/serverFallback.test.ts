@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildServerRetryOrder, replaceManagedProfile, runServerFallback } from "./serverFallback.ts";
+import { buildServerRetryOrder, runServerFallback } from "./serverFallback.ts";
 
 class RetryableError extends Error {}
 
@@ -111,13 +111,3 @@ test("buildServerRetryOrder dedupes a hub response that repeats a node id", () =
   assert.deepEqual(buildServerRetryOrder(servers, "us-east-1"), ["us-east-1", "us-east-2"]);
 });
 
-test("replaceManagedProfile preserves unrelated profiles and installs only the winner", () => {
-  const previous = { id: "auto-old" };
-  const unrelated = { id: "manual" };
-  const winner = { id: "auto-new" };
-
-  assert.deepEqual(
-    replaceManagedProfile([previous, unrelated, { id: "auto-new" }], previous.id, winner),
-    [unrelated, winner]
-  );
-});

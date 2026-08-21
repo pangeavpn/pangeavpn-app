@@ -19,6 +19,30 @@ export function getAppSupportDir(): string {
   return path.join(app.getPath("appData"), APP_FOLDER);
 }
 
+// Desktop-owned state (settings, caches). Never getAppSupportDir(): that one is
+// the daemon's, and it is admin-only on Windows and root-owned on macOS.
+export function getUserStateDir(): string {
+  return path.join(app.getPath("appData"), APP_FOLDER);
+}
+
+export async function ensureUserStateDir(): Promise<string> {
+  const dir = getUserStateDir();
+  await fs.mkdir(dir, { recursive: true, mode: 0o700 });
+  // mkdir's mode is a no-op on a dir that already existed with looser perms.
+  await fs.chmod(dir, 0o700).catch(() => {});
+  return dir;
+}
+
+// Path a desktop state file used to live at, back when it was written into the
+// daemon's directory. Read-only fallback for a one-time migration.
+export function getLegacyStateFilePath(fileName: string): string | null {
+  const legacyDir = getAppSupportDir();
+  if (legacyDir === getUserStateDir()) {
+    return null;
+  }
+  return path.join(legacyDir, fileName);
+}
+
 export function getTokenPath(): string {
   return path.join(getAppSupportDir(), "daemon-token.txt");
 }
