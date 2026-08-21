@@ -77,6 +77,32 @@ declare global {
     expiresAt: string | null;
   }
 
+  type HubMethodName = "directIp" | "shadowsocks" | "fronted" | "normal";
+
+  interface HubMethodFlags {
+    directIp: boolean;
+    shadowsocks: boolean;
+    fronted: boolean;
+    normal: boolean;
+  }
+
+  /** Mirrors HubStatus in src/shared/hubMethods.ts — `active` is the method
+   *  carrying hub traffic right now, `detail` the address it won on. */
+  interface HubStatus {
+    methods: HubMethodFlags;
+    active: HubMethodName | null;
+    detail: string | null;
+  }
+
+  /** Mirrors HubMethodTestResult in src/shared/hubMethods.ts. */
+  interface HubMethodTestResult {
+    method: HubMethodName;
+    ok: boolean;
+    detail?: string;
+    unavailable?: "noAddress" | "noCredentials" | "noRelay" | "busy";
+    ms: number;
+  }
+
   interface PangeaApi {
     login: (vpnToken: string) => Promise<AuthState>;
     logout: () => Promise<void>;
@@ -88,23 +114,13 @@ declare global {
     setDoh: (enabled: boolean) => Promise<void>;
     getDoh: () => Promise<boolean>;
     setHubMethod: (
-      method: "directIp" | "shadowsocks" | "fronted" | "normal",
+      method: HubMethodName,
       enabled: boolean
-    ) => Promise<{
-      methods: {
-        directIp: boolean;
-        shadowsocks: boolean;
-        fronted: boolean;
-        normal: boolean;
-      };
-      applied: boolean;
-    }>;
-    getHubMethods: () => Promise<{
-      directIp: boolean;
-      shadowsocks: boolean;
-      fronted: boolean;
-      normal: boolean;
-    }>;
+    ) => Promise<{ methods: HubMethodFlags; applied: boolean }>;
+    getHubMethods: () => Promise<HubMethodFlags>;
+    getHubStatus: () => Promise<HubStatus>;
+    testHubMethod: (method: HubMethodName) => Promise<HubMethodTestResult>;
+    onHubStatusChanged: (callback: (status: HubStatus) => void) => () => void;
     setAllowLan: (enabled: boolean) => Promise<void>;
     getAllowLan: () => Promise<boolean>;
     /** Resolves to the MTU actually stored — differs from `mtu` when it was rejected. */

@@ -2064,7 +2064,7 @@ button:disabled {
 }
 
 .btn-primary,
-button:not(.btn-ghost):not(.btn-danger):not(.btn-icon):not(.secondary):not(.ghost):not(.collapse-toggle):not(.menu-item):not(.btn-quiet):not(.region-row):not(.region-more):not(.region-expand):not(.region-node):not(.settings-action):not(.settings-nav-item):not(.settings-picker):not(.option-row):not(.subpane-back):not(.accent-swatch) {
+button:not(.btn-ghost):not(.btn-danger):not(.btn-icon):not(.secondary):not(.ghost):not(.collapse-toggle):not(.menu-item):not(.btn-quiet):not(.region-row):not(.region-more):not(.region-expand):not(.region-node):not(.settings-action):not(.settings-nav-item):not(.settings-picker):not(.option-row):not(.subpane-back):not(.accent-swatch):not(.hub-test-btn) {
   color: var(--accent-text);
   background: var(--accent);
   border-color: transparent;
@@ -2072,7 +2072,7 @@ button:not(.btn-ghost):not(.btn-danger):not(.btn-icon):not(.secondary):not(.ghos
 }
 
 .btn-primary:hover:not(:disabled),
-button:not(.btn-ghost):not(.btn-danger):not(.btn-icon):not(.secondary):not(.ghost):not(.collapse-toggle):not(.menu-item):not(.btn-quiet):not(.region-row):not(.region-more):not(.region-expand):not(.region-node):not(.settings-action):not(.settings-nav-item):not(.settings-picker):not(.option-row):not(.subpane-back):not(.accent-swatch):hover:not(:disabled) {
+button:not(.btn-ghost):not(.btn-danger):not(.btn-icon):not(.secondary):not(.ghost):not(.collapse-toggle):not(.menu-item):not(.btn-quiet):not(.region-row):not(.region-more):not(.region-expand):not(.region-node):not(.settings-action):not(.settings-nav-item):not(.settings-picker):not(.option-row):not(.subpane-back):not(.accent-swatch):not(.hub-test-btn):hover:not(:disabled) {
   background: var(--accent-hover);
 }
 
@@ -2374,6 +2374,78 @@ button.ghost:hover:not(:disabled) {
   font-size: 0.78rem;
   line-height: 1.4;
   color: var(--text-muted);
+}
+
+/* Which hub path is carrying account traffic right now. */
+.hub-active {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 0 8px;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+}
+
+.hub-active-dot {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+
+.hub-active-dot[data-state="live"] { background: var(--accent); }
+.hub-active-text { min-width: 0; }
+
+.option-title-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.hub-badge {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--accent-glow);
+  color: var(--accent);
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.hub-test-result {
+  display: block;
+  margin-top: 4px;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.hub-test-result[data-state="ok"] { color: var(--accent); }
+.hub-test-result[data-state="fail"] { color: var(--danger); }
+.hub-test-result[data-state="unavailable"] { color: var(--text-secondary); }
+
+.hub-test-btn {
+  flex: none;
+  padding: 4px 11px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.14s ease, color 0.14s ease, border-color 0.14s ease;
+}
+
+.hub-test-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.hub-test-btn:disabled {
+  opacity: 0.5;
+  cursor: progress;
 }
 
 /* Reserves its width whether or not the row is the chosen one, so titles
