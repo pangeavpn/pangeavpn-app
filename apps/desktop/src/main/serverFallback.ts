@@ -4,7 +4,6 @@ export interface ServerFallbackResult<T> {
 }
 
 type RetryServer = { id: string; load?: number | null };
-type Identified = { id: string };
 
 const regionKeyOf = (serverId: string): string => serverId.replace(/-(\d+)$/, "");
 const loadOf = (server: RetryServer): number =>
@@ -45,17 +44,6 @@ export function buildServerRetryOrder(servers: readonly RetryServer[], initialSe
       return [initialServerId, ...nodes.filter((node) => node.id !== initialServerId).map((node) => node.id)];
     })
   );
-}
-
-export function replaceManagedProfile<T extends Identified>(
-  profiles: readonly T[],
-  previousProfileId: string | null,
-  winner: T
-): T[] {
-  return [
-    ...profiles.filter((profile) => profile.id !== previousProfileId && profile.id !== winner.id),
-    winner
-  ];
 }
 
 /** Runs a finite server plan, advancing only for failures the caller classifies as retryable. */

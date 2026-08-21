@@ -3,7 +3,7 @@ import path from "node:path";
 import type { ConfigResponse, OkResponse, Profile, StatusResponse } from "@pangeavpn/shared-types";
 import { DaemonClient, TransportExhaustedError } from "./daemonClient";
 import { DaemonProcessManager } from "./daemonProcess";
-import { readDaemonTokens } from "./platformPaths";
+import { getLegacyStateFilePath, getUserStateDir, readDaemonTokens } from "./platformPaths";
 import { getConnectedTrayIconPath, getTrayIconPath, getWindowsAppIconPath } from "./resourcePaths";
 import {
   IPC_CHANNELS,
@@ -28,6 +28,7 @@ import { setLoginItemEnabled, isLoginItemEnabled, isHiddenLaunchArg } from "./lo
 import { startNetworkWatcher, onNetworkChange } from "./networkWatcher";
 import { mt, mtState, setMainLocale, resolveMainLocale } from "./i18n";
 import { sanitizeLog } from "./logSanitize";
+import { shouldReleaseKillSwitch } from "./killSwitchRelease";
 import { shouldShowTrayHint, trayHintBodyKey } from "./trayHint";
 import {
   applyHubMethod,
@@ -37,9 +38,19 @@ import {
 } from "../shared/hubMethods";
 import {
   buildServerRetryOrder as buildMainServerRetryOrder,
-  replaceManagedProfile,
   runServerFallback
 } from "./serverFallback";
+import {
+  commitProfileSet,
+  dropExpired,
+  forgetProfile,
+  isReusable,
+  parseProfileRecords,
+  profileFingerprint,
+  recordProvision,
+  retainOnly,
+  type ProfileRecords
+} from "./profileCache";
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -65,6 +76,8 @@ const pangeaApiClient = new PangeaApiClient();
 
 let managedProfileId: string | null = null;
 let lastServerId: string | null = null;
+// Hub-registered WireGuard peers still worth reusing, keyed by profile id.
+let provisionedProfiles: ProfileRecords = {};
 let connectionAttemptRunning = false;
 let allowLanEnabled = true;
 let launchAtStartupEnabled = false;
@@ -525,6 +538,7 @@ async function recoverFromNetworkChange(): Promise<void> {
     const result = await connectWithRecovery(lastConnectedProfileId);
     if (!result.ok) {
       console.warn("network recover: reconnect failed", sanitizeLog((result as { error?: string }).error));
+      await releaseFailClosedKillSwitch();
     }
   } catch (err) {
     console.warn("network recover: unexpected error", sanitizeLog(err));
@@ -544,7 +558,7 @@ async function recoverFromNetworkChange(): Promise<void> {
  * a new one needs a /api/register round trip, which is exactly what is blocked.
  * Assumes the caller owns connectionAttemptRunning.
  */
-async function connectExistingProfile(): Promise<boolean> {
+async function connectExistingProfile(attempt: ReturnType<typeof beginAttempt>): Promise<boolean> {
   const profileId = lastConnectedProfileId ?? managedProfileId;
   if (!profileId) return false;
 
@@ -555,7 +569,18 @@ async function connectExistingProfile(): Promise<boolean> {
   );
   if (!config.profiles.some((profile) => profile.id === profileId)) return false;
 
+  if (isCancelled(attempt)) return false;
   const result = await connectWithRecovery(profileId);
+  // Stop can land while the daemon is mid-connect, and this path has no hub
+  // call left to abort — so the tunnel has to be taken back down here.
+  if (isCancelled(attempt)) {
+    if (result.ok) {
+      await daemonClient
+        .disconnect({ keepKillSwitch: lockdownEnabled })
+        .catch((err) => console.warn("cancel: fallback teardown failed", sanitizeLog(err)));
+    }
+    return false;
+  }
   if (!result.ok) return false;
   lastConnectedProfileId = profileId;
   void persistLastConnection();
@@ -566,9 +591,12 @@ async function reconnectExistingProfile(): Promise<boolean> {
   if (connectionAttemptRunning) return false;
 
   connectionAttemptRunning = true;
+  // Tracked as a cancellable attempt, or Stop has nothing to interrupt here.
+  const attempt = beginAttempt();
   try {
-    return await connectExistingProfile();
+    return await connectExistingProfile(attempt);
   } finally {
+    endAttempt(attempt);
     connectionAttemptRunning = false;
   }
 }
@@ -706,6 +734,37 @@ async function permitHubThroughLockdown(): Promise<void> {
   }
 }
 
+function fingerprintForServer(serverId: string): string {
+  return profileFingerprint({
+    wireguardMtu: pangeaApiClient.getWireguardMtu(),
+    customDns: pangeaApiClient.getCustomDns(),
+    server: pangeaApiClient.getCachedServers().find((server) => server.id === serverId) ?? null
+  });
+}
+
+/**
+ * The peer the hub registered for this server on an earlier run, when it is
+ * still inside its TTL and was built from the same inputs. Reusing it turns a
+ * reconnect into zero hub round trips; the caller re-provisions if it fails.
+ */
+async function reusableProfileForServer(serverId: string): Promise<Profile | null> {
+  const profileId = `auto-${serverId}`;
+  if (!isReusable(provisionedProfiles[profileId], fingerprintForServer(serverId), Date.now())) {
+    return null;
+  }
+  try {
+    const config = await withDaemonRestartOnUnavailable(
+      () => daemonClient.getConfig(),
+      "reuse-config",
+      { allowRestart: false }
+    );
+    return config.profiles.find((profile) => profile.id === profileId) ?? null;
+  } catch (err) {
+    console.warn("reuse: could not read daemon config", sanitizeLog(err));
+    return null;
+  }
+}
+
 async function provisionProfileForServer(serverId: string, signal?: AbortSignal): Promise<Profile> {
   await permitHubThroughLockdown();
   const profile = await pangeaApiClient.provision(serverId, signal);
@@ -721,7 +780,36 @@ async function provisionProfileForServer(serverId: string, signal?: AbortSignal)
   profiles.push(profile);
 
   await withDaemonRestartOnUnavailable(() => daemonClient.setConfig(profiles), "provision-setConfig");
+  rememberProvisionedProfile(profile.id, serverId);
   return profile;
+}
+
+function rememberProvisionedProfile(profileId: string, serverId: string): void {
+  provisionedProfiles = recordProvision(provisionedProfiles, profileId, {
+    serverId,
+    provisionedAt: Date.now(),
+    fingerprint: fingerprintForServer(serverId)
+  });
+  void persistProvisionedProfiles();
+}
+
+function forgetProvisionedProfile(profileId: string): void {
+  provisionedProfiles = forgetProfile(provisionedProfiles, profileId);
+  void persistProvisionedProfiles();
+}
+
+/** Forgets every cached peer and strips them from the daemon's config. */
+async function discardProvisionedProfiles(): Promise<void> {
+  const cachedIds = Object.keys(provisionedProfiles);
+  provisionedProfiles = {};
+  await persistProvisionedProfiles();
+  if (cachedIds.length === 0) return;
+  try {
+    const config = await daemonClient.getConfig();
+    await daemonClient.setConfig(config.profiles.filter((p) => !cachedIds.includes(p.id)));
+  } catch (err) {
+    console.warn("could not drop cached peers from the daemon config", sanitizeLog(err));
+  }
 }
 
 function normalizeServerPlan(value: unknown): string[] {
@@ -739,6 +827,62 @@ function normalizeServerPlan(value: unknown): string[] {
   return serverIds;
 }
 
+interface DialOutcome {
+  profile: Profile;
+  result: OkResponse;
+}
+
+async function dialServer(
+  profile: Profile,
+  index: number,
+  mode: "connect" | "switch",
+  attempt: ReturnType<typeof beginAttempt>
+): Promise<DialOutcome> {
+  // Provisioning is several round trips; Stop must win before the daemon
+  // receives a connect or switch request.
+  if (isCancelled(attempt)) throw new ConnectCancelledError();
+
+  const result = mode === "switch" && index === 0
+    ? await withDaemonRestartOnUnavailable(
+        () => daemonClient.switch(profile.id, connectionOptions()),
+        "switch"
+      )
+    : await connectWithRecovery(profile.id);
+
+  // Daemon connect can't be un-sent. If Stop landed mid-flight, tear it
+  // back down while preserving Lockdown's kill switch.
+  if (isCancelled(attempt)) {
+    if (result.ok) {
+      await daemonClient
+        .disconnect({ keepKillSwitch: lockdownEnabled })
+        .catch((err) => console.warn("cancel: disconnect failed", sanitizeLog(err)));
+    }
+    throw new ConnectCancelledError();
+  }
+  return { profile, result };
+}
+
+/** Null when the cached peer did not get us connected, having forgotten it. */
+async function dialReusedProfile(
+  profile: Profile,
+  index: number,
+  mode: "connect" | "switch",
+  attempt: ReturnType<typeof beginAttempt>
+): Promise<DialOutcome | null> {
+  let outcome: DialOutcome;
+  try {
+    outcome = await dialServer(profile, index, mode, attempt);
+  } catch (err) {
+    if (err instanceof ConnectCancelledError || isCancelled(attempt)) throw err;
+    console.warn(`reuse: ${profile.id} failed, re-provisioning`, sanitizeLog(err));
+    forgetProvisionedProfile(profile.id);
+    return null;
+  }
+  if (outcome.result.ok) return outcome;
+  forgetProvisionedProfile(profile.id);
+  return null;
+}
+
 async function provisionAcrossServers(serverIds: readonly string[], mode: "connect" | "switch"): Promise<ConnectResult> {
   if (connectionAttemptRunning) {
     return { ok: false, error: "connect-in-progress" };
@@ -747,7 +891,6 @@ async function provisionAcrossServers(serverIds: readonly string[], mode: "conne
   // A user-driven attempt outranks the cooldown from the last failed cascade.
   pangeaApiClient.retryHubNow();
   const attempt = beginAttempt();
-  const previousManagedProfileId = managedProfileId;
   let initialProfiles: Profile[] | null = null;
   let configChanged = false;
   let committed = false;
@@ -762,45 +905,34 @@ async function provisionAcrossServers(serverIds: readonly string[], mode: "conne
     const outcome = await runServerFallback(
       candidates,
       async (serverId, index) => {
+        const reused = await reusableProfileForServer(serverId);
+        if (reused) {
+          // The hub may have dropped the peer behind our back, so a failure
+          // here re-provisions the same server rather than cascading away.
+          const outcome = await dialReusedProfile(reused, index, mode, attempt);
+          if (outcome) return outcome;
+        }
+
         if (isCancelled(attempt)) throw new ConnectCancelledError();
         const profile = await provisionProfileForServer(serverId, attempt.controller.signal);
         configChanged = true;
-
-        // Provisioning is several round trips; Stop must win before the daemon
-        // receives a connect or switch request.
-        if (isCancelled(attempt)) throw new ConnectCancelledError();
-
-        const result = mode === "switch" && index === 0
-          ? await withDaemonRestartOnUnavailable(
-              () => daemonClient.switch(profile.id, connectionOptions()),
-              "switch"
-            )
-          : await connectWithRecovery(profile.id);
-
-        // Daemon connect can't be un-sent. If Stop landed mid-flight, tear it
-        // back down while preserving Lockdown's kill switch.
-        if (isCancelled(attempt)) {
-          if (result.ok) {
-            await daemonClient
-              .disconnect({ keepKillSwitch: lockdownEnabled })
-              .catch((err) => console.warn("cancel: disconnect failed", sanitizeLog(err)));
-          }
-          throw new ConnectCancelledError();
-        }
-        return { profile, result };
+        return await dialServer(profile, index, mode, attempt);
       },
       (error) => preferredTransport === "auto" && error instanceof TransportExhaustedError
     );
 
     if (outcome.value.result.ok) {
-      const committedProfiles = replaceManagedProfile(
+      provisionedProfiles = dropExpired(provisionedProfiles, Date.now());
+      const committedProfiles = commitProfileSet(
         initialProfiles,
-        previousManagedProfileId,
-        outcome.value.profile
+        outcome.value.profile,
+        Object.keys(provisionedProfiles)
       );
       await daemonClient.setConfig(committedProfiles).catch((error) => {
         console.warn("connect: profile cleanup failed", sanitizeLog(error));
       });
+      provisionedProfiles = retainOnly(provisionedProfiles, committedProfiles.map((p) => p.id));
+      void persistProvisionedProfiles();
       if (isCancelled(attempt)) {
         await daemonClient
           .disconnect({ keepKillSwitch: lockdownEnabled })
@@ -834,6 +966,9 @@ async function provisionAcrossServers(serverIds: readonly string[], mode: "conne
     const cancelledDuringCleanup = !committed && isCancelled(attempt);
     endAttempt(attempt);
     connectionAttemptRunning = false;
+    if (!committed) {
+      await releaseFailClosedKillSwitch();
+    }
     if (cancelledDuringCleanup) {
       return { ok: false, error: "cancelled" };
     }
@@ -861,12 +996,27 @@ async function provisionAndConnect(serverIds: readonly string[]): Promise<Connec
     if (await reconnectExistingProfile()) {
       return { ok: true, ...(lastServerId ? { serverId: lastServerId } : {}) };
     }
+    await releaseFailClosedKillSwitch();
     throw err;
   }
 }
 
 async function provisionAndSwitch(serverIds: readonly string[]): Promise<ConnectResult> {
   return provisionAcrossServers(serverIds, "switch");
+}
+
+// The daemon is fail-closed, so a cascade that gave up leaves the switch armed
+// with no tunnel to disconnect from. Lockdown means the user wanted the block.
+async function releaseFailClosedKillSwitch(): Promise<void> {
+  if (lockdownEnabled) return;
+  try {
+    const status = await daemonClient.getStatus();
+    if (!shouldReleaseKillSwitch(status, lockdownEnabled)) return;
+    await daemonClient.clearKillSwitch();
+    console.warn("cleared the kill switch a failed connect left armed");
+  } catch (err) {
+    console.warn("could not clear the kill switch after a failed connect", sanitizeLog(err));
+  }
 }
 
 /** Stop the in-flight connect attempt; never tears down a wanted connection. */
@@ -896,18 +1046,50 @@ function connectionOptions(): {
   };
 }
 
+function getSettingsPath(): string {
+  return path.join(getUserStateDir(), "settings.json");
+}
+
+// Reads a desktop state file, falling back to the copy the daemon's directory
+// may still hold from before these moved to the user directory.
+async function readStateFile(fileName: string): Promise<string> {
+  const fs = (await import("node:fs/promises")).default;
+  try {
+    return await fs.readFile(path.join(getUserStateDir(), fileName), "utf8");
+  } catch (err) {
+    const legacyPath = getLegacyStateFilePath(fileName);
+    if (!legacyPath) {
+      throw err;
+    }
+    return await fs.readFile(legacyPath, "utf8");
+  }
+}
+
+// Settings written before the move out of the daemon's directory. Read-only:
+// the next write lands in the user directory and takes over from there.
+async function readLegacySettingsFile(): Promise<Record<string, unknown>> {
+  const legacyPath = getLegacyStateFilePath("settings.json");
+  if (!legacyPath) {
+    return {};
+  }
+  try {
+    const fs = (await import("node:fs/promises")).default;
+    return JSON.parse(await fs.readFile(legacyPath, "utf8")) as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+}
+
 async function readSettingsFile(): Promise<Record<string, unknown>> {
-  const filePath = path.join(
-    (await import("./platformPaths")).getAppSupportDir(),
-    "settings.json"
-  );
+  const filePath = getSettingsPath();
   const fs = (await import("node:fs/promises")).default;
   let raw: string;
   try {
     raw = await fs.readFile(filePath, "utf8");
   } catch {
-    // No file yet — a genuinely fresh install, not corruption.
-    return {};
+    // No file here yet: either a fresh install or one that predates the move
+    // off the daemon's directory, which the desktop cannot write to.
+    return readLegacySettingsFile();
   }
   try {
     return JSON.parse(raw) as Record<string, unknown>;
@@ -921,10 +1103,8 @@ async function readSettingsFile(): Promise<Record<string, unknown>> {
 }
 
 async function writeSettingsFile(settings: Record<string, unknown>): Promise<void> {
-  const dir = (await import("./platformPaths")).getAppSupportDir();
+  const dir = await (await import("./platformPaths")).ensureUserStateDir();
   const fs = (await import("node:fs/promises")).default;
-  // First run can reach here before the daemon has created the directory.
-  await fs.mkdir(dir, { recursive: true });
   const finalPath = path.join(dir, "settings.json");
   const tmpPath = `${finalPath}.tmp-${process.pid}-${Date.now()}`;
   // Write-then-rename: a crash or power loss mid-write leaves the old file
@@ -1087,6 +1267,12 @@ function redactWireGuardKeys(configText: string): string {
     .join("\n");
 }
 
+async function persistProvisionedProfiles(): Promise<void> {
+  await updateSettings((settings) => {
+    settings.provisionedProfiles = provisionedProfiles;
+  }, "provisioned profiles");
+}
+
 /** The hub's last word on the plan, so an unreachable hub does not present a
  *  paying user with "no subscription". Cleared on logout, which passes null. */
 async function persistSubscription(cached: CachedSubscription | null): Promise<void> {
@@ -1160,12 +1346,23 @@ function registerIpcHandlers(): void {
         return { ok: false };
       }
       const result = await connectWithRecovery(profileId);
-      if (result.ok && !isCancelled(attempt)) {
+      if (isCancelled(attempt)) {
+        // Stop landed while the daemon was connecting; it can't be un-sent.
+        if (result.ok) {
+          await daemonClient
+            .disconnect({ keepKillSwitch: lockdownEnabled })
+            .catch((err) => console.warn("cancel: connect teardown failed", sanitizeLog(err)));
+        }
+        return { ok: false };
+      }
+      if (result.ok) {
         lastConnectedProfileId = profileId;
         void persistLastConnection();
         // The tunnel is up, so the hub is reachable through it even when it was
         // not before — the most reliable point to re-cache the renewal date.
         refreshSubscriptionCache("connect");
+      } else {
+        await releaseFailClosedKillSwitch();
       }
       return result;
     } finally {
@@ -1333,6 +1530,8 @@ function registerIpcHandlers(): void {
       managedProfileId = null;
     }
 
+    // The cached peers belong to the account that is signing out.
+    await discardProvisionedProfiles();
     pangeaApiClient.clearCache();
     await auth.logout();
     void refreshTrayStatus();
@@ -1540,11 +1739,7 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.getCachedServers, async () => {
     try {
-      const cachePath = (await import("node:path")).join(
-        (await import("./platformPaths")).getAppSupportDir(),
-        "server-cache.json"
-      );
-      const raw = await (await import("node:fs/promises")).default.readFile(cachePath, "utf8");
+      const raw = await readStateFile("server-cache.json");
       return sanitizePublicServers(JSON.parse(raw));
     } catch {
       return [];
@@ -1557,9 +1752,8 @@ function registerIpcHandlers(): void {
     }
     const safe = sanitizePublicServers(servers);
     try {
-      const dir = (await import("./platformPaths")).getAppSupportDir();
+      const dir = await (await import("./platformPaths")).ensureUserStateDir();
       const fs = (await import("node:fs/promises")).default;
-      await fs.mkdir(dir, { recursive: true });
       const finalPath = path.join(dir, "server-cache.json");
       const tmpPath = `${finalPath}.tmp-${process.pid}-${Date.now()}`;
       await fs.writeFile(tmpPath, JSON.stringify(safe), "utf8");
@@ -1801,12 +1995,7 @@ async function boot(): Promise<void> {
 
   // Restore persisted settings
   try {
-    const settingsPath = (await import("node:path")).join(
-      (await import("./platformPaths")).getAppSupportDir(),
-      "settings.json"
-    );
-    const settingsRaw = await (await import("node:fs/promises")).default.readFile(settingsPath, "utf8");
-    const settings = JSON.parse(settingsRaw) as Record<string, unknown>;
+    const settings = JSON.parse(await readStateFile("settings.json")) as Record<string, unknown>;
     if (settings.dohEnabled === true) {
       pangeaApiClient.setDohEnabled(true);
     }
@@ -1871,6 +2060,7 @@ async function boot(): Promise<void> {
     if (typeof settings.lastProfileId === "string") {
       lastConnectedProfileId = settings.lastProfileId;
     }
+    provisionedProfiles = dropExpired(parseProfileRecords(settings.provisionedProfiles), Date.now());
     if (typeof settings.locale === "string") {
       localePref = settings.locale;
     }

@@ -3134,9 +3134,14 @@ function updateServerControlStates(): void {
     || getVisibleServers().length === 0
     || entitled === false;
 
+  // An armed kill switch is exactly when the escape hatch matters most: no
+  // tunnel, no internet, and this button is what clears the block.
+  const killSwitchArmed = latestStatus?.killSwitchActive === true;
+
   // Disconnect is the escape hatch, so it is gated on one thing only: there is
   // nothing left to tear down. Busy, signed-out and error states all keep it live.
-  serverDisconnectBtn.disabled = !connectInFlight && !disconnectingVisual && fullyDisconnected;
+  serverDisconnectBtn.disabled =
+    !connectInFlight && !disconnectingVisual && fullyDisconnected && !killSwitchArmed;
   serverDisconnectBtn.textContent = connectInFlight ? t("hero.stop") : t("hero.disconnect");
 }
 

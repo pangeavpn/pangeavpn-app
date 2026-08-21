@@ -1,26 +1,17 @@
-import { app } from "electron";
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { AuthState, AuthUser } from "../shared/ipc";
-import { getAppSupportDir } from "./platformPaths";
+import { ensureUserStateDir, getAppSupportDir, getUserStateDir } from "./platformPaths";
 import { readSecret, writeSecret } from "./secureStore";
 
-/**
- * User-writable directory for auth files (session, license key, identity keys).
- * Always uses the per-user path, never the root-owned system path,
- * because these files are written by the Electron app (running as the user),
- * not by the daemon (running as root).
- */
+// Auth files (session, license key, identity keys) are written by the Electron
+// app as the user, so they live in the user directory, not the daemon's.
 function getUserAuthDir(): string {
-  const userDir = path.join(app.getPath("appData"), "pangeavpn-desktop");
-  return userDir;
+  return getUserStateDir();
 }
 
 async function ensureUserAuthDir(): Promise<void> {
-  const dir = getUserAuthDir();
-  await fs.mkdir(dir, { recursive: true, mode: 0o700 });
-  // mkdir's mode is a no-op on a dir that already existed with looser perms.
-  await fs.chmod(dir, 0o700).catch(() => {});
+  await ensureUserStateDir();
 }
 
 // --- Auth session persistence (stores user info from token login) ---
