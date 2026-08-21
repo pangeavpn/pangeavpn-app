@@ -53,9 +53,11 @@ const (
 	// Static-session objects outlive this process; PERSISTENT also survives a
 	// reboot, so the lock stays engaged until explicitly cleared.
 	fwpmSublayerFlagPersistent uint16 = 0x0001
-	fwpmFilterFlagPersistent   uint32 = 0x00020000
+	fwpmFilterFlagPersistent   uint32 = 0x00000001
 
-	fwpEAlreadyExists uint32 = 0x80320009 // FWP_E_ALREADY_EXISTS
+	fwpEAlreadyExists    uint32 = 0x80320009 // FWP_E_ALREADY_EXISTS
+	fwpEFilterNotFound   uint32 = 0x80320003 // FWP_E_FILTER_NOT_FOUND
+	fwpESublayerNotFound uint32 = 0x80320007 // FWP_E_SUBLAYER_NOT_FOUND
 
 	rpcCAuthnWinnt uint32 = 10
 	ipprotoUDP     uint8  = 17
@@ -89,6 +91,19 @@ var (
 	pangeaBlockAllInboundV4FilterKey  = windows.GUID{Data1: 0xa9d3e8f3, Data2: 0x4b7c, Data3: 0x4d2a, Data4: [8]byte{0x9e, 0x6f, 0x1a, 0x2b, 0x3c, 0x4d, 0x5e, 0x71}}
 	pangeaBlockAllOutboundV6FilterKey = windows.GUID{Data1: 0xa9d3e8f4, Data2: 0x4b7c, Data3: 0x4d2a, Data4: [8]byte{0x9e, 0x6f, 0x1a, 0x2b, 0x3c, 0x4d, 0x5e, 0x72}}
 	pangeaBlockAllInboundV6FilterKey  = windows.GUID{Data1: 0xa9d3e8f5, Data2: 0x4b7c, Data3: 0x4d2a, Data4: [8]byte{0x9e, 0x6f, 0x1a, 0x2b, 0x3c, 0x4d, 0x5e, 0x73}}
+)
+
+// Loopback permits are persistent for the same reason the blocks are: a lock
+// that outlives a reboot must not take the local daemon API down with it.
+var (
+	pangeaPermitLoopbackV4FilterKey        = windows.GUID{Data1: 0xa9d3e8f6, Data2: 0x4b7c, Data3: 0x4d2a, Data4: [8]byte{0x9e, 0x6f, 0x1a, 0x2b, 0x3c, 0x4d, 0x5e, 0x74}}
+	pangeaPermitLoopbackInboundV4FilterKey = windows.GUID{Data1: 0xa9d3e8f7, Data2: 0x4b7c, Data3: 0x4d2a, Data4: [8]byte{0x9e, 0x6f, 0x1a, 0x2b, 0x3c, 0x4d, 0x5e, 0x75}}
+	pangeaPermitLoopbackNetV4FilterKey     = windows.GUID{Data1: 0xa9d3e8f8, Data2: 0x4b7c, Data3: 0x4d2a, Data4: [8]byte{0x9e, 0x6f, 0x1a, 0x2b, 0x3c, 0x4d, 0x5e, 0x76}}
+	pangeaPermitLoopbackNetInV4FilterKey   = windows.GUID{Data1: 0xa9d3e8f9, Data2: 0x4b7c, Data3: 0x4d2a, Data4: [8]byte{0x9e, 0x6f, 0x1a, 0x2b, 0x3c, 0x4d, 0x5e, 0x77}}
+	pangeaPermitLoopbackV6FilterKey        = windows.GUID{Data1: 0xa9d3e8fa, Data2: 0x4b7c, Data3: 0x4d2a, Data4: [8]byte{0x9e, 0x6f, 0x1a, 0x2b, 0x3c, 0x4d, 0x5e, 0x78}}
+	pangeaPermitLoopbackInboundV6FilterKey = windows.GUID{Data1: 0xa9d3e8fb, Data2: 0x4b7c, Data3: 0x4d2a, Data4: [8]byte{0x9e, 0x6f, 0x1a, 0x2b, 0x3c, 0x4d, 0x5e, 0x79}}
+	pangeaPermitLoopbackNetV6FilterKey     = windows.GUID{Data1: 0xa9d3e8fc, Data2: 0x4b7c, Data3: 0x4d2a, Data4: [8]byte{0x9e, 0x6f, 0x1a, 0x2b, 0x3c, 0x4d, 0x5e, 0x7a}}
+	pangeaPermitLoopbackNetInV6FilterKey   = windows.GUID{Data1: 0xa9d3e8fd, Data2: 0x4b7c, Data3: 0x4d2a, Data4: [8]byte{0x9e, 0x6f, 0x1a, 0x2b, 0x3c, 0x4d, 0x5e, 0x7b}}
 )
 
 // ---------------------------------------------------------------------------
@@ -291,6 +306,9 @@ func (e *wfpEngine) deleteSublayerByKey(key windows.GUID) error {
 		uintptr(unsafe.Pointer(&key)),
 	)
 	if r != 0 {
+		if uint32(r) == fwpESublayerNotFound {
+			return nil
+		}
 		return fmt.Errorf("FwpmSubLayerDeleteByKey0: %w", windows.Errno(r))
 	}
 	return nil
@@ -357,6 +375,9 @@ func (e *wfpEngine) deleteFilterByKey(key windows.GUID) error {
 		uintptr(unsafe.Pointer(&key)),
 	)
 	if r != 0 {
+		if uint32(r) == fwpEFilterNotFound {
+			return nil
+		}
 		return fmt.Errorf("FwpmFilterDeleteByKey0: %w", windows.Errno(r))
 	}
 	return nil
@@ -387,7 +408,7 @@ func (e *wfpEngine) addBlockAllInbound() (uint64, error) {
 	return e.addFilterKeyed(fwpmLayerAleAuthRecvAcceptV4, pangeaBlockAllInboundV4FilterKey, "PangeaVPN Block All Inbound", 1, fwpActionBlock, fwpmFilterFlagPersistent, nil)
 }
 
-func (e *wfpEngine) addPermitLoopbackAt(layer windows.GUID, filterName string) (uint64, error) {
+func (e *wfpEngine) addPermitLoopbackAt(layer, filterKey windows.GUID, filterName string) (uint64, error) {
 	conditions := []fwpmFilterCondition0{
 		{
 			fieldKey:  fwpmConditionFlags,
@@ -398,22 +419,22 @@ func (e *wfpEngine) addPermitLoopbackAt(layer windows.GUID, filterName string) (
 			},
 		},
 	}
-	return e.addFilter(layer, filterName, 10, fwpActionPermit, conditions)
+	return e.addFilterKeyed(layer, filterKey, filterName, 10, fwpActionPermit, fwpmFilterFlagPersistent, conditions)
 }
 
 func (e *wfpEngine) addPermitLoopback() (uint64, error) {
-	return e.addPermitLoopbackAt(fwpmLayerAleAuthConnectV4, "PangeaVPN Allow Loopback")
+	return e.addPermitLoopbackAt(fwpmLayerAleAuthConnectV4, pangeaPermitLoopbackV4FilterKey, "PangeaVPN Allow Loopback")
 }
 
 // addPermitLoopbackInboundV4 mirrors addPermitLoopbackInboundV6: without it
 // the inbound block drops the server side of every 127.0.0.1 connection.
 func (e *wfpEngine) addPermitLoopbackInboundV4() (uint64, error) {
-	return e.addPermitLoopbackAt(fwpmLayerAleAuthRecvAcceptV4, "PangeaVPN Allow Loopback Inbound")
+	return e.addPermitLoopbackAt(fwpmLayerAleAuthRecvAcceptV4, pangeaPermitLoopbackInboundV4FilterKey, "PangeaVPN Allow Loopback Inbound")
 }
 
 // addPermitLoopbackSubnetAt permits 127.0.0.0/8 by address on the given
 // layer — the IS_LOOPBACK flag alone misses fresh inter-process connects.
-func (e *wfpEngine) addPermitLoopbackSubnetAt(layer windows.GUID, filterName string) (uint64, error) {
+func (e *wfpEngine) addPermitLoopbackSubnetAt(layer, filterKey windows.GUID, filterName string) (uint64, error) {
 	addrMask := fwpV4AddrAndMask{
 		addr: uint32(127) << 24,
 		mask: 0xFF000000, // /8
@@ -428,17 +449,17 @@ func (e *wfpEngine) addPermitLoopbackSubnetAt(layer windows.GUID, filterName str
 			},
 		},
 	}
-	id, err := e.addFilter(layer, filterName, 10, fwpActionPermit, conditions)
+	id, err := e.addFilterKeyed(layer, filterKey, filterName, 10, fwpActionPermit, fwpmFilterFlagPersistent, conditions)
 	runtime.KeepAlive(&addrMask)
 	return id, err
 }
 
 func (e *wfpEngine) addPermitLoopbackSubnet() (uint64, error) {
-	return e.addPermitLoopbackSubnetAt(fwpmLayerAleAuthConnectV4, "PangeaVPN Allow Loopback Subnet")
+	return e.addPermitLoopbackSubnetAt(fwpmLayerAleAuthConnectV4, pangeaPermitLoopbackNetV4FilterKey, "PangeaVPN Allow Loopback Subnet")
 }
 
 func (e *wfpEngine) addPermitLoopbackSubnetInboundV4() (uint64, error) {
-	return e.addPermitLoopbackSubnetAt(fwpmLayerAleAuthRecvAcceptV4, "PangeaVPN Allow Loopback Subnet Inbound")
+	return e.addPermitLoopbackSubnetAt(fwpmLayerAleAuthRecvAcceptV4, pangeaPermitLoopbackNetInV4FilterKey, "PangeaVPN Allow Loopback Subnet Inbound")
 }
 
 func (e *wfpEngine) addPermitEndpointIP(ipStr string) (uint64, error) {
@@ -587,17 +608,7 @@ func (e *wfpEngine) addBlockAllInboundV6() (uint64, error) {
 }
 
 func (e *wfpEngine) addPermitLoopbackV6() (uint64, error) {
-	conditions := []fwpmFilterCondition0{
-		{
-			fieldKey:  fwpmConditionFlags,
-			matchType: fwpMatchFlagsAllSet,
-			conditionValue: fwpValue0{
-				valueType: fwpUint32,
-				value:     uintptr(fwpConditionFlagIsLoopback),
-			},
-		},
-	}
-	return e.addFilter(fwpmLayerAleAuthConnectV6, "PangeaVPN Allow Loopback IPv6", 10, fwpActionPermit, conditions)
+	return e.addPermitLoopbackAt(fwpmLayerAleAuthConnectV6, pangeaPermitLoopbackV6FilterKey, "PangeaVPN Allow Loopback IPv6")
 }
 
 // addPermitLoopbackInboundV6 permits IPv6 traffic carrying the IS_LOOPBACK
@@ -606,17 +617,7 @@ func (e *wfpEngine) addPermitLoopbackV6() (uint64, error) {
 // Windows, so local web servers become unreachable while the kill switch is
 // active.
 func (e *wfpEngine) addPermitLoopbackInboundV6() (uint64, error) {
-	conditions := []fwpmFilterCondition0{
-		{
-			fieldKey:  fwpmConditionFlags,
-			matchType: fwpMatchFlagsAllSet,
-			conditionValue: fwpValue0{
-				valueType: fwpUint32,
-				value:     uintptr(fwpConditionFlagIsLoopback),
-			},
-		},
-	}
-	return e.addFilter(fwpmLayerAleAuthRecvAcceptV6, "PangeaVPN Allow Loopback Inbound IPv6", 10, fwpActionPermit, conditions)
+	return e.addPermitLoopbackAt(fwpmLayerAleAuthRecvAcceptV6, pangeaPermitLoopbackInboundV6FilterKey, "PangeaVPN Allow Loopback Inbound IPv6")
 }
 
 // addPermitLoopbackSubnetV6 permits ::1/128 by remote address on the given
@@ -624,7 +625,7 @@ func (e *wfpEngine) addPermitLoopbackInboundV6() (uint64, error) {
 // for fresh inter-process TCP connects — the same quirk that required
 // addPermitLoopbackSubnet on IPv4. Loopback is non-routable, so there is no
 // leak risk.
-func (e *wfpEngine) addPermitLoopbackSubnetV6(layer windows.GUID, filterName string) (uint64, error) {
+func (e *wfpEngine) addPermitLoopbackSubnetV6(layer, filterKey windows.GUID, filterName string) (uint64, error) {
 	addrMask := fwpV6AddrAndMask{prefixLength: 128}
 	addrMask.addr[15] = 1 // ::1
 	conditions := []fwpmFilterCondition0{
@@ -637,7 +638,7 @@ func (e *wfpEngine) addPermitLoopbackSubnetV6(layer windows.GUID, filterName str
 			},
 		},
 	}
-	id, err := e.addFilter(layer, filterName, 10, fwpActionPermit, conditions)
+	id, err := e.addFilterKeyed(layer, filterKey, filterName, 10, fwpActionPermit, fwpmFilterFlagPersistent, conditions)
 	runtime.KeepAlive(&addrMask)
 	return id, err
 }

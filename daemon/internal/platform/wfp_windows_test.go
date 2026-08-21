@@ -136,4 +136,12 @@ func TestWFPConstants(t *testing.T) {
 	if ipprotoUDP != 17 {
 		t.Errorf("ipprotoUDP = %d, want 17", ipprotoUDP)
 	}
+
+	// A wrong value here is rejected at runtime with FWP_E_INVALID_FLAGS.
+	if fwpmFilterFlagPersistent != 0x00000001 {
+		t.Errorf("fwpmFilterFlagPersistent = 0x%x, want 0x00000001", fwpmFilterFlagPersistent)
+	}
+	if fwpmSublayerFlagPersistent != 0x0001 {
+		t.Errorf("fwpmSublayerFlagPersistent = 0x%x, want 0x0001", fwpmSublayerFlagPersistent)
+	}
 }

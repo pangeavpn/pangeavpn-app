@@ -270,7 +270,7 @@ func (ks *windowsKillSwitch) Enable(ctx context.Context, endpointHosts []string,
 	// flag (unreliable for fresh connects), and permits at the inbound layer —
 	// the inbound V6 block otherwise drops the server side of every [::1]
 	// connection, making localhost websites unreachable while connected.
-	if _, err := engine.addPermitLoopbackSubnetV6(fwpmLayerAleAuthConnectV6, "PangeaVPN Allow Loopback Subnet IPv6"); err != nil {
+	if _, err := engine.addPermitLoopbackSubnetV6(fwpmLayerAleAuthConnectV6, pangeaPermitLoopbackNetV6FilterKey, "PangeaVPN Allow Loopback Subnet IPv6"); err != nil {
 		engine.abortTransaction()
 		engine.close()
 		_ = removeKillSwitchState()
@@ -282,7 +282,7 @@ func (ks *windowsKillSwitch) Enable(ctx context.Context, endpointHosts []string,
 		_ = removeKillSwitchState()
 		return fmt.Errorf("kill switch enable: %w", err)
 	}
-	if _, err := engine.addPermitLoopbackSubnetV6(fwpmLayerAleAuthRecvAcceptV6, "PangeaVPN Allow Loopback Subnet Inbound IPv6"); err != nil {
+	if _, err := engine.addPermitLoopbackSubnetV6(fwpmLayerAleAuthRecvAcceptV6, pangeaPermitLoopbackNetInV6FilterKey, "PangeaVPN Allow Loopback Subnet Inbound IPv6"); err != nil {
 		engine.abortTransaction()
 		engine.close()
 		_ = removeKillSwitchState()
@@ -386,13 +386,21 @@ func resolveTunnelLUID(tunnel TunnelRef) (uint64, error) {
 	return uint64(luid), nil
 }
 
-// pangeaBlockFilterKeys are the well-known keys for the persistent block-all
-// filters — closing a static session's engine handle does not remove them.
-var pangeaBlockFilterKeys = []windows.GUID{
+// pangeaPersistentFilterKeys are the well-known keys of every filter that
+// outlives the process. Blocks come first so no window drops loopback.
+var pangeaPersistentFilterKeys = []windows.GUID{
 	pangeaBlockAllOutboundV4FilterKey,
 	pangeaBlockAllInboundV4FilterKey,
 	pangeaBlockAllOutboundV6FilterKey,
 	pangeaBlockAllInboundV6FilterKey,
+	pangeaPermitLoopbackV4FilterKey,
+	pangeaPermitLoopbackInboundV4FilterKey,
+	pangeaPermitLoopbackNetV4FilterKey,
+	pangeaPermitLoopbackNetInV4FilterKey,
+	pangeaPermitLoopbackV6FilterKey,
+	pangeaPermitLoopbackInboundV6FilterKey,
+	pangeaPermitLoopbackNetV6FilterKey,
+	pangeaPermitLoopbackNetInV6FilterKey,
 }
 
 func (ks *windowsKillSwitch) Clear(ctx context.Context) error {
@@ -401,41 +409,50 @@ func (ks *windowsKillSwitch) Clear(ctx context.Context) error {
 
 	var errs []string
 
-	if ks.engine != nil {
-		for _, id := range ks.endpointFilterIds {
-			if err := ks.engine.deleteFilter(id); err != nil {
-				errs = append(errs, fmt.Sprintf("endpoint permit %d: %v", id, err))
-			}
+	// A restarted daemon inherits no handle to the filters the previous
+	// process left live, so open a fresh engine rather than skip the teardown.
+	engine, ownsEngine := ks.engine, false
+	if engine == nil {
+		opened, err := wfpOpen()
+		if err != nil {
+			return fmt.Errorf("kill switch clear: %w", err)
 		}
-		for _, id := range ks.lanFilterIds {
-			if err := ks.engine.deleteFilter(id); err != nil {
-				errs = append(errs, fmt.Sprintf("lan permit %d: %v", id, err))
-			}
-		}
-		if ks.tunnelFilterId != 0 {
-			if err := ks.engine.deleteFilter(ks.tunnelFilterId); err != nil {
-				errs = append(errs, fmt.Sprintf("tunnel permit %d: %v", ks.tunnelFilterId, err))
-			}
-		}
-		for _, id := range ks.staleTunnelFilterIds {
-			if err := ks.engine.deleteFilter(id); err != nil {
-				errs = append(errs, fmt.Sprintf("stale tunnel permit %d: %v", id, err))
-			}
-		}
-		for _, key := range pangeaBlockFilterKeys {
-			if err := ks.engine.deleteFilterByKey(key); err != nil {
-				errs = append(errs, fmt.Sprintf("block filter %v: %v", key, err))
-			}
-		}
-		if err := ks.engine.deleteSublayerByKey(pangeaVPNSublayerKey); err != nil {
-			errs = append(errs, fmt.Sprintf("sublayer: %v", err))
-		}
+		engine, ownsEngine = opened, true
+	}
 
-		if err := ks.engine.close(); err != nil {
-			errs = append(errs, fmt.Sprintf("engine close: %v", err))
-		} else {
-			ks.engine = nil
+	for _, id := range ks.endpointFilterIds {
+		if err := engine.deleteFilter(id); err != nil {
+			errs = append(errs, fmt.Sprintf("endpoint permit %d: %v", id, err))
 		}
+	}
+	for _, id := range ks.lanFilterIds {
+		if err := engine.deleteFilter(id); err != nil {
+			errs = append(errs, fmt.Sprintf("lan permit %d: %v", id, err))
+		}
+	}
+	if ks.tunnelFilterId != 0 {
+		if err := engine.deleteFilter(ks.tunnelFilterId); err != nil {
+			errs = append(errs, fmt.Sprintf("tunnel permit %d: %v", ks.tunnelFilterId, err))
+		}
+	}
+	for _, id := range ks.staleTunnelFilterIds {
+		if err := engine.deleteFilter(id); err != nil {
+			errs = append(errs, fmt.Sprintf("stale tunnel permit %d: %v", id, err))
+		}
+	}
+	for _, key := range pangeaPersistentFilterKeys {
+		if err := engine.deleteFilterByKey(key); err != nil {
+			errs = append(errs, fmt.Sprintf("filter %v: %v", key, err))
+		}
+	}
+	if err := engine.deleteSublayerByKey(pangeaVPNSublayerKey); err != nil {
+		errs = append(errs, fmt.Sprintf("sublayer: %v", err))
+	}
+
+	if err := engine.close(); err != nil {
+		errs = append(errs, fmt.Sprintf("engine close: %v", err))
+	} else if !ownsEngine {
+		ks.engine = nil
 	}
 
 	// A partial teardown must not report the lock as cleared: leave Active
