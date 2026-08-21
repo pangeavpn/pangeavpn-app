@@ -144,6 +144,11 @@
   nsExec::ExecToLog 'powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$$ErrorActionPreference = \"Stop\"; $$serviceName = \"PangeaDaemon\"; $$ace = \"(A;;RPLOLC;;;BU)\"; $$sd = (sc.exe sdshow $$serviceName | Out-String).Trim(); if ([string]::IsNullOrWhiteSpace($$sd)) { exit 1 }; if ($$sd -notlike \"*$$ace*\") { $$sIndex = $$sd.IndexOf(\"S:\"); if ($$sIndex -ge 0) { $$sd = $$sd.Substring(0, $$sIndex) + $$ace + $$sd.Substring($$sIndex) } else { $$sd = $$sd + $$ace }; sc.exe sdset $$serviceName $$sd | Out-Null; if ($$LASTEXITCODE -ne 0) { exit $$LASTEXITCODE } }"'
   nsExec::ExecToLog 'sc.exe start PangeaDaemon'
 
+  ; Name and icon Windows shows on our toasts; without it they are attributed
+  ; to the Electron runtime instead of PangeaVPN.
+  WriteRegStr HKLM "Software\Classes\AppUserModelId\${APP_ID}" "DisplayName" "${PRODUCT_NAME}"
+  WriteRegStr HKLM "Software\Classes\AppUserModelId\${APP_ID}" "IconUri" "$INSTDIR\resources\build\PangeaVPN.png"
+
   ; Optional desktop shortcut (per the Options page; created on the common
   ; desktop since this is a per-machine install). Non-fatal if it fails.
   ${If} $PangeaDesktopShortcut == "1"
@@ -156,6 +161,8 @@
   nsExec::ExecToLog 'sc.exe stop PangeaDaemon'
   Sleep 500
   nsExec::ExecToLog 'sc.exe delete PangeaDaemon'
+
+  DeleteRegKey HKLM "Software\Classes\AppUserModelId\${APP_ID}"
 
   Delete "$DESKTOP\${PRODUCT_FILENAME}.lnk"
 

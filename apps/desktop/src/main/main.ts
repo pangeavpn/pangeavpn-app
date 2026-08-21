@@ -1745,9 +1745,9 @@ async function connectWithRecovery(profileId: string): Promise<OkResponse> {
 async function boot(): Promise<void> {
   await app.whenReady();
 
-  // Windows drops toasts whose AUMID doesn't match a Start Menu shortcut's;
-  // NSIS writes ours with build.appId, so the process must claim the same one.
-  app.setAppUserModelId("com.pangea.pangeavpn");
+  // Toasts are attributed to the AUMID's Start Menu shortcut, which only an
+  // install has — an unpackaged run must claim electron.exe, not the shipped id.
+  app.setAppUserModelId(app.isPackaged ? "com.pangea.pangeavpn" : process.execPath);
 
   // Lock down navigation, new windows, embeds, permissions, and TLS.
   app.on("web-contents-created", (_event, contents) => {
