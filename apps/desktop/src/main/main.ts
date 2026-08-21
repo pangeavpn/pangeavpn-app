@@ -1584,6 +1584,17 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.getHubMethods, async () => pangeaApiClient.getHubMethods());
 
+  ipcMain.handle(IPC_CHANNELS.getHubStatus, async () => pangeaApiClient.getHubStatus());
+
+  // Probes one method on demand. Rejecting an unknown name rather than
+  // defaulting keeps a stray IPC call from starting the daemon's proxy.
+  ipcMain.handle(IPC_CHANNELS.testHubMethod, async (_event, method: unknown) => {
+    if (!isHubMethod(method)) {
+      throw new Error("Unknown hub method");
+    }
+    return pangeaApiClient.testHubMethod(method);
+  });
+
   ipcMain.handle(IPC_CHANNELS.setAllowLan, async (_event, enabled: boolean) => {
     allowLanEnabled = !!enabled;
     await updateSettings((settings) => {
@@ -1969,6 +1980,9 @@ async function boot(): Promise<void> {
   // Registered before the restore below so a first run with no settings file
   // still persists the hub IP once it is learned.
   pangeaApiClient.onHubIp((ip) => void persistHubIp(ip));
+  pangeaApiClient.onHubStatusChanged((status) => {
+    mainWindow?.webContents.send(IPC_CHANNELS.hubStatusChanged, status);
+  });
   pangeaApiClient.onHubShadowsocksResolved((creds) => void persistHubShadowsocks(creds));
   pangeaApiClient.onFrontedEndpointsResolved((endpoints) => void persistFrontedEndpoints(endpoints));
   pangeaApiClient.onServersResolved((servers) => void persistServers(servers));

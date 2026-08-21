@@ -5,9 +5,20 @@ import type {
   Profile,
   StatusResponse
 } from "@pangeavpn/shared-types";
-import type { HubMethod, HubMethods } from "./hubMethods";
+import type {
+  HubMethod,
+  HubMethods,
+  HubMethodTestResult,
+  HubStatus
+} from "./hubMethods";
 
-export type { HubMethod, HubMethods } from "./hubMethods";
+export type {
+  HubMethod,
+  HubMethods,
+  HubMethodTestResult,
+  HubMethodUnavailable,
+  HubStatus
+} from "./hubMethods";
 
 /** Result of setHubMethod: `applied` is false when the last method was kept on. */
 export interface HubMethodResult {
@@ -35,6 +46,9 @@ export const IPC_CHANNELS = {
   getDoh: "pangea:getDoh",
   setHubMethod: "pangea:setHubMethod",
   getHubMethods: "pangea:getHubMethods",
+  getHubStatus: "pangea:getHubStatus",
+  testHubMethod: "pangea:testHubMethod",
+  hubStatusChanged: "pangea:hubStatusChanged",
   setAllowLan: "pangea:setAllowLan",
   getAllowLan: "pangea:getAllowLan",
   setWireguardMtu: "settings:setWireguardMtu",
@@ -301,6 +315,12 @@ export interface PangeaApi {
    */
   setHubMethod: (method: HubMethod, enabled: boolean) => Promise<HubMethodResult>;
   getHubMethods: () => Promise<HubMethods>;
+  /** Which method is carrying hub traffic right now, plus the switches. */
+  getHubStatus: () => Promise<HubStatus>;
+  /** Probes one method on its own. Never rejects on an unreachable hub. */
+  testHubMethod: (method: HubMethod) => Promise<HubMethodTestResult>;
+  /** Subscribes to path changes; returns an unsubscribe function. */
+  onHubStatusChanged: (callback: (status: HubStatus) => void) => () => void;
   setAllowLan: (enabled: boolean) => Promise<void>;
   getAllowLan: () => Promise<boolean>;
   /** Resolves to the MTU actually stored — differs from `mtu` when it was rejected. */
