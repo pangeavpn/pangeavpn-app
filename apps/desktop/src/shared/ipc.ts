@@ -62,6 +62,8 @@ export const IPC_CHANNELS = {
   setLockdown: "settings:setLockdown",
   getLockdown: "settings:getLockdown",
   setAutoConnect: "settings:setAutoConnect",
+  setDeadDrop: "settings:setDeadDrop",
+  getDeadDrop: "settings:getDeadDrop",
   getAutoConnect: "settings:getAutoConnect",
   getLastServer: "settings:getLastServer",
   clearLastServer: "settings:clearLastServer",
@@ -338,6 +340,8 @@ export interface PangeaApi {
   getLockdown: () => Promise<boolean>;
   /** Reconnect to the last server on launch and after drops. Independent of lockdown. */
   setAutoConnect: (enabled: boolean) => Promise<void>;
+  setDeadDrop: (enabled: boolean) => Promise<void>;
+  getDeadDrop: () => Promise<boolean>;
   getAutoConnect: () => Promise<boolean>;
   getLastServer: () => Promise<{ lastServerId: string | null; lastProfileId: string | null }>;
   clearLastServer: () => Promise<void>;

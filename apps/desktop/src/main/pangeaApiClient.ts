@@ -28,6 +28,9 @@ import {
   restoreFrontedEndpoints
 } from "../shared/frontedEndpoints";
 import { isCachedServer, restoreCachedServers } from "../shared/cachedServers";
+import { isIPv4Literal } from "../shared/ipLiteral";
+import { DEAD_DROP_KEYS } from "./deadDropKeys";
+import { deadDropDue, fetchDeadDropPayload } from "./deadDrop";
 import {
   cachedEntitlement,
   restoreCachedSubscription,
@@ -435,15 +438,6 @@ function allowedIPsExcludingAll(excludeIPs: string[]): string[] {
   return blocks.map((b) => `${intToIp(b.base)}/${b.prefixLen}`);
 }
 
-/** Matches a literal dotted-quad IPv4 address (not a hostname). */
-const IPV4_LITERAL_PATTERN = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
-
-function isIPv4Literal(host: string): boolean {
-  const match = IPV4_LITERAL_PATTERN.exec(host);
-  if (!match) return false;
-  return match.slice(1, 5).every((octet) => Number(octet) <= 255);
-}
-
 function buildWireGuardConfig(
   privateKey: string,
   assignedIP: string,
@@ -552,6 +546,13 @@ export class PangeaApiClient {
   // the shadowsocks method sits inert until credentials are cached.
   private frontedEndpoints: string[] = [];
   private onFrontedEndpoints: ((endpoints: string[]) => void) | null = null;
+
+  // Signed public file of last resort: addresses to try when every carrier has
+  // failed. Inbound only — it re-seeds this cache, it never carries a request.
+  private deadDropEnabled = true;
+  private deadDropSeq = 0;
+  private deadDropLastAttemptMs = 0;
+  private onDeadDropState: ((state: { seq: number; lastAttemptMs: number }) => void) | null = null;
   // The relay currently carrying our traffic; null when the method is off or
   // not the path in use.
   private frontedHost: string | null = null;
@@ -682,6 +683,27 @@ export class PangeaApiClient {
   /** Called when a fresh relay list arrives, so the caller can persist it. */
   onFrontedEndpointsResolved(fn: (endpoints: string[]) => void): void {
     this.onFrontedEndpoints = fn;
+  }
+
+  /** Restore the dead-drop switch and replay guard from settings at startup. */
+  setDeadDropEnabled(enabled: boolean): void {
+    this.deadDropEnabled = enabled;
+  }
+
+  getDeadDropEnabled(): boolean {
+    return this.deadDropEnabled;
+  }
+
+  setDeadDropState(seq: unknown, lastAttemptMs: unknown): void {
+    this.deadDropSeq = typeof seq === "number" && Number.isSafeInteger(seq) && seq >= 0 ? seq : 0;
+    this.deadDropLastAttemptMs =
+      typeof lastAttemptMs === "number" && Number.isFinite(lastAttemptMs) && lastAttemptMs >= 0
+        ? lastAttemptMs
+        : 0;
+  }
+
+  onDeadDropStateChanged(fn: (state: { seq: number; lastAttemptMs: number }) => void): void {
+    this.onDeadDropState = fn;
   }
 
   /** The relay currently carrying hub traffic, for diagnostics. */
@@ -920,7 +942,7 @@ export class PangeaApiClient {
     return this.hubResolution;
   }
 
-  private async resolveHubPath(): Promise<boolean> {
+  private async resolveHubPath(reseeded = false): Promise<boolean> {
     console.log(`[HubURL] Finding working API connection...`);
 
     // 1. Last known good IP — no lookup, so it works under a lockdown lock.
@@ -992,6 +1014,13 @@ export class PangeaApiClient {
     }
 
     this.dohResolvedIp = null;
+
+    // Every carrier is out of addresses that work. The dead drop is the only
+    // remaining source of new ones, so spend it before giving up.
+    if (!reseeded && (await this.reseedFromDeadDrop())) {
+      return this.resolveHubPath(true);
+    }
+
     if (!this.hubMethods.normal) {
       // Fail closed: falling back to the domain here would leak the SNI the
       // user switched that method off to avoid.
@@ -1004,6 +1033,58 @@ export class PangeaApiClient {
     // domain one genuine attempt — but do not record the path as confirmed.
     console.log(`[HubURL] All strategies failed, falling back to direct domain`);
     return false;
+  }
+
+  /**
+   * Pulls the signed public bootstrap file and folds whatever it names into the
+   * caches the ladder reads. Returns whether anything actually changed, so a
+   * blob we already had does not buy a pointless second pass.
+   *
+   * Never throws: a dead drop that cannot be reached leaves the client exactly
+   * where it already was.
+   */
+  private async reseedFromDeadDrop(): Promise<boolean> {
+    if (!this.deadDropEnabled) return false;
+    const now = Date.now();
+    if (!deadDropDue(this.deadDropLastAttemptMs, now)) {
+      console.log(`[HubURL] Dead drop rate limited, skipping`);
+      return false;
+    }
+    this.deadDropLastAttemptMs = now;
+    this.onDeadDropState?.({ seq: this.deadDropSeq, lastAttemptMs: now });
+
+    let result: Awaited<ReturnType<typeof fetchDeadDropPayload>> = null;
+    try {
+      result = await fetchDeadDropPayload({
+        keys: DEAD_DROP_KEYS,
+        minSeq: this.deadDropSeq,
+        nowMs: now
+      });
+    } catch (err) {
+      console.warn(`[HubURL] Dead drop fetch failed:`, sanitizeLog(err));
+      return false;
+    }
+    if (!result) {
+      console.log(`[HubURL] Dead drop had nothing usable`);
+      return false;
+    }
+
+    console.log(`[HubURL] Dead drop seq ${result.payload.seq} from ${result.url}`);
+    this.deadDropSeq = result.payload.seq;
+    this.onDeadDropState?.({ seq: this.deadDropSeq, lastAttemptMs: now });
+
+    const before = this.frontedEndpoints;
+    this.rememberFrontedEndpoints(result.payload.frontedEndpoints);
+    let changed = this.frontedEndpoints !== before;
+
+    // Only one hub IP is cached at a time, so take the first the blob names and
+    // leave the rest for the next pass if this one does not work out.
+    const [hubIp] = result.payload.hubIps;
+    if (hubIp && hubIp !== this.cachedHubIp) {
+      this.rememberHubIp(hubIp);
+      changed = true;
+    }
+    return changed;
   }
 
   /**

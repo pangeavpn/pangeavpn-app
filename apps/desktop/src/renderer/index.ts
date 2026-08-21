@@ -108,6 +108,7 @@ const wireguardMtuInput = document.getElementById("wireguardMtuInput") as HTMLIn
 const preferredTransportSelect = document.getElementById("preferredTransportSelect") as HTMLSelectElement;
 const launchAtStartupToggle = document.getElementById("launchAtStartupToggle") as HTMLInputElement;
 const autoConnectToggle = document.getElementById("autoConnectToggle") as HTMLInputElement;
+const deadDropToggle = document.getElementById("deadDropToggle") as HTMLInputElement;
 const lockdownToggle = document.getElementById("lockdownToggle") as HTMLInputElement;
 const loginScreen = document.getElementById("loginScreen") as HTMLElement;
 const loginSettingsBtn = document.getElementById("loginSettingsBtn") as HTMLButtonElement;
@@ -1550,6 +1551,19 @@ autoConnectToggle.addEventListener("change", async () => {
   }
 });
 
+deadDropToggle.addEventListener("change", async () => {
+  if (!pangeaApi) return;
+  const requested = deadDropToggle.checked;
+  try {
+    await pangeaApi.setDeadDrop(requested);
+  } catch (err) {
+    deadDropToggle.checked = !requested;
+    showToast(reportError("deadDrop", err, t("toggle.updateFailed")));
+    return;
+  }
+  showToast(requested ? t("toggle.deadDrop.on") : t("toggle.deadDrop.off"), 4000, true);
+});
+
 lockdownToggle.addEventListener("change", async () => {
   if (!pangeaApi) return;
   lockdownLocal = lockdownToggle.checked;
@@ -1864,6 +1878,7 @@ async function init(): Promise<void> {
       autoConnectToggle.checked = autoConnectLocal;
       lockdownLocal = await pangeaApi.getLockdown();
       lockdownToggle.checked = lockdownLocal;
+      deadDropToggle.checked = await pangeaApi.getDeadDrop();
       const last = await pangeaApi.getLastServer();
       lastServerIdLocal = last.lastServerId;
     } catch {

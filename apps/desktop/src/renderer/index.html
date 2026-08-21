@@ -532,6 +532,18 @@
             <input id="hubNormalToggle" class="toggle-switch" type="checkbox" />
           </div>
         </div>
+        <p class="settings-description" data-i18n="settings.provisioning.deadDrop.description">If every method above runs out of working addresses, the app can look up replacements from a signed public file.</p>
+        <div class="option-list">
+          <div class="option-row option-row-toggle">
+            <span class="option-copy">
+              <span class="option-title-line">
+                <label class="option-title" for="deadDropToggle" data-i18n="settings.provisioning.deadDrop.title">Recover addresses</label>
+              </span>
+              <span class="option-desc" data-i18n="settings.provisioning.deadDrop.hint">Fetches a replacement address list, signed by us and checked on your device, from a public host. Used only after everything else has failed. Carries no account details.</span>
+            </span>
+            <input id="deadDropToggle" class="toggle-switch" type="checkbox" />
+          </div>
+        </div>
       </div>
     </div>
 
