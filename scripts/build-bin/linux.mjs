@@ -49,7 +49,7 @@ for (const target of archTargets) {
       `--${target.arch}`,
       "--publish",
       "never",
-      "--config.electronVersion=34.1.0"
+      "--config.electronVersion=41.5.0"
     ],
     { cwd: rootDir, shell: true }
   );
