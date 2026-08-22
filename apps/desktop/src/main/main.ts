@@ -2303,6 +2303,12 @@ app.on("before-quit", (event) => {
   })();
 });
 
+// Chromium encrypts its cookie store with a keychain key, and an ad-hoc
+// signature cannot hold the ACL, so macOS asks for the password every launch.
+if (process.platform === "darwin") {
+  app.commandLine.appendSwitch("use-mock-keychain");
+}
+
 // Ensure only one instance of the app is running (Windows especially)
 const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
