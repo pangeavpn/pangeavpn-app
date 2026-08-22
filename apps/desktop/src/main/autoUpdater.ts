@@ -1,5 +1,6 @@
 import { app, ipcMain, net, shell, type BrowserWindow } from "electron";
 import { IPC_CHANNELS } from "../shared/ipc";
+import { isSafeExternalUrl } from "./externalUrl";
 
 const HUB_LATEST_URL = "https://api.pangeavpn.org/api/desktop/latest";
 const GITHUB_LATEST_URL = "https://api.github.com/repos/pangeavpn/pangeavpn-app/releases/latest";
@@ -12,9 +13,6 @@ const MANUAL_CHECK_MIN_INTERVAL_MS = 60_000;
 // stranding users who never connect.
 const CONNECT_WAIT_MS = 5 * 60 * 1000;
 
-// Only these hosts (and their subdomains) may be opened as a release link.
-const ALLOWED_RELEASE_HOSTS = ["github.com", "pangeavpn.org", "pangeavpn.it"];
-
 interface LatestRelease {
   version: string;
   tagName: string;
@@ -24,15 +22,7 @@ interface LatestRelease {
 }
 
 function isSafeReleaseUrl(url: string): boolean {
-  try {
-    const parsed = new URL(url);
-    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return false;
-    return ALLOWED_RELEASE_HOSTS.some(
-      (host) => parsed.hostname === host || parsed.hostname.endsWith(`.${host}`)
-    );
-  } catch {
-    return false;
-  }
+  return isSafeExternalUrl(url);
 }
 
 function parseVersion(v: string): { core: number[]; prerelease: string | null } {
