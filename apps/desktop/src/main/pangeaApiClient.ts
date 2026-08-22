@@ -25,8 +25,9 @@ import {
 import {
   mergeFrontedEndpoints,
   promoteFrontedEndpoint,
-  restoreFrontedEndpoints
+  seedFrontedEndpoints
 } from "../shared/frontedEndpoints";
+import { HUB_HOSTNAME, normalHubHosts } from "../shared/hubHosts";
 import { isCachedServer, restoreCachedServers } from "../shared/cachedServers";
 import { isIPv4Literal } from "../shared/ipLiteral";
 import { DEAD_DROP_KEYS } from "./deadDropKeys";
@@ -103,8 +104,6 @@ function raceAbort<T>(work: Promise<T>, signal?: AbortSignal): Promise<T> {
   });
 }
 
-const HUB_HOSTNAME = "api.pangeavpn.org";
-const HUB_API_BASE = `https://${HUB_HOSTNAME}`;
 
 // DoH providers — all accessed by IP to avoid SNI-based blocking
 const DOH_PROVIDERS = [
@@ -487,7 +486,7 @@ type HubProbePath =
   | { kind: "ip"; ip: string }
   | { kind: "proxy"; port: number; username?: string; password?: string }
   | { kind: "fronted"; host: string }
-  | { kind: "domain" };
+  | { kind: "domain"; host: string };
 
 /** A test result before the method name and elapsed time are stamped on. */
 type HubMethodOutcome = Omit<HubMethodTestResult, "method" | "ms">;
@@ -510,6 +509,7 @@ export class PangeaApiClient {
   private dohEnabled = true;
   // Which paths to the hub are permitted, in ensureHub's attempt order.
   private hubMethods: HubMethods = { ...DEFAULT_HUB_METHODS };
+  private normalHost: string = HUB_HOSTNAME;
   private wireguardMtu = MTU_DEFAULT;
   private customDnsServers: string[] | null = null;
   identityPubkey: string | null = null;
@@ -544,7 +544,7 @@ export class PangeaApiClient {
   // refreshed from whatever the hub advertises. Empty until one is configured,
   // which makes the fronted method a no-op ensureHub skips over — the same way
   // the shadowsocks method sits inert until credentials are cached.
-  private frontedEndpoints: string[] = [];
+  private frontedEndpoints: string[] = seedFrontedEndpoints(null);
   private onFrontedEndpoints: ((endpoints: string[]) => void) | null = null;
 
   // Signed public file of last resort: addresses to try when every carrier has
@@ -672,7 +672,7 @@ export class PangeaApiClient {
 
   /** Restores cached edge relays at startup. */
   setCachedFrontedEndpoints(stored: unknown): void {
-    this.frontedEndpoints = restoreFrontedEndpoints(stored);
+    this.frontedEndpoints = seedFrontedEndpoints(stored);
     this.resetHubResolution();
   }
 
@@ -828,7 +828,7 @@ export class PangeaApiClient {
     }
     if (this.frontedHost) return { kind: "fronted", host: this.frontedHost };
     if (this.dohResolvedIp) return { kind: "ip", ip: this.dohResolvedIp };
-    return { kind: "domain" };
+    return { kind: "domain", host: this.normalHost };
   }
 
   private async probeSecurePath(path: HubProbePath): Promise<boolean> {
@@ -864,7 +864,7 @@ export class PangeaApiClient {
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), 5000);
         try {
-          rawResponse = await net.fetch(`${HUB_API_BASE}/v1/secure`, {
+          rawResponse = await net.fetch(`https://${path.host}/v1/secure`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: envelopeJson,
@@ -1002,15 +1002,20 @@ export class PangeaApiClient {
     // 5. Plain HTTPS to the domain. Last because it is the only step whose
     //    SNI names the hub in cleartext.
     if (this.hubMethods.normal) {
-      console.log(`[HubURL] Trying direct domain: ${HUB_API_BASE}`);
       this.dohResolvedIp = null;
-      if (await this.trySecureProbeCurrentPath()) {
-        console.log(`[HubURL] Direct domain secure probe works`);
-        this.setActiveHubMethod("normal", HUB_HOSTNAME);
-        this.hubReady = true;
-        return true;
+      for (const host of normalHubHosts()) {
+        console.log(`[HubURL] Trying direct domain: https://${host}`);
+        this.normalHost = host;
+        if (await this.trySecureProbeCurrentPath()) {
+          console.log(`[HubURL] Direct domain secure probe works`);
+          this.setActiveHubMethod("normal", host);
+          this.hubReady = true;
+          return true;
+        }
+        console.log(`[HubURL] Direct domain failed: ${host}`);
       }
-      console.log(`[HubURL] Direct domain failed`);
+      // Nothing answered; do not strand later requests on the mirror.
+      this.normalHost = HUB_HOSTNAME;
     }
 
     this.dohResolvedIp = null;
@@ -1190,8 +1195,12 @@ export class PangeaApiClient {
       case "fronted":
         return this.testFrontedPath();
       case "normal": {
-        const ok = await this.probeSecurePath({ kind: "domain" });
-        return ok ? { ok, detail: HUB_HOSTNAME } : { ok };
+        for (const host of normalHubHosts()) {
+          if (await this.probeSecurePath({ kind: "domain", host })) {
+            return { ok: true, detail: host };
+          }
+        }
+        return { ok: false };
       }
     }
   }
@@ -1360,7 +1369,7 @@ export class PangeaApiClient {
         else options.signal.addEventListener("abort", onExternalAbort, { once: true });
       }
       try {
-        rawResponse = await net.fetch(`${HUB_API_BASE}/v1/secure`, {
+        rawResponse = await net.fetch(`https://${this.normalHost}/v1/secure`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: envelopeJson,
@@ -1554,6 +1563,7 @@ export class PangeaApiClient {
       const data = await this.hubRequest<ServerInfo[]>("GET", route);
       this.rememberServers(data);
       this.rememberHubShadowsocks(data);
+      this.rememberFrontedEndpoints(data.find((s) => s.frontedEndpoints)?.frontedEndpoints);
       return data;
     } catch (err) {
       if (err instanceof AuthError || err instanceof SubscriptionExpiredError) throw err;
