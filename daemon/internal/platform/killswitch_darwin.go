@@ -197,19 +197,28 @@ func buildPFRules(endpointIPs []string, tunnelInterface string, allowLAN bool) (
 	// restrictive WiFi. Only applied when the user opts in.
 	if allowLAN {
 		for _, cidr := range LANAllowPrefixes {
-			rules = append(rules, fmt.Sprintf("pass out quick inet to %s", cidr))
+			rules = append(rules, fmt.Sprintf("pass out quick %s to %s", pfAddressFamily(cidr), cidr))
 		}
 	}
 
 	// Allow traffic on the tunnel interface if set.
 	if tunnelInterface != "" {
-		rules = append(rules, fmt.Sprintf("pass out quick on %s inet all", tunnelInterface))
+		rules = append(rules, fmt.Sprintf("pass out quick on %s all", tunnelInterface))
 	}
 
 	// Block everything else outbound.
 	rules = append(rules, "block out all")
 
 	return strings.Join(rules, "\n") + "\n", nil
+}
+
+// pfAddressFamily picks the family keyword for an address or prefix. pfctl
+// rejects the entire ruleset when a family and its address disagree.
+func pfAddressFamily(addr string) string {
+	if strings.Contains(addr, ":") {
+		return "inet6"
+	}
+	return "inet"
 }
 
 // applyPFAnchor writes the kill-switch ruleset to disk, wires it into
