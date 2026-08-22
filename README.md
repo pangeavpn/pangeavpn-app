@@ -6,7 +6,7 @@
 
 **One internet. No borders.**
 
-An open-source VPN client that survives deep packet inspection. WireGuard inside four pluggable censorship-resistant transports, so the tunnel looks like ordinary HTTPS.
+An open-source VPN client that survives deep packet inspection. WireGuard inside five pluggable censorship-resistant transports, so the tunnel looks like ordinary HTTPS.
 
 [![Website](https://img.shields.io/badge/site-pangeavpn.org-DA7F4F?style=flat-square)](https://pangeavpn.org)
 [![License](https://img.shields.io/badge/license-GPL--3.0-blue?style=flat-square)](LICENSE)
@@ -23,17 +23,17 @@ An open-source VPN client that survives deep packet inspection. WireGuard inside
 
 ## What this is
 
-PangeaVPN is a desktop VPN client for **Windows, macOS and Linux**, built for networks that actively detect and block VPNs — national firewalls, ISP-level DPI, corporate filters, captive Wi-Fi, and hotel networks.
+PangeaVPN is a desktop VPN client for Windows, macOS and Linux. It is built for networks that actively detect and block VPNs: national firewalls, ISP-level DPI, corporate filters, captive Wi-Fi, hotel networks.
 
 It runs WireGuard entirely in-process and wraps it in an obfuscation transport, so what crosses the wire looks like a normal HTTPS session rather than a recognisable VPN handshake. If one transport gets blocked, it automatically tries the next.
 
 > **This client is open source; the network is a paid service.**
-> The app in this repository is GPL-3.0 and yours to read, build, fork and audit. Connecting to the Pangea network needs an account — there's a **5-day free trial with no card required**, then from £2.33/month. Monero accepted, no email required. See [pangeavpn.org/pricing](https://pangeavpn.org/pricing).
+> The app in this repository is GPL-3.0 and yours to read, build, fork and audit. Connecting to the Pangea network needs an account. There's a 5-day free trial, no card required, then from £2.33/month. Monero accepted, no email required. See [pangeavpn.org/pricing](https://pangeavpn.org/pricing).
 > The client speaks a documented HTTP API, so pointing it at your own infrastructure is possible, though not currently a supported path.
 
 ## Why it exists
 
-Most VPNs leak a tell. A weird port. A WireGuard handshake signature. A TLS fingerprint that doesn't match a real browser. Deep packet inspection sees them coming and drops the connection — and when a protocol gets fingerprinted, every user of that protocol goes down at once.
+Most VPNs leak a tell. A weird port. A WireGuard handshake signature. A TLS fingerprint that doesn't match a real browser. Deep packet inspection sees them coming and drops the connection. Worse, when a protocol gets fingerprinted, every user of that protocol goes down at once.
 
 PangeaVPN's answer is transport diversity. Rather than betting on a single obfuscation scheme holding forever, the daemon carries several and falls back between them automatically. Blocking one doesn't take you offline.
 
@@ -45,7 +45,7 @@ In auto mode the daemon walks this list until one establishes. You can also pin 
 |---|---|---|
 | 1 | **VLESS + REALITY** | A TLS handshake borrowing a real third-party site's certificate |
 | 2 | **Cloak** | A TLS session to an innocuous-looking web host |
-| 3 | **Shadowsocks** | An encrypted stream on its own port, with no TLS shape at all — the first attempt that shares nothing with a block on the two above |
+| 3 | **Shadowsocks** | An encrypted stream on its own port, with no TLS shape at all. The first attempt that shares nothing with a block on the two above |
 | 4 | **Hysteria2** | QUIC / HTTP-3, hard to distinguish from modern web traffic |
 | 5 | **NaiveProxy** | Traffic carrying a genuine Chrome TLS fingerprint |
 
@@ -53,7 +53,7 @@ Cloak is always available and backs up whatever precedes it. The others activate
 
 The client also remembers what worked on each network and promotes that transport to the front of the queue next time you connect there, so a network that blocks REALITY doesn't cost you the fallback delay twice.
 
-A **Snowflake** transport (WebRTC, as used by Tor) is implemented and wired up but disabled in current releases — see `snowflakeReleaseGated` in [`daemon/internal/api/service.go`](daemon/internal/api/service.go).
+A Snowflake transport (WebRTC, as used by Tor) is implemented and wired up but disabled in current releases. See `snowflakeReleaseGated` in [`daemon/internal/api/service.go`](daemon/internal/api/service.go).
 
 WireGuard rides inside whichever transport comes up. The tunnel itself is always WireGuard: modern crypto, low latency, no `wg`, no `wg-quick`, no shelling out to external binaries on any platform.
 
@@ -61,11 +61,11 @@ WireGuard rides inside whichever transport comes up. The tunnel itself is always
 
 | | |
 |---|---|
-| **Four transports, automatic fallback** | Blocking one doesn't take you offline, and the client remembers what works per network |
+| **Five transports, automatic fallback** | Blocking one doesn't take you offline, and the client remembers what works per network |
 | **WireGuard core** | Modern crypto, low latency, fully in-process |
 | **Kill switch** | OS-level firewall rules block traffic if the tunnel drops (Windows WFP, Linux nftables/iptables, macOS PF) |
 | **Lockdown mode** | Optionally keeps the kill switch armed even after disconnect |
-| **Encrypted hub channel** | Per-request X25519 + AES-256-GCM — works behind proxies that intercept TLS |
+| **Encrypted hub channel** | Per-request X25519 + AES-256-GCM, so it works behind proxies that intercept TLS |
 | **DoH + direct IP** | Falls back to DNS-over-HTTPS, or bypasses DNS entirely when it's blocked |
 | **8 languages** | Including Persian, Arabic, Chinese, Russian and Ukrainian |
 | **Native desktop** | Compact taskbar popover, dark/light themes, system tray, auto-start at login |
@@ -75,7 +75,7 @@ WireGuard rides inside whichever transport comes up. The tunnel itself is always
 
 English · Español · Français · Русский · Українська · 中文 · العربية · فارسی
 
-Translation improvements are welcome — locale files live in [`apps/desktop/src/renderer/i18n/locales/`](apps/desktop/src/renderer/i18n/locales/).
+Translation improvements are welcome. Locale files live in [`apps/desktop/src/renderer/i18n/locales/`](apps/desktop/src/renderer/i18n/locales/).
 
 ## Install
 
@@ -83,7 +83,7 @@ Download for your platform from [pangeavpn.org/download](https://pangeavpn.org/d
 
 | Platform | Format | Notes |
 |---|---|---|
-| **Windows 10/11** | `Setup.exe` (NSIS) | Installs `PangeaDaemon` as a Windows service — no prompt on every connect |
+| **Windows 10/11** | `Setup.exe` (NSIS) | Installs `PangeaDaemon` as a Windows service, so there's no prompt on every connect |
 | **macOS** (Intel + Apple Silicon) | `.pkg` | Registers a launchd daemon at install time. No runtime password prompts |
 | **Linux** | `.AppImage`, `.deb` (x64 + arm64) | Or `./scripts/install-linux.sh` for a from-source install with systemd |
 
@@ -93,7 +93,7 @@ Download for your platform from [pangeavpn.org/download](https://pangeavpn.org/d
 curl -fsSL https://pangeavpn.org/install-mac.sh | bash
 ```
 
-Convenient, but it pipes a remote script into a root shell — reasonable for developers, and we'd rather you read [`scripts/install-mac.sh`](scripts/install-mac.sh) first. The `.pkg` from the releases page does the same job with a normal guided installer.
+Convenient, but it pipes a remote script into a root shell. Reasonable for developers, though we'd rather you read [`scripts/install-mac.sh`](scripts/install-mac.sh) first. The `.pkg` from the releases page does the same job with a normal guided installer.
 
 ### Linux from source
 
@@ -118,13 +118,13 @@ What you can do instead of taking our word for it:
   ```
   ```powershell
   # Windows
-  Get-FileHash .\PangeaVPN-Setup-0.5.5-x64.exe -Algorithm SHA256
+  Get-FileHash .\PangeaVPN-Setup-0.5.7-x64.exe -Algorithm SHA256
   ```
 - **Check where it was built.** Every release artifact is produced by [GitHub Actions](.github/workflows/build-desktop.yml) from the tagged commit, in public, with public logs.
 - **Build it yourself.** See [Build from source](#build-from-source). You do not have to trust our binaries at all.
 - **Read the code.** That's the point of the licence.
 
-Bundled `wintun.dll` and `wireguard.dll` are the official, Authenticode-signed builds from WireGuard LLC — we don't rebuild them.
+Bundled `wintun.dll` and `wireguard.dll` are the official, Authenticode-signed builds from WireGuard LLC. We don't rebuild them.
 
 ## How it works
 
@@ -183,9 +183,9 @@ All four steps complete in well under a second on a normal connection.
 
 Three components, one repo:
 
-- **`apps/desktop`** — Electron + TypeScript. Sandbox enabled, context isolation on, no Node access from the renderer. Vanilla HTML/CSS, no framework.
-- **`daemon`** — Go HTTP daemon on `127.0.0.1:8787`. Bearer token auth, rate limited, 1 MB body cap, sanitised errors. Owns the state machine and the in-process WireGuard and transport managers.
-- **`packages/shared-types`** — Zod schemas shared between Electron and the daemon-facing TypeScript.
+- `apps/desktop` is Electron + TypeScript. Sandbox enabled, context isolation on, no Node access from the renderer. Vanilla HTML/CSS, no framework.
+- `daemon` is a Go HTTP daemon on `127.0.0.1:8787`. Bearer token auth, rate limited, 1 MB body cap, sanitised errors. Owns the state machine and the in-process WireGuard and transport managers.
+- `packages/shared-types` holds the Zod schemas shared between Electron and the daemon-facing TypeScript.
 
 Full deep-dive in [docs/architecture.md](docs/architecture.md).
 
@@ -197,7 +197,7 @@ Full deep-dive in [docs/architecture.md](docs/architecture.md).
 | **macOS** | In-process (Go lib + utun) | In-process | launchd system daemon | PF rules |
 | **Linux** | In-process (Go lib + TUN, policy routing + fwmark) | In-process | systemd service | nftables (iptables fallback) |
 
-No external `wg`, `wg-quick`, `wireguard-go`, or `ck-client` binaries are spawned on any platform. This is enforced by a test — see [`daemon/internal/wg/no_exec_test.go`](daemon/internal/wg/no_exec_test.go).
+No external `wg`, `wg-quick`, `wireguard-go`, or `ck-client` binaries are spawned on any platform. A test enforces it: [`daemon/internal/wg/no_exec_test.go`](daemon/internal/wg/no_exec_test.go).
 
 ## Security
 
@@ -215,7 +215,7 @@ Per request:
 4. AES-256-GCM encrypts the inner `{method, route, headers, body}`
 5. Sent to `/v1/secure`; only an allowlist of client-facing routes is reachable
 
-> **On `rejectUnauthorized: false`.** The outer TLS layer deliberately does not perform CA validation, and this is a design decision rather than an oversight. On a network whose middlebox already terminates and re-signs TLS, CA validation either fails outright or succeeds against the middlebox's certificate — in both cases it tells you nothing. The actual trust anchor is the **pinned X25519 static key**: without the corresponding private key an interceptor cannot read or forge the inner payload, regardless of what it does to the outer TLS. Please read [docs/architecture.md](docs/architecture.md) before proposing a change here.
+> **On `rejectUnauthorized: false`.** Yes, the outer TLS layer skips CA validation, and yes, that is deliberate. On a network whose middlebox already terminates and re-signs TLS, validation either fails outright or succeeds against the middlebox's own certificate. Neither outcome tells you anything. The trust anchor is the pinned X25519 static key: without the matching private key an interceptor can't read or forge the inner payload, whatever it does to the outer TLS. Read [docs/architecture.md](docs/architecture.md) before proposing a change here.
 
 ### Electron hardening
 
@@ -231,8 +231,8 @@ Per request:
 
 - Bearer token required on every endpoint except `/ping`
 - Token file at `0600`; machine-scoped (`%ProgramData%`) for the Windows service, user-scoped elsewhere
-- 30 requests/minute rate limit, 1 MB request cap, sanitised error messages
-- Loopback-only listener — never bound to a network interface
+- Token-bucket rate limit (2000 burst, refilling ~33/s), 1 MB request cap, sanitised error messages
+- Loopback-only listener, never bound to a network interface. Requests naming a non-loopback `Host` or `Origin` are refused, so a web page can't reach it
 
 ### Reporting a vulnerability
 
@@ -293,24 +293,24 @@ docs/                   Architecture and packaging deep-dives
 
 In rough priority order:
 
-- **Mobile clients** (Android, iOS) — the single biggest gap
-- **Code-signed releases** on Windows and macOS
-- **Split tunnelling** — per-app and per-CIDR routing
-- **Multi-hop / cascade routing** — chain two nodes for unlinkability
-- **Auto-connect rules** — untrusted Wi-Fi, on-boot, on captive-portal exit
-- **Snowflake transport** — implemented, pending production rollout
-- **SNI rotation / domain fronting** — defeat single-fingerprint blocks
-- **Reproducible builds** — so anyone can confirm a release matches this source
-- **Kernel WireGuard on Windows and Linux** — toward gigabit throughput
+- Mobile clients for Android and iOS. The biggest gap by far.
+- Code-signed releases on Windows and macOS.
+- Split tunnelling, per-app and per-CIDR.
+- Multi-hop routing: chain two nodes so neither sees both ends.
+- Auto-connect rules for untrusted Wi-Fi, on boot, and on leaving a captive portal.
+- Snowflake. Written, not yet switched on in production.
+- SNI rotation and domain fronting, to beat single-fingerprint blocks.
+- Reproducible builds, so anyone can confirm a release matches this source.
+- Kernel WireGuard on Windows and Linux, for gigabit throughput.
 
 ## Contributing
 
 PRs and issues welcome. A few notes:
 
-- **One commit per logical change** — easier to review, easier to revert.
-- **Don't change `rejectUnauthorized` on the secure channel** — it's deliberate. Read [docs/architecture.md](docs/architecture.md) first if it looks wrong.
-- **Don't shell out to `wg`, `wireguard-go`, or `ck-client`** — everything runs in-process for a reason, and `no_exec_test.go` enforces it.
-- **Run `npm test` before opening a PR.**
+- One commit per logical change. Easier to review, easier to revert.
+- Don't change `rejectUnauthorized` on the secure channel. It's deliberate. Read [docs/architecture.md](docs/architecture.md) first if it looks wrong.
+- Don't shell out to `wg`, `wireguard-go`, or `ck-client`. Everything runs in-process for a reason, and `no_exec_test.go` enforces it.
+- Run `npm test` before opening a PR.
 
 ## Links
 
@@ -322,4 +322,4 @@ PRs and issues welcome. A few notes:
 
 ## License
 
-[GPL-3.0](LICENSE) — free as in freedom. If you ship a fork, ship the source.
+[GPL-3.0](LICENSE). If you ship a fork, ship the source.
