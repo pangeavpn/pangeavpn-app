@@ -24,6 +24,7 @@ import type { HubShadowsocksCreds } from "../shared/hubShadowsocksCreds";
 import type { CachedSubscription } from "../shared/cachedSubscription";
 import { beginAttempt, cancelAttempt, commitAttempt, endAttempt, isCancelled } from "./connectAttempt";
 import { setupAutoUpdater, notifyConnectionStateChange } from "./autoUpdater";
+import { isSafeExternalUrl } from "./externalUrl";
 import { setLoginItemEnabled, isLoginItemEnabled, isHiddenLaunchArg } from "./loginItem";
 import { startNetworkWatcher, onNetworkChange } from "./networkWatcher";
 import { mt, mtState, setMainLocale, resolveMainLocale } from "./i18n";
@@ -1426,7 +1427,7 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.openExternal, async (_event, url: string) => {
     const { shell } = await import("electron");
-    if (typeof url === "string" && (url.startsWith("https://") || url.startsWith("http://"))) {
+    if (isSafeExternalUrl(url)) {
       await shell.openExternal(url);
     }
   });
@@ -1974,7 +1975,7 @@ async function boot(): Promise<void> {
   // Lock down navigation, new windows, embeds, permissions, and TLS.
   app.on("web-contents-created", (_event, contents) => {
     contents.setWindowOpenHandler(({ url }) => {
-      if (url.startsWith("https://") || url.startsWith("http://")) {
+      if (isSafeExternalUrl(url)) {
         void shell.openExternal(url);
       }
       return { action: "deny" };

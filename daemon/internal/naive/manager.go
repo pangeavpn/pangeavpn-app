@@ -400,6 +400,10 @@ func (m *Manager) teardown(generation uint64) {
 	m.boundLocalPort = 0
 	m.sessionCtx = nil
 	m.sessionCancel = nil
+	// Retire the generation here, not just in Start: Stop's timeout path and
+	// runSession's own exit both tear the same one down, and PangeaNaiveStop
+	// is a C entry point with no promise of being idempotent.
+	m.generation++
 	m.mu.Unlock()
 
 	if sessionCancel != nil {
