@@ -61,6 +61,11 @@ var LANAllowPrefixes = []string{
 	"224.0.0.0/4",
 	"255.255.255.255/32",
 	"100.64.0.0/10",
+}
+
+// LANAllowPrefixesV6 are the IPv6 analogues. Kept separate because the
+// Windows and Linux kill switches only build IPv4 rules from a prefix list.
+var LANAllowPrefixesV6 = []string{
 	"fe80::/10",
 	"ff02::/16",
 	"fc00::/7",

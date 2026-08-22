@@ -423,3 +423,21 @@ func TestUpdateTunnelInterfaceState_PropagatesUnreadableError(t *testing.T) {
 		t.Fatal("expected an error when the prior state is unreadable")
 	}
 }
+
+// The Windows, nftables and iptables kill switches all feed LANAllowPrefixes
+// straight into IPv4-only rules, so a v6 entry there fails the whole arm.
+func TestLANAllowPrefixesAreFamilySeparated(t *testing.T) {
+	for _, cidr := range LANAllowPrefixes {
+		if strings.Contains(cidr, ":") {
+			t.Errorf("LANAllowPrefixes must be IPv4 only, got %s", cidr)
+		}
+	}
+	if len(LANAllowPrefixesV6) == 0 {
+		t.Fatal("LANAllowPrefixesV6 must not be empty")
+	}
+	for _, cidr := range LANAllowPrefixesV6 {
+		if !strings.Contains(cidr, ":") {
+			t.Errorf("LANAllowPrefixesV6 must be IPv6 only, got %s", cidr)
+		}
+	}
+}
