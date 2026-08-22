@@ -17,16 +17,20 @@ import (
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/wg"
 )
 
-// dnsProbeInterval is how often a Connected session is tested end to end.
-const dnsProbeInterval = 30 * time.Second
+// dnsProbeIntervalMin/Max bound the gap between rounds, redrawn per round: a
+// fixed period is a beacon in the encrypted flow even when the payload is not.
+const (
+	dnsProbeIntervalMin = 8 * time.Second
+	dnsProbeIntervalMax = 22 * time.Second
+)
 
 // dnsProbeTimeout bounds one resolver query.
 const dnsProbeTimeout = 3 * time.Second
 
 // dnsProbeFailuresBeforeRebuild is how many consecutive rounds must fail before
 // the session is rebuilt. UDP loses datagrams and a resolver may drop one, so a
-// single miss is not a dead tunnel; three across 90s is.
-const dnsProbeFailuresBeforeRebuild = 3
+// single miss is not a dead tunnel; two in a row is.
+const dnsProbeFailuresBeforeRebuild = 2
 
 // dnsProbeRebuildCooldown is the minimum gap between probe-driven rebuilds. A
 // node that keeps answering handshakes but never carries traffic would otherwise
@@ -36,6 +40,25 @@ const dnsProbeRebuildCooldown = 5 * time.Minute
 // dnsProbeServers is how many of the session's resolvers one round tries before
 // calling it a failure, bounding a round at dnsProbeServers*dnsProbeTimeout.
 const dnsProbeServers = 2
+
+// dataPathGateAttempts is how many queries a candidate gets during bring-up
+// before it is rejected; the delay gives a just-up tunnel time to settle.
+const (
+	dataPathGateAttempts   = 2
+	dataPathGateRetryDelay = 300 * time.Millisecond
+)
+
+// nextDNSProbeDelay draws a uniform gap in [min, max]. A failed read falls back
+// to the midpoint — a regular cadence is worse than a random one, never wrong.
+func nextDNSProbeDelay() time.Duration {
+	spread := int64(dnsProbeIntervalMax - dnsProbeIntervalMin)
+	var buf [8]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		return dnsProbeIntervalMin + time.Duration(spread/2)
+	}
+	offset := int64(binary.BigEndian.Uint64(buf[:]) % uint64(spread+1))
+	return dnsProbeIntervalMin + time.Duration(offset)
+}
 
 // dnsProbePort is the resolver port, held in an atomic.Value so tests may point
 // the probe at a stub on an ephemeral port from a goroutine without racing the
@@ -125,26 +148,28 @@ func activeTunnelInterface() (string, error) {
 	return "", errors.New("no tunnel interface is up")
 }
 
-// probeResolverOverUDP asks a resolver for the root NS set and reports whether a
-// matching reply comes back. The socket is pinned to the tunnel interface (see
+// probeResolverOverUDP asks a resolver a root-zone question and reports whether
+// a matching reply comes back. The socket is pinned to the tunnel interface (see
 // bindDialerToInterface's platform variants), so the query provably leaves —
 // and the reply is provably read — over the tunnel rather than the LAN.
 //
 // Any well-formed reply counts, including an error RCODE. The probe asks whether
 // the tunnel still carries a round trip, not whether the resolver liked the
 // question, and treating REFUSED as a dead tunnel would rebuild a working
-// session. The root NS set belongs to no third party, every recursive resolver
-// answers it from cache, and the ~500 byte response is far larger than the
-// ~150 byte handshake packets that keep passing when a path has stopped
-// carrying anything bigger.
+// session. The root zone belongs to no third party and every recursive resolver
+// answers it from its priming cache, and even the smallest of these replies is
+// bigger than the ~150 byte handshake packets that keep passing when a path has
+// stopped carrying anything larger.
 func probeResolverOverUDP(ctx context.Context, server string) error {
+	// Local setup failures are inconclusive, not evidence: the adapter can lag
+	// the handshake, and rejecting on that would fail a working transport.
 	iface, err := activeTunnelInterface()
 	if err != nil {
-		return fmt.Errorf("find tunnel interface: %w", err)
+		return fmt.Errorf("%w: find tunnel interface: %v", errDNSProbeInconclusive, err)
 	}
 	dialer, err := bindDialerToInterface(iface)
 	if err != nil {
-		return fmt.Errorf("bind to tunnel interface %s: %w", iface, err)
+		return fmt.Errorf("%w: bind to tunnel interface %s: %v", errDNSProbeInconclusive, iface, err)
 	}
 	return probeResolverWithDialer(ctx, dialer, server)
 }
@@ -167,7 +192,7 @@ func probeResolverWithDialer(ctx context.Context, dialer *net.Dialer, server str
 		return err
 	}
 
-	query, id, err := rootNSQuery()
+	query, questionEnd, id, err := rootProbeQuery()
 	if err != nil {
 		return fmt.Errorf("build probe query: %w", err)
 	}
@@ -181,7 +206,7 @@ func probeResolverWithDialer(ctx context.Context, dialer *net.Dialer, server str
 		if err != nil {
 			return classifyProbeReadError(ctx, err)
 		}
-		if isDNSReplyTo(buf[:n], query, id) {
+		if isDNSReplyTo(buf[:n], query, questionEnd, id) {
 			return nil
 		}
 		// Someone else's datagram on our port; keep waiting out the deadline.
@@ -202,37 +227,74 @@ func classifyProbeReadError(ctx context.Context, err error) error {
 	return err
 }
 
-// rootNSQuery builds a `. IN NS` query and returns it with the transaction ID to
-// match the reply against. A predictable ID would make the reply-matching check
-// trivially spoofable, so a failed crypto/rand.Read fails the probe outright
-// rather than falling back to a guessable one.
-func rootNSQuery() ([]byte, uint16, error) {
-	var idBytes [2]byte
-	if _, err := rand.Read(idBytes[:]); err != nil {
-		return nil, 0, fmt.Errorf("generate probe transaction ID: %w", err)
-	}
-	id := binary.BigEndian.Uint16(idBytes[:])
+// dnsProbeMaxPadding caps the EDNS0 padding drawn per query. Enough spread that
+// consecutive probes never share a length, small enough to stay one datagram.
+const dnsProbeMaxPadding = 64
 
-	msg := make([]byte, 0, 17)
+// rootProbeQTypes are root-zone questions every recursive resolver answers from
+// its priming cache, chosen because their answers differ wildly in size.
+var rootProbeQTypes = []uint16{
+	2,  // NS: the root NS set, ~500 B
+	6,  // SOA: one record, ~100 B
+	48, // DNSKEY: the root keys, ~1 KB, truncated at the smaller payload sizes
+	1,  // A: NODATA, ~50 B
+	28, // AAAA: NODATA, ~50 B
+}
+
+// rootProbePayloadSizes are the advertised EDNS0 buffer sizes. Which one is sent
+// decides where the resolver truncates, which varies the reply's size too.
+var rootProbePayloadSizes = []uint16{512, 1232, 1400, 4096}
+
+// rootProbeQuery builds a root-zone query whose transaction ID, question,
+// DNSSEC bit, buffer size and padding are all drawn per query, so neither the
+// request nor the reply it draws has a size a censor can lock onto.
+func rootProbeQuery() ([]byte, int, uint16, error) {
+	var seed [6]byte
+	if _, err := rand.Read(seed[:]); err != nil {
+		return nil, 0, 0, fmt.Errorf("generate probe transaction ID: %w", err)
+	}
+	id := binary.BigEndian.Uint16(seed[:2])
+	padding := make([]byte, int(seed[2])%(dnsProbeMaxPadding+1))
+	qtype := rootProbeQTypes[int(seed[3])%len(rootProbeQTypes)]
+	payloadSize := rootProbePayloadSizes[int(seed[4])%len(rootProbePayloadSizes)]
+	// DO asks for the signatures alongside the answer, several hundred bytes of
+	// difference on the same question.
+	var ednsFlags uint32
+	if seed[5]&1 == 1 {
+		ednsFlags = 0x00008000
+	}
+
+	msg := make([]byte, 0, 17+11+len(padding))
 	msg = binary.BigEndian.AppendUint16(msg, id)
 	msg = binary.BigEndian.AppendUint16(msg, 0x0100) // standard query, recursion desired
 	msg = binary.BigEndian.AppendUint16(msg, 1)      // QDCOUNT
 	msg = binary.BigEndian.AppendUint16(msg, 0)      // ANCOUNT
 	msg = binary.BigEndian.AppendUint16(msg, 0)      // NSCOUNT
-	msg = binary.BigEndian.AppendUint16(msg, 0)      // ARCOUNT
+	msg = binary.BigEndian.AppendUint16(msg, 1)      // ARCOUNT: the OPT record below
 	msg = append(msg, 0)                             // QNAME: the root label
-	msg = binary.BigEndian.AppendUint16(msg, 2)      // QTYPE: NS
-	msg = binary.BigEndian.AppendUint16(msg, 1)      // QCLASS: IN
-	return msg, id, nil
+	msg = binary.BigEndian.AppendUint16(msg, qtype)
+	msg = binary.BigEndian.AppendUint16(msg, 1) // QCLASS: IN
+	questionEnd := len(msg)
+
+	msg = append(msg, 0)                                             // OPT owner: root
+	msg = binary.BigEndian.AppendUint16(msg, 41)                     // TYPE: OPT
+	msg = binary.BigEndian.AppendUint16(msg, payloadSize)            // advertised UDP payload size
+	msg = binary.BigEndian.AppendUint32(msg, ednsFlags)              // extended RCODE and flags
+	msg = binary.BigEndian.AppendUint16(msg, uint16(len(padding)+4)) // RDLENGTH
+	msg = binary.BigEndian.AppendUint16(msg, 12)                     // option code: PADDING
+	msg = binary.BigEndian.AppendUint16(msg, uint16(len(padding)))   // option length
+	msg = append(msg, padding...)
+	return msg, questionEnd, id, nil
 }
 
 // isDNSReplyTo reports whether msg is a response to query: same transaction ID,
 // QR set, and the same question section echoed back. Matching on ID alone lets
 // a same-IP LAN responder — reached because the query leaked off-tunnel — pass
 // as the tunnel resolver; the question section is spoofed far less cheaply.
-func isDNSReplyTo(msg, query []byte, id uint16) bool {
+// Only the question is compared — the reply carries its own OPT record.
+func isDNSReplyTo(msg, query []byte, questionEnd int, id uint16) bool {
 	const headerLen = 12
-	if len(msg) < len(query) {
+	if len(msg) < questionEnd || questionEnd > len(query) {
 		return false
 	}
 	if binary.BigEndian.Uint16(msg[0:2]) != id {
@@ -241,7 +303,7 @@ func isDNSReplyTo(msg, query []byte, id uint16) bool {
 	if msg[2]&0x80 == 0 { // QR
 		return false
 	}
-	return bytes.Equal(msg[headerLen:len(query)], query[headerLen:])
+	return bytes.Equal(msg[headerLen:questionEnd], query[headerLen:questionEnd])
 }
 
 // dataPathIsDead reports whether the tunnel has stopped carrying traffic while
@@ -254,7 +316,7 @@ func isDNSReplyTo(msg, query []byte, id uint16) bool {
 // That is the state a browser reports as a DNS probe error. Resolving over the
 // tunnel is the cheapest end-to-end check and covers exactly what breaks first.
 //
-// A round runs at most every dnsProbeInterval and only escalates after
+// Rounds run on the jittered dnsProbe schedule and only escalate after
 // dnsProbeFailuresBeforeRebuild consecutive failures.
 func (s *Service) dataPathIsDead(ctx context.Context, profile state.Profile) bool {
 	if s.probeResolver == nil {
@@ -268,9 +330,7 @@ func (s *Service) dataPathIsDead(ctx context.Context, profile state.Profile) boo
 		return false
 	}
 
-	if len(servers) > dnsProbeServers {
-		servers = servers[:dnsProbeServers]
-	}
+	servers = probeServerOrder(servers)
 	var lastErr error
 	for _, server := range servers {
 		probeCtx, cancel := context.WithTimeout(ctx, dnsProbeTimeout)
@@ -299,6 +359,63 @@ func (s *Service) dataPathIsDead(ctx context.Context, profile state.Profile) boo
 	return rebuild
 }
 
+// probeServerOrder trims the resolver list to one round's worth, starting at a
+// random member so the same resolver is not always asked first.
+func probeServerOrder(servers []string) []string {
+	var seed [1]byte
+	if _, err := rand.Read(seed[:]); err == nil {
+		start := int(seed[0]) % len(servers)
+		servers = append(append([]string(nil), servers[start:]...), servers[:start]...)
+	}
+	if len(servers) > dnsProbeServers {
+		servers = servers[:dnsProbeServers]
+	}
+	return servers
+}
+
+// canProveDataPath reports whether traffic can be judged directly. Where it
+// cannot, the handshake is the only liveness signal there is.
+func (s *Service) canProveDataPath(profile state.Profile) bool {
+	return s.probeResolver != nil && len(wg.Resolvers(profile.WireGuard)) > 0
+}
+
+// proveDataPath is the bring-up gate: a candidate must carry a round trip, not
+// just handshake, because a censor kills the flow the moment traffic starts.
+//
+// No resolvers and an inconclusive round both pass: neither is evidence against
+// the transport, and rejecting on them would fail working ones.
+func (s *Service) proveDataPath(ctx context.Context, wireGuardProfile state.WireGuardProfile) error {
+	if s.probeResolver == nil {
+		return nil
+	}
+	servers := wg.Resolvers(wireGuardProfile)
+	if len(servers) == 0 {
+		return nil
+	}
+	servers = probeServerOrder(servers)
+
+	var lastErr error
+	for attempt := range dataPathGateAttempts {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return nil
+			case <-time.After(dataPathGateRetryDelay):
+			}
+		}
+		server := servers[attempt%len(servers)]
+		probeCtx, cancel := context.WithTimeout(ctx, dnsProbeTimeout)
+		err := s.probeResolver(probeCtx, server)
+		cancel()
+		switch {
+		case err == nil, errors.Is(err, errDNSProbeConnRefused), errors.Is(err, errDNSProbeInconclusive):
+			return nil
+		}
+		lastErr = fmt.Errorf("%s: %w", server, err)
+	}
+	return fmt.Errorf("tunnel came up but did not carry traffic: %w", lastErr)
+}
+
 // dnsProbeDue reports whether a round is due, claiming the slot when it is so
 // the 3s health tick does not probe on every pass.
 func (s *Service) dnsProbeDue() bool {
@@ -307,7 +424,7 @@ func (s *Service) dnsProbeDue() bool {
 	if time.Now().Before(s.dnsProbeNextAt) {
 		return false
 	}
-	s.dnsProbeNextAt = time.Now().Add(dnsProbeInterval)
+	s.dnsProbeNextAt = time.Now().Add(nextDNSProbeDelay())
 	return true
 }
 
@@ -350,7 +467,7 @@ func (s *Service) resetDNSProbe() {
 	s.recoveryMu.Lock()
 	defer s.recoveryMu.Unlock()
 	s.dnsProbeFailures = 0
-	s.dnsProbeNextAt = time.Now().Add(dnsProbeInterval)
+	s.dnsProbeNextAt = time.Now().Add(nextDNSProbeDelay())
 }
 
 // endDNSProbeSession clears the schedule outright once a session is over, so the

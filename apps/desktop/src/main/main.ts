@@ -41,6 +41,7 @@ import {
   buildServerRetryOrder as buildMainServerRetryOrder,
   runServerFallback
 } from "./serverFallback";
+import { shouldRotateServers } from "./serverRotation";
 import {
   commitProfileSet,
   dropExpired,
@@ -489,6 +490,9 @@ async function refreshTrayStatus(): Promise<void> {
       const status = await withDaemonRestartOnUnavailable(() => daemonClient.getStatus(), "tray status", { allowRestart: false });
       trayStatusState = status.state;
       trayStatusDetail = status.detail;
+      if (status.transportsExhausted) {
+        void rotateAwayFromBlockedServer();
+      }
     } catch {
       trayStatusState = "ERROR";
       trayStatusDetail = "daemon unavailable";
@@ -501,6 +505,45 @@ async function refreshTrayStatus(): Promise<void> {
     trayStatusRefreshPromise = null;
   });
   return trayStatusRefreshPromise;
+}
+
+let serverRotationInFlight = false;
+let lastServerRotationAtMs = 0;
+
+/** Reconnects elsewhere once no transport gets through this server: the daemon
+ *  walks transports, only the app can walk servers. */
+async function rotateAwayFromBlockedServer(): Promise<void> {
+  const blockedServerId = lastServerId;
+  if (
+    !shouldRotateServers({
+      transportsExhausted: true,
+      connectionAttemptRunning,
+      rotationInFlight: serverRotationInFlight,
+      lastRotationAtMs: lastServerRotationAtMs,
+      nowMs: Date.now()
+    })
+  ) {
+    return;
+  }
+
+  serverRotationInFlight = true;
+  lastServerRotationAtMs = Date.now();
+  try {
+    const plan = await resolveTrayServerPlan(blockedServerId);
+    if (!plan) {
+      console.warn("rotation: no other server to try");
+      return;
+    }
+    console.warn(`rotation: ${blockedServerId ?? "current server"} carries no transport; trying another server`);
+    const result = await provisionAndConnect(plan);
+    if (!result.ok) {
+      console.warn("rotation: reconnecting on another server failed", result.error);
+    }
+  } catch (error) {
+    console.warn("rotation: reconnecting on another server failed", sanitizeLog(error));
+  } finally {
+    serverRotationInFlight = false;
+  }
 }
 
 let networkRecoverInProgress = false;

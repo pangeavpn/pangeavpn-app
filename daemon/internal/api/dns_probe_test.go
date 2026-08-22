@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -50,6 +51,15 @@ func (p *fakeProbe) callCount() int {
 	return p.calls
 }
 
+// forget drops what the bring-up gate did, so a test counts only the rounds the
+// health loop ran.
+func (p *fakeProbe) forget() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.calls = 0
+	p.servers = nil
+}
+
 // dataPathTestService is a connected naive session whose resolvers are answered
 // by a stub, with no backoff to wait out.
 func dataPathTestService(t *testing.T) (*Service, *fakeProbe, *fakeNaiveManager, *fakeWGManager, *fakeKillSwitch) {
@@ -67,11 +77,12 @@ func dataPathTestService(t *testing.T) (*Service, *fakeProbe, *fakeNaiveManager,
 	if err := svc.Connect(context.Background(), "p1", ConnectOptions{PreferredTransport: "naive"}); err != nil {
 		t.Fatalf("connect failed: %v", err)
 	}
+	probe.forget()
 	return svc, probe, naive, wgMgr, ks
 }
 
 // forceDNSProbeDue brings the next probe round forward, so a test does not have
-// to wait out dnsProbeInterval between health checks.
+// to wait out the probe schedule between health checks.
 func forceDNSProbeDue(svc *Service) {
 	svc.recoveryMu.Lock()
 	defer svc.recoveryMu.Unlock()
@@ -97,7 +108,18 @@ func TestHealthCheck_DeadDataPathRebuildsSession(t *testing.T) {
 	startsAfterConnect := wgMgr.startCount
 	wgMgr.mu.Unlock()
 
-	probe.setErr(errors.New("i/o timeout"))
+	// Fails the health rounds, then answers again: the rebuild's own bring-up
+	// has to prove a data path too, so a probe that never recovers can only
+	// produce a failed rebuild.
+	svc.probeResolver = func(ctx context.Context, server string) error {
+		wgMgr.mu.Lock()
+		rebuilt := wgMgr.startCount > startsAfterConnect
+		wgMgr.mu.Unlock()
+		if !rebuilt {
+			return errors.New("i/o timeout")
+		}
+		return probe.probe(ctx, server)
+	}
 	runProbedHealthChecks(svc, dnsProbeFailuresBeforeRebuild)
 
 	status := svc.Status(context.Background())
@@ -206,6 +228,9 @@ func TestHealthCheck_DataPathProbeSecondResolverRescuesTheRound(t *testing.T) {
 // holds off the second rebuild, and each one drops the tunnel for a moment.
 func TestHealthCheck_DataPathProbeRebuildIsRateLimited(t *testing.T) {
 	svc, probe, _, wgMgr, _ := dataPathTestService(t)
+	// The rebuild fails (nothing carries traffic), so without a backoff to sit
+	// in, recovery would retry every tick and hide the cooldown under test.
+	svc.recoveryDelays = []time.Duration{time.Hour}
 
 	wgMgr.mu.Lock()
 	startsAfterConnect := wgMgr.startCount
@@ -530,8 +555,8 @@ func TestProbeResolverOverUDP_IgnoresAWrongQuestion(t *testing.T) {
 	server, stop := stubDNSServer(t, func(query []byte) []byte {
 		reply := make([]byte, len(query))
 		copy(reply, query)
-		reply[2] = 0x80              // QR
-		reply[len(reply)-1] = 0x0f // QCLASS changed from IN(1) to CH(15)
+		reply[2] = 0x80  // QR
+		reply[16] = 0x0f // QCLASS changed from IN(1) to CH(15)
 		return reply
 	})
 	defer stop()
@@ -543,15 +568,21 @@ func TestProbeResolverOverUDP_IgnoresAWrongQuestion(t *testing.T) {
 	}
 }
 
-// TestRootNSQuery proves the query is a well-formed `. IN NS` request.
-func TestRootNSQuery(t *testing.T) {
-	msg, id, err := rootNSQuery()
+// TestRootProbeQuery proves the query is a well-formed root-zone request.
+func TestRootProbeQuery(t *testing.T) {
+	msg, questionEnd, id, err := rootProbeQuery()
 	if err != nil {
-		t.Fatalf("rootNSQuery: %v", err)
+		t.Fatalf("rootProbeQuery: %v", err)
 	}
 
-	if len(msg) != 17 {
-		t.Fatalf("query length = %d, want 17", len(msg))
+	if questionEnd != 17 {
+		t.Fatalf("question section ends at %d, want 17", questionEnd)
+	}
+	if len(msg) <= questionEnd {
+		t.Fatalf("query length = %d, want the padded OPT record after the question", len(msg))
+	}
+	if got := binary.BigEndian.Uint16(msg[10:12]); got != 1 {
+		t.Errorf("ARCOUNT = %d, want 1 (the OPT record)", got)
 	}
 	if got := binary.BigEndian.Uint16(msg[0:2]); got != id {
 		t.Errorf("transaction ID in message = %d, want the reported %d", got, id)
@@ -565,8 +596,8 @@ func TestRootNSQuery(t *testing.T) {
 	if msg[12] != 0 {
 		t.Errorf("QNAME = %#02x, want 0x00 (the root label)", msg[12])
 	}
-	if got := binary.BigEndian.Uint16(msg[13:15]); got != 2 {
-		t.Errorf("QTYPE = %d, want 2 (NS)", got)
+	if got := binary.BigEndian.Uint16(msg[13:15]); !slices.Contains(rootProbeQTypes, got) {
+		t.Errorf("QTYPE = %d, want one of the root-zone probe types %v", got, rootProbeQTypes)
 	}
 	if got := binary.BigEndian.Uint16(msg[15:17]); got != 1 {
 		t.Errorf("QCLASS = %d, want 1 (IN)", got)
@@ -574,9 +605,9 @@ func TestRootNSQuery(t *testing.T) {
 
 	// A repeat is possible by chance (1/65536), but a constant ID would make
 	// the probe trivially spoofable by any stale datagram on the port.
-	_, second, err := rootNSQuery()
+	_, _, second, err := rootProbeQuery()
 	if err != nil {
-		t.Fatalf("rootNSQuery: %v", err)
+		t.Fatalf("rootProbeQuery: %v", err)
 	}
 	if second == id {
 		t.Error("two queries drew the same transaction ID")
@@ -584,9 +615,9 @@ func TestRootNSQuery(t *testing.T) {
 }
 
 func TestIsDNSReplyTo(t *testing.T) {
-	query, id, err := rootNSQuery()
+	query, questionEnd, id, err := rootProbeQuery()
 	if err != nil {
-		t.Fatalf("rootNSQuery: %v", err)
+		t.Fatalf("rootProbeQuery: %v", err)
 	}
 
 	reply := func(flags byte, mutate func([]byte)) []byte {
@@ -599,19 +630,19 @@ func TestIsDNSReplyTo(t *testing.T) {
 		return msg
 	}
 
-	if !isDNSReplyTo(reply(0x80, nil), query, id) {
+	if !isDNSReplyTo(reply(0x80, nil), query, questionEnd, id) {
 		t.Error("a response carrying our ID and question should match")
 	}
-	if isDNSReplyTo(reply(0x00, nil), query, id) {
+	if isDNSReplyTo(reply(0x00, nil), query, questionEnd, id) {
 		t.Error("a query (QR unset) is not a reply")
 	}
-	if isDNSReplyTo(reply(0x80, func(m []byte) { binary.BigEndian.PutUint16(m[0:2], id+1) }), query, id) {
+	if isDNSReplyTo(reply(0x80, func(m []byte) { binary.BigEndian.PutUint16(m[0:2], id+1) }), query, questionEnd, id) {
 		t.Error("a response carrying a foreign ID should not match")
 	}
-	if isDNSReplyTo(reply(0x80, func(m []byte) { m[len(m)-1] = 0x0f }), query, id) {
+	if isDNSReplyTo(reply(0x80, func(m []byte) { m[questionEnd-1] = 0x0f }), query, questionEnd, id) {
 		t.Error("a response whose question section does not match ours should not match")
 	}
-	if isDNSReplyTo(make([]byte, 11), query, id) {
+	if isDNSReplyTo(make([]byte, 11), query, questionEnd, id) {
 		t.Error("a datagram shorter than the query should not match")
 	}
 }

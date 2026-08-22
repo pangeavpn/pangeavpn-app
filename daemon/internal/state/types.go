@@ -79,6 +79,9 @@ type StatusResponse struct {
 	// dropped on its own and rebuilds are being retried on a backoff. Clients
 	// show it as a connection in progress rather than a dead one.
 	Reconnecting bool `json:"reconnecting"`
+	// TransportsExhausted marks a session no transport gets traffic through here.
+	// Clients rotate servers on it; the daemon cannot, a server being a profile.
+	TransportsExhausted bool `json:"transportsExhausted"`
 }
 
 type CloakProfile struct {

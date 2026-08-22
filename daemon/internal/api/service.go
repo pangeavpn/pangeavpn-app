@@ -168,6 +168,11 @@ type Service struct {
 	// a correction. Guarded by recoveryMu.
 	dnsGuardNextAt time.Time
 
+	// demotedTransport is sent to the back of the next cascade; transportsExhausted
+	// says the cascade ran out here, the app's cue to try another server.
+	demotedTransport    string
+	transportsExhausted bool
+
 	// endpointRouteRepairs counts consecutive health checks that had to re-pin
 	// the tunnel's endpoint routes, so a route that never settles cannot hold
 	// off recovery forever. Guarded by recoveryMu.
@@ -393,6 +398,12 @@ func (s *Service) setActiveTransportKind(kind string) {
 	s.activeMu.Lock()
 	defer s.activeMu.Unlock()
 	s.activeTransportKind = kind
+}
+
+func (s *Service) activeTransportKindSnapshot() string {
+	s.activeMu.RLock()
+	defer s.activeMu.RUnlock()
+	return s.activeTransportKind
 }
 
 func (s *Service) StartBackground(ctx context.Context) {
@@ -1103,6 +1114,7 @@ func (s *Service) startTransportWithHandshake(ctx context.Context, profile *stat
 		return "", err
 	}
 	candidates = s.reorderByMemory(candidates, preferredTransport, networkKey)
+	candidates = s.demoteFailedTransport(candidates)
 
 	var failures []string
 	for i, candidate := range candidates {
@@ -1176,6 +1188,35 @@ func (s *Service) reorderByMemory(candidates []transportCandidate, preferredTran
 	reordered = append(reordered, candidates[idx+1:]...)
 	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("trying %s first (last worked on this network)", remembered))
 	return reordered
+}
+
+// demoteFailedTransport moves the transport whose data path just died to the
+// back, so recovery tries every other way out before walking into the block.
+func (s *Service) demoteFailedTransport(candidates []transportCandidate) []transportCandidate {
+	kind := s.takeDemotedTransport()
+	if kind == "" || len(candidates) < 2 {
+		return candidates
+	}
+	demoted := make([]transportCandidate, 0, len(candidates))
+	var tail []transportCandidate
+	for _, candidate := range candidates {
+		if candidate.kind == kind {
+			tail = append(tail, candidate)
+			continue
+		}
+		demoted = append(demoted, candidate)
+	}
+	return append(demoted, tail...)
+}
+
+// takeDemotedTransport reads and clears the demotion, which applies to the next
+// cascade only — a later session must not inherit it.
+func (s *Service) takeDemotedTransport() string {
+	s.recoveryMu.Lock()
+	defer s.recoveryMu.Unlock()
+	kind := s.demotedTransport
+	s.demotedTransport = ""
+	return kind
 }
 
 // rememberTransport records kind as the last-good transport for networkKey so
@@ -1257,6 +1298,11 @@ func (s *Service) bringUpTransport(ctx context.Context, profile *state.Profile, 
 
 	s.machine.Set(state.StateConnecting, fmt.Sprintf("waiting for %s handshake", kind))
 	if err = s.waitForWireGuardHandshake(ctx, *wireGuardProfile); err != nil {
+		return fmt.Errorf("%s: %w", kind, err)
+	}
+
+	s.machine.Set(state.StateConnecting, fmt.Sprintf("checking traffic over %s", kind))
+	if err = s.proveDataPath(ctx, *wireGuardProfile); err != nil {
 		return fmt.Errorf("%s: %w", kind, err)
 	}
 	return nil
@@ -1831,18 +1877,19 @@ func (s *Service) Status(ctx context.Context) state.StatusResponse {
 	}
 
 	return state.StatusResponse{
-		State:            stateValue,
-		Detail:           detail,
-		ActiveTransport:  activeKind,
-		Cloak:            cloakStatus,
-		Naive:            naiveStatus,
-		Reality:          realityStatus,
-		Hysteria2:        hysteria2Status,
-		Shadowsocks:      shadowsocksStatus,
-		Snowflake:        snowflakeStatus,
-		WireGuard:        wgStatus,
-		KillSwitchActive: s.killSwitch.Active(),
-		Reconnecting:     s.recoveryPending(),
+		State:               stateValue,
+		Detail:              detail,
+		ActiveTransport:     activeKind,
+		Cloak:               cloakStatus,
+		Naive:               naiveStatus,
+		Reality:             realityStatus,
+		Hysteria2:           hysteria2Status,
+		Shadowsocks:         shadowsocksStatus,
+		Snowflake:           snowflakeStatus,
+		WireGuard:           wgStatus,
+		KillSwitchActive:    s.killSwitch.Active(),
+		Reconnecting:        s.recoveryPending(),
+		TransportsExhausted: s.transportsAreExhausted(),
 	}
 }
 
@@ -1979,11 +2026,17 @@ func (s *Service) runHealthCheck(ctx context.Context) {
 	// tunnel silent for another reason still reaches the rebuild.
 	routeRepaired := s.ensureEndpointRoutes(ctx, profile)
 
+	// A stale handshake is a hint, never the verdict: WireGuard's counters say
+	// nothing about whether the tunnel still carries traffic.
 	if !routeRepaired && s.wireGuardHandshakeStale(wgStatus) {
 		age := time.Since(time.Unix(wgStatus.LastHandshakeUnix, 0)).Round(time.Second)
-		s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("wireguard tunnel is silent (no handshake for %s); rebuilding session", age))
-		s.attemptSessionRebuild(ctx, profile, fmt.Sprintf("wireguard tunnel is silent (no handshake for %s)", age))
-		return
+		if !s.canProveDataPath(profile) {
+			s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("wireguard tunnel is silent (no handshake for %s); rebuilding session", age))
+			s.attemptSessionRebuild(ctx, profile, fmt.Sprintf("wireguard tunnel is silent (no handshake for %s)", age))
+			return
+		}
+		s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("no wireguard handshake for %s; testing the tunnel now", age))
+		s.probeDataPathNow()
 	}
 
 	if !s.killSwitch.Active() {
@@ -2003,11 +2056,47 @@ func (s *Service) runHealthCheck(ctx context.Context) {
 	s.ensureTunnelDNS(ctx, profile)
 
 	if s.dataPathIsDead(ctx, profile) {
-		s.attemptSessionRebuild(ctx, profile, "tunnel stopped carrying traffic")
+		s.escalateDeadDataPath(ctx, profile, activeKind)
 		return
 	}
 
 	s.resetRecovery()
+}
+
+// escalateDeadDataPath rebuilds a session whose tunnel stopped carrying traffic,
+// re-running the whole cascade rather than restarting the transport that died.
+func (s *Service) escalateDeadDataPath(ctx context.Context, profile state.Profile, activeKind string) {
+	s.setDemotedTransport(activeKind)
+	s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf(
+		"%s tunnel stopped carrying traffic; trying every transport again", activeKind))
+	s.attemptSessionRebuild(ctx, profile, "tunnel stopped carrying traffic")
+}
+
+// probeDataPathNow brings the next probe round forward to this tick.
+func (s *Service) probeDataPathNow() {
+	s.recoveryMu.Lock()
+	defer s.recoveryMu.Unlock()
+	s.dnsProbeNextAt = time.Time{}
+}
+
+func (s *Service) setDemotedTransport(kind string) {
+	s.recoveryMu.Lock()
+	defer s.recoveryMu.Unlock()
+	s.demotedTransport = kind
+}
+
+// setTransportsExhausted records whether the cascade ran out on this server, so
+// Status can tell the app to rotate.
+func (s *Service) setTransportsExhausted(exhausted bool) {
+	s.recoveryMu.Lock()
+	defer s.recoveryMu.Unlock()
+	s.transportsExhausted = exhausted
+}
+
+func (s *Service) transportsAreExhausted() bool {
+	s.recoveryMu.Lock()
+	defer s.recoveryMu.Unlock()
+	return s.transportsExhausted
 }
 
 // retryDroppedSession keeps rebuilding a session that dropped on its own until
@@ -2059,6 +2148,7 @@ func (s *Service) attemptSessionRebuild(ctx context.Context, profile state.Profi
 		// attempt or push the backoff out.
 		return
 	}
+	s.setTransportsExhausted(errors.Is(err, ErrTransportExhausted))
 
 	attempt := s.beginRecoveryAttempt()
 	if attempt > 1 {
@@ -2166,7 +2256,7 @@ func (s *Service) holdHealthChecks(d time.Duration) {
 	// Rounds that failed while the host was asleep say nothing about the network
 	// it woke up on, and the first probe should land after it has settled.
 	s.dnsProbeFailures = 0
-	s.dnsProbeNextAt = time.Now().Add(d + dnsProbeInterval)
+	s.dnsProbeNextAt = time.Now().Add(d + nextDNSProbeDelay())
 }
 
 func (s *Service) healthHeld() bool {

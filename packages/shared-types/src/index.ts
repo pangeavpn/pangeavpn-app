@@ -166,7 +166,10 @@ export const StatusResponseSchema = z.object({
   killSwitchActive: z.boolean().default(false),
   // An ERROR the daemon is still retrying by itself, after a session dropped
   // on its own. Older daemons omit it.
-  reconnecting: z.boolean().default(false)
+  reconnecting: z.boolean().default(false),
+  // A live session whose every transport stopped getting traffic through this
+  // server; the client answers by rotating servers. Older daemons omit it.
+  transportsExhausted: z.boolean().default(false)
 });
 
 export const ConnectRequestSchema = z.object({
