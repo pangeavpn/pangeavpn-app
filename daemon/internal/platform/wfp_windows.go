@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"runtime"
+	"strings"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -28,6 +29,11 @@ var (
 	procFwpmFilterAdd0           = modFwpuclnt.NewProc("FwpmFilterAdd0")
 	procFwpmFilterDeleteById0    = modFwpuclnt.NewProc("FwpmFilterDeleteById0")
 	procFwpmFilterDeleteByKey0   = modFwpuclnt.NewProc("FwpmFilterDeleteByKey0")
+
+	procFwpmFilterCreateEnumHandle0  = modFwpuclnt.NewProc("FwpmFilterCreateEnumHandle0")
+	procFwpmFilterEnum0              = modFwpuclnt.NewProc("FwpmFilterEnum0")
+	procFwpmFilterDestroyEnumHandle0 = modFwpuclnt.NewProc("FwpmFilterDestroyEnumHandle0")
+	procFwpmFreeMemory0              = modFwpuclnt.NewProc("FwpmFreeMemory0")
 )
 
 // ---------------------------------------------------------------------------
@@ -389,9 +395,84 @@ func (e *wfpEngine) deleteFilter(filterId uint64) error {
 		uintptr(filterId),
 	)
 	if r != 0 {
+		// Already gone is the outcome the caller wanted. Without this a
+		// sublayer sweep would make every later delete look like a failure.
+		if uint32(r) == fwpEFilterNotFound {
+			return nil
+		}
 		return fmt.Errorf("FwpmFilterDeleteById0: %w", windows.Errno(r))
 	}
 	return nil
+}
+
+// sublayerFilterIds lists every filter currently in one of our sublayers,
+// including ones this process never added.
+//
+// Filters added with an engine-assigned key are only ever reachable by the id
+// the adding process held in memory, so a daemon that died without a Clear
+// leaves permits nothing can name. Enumeration is how a fresh process finds
+// them again.
+func (e *wfpEngine) sublayerFilterIds(subLayer windows.GUID) ([]uint64, error) {
+	var enumHandle windows.Handle
+	r, _, _ := procFwpmFilterCreateEnumHandle0.Call(
+		uintptr(e.handle),
+		0, // no template: every layer, filtered by sublayer below
+		uintptr(unsafe.Pointer(&enumHandle)),
+	)
+	if r != 0 {
+		return nil, fmt.Errorf("FwpmFilterCreateEnumHandle0: %w", windows.Errno(r))
+	}
+	defer procFwpmFilterDestroyEnumHandle0.Call(uintptr(e.handle), uintptr(enumHandle))
+
+	const batch = 256
+	var ids []uint64
+	for {
+		var entries **fwpmFilter0
+		var returned uint32
+		r, _, _ = procFwpmFilterEnum0.Call(
+			uintptr(e.handle),
+			uintptr(enumHandle),
+			batch,
+			uintptr(unsafe.Pointer(&entries)),
+			uintptr(unsafe.Pointer(&returned)),
+		)
+		if r != 0 {
+			return nil, fmt.Errorf("FwpmFilterEnum0: %w", windows.Errno(r))
+		}
+		if returned == 0 {
+			return ids, nil
+		}
+		for _, filter := range unsafe.Slice(entries, returned) {
+			if filter != nil && filter.subLayerKey == subLayer {
+				ids = append(ids, filter.filterId)
+			}
+		}
+		procFwpmFreeMemory0.Call(uintptr(unsafe.Pointer(&entries)))
+		if returned < batch {
+			return ids, nil
+		}
+	}
+}
+
+// deleteFiltersInSublayer removes every filter in the sublayer, tracked or not.
+func (e *wfpEngine) deleteFiltersInSublayer(subLayer windows.GUID) (int, error) {
+	ids, err := e.sublayerFilterIds(subLayer)
+	if err != nil {
+		return 0, err
+	}
+	var errs []string
+	deleted := 0
+	for _, id := range ids {
+		if err := e.deleteFilter(id); err != nil {
+			errs = append(errs, fmt.Sprintf("%d: %v", id, err))
+			continue
+		}
+		deleted++
+	}
+	if len(errs) > 0 {
+		return deleted, fmt.Errorf("sublayer sweep: %s", strings.Join(errs, "; "))
+	}
+	return deleted, nil
 }
 
 // ---------------------------------------------------------------------------

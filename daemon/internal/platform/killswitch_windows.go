@@ -420,6 +420,14 @@ func (ks *windowsKillSwitch) Clear(ctx context.Context) error {
 		engine, ownsEngine = opened, true
 	}
 
+	// Sweep the whole sublayer first. Endpoint, LAN and tunnel permits carry
+	// engine-assigned keys, so a daemon that died without clearing left ones
+	// only enumeration can still name — and the sublayer delete below fails
+	// while any of them survive, which would strand the machine blocked.
+	if _, err := engine.deleteFiltersInSublayer(pangeaVPNSublayerKey); err != nil {
+		errs = append(errs, fmt.Sprintf("sublayer sweep: %v", err))
+	}
+
 	for _, id := range ks.endpointFilterIds {
 		if err := engine.deleteFilter(id); err != nil {
 			errs = append(errs, fmt.Sprintf("endpoint permit %d: %v", id, err))
