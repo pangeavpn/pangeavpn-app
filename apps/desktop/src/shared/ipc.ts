@@ -211,6 +211,9 @@ export interface ServerInfo {
     method: string;
     password: string;
   };
+  /** Edge relays, repeated per region: this route answers with a bare array,
+   *  so a top-level field would break clients that expect one. */
+  frontedEndpoints?: string[];
   /**
    * Tor Snowflake (WebRTC rendezvous) connection info, present only when the
    * hub node has Snowflake configured. Static per-node config, same as

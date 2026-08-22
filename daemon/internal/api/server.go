@@ -376,7 +376,9 @@ func NewHandler(token string, service *Service) http.Handler {
 			UDPOverTCP: req.UDPOverTCP,
 		})
 		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, ssProxyStartResponse{OK: false})
+			// The reason travels: without it the settings pane can only say the
+			// hub was unreachable, which sends the next hour after the network.
+			writeJSON(w, http.StatusInternalServerError, ssProxyStartResponse{OK: false, Error: err.Error()})
 			return
 		}
 

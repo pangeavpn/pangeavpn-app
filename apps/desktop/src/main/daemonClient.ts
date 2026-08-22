@@ -69,10 +69,16 @@ export class DaemonClient {
       proxyPassword?: string;
       error?: string;
     }>("POST", "/ssproxy/start", profile);
-    if (!res.ok || !res.port || !res.proxyUsername || !res.proxyPassword) {
+    if (!res.ok || !res.port) {
       throw new Error(res.error || "shadowsocks proxy failed to start");
     }
-    return { port: res.port, proxyUsername: res.proxyUsername, proxyPassword: res.proxyPassword };
+    // A daemon older than the proxy credentials answers with the port alone,
+    // and its inbound wants no Proxy-Authorization.
+    return {
+      port: res.port,
+      proxyUsername: res.proxyUsername ?? "",
+      proxyPassword: res.proxyPassword ?? ""
+    };
   }
 
   async stopSsProxy(): Promise<OkResponse> {
