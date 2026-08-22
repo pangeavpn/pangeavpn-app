@@ -8,7 +8,13 @@ import { MTU_DEFAULT, normalizeMtu, normalizeMtuOrDefault } from "../shared/mtu"
 import { resolveNaiveEndpoint } from "../shared/naiveEndpoint";
 import { parseNodeWireGuardEndpoint } from "../shared/wireguardEndpoint";
 import { buildShadowsocksProfile } from "../shared/shadowsocksProfile";
-import { DEFAULT_HUB_METHODS, type HubMethods } from "../shared/hubMethods";
+import {
+  DEFAULT_HUB_METHODS,
+  type HubMethod,
+  type HubMethods,
+  type HubMethodTestResult,
+  type HubStatus
+} from "../shared/hubMethods";
 import {
   firstWorkingCreds,
   mergeAdvertisedCreds,
@@ -22,6 +28,9 @@ import {
   restoreFrontedEndpoints
 } from "../shared/frontedEndpoints";
 import { isCachedServer, restoreCachedServers } from "../shared/cachedServers";
+import { isIPv4Literal } from "../shared/ipLiteral";
+import { DEAD_DROP_KEYS } from "./deadDropKeys";
+import { deadDropDue, fetchDeadDropPayload } from "./deadDrop";
 import {
   cachedEntitlement,
   restoreCachedSubscription,
@@ -429,15 +438,6 @@ function allowedIPsExcludingAll(excludeIPs: string[]): string[] {
   return blocks.map((b) => `${intToIp(b.base)}/${b.prefixLen}`);
 }
 
-/** Matches a literal dotted-quad IPv4 address (not a hostname). */
-const IPV4_LITERAL_PATTERN = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
-
-function isIPv4Literal(host: string): boolean {
-  const match = IPV4_LITERAL_PATTERN.exec(host);
-  if (!match) return false;
-  return match.slice(1, 5).every((octet) => Number(octet) <= 255);
-}
-
 function buildWireGuardConfig(
   privateKey: string,
   assignedIP: string,
@@ -481,6 +481,17 @@ export interface DeviceInfo {
  * The daemon-side Shadowsocks proxy ensureHub routes the secure envelope
  * through. Injected so the client keeps no daemon dependency of its own.
  */
+/** One fully-specified way to reach the hub, holding no instance state, so a
+ *  probe can run against a path the client is not currently using. */
+type HubProbePath =
+  | { kind: "ip"; ip: string }
+  | { kind: "proxy"; port: number; username?: string; password?: string }
+  | { kind: "fronted"; host: string }
+  | { kind: "domain" };
+
+/** A test result before the method name and elapsed time are stamped on. */
+type HubMethodOutcome = Omit<HubMethodTestResult, "method" | "ms">;
+
 export interface ShadowsocksHubProxy {
   /** Resolves to the proxy's loopback port and CONNECT auth, or null when unavailable. */
   start(creds: HubShadowsocksCreds): Promise<{ port: number; proxyUsername: string; proxyPassword: string } | null>;
@@ -535,6 +546,13 @@ export class PangeaApiClient {
   // the shadowsocks method sits inert until credentials are cached.
   private frontedEndpoints: string[] = [];
   private onFrontedEndpoints: ((endpoints: string[]) => void) | null = null;
+
+  // Signed public file of last resort: addresses to try when every carrier has
+  // failed. Inbound only — it re-seeds this cache, it never carries a request.
+  private deadDropEnabled = true;
+  private deadDropSeq = 0;
+  private deadDropLastAttemptMs = 0;
+  private onDeadDropState: ((state: { seq: number; lastAttemptMs: number }) => void) | null = null;
   // The relay currently carrying our traffic; null when the method is off or
   // not the path in use.
   private frontedHost: string | null = null;
@@ -543,6 +561,15 @@ export class PangeaApiClient {
   // no subscription. Restored from settings.json at startup.
   private cachedSubscription: CachedSubscription | null = null;
   private onSubscription: ((cached: CachedSubscription | null) => void) | null = null;
+
+  // The method whose probe last won, and the address it won on — diagnostics
+  // for the settings pane, never an input to any decision.
+  private activeHubMethod: HubMethod | null = null;
+  private activeHubDetail: string | null = null;
+  private onHubStatus: ((status: HubStatus) => void) | null = null;
+  // One test at a time: the shadowsocks probe borrows the daemon's single
+  // proxy, so two overlapping tests would fight over it.
+  private hubTestInFlight = false;
 
   // One shared cascade, so concurrent callers don't each pay ensureHub's full
   // probe sequence against a hub that is down.
@@ -578,6 +605,27 @@ export class PangeaApiClient {
 
   getHubMethods(): HubMethods {
     return { ...this.hubMethods };
+  }
+
+  /** The switches plus which method is carrying hub traffic right now. */
+  getHubStatus(): HubStatus {
+    return {
+      methods: { ...this.hubMethods },
+      active: this.activeHubMethod,
+      detail: this.activeHubDetail
+    };
+  }
+
+  /** Called whenever the path in use changes, so the UI can follow it. */
+  onHubStatusChanged(fn: ((status: HubStatus) => void) | null): void {
+    this.onHubStatus = fn;
+  }
+
+  private setActiveHubMethod(method: HubMethod | null, detail: string | null): void {
+    if (this.activeHubMethod === method && this.activeHubDetail === detail) return;
+    this.activeHubMethod = method;
+    this.activeHubDetail = detail;
+    this.onHubStatus?.(this.getHubStatus());
   }
 
   /**
@@ -635,6 +683,27 @@ export class PangeaApiClient {
   /** Called when a fresh relay list arrives, so the caller can persist it. */
   onFrontedEndpointsResolved(fn: (endpoints: string[]) => void): void {
     this.onFrontedEndpoints = fn;
+  }
+
+  /** Restore the dead-drop switch and replay guard from settings at startup. */
+  setDeadDropEnabled(enabled: boolean): void {
+    this.deadDropEnabled = enabled;
+  }
+
+  getDeadDropEnabled(): boolean {
+    return this.deadDropEnabled;
+  }
+
+  setDeadDropState(seq: unknown, lastAttemptMs: unknown): void {
+    this.deadDropSeq = typeof seq === "number" && Number.isSafeInteger(seq) && seq >= 0 ? seq : 0;
+    this.deadDropLastAttemptMs =
+      typeof lastAttemptMs === "number" && Number.isFinite(lastAttemptMs) && lastAttemptMs >= 0
+        ? lastAttemptMs
+        : 0;
+  }
+
+  onDeadDropStateChanged(fn: (state: { seq: number; lastAttemptMs: number }) => void): void {
+    this.onDeadDropState = fn;
   }
 
   /** The relay currently carrying hub traffic, for diagnostics. */
@@ -716,6 +785,7 @@ export class PangeaApiClient {
     this.dohResolvedIp = null;
     this.frontedHost = null;
     this.hubReady = false;
+    this.setActiveHubMethod(null, null);
     // Every caller of this is a deliberate change of plan, so the cooldown from
     // the last failure must not hold the new one back.
     this.hubResolutionFailedAtMs = 0;
@@ -743,29 +813,48 @@ export class PangeaApiClient {
    * successfully-decrypted envelope, which is all the probe needs.
    */
   private async trySecureProbeCurrentPath(): Promise<boolean> {
+    return this.probeSecurePath(this.currentProbePath());
+  }
+
+  /** The path the next hub request would take, as an explicit value. */
+  private currentProbePath(): HubProbePath {
+    if (this.ssProxyPort) {
+      return {
+        kind: "proxy",
+        port: this.ssProxyPort,
+        username: this.ssProxyUsername ?? undefined,
+        password: this.ssProxyPassword ?? undefined
+      };
+    }
+    if (this.frontedHost) return { kind: "fronted", host: this.frontedHost };
+    if (this.dohResolvedIp) return { kind: "ip", ip: this.dohResolvedIp };
+    return { kind: "domain" };
+  }
+
+  private async probeSecurePath(path: HubProbePath): Promise<boolean> {
     const { envelope, aesKey } = encryptRequest("GET", "/api/client/regions", {}, undefined);
     const envelopeJson = JSON.stringify(envelope);
 
     try {
       let rawResponse: Response;
-      if (this.ssProxyPort) {
-        rawResponse = await fetchViaConnectProxy(this.ssProxyPort, HUB_HOSTNAME, HUB_HOSTNAME, "/v1/secure", {
+      if (path.kind === "proxy") {
+        rawResponse = await fetchViaConnectProxy(path.port, HUB_HOSTNAME, HUB_HOSTNAME, "/v1/secure", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: envelopeJson,
           timeoutMs: 8000,
-          proxyUsername: this.ssProxyUsername ?? undefined,
-          proxyPassword: this.ssProxyPassword ?? undefined
+          proxyUsername: path.username,
+          proxyPassword: path.password
         });
-      } else if (this.frontedHost) {
-        rawResponse = await fetchFronted(this.frontedHost, "/v1/secure", {
+      } else if (path.kind === "fronted") {
+        rawResponse = await fetchFronted(path.host, "/v1/secure", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: envelopeJson,
           timeoutMs: 8000
         });
-      } else if (this.dohResolvedIp) {
-        rawResponse = await fetchDohResolved(this.dohResolvedIp, HUB_HOSTNAME, "/v1/secure", {
+      } else if (path.kind === "ip") {
+        rawResponse = await fetchDohResolved(path.ip, HUB_HOSTNAME, "/v1/secure", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: envelopeJson,
@@ -853,7 +942,7 @@ export class PangeaApiClient {
     return this.hubResolution;
   }
 
-  private async resolveHubPath(): Promise<boolean> {
+  private async resolveHubPath(reseeded = false): Promise<boolean> {
     console.log(`[HubURL] Finding working API connection...`);
 
     // 1. Last known good IP — no lookup, so it works under a lockdown lock.
@@ -862,6 +951,7 @@ export class PangeaApiClient {
       this.dohResolvedIp = this.cachedHubIp;
       if (await this.trySecureProbeCurrentPath()) {
         console.log(`[HubURL] Cached hub IP works`);
+        this.setActiveHubMethod("directIp", this.cachedHubIp);
         this.hubReady = true;
         return true;
       }
@@ -878,6 +968,7 @@ export class PangeaApiClient {
         if (await this.trySecureProbeCurrentPath()) {
           console.log(`[HubURL] DoH secure probe works`);
           this.rememberHubIp(resolvedIp);
+          this.setActiveHubMethod("directIp", resolvedIp);
           this.hubReady = true;
           return true;
         }
@@ -891,6 +982,7 @@ export class PangeaApiClient {
       this.dohResolvedIp = null;
       if (await this.tryShadowsocksHubPath()) {
         console.log(`[HubURL] Shadowsocks hub path works`);
+        this.setActiveHubMethod("shadowsocks", this.hubShadowsocks[0]?.remoteHost ?? null);
         this.hubReady = true;
         return true;
       }
@@ -901,6 +993,7 @@ export class PangeaApiClient {
       this.dohResolvedIp = null;
       if (await this.tryFrontedPath()) {
         console.log(`[HubURL] Fronted relay works`);
+        this.setActiveHubMethod("fronted", this.frontedHost);
         this.hubReady = true;
         return true;
       }
@@ -913,6 +1006,7 @@ export class PangeaApiClient {
       this.dohResolvedIp = null;
       if (await this.trySecureProbeCurrentPath()) {
         console.log(`[HubURL] Direct domain secure probe works`);
+        this.setActiveHubMethod("normal", HUB_HOSTNAME);
         this.hubReady = true;
         return true;
       }
@@ -920,6 +1014,13 @@ export class PangeaApiClient {
     }
 
     this.dohResolvedIp = null;
+
+    // Every carrier is out of addresses that work. The dead drop is the only
+    // remaining source of new ones, so spend it before giving up.
+    if (!reseeded && (await this.reseedFromDeadDrop())) {
+      return this.resolveHubPath(true);
+    }
+
     if (!this.hubMethods.normal) {
       // Fail closed: falling back to the domain here would leak the SNI the
       // user switched that method off to avoid.
@@ -932,6 +1033,58 @@ export class PangeaApiClient {
     // domain one genuine attempt — but do not record the path as confirmed.
     console.log(`[HubURL] All strategies failed, falling back to direct domain`);
     return false;
+  }
+
+  /**
+   * Pulls the signed public bootstrap file and folds whatever it names into the
+   * caches the ladder reads. Returns whether anything actually changed, so a
+   * blob we already had does not buy a pointless second pass.
+   *
+   * Never throws: a dead drop that cannot be reached leaves the client exactly
+   * where it already was.
+   */
+  private async reseedFromDeadDrop(): Promise<boolean> {
+    if (!this.deadDropEnabled) return false;
+    const now = Date.now();
+    if (!deadDropDue(this.deadDropLastAttemptMs, now)) {
+      console.log(`[HubURL] Dead drop rate limited, skipping`);
+      return false;
+    }
+    this.deadDropLastAttemptMs = now;
+    this.onDeadDropState?.({ seq: this.deadDropSeq, lastAttemptMs: now });
+
+    let result: Awaited<ReturnType<typeof fetchDeadDropPayload>> = null;
+    try {
+      result = await fetchDeadDropPayload({
+        keys: DEAD_DROP_KEYS,
+        minSeq: this.deadDropSeq,
+        nowMs: now
+      });
+    } catch (err) {
+      console.warn(`[HubURL] Dead drop fetch failed:`, sanitizeLog(err));
+      return false;
+    }
+    if (!result) {
+      console.log(`[HubURL] Dead drop had nothing usable`);
+      return false;
+    }
+
+    console.log(`[HubURL] Dead drop seq ${result.payload.seq} from ${result.url}`);
+    this.deadDropSeq = result.payload.seq;
+    this.onDeadDropState?.({ seq: this.deadDropSeq, lastAttemptMs: now });
+
+    const before = this.frontedEndpoints;
+    this.rememberFrontedEndpoints(result.payload.frontedEndpoints);
+    let changed = this.frontedEndpoints !== before;
+
+    // Only one hub IP is cached at a time, so take the first the blob names and
+    // leave the rest for the next pass if this one does not work out.
+    const [hubIp] = result.payload.hubIps;
+    if (hubIp && hubIp !== this.cachedHubIp) {
+      this.rememberHubIp(hubIp);
+      changed = true;
+    }
+    return changed;
   }
 
   /**
@@ -1007,6 +1160,95 @@ export class PangeaApiClient {
     if (!promoted) return;
     this.hubShadowsocks = promoted;
     this.onHubShadowsocks?.(this.hubShadowsocks);
+  }
+
+  /** Probes one method on its own, leaving the path in use untouched. Never
+   *  throws — a failure is a result the settings pane renders. */
+  async testHubMethod(method: HubMethod): Promise<HubMethodTestResult> {
+    if (this.hubTestInFlight) {
+      return { method, ok: false, unavailable: "busy", ms: 0 };
+    }
+    this.hubTestInFlight = true;
+    const startedAt = Date.now();
+    try {
+      const outcome = await this.runHubMethodTest(method);
+      return { ...outcome, method, ms: Date.now() - startedAt };
+    } catch (err) {
+      console.warn(`[HubTest] ${method} failed:`, sanitizeLog(err));
+      return { method, ok: false, ms: Date.now() - startedAt };
+    } finally {
+      this.hubTestInFlight = false;
+    }
+  }
+
+  private async runHubMethodTest(method: HubMethod): Promise<HubMethodOutcome> {
+    switch (method) {
+      case "directIp":
+        return this.testDirectIpPath();
+      case "shadowsocks":
+        return this.testShadowsocksPath();
+      case "fronted":
+        return this.testFrontedPath();
+      case "normal": {
+        const ok = await this.probeSecurePath({ kind: "domain" });
+        return ok ? { ok, detail: HUB_HOSTNAME } : { ok };
+      }
+    }
+  }
+
+  private async testDirectIpPath(): Promise<HubMethodOutcome> {
+    const candidates = this.cachedHubIp ? [this.cachedHubIp] : [];
+    if (this.dohEnabled) {
+      const resolved = await resolveViaDoH(HUB_HOSTNAME);
+      if (resolved && !candidates.includes(resolved)) candidates.push(resolved);
+    }
+    if (candidates.length === 0) {
+      return { ok: false, unavailable: "noAddress" };
+    }
+    for (const ip of candidates) {
+      if (await this.probeSecurePath({ kind: "ip", ip })) return { ok: true, detail: ip };
+    }
+    return { ok: false };
+  }
+
+  private async testFrontedPath(): Promise<HubMethodOutcome> {
+    if (this.frontedEndpoints.length === 0) {
+      return { ok: false, unavailable: "noRelay" };
+    }
+    for (const host of this.frontedEndpoints) {
+      if (await this.probeSecurePath({ kind: "fronted", host })) return { ok: true, detail: host };
+    }
+    return { ok: false };
+  }
+
+  private async testShadowsocksPath(): Promise<HubMethodOutcome> {
+    if (!this.shadowsocksHubProxy || this.hubShadowsocks.length === 0) {
+      return { ok: false, unavailable: "noCredentials" };
+    }
+    // Borrow the running proxy rather than restarting the one carrying traffic.
+    if (this.ssProxyPort !== null) {
+      const ok = await this.probeSecurePath(this.currentProbePath());
+      return ok ? { ok, detail: this.hubShadowsocks[0]?.remoteHost } : { ok };
+    }
+    const proxy = this.shadowsocksHubProxy;
+    for (const creds of this.hubShadowsocks) {
+      let started: { port: number; proxyUsername: string; proxyPassword: string } | null = null;
+      try {
+        started = await proxy.start(creds);
+      } catch (err) {
+        console.warn(`[HubTest] Shadowsocks proxy start failed:`, sanitizeLog(err));
+      }
+      if (!started) continue;
+      const ok = await this.probeSecurePath({
+        kind: "proxy",
+        port: started.port,
+        username: started.proxyUsername,
+        password: started.proxyPassword
+      });
+      await proxy.stop();
+      if (ok) return { ok: true, detail: creds.remoteHost };
+    }
+    return { ok: false };
   }
 
   /**
@@ -1134,6 +1376,7 @@ export class PangeaApiClient {
             if (resolvedIp) {
               this.dohResolvedIp = resolvedIp;
               this.rememberHubIp(resolvedIp);
+              this.setActiveHubMethod("directIp", resolvedIp);
               rawResponse = await fetchDohResolved(resolvedIp, HUB_HOSTNAME, "/v1/secure", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -1169,6 +1412,7 @@ export class PangeaApiClient {
         const resolvedIp = await resolveViaDoH(HUB_HOSTNAME);
         if (resolvedIp) {
           this.dohResolvedIp = resolvedIp;
+          this.setActiveHubMethod("directIp", resolvedIp);
           // A relay or proxy that answers with an error page is being
           // intercepted just as surely as the domain would be; drop both so
           // the branch order in this method reaches the DoH path just resolved.

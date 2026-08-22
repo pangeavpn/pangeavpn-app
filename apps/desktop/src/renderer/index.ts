@@ -23,6 +23,7 @@ import {
   type Region
 } from "./regions.js";
 import { scheduleConnectionMessages } from "./connectionProgress.js";
+import { HUB_METHOD_TITLE_KEYS, hubActiveText, hubTestText } from "./hubStatusText.js";
 import {
   ACCENT_NAMES,
   ACCENT_THEMES,
@@ -93,6 +94,8 @@ const serverSelect = document.getElementById("serverSelect") as HTMLSelectElemen
 const serverConnectBtn = document.getElementById("serverConnectBtn") as HTMLButtonElement;
 const serverDisconnectBtn = document.getElementById("serverDisconnectBtn") as HTMLButtonElement;
 const serverRefreshBtn = document.getElementById("serverRefreshBtn") as HTMLButtonElement;
+const hubActiveDot = document.getElementById("hubActiveDot") as HTMLElement;
+const hubActiveTextEl = document.getElementById("hubActiveText") as HTMLElement;
 const hubDirectIpToggle = document.getElementById("hubDirectIpToggle") as HTMLInputElement;
 const hubShadowsocksToggle = document.getElementById("hubShadowsocksToggle") as HTMLInputElement;
 const hubFrontedToggle = document.getElementById("hubFrontedToggle") as HTMLInputElement;
@@ -105,6 +108,7 @@ const wireguardMtuInput = document.getElementById("wireguardMtuInput") as HTMLIn
 const preferredTransportSelect = document.getElementById("preferredTransportSelect") as HTMLSelectElement;
 const launchAtStartupToggle = document.getElementById("launchAtStartupToggle") as HTMLInputElement;
 const autoConnectToggle = document.getElementById("autoConnectToggle") as HTMLInputElement;
+const deadDropToggle = document.getElementById("deadDropToggle") as HTMLInputElement;
 const lockdownToggle = document.getElementById("lockdownToggle") as HTMLInputElement;
 const loginScreen = document.getElementById("loginScreen") as HTMLElement;
 const loginSettingsBtn = document.getElementById("loginSettingsBtn") as HTMLButtonElement;
@@ -1311,14 +1315,6 @@ serverRefreshBtn.addEventListener("click", async () => {
 // goes through showToast; each reverts its checkbox if the backend call fails.
 settingsOverlay.addEventListener("change", updateSettingsSummaries);
 
-type HubMethodName = "directIp" | "shadowsocks" | "fronted" | "normal";
-type HubMethodState = {
-  directIp: boolean;
-  shadowsocks: boolean;
-  fronted: boolean;
-  normal: boolean;
-};
-
 const hubMethodToggles: Record<HubMethodName, HTMLInputElement> = {
   directIp: hubDirectIpToggle,
   shadowsocks: hubShadowsocksToggle,
@@ -1326,19 +1322,30 @@ const hubMethodToggles: Record<HubMethodName, HTMLInputElement> = {
   normal: hubNormalToggle
 };
 
-const hubMethodLabels: Record<HubMethodName, MessageKey> = {
-  directIp: "settings.provisioning.directIp.title",
-  shadowsocks: "settings.provisioning.hubShadowsocks.title",
-  fronted: "settings.provisioning.hubFronted.title",
-  normal: "settings.provisioning.hubNormal.title"
-};
+const hubMethodNames = Object.keys(hubMethodToggles) as HubMethodName[];
+
+function hubMethodElement<T extends HTMLElement>(name: HubMethodName, suffix: string): T {
+  const id = `hub${name.charAt(0).toUpperCase()}${name.slice(1)}${suffix}`;
+  return document.getElementById(id) as T;
+}
+
+const hubMethodBadges = Object.fromEntries(
+  hubMethodNames.map((name) => [name, hubMethodElement<HTMLElement>(name, "Badge")])
+) as Record<HubMethodName, HTMLElement>;
+
+const hubMethodResults = Object.fromEntries(
+  hubMethodNames.map((name) => [name, hubMethodElement<HTMLElement>(name, "Result")])
+) as Record<HubMethodName, HTMLElement>;
+
+const hubMethodTestButtons = Object.fromEntries(
+  hubMethodNames.map((name) => [name, hubMethodElement<HTMLButtonElement>(name, "TestBtn")])
+) as Record<HubMethodName, HTMLButtonElement>;
 
 /** Mirrors main-process state onto the switches, and locks the last one on so
  *  the user cannot leave the app with no way to reach the hub. */
-function renderHubMethods(methods: HubMethodState): void {
-  const names = Object.keys(hubMethodToggles) as HubMethodName[];
-  const enabled = names.filter((name) => methods[name]);
-  for (const name of names) {
+function renderHubMethods(methods: HubMethodFlags): void {
+  const enabled = hubMethodNames.filter((name) => methods[name]);
+  for (const name of hubMethodNames) {
     const toggle = hubMethodToggles[name];
     toggle.checked = methods[name];
     toggle.disabled = enabled.length === 1 && methods[name];
@@ -1359,7 +1366,7 @@ function wireHubMethodToggle(name: HubMethodName): void {
         return;
       }
       showToast(
-        `${t(hubMethodLabels[name])} — ${requested ? t("toggle.hubMethod.on") : t("toggle.hubMethod.off")}`,
+        `${t(HUB_METHOD_TITLE_KEYS[name])} — ${requested ? t("toggle.hubMethod.on") : t("toggle.hubMethod.off")}`,
         3000,
         true
       );
@@ -1370,7 +1377,43 @@ function wireHubMethodToggle(name: HubMethodName): void {
   });
 }
 
-(Object.keys(hubMethodToggles) as HubMethodName[]).forEach(wireHubMethodToggle);
+hubMethodNames.forEach(wireHubMethodToggle);
+
+/** Names the method carrying account traffic right now, on the row and in the
+ *  line above the list. */
+function renderHubStatus(status: HubStatus): void {
+  for (const name of hubMethodNames) {
+    hubMethodBadges[name].hidden = status.active !== name;
+  }
+  hubActiveDot.dataset.state = status.active ? "live" : "idle";
+  hubActiveTextEl.textContent = hubActiveText(status, t);
+}
+
+/** Probes one method on demand. Every button is locked while a probe runs —
+ *  the main process only tests one at a time. */
+function wireHubMethodTest(name: HubMethodName): void {
+  hubMethodTestButtons[name].addEventListener("click", async () => {
+    if (!pangeaApi) return;
+    const output = hubMethodResults[name];
+    output.hidden = false;
+    output.dataset.state = "pending";
+    output.textContent = t("settings.provisioning.testing");
+    for (const other of hubMethodNames) hubMethodTestButtons[other].disabled = true;
+    try {
+      const result = await pangeaApi.testHubMethod(name);
+      output.dataset.state = result.ok ? "ok" : result.unavailable ? "unavailable" : "fail";
+      output.textContent = hubTestText(result, t);
+      renderHubStatus(await pangeaApi.getHubStatus());
+    } catch (err) {
+      output.dataset.state = "fail";
+      output.textContent = reportError(`hubTest:${name}`, err, t("settings.provisioning.result.fail"));
+    } finally {
+      for (const other of hubMethodNames) hubMethodTestButtons[other].disabled = false;
+    }
+  });
+}
+
+hubMethodNames.forEach(wireHubMethodTest);
 
 allowLanToggle.addEventListener("change", async () => {
   if (!pangeaApi) return;
@@ -1506,6 +1549,19 @@ autoConnectToggle.addEventListener("change", async () => {
   } else {
     showToast(t("toggle.autoConnect.off"), 4000, true);
   }
+});
+
+deadDropToggle.addEventListener("change", async () => {
+  if (!pangeaApi) return;
+  const requested = deadDropToggle.checked;
+  try {
+    await pangeaApi.setDeadDrop(requested);
+  } catch (err) {
+    deadDropToggle.checked = !requested;
+    showToast(reportError("deadDrop", err, t("toggle.updateFailed")));
+    return;
+  }
+  showToast(requested ? t("toggle.deadDrop.on") : t("toggle.deadDrop.off"), 4000, true);
 });
 
 lockdownToggle.addEventListener("change", async () => {
@@ -1796,7 +1852,10 @@ async function init(): Promise<void> {
 
   if (pangeaApi) {
     try {
-      renderHubMethods(await pangeaApi.getHubMethods());
+      const hubStatus = await pangeaApi.getHubStatus();
+      renderHubMethods(hubStatus.methods);
+      renderHubStatus(hubStatus);
+      pangeaApi.onHubStatusChanged(renderHubStatus);
       allowLanToggle.checked = await pangeaApi.getAllowLan();
       syncDnsControls(await pangeaApi.getCustomDns());
       wireguardMtuInput.value = String(await pangeaApi.getWireguardMtu());
@@ -1819,6 +1878,7 @@ async function init(): Promise<void> {
       autoConnectToggle.checked = autoConnectLocal;
       lockdownLocal = await pangeaApi.getLockdown();
       lockdownToggle.checked = lockdownLocal;
+      deadDropToggle.checked = await pangeaApi.getDeadDrop();
       const last = await pangeaApi.getLastServer();
       lastServerIdLocal = last.lastServerId;
     } catch {

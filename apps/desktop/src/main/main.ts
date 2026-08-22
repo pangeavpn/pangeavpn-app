@@ -1159,6 +1159,13 @@ async function persistFrontedEndpoints(endpoints: string[]): Promise<void> {
   }, "fronted endpoints");
 }
 
+async function persistDeadDropState(state: { seq: number; lastAttemptMs: number }): Promise<void> {
+  await updateSettings((settings) => {
+    settings.deadDropSeq = state.seq;
+    settings.deadDropLastAttempt = state.lastAttemptMs;
+  }, "dead drop state");
+}
+
 /** The node list, so a client that cannot reach the hub still knows where the
  *  servers are. Cleared on logout, which passes an empty list. */
 async function persistServers(servers: ServerInfo[]): Promise<void> {
@@ -1582,7 +1589,28 @@ function registerIpcHandlers(): void {
     return { methods, applied: true };
   });
 
+  ipcMain.handle(IPC_CHANNELS.setDeadDrop, async (_event, enabled: unknown) => {
+    const on = enabled === true;
+    pangeaApiClient.setDeadDropEnabled(on);
+    await updateSettings((settings) => {
+      settings.deadDrop = on;
+    }, "dead drop setting");
+  });
+
+  ipcMain.handle(IPC_CHANNELS.getDeadDrop, async () => pangeaApiClient.getDeadDropEnabled());
+
   ipcMain.handle(IPC_CHANNELS.getHubMethods, async () => pangeaApiClient.getHubMethods());
+
+  ipcMain.handle(IPC_CHANNELS.getHubStatus, async () => pangeaApiClient.getHubStatus());
+
+  // Probes one method on demand. Rejecting an unknown name rather than
+  // defaulting keeps a stray IPC call from starting the daemon's proxy.
+  ipcMain.handle(IPC_CHANNELS.testHubMethod, async (_event, method: unknown) => {
+    if (!isHubMethod(method)) {
+      throw new Error("Unknown hub method");
+    }
+    return pangeaApiClient.testHubMethod(method);
+  });
 
   ipcMain.handle(IPC_CHANNELS.setAllowLan, async (_event, enabled: boolean) => {
     allowLanEnabled = !!enabled;
@@ -1969,8 +1997,12 @@ async function boot(): Promise<void> {
   // Registered before the restore below so a first run with no settings file
   // still persists the hub IP once it is learned.
   pangeaApiClient.onHubIp((ip) => void persistHubIp(ip));
+  pangeaApiClient.onHubStatusChanged((status) => {
+    mainWindow?.webContents.send(IPC_CHANNELS.hubStatusChanged, status);
+  });
   pangeaApiClient.onHubShadowsocksResolved((creds) => void persistHubShadowsocks(creds));
   pangeaApiClient.onFrontedEndpointsResolved((endpoints) => void persistFrontedEndpoints(endpoints));
+  pangeaApiClient.onDeadDropStateChanged((state) => void persistDeadDropState(state));
   pangeaApiClient.onServersResolved((servers) => void persistServers(servers));
   pangeaApiClient.onSubscriptionResolved((cached) => void persistSubscription(cached));
 
@@ -2052,6 +2084,10 @@ async function boot(): Promise<void> {
     // Edge relays, and the last node list the hub gave us. Both are what stands
     // between a blocked hub and a client with nowhere left to go.
     pangeaApiClient.setCachedFrontedEndpoints(settings.frontedEndpoints);
+    // The replay guard travels with the switch: without the last accepted seq a
+    // reinstall would accept a stale blob it has already moved past.
+    pangeaApiClient.setDeadDropEnabled(settings.deadDrop !== false);
+    pangeaApiClient.setDeadDropState(settings.deadDropSeq, settings.deadDropLastAttempt);
     pangeaApiClient.setCachedServers(settings.servers);
     pangeaApiClient.setCachedSubscription(settings.subscription);
     if (typeof settings.lastServerId === "string") {

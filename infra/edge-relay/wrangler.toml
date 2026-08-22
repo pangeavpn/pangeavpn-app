@@ -2,15 +2,25 @@ name = "pangea-edge-relay"
 main = "worker.js"
 compatibility_date = "2025-01-01"
 
-# Deliberately no routes block. The relay is reached by its workers.dev
-# hostname, or by a custom domain that must not resemble ours — a relay on
-# anything recognisably pangeavpn is blocked by the same keyword rule that
-# blocks the hub, which defeats the point of running it.
-
+# Envelopes are sealed, but there is no reason to retain them either.
 [observability]
 enabled = true
 
-# Keep request bodies out of the logs. They are sealed envelopes, so there is
-# nothing readable in them, but there is no reason to retain them either.
 [observability.logs]
 invocation_logs = false
+
+# One env per relay, each on its own account or hostname. The client rotates
+# the list, so a burned relay costs one failed probe, not the whole method.
+
+[env.cdn]
+name = "pangea-relay-cdn"
+workers_dev = false
+routes = [{ pattern = "cdn.pangeavpn.it", custom_domain = true }]
+
+[env.alt]
+name = "pangea-relay-alt"
+workers_dev = true
+
+[env.org]
+name = "pangea-relay-org"
+workers_dev = true

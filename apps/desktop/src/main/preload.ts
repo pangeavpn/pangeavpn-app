@@ -22,6 +22,9 @@ const CH = {
   getDoh: "pangea:getDoh",
   setHubMethod: "pangea:setHubMethod",
   getHubMethods: "pangea:getHubMethods",
+  getHubStatus: "pangea:getHubStatus",
+  testHubMethod: "pangea:testHubMethod",
+  hubStatusChanged: "pangea:hubStatusChanged",
   setAllowLan: "pangea:setAllowLan",
   getAllowLan: "pangea:getAllowLan",
   setWireguardMtu: "settings:setWireguardMtu",
@@ -35,6 +38,8 @@ const CH = {
   setLockdown: "settings:setLockdown",
   getLockdown: "settings:getLockdown",
   setAutoConnect: "settings:setAutoConnect",
+  setDeadDrop: "settings:setDeadDrop",
+  getDeadDrop: "settings:getDeadDrop",
   getAutoConnect: "settings:getAutoConnect",
   getLastServer: "settings:getLastServer",
   clearLastServer: "settings:clearLastServer",
@@ -85,6 +90,13 @@ const pangeaApi = {
   setHubMethod: (method: string, enabled: boolean) =>
     ipcRenderer.invoke(CH.setHubMethod, method, enabled),
   getHubMethods: () => ipcRenderer.invoke(CH.getHubMethods),
+  getHubStatus: () => ipcRenderer.invoke(CH.getHubStatus),
+  testHubMethod: (method: string) => ipcRenderer.invoke(CH.testHubMethod, method),
+  onHubStatusChanged: (callback: (status: unknown) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, status: unknown) => callback(status);
+    ipcRenderer.on(CH.hubStatusChanged, listener);
+    return () => ipcRenderer.removeListener(CH.hubStatusChanged, listener);
+  },
   setAllowLan: (enabled: boolean) => ipcRenderer.invoke(CH.setAllowLan, enabled),
   getAllowLan: () => ipcRenderer.invoke(CH.getAllowLan),
   setWireguardMtu: (mtu: number) => ipcRenderer.invoke(CH.setWireguardMtu, mtu),
@@ -99,6 +111,8 @@ const pangeaApi = {
   setLockdown: (enabled: boolean) => ipcRenderer.invoke(CH.setLockdown, enabled),
   getLockdown: () => ipcRenderer.invoke(CH.getLockdown),
   setAutoConnect: (enabled: boolean) => ipcRenderer.invoke(CH.setAutoConnect, enabled),
+  setDeadDrop: (enabled: boolean) => ipcRenderer.invoke(CH.setDeadDrop, enabled),
+  getDeadDrop: () => ipcRenderer.invoke(CH.getDeadDrop),
   getAutoConnect: () => ipcRenderer.invoke(CH.getAutoConnect),
   getLastServer: () => ipcRenderer.invoke(CH.getLastServer),
   clearLastServer: () => ipcRenderer.invoke(CH.clearLastServer),

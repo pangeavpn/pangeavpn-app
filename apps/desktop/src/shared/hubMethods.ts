@@ -110,3 +110,24 @@ export function normalizeHubMethods(raw: unknown): HubMethods {
 export function persistableHubMethods(methods: HubMethods): Record<string, unknown> {
   return { ...methods, rev: HUB_METHODS_REV };
 }
+
+/** Why a method could not even be attempted, so the UI can say more than "failed". */
+export type HubMethodUnavailable = "noAddress" | "noCredentials" | "noRelay" | "busy";
+
+export interface HubMethodTestResult {
+  method: HubMethod;
+  ok: boolean;
+  /** The address, relay host, or node the probe reached. */
+  detail?: string;
+  /** Set instead of a failure when the method had nothing to try. */
+  unavailable?: HubMethodUnavailable;
+  /** Round trip of the probe, in milliseconds. */
+  ms: number;
+}
+
+/** Which method is carrying hub traffic right now, alongside the switches. */
+export interface HubStatus {
+  methods: HubMethods;
+  active: HubMethod | null;
+  detail: string | null;
+}
