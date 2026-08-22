@@ -15,14 +15,17 @@ import (
 const appFolder = "pangeavpn-desktop"
 const appSupportDirOverrideEnv = "PANGEA_APP_SUPPORT_DIR"
 
+// Traversal only. Each file inside carries its own mode, so the directory
+// grants the path walk the desktop app needs without granting a listing.
+const dirTraverseBits = 0o011
+const dataDirMode = 0o711
+
 func AppSupportDir() (string, error) {
 	privileged := os.Geteuid() == 0
 
-	// The override only serves unprivileged dev/test runs; honouring it for
-	// root would let anything that can set the daemon's environment (sudo
-	// preserves HOME by default) relocate the token file and killswitch
-	// state to a directory the invoking user controls.
-	if override := strings.TrimSpace(os.Getenv(appSupportDirOverrideEnv)); override != "" && !privileged {
+	// Honoured under root too: the launchd plist points the daemon at the
+	// installer's directory, and ensureDataDir refuses one root does not own.
+	if override := strings.TrimSpace(os.Getenv(appSupportDirOverrideEnv)); override != "" {
 		if !filepath.IsAbs(override) {
 			return "", fmt.Errorf("%s must be an absolute path", appSupportDirOverrideEnv)
 		}
@@ -90,13 +93,17 @@ func TunnelConfigDir() (string, error) {
 	return dir, nil
 }
 
-// ensureDataDir creates path (and any missing parents) mode 0700, or, if it
+// ensureDataDir creates path (and any missing parents) traversable, or, if it
 // already exists, refuses a symlink and — when running privileged — hard-fails
-// unless it is uid-0 owned, repairing an overly permissive mode in place.
+// unless it is uid-0 owned, repairing a bad mode in place.
 func ensureDataDir(path string) error {
 	info, err := os.Lstat(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return os.MkdirAll(path, 0o700)
+		if err := os.MkdirAll(path, dataDirMode); err != nil {
+			return err
+		}
+		// MkdirAll applies the umask, which can strip the traversal bits.
+		return os.Chmod(path, dataDirMode)
 	}
 	if err != nil {
 		return fmt.Errorf("stat %s: %w", path, err)
@@ -121,10 +128,18 @@ func verifyRootOwnedDir(path string, info os.FileInfo) error {
 	if stat.Uid != 0 {
 		return fmt.Errorf("%s is not owned by root (uid %d)", path, stat.Uid)
 	}
-	if info.Mode().Perm()&0o077 != 0 {
-		if err := os.Chmod(path, 0o700); err != nil {
-			return fmt.Errorf("tighten permissions on %s: %w", path, err)
-		}
+	return repairDirMode(path, info.Mode().Perm())
+}
+
+// repairDirMode drops write access, and restores the traversal a 0700 dir left
+// by an older build denies: without it the app cannot reach the token inside.
+func repairDirMode(path string, perm os.FileMode) error {
+	want := (perm &^ 0o022) | dirTraverseBits
+	if want == perm {
+		return nil
+	}
+	if err := os.Chmod(path, want); err != nil {
+		return fmt.Errorf("repair permissions on %s: %w", path, err)
 	}
 	return nil
 }

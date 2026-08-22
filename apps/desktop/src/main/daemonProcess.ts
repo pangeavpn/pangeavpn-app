@@ -436,7 +436,6 @@ async function restartProcessElevatedMac(filePath: string, context: MacDaemonCon
   const daemonPath = shSingleQuoteMac(filePath);
   const resourcesDir = shSingleQuoteMac(path.resolve(path.dirname(filePath), ".."));
   const appSupportDir = shSingleQuoteMac(context.appSupportDir);
-  const tokenPath = shSingleQuoteMac(path.join(context.appSupportDir, "daemon-token.txt"));
   const configPath = shSingleQuoteMac(path.join(context.appSupportDir, "config.json"));
   const targetUser = shSingleQuoteMac(context.user);
   const targetHome = shSingleQuoteMac(context.home);
@@ -445,7 +444,6 @@ async function restartProcessElevatedMac(filePath: string, context: MacDaemonCon
     `RESOURCES_DIR=${resourcesDir}`,
     `/usr/bin/xattr -dr com.apple.quarantine "$RESOURCES_DIR/daemon" "$RESOURCES_DIR/bin" >/dev/null 2>&1 || true`,
     `APP_SUPPORT_DIR=${appSupportDir}`,
-    `TOKEN_PATH=${tokenPath}`,
     `CONFIG_PATH=${configPath}`,
     `TARGET_USER=${targetUser}`,
     `TARGET_HOME=${targetHome}`,
@@ -454,12 +452,15 @@ async function restartProcessElevatedMac(filePath: string, context: MacDaemonCon
     `/bin/mkdir -p "$APP_SUPPORT_DIR" "$LOG_DIR"`,
     // rm -f unlinks any pre-planted symlink; the redirect below then creates a fresh root-owned file.
     `/bin/rm -f "$LOG_PATH"`,
-    `/bin/chmod 700 "$LOG_DIR" >/dev/null 2>&1 || true`,
-    `if [ ! -s "$TOKEN_PATH" ]; then /usr/bin/openssl rand -hex 32 > "$TOKEN_PATH"; fi`,
+    // LOG_DIR is the state dir, which stays traversable, so the log needs its
+    // own mode: it carries daemon stderr and must not be world-readable.
+    `/usr/bin/touch "$LOG_PATH" && /bin/chmod 600 "$LOG_PATH" >/dev/null 2>&1 || true`,
+    // The daemon runs as root and mints its own token root:admin 0640, so the
+    // dir stays root-owned and traversable rather than being handed to the user.
     `if [ ! -s "$CONFIG_PATH" ]; then /usr/bin/printf '{\\n  "profiles": []\\n}\\n' > "$CONFIG_PATH"; fi`,
-    `/usr/sbin/chown "$TARGET_USER" "$APP_SUPPORT_DIR" "$TOKEN_PATH" "$CONFIG_PATH" >/dev/null 2>&1 || true`,
-    `/bin/chmod 700 "$APP_SUPPORT_DIR" >/dev/null 2>&1 || true`,
-    `/bin/chmod 600 "$TOKEN_PATH" "$CONFIG_PATH" >/dev/null 2>&1 || true`,
+    `/usr/sbin/chown root "$APP_SUPPORT_DIR" "$CONFIG_PATH" >/dev/null 2>&1 || true`,
+    `/bin/chmod 755 "$APP_SUPPORT_DIR" >/dev/null 2>&1 || true`,
+    `/bin/chmod 600 "$CONFIG_PATH" >/dev/null 2>&1 || true`,
     `for daemon_pid in $(/usr/sbin/lsof -tiTCP:8787 -sTCP:LISTEN 2>/dev/null); do /bin/kill -TERM "$daemon_pid" >/dev/null 2>&1 || true; done`,
     "/bin/sleep 0.2",
     `/usr/bin/nohup /usr/bin/env HOME="$TARGET_HOME" USER="$TARGET_USER" LOGNAME="$TARGET_USER" PANGEA_APP_SUPPORT_DIR="$APP_SUPPORT_DIR" ${daemonPath} >"$LOG_PATH" 2>&1 &`

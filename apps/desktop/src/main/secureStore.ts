@@ -9,26 +9,8 @@ const IV_BYTES = 12;
 const TAG_BYTES = 16;
 const MANIFEST_FILE = ".secure-manifest.json";
 
-interface SafeStorageLike {
-  isEncryptionAvailable(): boolean;
-  encryptString(plainText: string): Buffer;
-  decryptString(encrypted: Buffer): string;
-}
-
-function getSafeStorage(): SafeStorageLike | null {
-  try {
-    const electron = require("electron") as { safeStorage?: SafeStorageLike };
-    return electron?.safeStorage ?? null;
-  } catch {
-    return null;
-  }
-}
-
-function keychainUsable(): boolean {
-  const storage = getSafeStorage();
-  return storage ? storage.isEncryptionAvailable() : false;
-}
-
+// Never call Electron safeStorage: on macOS every entry point to it, reads
+// included, prompts for the keychain password on each launch.
 function looksSafeStorageEncrypted(data: Buffer): boolean {
   const prefix = data.subarray(0, 3).toString("latin1");
   if (prefix === "v10" || prefix === "v11") return true;
@@ -117,15 +99,6 @@ async function writeSecretNow(filePath: string, value: string): Promise<void> {
   const dir = path.dirname(filePath);
   await fs.mkdir(dir, { recursive: true, mode: 0o700 });
 
-  if (keychainUsable()) {
-    const storage = getSafeStorage();
-    if (storage) {
-      await writeFileAtomic(filePath, storage.encryptString(value), 0o600);
-      await markManaged(dir, path.basename(filePath));
-      return;
-    }
-  }
-
   const key = await loadOrCreateKey(dir);
   await writeFileAtomic(filePath, encryptLocal(key, value), 0o600);
   await markManaged(dir, path.basename(filePath));
@@ -158,19 +131,11 @@ export async function readSecret(filePath: string): Promise<string | null> {
     }
   }
 
-  // Written by an older build through the OS keychain: read it once, then
-  // rewrite it in the current format so the keychain is never touched again.
+  // Written by an older build through the OS keychain. Unreadable without a
+  // keychain prompt, so drop it and let the caller re-acquire the secret.
   if (looksSafeStorageEncrypted(data)) {
-    const storage = getSafeStorage();
-    try {
-      if (storage && storage.isEncryptionAvailable()) {
-        const value = storage.decryptString(data);
-        await writeSecret(filePath, value).catch(() => {});
-        return value;
-      }
-    } catch {
-      return null;
-    }
+    await markManaged(dir, basename).catch(() => {});
+    await fs.rm(filePath, { force: true }).catch(() => {});
     return null;
   }
 

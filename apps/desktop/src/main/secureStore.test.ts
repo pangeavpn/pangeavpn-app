@@ -111,3 +111,22 @@ test("writeSecret self-heals a corrupt storage key instead of failing forever", 
 
   assert.equal(await readSecret(file), "value-after-heal");
 });
+
+test("readSecret discards a keychain-encrypted file instead of prompting", async () => {
+  const dir = await tempDir();
+  const file = path.join(dir, "session.dat");
+  await fs.writeFile(file, Buffer.concat([Buffer.from("v10", "latin1"), Buffer.from("opaque")]), { mode: 0o600 });
+
+  assert.equal(await readSecret(file), null);
+  await assert.rejects(fs.readFile(file));
+});
+
+test("a discarded keychain file cannot be replaced with plaintext", async () => {
+  const dir = await tempDir();
+  const file = path.join(dir, "license.dat");
+  await fs.writeFile(file, Buffer.from("v11opaque", "latin1"), { mode: 0o600 });
+  await readSecret(file);
+
+  await fs.writeFile(file, "forged-key", { mode: 0o600 });
+  assert.equal(await readSecret(file), null);
+});

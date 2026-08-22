@@ -155,6 +155,9 @@ WORK_DIR="$(mktemp -d -t pangeavpn-install)"
 # Keep sudo alive for the duration of the script
 while true; do sudo -n true || true; sleep 50; kill -0 "$$" 2>/dev/null || exit; done 2>/dev/null &
 SUDO_KEEPALIVE_PID=$!
+# disown it, or the shell prints a "Terminated" job notice over the closing
+# message when the trap kills it.
+disown "$SUDO_KEEPALIVE_PID" 2>/dev/null || true
 trap 'kill "$SUDO_KEEPALIVE_PID" 2>/dev/null || true; rm -rf "$WORK_DIR"' EXIT
 
 # ── Locate the PKG ──────────────────────────────────────────────────────────

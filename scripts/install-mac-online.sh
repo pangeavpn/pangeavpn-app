@@ -172,6 +172,9 @@ main() {
     # Refresh the 5-minute sudo timestamp so a slow download cannot expire it.
     while true; do sudo -n true || true; sleep 50; kill -0 "$$" 2>/dev/null || exit; done 2>/dev/null &
     SUDO_KEEPALIVE_PID=$!
+    # disown it, or the shell prints a "Terminated" job notice over the
+    # closing message when the cleanup trap kills it.
+    disown "$SUDO_KEEPALIVE_PID" 2>/dev/null || true
 
     # ── Resolve the DMG URL for this arch ───────────────────────────────────
     # Prefer the hub (censorship-resistant); fall back to GitHub if unreachable.
