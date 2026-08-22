@@ -6,6 +6,14 @@
  *  hand-edited file or a compromised response aim the client somewhere the
  *  validation below cannot reason about. */
 
+/** Shipped relays. Without them an install that has never reached the hub has
+ *  no relay at all; the hub's list replaces them once one arrives. */
+export const DEFAULT_FRONTED_ENDPOINTS: readonly string[] = [
+  "cdn.pangeavpn.it",
+  "pangea-relay-org.purple-field-fb05.workers.dev",
+  "pangea-relay-alt.purple-field-fb05.workers.dev"
+];
+
 const MAX_HOSTNAME_LENGTH = 253;
 const LABEL = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
 // All-numeric labels also match LABEL, so a dotted-quad IP would otherwise
@@ -42,6 +50,12 @@ export function restoreFrontedEndpoints(stored: unknown): string[] {
     if (host && !out.includes(host)) out.push(host);
   }
   return out;
+}
+
+/** The stored list, or the shipped relays when nothing usable is stored. */
+export function seedFrontedEndpoints(stored: unknown): string[] {
+  const restored = restoreFrontedEndpoints(stored);
+  return restored.length > 0 ? restored : [...DEFAULT_FRONTED_ENDPOINTS];
 }
 
 /**

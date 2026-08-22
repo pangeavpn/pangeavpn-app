@@ -13,7 +13,7 @@ const MANUAL_CHECK_MIN_INTERVAL_MS = 60_000;
 const CONNECT_WAIT_MS = 5 * 60 * 1000;
 
 // Only these hosts (and their subdomains) may be opened as a release link.
-const ALLOWED_RELEASE_HOSTS = ["github.com", "pangeavpn.org"];
+const ALLOWED_RELEASE_HOSTS = ["github.com", "pangeavpn.org", "pangeavpn.it"];
 
 interface LatestRelease {
   version: string;
