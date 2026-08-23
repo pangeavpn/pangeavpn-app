@@ -265,7 +265,9 @@ func (m *Manager) Start(ctx context.Context, profile state.RealityProfile) error
 
 	remoteAddr := &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: targetPort}
 	go func() {
-		bridgeErr := bridgeUDP(engineCtx, localConn, remote, remoteAddr)
+		bridgeErr := bridgeUDP(engineCtx, localConn, remote, remoteAddr, func(format string, args ...any) {
+			m.logs.Add(state.LogDebug, state.SourceDaemon, fmt.Sprintf("reality "+format, args...))
+		})
 
 		m.mu.Lock()
 		if m.generation == generation {

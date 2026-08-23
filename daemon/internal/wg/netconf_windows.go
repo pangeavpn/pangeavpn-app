@@ -88,10 +88,10 @@ func configureWindowsInterface(luidValue uint64, addresses []string, allowedIPs 
 	}
 	// Addresses first: an on-link default route can fail ERROR_NOT_FOUND on an
 	// interface with no address configured yet.
-	if err := luid.SetRoutesForFamily(windowsFamilyV4, routes4); err != nil {
+	if err := setWindowsRoutesForFamily(luid, windowsFamilyV4, routes4); err != nil {
 		errs = append(errs, fmt.Errorf("set IPv4 routes: %w", err))
 	}
-	if err := luid.SetRoutesForFamily(windowsFamilyV6, routes6); err != nil {
+	if err := setWindowsRoutesForFamily(luid, windowsFamilyV6, routes6); err != nil {
 		errs = append(errs, fmt.Errorf("set IPv6 routes: %w", err))
 	}
 	if err := configureWindowsIPInterface(luid, mtu); err != nil {
@@ -102,6 +102,17 @@ func configureWindowsInterface(luidValue uint64, addresses []string, allowedIPs 
 	}
 
 	return errors.Join(errs...)
+}
+
+// setWindowsRoutesForFamily replaces the family's routes, retrying once on
+// ERROR_NOT_FOUND: FlushRoutes reports a row the OS already removed and
+// SetRoutesForFamily then returns before installing anything.
+func setWindowsRoutesForFamily(luid winipcfg.LUID, family winipcfg.AddressFamily, routes []*winipcfg.RouteData) error {
+	err := luid.SetRoutesForFamily(family, routes)
+	if err != nil && errors.Is(err, windows.ERROR_NOT_FOUND) {
+		err = luid.SetRoutesForFamily(family, routes)
+	}
+	return err
 }
 
 func clearWindowsInterfaceConfig(luidValue uint64) error {

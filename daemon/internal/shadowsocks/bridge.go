@@ -44,12 +44,16 @@ func bridgeUDP(ctx context.Context, local *net.UDPConn, remote net.PacketConn, r
 				}
 				continue
 			}
-			// Pin the peer to whoever spoke first; anything else is another
-			// local process trying to hijack the return path.
+			// Pin the peer to whoever spoke first; other local sources are
+			// rejected unless they open with a fresh WireGuard initiation
+			// (the device was rebuilt mid-session and has a new socket).
 			if known := peer.Load(); known == nil {
 				peer.Store(addr)
 			} else if !sameUDPAddr(known, addr) {
-				continue
+				if !isWireGuardInitiation(buf[:n]) {
+					continue
+				}
+				peer.Store(addr)
 			}
 			if _, err := remote.WriteTo(buf[:n], remoteAddr); err != nil {
 				if isBridgeShutdown(err) {
@@ -135,4 +139,14 @@ func isBridgeShutdown(err error) bool {
 // platforms for loopback traffic and would otherwise reject a valid peer.
 func sameUDPAddr(a, b *net.UDPAddr) bool {
 	return a.Port == b.Port && a.IP.Equal(b.IP)
+}
+
+// wireGuardInitiationLen is a WireGuard handshake-initiation datagram: message
+// type 1 plus three zero reserved bytes, 148 bytes total.
+const wireGuardInitiationLen = 148
+
+// isWireGuardInitiation gates re-pinning the reply peer: a forged initiation
+// only diverts ciphertext the forger cannot read.
+func isWireGuardInitiation(pkt []byte) bool {
+	return len(pkt) == wireGuardInitiationLen && pkt[0] == 1 && pkt[1] == 0 && pkt[2] == 0 && pkt[3] == 0
 }
