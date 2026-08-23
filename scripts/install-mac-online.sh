@@ -187,33 +187,39 @@ main() {
     TMPDIR_PANGEA="$(mktemp -d -t pangeavpn-install)"
     RELEASE_FILE="$TMPDIR_PANGEA/release.json"
     RELEASE_JSON=""
-
-    # One quick try each: with the VPN up, hub traffic is deliberately routed
-    # around the tunnel and a hostile network blackholes it - minutes of
-    # "returned 000" retries when GitHub (through the tunnel) works instantly.
-    if http_fetch "$HUB_LATEST_URL" "$RELEASE_FILE" lookup 1 && [[ -s "$RELEASE_FILE" ]]; then
-        RELEASE_JSON="$(cat "$RELEASE_FILE")"
-    elif http_fetch "$GITHUB_LATEST_URL" "$RELEASE_FILE" lookup 2 && [[ -s "$RELEASE_FILE" ]]; then
-        RELEASE_JSON="$(cat "$RELEASE_FILE")"
-    elif [[ "$HTTP_STATUS" == "429" || "$HTTP_STATUS" == "403" ]]; then
-        fail "The download server is refusing new requests from your network right now (HTTP ${HTTP_STATUS}) - usually because many people share your connection. Wait a few minutes and run this again, or download directly from ${DOWNLOAD_URL}"
-    else
-        fail "Could not reach the download server (HTTP ${HTTP_STATUS}). If the rest of your internet works, your network may be blocking it - try a different network, or get the installer from ${DOWNLOAD_URL}"
-    fi
+    DMG_URL=""
+    SAW_RELEASE=""
 
     # Accepts the hub's "url" and GitHub's "browser_download_url" asset shapes.
     # GitHub pretty-prints its JSON, so a space may follow the colon.
-    DMG_URL="$(
-        printf "%s" "$RELEASE_JSON" \
-            | tr ',' '\n' \
+    extract_dmg_url() {
+        tr ',' '\n' < "$RELEASE_FILE" \
             | grep -Eo '"(url|browser_download_url)":[[:space:]]*"https://[^"]+'"$ARCH_TAG"'-installer\.dmg"' \
             | head -1 \
             | sed -E 's/.*"(https:[^"]+)".*/\1/' \
             || true
-    )"
+    }
 
-    if [[ -z "$DMG_URL" ]]; then
+    # A source only counts once it yields a DMG for this arch. Filtered networks
+    # answer the hub with a 200 HTML block page, which must not end the lookup.
+    try_release_source() {
+        http_fetch "$1" "$RELEASE_FILE" lookup "$2" && [[ -s "$RELEASE_FILE" ]] || return 1
+        grep -q '"assets"' "$RELEASE_FILE" && SAW_RELEASE=1
+        DMG_URL="$(extract_dmg_url)"
+        [[ -n "$DMG_URL" ]]
+    }
+
+    # One quick try each: with the VPN up, hub traffic is deliberately routed
+    # around the tunnel and a hostile network blackholes it - minutes of
+    # "returned 000" retries when GitHub (through the tunnel) works instantly.
+    if try_release_source "$HUB_LATEST_URL" 1 || try_release_source "$GITHUB_LATEST_URL" 2; then
+        RELEASE_JSON="$(cat "$RELEASE_FILE")"
+    elif [[ -n "$SAW_RELEASE" ]]; then
         fail "The latest release has no download for this Mac yet. It may still be uploading - try again in a few minutes, or see ${DOWNLOAD_URL}"
+    elif [[ "$HTTP_STATUS" == "429" || "$HTTP_STATUS" == "403" ]]; then
+        fail "The download server is refusing new requests from your network right now (HTTP ${HTTP_STATUS}) - usually because many people share your connection. Wait a few minutes and run this again, or download directly from ${DOWNLOAD_URL}"
+    else
+        fail "Could not reach the download server (HTTP ${HTTP_STATUS}). If the rest of your internet works, your network may be blocking it - try a different network, or get the installer from ${DOWNLOAD_URL}"
     fi
 
     VERSION="$(printf "%s" "$RELEASE_JSON" | grep -Eo '"(version|tag_name)":[[:space:]]*"[^"]+"' | head -1 | sed -E 's/.*"([^"]+)"$/\1/' | sed 's/^v//' || true)"
