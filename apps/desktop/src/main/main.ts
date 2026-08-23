@@ -60,6 +60,7 @@ let tray: Tray | null = null;
 let isQuitting = false;
 let trayStatusState: StatusResponse["state"] = "DISCONNECTED";
 let trayStatusDetail = "idle";
+let trayStatusReconnecting = false;
 let trayActionInProgress = false;
 let trayStatusRefreshPromise: Promise<void> | null = null;
 let trayStatusTimer: NodeJS.Timeout | null = null;
@@ -491,12 +492,14 @@ async function refreshTrayStatus(): Promise<void> {
       const status = await withDaemonRestartOnUnavailable(() => daemonClient.getStatus(), "tray status", { allowRestart: false });
       trayStatusState = status.state;
       trayStatusDetail = status.detail;
+      trayStatusReconnecting = status.reconnecting;
       if (status.transportsExhausted) {
         void rotateAwayFromBlockedServer();
       }
     } catch {
       trayStatusState = "ERROR";
       trayStatusDetail = "daemon unavailable";
+      trayStatusReconnecting = false;
     } finally {
       updateTrayMenu();
       notifyConnectionStateChange(trayStatusState);
@@ -570,6 +573,8 @@ async function recoverFromNetworkChange(): Promise<void> {
     if (trayStatusState === "CONNECTED" || trayStatusState === "CONNECTING") {
       return;
     }
+    // The disconnect below would cancel the daemon's own cascade mid-transport.
+    if (trayStatusReconnecting) return;
     if (isCancelled(attempt)) return;
     console.log("network change detected — attempting reconnect");
     // Tear down stale tunnel/firewall state, keeping the kill switch when

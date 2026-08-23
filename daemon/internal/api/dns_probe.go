@@ -465,6 +465,15 @@ func (s *Service) recordDNSProbeFailure() (int, bool) {
 	return failures, true
 }
 
+// deferDataPathRebuild gives back the rebuild a round just claimed, so a tunnel
+// judged while the host had no network is re-judged as soon as it is back.
+func (s *Service) deferDataPathRebuild() {
+	s.recoveryMu.Lock()
+	defer s.recoveryMu.Unlock()
+	s.dnsProbeFailures = 0
+	s.dnsProbeQuietUntil = time.Time{}
+}
+
 // resetDNSProbe restarts the schedule for a tunnel that has just come up, so it
 // is not judged on the previous one's failures and gets a round to settle.
 //

@@ -278,3 +278,96 @@ func TestProveDataPath_ProbesTheLiveTunnelInterface(t *testing.T) {
 		}
 	}
 }
+
+// TestHealthCheck_DeadDataPathWaitsForUsableNetwork is the idle-laptop case: the
+// NIC drops for a moment, the probe fails, and a cascade dialled now would fail
+// on every transport and tell the app this server is blocked.
+func TestHealthCheck_DeadDataPathWaitsForUsableNetwork(t *testing.T) {
+	svc, probe := cascadeTestService(t, map[string]bool{"shadowsocks": true})
+	if err := svc.Connect(context.Background(), "p1", ConnectOptions{}); err != nil {
+		t.Fatalf("connect failed: %v", err)
+	}
+
+	var networkKeyMu sync.Mutex
+	networkKey := ""
+	svc.networkKey = func() string {
+		networkKeyMu.Lock()
+		defer networkKeyMu.Unlock()
+		return networkKey
+	}
+
+	probe.reset(map[string]bool{})
+	runProbedHealthChecks(svc, dnsProbeFailuresBeforeRebuild)
+
+	if order := probe.recoveryOrder("shadowsocks"); len(order) != 0 {
+		t.Fatalf("cascade ran with no host network: %v", order)
+	}
+	if st := svc.Status(context.Background()); st.State != state.StateConnected || st.TransportsExhausted {
+		t.Fatalf("status = %s exhausted=%v, want CONNECTED and not exhausted while waiting", st.State, st.TransportsExhausted)
+	}
+
+	networkKeyMu.Lock()
+	networkKey = "eth0:192.0.2.10"
+	networkKeyMu.Unlock()
+	probe.reset(map[string]bool{"reality": true})
+	runProbedHealthChecks(svc, dnsProbeFailuresBeforeRebuild)
+
+	if got := svc.activeTransportKindSnapshot(); got != "reality" {
+		t.Fatalf("active transport once the network is back = %q, want reality (rebuild must not wait out the cooldown)", got)
+	}
+}
+
+// TestStatus_HostNetworkOutageIsNotExhaustion: a cascade that failed because the
+// host had no route is not this server being blocked, so the app must not rotate.
+func TestStatus_HostNetworkOutageIsNotExhaustion(t *testing.T) {
+	svc, probe := cascadeTestService(t, map[string]bool{"shadowsocks": true})
+	if err := svc.Connect(context.Background(), "p1", ConnectOptions{}); err != nil {
+		t.Fatalf("connect failed: %v", err)
+	}
+
+	probe.reset(map[string]bool{})
+	svc.probeResolver = func(context.Context, string, string) error {
+		return errors.New("dial udp 10.0.0.53:53: connect: A socket operation was attempted to an unreachable network.")
+	}
+	runProbedHealthChecks(svc, dnsProbeFailuresBeforeRebuild)
+
+	st := svc.Status(context.Background())
+	if st.State != state.StateError {
+		t.Fatalf("state = %s, want ERROR after a failed rebuild", st.State)
+	}
+	if st.TransportsExhausted {
+		t.Fatal("an outage on the host must not be reported as exhausted transports")
+	}
+	if !st.Reconnecting {
+		t.Fatal("the daemon must keep recovering the session itself")
+	}
+}
+
+func TestHandshakeTimeoutFor_RebuildsGetTheLongerBudget(t *testing.T) {
+	ctx := context.Background()
+	if got := handshakeTimeoutFor(ctx, 0); got != defaultWireGuardHandshakeTimeout {
+		t.Fatalf("default = %s", got)
+	}
+	if got := handshakeTimeoutFor(withHandshakeBudget(ctx, rebuildHandshakeTimeout), 0); got != rebuildHandshakeTimeout {
+		t.Fatalf("rebuild budget = %s, want %s", got, rebuildHandshakeTimeout)
+	}
+	if got := handshakeTimeoutFor(withHandshakeBudget(ctx, rebuildHandshakeTimeout), time.Millisecond); got != time.Millisecond {
+		t.Fatalf("configured timeout must win, got %s", got)
+	}
+}
+
+func TestHostNetworkUnreachable(t *testing.T) {
+	cases := map[string]bool{
+		"all configured transports failed: reality: dial tcp: connectex: A socket operation was attempted to an unreachable network.": true,
+		"all configured transports failed: cloak: no wireguard handshake within 10s; reality: dial: no route to host":                  true,
+		"all configured transports failed: cloak: no wireguard handshake within 10s":                                                   false,
+	}
+	for msg, want := range cases {
+		if got := hostNetworkUnreachable(errors.New(msg)); got != want {
+			t.Errorf("%q: got %v want %v", msg, got, want)
+		}
+	}
+	if hostNetworkUnreachable(nil) {
+		t.Error("nil error must not be an outage")
+	}
+}

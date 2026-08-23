@@ -4,6 +4,9 @@ export type AutoConnectDeps = {
   getEnabled: () => boolean;
   getAuthenticated: () => boolean;
   getDaemonState: () => StatusResponse["state"];
+  /** The daemon is rebuilding a dropped session itself; a Connect fired on top
+   *  of that queues behind its cascade or restarts it from scratch. */
+  getDaemonReconnecting?: () => boolean;
   getUserIntent: () => "connected" | "disconnected";
   getConnectionInFlight: () => boolean;
   /** Reports the attempt's own busy state to the rest of the UI, so a manual
@@ -82,6 +85,7 @@ function shouldAttempt(): boolean {
   if (inFlight) return false;
   const state = deps.getDaemonState();
   if (state !== "DISCONNECTED" && state !== "ERROR") return false;
+  if (deps.getDaemonReconnecting?.()) return false;
   if (!resolveServerId()) return false;
   if (Date.now() < nextAttemptAtMs) return false;
   return true;

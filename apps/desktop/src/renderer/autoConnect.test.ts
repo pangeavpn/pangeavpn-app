@@ -111,3 +111,19 @@ test("notifyUserConnected clears backoff state set up by a prior failure", async
   notifyStatusTick();
   assert.equal(deps.inFlightCalls.filter((v) => v).length, 2);
 });
+
+test("no attempt while the daemon is recovering a dropped session itself", async () => {
+  let attempts = 0;
+  const deps = makeDeps({
+    getDaemonState: () => "ERROR",
+    getDaemonReconnecting: () => true,
+    provisionAndSwitch: async () => {
+      attempts += 1;
+      return { ok: true, serverId: "srv-1" };
+    }
+  });
+  initAutoConnect(deps);
+  await attemptInitialAutoConnect();
+  notifyStatusTick();
+  assert.equal(attempts, 0);
+});

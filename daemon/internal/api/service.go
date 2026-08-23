@@ -1402,6 +1402,28 @@ func transportLocalPort(profile *state.Profile, kind string) int {
 // on the first WireGuard packet, so the handshake also covers Cloak's session).
 const defaultWireGuardHandshakeTimeout = 10 * time.Second
 
+// rebuildHandshakeTimeout is the per-transport budget when recovering a dropped session:
+// the usual cause is a host network still settling, which the first-connect budget outran.
+const rebuildHandshakeTimeout = 20 * time.Second
+
+type handshakeBudgetKey struct{}
+
+func withHandshakeBudget(ctx context.Context, d time.Duration) context.Context {
+	return context.WithValue(ctx, handshakeBudgetKey{}, d)
+}
+
+// handshakeTimeoutFor resolves the budget for one wait: an explicitly configured
+// timeout (tests) wins, then the context's budget, then the default.
+func handshakeTimeoutFor(ctx context.Context, configured time.Duration) time.Duration {
+	if configured > 0 {
+		return configured
+	}
+	if budget, ok := ctx.Value(handshakeBudgetKey{}).(time.Duration); ok && budget > 0 {
+		return budget
+	}
+	return defaultWireGuardHandshakeTimeout
+}
+
 // wireGuardHandshakePollInterval is how often waitForWireGuardHandshake
 // re-reads WireGuard status while waiting for the first handshake.
 const wireGuardHandshakePollInterval = 200 * time.Millisecond
@@ -1412,10 +1434,7 @@ const wireGuardHandshakePollInterval = 200 * time.Millisecond
 // session. Returns an error if the interface drops, the deadline passes, or ctx
 // is cancelled (Disconnect).
 func (s *Service) waitForWireGuardHandshake(ctx context.Context, wireGuardProfile state.WireGuardProfile) error {
-	timeout := s.handshakeTimeout
-	if timeout <= 0 {
-		timeout = defaultWireGuardHandshakeTimeout
-	}
+	timeout := handshakeTimeoutFor(ctx, s.handshakeTimeout)
 	deadline := time.Now().Add(timeout)
 	for {
 		status, err := s.wg.Status(ctx, wireGuardProfile)
@@ -2185,6 +2204,14 @@ func (s *Service) runHealthCheck(ctx context.Context) {
 // escalateDeadDataPath rebuilds a session whose tunnel stopped carrying traffic,
 // re-running the whole cascade rather than restarting the transport that died.
 func (s *Service) escalateDeadDataPath(ctx context.Context, profile state.Profile, activeKind string) {
+	// A tunnel with no host network under it is not a blocked transport; a
+	// cascade dialled now fails everywhere and reads as exhaustion to the app.
+	if !s.networkLooksUsable() {
+		s.deferDataPathRebuild()
+		s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf(
+			"%s tunnel stopped carrying traffic, but the host has no network to rebuild on; waiting for it", activeKind))
+		return
+	}
 	s.setDemotedTransport(activeKind)
 	s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf(
 		"%s tunnel stopped carrying traffic; trying every transport again", activeKind))
@@ -2210,6 +2237,21 @@ func (s *Service) setTransportsExhausted(exhausted bool) {
 	s.recoveryMu.Lock()
 	defer s.recoveryMu.Unlock()
 	s.transportsExhausted = exhausted
+}
+
+// hostNetworkUnreachable reports whether a failed cascade ran into the host
+// having no route out (a NIC mid-resume), rather than every transport being blocked.
+func hostNetworkUnreachable(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	for _, marker := range []string{"unreachable network", "unreachable host", "network is unreachable", "no route to host", "network is down", "dead network"} {
+		if strings.Contains(msg, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Service) transportsAreExhausted() bool {
@@ -2260,6 +2302,7 @@ func (s *Service) retryDroppedSession(ctx context.Context) {
 // why the session needs rebuilding and is carried into the error detail so the
 // UI keeps naming the original fault rather than just the latest retry.
 func (s *Service) attemptSessionRebuild(ctx context.Context, profile state.Profile, cause string) {
+	s.setTransportsExhausted(false)
 	err := s.rebuildSilentSession(ctx, profile)
 	if errors.Is(err, errRebuildBusy) {
 		// A real operation (or an overlapping rebuild) already owns opMu;
@@ -2267,7 +2310,9 @@ func (s *Service) attemptSessionRebuild(ctx context.Context, profile state.Profi
 		// attempt or push the backoff out.
 		return
 	}
-	s.setTransportsExhausted(errors.Is(err, ErrTransportExhausted))
+	// Exhaustion is the app's cue to rotate servers; a cascade that ran into a
+	// dead host network says nothing about this server.
+	s.setTransportsExhausted(errors.Is(err, ErrTransportExhausted) && !hostNetworkUnreachable(err))
 
 	attempt := s.beginRecoveryAttempt()
 	if attempt > 1 {
@@ -2443,7 +2488,7 @@ func (s *Service) rebuildSilentSession(ctx context.Context, profile state.Profil
 	defer s.opMu.Unlock()
 	defer clearCancel()
 	defer cancel()
-	ctx = rebuildCtx
+	ctx = withHandshakeBudget(rebuildCtx, rebuildHandshakeTimeout)
 
 	if currentState, _ := s.machine.Get(); currentState != state.StateConnected && currentState != state.StateError {
 		return errors.New("state changed")
@@ -3064,6 +3109,7 @@ func (s *Service) clearCurrentProfile() {
 	s.profileMu.Unlock()
 
 	s.endDNSProbeSession()
+	s.setTransportsExhausted(false)
 }
 
 func (s *Service) setSessionOpts(opts ConnectOptions) {

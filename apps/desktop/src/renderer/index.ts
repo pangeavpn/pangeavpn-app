@@ -1889,6 +1889,7 @@ async function init(): Promise<void> {
       getEnabled: () => autoConnectLocal,
       getAuthenticated: () => authState.authenticated,
       getDaemonState: () => currentDaemonState,
+      getDaemonReconnecting: () => latestStatus?.reconnecting === true,
       getUserIntent,
       getConnectionInFlight: () => connectInFlight,
       setConnectionInFlight: (inFlight: boolean) => {
