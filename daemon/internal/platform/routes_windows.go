@@ -31,19 +31,6 @@ type defaultGatewayRecord struct {
 func RepairNetworkAfterTunnelDisconnect(ctx context.Context, tunnelNames []string) ([]string, error) {
 	actions := make([]string, 0, 8)
 
-	removedRoutes, removeErr := removeLikelyTunnelDefaultRoutes(ctx, tunnelNames)
-	if removeErr != nil {
-		actions = append(actions, fmt.Sprintf("warning: stale route cleanup failed: %v", removeErr))
-	} else if len(removedRoutes) > 0 {
-		actions = append(actions, fmt.Sprintf("removed stale tunnel default routes: %s", strings.Join(removedRoutes, ", ")))
-	}
-
-	if stale, staleErr := hasStaleTunnelDefaultRoute(ctx, tunnelNames); staleErr != nil {
-		actions = append(actions, fmt.Sprintf("warning: stale route verification failed: %v", staleErr))
-	} else if stale {
-		actions = append(actions, "warning: tunnel default route still present after cleanup")
-	}
-
 	flushOutput, flushErr := runHiddenCommand(ctx, "ipconfig", "/flushdns")
 	if flushErr != nil {
 		actions = append(actions, fmt.Sprintf("warning: dns flush failed: %v (%s)", flushErr, strings.TrimSpace(flushOutput)))
@@ -56,6 +43,25 @@ func RepairNetworkAfterTunnelDisconnect(ctx context.Context, tunnelNames []strin
 		actions = append(actions, fmt.Sprintf("warning: destination cache cleanup failed: %v (%s)", destCacheErr, strings.TrimSpace(destCacheOutput)))
 	} else {
 		actions = append(actions, "cleared IP destination cache")
+	}
+
+	// The common disconnect needs only the cache hygiene above: gateway intact,
+	// tunnel routes gone with the adapter. Skip the route surgery when so.
+	if ok, _ := connectivityRestored(ctx, tunnelNames); ok {
+		return actions, nil
+	}
+
+	removedRoutes, removeErr := removeLikelyTunnelDefaultRoutes(ctx, tunnelNames)
+	if removeErr != nil {
+		actions = append(actions, fmt.Sprintf("warning: stale route cleanup failed: %v", removeErr))
+	} else if len(removedRoutes) > 0 {
+		actions = append(actions, fmt.Sprintf("removed stale tunnel default routes: %s", strings.Join(removedRoutes, ", ")))
+	}
+
+	if stale, staleErr := hasStaleTunnelDefaultRoute(ctx, tunnelNames); staleErr != nil {
+		actions = append(actions, fmt.Sprintf("warning: stale route verification failed: %v", staleErr))
+	} else if stale {
+		actions = append(actions, "warning: tunnel default route still present after cleanup")
 	}
 
 	if ok, _ := connectivityRestored(ctx, tunnelNames); ok {

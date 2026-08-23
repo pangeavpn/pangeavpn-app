@@ -677,6 +677,8 @@ func newTestServiceFull(
 	// Keep handshake-gated failure paths fast in tests; a live fake tunnel
 	// handshakes on the first status poll, so success paths are unaffected.
 	svc.handshakeTimeout = 200 * time.Millisecond
+	// Never let a unit test spawn the real netsh/powershell repair chain.
+	svc.networkRepair = func(context.Context, []string) ([]string, error) { return nil, nil }
 	return svc
 }
 
@@ -1883,6 +1885,156 @@ func TestHealthCheck_RecoveryWaitsForUsableNetwork(t *testing.T) {
 	svc.runHealthCheck(context.Background())
 	if st := svc.Status(context.Background()).State; st != state.StateConnected {
 		t.Fatalf("state = %q, want CONNECTED once the network is back", st)
+	}
+}
+
+// TestDisconnect_DoesNotBlockOnNetworkRepair proves the post-disconnect route
+// repair cannot hold the user in DISCONNECTING; it runs after the state flip.
+func TestDisconnect_DoesNotBlockOnNetworkRepair(t *testing.T) {
+	profile := testProfile()
+	ks := &fakeKillSwitch{}
+	svc := newTestService(t, &fakeCloakManager{}, &fakeNaiveManager{}, &fakeWGManager{}, ks, profile)
+
+	started := make(chan []string, 1)
+	release := make(chan struct{})
+	svc.networkRepair = func(ctx context.Context, tunnelNames []string) ([]string, error) {
+		started <- tunnelNames
+		<-release
+		return []string{"repaired"}, nil
+	}
+
+	if err := svc.Connect(context.Background(), profile.ID, ConnectOptions{}); err != nil {
+		t.Fatalf("connect failed: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- svc.Disconnect(context.Background(), false) }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("disconnect failed: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("disconnect blocked on the network repair")
+	}
+
+	if st, _ := svc.machine.Get(); st != state.StateDisconnected {
+		t.Fatalf("state = %q, want DISCONNECTED while repair is still running", st)
+	}
+	select {
+	case names := <-started:
+		if len(names) == 0 || names[0] != profile.WireGuard.TunnelName {
+			t.Fatalf("repair got tunnel names %v, want [%s]", names, profile.WireGuard.TunnelName)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("network repair was never started")
+	}
+	close(release)
+}
+
+// TestConnect_CancelsPendingNetworkRepair proves a reconnect cannot race a
+// still-running repair that would renew adapters under the new tunnel.
+func TestConnect_CancelsPendingNetworkRepair(t *testing.T) {
+	profile := testProfile()
+	ks := &fakeKillSwitch{}
+	svc := newTestService(t, &fakeCloakManager{}, &fakeNaiveManager{}, &fakeWGManager{}, ks, profile)
+
+	cancelled := make(chan struct{})
+	svc.networkRepair = func(ctx context.Context, tunnelNames []string) ([]string, error) {
+		<-ctx.Done()
+		close(cancelled)
+		return nil, ctx.Err()
+	}
+
+	if err := svc.Connect(context.Background(), profile.ID, ConnectOptions{}); err != nil {
+		t.Fatalf("connect failed: %v", err)
+	}
+	if err := svc.Disconnect(context.Background(), false); err != nil {
+		t.Fatalf("disconnect failed: %v", err)
+	}
+	if err := svc.Connect(context.Background(), profile.ID, ConnectOptions{}); err != nil {
+		t.Fatalf("reconnect failed: %v", err)
+	}
+
+	select {
+	case <-cancelled:
+	case <-time.After(3 * time.Second):
+		t.Fatal("reconnect did not cancel the pending network repair")
+	}
+}
+
+// TestConnect_TunnelPermittedBeforeDataPathProbe proves the kill switch opens
+// for the tunnel adapter before the bring-up probe, or the probe hits the lock.
+func TestConnect_TunnelPermittedBeforeDataPathProbe(t *testing.T) {
+	profile := testProfile()
+	// The gate only probes when the session has resolvers to ask.
+	profile.WireGuard.ConfigText = strings.Replace(profile.WireGuard.ConfigText, "[Interface]\n", "[Interface]\nDNS = 10.0.0.53\n", 1)
+	ks := &fakeKillSwitch{}
+	svc := newTestService(t, &fakeCloakManager{}, &fakeNaiveManager{}, &fakeWGManager{}, ks, profile)
+
+	probed := make(chan int, 1)
+	svc.probeResolver = func(context.Context, string, string) error {
+		ks.mu.Lock()
+		updates := ks.updateCount
+		ks.mu.Unlock()
+		probed <- updates
+		return nil
+	}
+
+	if err := svc.Connect(context.Background(), profile.ID, ConnectOptions{}); err != nil {
+		t.Fatalf("connect failed: %v", err)
+	}
+	select {
+	case updates := <-probed:
+		if updates == 0 {
+			t.Fatal("data-path probe ran before the kill switch permitted the tunnel")
+		}
+	default:
+		t.Fatal("data-path probe never ran")
+	}
+}
+
+// TestConnect_FailedReconnectRestartsNetworkRepair proves a reconnect that
+// cancels the repair but then fails cannot strand a broken host network.
+func TestConnect_FailedReconnectRestartsNetworkRepair(t *testing.T) {
+	profile := testProfile()
+	wgMgr := &fakeWGManager{}
+	svc := newTestService(t, &fakeCloakManager{}, &fakeNaiveManager{}, wgMgr, &fakeKillSwitch{}, profile)
+
+	var calls int
+	var callsMu sync.Mutex
+	restarted := make(chan struct{}, 1)
+	svc.networkRepair = func(ctx context.Context, tunnelNames []string) ([]string, error) {
+		callsMu.Lock()
+		calls++
+		first := calls == 1
+		callsMu.Unlock()
+		if first {
+			<-ctx.Done()
+			return nil, ctx.Err()
+		}
+		restarted <- struct{}{}
+		return nil, nil
+	}
+
+	if err := svc.Connect(context.Background(), profile.ID, ConnectOptions{}); err != nil {
+		t.Fatalf("connect failed: %v", err)
+	}
+	if err := svc.Disconnect(context.Background(), false); err != nil {
+		t.Fatalf("disconnect failed: %v", err)
+	}
+
+	wgMgr.mu.Lock()
+	wgMgr.startErr = errors.New("wg refuses to start")
+	wgMgr.mu.Unlock()
+	if err := svc.Connect(context.Background(), profile.ID, ConnectOptions{}); err == nil {
+		t.Fatal("expected reconnect to fail")
+	}
+
+	select {
+	case <-restarted:
+	case <-time.After(3 * time.Second):
+		t.Fatal("failed reconnect did not restart the cancelled network repair")
 	}
 }
 

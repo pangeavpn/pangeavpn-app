@@ -222,7 +222,9 @@ func probeResolverWithDialer(ctx context.Context, dialer *net.Dialer, server str
 // port-unreachable arriving as ECONNRESET/ECONNREFUSED on the connected socket
 // proves the opposite of what it looks like — the tunnel carried the round trip.
 func classifyProbeReadError(ctx context.Context, err error) error {
-	if ctx.Err() != nil {
+	// Only a deliberate cancel (Switch/Disconnect) is inconclusive; the probe's
+	// own deadline expiring IS the no-answer the round exists to detect.
+	if errors.Is(ctx.Err(), context.Canceled) {
 		return fmt.Errorf("%w: %v", errDNSProbeInconclusive, ctx.Err())
 	}
 	if errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.ECONNREFUSED) {

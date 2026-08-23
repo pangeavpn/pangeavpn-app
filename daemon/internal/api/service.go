@@ -187,6 +187,20 @@ type Service struct {
 	// repeats for every attempt beyond it. Tests shorten it.
 	recoveryDelays []time.Duration
 
+	// networkRepair is the post-disconnect route/DNS cleanup, injectable so
+	// tests don't spawn real netsh/powershell. Runs in the background.
+	networkRepair func(ctx context.Context, tunnelNames []string) ([]string, error)
+
+	// repairCancel aborts the in-flight background repair; a new connect must
+	// not race adapter renews under its fresh tunnel. Guarded by repairMu.
+	repairMu     sync.Mutex
+	repairCancel context.CancelFunc
+
+	// repairNames and repairSeq let a cancelled repair be restarted if the
+	// connect that interrupted it fails. Guarded by repairMu.
+	repairNames []string
+	repairSeq   int
+
 	// handshakeTimeout bounds how long a single transport is given to carry a
 	// first WireGuard handshake during bring-up. Defaults to
 	// defaultWireGuardHandshakeTimeout; tests set it small.
@@ -300,6 +314,7 @@ func NewService(
 		networkKey:       currentNetworkKey,
 		recoveryDelays:   defaultRecoveryDelays,
 		probeResolver:    probeResolverOverUDP,
+		networkRepair:    platform.RepairNetworkAfterTunnelDisconnect,
 	}
 }
 
@@ -433,7 +448,7 @@ type ConnectOptions struct {
 	PreferredTransport string
 }
 
-func (s *Service) Connect(ctx context.Context, profileID string, opts ConnectOptions) error {
+func (s *Service) Connect(ctx context.Context, profileID string, opts ConnectOptions) (err error) {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
 
@@ -475,6 +490,14 @@ func (s *Service) Connect(ctx context.Context, profileID string, opts ConnectOpt
 		}
 	}
 
+	// A connect that fails after interrupting the repair must re-run it, or a
+	// genuinely broken host network is stranded with no retry.
+	interruptedRepair := s.cancelNetworkRepair()
+	defer func() {
+		if err != nil {
+			s.startNetworkRepair(interruptedRepair)
+		}
+	}()
 	adopted, err := s.attachToRunningSession(ctx, profile, opts.PreferredTransport)
 	if err != nil {
 		s.setError(err.Error())
@@ -549,7 +572,15 @@ func wireGuardProfileFor(profile state.Profile, allowLAN bool) (state.WireGuardP
 // Connect and Switch. StateConnected is reached only after a real WireGuard
 // handshake (proven per transport inside startTransportWithHandshake), so a
 // started-but-dead tunnel never reports connected.
-func (s *Service) bringUpAfterKillSwitch(ctx context.Context, profile state.Profile, wireGuardProfile state.WireGuardProfile, opts ConnectOptions) error {
+func (s *Service) bringUpAfterKillSwitch(ctx context.Context, profile state.Profile, wireGuardProfile state.WireGuardProfile, opts ConnectOptions) (err error) {
+	// Cancelled here too because Switch and the recovery rebuild reach this
+	// without going through Connect; restarted on failure for the same reason.
+	interruptedRepair := s.cancelNetworkRepair()
+	defer func() {
+		if err != nil {
+			s.startNetworkRepair(interruptedRepair)
+		}
+	}()
 	s.machine.Set(state.StateConnecting, "starting transport")
 	stepStart := time.Now()
 
@@ -562,21 +593,6 @@ func (s *Service) bringUpAfterKillSwitch(ctx context.Context, profile state.Prof
 	s.setActiveTransportKind(kind)
 	s.rememberTransport(networkKey, kind)
 	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("%s tunnel established with wireguard handshake (%dms)", kind, time.Since(stepStart).Milliseconds()))
-
-	stepStart = time.Now()
-	tunnel := s.resolveTunnelRef(ctx, wireGuardProfile)
-	// The permit scoped to this tunnel is what lets application traffic out
-	// through the lock, so a session without it is connected and unusable —
-	// worth failing and rebuilding rather than reporting as healthy.
-	if err := s.killSwitch.Update(ctx, tunnel); err != nil {
-		s.tearDownFailedBringUp(wireGuardProfile)
-		s.setError(fmt.Sprintf("kill switch tunnel update failed: %v", err))
-		return err
-	}
-	// The LUID says which adapter the permit actually names; without it a permit
-	// left on a destroyed adapter is indistinguishable in the log from a good one.
-	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf(
-		"kill switch updated (%dms), permitting %s (LUID %d)", time.Since(stepStart).Milliseconds(), tunnel.Name, tunnel.WindowsLUID))
 
 	s.setCurrentProfile(profile)
 	s.setSessionOpts(opts)
@@ -1297,14 +1313,29 @@ func (s *Service) bringUpTransport(ctx context.Context, profile *state.Profile, 
 	}
 
 	s.machine.Set(state.StateConnecting, fmt.Sprintf("waiting for %s handshake", kind))
+	handshakeStart := time.Now()
 	if err = s.waitForWireGuardHandshake(ctx, *wireGuardProfile); err != nil {
 		return fmt.Errorf("%s: %w", kind, err)
 	}
+	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("%s wireguard handshake completed (%dms)", kind, time.Since(handshakeStart).Milliseconds()))
+
+	// The permit must open before the probe: WFP blocks the daemon's own
+	// packets out the tunnel adapter, so probing a locked tunnel always times out.
+	s.machine.Set(state.StateConnecting, fmt.Sprintf("permitting tunnel traffic over %s", kind))
+	updateStart := time.Now()
+	tunnel := s.resolveTunnelRef(ctx, *wireGuardProfile)
+	if err = s.killSwitch.Update(ctx, tunnel); err != nil {
+		return fmt.Errorf("%s: kill switch tunnel update: %w", kind, err)
+	}
+	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf(
+		"kill switch updated (%dms), permitting %s (LUID %d)", time.Since(updateStart).Milliseconds(), tunnel.Name, tunnel.WindowsLUID))
 
 	s.machine.Set(state.StateConnecting, fmt.Sprintf("checking traffic over %s", kind))
+	probeStart := time.Now()
 	if err = s.proveDataPath(ctx, *wireGuardProfile); err != nil {
 		return fmt.Errorf("%s: %w", kind, err)
 	}
+	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("%s data path verified (%dms)", kind, time.Since(probeStart).Milliseconds()))
 	return nil
 }
 
@@ -1788,22 +1819,11 @@ func (s *Service) disconnect(ctx context.Context, shouldKeepKillSwitch func() bo
 	}
 	s.setActiveTransportKind("")
 
-	if len(profilesToStop) > 0 {
-		tunnelNames := make([]string, 0, len(profilesToStop))
-		for _, p := range profilesToStop {
-			if name := strings.TrimSpace(p.WireGuard.TunnelName); name != "" {
-				tunnelNames = append(tunnelNames, name)
-			}
+	repairTunnelNames := make([]string, 0, len(profilesToStop))
+	for _, p := range profilesToStop {
+		if name := strings.TrimSpace(p.WireGuard.TunnelName); name != "" {
+			repairTunnelNames = append(repairTunnelNames, name)
 		}
-		repairCtx, repairCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		if actions, err := platform.RepairNetworkAfterTunnelDisconnect(repairCtx, tunnelNames); err != nil {
-			s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("post-disconnect network repair failed: %v", err))
-		} else {
-			for _, action := range actions {
-				s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("post-disconnect repair: %s", action))
-			}
-		}
-		repairCancel()
 	}
 
 	// Always clear profile and kill switch regardless of earlier errors.
@@ -1839,6 +1859,7 @@ func (s *Service) disconnect(ctx context.Context, shouldKeepKillSwitch func() bo
 
 	// Always transition to disconnected, even with partial cleanup failures.
 	s.machine.Set(state.StateDisconnected, "idle")
+	s.startNetworkRepair(repairTunnelNames)
 	if len(cleanupErrors) > 0 {
 		detail := fmt.Sprintf("disconnect completed with warnings: %s", strings.Join(cleanupErrors, "; "))
 		s.logs.Add(state.LogWarn, state.SourceDaemon, detail)
@@ -1846,6 +1867,62 @@ func (s *Service) disconnect(ctx context.Context, shouldKeepKillSwitch func() bo
 	}
 	s.logs.Add(state.LogInfo, state.SourceDaemon, "disconnect flow completed")
 	return nil
+}
+
+// networkRepairTimeout bounds the background post-disconnect repair; renews
+// can block on DHCP, and nothing user-visible waits on this anymore.
+const networkRepairTimeout = 45 * time.Second
+
+// startNetworkRepair runs the post-disconnect route/DNS cleanup in the
+// background: the user is already disconnected, only the host's plumbing waits.
+func (s *Service) startNetworkRepair(tunnelNames []string) {
+	if s.networkRepair == nil || len(tunnelNames) == 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), networkRepairTimeout)
+	s.repairMu.Lock()
+	if s.repairCancel != nil {
+		s.repairCancel()
+	}
+	s.repairCancel = cancel
+	s.repairNames = tunnelNames
+	s.repairSeq++
+	seq := s.repairSeq
+	s.repairMu.Unlock()
+
+	go func() {
+		defer cancel()
+		actions, err := s.networkRepair(ctx, tunnelNames)
+		s.repairMu.Lock()
+		if s.repairSeq == seq {
+			s.repairCancel = nil
+			s.repairNames = nil
+		}
+		s.repairMu.Unlock()
+		for _, action := range actions {
+			s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("post-disconnect repair: %s", action))
+		}
+		// A deliberate cancel (new connect superseding this repair) is quiet; a
+		// genuine failure or the 45s deadline expiring is worth a warning.
+		if err != nil && !errors.Is(ctx.Err(), context.Canceled) {
+			s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("post-disconnect network repair failed: %v", err))
+		}
+	}()
+}
+
+// cancelNetworkRepair aborts any in-flight background repair so it can't renew
+// adapters under a fresh tunnel; returns its tunnel names for a later restart.
+func (s *Service) cancelNetworkRepair() []string {
+	s.repairMu.Lock()
+	defer s.repairMu.Unlock()
+	if s.repairCancel == nil {
+		return nil
+	}
+	s.repairCancel()
+	s.repairCancel = nil
+	names := s.repairNames
+	s.repairNames = nil
+	return names
 }
 
 func (s *Service) Status(ctx context.Context) state.StatusResponse {
