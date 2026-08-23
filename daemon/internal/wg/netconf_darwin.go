@@ -210,7 +210,9 @@ func addDarwinAllowedIPRoutes(interfaceName string, allowedIPs []string) error {
 				"-netmask", mask.String(),
 				"-interface", interfaceName,
 			)
-			if err != nil {
+			// Overlapping AllowedIPs representations (0.0.0.0/0 vs its split
+			// halves) can collide on the same physical route; that's not a failure.
+			if err != nil && !isDarwinRouteExists(out) {
 				return fmt.Errorf("add route %s via %s: %w (%s)", rp, interfaceName, err, strings.TrimSpace(string(out)))
 			}
 		}

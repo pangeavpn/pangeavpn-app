@@ -161,7 +161,7 @@ func (m *wireGuardGoManager) PinEndpointRoutes(ctx context.Context, profile stat
 
 	added, err := addWindowsEndpointRoutes(ctx, m.ActiveLUIDs(), parsed.endpointHosts)
 	// Track what landed even on partial failure, so teardown cleans it up.
-	session.windowsRoutes = mergeWindowsRouteSpecs(session.windowsRoutes, added)
+	session.windowsRoutes = mergeSpecSet(session.windowsRoutes, added)
 	return err
 }
 
@@ -196,16 +196,18 @@ func (m *wireGuardGoManager) trySwitchInPlace(ctx context.Context, tunnelKey str
 
 	newRoutes, routeErr := addWindowsEndpointRoutes(ctx, m.ActiveLUIDs(), parsed.endpointHosts)
 	if routeErr != nil {
-		// The transport already dialled through routes pinned earlier; a route
-		// the repair guard can re-pin later is not worth a device rebuild.
+		// A failed resolve must not drop tracking of installed routes: the
+		// guard only re-pins what is tracked, so keep the union and no stale removal.
 		m.logs.Add(state.LogWarn, state.SourceWireGuard, fmt.Sprintf("in-place reconfigure: endpoint route warning: %v", routeErr))
+		session.windowsRoutes = mergeSpecSet(session.windowsRoutes, newRoutes)
+	} else {
+		stale := subtractSpecSet(session.windowsRoutes, newRoutes)
+		if err := removeWindowsEndpointRoutes(stale); err != nil {
+			m.logs.Add(state.LogWarn, state.SourceWireGuard, fmt.Sprintf("in-place reconfigure: stale route cleanup warning: %v", err))
+			newRoutes = mergeSpecSet(newRoutes, stale)
+		}
+		session.windowsRoutes = newRoutes
 	}
-	stale := subtractWindowsRouteSpecs(session.windowsRoutes, newRoutes)
-	if err := removeWindowsEndpointRoutes(stale); err != nil {
-		m.logs.Add(state.LogWarn, state.SourceWireGuard, fmt.Sprintf("in-place reconfigure: stale route cleanup warning: %v", err))
-		newRoutes = mergeWindowsRouteSpecs(newRoutes, stale)
-	}
-	session.windowsRoutes = newRoutes
 
 	if err := configureWindowsInterface(session.windowsLUID, parsed.addresses, allowedIPs, parsed.dnsServers, parsed.mtu); err != nil {
 		m.logs.Add(state.LogWarn, state.SourceWireGuard, fmt.Sprintf("in-place reconfigure: interface config failed: %v", err))
@@ -214,33 +216,6 @@ func (m *wireGuardGoManager) trySwitchInPlace(ctx context.Context, tunnelKey str
 
 	m.logs.Add(state.LogInfo, state.SourceWireGuard, fmt.Sprintf("wireguard re-pointed in place on %s", session.interfaceName))
 	return true
-}
-
-func mergeWindowsRouteSpecs(existing, extra []windowsRouteSpec) []windowsRouteSpec {
-	seen := make(map[windowsRouteSpec]struct{}, len(existing)+len(extra))
-	merged := make([]windowsRouteSpec, 0, len(existing)+len(extra))
-	for _, spec := range append(append([]windowsRouteSpec{}, existing...), extra...) {
-		if _, dup := seen[spec]; dup {
-			continue
-		}
-		seen[spec] = struct{}{}
-		merged = append(merged, spec)
-	}
-	return merged
-}
-
-func subtractWindowsRouteSpecs(from, remove []windowsRouteSpec) []windowsRouteSpec {
-	keep := make(map[windowsRouteSpec]struct{}, len(remove))
-	for _, spec := range remove {
-		keep[spec] = struct{}{}
-	}
-	var out []windowsRouteSpec
-	for _, spec := range from {
-		if _, kept := keep[spec]; !kept {
-			out = append(out, spec)
-		}
-	}
-	return out
 }
 
 func (m *wireGuardGoManager) stopWindows(_ context.Context, profile state.WireGuardProfile) error {

@@ -20,6 +20,9 @@ import (
 type darwinSessionExtra struct {
 	allowedIPs []string
 	ipv6States []darwinIPv6State
+	// appliedDNS is what this session set on the host's services; a switch to
+	// the same servers skips every networksetup call.
+	appliedDNS []string
 }
 
 var (
@@ -31,6 +34,12 @@ func storeDarwinExtra(tunnelKey string, extra *darwinSessionExtra) {
 	darwinExtraMu.Lock()
 	defer darwinExtraMu.Unlock()
 	darwinExtra[tunnelKey] = extra
+}
+
+func peekDarwinExtra(tunnelKey string) *darwinSessionExtra {
+	darwinExtraMu.Lock()
+	defer darwinExtraMu.Unlock()
+	return darwinExtra[tunnelKey]
 }
 
 func takeDarwinExtra(tunnelKey string) *darwinSessionExtra {
@@ -82,6 +91,14 @@ func (m *wireGuardGoManager) startDarwin(ctx context.Context, profile state.Wire
 	}
 
 	tunnelKey := sanitizeTunnelName(profile.TunnelName)
+	if m.hasActiveDevice(tunnelKey) {
+		if m.trySwitchInPlaceDarwin(ctx, tunnelKey, parsed, allowedIPs) {
+			return nil
+		}
+		if stopErr := m.stopDarwin(ctx, profile); stopErr != nil {
+			m.logs.Add(state.LogWarn, state.SourceWireGuard, fmt.Sprintf("teardown before device rebuild: %v", stopErr))
+		}
+	}
 	if err := m.reserveSession(tunnelKey); err != nil {
 		return err
 	}
@@ -171,16 +188,156 @@ func (m *wireGuardGoManager) startDarwin(ctx context.Context, profile state.Wire
 		interfaceName:  interfaceName,
 		device:         dev,
 		tunDevice:      tunDev,
+		deviceMTU:      clampWireGuardDeviceMTU(parsed.mtu),
 		endpointRoutes: endpointRoutes,
 		dnsOverrides:   dnsOverrides,
 	})
 	storeDarwinExtra(tunnelKey, &darwinSessionExtra{
 		allowedIPs: allowedIPs,
 		ipv6States: ipv6States,
+		appliedDNS: parsed.dnsServers,
 	})
 
 	m.logs.Add(state.LogInfo, state.SourceWireGuard, fmt.Sprintf("wireguard started for %s on %s (in-process)", profile.TunnelName, interfaceName))
 	return nil
+}
+
+// PinEndpointRoutes installs bypass routes for profile's endpoints while the
+// previous session still owns routing, so a switch's new transport can dial
+// out before the device is re-pointed. No-op without a live session. The
+// tunnel never installs "default" (only split routes), so the gateway lookup
+// still finds the physical one.
+func (m *wireGuardGoManager) PinEndpointRoutes(ctx context.Context, profile state.WireGuardProfile) error {
+	parsed, err := parseUserlandConfig(profile.ConfigText)
+	if err != nil {
+		return err
+	}
+	parsed.endpointHosts = mergeEndpointHosts(parsed.endpointHosts, profile.BypassHosts)
+
+	tunnelKey := sanitizeTunnelName(profile.TunnelName)
+	m.guardMu.Lock()
+	defer m.guardMu.Unlock()
+	session, ok := m.session(tunnelKey)
+	if !ok || session == nil {
+		return nil
+	}
+
+	added, err := addDarwinEndpointRoutes(ctx, parsed.endpointHosts)
+	// Track what landed even on partial failure, so teardown cleans it up.
+	session.endpointRoutes = mergeSpecSet(session.endpointRoutes, added)
+	return err
+}
+
+// trySwitchInPlaceDarwin re-points the live utun at a new server: UAPI peer
+// swap (replace_peers), endpoint and allowed-IP route diffs, and DNS/IPv6
+// changes only when the target state actually differs — the common switch
+// keeps both and skips every networksetup call. Reports false when the caller
+// should rebuild the device instead.
+//
+// Not transactional: a failure after IpcSet leaves the device on the new peer
+// briefly — bounded by the caller's immediate stop-and-rebuild.
+func (m *wireGuardGoManager) trySwitchInPlaceDarwin(ctx context.Context, tunnelKey string, parsed parsedUserlandConfig, allowedIPs []string) bool {
+	m.guardMu.Lock()
+	defer m.guardMu.Unlock()
+
+	session, ok := m.session(tunnelKey)
+	extra := peekDarwinExtra(tunnelKey)
+	if !ok || session == nil || session.device == nil || extra == nil {
+		return false
+	}
+	if clampWireGuardDeviceMTU(parsed.mtu) != session.deviceMTU {
+		m.logs.Add(state.LogInfo, state.SourceWireGuard, "mtu changed; rebuilding the device instead of reconfiguring in place")
+		return false
+	}
+
+	uapi, err := wgConfigToUAPI(parsed.wgConfig)
+	if err != nil {
+		m.logs.Add(state.LogWarn, state.SourceWireGuard, fmt.Sprintf("in-place reconfigure: uapi translation failed: %v", err))
+		return false
+	}
+	if err := session.device.IpcSet(uapi); err != nil {
+		m.logs.Add(state.LogWarn, state.SourceWireGuard, fmt.Sprintf("in-place reconfigure: uapi apply failed: %v", err))
+		return false
+	}
+
+	newEndpointRoutes, epErr := addDarwinEndpointRoutes(ctx, parsed.endpointHosts)
+	if epErr != nil {
+		// A failed resolve must not drop tracking of installed routes: the
+		// guard only re-pins what is tracked, so keep the union and no stale removal.
+		m.logs.Add(state.LogWarn, state.SourceWireGuard, fmt.Sprintf("in-place reconfigure: endpoint route warning: %v", epErr))
+		session.endpointRoutes = mergeSpecSet(session.endpointRoutes, newEndpointRoutes)
+	} else {
+		removeDarwinEndpointRoutes(subtractSpecSet(session.endpointRoutes, newEndpointRoutes))
+		session.endpointRoutes = newEndpointRoutes
+	}
+
+	// Track the union while routes are in flux, so a failure mid-diff still
+	// gets everything cleaned up by the fallback teardown.
+	oldAllowedIPs := extra.allowedIPs
+	extra.allowedIPs = mergeSpecSet(oldAllowedIPs, allowedIPs)
+	if err := addDarwinAllowedIPRoutes(session.interfaceName, subtractSpecSet(allowedIPs, oldAllowedIPs)); err != nil {
+		m.logs.Add(state.LogWarn, state.SourceWireGuard, fmt.Sprintf("in-place reconfigure: allowed-ip routes failed: %v", err))
+		return false
+	}
+	removeDarwinAllowedIPRoutes(session.interfaceName, subtractSpecSet(oldAllowedIPs, allowedIPs))
+	extra.allowedIPs = allowedIPs
+
+	newNeedsV6Lock := allowedIPsHaveIPv6(allowedIPs)
+	switch {
+	case newNeedsV6Lock && len(extra.ipv6States) == 0:
+		states, v6Err := disableDarwinIPv6ForSession()
+		if v6Err != nil {
+			m.logs.Add(state.LogWarn, state.SourceWireGuard, fmt.Sprintf("in-place reconfigure: ipv6 lockdown failed: %v", v6Err))
+			return false
+		}
+		extra.ipv6States = states
+	case !newNeedsV6Lock && len(extra.ipv6States) > 0:
+		restoreDarwinIPv6(extra.ipv6States)
+		extra.ipv6States = nil
+	}
+
+	if !darwinDNSListsEqual(extra.appliedDNS, parsed.dnsServers) {
+		if !m.reapplySessionDNSLocked(session, parsed.dnsServers) {
+			return false
+		}
+		extra.appliedDNS = parsed.dnsServers
+	}
+
+	m.logs.Add(state.LogInfo, state.SourceWireGuard, fmt.Sprintf("wireguard re-pointed in place on %s", session.interfaceName))
+	return true
+}
+
+// reapplySessionDNSLocked moves the session's DNS override to want. The
+// recorded pre-tunnel state is kept: overrides written now would capture the
+// tunnel's own servers and restore the wrong thing at teardown.
+func (m *wireGuardGoManager) reapplySessionDNSLocked(session *tunnelSession, want []string) bool {
+	switch {
+	case len(want) == 0 && len(session.dnsOverrides) > 0:
+		if err := restoreDarwinDNSServers(session.dnsOverrides); err != nil {
+			m.logs.Add(state.LogWarn, state.SourceWireGuard, fmt.Sprintf("in-place reconfigure: dns restore failed: %v", err))
+			return false
+		}
+		session.dnsOverrides = nil
+		clearDarwinDNSState()
+	case len(want) > 0 && len(session.dnsOverrides) == 0:
+		overrides, err := applyDarwinDNSServers(want)
+		if err != nil {
+			m.logs.Add(state.LogWarn, state.SourceWireGuard, fmt.Sprintf("in-place reconfigure: dns apply failed: %v", err))
+			return false
+		}
+		session.dnsOverrides = overrides
+		if persistErr := persistDarwinDNSState(overrides); persistErr != nil {
+			m.logs.Add(state.LogWarn, state.SourceWireGuard, fmt.Sprintf("persist DNS pre-state failed: %v", persistErr))
+		}
+	case len(want) > 0:
+		for _, override := range session.dnsOverrides {
+			if err := setDarwinDNSServers(override.service, want); err != nil {
+				m.logs.Add(state.LogWarn, state.SourceWireGuard, fmt.Sprintf("in-place reconfigure: dns update for %s failed: %v", override.service, err))
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func (m *wireGuardGoManager) stopDarwin(_ context.Context, profile state.WireGuardProfile) error {

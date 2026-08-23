@@ -111,6 +111,36 @@ const (
 	maxWireGuardMTU = 1500
 )
 
+// mergeSpecSet returns existing plus extra with duplicates dropped, first
+// occurrence order preserved. Used to reconcile tracked route sets.
+func mergeSpecSet[T comparable](existing, extra []T) []T {
+	seen := make(map[T]struct{}, len(existing)+len(extra))
+	merged := make([]T, 0, len(existing)+len(extra))
+	for _, spec := range append(append([]T{}, existing...), extra...) {
+		if _, dup := seen[spec]; dup {
+			continue
+		}
+		seen[spec] = struct{}{}
+		merged = append(merged, spec)
+	}
+	return merged
+}
+
+// subtractSpecSet returns the entries of from that are not in remove.
+func subtractSpecSet[T comparable](from, remove []T) []T {
+	drop := make(map[T]struct{}, len(remove))
+	for _, spec := range remove {
+		drop[spec] = struct{}{}
+	}
+	var out []T
+	for _, spec := range from {
+		if _, dropped := drop[spec]; !dropped {
+			out = append(out, spec)
+		}
+	}
+	return out
+}
+
 // clampWireGuardDeviceMTU is the MTU the TUN device is actually created with.
 func clampWireGuardDeviceMTU(mtu int) int {
 	switch {
