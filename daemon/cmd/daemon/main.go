@@ -185,7 +185,11 @@ func startDaemonRuntime() (*daemonRuntime, error) {
 	}
 	listener, err := net.Listen("tcp", server.Addr)
 	if err != nil {
-		return nil, fmt.Errorf("listen on %s: %w", server.Addr, err)
+		// Straight to the log store: stderr is the crash log by now, so a
+		// bare return leaves the supervisor's log showing nothing at all.
+		detail := describeListenError(server.Addr, err)
+		logs.Add(state.LogError, state.SourceDaemon, detail)
+		return nil, errors.New(detail)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
