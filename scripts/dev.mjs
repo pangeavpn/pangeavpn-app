@@ -258,9 +258,12 @@ async function startDaemon() {
   }
 
   if (goCmd) {
+    // with_utls matches the packaged builds: sing-box compiles uTLS out by
+    // default and VLESS+REALITY refuses to start without it.
+    const goRunArgs = ["run", "-tags", "with_utls", "./cmd/daemon"];
     const [cmd, args] = needsSudo
-      ? ["sudo", [...buildSudoEnvArgs(daemonEnv), goCmd, "run", "./cmd/daemon"]]
-      : [goCmd, ["run", "./cmd/daemon"]];
+      ? ["sudo", [...buildSudoEnvArgs(daemonEnv), goCmd, ...goRunArgs]]
+      : [goCmd, goRunArgs];
     return {
       managed: true,
       child: spawn(cmd, args, {
