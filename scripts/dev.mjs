@@ -6,6 +6,7 @@ import path from "node:path";
 import process from "node:process";
 
 const npmCmd = "npm";
+const MAC_DAEMON_LABEL = "com.pangea.pangeavpn.daemon";
 const isWin = process.platform === "win32";
 const goCmd = resolveGoCommand();
 const sudoContext = resolveSudoContext();
@@ -13,20 +14,21 @@ const sudoContext = resolveSudoContext();
 runNpmOrExit(["run", "build", "--workspace", "@pangeavpn/shared-types"]);
 ensureSudoUserRuntimeFiles();
 
-const daemonWasRunning = await isDaemonReachable();
-if (daemonWasRunning && !isWin) {
-  console.log("Detected existing daemon on 127.0.0.1:8787, reusing it for dev.");
-}
-
-if (daemonWasRunning && isWin) {
-  console.log("Detected existing daemon on 127.0.0.1:8787, restarting with latest elevated build.");
+// Reusing whatever already held the port meant dev silently tested a stale
+// daemon binary instead of the working tree.
+const daemonAlreadyListening = await isDaemonReachable();
+if (daemonAlreadyListening) {
+  console.log("Detected existing daemon on 127.0.0.1:8787, replacing it with the current source.");
+  if (!isWin) {
+    stopManagedDaemonService();
+  }
   killPort8787();
 }
 
 const children = [];
 let stopping = false;
 
-const daemonHandle = isWin ? await startWindowsElevatedDaemon() : daemonWasRunning ? null : await startDaemon();
+const daemonHandle = isWin ? await startWindowsElevatedDaemon() : await startDaemon();
 
 if (daemonHandle?.managed && daemonHandle.child) {
   children.push(daemonHandle.child);
@@ -39,7 +41,7 @@ if (daemonHandle?.managed && daemonHandle.child) {
   });
 }
 
-if (!daemonWasRunning && daemonHandle?.managed) {
+if (daemonHandle?.managed) {
   console.log("Waiting for daemon to be ready...");
   const ready = await waitForDaemon(60000, daemonHandle.child);
   if (!ready) {
@@ -51,16 +53,30 @@ if (!daemonWasRunning && daemonHandle?.managed) {
 const desktop = startDesktopProcess();
 children.push(desktop);
 
+// Shutdown must never block on a password prompt, so it only reuses a sudo
+// ticket the startup takeover already acquired.
 function killDaemonSync() {
-  if (isWin) {
-    killPort8787();
+  killPort8787({ interactive: false });
+}
+
+// launchd restarts the installed service the moment it dies, so the job has
+// to be booted out before the port can be taken.
+function stopManagedDaemonService() {
+  if (process.platform !== "darwin") {
     return;
-  } else {
-    killPort8787();
+  }
+  acquireSudo();
+  const result = spawnSync("sudo", ["launchctl", "bootout", "system/" + MAC_DAEMON_LABEL], {
+    stdio: "pipe",
+    shell: false,
+    timeout: 10000
+  });
+  if ((result.status ?? 1) === 0) {
+    console.log("Stopped the installed daemon service. It comes back on reboot or reinstall.");
   }
 }
 
-function killPort8787() {
+function killPort8787({ interactive = true } = {}) {
   try {
     if (isWin) {
       const result = spawnSync("netstat", ["-ano", "-p", "TCP"], { stdio: "pipe", shell: false, timeout: 5000 });
@@ -101,13 +117,30 @@ function killPort8787() {
     } else {
       const result = spawnSync("lsof", ["-ti", "tcp:8787"], { stdio: "pipe", shell: false, timeout: 5000 });
       const pids = (result.stdout ?? "").toString().trim().split("\n").filter(Boolean);
+      if (pids.length === 0) {
+        return;
+      }
+      // The daemon runs as root, so an unprivileged kill is refused silently.
+      if (interactive) {
+        acquireSudo();
+      }
+      const sudoArgs = interactive ? ["kill", "-9"] : ["-n", "kill", "-9"];
       for (const pid of pids) {
-        spawnSync("kill", ["-9", pid], { stdio: "pipe", shell: false, timeout: 3000 });
+        spawnSync("sudo", [...sudoArgs, pid], { stdio: "pipe", shell: false, timeout: 3000 });
+      }
+      const freeBy = Date.now() + 5000;
+      while (Date.now() < freeBy && isPortHeldPosix()) {
+        sleepSync(100);
       }
     }
   } catch {
     // best-effort
   }
+}
+
+function isPortHeldPosix() {
+  const result = spawnSync("lsof", ["-ti", "tcp:8787"], { stdio: "pipe", shell: false, timeout: 3000 });
+  return (result.stdout ?? "").toString().trim().length > 0;
 }
 
 function isPort8787ReachableSync() {
