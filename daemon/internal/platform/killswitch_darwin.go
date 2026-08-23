@@ -194,8 +194,10 @@ func buildPFRules(endpointIPs []string, tunnelInterface string, allowLAN bool) (
 
 	var rules []string
 
-	// Allow all loopback traffic.
-	rules = append(rules, "pass out quick on lo0 all")
+	// Loopback must be stateless: macOS pf drops stateful loopback TCP
+	// (unchecksummed TSO segments), which cut the app off from the daemon.
+	rules = append(rules, "pass out quick on lo0 all no state")
+	rules = append(rules, "pass in quick on lo0 all no state")
 
 	// Allow traffic to VPN transport endpoint IPs, v4 and v6 alike.
 	for _, ip := range endpointIPs {

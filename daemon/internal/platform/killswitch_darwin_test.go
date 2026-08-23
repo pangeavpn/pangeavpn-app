@@ -107,3 +107,18 @@ func TestDarwinKillSwitch_ActiveDoesNotBlockBehindEnable(t *testing.T) {
 	close(release)
 	<-enableDone
 }
+
+// The shipped outage: stateful lo0 filtering made macOS pf drop loopback TCP
+// the moment the lock armed, so the app could no longer reach its own daemon.
+func TestBuildPFRules_LoopbackIsStatelessBothDirections(t *testing.T) {
+	rules, err := buildPFRules([]string{"198.51.100.20"}, "utun9", false)
+	if err != nil {
+		t.Fatalf("buildPFRules: %v", err)
+	}
+	if !strings.Contains(rules, "pass out quick on lo0 all no state") {
+		t.Fatalf("outbound lo0 rule must be stateless:\n%s", rules)
+	}
+	if !strings.Contains(rules, "pass in quick on lo0 all no state") {
+		t.Fatalf("inbound lo0 rule must exist and be stateless:\n%s", rules)
+	}
+}
