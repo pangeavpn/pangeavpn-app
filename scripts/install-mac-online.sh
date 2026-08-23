@@ -92,7 +92,11 @@ http_fetch() {
         if [[ "$mode" == "progress" ]]; then
             code="$(curl -L --progress-bar -D "$header_file" -w '%{http_code}' -o "$dest" "$url")" || code="000"
         else
-            code="$(curl -sSL --max-time 25 -D "$header_file" -w '%{http_code}' -o "$dest" "$url" 2>/dev/null)" || code="000"
+            # Lookups fail over to a sibling URL, so a dead path gets seconds,
+            # not the download's patient retry budget.
+            local max_time=25
+            [[ "$mode" == "lookup" ]] && max_time=10
+            code="$(curl -sSL --max-time "$max_time" -D "$header_file" -w '%{http_code}' -o "$dest" "$url" 2>/dev/null)" || code="000"
         fi
         HTTP_STATUS="$code"
 
@@ -184,9 +188,12 @@ main() {
     RELEASE_FILE="$TMPDIR_PANGEA/release.json"
     RELEASE_JSON=""
 
-    if http_fetch "$HUB_LATEST_URL" "$RELEASE_FILE" && [[ -s "$RELEASE_FILE" ]]; then
+    # One quick try each: with the VPN up, hub traffic is deliberately routed
+    # around the tunnel and a hostile network blackholes it - minutes of
+    # "returned 000" retries when GitHub (through the tunnel) works instantly.
+    if http_fetch "$HUB_LATEST_URL" "$RELEASE_FILE" lookup 1 && [[ -s "$RELEASE_FILE" ]]; then
         RELEASE_JSON="$(cat "$RELEASE_FILE")"
-    elif http_fetch "$GITHUB_LATEST_URL" "$RELEASE_FILE" && [[ -s "$RELEASE_FILE" ]]; then
+    elif http_fetch "$GITHUB_LATEST_URL" "$RELEASE_FILE" lookup 2 && [[ -s "$RELEASE_FILE" ]]; then
         RELEASE_JSON="$(cat "$RELEASE_FILE")"
     elif [[ "$HTTP_STATUS" == "429" || "$HTTP_STATUS" == "403" ]]; then
         fail "The download server is refusing new requests from your network right now (HTTP ${HTTP_STATUS}) - usually because many people share your connection. Wait a few minutes and run this again, or download directly from ${DOWNLOAD_URL}"
