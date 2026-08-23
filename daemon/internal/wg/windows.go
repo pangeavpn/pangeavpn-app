@@ -65,6 +65,14 @@ func (m *wireGuardGoManager) startWindows(ctx context.Context, profile state.Wir
 	m.logs.Add(state.LogDebug, state.SourceWireGuard, fmt.Sprintf("wireguard allowed IPv4 route entries: %d", len(allowedIPs)))
 
 	tunnelKey := sanitizeTunnelName(profile.TunnelName)
+	if m.hasActiveDevice(tunnelKey) {
+		if m.trySwitchInPlace(ctx, tunnelKey, parsed, allowedIPs) {
+			return nil
+		}
+		if stopErr := m.stopWindows(ctx, profile); stopErr != nil {
+			m.logs.Add(state.LogWarn, state.SourceWireGuard, fmt.Sprintf("teardown before device rebuild: %v", stopErr))
+		}
+	}
 	if err := m.reserveSession(tunnelKey); err != nil {
 		return err
 	}
@@ -124,12 +132,115 @@ func (m *wireGuardGoManager) startWindows(ctx context.Context, profile state.Wir
 		interfaceName: interfaceName,
 		device:        dev,
 		tunDevice:     tunDev,
+		deviceMTU:     clampWireGuardDeviceMTU(parsed.mtu),
 		windowsLUID:   tunnelLUID,
 		windowsRoutes: endpointRoutes,
 	})
 
 	m.logs.Add(state.LogInfo, state.SourceWireGuard, fmt.Sprintf("wireguard started for %s on %s (in-process)", profile.TunnelName, interfaceName))
 	return nil
+}
+
+// PinEndpointRoutes installs bypass routes for profile's endpoints while the
+// previous session still owns the routing table, so a switch's new transport
+// can dial out before the device is re-pointed. No-op without a live session.
+func (m *wireGuardGoManager) PinEndpointRoutes(ctx context.Context, profile state.WireGuardProfile) error {
+	parsed, err := parseUserlandConfig(profile.ConfigText)
+	if err != nil {
+		return err
+	}
+	parsed.endpointHosts = mergeEndpointHosts(parsed.endpointHosts, profile.BypassHosts)
+
+	tunnelKey := sanitizeTunnelName(profile.TunnelName)
+	m.guardMu.Lock()
+	defer m.guardMu.Unlock()
+	session, ok := m.session(tunnelKey)
+	if !ok || session == nil || session.windowsLUID == 0 {
+		return nil
+	}
+
+	added, err := addWindowsEndpointRoutes(ctx, m.ActiveLUIDs(), parsed.endpointHosts)
+	// Track what landed even on partial failure, so teardown cleans it up.
+	session.windowsRoutes = mergeWindowsRouteSpecs(session.windowsRoutes, added)
+	return err
+}
+
+// trySwitchInPlace re-points the live device at a new server: UAPI peer swap
+// (replace_peers), endpoint bypass route diff, interface reconfigure. Reports
+// false when the caller should rebuild the device instead.
+//
+// Not transactional: a failure after IpcSet leaves the device on the new peer
+// briefly — bounded by the caller's immediate stop-and-rebuild.
+func (m *wireGuardGoManager) trySwitchInPlace(ctx context.Context, tunnelKey string, parsed parsedUserlandConfig, allowedIPs []string) bool {
+	m.guardMu.Lock()
+	defer m.guardMu.Unlock()
+
+	session, ok := m.session(tunnelKey)
+	if !ok || session == nil || session.device == nil || session.windowsLUID == 0 {
+		return false
+	}
+	if clampWireGuardDeviceMTU(parsed.mtu) != session.deviceMTU {
+		m.logs.Add(state.LogInfo, state.SourceWireGuard, "mtu changed; rebuilding the device instead of reconfiguring in place")
+		return false
+	}
+
+	uapi, err := wgConfigToUAPI(parsed.wgConfig)
+	if err != nil {
+		m.logs.Add(state.LogWarn, state.SourceWireGuard, fmt.Sprintf("in-place reconfigure: uapi translation failed: %v", err))
+		return false
+	}
+	if err := session.device.IpcSet(uapi); err != nil {
+		m.logs.Add(state.LogWarn, state.SourceWireGuard, fmt.Sprintf("in-place reconfigure: uapi apply failed: %v", err))
+		return false
+	}
+
+	newRoutes, routeErr := addWindowsEndpointRoutes(ctx, m.ActiveLUIDs(), parsed.endpointHosts)
+	if routeErr != nil {
+		// The transport already dialled through routes pinned earlier; a route
+		// the repair guard can re-pin later is not worth a device rebuild.
+		m.logs.Add(state.LogWarn, state.SourceWireGuard, fmt.Sprintf("in-place reconfigure: endpoint route warning: %v", routeErr))
+	}
+	stale := subtractWindowsRouteSpecs(session.windowsRoutes, newRoutes)
+	if err := removeWindowsEndpointRoutes(stale); err != nil {
+		m.logs.Add(state.LogWarn, state.SourceWireGuard, fmt.Sprintf("in-place reconfigure: stale route cleanup warning: %v", err))
+		newRoutes = mergeWindowsRouteSpecs(newRoutes, stale)
+	}
+	session.windowsRoutes = newRoutes
+
+	if err := configureWindowsInterface(session.windowsLUID, parsed.addresses, allowedIPs, parsed.dnsServers, parsed.mtu); err != nil {
+		m.logs.Add(state.LogWarn, state.SourceWireGuard, fmt.Sprintf("in-place reconfigure: interface config failed: %v", err))
+		return false
+	}
+
+	m.logs.Add(state.LogInfo, state.SourceWireGuard, fmt.Sprintf("wireguard re-pointed in place on %s", session.interfaceName))
+	return true
+}
+
+func mergeWindowsRouteSpecs(existing, extra []windowsRouteSpec) []windowsRouteSpec {
+	seen := make(map[windowsRouteSpec]struct{}, len(existing)+len(extra))
+	merged := make([]windowsRouteSpec, 0, len(existing)+len(extra))
+	for _, spec := range append(append([]windowsRouteSpec{}, existing...), extra...) {
+		if _, dup := seen[spec]; dup {
+			continue
+		}
+		seen[spec] = struct{}{}
+		merged = append(merged, spec)
+	}
+	return merged
+}
+
+func subtractWindowsRouteSpecs(from, remove []windowsRouteSpec) []windowsRouteSpec {
+	keep := make(map[windowsRouteSpec]struct{}, len(remove))
+	for _, spec := range remove {
+		keep[spec] = struct{}{}
+	}
+	var out []windowsRouteSpec
+	for _, spec := range from {
+		if _, kept := keep[spec]; !kept {
+			out = append(out, spec)
+		}
+	}
+	return out
 }
 
 func (m *wireGuardGoManager) stopWindows(_ context.Context, profile state.WireGuardProfile) error {

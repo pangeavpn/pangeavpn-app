@@ -45,6 +45,9 @@ type tunnelSession struct {
 	interfaceName string
 	device        *device.Device
 	tunDevice     tun.Device
+	// deviceMTU is the clamped MTU the TUN was created with; an in-place
+	// reconfigure must decline when the new profile needs a different one.
+	deviceMTU int
 
 	// Networking state for cleanup.
 	endpointRoutes   []routeSpec
@@ -108,6 +111,19 @@ const (
 	maxWireGuardMTU = 1500
 )
 
+// clampWireGuardDeviceMTU is the MTU the TUN device is actually created with.
+func clampWireGuardDeviceMTU(mtu int) int {
+	switch {
+	case mtu <= 0:
+		return device.DefaultMTU
+	case mtu < minWireGuardMTU:
+		return minWireGuardMTU
+	case mtu > maxWireGuardMTU:
+		return maxWireGuardMTU
+	}
+	return mtu
+}
+
 func newWireGuardGoManager(logs *state.LogStore) *wireGuardGoManager {
 	return &wireGuardGoManager{
 		logs:     logs,
@@ -152,14 +168,7 @@ func (m *wireGuardGoManager) createInProcessDeviceWithFactory(
 	wgConfig string,
 	createTUN tunFactory,
 ) (*device.Device, tun.Device, error) {
-	switch {
-	case mtu <= 0:
-		mtu = device.DefaultMTU
-	case mtu < minWireGuardMTU:
-		mtu = minWireGuardMTU
-	case mtu > maxWireGuardMTU:
-		mtu = maxWireGuardMTU
-	}
+	mtu = clampWireGuardDeviceMTU(mtu)
 
 	tunDev, err := createTUN(interfaceName, mtu)
 	if err != nil {

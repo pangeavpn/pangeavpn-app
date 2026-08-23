@@ -217,6 +217,12 @@ type wgPreflightChecker interface {
 	Preflight(ctx context.Context, profile state.WireGuardProfile) error
 }
 
+// wgInPlaceSwitcher marks a manager whose live device Start can re-point at a
+// new server (Windows); Switch then keeps the adapter instead of rebuilding it.
+type wgInPlaceSwitcher interface {
+	PinEndpointRoutes(ctx context.Context, profile state.WireGuardProfile) error
+}
+
 type wgActiveInterfaceReporter interface {
 	ActiveInterfaceName(ctx context.Context, profile state.WireGuardProfile) (string, error)
 }
@@ -1312,23 +1318,32 @@ func (s *Service) bringUpTransport(ctx context.Context, profile *state.Profile, 
 		return err
 	}
 
+	// The permit must open before the probe: WFP blocks the daemon's own
+	// packets out the tunnel adapter, so probing a locked tunnel always times
+	// out. It doesn't depend on the handshake, so it runs alongside the wait.
+	updateDone := make(chan error, 1)
+	go func() {
+		updateStart := time.Now()
+		tunnel := s.resolveTunnelRef(ctx, *wireGuardProfile)
+		updateErr := s.killSwitch.Update(ctx, tunnel)
+		if updateErr == nil {
+			s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf(
+				"kill switch updated (%dms), permitting %s (LUID %d)", time.Since(updateStart).Milliseconds(), tunnel.Name, tunnel.WindowsLUID))
+		}
+		updateDone <- updateErr
+	}()
+
 	s.machine.Set(state.StateConnecting, fmt.Sprintf("waiting for %s handshake", kind))
 	handshakeStart := time.Now()
 	if err = s.waitForWireGuardHandshake(ctx, *wireGuardProfile); err != nil {
+		<-updateDone
 		return fmt.Errorf("%s: %w", kind, err)
 	}
 	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("%s wireguard handshake completed (%dms)", kind, time.Since(handshakeStart).Milliseconds()))
 
-	// The permit must open before the probe: WFP blocks the daemon's own
-	// packets out the tunnel adapter, so probing a locked tunnel always times out.
-	s.machine.Set(state.StateConnecting, fmt.Sprintf("permitting tunnel traffic over %s", kind))
-	updateStart := time.Now()
-	tunnel := s.resolveTunnelRef(ctx, *wireGuardProfile)
-	if err = s.killSwitch.Update(ctx, tunnel); err != nil {
+	if err = <-updateDone; err != nil {
 		return fmt.Errorf("%s: kill switch tunnel update: %w", kind, err)
 	}
-	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf(
-		"kill switch updated (%dms), permitting %s (LUID %d)", time.Since(updateStart).Milliseconds(), tunnel.Name, tunnel.WindowsLUID))
 
 	s.machine.Set(state.StateConnecting, fmt.Sprintf("checking traffic over %s", kind))
 	probeStart := time.Now()
@@ -1484,9 +1499,23 @@ func (s *Service) Switch(ctx context.Context, newProfileID string, opts ConnectO
 	}
 	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("kill switch re-enabled for %s (%dms)", newProfile.ID, time.Since(stepStart).Milliseconds()))
 
-	s.machine.Set(state.StateConnecting, fmt.Sprintf("switching to %s: stopping wireguard", newProfile.ID))
-	if err := s.wg.Stop(ctx, withTransportBypassHosts(oldProfile)); err != nil {
-		s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("switch: wg stop warning: %v", err))
+	// Adapter reuse: pin the new server's bypass routes while the old tunnel
+	// still owns the default route, then let wg.Start re-point the live device.
+	// A dial that fails before wg.Start leaves the pinned routes on the old
+	// session; the next teardown or in-place diff cleans them up.
+	keepDevice := false
+	if pinner, ok := s.wg.(wgInPlaceSwitcher); ok {
+		if err := pinner.PinEndpointRoutes(ctx, wireGuardProfile); err != nil {
+			s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("switch: could not pre-route the new endpoints (%v); rebuilding the device", err))
+		} else {
+			keepDevice = true
+		}
+	}
+	if !keepDevice {
+		s.machine.Set(state.StateConnecting, fmt.Sprintf("switching to %s: stopping wireguard", newProfile.ID))
+		if err := s.wg.Stop(ctx, withTransportBypassHosts(oldProfile)); err != nil {
+			s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("switch: wg stop warning: %v", err))
+		}
 	}
 
 	s.machine.Set(state.StateConnecting, fmt.Sprintf("switching to %s: stopping transport", newProfile.ID))

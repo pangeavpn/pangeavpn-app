@@ -5,6 +5,7 @@ import (
 	"errors"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/state"
 )
@@ -201,5 +202,55 @@ func TestSwitch_ArmsKillSwitchForNewServer(t *testing.T) {
 	}
 	if !slices.Contains(endpoints, b.Hysteria2.RemoteHost) {
 		t.Fatalf("kill switch armed with %v, missing the new server's hysteria2 endpoint %s", endpoints, b.Hysteria2.RemoteHost)
+	}
+}
+
+// fakeInPlaceWGManager models a manager (Windows) whose live device can be
+// re-pointed at a new server without being rebuilt.
+type fakeInPlaceWGManager struct {
+	fakeWGManager
+	pinCount int
+}
+
+func (f *fakeInPlaceWGManager) PinEndpointRoutes(_ context.Context, _ state.WireGuardProfile) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.pinCount++
+	return nil
+}
+
+// TestSwitch_InPlaceManagerKeepsDevice proves a switch neither stops the
+// device nor skips pre-routing the new endpoints when the manager can
+// reconfigure in place.
+func TestSwitch_InPlaceManagerKeepsDevice(t *testing.T) {
+	a, b := switchProfilePair()
+	wgMgr := &fakeInPlaceWGManager{}
+	ks := &fakeKillSwitch{}
+	machine := state.NewMachine()
+	logs := state.NewLogStore(100)
+	config := testConfigStore(t, a, b)
+	svc := NewService(machine, logs, config, &fakeCloakManager{}, &fakeNaiveManager{}, &fakeRealityManager{}, &fakeHysteria2Manager{}, &fakeShadowsocksManager{}, &fakeSnowflakeManager{}, wgMgr, ks)
+	svc.handshakeTimeout = 200 * time.Millisecond
+	svc.networkRepair = func(context.Context, []string) ([]string, error) { return nil, nil }
+
+	opts := ConnectOptions{PreferredTransport: "cloak"}
+	if err := svc.Connect(context.Background(), a.ID, opts); err != nil {
+		t.Fatalf("Connect(%s): %v", a.ID, err)
+	}
+	wgMgr.mu.Lock()
+	stopsBefore := wgMgr.stopCount
+	wgMgr.mu.Unlock()
+
+	if err := svc.Switch(context.Background(), b.ID, opts); err != nil {
+		t.Fatalf("Switch(%s -> %s): %v", a.ID, b.ID, err)
+	}
+
+	wgMgr.mu.Lock()
+	defer wgMgr.mu.Unlock()
+	if wgMgr.pinCount != 1 {
+		t.Errorf("PinEndpointRoutes called %d times, want 1", wgMgr.pinCount)
+	}
+	if wgMgr.stopCount != stopsBefore {
+		t.Errorf("switch stopped the device (%d -> %d stops); in-place manager should keep it", stopsBefore, wgMgr.stopCount)
 	}
 }
