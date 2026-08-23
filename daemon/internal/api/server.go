@@ -479,7 +479,7 @@ func NewHandler(token string, service *Service) http.Handler {
 		}
 	}))
 
-	return hostOriginMiddleware(mux)
+	return slowRequestWatchdog(hostOriginMiddleware(mux))
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {
