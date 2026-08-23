@@ -12,7 +12,7 @@ import (
 
 // slowRequestThreshold is how long a request may run before the watchdog
 // dumps every goroutine stack, naming whatever is blocking the handlers.
-var slowRequestThreshold = 10 * time.Second
+var slowRequestThreshold = 6 * time.Second
 
 // slowDumpCooldown spaces dumps out so a wedge polled at 1Hz cannot flood
 // the crash log with one dump per stuck request.

@@ -143,6 +143,10 @@ func (m *wireGuardGoManager) stopWindows(_ context.Context, profile state.WireGu
 		return nil
 	}
 
+	// Wait out any in-flight repair guard before undoing its work.
+	m.guardMu.Lock()
+	defer m.guardMu.Unlock()
+
 	if len(session.windowsRoutes) > 0 {
 		if err := removeWindowsEndpointRoutes(session.windowsRoutes); err != nil {
 			m.logs.Add(state.LogWarn, state.SourceWireGuard, fmt.Sprintf("endpoint route cleanup warning: %v", err))

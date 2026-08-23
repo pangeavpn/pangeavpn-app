@@ -195,6 +195,10 @@ func (m *wireGuardGoManager) stopDarwin(_ context.Context, profile state.WireGua
 		return nil
 	}
 
+	// Wait out any in-flight repair guard before undoing its work.
+	m.guardMu.Lock()
+	defer m.guardMu.Unlock()
+
 	// Restore DNS.
 	if len(session.dnsOverrides) > 0 {
 		if err := restoreDarwinDNSServers(session.dnsOverrides); err != nil {

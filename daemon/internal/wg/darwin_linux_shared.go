@@ -29,7 +29,16 @@ type wireGuardGoManager struct {
 	logs     *state.LogStore
 	mu       sync.Mutex
 	sessions map[string]*tunnelSession
+	// guardMu serialises the exec-heavy repair guards against teardown, so
+	// m.mu stays a map lock and /status never waits behind networksetup.
+	guardMu sync.Mutex
 }
+
+// Seams for the lock-scope tests; production always points at the real repairs.
+var (
+	ensureSessionDNSFn            = ensureSessionDNS
+	ensureSessionEndpointRoutesFn = ensureSessionEndpointRoutes
+)
 
 // tunnelSession holds state for an active in-process WireGuard tunnel.
 type tunnelSession struct {
@@ -349,22 +358,25 @@ func (m *wireGuardGoManager) EnsureEndpointRoutes(ctx context.Context, profile s
 		return false, nil
 	}
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	session, ok := m.sessions[sanitizeTunnelName(profile.TunnelName)]
-	if !ok || session == nil {
-		return false, nil
-	}
+	// guardMu, not m.mu, fences the repair against teardown: a Stop waits on
+	// it before restoring state, and a repair sees no session after a Stop.
+	m.guardMu.Lock()
+	defer m.guardMu.Unlock()
 
-	// Read directly rather than through ActiveLUIDs, which takes the lock this
-	// already holds. Every tunnel is off limits as a next hop, not just this one.
+	m.mu.Lock()
+	session, ok := m.sessions[sanitizeTunnelName(profile.TunnelName)]
 	excludeLUIDs := make(map[uint64]struct{}, len(m.sessions))
 	for _, s := range m.sessions {
 		if s != nil && s.windowsLUID != 0 {
 			excludeLUIDs[s.windowsLUID] = struct{}{}
 		}
 	}
-	return ensureSessionEndpointRoutes(ctx, session, excludeLUIDs)
+	m.mu.Unlock()
+	if !ok || session == nil {
+		return false, nil
+	}
+
+	return ensureSessionEndpointRoutesFn(ctx, session, excludeLUIDs)
 }
 
 // ---------------------------------------------------------------------------
@@ -547,15 +559,18 @@ func (m *wireGuardGoManager) EnsureDNS(_ context.Context, profile state.WireGuar
 		return false, nil
 	}
 
-	// Same contract as EnsureEndpointRoutes: hold m.mu so a Disconnect can't
-	// tear the session down mid-repair and have this re-install stale DNS.
+	// Same contract as EnsureEndpointRoutes: guardMu fences the repair
+	// against a Disconnect re-installing stale DNS mid-teardown.
+	m.guardMu.Lock()
+	defer m.guardMu.Unlock()
+
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	session, ok := m.sessions[sanitizeTunnelName(profile.TunnelName)]
+	m.mu.Unlock()
 	if !ok || session == nil {
 		return false, nil
 	}
-	return ensureSessionDNS(session, want)
+	return ensureSessionDNSFn(session, want)
 }
 
 // Resolvers reports the DNS servers a session brings the interface up with,

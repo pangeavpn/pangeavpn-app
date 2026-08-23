@@ -191,6 +191,10 @@ func (m *wireGuardGoManager) stopLinux(ctx context.Context, profile state.WireGu
 		return nil
 	}
 
+	// Wait out any in-flight repair guard before undoing its work.
+	m.guardMu.Lock()
+	defer m.guardMu.Unlock()
+
 	interfaceName := session.interfaceName
 
 	// Restore DNS.
