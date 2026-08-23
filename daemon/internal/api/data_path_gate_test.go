@@ -54,7 +54,7 @@ func (g *gatedProbe) runningKind() string {
 	}
 }
 
-func (g *gatedProbe) probe(context.Context, string) error {
+func (g *gatedProbe) probe(context.Context, string, string) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	kind := g.runningKind()
@@ -245,5 +245,36 @@ func TestRootProbeQuery_VariesWhatTheReplyWillLookLike(t *testing.T) {
 	}
 	if len(dnssec) != 2 {
 		t.Errorf("the DNSSEC bit never varied: %v", dnssec)
+	}
+}
+
+// The shipped macOS bug: scanning for the first up utun* finds the system's
+// own utun0, so the gate probed an interface the tunnel never ran on.
+func TestProveDataPath_ProbesTheLiveTunnelInterface(t *testing.T) {
+	wgMgr := &fakeWGManager{interfaceName: "utun7"}
+	svc := newTestServiceFull(t, &fakeCloakManager{}, &fakeNaiveManager{}, &fakeRealityManager{},
+		&fakeHysteria2Manager{}, &fakeShadowsocksManager{}, &fakeSnowflakeManager{}, wgMgr, &fakeKillSwitch{}, cascadeProfile())
+
+	var mu sync.Mutex
+	var probedIfaces []string
+	svc.probeResolver = func(_ context.Context, iface, _ string) error {
+		mu.Lock()
+		defer mu.Unlock()
+		probedIfaces = append(probedIfaces, iface)
+		return nil
+	}
+
+	if err := svc.proveDataPath(context.Background(), cascadeProfile().WireGuard); err != nil {
+		t.Fatalf("proveDataPath failed: %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(probedIfaces) == 0 {
+		t.Fatal("probe was never called")
+	}
+	for _, iface := range probedIfaces {
+		if iface != "utun7" {
+			t.Fatalf("probe bound to %q, want the live tunnel interface utun7", iface)
+		}
 	}
 }

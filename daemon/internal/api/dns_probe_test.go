@@ -31,7 +31,7 @@ type fakeProbe struct {
 	servers []string
 }
 
-func (p *fakeProbe) probe(_ context.Context, server string) error {
+func (p *fakeProbe) probe(_ context.Context, _, server string) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.calls++
@@ -111,14 +111,14 @@ func TestHealthCheck_DeadDataPathRebuildsSession(t *testing.T) {
 	// Fails the health rounds, then answers again: the rebuild's own bring-up
 	// has to prove a data path too, so a probe that never recovers can only
 	// produce a failed rebuild.
-	svc.probeResolver = func(ctx context.Context, server string) error {
+	svc.probeResolver = func(ctx context.Context, _, server string) error {
 		wgMgr.mu.Lock()
 		rebuilt := wgMgr.startCount > startsAfterConnect
 		wgMgr.mu.Unlock()
 		if !rebuilt {
 			return errors.New("i/o timeout")
 		}
-		return probe.probe(ctx, server)
+		return probe.probe(ctx, "", server)
 	}
 	runProbedHealthChecks(svc, dnsProbeFailuresBeforeRebuild)
 
@@ -203,11 +203,11 @@ func TestHealthCheck_DataPathProbeSecondResolverRescuesTheRound(t *testing.T) {
 	startsAfterConnect := wgMgr.startCount
 	wgMgr.mu.Unlock()
 
-	svc.probeResolver = func(ctx context.Context, server string) error {
+	svc.probeResolver = func(ctx context.Context, _, server string) error {
 		if server == "10.0.0.53" {
 			return errors.New("i/o timeout")
 		}
-		return probe.probe(ctx, server)
+		return probe.probe(ctx, "", server)
 	}
 
 	runProbedHealthChecks(svc, dnsProbeFailuresBeforeRebuild+1)
@@ -322,7 +322,7 @@ func TestHealthCheck_ConnRefusedProvesTheTunnelIsLive(t *testing.T) {
 	startsAfterConnect := wgMgr.startCount
 	wgMgr.mu.Unlock()
 
-	svc.probeResolver = func(context.Context, string) error { return errDNSProbeConnRefused }
+	svc.probeResolver = func(context.Context, string, string) error { return errDNSProbeConnRefused }
 	runProbedHealthChecks(svc, dnsProbeFailuresBeforeRebuild*2)
 
 	wgMgr.mu.Lock()
@@ -343,7 +343,7 @@ func TestHealthCheck_InconclusiveRoundIsNotBookedEitherWay(t *testing.T) {
 	startsAfterConnect := wgMgr.startCount
 	wgMgr.mu.Unlock()
 
-	svc.probeResolver = func(context.Context, string) error {
+	svc.probeResolver = func(context.Context, string, string) error {
 		return fmt.Errorf("%w: context canceled", errDNSProbeInconclusive)
 	}
 	runProbedHealthChecks(svc, dnsProbeFailuresBeforeRebuild*3)
@@ -374,7 +374,7 @@ func TestHealthCheck_SessionChangedMidRoundIsNotBooked(t *testing.T) {
 	wgMgr.mu.Unlock()
 
 	swaps := 0
-	svc.probeResolver = func(context.Context, string) error {
+	svc.probeResolver = func(context.Context, string, string) error {
 		swaps++
 		other := deadDataPathProfile()
 		other.ID = fmt.Sprintf("some-other-profile-%d", swaps)

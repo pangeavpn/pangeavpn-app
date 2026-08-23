@@ -181,7 +181,7 @@ type Service struct {
 	// probeResolver resolves over the live tunnel to prove it still carries
 	// traffic. Defaults to probeResolverOverUDP; tests stub it, and a nil value
 	// disables the check.
-	probeResolver func(ctx context.Context, server string) error
+	probeResolver func(ctx context.Context, tunnelInterface, server string) error
 
 	// recoveryDelays is the backoff between reconnect attempts; the last entry
 	// repeats for every attempt beyond it. Tests shorten it.

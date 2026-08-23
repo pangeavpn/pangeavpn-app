@@ -149,7 +149,7 @@ func activeTunnelInterface() (string, error) {
 }
 
 // probeResolverOverUDP asks a resolver a root-zone question and reports whether
-// a matching reply comes back. The socket is pinned to the tunnel interface (see
+// a matching reply comes back. The socket is pinned to tunnelInterface (see
 // bindDialerToInterface's platform variants), so the query provably leaves —
 // and the reply is provably read — over the tunnel rather than the LAN.
 //
@@ -160,12 +160,16 @@ func activeTunnelInterface() (string, error) {
 // answers it from its priming cache, and even the smallest of these replies is
 // bigger than the ~150 byte handshake packets that keep passing when a path has
 // stopped carrying anything larger.
-func probeResolverOverUDP(ctx context.Context, server string) error {
+func probeResolverOverUDP(ctx context.Context, tunnelInterface, server string) error {
 	// Local setup failures are inconclusive, not evidence: the adapter can lag
 	// the handshake, and rejecting on that would fail a working transport.
-	iface, err := activeTunnelInterface()
-	if err != nil {
-		return fmt.Errorf("%w: find tunnel interface: %v", errDNSProbeInconclusive, err)
+	iface := strings.TrimSpace(tunnelInterface)
+	if iface == "" {
+		var err error
+		iface, err = activeTunnelInterface()
+		if err != nil {
+			return fmt.Errorf("%w: find tunnel interface: %v", errDNSProbeInconclusive, err)
+		}
 	}
 	dialer, err := bindDialerToInterface(iface)
 	if err != nil {
@@ -331,10 +335,11 @@ func (s *Service) dataPathIsDead(ctx context.Context, profile state.Profile) boo
 	}
 
 	servers = probeServerOrder(servers)
+	iface := s.resolveWireGuardInterfaceName(ctx, profile.WireGuard)
 	var lastErr error
 	for _, server := range servers {
 		probeCtx, cancel := context.WithTimeout(ctx, dnsProbeTimeout)
-		err := s.probeResolver(probeCtx, server)
+		err := s.probeResolver(probeCtx, iface, server)
 		cancel()
 		switch {
 		case err == nil, errors.Is(err, errDNSProbeConnRefused):
@@ -393,6 +398,7 @@ func (s *Service) proveDataPath(ctx context.Context, wireGuardProfile state.Wire
 		return nil
 	}
 	servers = probeServerOrder(servers)
+	iface := s.resolveWireGuardInterfaceName(ctx, wireGuardProfile)
 
 	var lastErr error
 	for attempt := range dataPathGateAttempts {
@@ -405,7 +411,7 @@ func (s *Service) proveDataPath(ctx context.Context, wireGuardProfile state.Wire
 		}
 		server := servers[attempt%len(servers)]
 		probeCtx, cancel := context.WithTimeout(ctx, dnsProbeTimeout)
-		err := s.probeResolver(probeCtx, server)
+		err := s.probeResolver(probeCtx, iface, server)
 		cancel()
 		switch {
 		case err == nil, errors.Is(err, errDNSProbeConnRefused), errors.Is(err, errDNSProbeInconclusive):
