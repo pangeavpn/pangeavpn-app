@@ -93,6 +93,10 @@ var lookupResolverIP = func(ctx context.Context, network, host string) ([]net.IP
 	return net.DefaultResolver.LookupIP(ctx, network, host)
 }
 
+// endpointResolveTimeout bounds one Enable's DNS pass: behind an armed lock,
+// port 53 is blackholed and an unbounded resolve hangs the caller's mutexes.
+var endpointResolveTimeout = 15 * time.Second
+
 // EndpointResolveWarn, when set, is called for each endpoint host that could
 // not be resolved and was therefore skipped instead of being permitted through
 // the kill switch. Wired to the daemon log store in cmd/daemon so a transport
@@ -294,6 +298,11 @@ func resolveEndpointHosts(ctx context.Context, hosts []string) ([]string, error)
 		// No endpoints to permit: caller wants a pure block-all lock
 		// (e.g. Lockdown engaged while disconnected). Not an error.
 		return nil, nil
+	}
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, endpointResolveTimeout)
+		defer cancel()
 	}
 	seen := make(map[string]struct{}, len(hosts))
 	out := make([]string, 0, len(hosts))

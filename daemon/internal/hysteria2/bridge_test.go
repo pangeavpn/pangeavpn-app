@@ -108,3 +108,48 @@ func TestUDPBridgeRoundTripsThroughSocks(t *testing.T) {
 		t.Fatalf("round trip = %q, want %q", buf[:n], payload)
 	}
 }
+
+// timeoutPacketConn models a tunnel conn degraded into answering every read
+// with a timeout-class error, the shape that used to spin a pump at 100% CPU.
+type timeoutPacketConn struct{ net.PacketConn }
+
+type timeoutErr struct{}
+
+func (timeoutErr) Error() string   { return "i/o timeout" }
+func (timeoutErr) Timeout() bool   { return true }
+func (timeoutErr) Temporary() bool { return true }
+
+func (c *timeoutPacketConn) ReadFrom(_ []byte) (int, net.Addr, error) {
+	return 0, nil, timeoutErr{}
+}
+
+func TestPumpToWG_ExitsOnPersistentRecoverableErrors(t *testing.T) {
+	local, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer local.Close()
+
+	b := &udpBridge{
+		local:  local,
+		tunnel: &timeoutPacketConn{},
+		logs:   state.NewLogStore(16),
+		stop:   make(chan struct{}),
+		dead:   make(chan struct{}),
+	}
+	b.wg.Add(1)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		b.pumpToWG()
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("pump spun forever on persistent recoverable errors")
+	}
+	if !b.isDead() {
+		t.Error("bridge not marked dead after persistent errors")
+	}
+}

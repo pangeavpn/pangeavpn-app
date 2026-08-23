@@ -33,14 +33,31 @@ func init() {
 }
 
 type darwinKillSwitch struct {
-	mu       sync.Mutex
+	// opMu serialises Enable/Update/Clear; stateMu guards the flags so
+	// Active() (called by every /status) never queues behind a slow op.
+	opMu     sync.Mutex
+	stateMu  sync.Mutex
 	active   bool
 	allowLAN bool
 }
 
+func (ks *darwinKillSwitch) snapshotState() (active, allowLAN bool) {
+	ks.stateMu.Lock()
+	defer ks.stateMu.Unlock()
+	return ks.active, ks.allowLAN
+}
+
+func (ks *darwinKillSwitch) setState(active, allowLAN bool) {
+	ks.stateMu.Lock()
+	defer ks.stateMu.Unlock()
+	ks.active = active
+	ks.allowLAN = allowLAN
+}
+
 func (ks *darwinKillSwitch) Enable(ctx context.Context, endpointHosts []string, allowLAN bool, locked bool) error {
-	ks.mu.Lock()
-	defer ks.mu.Unlock()
+	ks.opMu.Lock()
+	defer ks.opMu.Unlock()
+	wasActive, _ := ks.snapshotState()
 
 	ips, err := resolveEndpointHosts(ctx, endpointHosts)
 	if err != nil {
@@ -49,7 +66,7 @@ func (ks *darwinKillSwitch) Enable(ctx context.Context, endpointHosts []string, 
 
 	var tunnelInterface string
 	var prev KillSwitchState
-	if ks.active {
+	if wasActive {
 		prev, err = loadKillSwitchState()
 		if err != nil {
 			return fmt.Errorf("kill switch enable: load state: %w", err)
@@ -64,7 +81,7 @@ func (ks *darwinKillSwitch) Enable(ctx context.Context, endpointHosts []string, 
 		}
 	}
 
-	firstActivation := !ks.active
+	firstActivation := !wasActive
 	var token string
 	if firstActivation {
 		token, err = enablePF(ctx)
@@ -91,8 +108,7 @@ func (ks *darwinKillSwitch) Enable(ctx context.Context, endpointHosts []string, 
 		}
 	}
 
-	ks.active = true
-	ks.allowLAN = allowLAN
+	ks.setState(true, allowLAN)
 
 	st := KillSwitchState{
 		Active:          true,
@@ -108,10 +124,11 @@ func (ks *darwinKillSwitch) Enable(ctx context.Context, endpointHosts []string, 
 }
 
 func (ks *darwinKillSwitch) Update(ctx context.Context, tunnel TunnelRef) error {
-	ks.mu.Lock()
-	defer ks.mu.Unlock()
+	ks.opMu.Lock()
+	defer ks.opMu.Unlock()
 
-	if !ks.active {
+	active, allowLAN := ks.snapshotState()
+	if !active {
 		return fmt.Errorf("kill switch not active")
 	}
 
@@ -125,7 +142,7 @@ func (ks *darwinKillSwitch) Update(ctx context.Context, tunnel TunnelRef) error 
 		return fmt.Errorf("kill switch update: load state: %w", err)
 	}
 
-	if err := applyPFAnchor(ctx, st.EndpointIPs, tunnelInterface, ks.allowLAN); err != nil {
+	if err := applyPFAnchor(ctx, st.EndpointIPs, tunnelInterface, allowLAN); err != nil {
 		return fmt.Errorf("kill switch update: %w", err)
 	}
 
@@ -137,8 +154,8 @@ func (ks *darwinKillSwitch) Update(ctx context.Context, tunnel TunnelRef) error 
 }
 
 func (ks *darwinKillSwitch) Clear(ctx context.Context) error {
-	ks.mu.Lock()
-	defer ks.mu.Unlock()
+	ks.opMu.Lock()
+	defer ks.opMu.Unlock()
 
 	if err := removePFAnchor(ctx); err != nil {
 		return fmt.Errorf("kill switch clear: remove anchor: %w", err)
@@ -156,14 +173,13 @@ func (ks *darwinKillSwitch) Clear(ctx context.Context) error {
 	if err := removeKillSwitchState(); err != nil {
 		return fmt.Errorf("kill switch clear: remove state: %w", err)
 	}
-	ks.active = false
+	ks.setState(false, false)
 	return nil
 }
 
 func (ks *darwinKillSwitch) Active() bool {
-	ks.mu.Lock()
-	defer ks.mu.Unlock()
-	return ks.active
+	active, _ := ks.snapshotState()
+	return active
 }
 
 // ---------------------------------------------------------------------------

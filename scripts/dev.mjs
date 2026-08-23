@@ -16,7 +16,7 @@ ensureSudoUserRuntimeFiles();
 
 // Reusing whatever already held the port meant dev silently tested a stale
 // daemon binary instead of the working tree.
-const daemonAlreadyListening = await isDaemonReachable();
+const daemonAlreadyListening = (await isDaemonReachable()) || (!isWin && isPortHeldPosix());
 if (daemonAlreadyListening) {
   console.log("Detected existing daemon on 127.0.0.1:8787, replacing it with the current source.");
   if (!isWin) {
@@ -117,13 +117,12 @@ function killPort8787({ interactive = true } = {}) {
     } else {
       // -sTCP:LISTEN is not optional: without it lsof also lists everything
       // connected to 8787, which includes this process and Electron.
+      if (interactive) {
+        acquireSudo();
+      }
       const pids = listeningPidsPosix().filter((pid) => pid !== String(process.pid) && pid !== String(process.ppid));
       if (pids.length === 0) {
         return;
-      }
-      // The daemon runs as root, so an unprivileged kill is refused silently.
-      if (interactive) {
-        acquireSudo();
       }
       const sudoArgs = interactive ? ["kill", "-9"] : ["-n", "kill", "-9"];
       for (const pid of pids) {
@@ -132,6 +131,9 @@ function killPort8787({ interactive = true } = {}) {
       const freeBy = Date.now() + 5000;
       while (Date.now() < freeBy && isPortHeldPosix()) {
         sleepSync(100);
+      }
+      if (isPortHeldPosix()) {
+        console.warn("Port 8787 is still held after the takeover; the new daemon will fail to bind.");
       }
     }
   } catch {
@@ -230,11 +232,18 @@ async function handleDaemonExit(code) {
     return;
   }
 
-  if ((code ?? 1) !== 0 && (await isDaemonReachable())) {
-    console.warn("Daemon startup exited, but another daemon is reachable; continuing.");
+  if ((code ?? 1) !== 0 && (await isDaemonHealthy())) {
+    console.warn("Daemon startup exited, but another healthy daemon is serving; continuing.");
     return;
   }
 
+  if ((code ?? 1) !== 0 && (await isDaemonReachable())) {
+    console.error("Another daemon owns 127.0.0.1:8787 but is not serving requests (it answers /ping only).");
+    console.error("It is likely wedged. Kill it, then rerun dev:");
+    console.error("  sudo launchctl bootout system/com.pangea.pangeavpn.daemon");
+    console.error("  sudo kill -9 $(sudo lsof -tiTCP:8787 -sTCP:LISTEN)");
+    console.error('Its logs: "/Library/Application Support/pangeavpn-desktop/logs/daemon-crash.log"');
+  }
   shutdown(code ?? 1);
 }
 
@@ -619,6 +628,44 @@ async function isDaemonReachable() {
   } finally {
     clearTimeout(timer);
   }
+}
+
+// A wedged daemon still answers the unauthenticated /ping; only an
+// authenticated /status round trip proves it can actually serve the app.
+async function isDaemonHealthy() {
+  const token = readDaemonTokenPosix();
+  if (!token) {
+    return false;
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 4000);
+  try {
+    const response = await fetch("http://127.0.0.1:8787/status", {
+      method: "GET",
+      headers: { Authorization: `Bearer ${token}` },
+      signal: controller.signal
+    });
+    return response.ok;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function readDaemonTokenPosix() {
+  const tokenPaths = [
+    "/Library/Application Support/pangeavpn-desktop/daemon-token.txt",
+    "/Library/Application Support/PangeaVPN/daemon-token.txt"
+  ];
+  for (const tokenPath of tokenPaths) {
+    const result = spawnSync("sudo", ["-n", "cat", tokenPath], { stdio: "pipe", shell: false, timeout: 3000 });
+    const token = (result.stdout ?? "").toString().trim();
+    if ((result.status ?? 1) === 0 && token) {
+      return token;
+    }
+  }
+  return null;
 }
 
 function sleep(ms) {

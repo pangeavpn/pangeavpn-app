@@ -278,7 +278,6 @@ func acquireLock(path string) (*fileLock, error) {
 		// process that crashed without releasing it; reclaim it.
 		if info, statErr := os.Stat(lockPath); statErr == nil && time.Since(info.ModTime()) > staleLockAge {
 			_ = os.Remove(lockPath)
-			continue
 		}
 
 		if time.Now().After(deadline) {

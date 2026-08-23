@@ -6,6 +6,7 @@ import (
 	"context"
 	"net/netip"
 	"testing"
+	"time"
 )
 
 const (
@@ -237,4 +238,20 @@ func TestDarwinIPv4Routes_ReadsTheLiveTable(t *testing.T) {
 		}
 	}
 	t.Logf("parsed %d IPv4 routes, %d of them default", len(entries), defaults)
+}
+
+// A networksetup call that hangs in configd used to hold the wg manager lock
+// forever; every exec must now die at the deadline.
+func TestDarwinCmdCombined_KillsHungCommands(t *testing.T) {
+	prev := darwinExecTimeout
+	darwinExecTimeout = 100 * time.Millisecond
+	defer func() { darwinExecTimeout = prev }()
+
+	start := time.Now()
+	if _, err := darwinCmdCombined("/bin/sleep", "30"); err == nil {
+		t.Fatal("hung command returned no error")
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Fatalf("hung command survived its deadline (%s)", elapsed)
+	}
 }

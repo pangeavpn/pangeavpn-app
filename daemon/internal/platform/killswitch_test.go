@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestResolveEndpointIPs_IPLiteral(t *testing.T) {
@@ -439,5 +440,37 @@ func TestLANAllowPrefixesAreFamilySeparated(t *testing.T) {
 		if !strings.Contains(cidr, ":") {
 			t.Errorf("LANAllowPrefixesV6 must be IPv6 only, got %s", cidr)
 		}
+	}
+}
+
+// A connect behind an armed kill switch blackholes DNS; without a deadline the
+// resolution hangs for minutes while callers hold locks /status needs.
+func TestResolveEndpointHosts_BoundsResolutionWhenContextHasNoDeadline(t *testing.T) {
+	t.Setenv("PANGEA_APP_SUPPORT_DIR", t.TempDir())
+	prevTimeout := endpointResolveTimeout
+	prevLookup := lookupResolverIP
+	endpointResolveTimeout = 50 * time.Millisecond
+	defer func() {
+		endpointResolveTimeout = prevTimeout
+		lookupResolverIP = prevLookup
+	}()
+
+	lookupResolverIP = func(ctx context.Context, _, _ string) ([]net.IP, error) {
+		if _, ok := ctx.Deadline(); !ok {
+			t.Error("lookup context has no deadline")
+		}
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = resolveEndpointHosts(context.Background(), []string{"node.example.com"})
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("resolveEndpointHosts did not return; blackholed DNS hangs it forever")
 	}
 }

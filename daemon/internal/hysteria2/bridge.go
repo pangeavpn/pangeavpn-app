@@ -49,6 +49,10 @@ type udpBridge struct {
 	wgWriteLog     rateGate
 }
 
+// maxConsecutivePumpErrors bounds a read direction failing on every call —
+// past it the conn is treated as dead instead of spinning a core forever.
+const maxConsecutivePumpErrors = 32
+
 // rateGate lets at most one caller through per interval; used to keep pump
 // goroutines from logging every datagram during a persistent failure.
 type rateGate struct {
@@ -132,19 +136,22 @@ func (b *udpBridge) isDead() bool {
 func (b *udpBridge) pumpFromWG() {
 	defer b.wg.Done()
 	buf := make([]byte, 65535)
+	consecutiveErrs := 0
 	for {
 		n, src, err := b.local.ReadFromUDP(buf)
 		if err != nil {
 			if b.stopped() {
 				return
 			}
-			if isRecoverableUDPErr(err) {
+			consecutiveErrs++
+			if isRecoverableUDPErr(err) && consecutiveErrs < maxConsecutivePumpErrors {
 				continue
 			}
-			b.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("hysteria2 bridge: read from wireguard failed: %v", err))
+			b.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("hysteria2 bridge: read from wireguard failed (%d consecutive): %v", consecutiveErrs, err))
 			b.markDead()
 			return
 		}
+		consecutiveErrs = 0
 
 		b.peerMu.Lock()
 		if b.peer == nil {
@@ -171,19 +178,22 @@ func (b *udpBridge) pumpFromWG() {
 func (b *udpBridge) pumpToWG() {
 	defer b.wg.Done()
 	buf := make([]byte, 65535)
+	consecutiveErrs := 0
 	for {
 		n, _, err := b.tunnel.ReadFrom(buf)
 		if err != nil {
 			if b.stopped() {
 				return
 			}
-			if isRecoverableUDPErr(err) {
+			consecutiveErrs++
+			if isRecoverableUDPErr(err) && consecutiveErrs < maxConsecutivePumpErrors {
 				continue
 			}
-			b.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("hysteria2 bridge: read from tunnel failed: %v", err))
+			b.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("hysteria2 bridge: read from tunnel failed (%d consecutive): %v", consecutiveErrs, err))
 			b.markDead()
 			return
 		}
+		consecutiveErrs = 0
 		b.peerMu.RLock()
 		peer := b.peer
 		b.peerMu.RUnlock()

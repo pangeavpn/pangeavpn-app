@@ -26,6 +26,21 @@ import (
 // darwinRouteTimeout bounds one route(8) call made from the health tick.
 const darwinRouteTimeout = 5 * time.Second
 
+// darwinExecTimeout bounds ifconfig/route/networksetup calls: a hung configd
+// must never pin the wg manager lock that /status blocks on.
+var darwinExecTimeout = 10 * time.Second
+
+func darwinCmdCombined(name string, args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), darwinExecTimeout)
+	defer cancel()
+	return exec.CommandContext(ctx, name, args...).CombinedOutput()
+}
+
+func darwinCmdRun(name string, args ...string) error {
+	_, err := darwinCmdCombined(name, args...)
+	return err
+}
+
 // Every command here runs as root; PATH-based lookup is avoidable and not worth the risk.
 const (
 	ifconfigPath     = "/sbin/ifconfig"
@@ -52,19 +67,19 @@ func configureDarwinAddresses(interfaceName string, addresses []string) error {
 		if v4 := ip.To4(); v4 != nil {
 			mask := net.IP(ipNet.Mask).To4()
 			// utun is point-to-point: ifconfig <iface> inet <addr> <addr> netmask <mask>
-			out, err := exec.Command(ifconfigPath, interfaceName,
+			out, err := darwinCmdCombined(ifconfigPath, interfaceName,
 				"inet", v4.String(), v4.String(),
 				"netmask", mask.String(),
-			).CombinedOutput()
+			)
 			if err != nil {
 				return fmt.Errorf("add ipv4 address %s on %s: %w (%s)", cidr, interfaceName, err, strings.TrimSpace(string(out)))
 			}
 		} else {
 			ones, _ := ipNet.Mask.Size()
-			out, err := exec.Command(ifconfigPath, interfaceName,
+			out, err := darwinCmdCombined(ifconfigPath, interfaceName,
 				"inet6", ip.String(),
 				"prefixlen", fmt.Sprintf("%d", ones),
-			).CombinedOutput()
+			)
 			if err != nil {
 				return fmt.Errorf("add ipv6 address %s on %s: %w (%s)", cidr, interfaceName, err, strings.TrimSpace(string(out)))
 			}
@@ -75,7 +90,7 @@ func configureDarwinAddresses(interfaceName string, addresses []string) error {
 
 // bringDarwinInterfaceUp sets the interface to UP state.
 func bringDarwinInterfaceUp(interfaceName string) error {
-	out, err := exec.Command(ifconfigPath, interfaceName, "up").CombinedOutput()
+	out, err := darwinCmdCombined(ifconfigPath, interfaceName, "up")
 	if err != nil {
 		return fmt.Errorf("bring up %s: %w (%s)", interfaceName, err, strings.TrimSpace(string(out)))
 	}
@@ -88,7 +103,7 @@ func bringDarwinInterfaceUp(interfaceName string) error {
 
 // darwinDefaultGatewayV4 returns the IPv4 default gateway address.
 func darwinDefaultGatewayV4() (string, error) {
-	out, err := exec.Command(routePath, "-n", "get", "default").CombinedOutput()
+	out, err := darwinCmdCombined(routePath, "-n", "get", "default")
 	if err != nil {
 		return "", fmt.Errorf("query default gateway: %w (%s)", err, strings.TrimSpace(string(out)))
 	}
@@ -136,7 +151,7 @@ func addDarwinEndpointRoutes(ctx context.Context, endpointHosts []string) ([]rou
 			continue // no v6 bypass path yet; disableDarwinIPv6ForSession covers the leak instead
 		}
 
-		out, err := exec.Command(routePath, "-n", "add", "-host", route.destination, "-gateway", gw).CombinedOutput()
+		out, err := darwinCmdCombined(routePath, "-n", "add", "-host", route.destination, "-gateway", gw)
 		if err != nil && !isDarwinRouteExists(out) {
 			errs = append(errs, fmt.Errorf("add endpoint route %s via %s: %w (%s)", route.destination, gw, err, strings.TrimSpace(string(out))))
 			continue
@@ -152,7 +167,7 @@ func removeDarwinEndpointRoutes(routes []routeSpec) {
 		if route.family == "inet6" {
 			continue
 		}
-		_ = exec.Command(routePath, "-n", "delete", "-host", route.destination).Run()
+		_ = darwinCmdRun(routePath, "-n", "delete", "-host", route.destination)
 	}
 }
 
@@ -190,11 +205,11 @@ func addDarwinAllowedIPRoutes(interfaceName string, allowedIPs []string) error {
 			}
 
 			mask := net.IP(ipNet.Mask).To4()
-			out, err := exec.Command(routePath, "-n", "add",
+			out, err := darwinCmdCombined(routePath, "-n", "add",
 				"-net", ipNet.IP.String(),
 				"-netmask", mask.String(),
 				"-interface", interfaceName,
-			).CombinedOutput()
+			)
 			if err != nil {
 				return fmt.Errorf("add route %s via %s: %w (%s)", rp, interfaceName, err, strings.TrimSpace(string(out)))
 			}
@@ -218,11 +233,11 @@ func removeDarwinAllowedIPRoutes(interfaceName string, allowedIPs []string) {
 				continue
 			}
 			mask := net.IP(ipNet.Mask).To4()
-			_ = exec.Command(routePath, "-n", "delete",
+			_ = darwinCmdRun(routePath, "-n", "delete",
 				"-net", ipNet.IP.String(),
 				"-netmask", mask.String(),
 				"-interface", interfaceName,
-			).Run()
+			)
 		}
 	}
 }
@@ -241,7 +256,7 @@ type darwinIPv6State struct {
 // getDarwinIPv6Mode reads a service's current IPv6 setting ("Automatic",
 // "Off", "Manual", ...) from networksetup -getinfo. Empty means unreadable.
 func getDarwinIPv6Mode(serviceName string) string {
-	out, err := exec.Command(networksetupPath, "-getinfo", serviceName).CombinedOutput()
+	out, err := darwinCmdCombined(networksetupPath, "-getinfo", serviceName)
 	if err != nil {
 		return ""
 	}
@@ -268,7 +283,7 @@ func disableDarwinIPv6ForSession() ([]darwinIPv6State, error) {
 		if mode == "" || strings.EqualFold(mode, "Off") {
 			continue
 		}
-		if _, err := exec.Command(networksetupPath, "-setv6off", svc).CombinedOutput(); err != nil {
+		if _, err := darwinCmdCombined(networksetupPath, "-setv6off", svc); err != nil {
 			continue
 		}
 		states = append(states, darwinIPv6State{service: svc, mode: mode})
@@ -282,10 +297,10 @@ func disableDarwinIPv6ForSession() ([]darwinIPv6State, error) {
 func restoreDarwinIPv6(states []darwinIPv6State) {
 	for _, s := range states {
 		if strings.EqualFold(s.mode, "LinkLocal") {
-			_ = exec.Command(networksetupPath, "-setv6linklocal", s.service).Run()
+			_ = darwinCmdRun(networksetupPath, "-setv6linklocal", s.service)
 			continue
 		}
-		_ = exec.Command(networksetupPath, "-setv6automatic", s.service).Run()
+		_ = darwinCmdRun(networksetupPath, "-setv6automatic", s.service)
 	}
 }
 
@@ -295,7 +310,7 @@ func restoreDarwinIPv6(states []darwinIPv6State) {
 
 // listDarwinNetworkServices returns all non-hardware-port network service names.
 func listDarwinNetworkServices() ([]string, error) {
-	out, err := exec.Command(networksetupPath, "-listallnetworkservices").CombinedOutput()
+	out, err := darwinCmdCombined(networksetupPath, "-listallnetworkservices")
 	if err != nil {
 		return nil, fmt.Errorf("list network services: %w (%s)", err, strings.TrimSpace(string(out)))
 	}
@@ -317,7 +332,7 @@ func listDarwinNetworkServices() ([]string, error) {
 // Returns nil if DNS is automatic/DHCP, or a single unknown-marker entry if
 // the state could not be determined at all (as opposed to being empty).
 func getDarwinDNSServers(serviceName string) []string {
-	out, err := exec.Command(networksetupPath, "-getdnsservers", serviceName).CombinedOutput()
+	out, err := darwinCmdCombined(networksetupPath, "-getdnsservers", serviceName)
 	if err != nil {
 		return []string{darwinDNSUnknownMarker}
 	}
@@ -362,7 +377,7 @@ func darwinDNSListsEqual(a, b []string) bool {
 // setDarwinDNSServers points serviceName's DNS at dnsServers.
 func setDarwinDNSServers(serviceName string, dnsServers []string) error {
 	args := append([]string{"-setdnsservers", serviceName}, dnsServers...)
-	out, err := exec.Command(networksetupPath, args...).CombinedOutput()
+	out, err := darwinCmdCombined(networksetupPath, args...)
 	if err != nil {
 		return fmt.Errorf("set DNS for service %s: %w (%s)", serviceName, err, strings.TrimSpace(string(out)))
 	}
@@ -425,7 +440,7 @@ func restoreDarwinDNSServers(overrides []darwinDNSOverride) error {
 			args = append([]string{"-setdnsservers", override.service}, override.dnsServers...)
 		}
 
-		out, err := exec.Command(networksetupPath, args...).CombinedOutput()
+		out, err := darwinCmdCombined(networksetupPath, args...)
 		if err != nil {
 			failures = append(failures, fmt.Sprintf("%s: %v (%s)", override.service, err, strings.TrimSpace(string(out))))
 		}
