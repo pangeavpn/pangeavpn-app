@@ -131,6 +131,9 @@ export const StatusResponseSchema = z.object({
   activeTransport: z
     .enum(["cloak", "naive", "reality", "hysteria2", "shadowsocks", "snowflake", "wireguard", ""])
     .default(""),
+  connectingTransport: z
+    .enum(["cloak", "naive", "reality", "hysteria2", "shadowsocks", "snowflake", "wireguard", ""])
+    .default(""),
   cloak: z.object({
     running: z.boolean(),
     pid: z.number().nullable()

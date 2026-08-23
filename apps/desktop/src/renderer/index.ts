@@ -2560,9 +2560,13 @@ function renderStatus(status: StatusResponse): void {
   connectedSince = connected ? connectedSince ?? Date.now() : null;
   rxBytesEl.textContent = connected ? formatBytes(wg.bytesIn ?? 0) : EM_DASH;
   txBytesEl.textContent = connected ? formatBytes(wg.bytesOut ?? 0) : EM_DASH;
+  // Mid-connect, name the candidate the cascade is trying; the trailing
+  // ellipsis marks it as an attempt rather than an established session.
   factViaEl.textContent = status.activeTransport
     ? TRANSPORT_LABELS[status.activeTransport] ?? status.activeTransport
-    : EM_DASH;
+    : status.connectingTransport
+      ? `${TRANSPORT_LABELS[status.connectingTransport] ?? status.connectingTransport}…`
+      : EM_DASH;
   renderSessionClock();
 
   // Recovery toast — cloak was down last poll, now it's back

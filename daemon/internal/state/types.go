@@ -66,7 +66,10 @@ type StatusResponse struct {
 	Detail string      `json:"detail"`
 	// ActiveTransport is "cloak", "naive", "reality", "hysteria2", "shadowsocks",
 	// "snowflake", "wireguard" (no transport at all), or "" when disconnected.
-	ActiveTransport  string          `json:"activeTransport"`
+	ActiveTransport string `json:"activeTransport"`
+	// ConnectingTransport is the candidate the cascade is trying right now,
+	// "" outside a bring-up. Lets clients show "via X" while connecting.
+	ConnectingTransport string          `json:"connectingTransport"`
 	Cloak            CloakStatus     `json:"cloak"`
 	Naive            TransportStatus `json:"naive"`
 	Reality          TransportStatus `json:"reality"`

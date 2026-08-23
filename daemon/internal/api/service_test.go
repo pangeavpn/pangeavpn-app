@@ -1994,6 +1994,40 @@ func TestConnect_TunnelPermittedBeforeDataPathProbe(t *testing.T) {
 	}
 }
 
+// TestStatus_ReportsTransportBeingTriedWhileConnecting proves /status names
+// the candidate under trial mid-connect, and clears it once one wins.
+func TestStatus_ReportsTransportBeingTriedWhileConnecting(t *testing.T) {
+	profile := testProfile()
+	profile.WireGuard.ConfigText = strings.Replace(profile.WireGuard.ConfigText, "[Interface]\n", "[Interface]\nDNS = 10.0.0.53\n", 1)
+	svc := newTestService(t, &fakeCloakManager{}, &fakeNaiveManager{}, &fakeWGManager{}, &fakeKillSwitch{}, profile)
+
+	seen := make(chan string, 1)
+	svc.probeResolver = func(context.Context, string, string) error {
+		seen <- svc.Status(context.Background()).ConnectingTransport
+		return nil
+	}
+
+	if err := svc.Connect(context.Background(), profile.ID, ConnectOptions{}); err != nil {
+		t.Fatalf("connect failed: %v", err)
+	}
+
+	select {
+	case kind := <-seen:
+		if kind != "cloak" {
+			t.Errorf("mid-connect ConnectingTransport = %q, want %q", kind, "cloak")
+		}
+	default:
+		t.Fatal("data-path probe never ran")
+	}
+	status := svc.Status(context.Background())
+	if status.ConnectingTransport != "" {
+		t.Errorf("post-connect ConnectingTransport = %q, want empty", status.ConnectingTransport)
+	}
+	if status.ActiveTransport != "cloak" {
+		t.Errorf("post-connect ActiveTransport = %q, want %q", status.ActiveTransport, "cloak")
+	}
+}
+
 // TestConnect_FailedReconnectRestartsNetworkRepair proves a reconnect that
 // cancels the repair but then fails cannot strand a broken host network.
 func TestConnect_FailedReconnectRestartsNetworkRepair(t *testing.T) {

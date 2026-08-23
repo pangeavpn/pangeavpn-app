@@ -147,6 +147,9 @@ type Service struct {
 	// Empty string when disconnected.
 	activeMu            sync.RWMutex
 	activeTransportKind string
+	// connectingTransportKind is the cascade candidate currently being tried,
+	// "" outside a bring-up. Also guarded by activeMu.
+	connectingTransportKind string
 
 	// recoveryMu guards the reconnect schedule for a session that dropped on
 	// its own: how many rebuilds have been tried, when the next one is due, and
@@ -419,6 +422,12 @@ func (s *Service) setActiveTransportKind(kind string) {
 	s.activeMu.Lock()
 	defer s.activeMu.Unlock()
 	s.activeTransportKind = kind
+}
+
+func (s *Service) setConnectingTransportKind(kind string) {
+	s.activeMu.Lock()
+	defer s.activeMu.Unlock()
+	s.connectingTransportKind = kind
 }
 
 func (s *Service) activeTransportKindSnapshot() string {
@@ -1137,9 +1146,11 @@ func (s *Service) startTransportWithHandshake(ctx context.Context, profile *stat
 	}
 	candidates = s.reorderByMemory(candidates, preferredTransport, networkKey)
 	candidates = s.demoteFailedTransport(candidates)
+	defer s.setConnectingTransportKind("")
 
 	var failures []string
 	for i, candidate := range candidates {
+		s.setConnectingTransportKind(candidate.kind)
 		// A fresh copy per candidate: bringUpTransport's start funcs mutate
 		// ConfigText (MTU clamp, loopback Endpoint rewrite), and without this
 		// a failed candidate's rewrite leaked into whichever one succeeded
@@ -1959,6 +1970,7 @@ func (s *Service) Status(ctx context.Context) state.StatusResponse {
 
 	s.activeMu.RLock()
 	activeKind := s.activeTransportKind
+	connectingKind := s.connectingTransportKind
 	s.activeMu.RUnlock()
 
 	cloakStatus := s.cloak.Status()
@@ -1986,6 +1998,7 @@ func (s *Service) Status(ctx context.Context) state.StatusResponse {
 		State:               stateValue,
 		Detail:              detail,
 		ActiveTransport:     activeKind,
+		ConnectingTransport: connectingKind,
 		Cloak:               cloakStatus,
 		Naive:               naiveStatus,
 		Reality:             realityStatus,
