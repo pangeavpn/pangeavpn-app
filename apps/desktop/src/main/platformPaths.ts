@@ -2,6 +2,7 @@ import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { app } from "electron";
+import { daemonTokenCandidatePaths } from "./daemonTokenPaths";
 import { ensureRuntimeFiles } from "./runtimeFiles";
 
 const APP_FOLDER = "pangeavpn-desktop";
@@ -102,27 +103,5 @@ function shouldUseMacSystemSupportDir(): boolean {
 }
 
 function daemonTokenCandidates(): string[] {
-  const candidates: string[] = [];
-  const seen = new Set<string>();
-  const add = (candidate: string) => {
-    const normalized = path.normalize(candidate);
-    if (seen.has(normalized)) {
-      return;
-    }
-    seen.add(normalized);
-    candidates.push(normalized);
-  };
-
-  add(getTokenPath());
-
-  if (process.platform === "darwin") {
-    add(path.join("/Library/Application Support", MAC_SYSTEM_FOLDER, "daemon-token.txt"));
-    add(path.join(app.getPath("appData"), APP_FOLDER, "daemon-token.txt"));
-  }
-
-  if (process.platform === "linux") {
-    add(path.join("/etc/pangeavpn", "daemon-token.txt"));
-  }
-
-  return candidates;
+  return daemonTokenCandidatePaths(process.platform, getTokenPath(), app.getPath("appData"));
 }

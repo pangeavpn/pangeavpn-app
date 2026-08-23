@@ -115,8 +115,9 @@ function killPort8787({ interactive = true } = {}) {
         sleepSync(100);
       }
     } else {
-      const result = spawnSync("lsof", ["-ti", "tcp:8787"], { stdio: "pipe", shell: false, timeout: 5000 });
-      const pids = (result.stdout ?? "").toString().trim().split("\n").filter(Boolean);
+      // -sTCP:LISTEN is not optional: without it lsof also lists everything
+      // connected to 8787, which includes this process and Electron.
+      const pids = listeningPidsPosix().filter((pid) => pid !== String(process.pid) && pid !== String(process.ppid));
       if (pids.length === 0) {
         return;
       }
@@ -138,9 +139,13 @@ function killPort8787({ interactive = true } = {}) {
   }
 }
 
+function listeningPidsPosix() {
+  const result = spawnSync("lsof", ["-ti", "tcp:8787", "-sTCP:LISTEN"], { stdio: "pipe", shell: false, timeout: 5000 });
+  return (result.stdout ?? "").toString().trim().split("\n").filter(Boolean);
+}
+
 function isPortHeldPosix() {
-  const result = spawnSync("lsof", ["-ti", "tcp:8787"], { stdio: "pipe", shell: false, timeout: 3000 });
-  return (result.stdout ?? "").toString().trim().length > 0;
+  return listeningPidsPosix().length > 0;
 }
 
 function isPort8787ReachableSync() {
