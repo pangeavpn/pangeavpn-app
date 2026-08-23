@@ -54,3 +54,18 @@ func TestBuildNFTRuleset_AllowLANIsNotSticky(t *testing.T) {
 		t.Fatalf("LAN permit present when allowLAN is off:\n%s", without)
 	}
 }
+
+// The nft table is IPv4-matched via `ip daddr`; a v6 prefix there is a parse
+// error that rejects the entire ruleset.
+func TestBuildNFTRuleset_LANPermitsAreIPv4Only(t *testing.T) {
+	ruleset := buildNFTRuleset([]string{"198.51.100.20"}, "wg0", true)
+
+	if !strings.Contains(ruleset, "ip daddr 192.168.0.0/16 accept") {
+		t.Fatalf("expected IPv4 LAN permits with allowLAN on:\n%s", ruleset)
+	}
+	for _, line := range strings.Split(ruleset, "\n") {
+		if strings.Contains(line, "ip daddr") && strings.Contains(line, "::") {
+			t.Errorf("IPv6 prefix in an `ip daddr` match: %s", line)
+		}
+	}
+}

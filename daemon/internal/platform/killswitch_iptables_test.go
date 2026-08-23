@@ -421,3 +421,26 @@ func TestLiveIPTablesChain_IgnoresAHookedButEmptiedChain(t *testing.T) {
 		t.Fatalf("a hooked-but-emptied chain was reported live as %q", live)
 	}
 }
+
+// iptables is the v4 binary; a v6 prefix in the LAN permits makes it reject
+// the rule and the whole arm fails.
+func TestIPTablesApplyPlan_LANPermitsAreIPv4Only(t *testing.T) {
+	plan := iptablesApplyPlan(iptChainName, ipt6ChainName, []string{"198.51.100.20"}, "wg0", true)
+
+	sawLAN := false
+	for _, cmd := range plan {
+		if cmd.Binary != "iptables" {
+			continue
+		}
+		joined := strings.Join(cmd.Args, " ")
+		if strings.Contains(joined, "192.168.0.0/16") {
+			sawLAN = true
+		}
+		if strings.Contains(joined, "::") {
+			t.Errorf("IPv6 address in an iptables command: %s", joined)
+		}
+	}
+	if !sawLAN {
+		t.Fatal("expected the IPv4 LAN permits to be present with allowLAN on")
+	}
+}
