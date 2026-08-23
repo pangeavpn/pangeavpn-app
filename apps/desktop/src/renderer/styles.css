@@ -890,6 +890,8 @@ body[data-state="ERROR"] .drift-map { color: var(--danger); opacity: 0.55; }
 .update-modal {
   position: relative;
   width: 340px;
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
   padding: 32px 24px 24px;
   background: var(--bg-surface);
   border: 1px solid var(--border);
@@ -971,7 +973,7 @@ body[data-state="ERROR"] .drift-map { color: var(--danger); opacity: 0.55; }
 .update-mac-install {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 
 .update-mac-step {
@@ -985,17 +987,48 @@ body[data-state="ERROR"] .drift-map { color: var(--danger); opacity: 0.55; }
   color: var(--text-primary);
 }
 
+.update-mac-cmd {
+  display: flex;
+  align-items: stretch;
+  background: var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  text-align: left;
+}
+
 .update-mac-command {
-  display: block;
+  flex: 1;
+  min-width: 0;
   font-family: "SF Mono", "Fira Code", monospace;
   font-size: 0.78rem;
-  background: var(--border);
   color: var(--text-primary);
   padding: 10px 12px;
-  border-radius: 8px;
   user-select: all;
   cursor: copy;
   word-break: break-all;
+}
+
+.update-mac-command-alt {
+  font-size: 0.7rem;
+  padding: 8px 10px;
+}
+
+.update-mac-copy {
+  flex: none;
+  align-self: center;
+  margin-right: 8px;
+  padding: 5px 10px;
+  border: none;
+  border-radius: 6px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.update-mac-copy.copied {
+  background: var(--text-muted);
 }
 
 .update-download-btn {

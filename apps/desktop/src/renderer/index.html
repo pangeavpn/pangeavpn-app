@@ -224,7 +224,15 @@
         </p>
         <div id="updateMacInstall" class="update-mac-install" hidden>
           <p class="update-mac-step" data-i18n="update.macStep">Open <strong>Terminal</strong> (press ⌘ + Space, type <em>Terminal</em>, press Enter), then paste this command and press Enter:</p>
-          <code id="updateMacCommand" class="update-mac-command">curl -fsSL https://pangeavpn.org/install-mac.sh | bash</code>
+          <div class="update-mac-cmd">
+            <code id="updateMacCommand" class="update-mac-command">curl -fsSL https://pangeavpn.org/install-mac.sh | bash</code>
+            <button id="updateMacCopyBtn" class="update-mac-copy" type="button" data-i18n="update.copy">Copy</button>
+          </div>
+          <p class="update-mac-step" data-i18n="update.macBlockedHint">Blocked on your network? Use this instead:</p>
+          <div class="update-mac-cmd">
+            <code id="updateMacCommandAlt" class="update-mac-command update-mac-command-alt">curl -fsSL https://raw.githubusercontent.com/pangeavpn/pangeavpn-app/master/scripts/install-mac-online.sh | bash</code>
+            <button id="updateMacCopyAltBtn" class="update-mac-copy" type="button" data-i18n="update.copy">Copy</button>
+          </div>
         </div>
         <button id="updateDownloadBtn" class="login-button update-download-btn" type="button" data-i18n="update.download">Download Update</button>
         <p id="updateMessage" class="update-message"></p>

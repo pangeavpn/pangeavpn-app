@@ -134,6 +134,8 @@ jobs:
           {
             printf '## Install (macOS)\n\n'
             printf '```bash\ncurl -fsSL https://pangeavpn.org/install-mac.sh | bash\n```\n\n'
+            printf 'If pangeavpn.org is blocked on your network:\n\n'
+            printf '```bash\ncurl -fsSL https://raw.githubusercontent.com/pangeavpn/pangeavpn-app/master/scripts/install-mac-online.sh | bash\n```\n\n'
             printf -- '---\n\n'
             cat notes.md
             if [ -s changelog.md ]; then
