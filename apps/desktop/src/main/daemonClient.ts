@@ -1,3 +1,5 @@
+import http from "node:http";
+
 import type {
   ConfigResponse,
   LogEntry,
@@ -20,10 +22,14 @@ export class DaemonClient {
   private readonly connectTimeoutMs: number;
   private readonly disconnectTimeoutMs: number;
 
-  constructor(baseUrl: string, tokenProvider: () => Promise<string | string[]>) {
+  constructor(
+    baseUrl: string,
+    tokenProvider: () => Promise<string | string[]>,
+    options?: { defaultRequestTimeoutMs?: number }
+  ) {
     this.baseUrl = baseUrl;
     this.tokenProvider = tokenProvider;
-    this.defaultRequestTimeoutMs = 5000;
+    this.defaultRequestTimeoutMs = options?.defaultRequestTimeoutMs ?? 5000;
     // Auto mode can spend 10s proving each configured transport end-to-end.
     this.connectTimeoutMs = 120000;
     this.disconnectTimeoutMs = 45000;
@@ -164,16 +170,40 @@ export class DaemonClient {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 1000);
     try {
-      const response = await fetch(`${this.baseUrl}/ping`, {
-        method: "GET",
-        signal: controller.signal
-      });
-      return response.ok;
+      const reply = await this.httpRequest("GET", "/ping", {}, undefined, controller.signal);
+      return reply.status === 200;
     } catch {
       return false;
     } finally {
       clearTimeout(timer);
     }
+  }
+
+  // One fresh socket per request (agent: false): a pooled keep-alive socket
+  // that dies quietly turns every later poll into a timeout on a live daemon.
+  private httpRequest(
+    method: string,
+    route: string,
+    headers: Record<string, string>,
+    body: string | undefined,
+    signal: AbortSignal
+  ): Promise<{ status: number; text: string }> {
+    return new Promise((resolve, reject) => {
+      const req = http.request(
+        `${this.baseUrl}${route}`,
+        { method, headers, agent: false, signal },
+        (res) => {
+          const chunks: Buffer[] = [];
+          res.on("data", (chunk: Buffer) => chunks.push(chunk));
+          res.on("error", reject);
+          res.on("end", () =>
+            resolve({ status: res.statusCode ?? 0, text: Buffer.concat(chunks).toString("utf8") })
+          );
+        }
+      );
+      req.on("error", reject);
+      req.end(body);
+    });
   }
 
   private async request<T>(
@@ -198,40 +228,37 @@ export class DaemonClient {
       const forwardAbort = () => controller.abort();
       signal?.addEventListener("abort", forwardAbort);
 
-      // Timer stays armed through the whole response read, not just fetch()
-      // itself — a daemon that stalls mid-body must still be interruptible.
+      // Timer stays armed through the whole response read, not just the
+      // request itself — a daemon that stalls mid-body must be interruptible.
       try {
-        const response = await fetch(`${this.baseUrl}${route}`, {
+        const reply = await this.httpRequest(
           method,
-          headers: {
+          route,
+          {
             "Content-Type": "application/json",
             Authorization: `Bearer ${token}`
           },
-          body: body === undefined ? undefined : JSON.stringify(body),
-          signal: controller.signal
-        });
+          body === undefined ? undefined : JSON.stringify(body),
+          controller.signal
+        );
 
-        if (response.status === 401) {
-          // Drain the body so the socket is released before the next candidate
-          // token restarts fetch, instead of holding it open until GC.
-          await response.text().catch(() => undefined);
+        if (reply.status === 401) {
           continue;
         }
 
-        if (!response.ok) {
-          const text = await response.text();
+        if (reply.status < 200 || reply.status >= 300) {
           try {
-            const payload = JSON.parse(text) as { error?: unknown };
+            const payload = JSON.parse(reply.text) as { error?: unknown };
             if (payload.error === "transport_exhausted") {
               throw new TransportExhaustedError();
             }
           } catch (error) {
             if (error instanceof TransportExhaustedError) throw error;
           }
-          throw new Error(`daemon request failed (${response.status}): ${text}`);
+          throw new Error(`daemon request failed (${reply.status}): ${reply.text}`);
         }
 
-        return (await response.json()) as T;
+        return JSON.parse(reply.text) as T;
       } catch (error) {
         if (error instanceof Error && error.name === "AbortError") {
           if (signal?.aborted) {
