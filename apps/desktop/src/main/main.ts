@@ -46,6 +46,7 @@ import {
   commitProfileSet,
   dropExpired,
   forgetProfile,
+  isLatestProvision,
   isReusable,
   parseProfileRecords,
   profileFingerprint,
@@ -794,6 +795,11 @@ function fingerprintForServer(serverId: string): string {
 async function reusableProfileForServer(serverId: string): Promise<Profile | null> {
   const profileId = `auto-${serverId}`;
   if (!isReusable(provisionedProfiles[profileId], fingerprintForServer(serverId), Date.now())) {
+    return null;
+  }
+  // Registering any other server evicted this peer hub-side; dialling it would
+  // burn the daemon's whole transport cascade on handshakes no node answers.
+  if (!isLatestProvision(provisionedProfiles, profileId)) {
     return null;
   }
   try {

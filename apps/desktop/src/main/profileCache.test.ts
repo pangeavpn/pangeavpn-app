@@ -6,6 +6,7 @@ import {
   commitProfileSet,
   dropExpired,
   forgetProfile,
+  isLatestProvision,
   isReusable,
   parseProfileRecords,
   profileFingerprint,
@@ -40,6 +41,28 @@ test("a record stamped in the future is treated as a clock change, not a fresh p
 
 test("a missing record is never reusable", () => {
   assert.equal(isReusable(undefined, FP, 1_000_001), false);
+});
+
+test("the newest provision is the latest", () => {
+  const records = {
+    "auto-a": record({ serverId: "a", provisionedAt: 1_000 }),
+    "auto-b": record({ serverId: "b", provisionedAt: 2_000 })
+  };
+  assert.equal(isLatestProvision(records, "auto-b"), true);
+});
+
+test("a peer provisioned before another server's is not the latest", () => {
+  const records = {
+    "auto-a": record({ serverId: "a", provisionedAt: 1_000 }),
+    "auto-b": record({ serverId: "b", provisionedAt: 2_000 })
+  };
+  assert.equal(isLatestProvision(records, "auto-a"), false);
+});
+
+test("a sole provision is the latest, an unknown one is not", () => {
+  const records = { "auto-a": record({ serverId: "a" }) };
+  assert.equal(isLatestProvision(records, "auto-a"), true);
+  assert.equal(isLatestProvision(records, "auto-missing"), false);
 });
 
 test("the fingerprint tracks MTU, custom DNS and the server entry", () => {

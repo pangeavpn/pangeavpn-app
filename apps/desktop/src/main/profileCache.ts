@@ -69,6 +69,16 @@ export function isReusable(
   return age >= 0 && age < PROFILE_TTL_MS;
 }
 
+/**
+ * The hub keeps one live WireGuard peer per device identity: registering any
+ * server evicts every earlier peer. Only the newest provision can still work.
+ */
+export function isLatestProvision(records: ProfileRecords, profileId: string): boolean {
+  const candidate = records[profileId];
+  if (!candidate) return false;
+  return Object.values(records).every((record) => record.provisionedAt <= candidate.provisionedAt);
+}
+
 export function recordProvision(
   records: ProfileRecords,
   profileId: string,
