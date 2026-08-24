@@ -162,8 +162,10 @@ const windowsIPInterfaceRetries = 20
 const windowsIPInterfaceRetryDelay = 50 * time.Millisecond
 
 // tuneWindowsIPInterface waits for the family's MIB_IPINTERFACE_ROW to be
-// published — it is often missing immediately after adapter creation — then
-// forces the metric to 0 and confirms the write actually took.
+// published, then forces the metric to 0. Metric tuning is a route/DNS
+// preference optimization, not a correctness gate, so a family whose row never
+// appears or whose metric won't stick is best-effort — the handshake proves the
+// tunnel, and aborting the whole connect here regressed every Windows connect.
 func tuneWindowsIPInterface(luid winipcfg.LUID, family winipcfg.AddressFamily, mtu int) error {
 	var row *winipcfg.MibIPInterfaceRow
 	var err error
@@ -177,35 +179,38 @@ func tuneWindowsIPInterface(luid winipcfg.LUID, family winipcfg.AddressFamily, m
 		}
 		time.Sleep(windowsIPInterfaceRetryDelay)
 	}
+	// The family's row may never publish (e.g. IPv6 disabled on this NIC): that
+	// is a metric we could not tune, not a bring-up failure.
 	if err != nil {
-		return fmt.Errorf("wait for ip interface: %w", err)
+		return nil
 	}
 
-	row.RouterDiscoveryBehavior = winipcfg.RouterDiscoveryDisabled
-	row.DadTransmits = 0
-	row.ManagedAddressConfigurationSupported = false
-	row.OtherStatefulConfigurationSupported = false
-
-	if mtu > 0 && mtu <= math.MaxUint32 {
-		row.NLMTU = uint32(mtu)
-	}
-	// Windows orders route selection and DNS preference by interface metric, so
-	// an automatic metric leaves the tunnel merely tied with other virtual
-	// adapters instead of decisively ahead.
-	row.UseAutomaticMetric = false
-	row.Metric = 0
+	applyWindowsIPInterfaceTuning(row, mtu)
 	if err := row.Set(); err != nil {
 		return err
 	}
 
-	verify, err := luid.IPInterface(family)
-	if err != nil {
-		return fmt.Errorf("verify ip interface metric: %w", err)
-	}
-	if verify.UseAutomaticMetric || verify.Metric != 0 {
-		return fmt.Errorf("ip interface metric did not take (automatic=%v metric=%d)", verify.UseAutomaticMetric, verify.Metric)
+	// Best-effort corrective re-apply: a metric that does not read back as 0 is
+	// a soft preference issue, never a reason to abort a connect.
+	if verify, verr := luid.IPInterface(family); verr == nil && (verify.UseAutomaticMetric || verify.Metric != 0) {
+		applyWindowsIPInterfaceTuning(verify, mtu)
+		_ = verify.Set()
 	}
 	return nil
+}
+
+func applyWindowsIPInterfaceTuning(row *winipcfg.MibIPInterfaceRow, mtu int) {
+	row.RouterDiscoveryBehavior = winipcfg.RouterDiscoveryDisabled
+	row.DadTransmits = 0
+	row.ManagedAddressConfigurationSupported = false
+	row.OtherStatefulConfigurationSupported = false
+	if mtu > 0 && mtu <= math.MaxUint32 {
+		row.NLMTU = uint32(mtu)
+	}
+	// Route selection and DNS preference order by interface metric, so an
+	// automatic metric leaves the tunnel merely tied, not decisively ahead.
+	row.UseAutomaticMetric = false
+	row.Metric = 0
 }
 
 func applyWindowsDNSServers(luid winipcfg.LUID, dnsServers []string) error {

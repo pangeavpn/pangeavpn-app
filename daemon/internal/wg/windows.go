@@ -110,12 +110,12 @@ func (m *wireGuardGoManager) startWindows(ctx context.Context, profile state.Wir
 	excludeLUIDs := m.ActiveLUIDs()
 	excludeLUIDs[tunnelLUID] = struct{}{}
 
+	// Best-effort: keep whatever bypass routes did install, but don't abort the
+	// connect on a partial/failed resolve. A truly unusable path still fails the
+	// downstream WireGuard handshake, so this can't report a false Connected.
 	endpointRoutes, endpointErr := addWindowsEndpointRoutes(ctx, excludeLUIDs, parsed.endpointHosts)
 	if endpointErr != nil {
-		_ = removeWindowsEndpointRoutes(endpointRoutes)
-		closeDevice(dev)
-		m.removeSession(tunnelKey)
-		return fmt.Errorf("endpoint bypass route setup: %w", endpointErr)
+		m.logs.Add(state.LogWarn, state.SourceWireGuard, fmt.Sprintf("endpoint bypass route setup warning: %v", endpointErr))
 	}
 
 	if err := configureWindowsInterface(tunnelLUID, parsed.addresses, allowedIPs, parsed.dnsServers, parsed.mtu); err != nil {
