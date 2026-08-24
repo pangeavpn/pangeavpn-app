@@ -911,6 +911,7 @@ body[data-state="DISCONNECTING"] .drift-map { color: var(--text-muted); opacity:
 body[data-state="CONNECTING"] .drift-map { opacity: 0.85; }
 body[data-state="CONNECTED"] .drift-map { color: var(--success); }
 body[data-state="ERROR"] .drift-map { color: var(--danger); opacity: 0.55; }
+body[data-offline="true"] .drift-map { color: var(--warning); opacity: 0.55; }
 
 .drift-orbit {
   transform-box: fill-box;
@@ -1304,6 +1305,15 @@ body[data-theme="light"] .menu-dropdown {
 
 .hero-card[data-state="ERROR"] .hero-dot { background: var(--danger); }
 .hero-card[data-state="ERROR"] .hero-kicker strong { color: var(--danger); }
+
+/* No internet is a wait, not a failure: amber wins over any state's color. */
+.hero-card[data-offline="true"] .hero-dot {
+  background: var(--warning);
+  box-shadow: 0 0 0 4px var(--warning-glow);
+  animation: none;
+}
+
+.hero-card[data-offline="true"] .hero-kicker strong { color: var(--warning); }
 
 .hero-headline {
   margin: 0;

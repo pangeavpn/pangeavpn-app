@@ -2096,14 +2096,14 @@ func (s *Service) Status(ctx context.Context) state.StatusResponse {
 	}
 }
 
-// offlineForState reports "no internet" only while a session is intended: a
-// user sitting idle at DISCONNECTED should not be told the internet is down.
+// offlineForState hides "no internet" only mid-teardown: DISCONNECTING is a
+// transient the user asked for, everywhere else they should see the outage.
 func offlineForState(current state.DaemonState, hostOffline bool) bool {
 	if !hostOffline {
 		return false
 	}
 	switch current {
-	case state.StateConnected, state.StateConnecting, state.StateError:
+	case state.StateConnected, state.StateConnecting, state.StateError, state.StateDisconnected:
 		return true
 	default:
 		return false

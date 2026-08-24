@@ -2531,9 +2531,11 @@ function setHeadline(state: StatusResponse["state"]): void {
 const MIN_CONNECTING_MS = 600;
 
 // 4Hz while a transition is in flight, so a state change lands on screen
-// almost immediately; 2s once things settle, so an idle app is not spinning.
+// almost immediately; 1Hz once settled, so the session clock ticks in seconds.
 const POLL_FAST_MS = 250;
-const POLL_IDLE_MS = 2000;
+const POLL_IDLE_MS = 1000;
+// Nobody is watching a hidden window, so it keeps the old lazier cadence.
+const POLL_HIDDEN_MS = 2000;
 const POLL_MAX_MS = 10000;
 
 // The daemon reports CONNECTED before the last of the teardown/route work is
@@ -2558,7 +2560,7 @@ function inTransition(): boolean {
 function nextPollDelay(): number {
   // Hidden means the tray is the only thing on screen, and main polls that
   // itself — visibilitychange forces a fresh sample the moment we come back.
-  if (document.hidden) return POLL_IDLE_MS;
+  if (document.hidden) return POLL_HIDDEN_MS;
   if (inTransition()) {
     lastTransitionAt = Date.now();
     return POLL_FAST_MS;
@@ -2701,6 +2703,32 @@ function renderSessionClock(): void {
     : `${pad(minutes)}:${pad(seconds)}`;
 }
 
+// The offline hold resolves without a click, so the corner message must follow
+// the poll: "no internet" while it lasts, Connected/Disconnected once it lands.
+let offlineResolutionPending = false;
+
+function announceOfflineTransition(showOffline: boolean, daemonState: StatusResponse["state"]): void {
+  const opInFlight = connectInFlight || serverWorking || disconnectingVisual;
+  if (showOffline) {
+    // Idle-disconnected with no internet promises nothing, so no held message.
+    if (daemonState === "DISCONNECTED") {
+      offlineResolutionPending = false;
+      return;
+    }
+    if (!offlineResolutionPending && !opInFlight) setUiMessage(t("connect.offline"));
+    offlineResolutionPending = true;
+    return;
+  }
+  if (!offlineResolutionPending || opInFlight) return;
+  if (daemonState === "CONNECTED") {
+    offlineResolutionPending = false;
+    setUiMessage(t("connect.connected"));
+  } else if (daemonState === "DISCONNECTED") {
+    offlineResolutionPending = false;
+    setUiMessage(t("connect.disconnected"));
+  }
+}
+
 function renderStatus(status: StatusResponse): void {
   latestStatus = status;
   currentDaemonState = status.state;
@@ -2724,6 +2752,7 @@ function renderStatus(status: StatusResponse): void {
   const showOffline = status.offline === true && !optimisticallyOff && !connectingVisual;
   document.body.dataset.offline = showOffline ? "true" : "false";
   heroCard.dataset.offline = showOffline ? "true" : "false";
+  announceOfflineTransition(showOffline, status.state);
 
   // A poll landing mid-switch must not yank the hero back off CONNECTING.
   if (optimisticallyOff) {

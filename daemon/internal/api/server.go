@@ -210,9 +210,9 @@ func withAuthAndLimit(token string, limiter *rateLimiter, handler http.HandlerFu
 }
 
 func NewHandler(token string, service *Service) http.Handler {
-	// Sized for the peak, not the average: the client polls status at 4Hz while
-	// connecting, on top of the config and kill-switch calls a connect makes.
-	limiter := newRateLimiter(2000, 33.3) // 2000 burst, refill ~33/s (~2000/min)
+	// Sized for the peak, not the average: status polls at 4Hz while connecting
+	// and 1Hz idle, plus logs/tray polls and a connect's config/kill-switch calls.
+	limiter := newRateLimiter(3000, 50) // 3000 burst, refill 50/s (~3000/min)
 	// /ping is unauthenticated, so it gets its own small bucket: draining it
 	// never starves the authenticated routes sharing limiter above.
 	pingLimiter := newRateLimiter(20, 1)
