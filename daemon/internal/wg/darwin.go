@@ -255,6 +255,12 @@ func (m *wireGuardGoManager) trySwitchInPlaceDarwin(ctx context.Context, tunnelK
 		m.logs.Add(state.LogWarn, state.SourceWireGuard, fmt.Sprintf("in-place reconfigure: uapi translation failed: %v", err))
 		return false
 	}
+	// Sends to the old transport's closed loopback port can wedge the device
+	// socket mid-switch; rebinding (same port) restarts the receive routines.
+	if err := session.device.BindUpdate(); err != nil {
+		m.logs.Add(state.LogWarn, state.SourceWireGuard, fmt.Sprintf("in-place reconfigure: socket rebind failed: %v", err))
+		return false
+	}
 	if err := session.device.IpcSet(uapi); err != nil {
 		m.logs.Add(state.LogWarn, state.SourceWireGuard, fmt.Sprintf("in-place reconfigure: uapi apply failed: %v", err))
 		return false
