@@ -1310,9 +1310,9 @@ serverConnectBtn.addEventListener("click", async () => {
         // ignore
       }
     }
-    setUiMessage(reportError("serverConnect", error));
+    const message = reportError("serverConnect", error);
     await settleConnectingState(connectingSince);
-    await refreshStatus();
+    await showErrorUnlessConnected(message);
   } finally {
     clearProgressMessages();
     connectingVisual = false;
@@ -1321,6 +1321,18 @@ serverConnectBtn.addEventListener("click", async () => {
     updateServerControlStates();
   }
 });
+
+// A hub error thrown after the daemon already recovered on its own would
+// stick a scary message under a live tunnel; trust the daemon's answer.
+async function showErrorUnlessConnected(message: string): Promise<void> {
+  const status = await refreshStatus();
+  if (status?.state === "CONNECTED" && getUserIntent() !== "disconnected") {
+    setUiMessage(t("connect.connected"));
+    notifyUserConnected();
+  } else {
+    setUiMessage(message);
+  }
+}
 
 async function switchToServer(serverId: string): Promise<void> {
   if (!pangeaApi || !daemonApi) return;
@@ -1366,9 +1378,9 @@ async function switchToServer(serverId: string): Promise<void> {
         // ignore
       }
     }
-    setUiMessage(reportError("serverSwitch", error));
+    const message = reportError("serverSwitch", error);
     await settleConnectingState(connectingSince);
-    await refreshStatus();
+    await showErrorUnlessConnected(message);
   } finally {
     clearProgressMessages();
     connectingVisual = false;
@@ -2448,7 +2460,10 @@ async function refreshStatus(): Promise<StatusResponse | null> {
   } catch (error) {
     daemonHealth = daemonHealthAfterFailure(daemonHealth);
     if (daemonHealth.recoveryRequired) showDaemonRecovery();
-    setUiMessage(reportError("status", error));
+    // A missed local poll is a daemon hiccup, not the user's internet; the
+    // recovery screen covers persistent failure.
+    const message = reportError("status", error);
+    if (verboseErrors) setUiMessage(message);
     return null;
   }
 }
@@ -2469,7 +2484,8 @@ async function refreshLogs(): Promise<void> {
     }
     renderLogs(logEntries);
   } catch (error) {
-    setUiMessage(reportError("logFetch", error));
+    const message = reportError("logFetch", error);
+    if (verboseErrors) setUiMessage(message);
   }
 }
 
@@ -2625,10 +2641,15 @@ function holdingOptimisticDisconnect(state: StatusResponse["state"]): boolean {
 // states, so while we are driving one the hero follows the operation, not the poll.
 let connectingVisual = false;
 
+// The daemon has left CONNECTED since this connect/switch began, so the next
+// CONNECTED poll is the new session, not a stale sample of the old one.
+let connectOpSawTransition = false;
+
 function showConnectingState(): number {
   // A new Connect supersedes any Stop still waiting on its daemon confirmation.
   disconnectingVisual = false;
   connectingVisual = true;
+  connectOpSawTransition = false;
   // Switching servers starts a brand-new session — don't carry over the old
   // elapsed time while the new one connects.
   connectedSince = null;
@@ -2683,6 +2704,16 @@ function renderStatus(status: StatusResponse): void {
   // instruction, and a teardown in progress is already "off" to the user.
   const optimisticallyOff = holdingOptimisticDisconnect(status.state);
 
+  // Once the daemon has left CONNECTED and come back, the tunnel is up — stop
+  // pinning the hero to CONNECTING while the IPC reply is still in flight.
+  if (connectingVisual && !optimisticallyOff) {
+    if (status.state !== "CONNECTED") {
+      connectOpSawTransition = true;
+    } else if (connectOpSawTransition) {
+      connectingVisual = false;
+    }
+  }
+
   // The OS says there is no internet: label it plainly and let CSS tone down the
   // ERROR styling via [data-offline], rather than reading as a failing connect.
   const showOffline = status.offline === true && !optimisticallyOff && !connectingVisual;
@@ -2708,7 +2739,9 @@ function renderStatus(status: StatusResponse): void {
   // Throughput stats
   const connected = status.state === "CONNECTED" && !optimisticallyOff;
   const wg = status.wireguard as StatusResponse["wireguard"] & { bytesIn?: number; bytesOut?: number };
-  connectedSince = connected ? connectedSince ?? Date.now() : null;
+  // While pinned to CONNECTING, a CONNECTED sample is the old session's; the
+  // clock starts when the pin releases so it never counts under "Connecting".
+  connectedSince = connected && !connectingVisual ? connectedSince ?? Date.now() : null;
   rxBytesEl.textContent = connected ? formatBytes(wg.bytesIn ?? 0) : EM_DASH;
   txBytesEl.textContent = connected ? formatBytes(wg.bytesOut ?? 0) : EM_DASH;
   // Mid-connect, name the candidate the cascade is trying; the trailing
