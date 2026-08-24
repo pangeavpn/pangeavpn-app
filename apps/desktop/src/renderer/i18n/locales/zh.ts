@@ -111,6 +111,7 @@ export const zh = {
   "state.CONNECTED": "已连接",
   "state.DISCONNECTING": "断开中",
   "state.ERROR": "错误",
+  "state.NO_INTERNET": "无网络",
 
   // ── Logs panel ────────────────────────────────────────
   "logs.title": "日志",

@@ -681,6 +681,9 @@ func newTestServiceFull(
 	svc.networkRepair = func(context.Context, []string) ([]string, error) { return nil, nil }
 	// Pin the fingerprint so no test depends on the host machine's network.
 	svc.networkKey = func() string { return "eth0:192.0.2.10" }
+	// Default the OS connectivity oracle to "unknown" so networkLooksUsable
+	// falls back to networkKey; offline tests override this explicitly.
+	svc.hostInternet = func() (bool, bool) { return false, false }
 	return svc
 }
 

@@ -2683,13 +2683,21 @@ function renderStatus(status: StatusResponse): void {
   // instruction, and a teardown in progress is already "off" to the user.
   const optimisticallyOff = holdingOptimisticDisconnect(status.state);
 
+  // The OS says there is no internet: label it plainly and let CSS tone down the
+  // ERROR styling via [data-offline], rather than reading as a failing connect.
+  const showOffline = status.offline === true && !optimisticallyOff && !connectingVisual;
+  document.body.dataset.offline = showOffline ? "true" : "false";
+  heroCard.dataset.offline = showOffline ? "true" : "false";
+
   // A poll landing mid-switch must not yank the hero back off CONNECTING.
   if (optimisticallyOff) {
     renderDisconnectedState();
   } else if (connectingVisual) {
     renderConnectingState();
   } else {
-    stateEl.textContent = t(("state." + status.state) as MessageKey);
+    stateEl.textContent = showOffline
+      ? t("state.NO_INTERNET")
+      : t(("state." + status.state) as MessageKey);
     detailEl.textContent = status.detail;
     detailEl.title = status.detail;
     heroCard.dataset.state = status.state;

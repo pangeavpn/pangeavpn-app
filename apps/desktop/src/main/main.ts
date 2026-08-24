@@ -62,6 +62,7 @@ let isQuitting = false;
 let trayStatusState: StatusResponse["state"] = "DISCONNECTED";
 let trayStatusDetail = "idle";
 let trayStatusReconnecting = false;
+let trayStatusOffline = false;
 let trayActionInProgress = false;
 let trayStatusRefreshPromise: Promise<void> | null = null;
 let trayStatusTimer: NodeJS.Timeout | null = null;
@@ -518,6 +519,7 @@ async function refreshTrayStatus(): Promise<void> {
       trayStatusState = status.state;
       trayStatusDetail = status.detail;
       trayStatusReconnecting = status.reconnecting;
+      trayStatusOffline = status.offline;
       if (status.transportsExhausted) {
         void rotateAwayFromBlockedServer();
       }
@@ -600,6 +602,9 @@ async function recoverFromNetworkChange(): Promise<void> {
     }
     // The disconnect below would cancel the daemon's own cascade mid-transport.
     if (trayStatusReconnecting) return;
+    // No physical link: the daemon is holding, so don't churn connect attempts
+    // into a dead network — the daemon resumes on its own when a link returns.
+    if (trayStatusOffline) return;
     if (isCancelled(attempt)) return;
     // Stamped only when a reconnect actually runs: the AP-loss event arrives
     // while the daemon still reports CONNECTED, and burning the cooldown on

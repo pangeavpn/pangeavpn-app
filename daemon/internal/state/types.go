@@ -85,6 +85,10 @@ type StatusResponse struct {
 	// TransportsExhausted marks a session no transport gets traffic through here.
 	// Clients rotate servers on it; the daemon cannot, a server being a profile.
 	TransportsExhausted bool `json:"transportsExhausted"`
+	// Offline marks a confident OS verdict of no internet (link physically down)
+	// while a session is intended. Clients show "no internet" and hold, rather
+	// than reading the retry backoff as a connection endlessly failing.
+	Offline bool `json:"offline"`
 }
 
 type CloakProfile struct {

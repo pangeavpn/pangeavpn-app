@@ -111,6 +111,7 @@ export const uk = {
   "state.CONNECTED": "ПІДКЛЮЧЕНО",
   "state.DISCONNECTING": "ВІДКЛЮЧЕННЯ",
   "state.ERROR": "ПОМИЛКА",
+  "state.NO_INTERNET": "Немає інтернету",
 
   // ── Logs panel ────────────────────────────────────────
   "logs.title": "Журнали",

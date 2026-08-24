@@ -111,6 +111,7 @@ export const ar = {
   "state.CONNECTED": "متصل",
   "state.DISCONNECTING": "جارٍ قطع الاتصال",
   "state.ERROR": "خطأ",
+  "state.NO_INTERNET": "لا يوجد إنترنت",
 
   // ── Logs panel ────────────────────────────────────────
   "logs.title": "السجلّات",

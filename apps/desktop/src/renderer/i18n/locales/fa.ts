@@ -111,6 +111,7 @@ export const fa = {
   "state.CONNECTED": "متصل",
   "state.DISCONNECTING": "در حال قطع اتصال",
   "state.ERROR": "خطا",
+  "state.NO_INTERNET": "بدون اینترنت",
 
   // ── Logs panel ────────────────────────────────────────
   "logs.title": "گزارش‌ها",

@@ -120,6 +120,9 @@ type Service struct {
 	// current network. Both are set once and read-only thereafter.
 	transportMemory transportMemory
 	networkKey      func() string
+	// hostInternet is the OS connectivity oracle (online, known); nil falls back
+	// to the network fingerprint. Injectable so offline behavior is testable.
+	hostInternet func() (bool, bool)
 
 	// shadowsocksProxy serves the hub control plane; nil leaves /ssproxy/*
 	// reporting unavailable. Set once at startup.
@@ -321,6 +324,7 @@ func NewService(
 		killSwitch:       killSwitch,
 		handshakeTimeout: defaultWireGuardHandshakeTimeout,
 		networkKey:       currentNetworkKey,
+		hostInternet:     platform.HostInternet,
 		recoveryDelays:   defaultRecoveryDelays,
 		probeResolver:    probeResolverOverUDP,
 		networkRepair:    platform.RepairNetworkAfterTunnelDisconnect,
@@ -2028,6 +2032,21 @@ func (s *Service) Status(ctx context.Context) state.StatusResponse {
 		KillSwitchActive:    s.killSwitch.Active(),
 		Reconnecting:        s.recoveryPending(),
 		TransportsExhausted: s.transportsAreExhausted(),
+		Offline:             offlineForState(stateValue, s.hostOffline()),
+	}
+}
+
+// offlineForState reports "no internet" only while a session is intended: a
+// user sitting idle at DISCONNECTED should not be told the internet is down.
+func offlineForState(current state.DaemonState, hostOffline bool) bool {
+	if !hostOffline {
+		return false
+	}
+	switch current {
+	case state.StateConnected, state.StateConnecting, state.StateError:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -2285,6 +2304,13 @@ func (s *Service) retryDroppedSession(ctx context.Context) {
 	if !ok {
 		return
 	}
+	// No internet at all (wifi/ethernet physically down): hold. Don't rebuild
+	// into a dead network, and don't let a still-recent handshake flip this to a
+	// transient CONNECTED — that flip-flop is exactly the offline thrash. The
+	// offline status flag drives the UI; recovery resumes when a link returns.
+	if s.hostOffline() {
+		return
+	}
 	// Not every error means a broken tunnel — a refused Connect stamps one on a
 	// session that is still carrying traffic. Rebuilding that would tear down a
 	// working tunnel, so a live, fail-closed session just gets its state back.
@@ -2364,14 +2390,31 @@ func (s *Service) sessionIsHealthy(ctx context.Context, profile state.Profile) b
 	return !s.wireGuardHandshakeStale(status)
 }
 
-// networkLooksUsable reports whether the host has an off-tunnel address to dial
-// from. An unknown answer (no fingerprint configured) counts as usable, so the
-// retry falls back to letting the transport itself fail.
+// networkLooksUsable reports whether the host has a path to dial out on. It
+// prefers the OS's own connectivity verdict (which ignores the tunnel and
+// virtual adapters that fool an interface-address scan), and only falls back to
+// the network fingerprint where the OS can't tell. An unknown answer counts as
+// usable, so the retry falls back to letting the transport itself fail.
 func (s *Service) networkLooksUsable() bool {
+	if s.hostInternet != nil {
+		if online, known := s.hostInternet(); known {
+			return online
+		}
+	}
 	if s.networkKey == nil {
 		return true
 	}
 	return s.networkKey() != ""
+}
+
+// hostOffline reports a confident "no internet" from the OS. An unknown verdict
+// counts as online, so a platform that can't tell never shows "no internet".
+func (s *Service) hostOffline() bool {
+	if s.hostInternet == nil {
+		return false
+	}
+	online, known := s.hostInternet()
+	return known && !online
 }
 
 func (s *Service) beginRecoveryAttempt() int {

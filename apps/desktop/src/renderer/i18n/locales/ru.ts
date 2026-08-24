@@ -111,6 +111,7 @@ export const ru = {
   "state.CONNECTED": "ПОДКЛЮЧЕНО",
   "state.DISCONNECTING": "ОТКЛЮЧЕНИЕ",
   "state.ERROR": "ОШИБКА",
+  "state.NO_INTERNET": "Нет интернета",
 
   // ── Logs panel ────────────────────────────────────────
   "logs.title": "Журнал",

@@ -172,7 +172,10 @@ export const StatusResponseSchema = z.object({
   reconnecting: z.boolean().default(false),
   // A live session whose every transport stopped getting traffic through this
   // server; the client answers by rotating servers. Older daemons omit it.
-  transportsExhausted: z.boolean().default(false)
+  transportsExhausted: z.boolean().default(false),
+  // The OS reports no internet (link physically down) while a session is
+  // intended; the client shows "no internet" and holds. Older daemons omit it.
+  offline: z.boolean().default(false)
 });
 
 export const ConnectRequestSchema = z.object({

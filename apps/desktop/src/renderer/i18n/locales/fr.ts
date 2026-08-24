@@ -111,6 +111,7 @@ export const fr = {
   "state.CONNECTED": "CONNECTÉ",
   "state.DISCONNECTING": "DÉCONNEXION",
   "state.ERROR": "ERREUR",
+  "state.NO_INTERNET": "Pas d'Internet",
 
   // ── Logs panel ────────────────────────────────────────
   "logs.title": "Journaux",
