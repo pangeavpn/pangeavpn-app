@@ -493,6 +493,9 @@ function maybeNotifyStatusChange(): void {
   const prev = lastNotifiedStatus;
   lastNotifiedStatus = next;
   if (!prev || !notificationsEnabled || !Notification.isSupported()) return;
+  // The status is already on screen when the window is open, so don't also toast
+  // it. lastNotifiedStatus is updated above, so nothing fires late on re-hide.
+  if (mainWindow && mainWindow.isVisible() && !mainWindow.isMinimized()) return;
   const kind = statusNotificationKind(prev, next);
   if (!kind) return;
   const iconPath = process.platform === "darwin" ? undefined : getTrayIconPath(__dirname);
