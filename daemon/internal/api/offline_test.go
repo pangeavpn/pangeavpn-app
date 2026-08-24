@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/state"
@@ -63,6 +64,58 @@ func TestHealthCheck_HoldsWhenHostOffline(t *testing.T) {
 	}
 	if status.Offline {
 		t.Error("Offline = true after reconnecting")
+	}
+}
+
+// The exact churn a link drop caused: the active transport dies, its restart
+// gets "unreachable network", and instead of stamping ERROR every ~3s (which a
+// still-recent handshake flips back to CONNECTED) the daemon parks in a stable
+// offline hold and reports offline, then recovers when the link returns.
+func TestHealthCheck_TransportRestartHoldsOnUnreachableNetwork(t *testing.T) {
+	svc, naive, _, _ := recoveryTestService(t)
+
+	// Link drops mid-session: the transport is down and its restart can't route
+	// out. hostInternet stays "unknown" so this exercises the instant signal.
+	naive.mu.Lock()
+	naive.running = false
+	naive.startErr = errors.New("dial tcp 95.179.239.1:443: connectex: A socket operation was attempted to an unreachable network.")
+	naive.mu.Unlock()
+
+	svc.runHealthCheck(context.Background())
+
+	status := svc.Status(context.Background())
+	if status.State != state.StateConnected {
+		t.Fatalf("state = %q, want CONNECTED held in the offline hold, not flipped to ERROR", status.State)
+	}
+	if !status.Offline {
+		t.Error("Offline = false, want true after an unreachable-network restart")
+	}
+	if !svc.offlineHoldActive() {
+		t.Error("offline hold not active after an unreachable-network restart")
+	}
+
+	// Ticks within the hold must not hammer restart or thrash the state.
+	naive.mu.Lock()
+	naive.startCalled = false
+	naive.mu.Unlock()
+	svc.runHealthCheck(context.Background())
+	svc.runHealthCheck(context.Background())
+	if transportStarted(naive) {
+		t.Error("transport restart was hammered while in the offline hold")
+	}
+	if st, _ := svc.machine.Get(); st != state.StateConnected {
+		t.Errorf("state = %q during hold, want a stable CONNECTED (no ERROR thrash)", st)
+	}
+
+	// The link returns: a network-change event clears the hold and recovery runs.
+	naive.mu.Lock()
+	naive.startErr = nil
+	naive.running = true
+	naive.mu.Unlock()
+	svc.onNetworkChanged()
+	svc.runHealthCheck(context.Background())
+	if svc.Status(context.Background()).Offline {
+		t.Error("Offline = true after the link returned")
 	}
 }
 

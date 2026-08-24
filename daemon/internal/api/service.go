@@ -161,6 +161,11 @@ type Service struct {
 	recoveryAttempts int
 	recoveryNextAt   time.Time
 	healthHoldUntil  time.Time
+	// offlineHoldUntil backs off transport recovery while the host has no route
+	// out (a dial that returns "unreachable network"), so a link drop parks in a
+	// stable "no internet" hold instead of hammering restart every tick. It is
+	// the instant signal GetNetworkConnectivityHint lags behind. Guarded by recoveryMu.
+	offlineHoldUntil time.Time
 
 	// resumeFreshUntil marks the window after a host resume in which a single
 	// failed probe round is enough to rebuild; resumeNotedAt dedupes the
@@ -2055,7 +2060,7 @@ func (s *Service) Status(ctx context.Context) state.StatusResponse {
 		KillSwitchActive:    s.killSwitch.Active(),
 		Reconnecting:        s.recoveryPending(),
 		TransportsExhausted: s.transportsAreExhausted(),
-		Offline:             offlineForState(stateValue, s.hostOffline()),
+		Offline:             offlineForState(stateValue, s.offlineNow()),
 	}
 }
 
@@ -2232,6 +2237,9 @@ func (s *Service) onNetworkChanged() {
 	if now.Before(s.dnsProbeNextAt) {
 		s.dnsProbeNextAt = time.Time{}
 	}
+	// The link is back: drop the offline hold so the health kick below retries
+	// transport recovery now instead of waiting out the backoff window.
+	s.offlineHoldUntil = time.Time{}
 	s.recoveryMu.Unlock()
 	s.kickHealthCheck()
 }
@@ -2293,10 +2301,23 @@ func (s *Service) runHealthCheck(ctx context.Context) {
 	}
 
 	if !transportRunning {
+		// No route out: park in a stable offline hold instead of restarting the
+		// transport every tick and flip-flopping the state through ERROR. This is
+		// the churn a link drop caused — the restart fails "unreachable network",
+		// stamps ERROR, and a still-recent handshake flips it back, every ~3s.
+		if s.offlineHoldActive() {
+			return
+		}
 		if err := s.recoverActiveTransport(ctx, profile, activeKind); err != nil {
+			if hostNetworkUnreachable(err) || s.hostOffline() {
+				s.enterOfflineHold()
+				s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("no route to the network; holding %s until it returns", activeKind))
+				return
+			}
 			s.setErrorFromHealthCheck(fmt.Sprintf("health check failed: %s transport is not running and restart failed: %v", activeKind, err))
 			return
 		}
+		s.clearOfflineHold()
 		s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("health check recovered %s transport", activeKind))
 	}
 
@@ -2439,7 +2460,7 @@ func (s *Service) retryDroppedSession(ctx context.Context) {
 	// into a dead network, and don't let a still-recent handshake flip this to a
 	// transient CONNECTED — that flip-flop is exactly the offline thrash. The
 	// offline status flag drives the UI; recovery resumes when a link returns.
-	if s.hostOffline() {
+	if s.offlineNow() {
 		return
 	}
 	// Not every error means a broken tunnel — a refused Connect stamps one on a
@@ -2548,6 +2569,35 @@ func (s *Service) hostOffline() bool {
 	return known && !online
 }
 
+// offlineHoldInterval is how long transport recovery backs off after a dial
+// that had no route out, so an outage parks instead of hammering restart.
+const offlineHoldInterval = 12 * time.Second
+
+func (s *Service) enterOfflineHold() {
+	s.recoveryMu.Lock()
+	defer s.recoveryMu.Unlock()
+	s.offlineHoldUntil = time.Now().Add(offlineHoldInterval)
+}
+
+func (s *Service) offlineHoldActive() bool {
+	s.recoveryMu.Lock()
+	defer s.recoveryMu.Unlock()
+	return time.Now().Before(s.offlineHoldUntil)
+}
+
+func (s *Service) clearOfflineHold() {
+	s.recoveryMu.Lock()
+	defer s.recoveryMu.Unlock()
+	s.offlineHoldUntil = time.Time{}
+}
+
+// offlineNow reports "no internet" from either the instant unreachable-dial hold
+// or the OS oracle. The hold leads by ~a minute: GetNetworkConnectivityHint only
+// downgrades after its own probes time out, well after a dial already said so.
+func (s *Service) offlineNow() bool {
+	return s.offlineHoldActive() || s.hostOffline()
+}
+
 func (s *Service) beginRecoveryAttempt() int {
 	s.recoveryMu.Lock()
 	defer s.recoveryMu.Unlock()
@@ -2590,6 +2640,7 @@ func (s *Service) resetRecovery() {
 	defer s.recoveryMu.Unlock()
 	s.recoveryAttempts = 0
 	s.recoveryNextAt = time.Time{}
+	s.offlineHoldUntil = time.Time{}
 }
 
 // holdHealthChecks pauses health evaluation for d and clears any backoff, so
