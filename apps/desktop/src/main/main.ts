@@ -1926,11 +1926,21 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.handle(IPC_CHANNELS.listDevices, async () => {
-    return pangeaApiClient.listDevices();
+    const devices = await pangeaApiClient.listDevices();
+    // Flag our row by pubkey (rename-proof); strip the pubkey from the renderer.
+    const myPubkey = pangeaApiClient.identityPubkey;
+    return devices.map(({ identityPubkey, ...rest }) => ({
+      ...rest,
+      isCurrentDevice: Boolean(myPubkey && identityPubkey === myPubkey)
+    }));
   });
 
   ipcMain.handle(IPC_CHANNELS.removeDevice, async (_event, deviceId: string) => {
     await pangeaApiClient.removeDevice(deviceId);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.renameDevice, async (_event, deviceId: string, friendlyName: string) => {
+    await pangeaApiClient.renameDevice(deviceId, friendlyName);
   });
 
   ipcMain.handle(IPC_CHANNELS.getSubscription, async () => {

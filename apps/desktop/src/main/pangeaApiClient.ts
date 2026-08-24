@@ -471,6 +471,8 @@ interface DeviceRegisterResponse {
 
 export interface DeviceInfo {
   id: string;
+  /** Absent on hubs older than the rename feature. */
+  identityPubkey?: string | null;
   friendlyName: string | null;
   createdAt: string;
   status: string;
@@ -1599,6 +1601,10 @@ export class PangeaApiClient {
 
   async removeDevice(deviceId: string): Promise<void> {
     await this.hubRequest<unknown>("POST", "/api/device/remove", { deviceId });
+  }
+
+  async renameDevice(deviceId: string, friendlyName: string): Promise<void> {
+    await this.hubRequest<unknown>("POST", "/api/device/rename", { deviceId, friendlyName });
   }
 
   /** Drops the post-failure cooldown. Pressing Connect is the user asking for

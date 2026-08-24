@@ -660,6 +660,7 @@ body[data-theme="light"] .login-brand {
 
 .device-info {
   display: flex;
+  flex: 1;
   flex-direction: column;
   gap: 2px;
   min-width: 0;
@@ -677,6 +678,69 @@ body[data-theme="light"] .login-brand {
 .device-date {
   font-size: 0.75rem;
   color: var(--text-muted);
+}
+
+.device-actions {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.device-rename-btn {
+  flex-shrink: 0;
+  padding: 5px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.device-rename-btn:hover:not(:disabled) {
+  background: var(--bg-elevated);
+}
+
+.device-rename-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.device-rename-save-btn {
+  flex-shrink: 0;
+  padding: 5px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.device-rename-save-btn:hover:not(:disabled) {
+  opacity: 0.85;
+}
+
+.device-rename-save-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.device-rename-input {
+  width: 100%;
+  min-width: 0;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--field-border);
+  background: var(--field-bg);
+  color: var(--text-primary);
+  font-size: 0.88rem;
+  font-weight: 600;
 }
 
 .device-remove-btn {

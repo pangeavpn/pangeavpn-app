@@ -76,6 +76,7 @@ export const IPC_CHANNELS = {
   cacheServers: "pangea:cacheServers",
   listDevices: "pangea:listDevices",
   removeDevice: "pangea:removeDevice",
+  renameDevice: "pangea:renameDevice",
   getSubscription: "pangea:getSubscription",
   checkForUpdates: "app:checkForUpdates",
   downloadAppUpdate: "app:downloadAppUpdate",
@@ -274,6 +275,8 @@ export interface DeviceInfo {
   friendlyName: string | null;
   createdAt: string;
   status: string;
+  /** Set by the main process by matching identity pubkeys; rename-proof. */
+  isCurrentDevice?: boolean;
 }
 
 /**
@@ -358,6 +361,7 @@ export interface PangeaApi {
   cacheServers: (servers: PublicServerInfo[]) => Promise<void>;
   listDevices: () => Promise<DeviceInfo[]>;
   removeDevice: (deviceId: string) => Promise<void>;
+  renameDevice: (deviceId: string, friendlyName: string) => Promise<void>;
   getSubscription: () => Promise<SubscriptionInfo | null>;
   /** Backed by the main-process secure store — never localStorage. */
   rememberAccountNumber: (accountNumber: string) => Promise<void>;

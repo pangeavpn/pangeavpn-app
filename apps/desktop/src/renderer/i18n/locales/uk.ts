@@ -50,6 +50,12 @@ export const uk = {
   "devices.removing": "Видалення...",
   "devices.removed": "Пристрій видалено.",
   "devices.removeFailed": "Не вдалося видалити пристрій. Спробуйте ще раз.",
+  "devices.rename": "Перейменувати",
+  "devices.renameSave": "Зберегти",
+  "devices.renameCancel": "Скасувати",
+  "devices.renameLabel": "Назва пристрою",
+  "devices.renamed": "Пристрій перейменовано.",
+  "devices.renameFailed": "Не вдалося перейменувати пристрій. Спробуйте ще раз.",
   "devices.none": "Пристроїв не знайдено.",
   "devices.noneRemaining": "Пристроїв не залишилося.",
 

@@ -52,6 +52,7 @@ const CH = {
   cacheServers: "pangea:cacheServers",
   listDevices: "pangea:listDevices",
   removeDevice: "pangea:removeDevice",
+  renameDevice: "pangea:renameDevice",
   getSubscription: "pangea:getSubscription",
   checkForUpdates: "app:checkForUpdates",
   downloadAppUpdate: "app:downloadAppUpdate",
@@ -127,6 +128,8 @@ const pangeaApi = {
   cacheServers: (servers: unknown[]) => ipcRenderer.invoke(CH.cacheServers, servers),
   listDevices: () => ipcRenderer.invoke(CH.listDevices),
   removeDevice: (deviceId: string) => ipcRenderer.invoke(CH.removeDevice, deviceId),
+  renameDevice: (deviceId: string, friendlyName: string) =>
+    ipcRenderer.invoke(CH.renameDevice, deviceId, friendlyName),
   getSubscription: () => ipcRenderer.invoke(CH.getSubscription),
   rememberAccountNumber: (accountNumber: string) =>
     ipcRenderer.invoke(CH.rememberAccountNumber, accountNumber),

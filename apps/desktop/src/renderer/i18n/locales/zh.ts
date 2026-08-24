@@ -50,6 +50,12 @@ export const zh = {
   "devices.removing": "正在移除...",
   "devices.removed": "设备已移除。",
   "devices.removeFailed": "移除设备失败，请重试。",
+  "devices.rename": "重命名",
+  "devices.renameSave": "保存",
+  "devices.renameCancel": "取消",
+  "devices.renameLabel": "设备名称",
+  "devices.renamed": "设备已重命名。",
+  "devices.renameFailed": "重命名设备失败，请重试。",
   "devices.none": "未找到设备。",
   "devices.noneRemaining": "没有剩余设备。",
 

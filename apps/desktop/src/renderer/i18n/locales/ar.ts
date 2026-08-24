@@ -50,6 +50,12 @@ export const ar = {
   "devices.removing": "جارٍ الإزالة...",
   "devices.removed": "تمت إزالة الجهاز.",
   "devices.removeFailed": "فشل إزالة الجهاز. يرجى المحاولة مرة أخرى.",
+  "devices.rename": "إعادة تسمية",
+  "devices.renameSave": "حفظ",
+  "devices.renameCancel": "إلغاء",
+  "devices.renameLabel": "اسم الجهاز",
+  "devices.renamed": "تمت إعادة تسمية الجهاز.",
+  "devices.renameFailed": "فشلت إعادة تسمية الجهاز. يرجى المحاولة مرة أخرى.",
   "devices.none": "لم يتم العثور على أجهزة.",
   "devices.noneRemaining": "لم يتبقَّ أي جهاز.",
 

@@ -50,6 +50,12 @@ export const fr = {
   "devices.removing": "Suppression...",
   "devices.removed": "Appareil supprimé.",
   "devices.removeFailed": "Échec de la suppression de l'appareil. Veuillez réessayer.",
+  "devices.rename": "Renommer",
+  "devices.renameSave": "Enregistrer",
+  "devices.renameCancel": "Annuler",
+  "devices.renameLabel": "Nom de l'appareil",
+  "devices.renamed": "Appareil renommé.",
+  "devices.renameFailed": "Échec du renommage de l'appareil. Veuillez réessayer.",
   "devices.none": "Aucun appareil trouvé.",
   "devices.noneRemaining": "Aucun appareil restant.",
 

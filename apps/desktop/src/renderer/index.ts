@@ -878,6 +878,23 @@ async function showDevicesModal(): Promise<void> {
   }
 }
 
+function findMyDeviceId(devices: DeviceInfo[]): string | null {
+  // Preferred: the main process flags our row by identity pubkey, so a rename
+  // from the website can't break the match. Sync the local name while here.
+  const pubkeyMatch = devices.find((d) => d.isCurrentDevice);
+  if (pubkeyMatch) {
+    if (pubkeyMatch.friendlyName) localStorage.setItem(MY_DEVICE_NAME_KEY, pubkeyMatch.friendlyName);
+    return pubkeyMatch.id;
+  }
+  // Old-hub fallback: names come from a small pool, so two devices can collide
+  // on the same name — pick only the most recently added match.
+  const myName = localStorage.getItem(MY_DEVICE_NAME_KEY);
+  const myMatches = myName !== null ? devices.filter((d) => d.friendlyName === myName) : [];
+  return myMatches.length > 0
+    ? myMatches.reduce((latest, d) => (d.createdAt > latest.createdAt ? d : latest)).id
+    : null;
+}
+
 function renderDevicesModalList(devices: DeviceInfo[]): void {
   devicesModalList.innerHTML = "";
   if (devices.length === 0) {
@@ -886,13 +903,7 @@ function renderDevicesModalList(devices: DeviceInfo[]): void {
   }
   devicesModalMessage.textContent = "";
 
-  // Names come from a small fallback pool, so two devices can collide on the
-  // same name — pick only the most recently added match as "this device".
-  const myName = localStorage.getItem(MY_DEVICE_NAME_KEY);
-  const myMatches = myName !== null ? devices.filter((d) => d.friendlyName === myName) : [];
-  const myDeviceId = myMatches.length > 0
-    ? myMatches.reduce((latest, d) => (d.createdAt > latest.createdAt ? d : latest)).id
-    : null;
+  const myDeviceId = findMyDeviceId(devices);
   // Put "this device" at the top so the user sees it first.
   const sorted = [...devices].sort((a, b) => {
     const aMine = a.id === myDeviceId;
@@ -902,43 +913,147 @@ function renderDevicesModalList(devices: DeviceInfo[]): void {
   });
 
   for (const device of sorted) {
-    const name = device.friendlyName || generateFallbackName();
-    const isMine = device.id === myDeviceId;
-    const dateStr = formatDeviceDate(device.createdAt);
-    const item = document.createElement("div");
-    item.className = "device-item";
-    item.dataset.deviceId = device.id;
-    const info = document.createElement("div");
-    info.className = "device-info";
-    const nameSpan = document.createElement("span");
-    nameSpan.className = "device-name";
-    nameSpan.textContent = name;
-    if (isMine) {
-      nameSpan.appendChild(document.createTextNode(" "));
-      const badge = document.createElement("span");
-      badge.className = "device-current-badge";
-      badge.textContent = t("devices.thisDevice");
-      nameSpan.appendChild(badge);
-    }
-    const dateSpan = document.createElement("span");
-    dateSpan.className = "device-date";
-    dateSpan.textContent = t("devices.added", { date: dateStr });
-    info.appendChild(nameSpan);
-    info.appendChild(dateSpan);
-    const removeBtn = document.createElement("button");
-    removeBtn.className = "device-remove-btn";
-    if (isMine) {
-      removeBtn.textContent = t("devices.current");
-      removeBtn.disabled = true;
-      removeBtn.title = t("devices.currentTitle");
-    } else {
-      removeBtn.textContent = t("devices.remove");
-      removeBtn.addEventListener("click", () => void handleDevicesModalRemove(device.id, item, removeBtn));
-    }
-    item.appendChild(info);
-    item.appendChild(removeBtn);
-    devicesModalList.appendChild(item);
+    devicesModalList.appendChild(buildDevicesModalItem(device, device.id === myDeviceId));
   }
+}
+
+function buildDevicesModalItem(device: DeviceInfo, isMine: boolean): HTMLElement {
+  const name = device.friendlyName || generateFallbackName();
+  const item = document.createElement("div");
+  item.className = "device-item";
+  item.dataset.deviceId = device.id;
+  const info = document.createElement("div");
+  info.className = "device-info";
+  const nameSpan = document.createElement("span");
+  nameSpan.className = "device-name";
+  const nameText = document.createElement("span");
+  nameText.textContent = name;
+  nameSpan.appendChild(nameText);
+  if (isMine) {
+    nameSpan.appendChild(document.createTextNode(" "));
+    const badge = document.createElement("span");
+    badge.className = "device-current-badge";
+    badge.textContent = t("devices.thisDevice");
+    nameSpan.appendChild(badge);
+  }
+  const dateSpan = document.createElement("span");
+  dateSpan.className = "device-date";
+  dateSpan.textContent = t("devices.added", { date: formatDeviceDate(device.createdAt) });
+  info.appendChild(nameSpan);
+  info.appendChild(dateSpan);
+
+  const actions = document.createElement("div");
+  actions.className = "device-actions";
+  const renameBtn = document.createElement("button");
+  renameBtn.className = "device-rename-btn";
+  renameBtn.textContent = t("devices.rename");
+  let currentName = device.friendlyName;
+  renameBtn.addEventListener("click", () =>
+    startDeviceRename(device.id, isMine, { info, nameSpan, nameText, actions }, {
+      get: () => currentName,
+      set: (n) => { currentName = n; }
+    })
+  );
+  actions.appendChild(renameBtn);
+  const removeBtn = document.createElement("button");
+  removeBtn.className = "device-remove-btn";
+  if (isMine) {
+    removeBtn.textContent = t("devices.current");
+    removeBtn.disabled = true;
+    removeBtn.title = t("devices.currentTitle");
+  } else {
+    removeBtn.textContent = t("devices.remove");
+    removeBtn.addEventListener("click", () => void handleDevicesModalRemove(device.id, item, removeBtn));
+  }
+  actions.appendChild(removeBtn);
+
+  item.appendChild(info);
+  item.appendChild(actions);
+  return item;
+}
+
+interface DeviceRowEls {
+  info: HTMLElement;
+  nameSpan: HTMLElement;
+  nameText: HTMLElement;
+  actions: HTMLElement;
+}
+
+function startDeviceRename(
+  deviceId: string,
+  isMine: boolean,
+  els: DeviceRowEls,
+  name: { get: () => string | null; set: (n: string) => void }
+): void {
+  if (els.info.querySelector(".device-rename-input")) return;
+  const input = document.createElement("input");
+  input.type = "text";
+  input.maxLength = 64;
+  input.className = "device-rename-input";
+  input.value = name.get() ?? "";
+  input.setAttribute("aria-label", t("devices.renameLabel"));
+  els.nameSpan.hidden = true;
+  els.info.insertBefore(input, els.nameSpan);
+
+  const rowButtons = Array.from(els.actions.children) as HTMLElement[];
+  for (const b of rowButtons) b.hidden = true;
+
+  const saveBtn = document.createElement("button");
+  saveBtn.className = "device-rename-save-btn";
+  saveBtn.textContent = t("devices.renameSave");
+  const cancelBtn = document.createElement("button");
+  cancelBtn.className = "device-rename-btn";
+  cancelBtn.textContent = t("devices.renameCancel");
+  els.actions.appendChild(saveBtn);
+  els.actions.appendChild(cancelBtn);
+
+  const finish = (): void => {
+    input.remove();
+    saveBtn.remove();
+    cancelBtn.remove();
+    els.nameSpan.hidden = false;
+    for (const b of rowButtons) b.hidden = false;
+  };
+
+  const save = async (): Promise<void> => {
+    if (!pangeaApi) return;
+    const newName = input.value.trim();
+    if (!newName) {
+      input.focus();
+      return;
+    }
+    saveBtn.disabled = true;
+    cancelBtn.disabled = true;
+    devicesModalMessage.textContent = "";
+    try {
+      await pangeaApi.renameDevice(deviceId, newName);
+      name.set(newName);
+      els.nameText.textContent = newName;
+      if (isMine) localStorage.setItem(MY_DEVICE_NAME_KEY, newName);
+      showToast(t("devices.renamed"), 4000, true);
+      finish();
+    } catch (err) {
+      saveBtn.disabled = false;
+      cancelBtn.disabled = false;
+      devicesModalMessage.textContent = reportError("renameDevice", err, t("devices.renameFailed"));
+    }
+  };
+
+  saveBtn.addEventListener("click", () => void save());
+  cancelBtn.addEventListener("click", finish);
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      void save();
+    } else if (e.key === "Escape") {
+      // Keep the modal open — back out of the edit only.
+      e.preventDefault();
+      e.stopPropagation();
+      finish();
+    }
+  });
+  input.focus();
+  input.select();
 }
 
 async function handleDevicesModalRemove(deviceId: string, itemEl: HTMLElement, btn: HTMLButtonElement): Promise<void> {

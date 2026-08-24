@@ -50,6 +50,12 @@ export const es = {
   "devices.removing": "Eliminando...",
   "devices.removed": "Dispositivo eliminado.",
   "devices.removeFailed": "No se pudo eliminar el dispositivo. Inténtalo de nuevo.",
+  "devices.rename": "Renombrar",
+  "devices.renameSave": "Guardar",
+  "devices.renameCancel": "Cancelar",
+  "devices.renameLabel": "Nombre del dispositivo",
+  "devices.renamed": "Dispositivo renombrado.",
+  "devices.renameFailed": "No se pudo renombrar el dispositivo. Inténtalo de nuevo.",
   "devices.none": "No se encontraron dispositivos.",
   "devices.noneRemaining": "No quedan dispositivos.",
 

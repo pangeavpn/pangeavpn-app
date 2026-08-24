@@ -50,6 +50,12 @@ export const en = {
   "devices.removing": "Removing...",
   "devices.removed": "Device removed.",
   "devices.removeFailed": "Failed to remove device. Please try again.",
+  "devices.rename": "Rename",
+  "devices.renameSave": "Save",
+  "devices.renameCancel": "Cancel",
+  "devices.renameLabel": "Device name",
+  "devices.renamed": "Device renamed.",
+  "devices.renameFailed": "Failed to rename device. Please try again.",
   "devices.none": "No devices found.",
   "devices.noneRemaining": "No devices remaining.",
 

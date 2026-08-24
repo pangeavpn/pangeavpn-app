@@ -50,6 +50,12 @@ export const fa = {
   "devices.removing": "در حال حذف...",
   "devices.removed": "دستگاه حذف شد.",
   "devices.removeFailed": "حذف دستگاه ناموفق بود. لطفاً دوباره تلاش کنید.",
+  "devices.rename": "تغییر نام",
+  "devices.renameSave": "ذخیره",
+  "devices.renameCancel": "لغو",
+  "devices.renameLabel": "نام دستگاه",
+  "devices.renamed": "نام دستگاه تغییر کرد.",
+  "devices.renameFailed": "تغییر نام دستگاه ناموفق بود. لطفاً دوباره تلاش کنید.",
   "devices.none": "دستگاهی یافت نشد.",
   "devices.noneRemaining": "دستگاهی باقی نمانده است.",
 

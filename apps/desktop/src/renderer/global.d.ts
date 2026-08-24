@@ -65,6 +65,8 @@ declare global {
     friendlyName: string | null;
     createdAt: string;
     status: string;
+    /** Set by the main process by matching identity pubkeys; rename-proof. */
+    isCurrentDevice?: boolean;
   }
 
   interface SubscriptionInfo {
@@ -150,6 +152,7 @@ declare global {
     cacheServers: (servers: ServerInfo[]) => Promise<void>;
     listDevices: () => Promise<DeviceInfo[]>;
     removeDevice: (deviceId: string) => Promise<void>;
+    renameDevice: (deviceId: string, friendlyName: string) => Promise<void>;
     getSubscription: () => Promise<SubscriptionInfo | null>;
     /** Backed by the main-process secure store — never localStorage. */
     rememberAccountNumber: (accountNumber: string) => Promise<void>;

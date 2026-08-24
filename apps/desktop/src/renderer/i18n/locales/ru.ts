@@ -50,6 +50,12 @@ export const ru = {
   "devices.removing": "Удаление...",
   "devices.removed": "Устройство удалено.",
   "devices.removeFailed": "Не удалось удалить устройство. Попробуйте ещё раз.",
+  "devices.rename": "Переименовать",
+  "devices.renameSave": "Сохранить",
+  "devices.renameCancel": "Отмена",
+  "devices.renameLabel": "Имя устройства",
+  "devices.renamed": "Устройство переименовано.",
+  "devices.renameFailed": "Не удалось переименовать устройство. Попробуйте ещё раз.",
   "devices.none": "Устройства не найдены.",
   "devices.noneRemaining": "Устройств не осталось.",
 
