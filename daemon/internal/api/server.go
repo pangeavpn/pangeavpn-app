@@ -197,6 +197,9 @@ func serviceErrorResponse(err error) okResponse {
 	if errors.Is(err, ErrTransportExhausted) {
 		return okResponse{OK: false, Error: "transport_exhausted"}
 	}
+	if errors.Is(err, ErrHostOffline) {
+		return okResponse{OK: false, Error: "host_offline"}
+	}
 	return okResponse{OK: false}
 }
 

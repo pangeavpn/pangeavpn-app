@@ -1284,6 +1284,9 @@ serverConnectBtn.addEventListener("click", async () => {
     } else if ((result as { error?: string }).error === "cancelled") {
       // The user stopped it — not a failure, so no error styling.
       setUiMessage(t("connect.cancelled"));
+    } else if ((result as { error?: string }).error === "offline") {
+      // The daemon is holding the session and connects once the network is back.
+      setUiMessage(t("connect.offline"));
     } else {
       setUiMessage(t("connect.failed"));
       // The most likely reason a connect is refused outright: re-check so the
@@ -1356,6 +1359,8 @@ async function switchToServer(serverId: string): Promise<void> {
       void refreshLastServer();
     } else if (result.error === "cancelled") {
       setUiMessage(t("connect.cancelled"));
+    } else if (result.error === "offline") {
+      setUiMessage(t("connect.offline"));
     } else {
       setUiMessage(t("connect.switchFailed"));
     }

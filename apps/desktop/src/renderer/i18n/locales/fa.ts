@@ -286,6 +286,7 @@ export const fa = {
   "connect.disconnected": "اتصال قطع شد.",
   "connect.disconnectFailed": "قطع اتصال ممکن نشد. لطفاً دوباره تلاش کنید.",
   "connect.cancelled": "اتصال لغو شد.",
+  "connect.offline": "اتصال اینترنت وجود ندارد. به محض بازگشت آن متصل می‌شویم.",
   "connect.expired": "زمان شما تمام شد — برای اتصال مجدد شارژ کنید.",
   "connect.recovered": "اتصال بازیابی شد.",
   "connect.refreshServersFailed": "به‌روزرسانی فهرست سرورها ممکن نشد. به‌طور خودکار دوباره تلاش می‌شود.",

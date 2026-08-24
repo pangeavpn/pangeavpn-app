@@ -286,6 +286,7 @@ export const ru = {
   "connect.disconnected": "Отключено.",
   "connect.disconnectFailed": "Не удалось отключиться. Попробуйте ещё раз.",
   "connect.cancelled": "Подключение отменено.",
+  "connect.offline": "Нет подключения к интернету. Подключимся, как только оно появится.",
   "connect.expired": "Ваше время вышло — пополните счёт, чтобы подключиться.",
   "connect.recovered": "Соединение восстановлено.",
   "connect.refreshServersFailed": "Не удалось обновить список серверов. Попытка повторится автоматически.",

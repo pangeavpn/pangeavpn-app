@@ -286,6 +286,7 @@ export const en = {
   "connect.disconnected": "Disconnected.",
   "connect.disconnectFailed": "Couldn't disconnect. Please try again.",
   "connect.cancelled": "Connection cancelled.",
+  "connect.offline": "No internet connection. We'll connect as soon as it's back.",
   "connect.expired": "Your time is up — top up to reconnect.",
   "connect.recovered": "Connection recovered.",
   "connect.refreshServersFailed": "Couldn't refresh the server list. It will retry automatically.",

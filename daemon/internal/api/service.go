@@ -24,6 +24,12 @@ import (
 // transport for one server. Desktop may then safely try another server.
 var ErrTransportExhausted = errors.New("all configured transports failed")
 
+// ErrHostOffline is returned when a dial found the host has no route out at
+// all; the cascade stops there, since every other transport would fail the same.
+var ErrHostOffline = errors.New("no internet connection")
+
+const offlineHoldDetail = "no internet connection; connecting when the network returns"
+
 // errRebuildBusy signals rebuildSilentSession found opMu already held by a
 // real operation (Connect/Switch, or an overlapping rebuild). It is not a
 // failed rebuild — attemptSessionRebuild must not book it against the retry
@@ -166,6 +172,9 @@ type Service struct {
 	// stable "no internet" hold instead of hammering restart every tick. It is
 	// the instant signal GetNetworkConnectivityHint lags behind. Guarded by recoveryMu.
 	offlineHoldUntil time.Time
+	// offlineHeld outlives the hold timer, until a bring-up succeeds or fails for
+	// another reason, so paced re-dials keep reporting "no internet". Guarded by recoveryMu.
+	offlineHeld bool
 
 	// resumeFreshUntil marks the window after a host resume in which a single
 	// failed probe round is enough to rebuild; resumeNotedAt dedupes the
@@ -592,6 +601,12 @@ func (s *Service) Connect(ctx context.Context, profileID string, opts ConnectOpt
 	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("kill switch enabled (%dms)", time.Since(stepStart).Milliseconds()))
 
 	if err := s.bringUpAfterKillSwitch(ctx, profile, wireGuardProfile, opts); err != nil {
+		// The user asked for this session: remember it so recovery brings it
+		// up once the host has a network again.
+		if errors.Is(err, ErrHostOffline) {
+			s.setCurrentProfile(profile)
+			s.setSessionOpts(opts)
+		}
 		return err
 	}
 	s.logs.Add(state.LogInfo, state.SourceDaemon, "connect flow completed")
@@ -634,9 +649,15 @@ func (s *Service) bringUpAfterKillSwitch(ctx context.Context, profile state.Prof
 	networkKey := s.currentNetworkKey()
 	kind, err := s.startTransportWithHandshake(ctx, &profile, &wireGuardProfile, opts.PreferredTransport, networkKey)
 	if err != nil {
+		if errors.Is(err, ErrHostOffline) {
+			s.holdBringUpOffline(err)
+			return err
+		}
+		s.clearOfflineHold()
 		s.setError(fmt.Sprintf("transport start failed: %v", err))
 		return err
 	}
+	s.clearOfflineHold()
 	s.setActiveTransportKind(kind)
 	s.rememberTransport(networkKey, kind)
 	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("%s tunnel established with wireguard handshake (%dms)", kind, time.Since(stepStart).Milliseconds()))
@@ -648,6 +669,14 @@ func (s *Service) bringUpAfterKillSwitch(ctx context.Context, profile state.Prof
 	s.resetEndpointRouteRepairs()
 	s.machine.Set(state.StateConnected, "tunnel active")
 	return nil
+}
+
+// holdBringUpOffline parks a bring-up that found no route out: ERROR carries the
+// offline flag, the kill switch stays armed, and recovery re-dials on a link.
+func (s *Service) holdBringUpOffline(err error) {
+	s.enterOfflineHold()
+	s.machine.Set(state.StateError, offlineHoldDetail)
+	s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("no route to the network; holding the connection until it returns (%v)", err))
 }
 
 // armKillSwitchForAdoptedTunnel enables and updates the kill switch for a
@@ -1196,6 +1225,9 @@ func (s *Service) startTransportWithHandshake(ctx context.Context, profile *stat
 			}
 			failures = append(failures, err.Error())
 			s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("%s transport did not establish a tunnel: %v", candidate.kind, err))
+			if hostNetworkUnreachable(err) || s.hostOffline() {
+				return "", fmt.Errorf("%w: %v", ErrHostOffline, err)
+			}
 			continue
 		}
 		*wireGuardProfile = attempt
@@ -2314,6 +2346,7 @@ func (s *Service) runHealthCheck(ctx context.Context) {
 				s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("no route to the network; holding %s until it returns", activeKind))
 				return
 			}
+			s.clearOfflineHold()
 			s.setErrorFromHealthCheck(fmt.Sprintf("health check failed: %s transport is not running and restart failed: %v", activeKind, err))
 			return
 		}
@@ -2460,7 +2493,7 @@ func (s *Service) retryDroppedSession(ctx context.Context) {
 	// into a dead network, and don't let a still-recent handshake flip this to a
 	// transient CONNECTED — that flip-flop is exactly the offline thrash. The
 	// offline status flag drives the UI; recovery resumes when a link returns.
-	if s.offlineNow() {
+	if s.offlineHoldActive() || s.hostOffline() {
 		return
 	}
 	// Not every error means a broken tunnel — a refused Connect stamps one on a
@@ -2495,6 +2528,11 @@ func (s *Service) attemptSessionRebuild(ctx context.Context, profile state.Profi
 		// A real operation (or an overlapping rebuild) already owns opMu;
 		// this tick simply didn't get to run, which must not burn a retry
 		// attempt or push the backoff out.
+		return
+	}
+	// No route out is a wait, not a failed attempt: bring-up already parked the
+	// session in the offline hold, and backoff here would only delay the reconnect.
+	if errors.Is(err, ErrHostOffline) {
 		return
 	}
 	// Exhaustion is the app's cue to rotate servers; a cascade that ran into a
@@ -2577,6 +2615,7 @@ func (s *Service) enterOfflineHold() {
 	s.recoveryMu.Lock()
 	defer s.recoveryMu.Unlock()
 	s.offlineHoldUntil = time.Now().Add(offlineHoldInterval)
+	s.offlineHeld = true
 }
 
 func (s *Service) offlineHoldActive() bool {
@@ -2589,13 +2628,17 @@ func (s *Service) clearOfflineHold() {
 	s.recoveryMu.Lock()
 	defer s.recoveryMu.Unlock()
 	s.offlineHoldUntil = time.Time{}
+	s.offlineHeld = false
 }
 
 // offlineNow reports "no internet" from either the instant unreachable-dial hold
 // or the OS oracle. The hold leads by ~a minute: GetNetworkConnectivityHint only
 // downgrades after its own probes time out, well after a dial already said so.
 func (s *Service) offlineNow() bool {
-	return s.offlineHoldActive() || s.hostOffline()
+	s.recoveryMu.Lock()
+	held := s.offlineHeld
+	s.recoveryMu.Unlock()
+	return held || s.hostOffline()
 }
 
 func (s *Service) beginRecoveryAttempt() int {
@@ -2641,6 +2684,7 @@ func (s *Service) resetRecovery() {
 	s.recoveryAttempts = 0
 	s.recoveryNextAt = time.Time{}
 	s.offlineHoldUntil = time.Time{}
+	s.offlineHeld = false
 }
 
 // holdHealthChecks pauses health evaluation for d and clears any backoff, so

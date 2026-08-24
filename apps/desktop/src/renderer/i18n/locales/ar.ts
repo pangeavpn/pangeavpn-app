@@ -286,6 +286,7 @@ export const ar = {
   "connect.disconnected": "تم قطع الاتصال.",
   "connect.disconnectFailed": "تعذّر قطع الاتصال. يرجى المحاولة مرة أخرى.",
   "connect.cancelled": "تم إلغاء الاتصال.",
+  "connect.offline": "لا يوجد اتصال بالإنترنت. سنتصل فور عودته.",
   "connect.expired": "انتهى وقتك — اشحن رصيدك لإعادة الاتصال.",
   "connect.recovered": "تمت استعادة الاتصال.",
   "connect.refreshServersFailed": "تعذّر تحديث قائمة الخوادم. ستتم إعادة المحاولة تلقائيًا.",

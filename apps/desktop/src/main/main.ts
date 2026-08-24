@@ -1,7 +1,7 @@
 import { Menu, Notification, Tray, app, BrowserWindow, ipcMain, nativeImage, session, shell, type NativeImage } from "electron";
 import path from "node:path";
 import type { ConfigResponse, OkResponse, Profile, StatusResponse } from "@pangeavpn/shared-types";
-import { DaemonClient, TransportExhaustedError } from "./daemonClient";
+import { DaemonClient, HostOfflineError, TransportExhaustedError } from "./daemonClient";
 import { DaemonProcessManager } from "./daemonProcess";
 import { getLegacyStateFilePath, getUserStateDir, readDaemonTokens } from "./platformPaths";
 import { getConnectedTrayIconPath, getTrayIconPath, getWindowsAppIconPath } from "./resourcePaths";
@@ -725,6 +725,8 @@ async function connectFromTray(): Promise<void> {
     try {
       if (await reconnectExistingProfile()) return;
     } catch (error) {
+      // Parked until the network returns; the status refresh shows it.
+      if (error instanceof HostOfflineError) return;
       if (!(error instanceof TransportExhaustedError)) throw error;
       exhaustedServerId = lastServerId;
     }
@@ -965,7 +967,7 @@ async function dialReusedProfile(
   try {
     outcome = await dialServer(profile, index, mode, attempt);
   } catch (err) {
-    if (err instanceof ConnectCancelledError || isCancelled(attempt)) throw err;
+    if (err instanceof ConnectCancelledError || err instanceof HostOfflineError || isCancelled(attempt)) throw err;
     console.warn(`reuse: ${profile.id} failed, re-provisioning`, sanitizeLog(err));
     forgetProvisionedProfile(profile.id);
     return null;
@@ -1048,6 +1050,11 @@ async function provisionAcrossServers(serverIds: readonly string[], mode: "conne
     if (err instanceof TransportExhaustedError) {
       return { ok: false, error: "all-servers-exhausted" };
     }
+    // The daemon is holding the session (kill switch armed) and connects
+    // itself once the host has a network; nothing here to unwind or retry.
+    if (err instanceof HostOfflineError) {
+      return { ok: false, error: "offline" };
+    }
     throw err;
   } finally {
     if (configChanged && !committed && initialProfiles) {
@@ -1085,7 +1092,14 @@ async function provisionAndConnect(serverIds: readonly string[]): Promise<Connec
   } catch (err) {
     if (!isHubReachabilityFailure(err)) throw err;
     console.warn("connect: hub unreachable, trying the last working profile", sanitizeLog(err));
-    if (await reconnectExistingProfile()) {
+    let reconnected: boolean;
+    try {
+      reconnected = await reconnectExistingProfile();
+    } catch (fallbackErr) {
+      if (fallbackErr instanceof HostOfflineError) return { ok: false, error: "offline" };
+      throw fallbackErr;
+    }
+    if (reconnected) {
       return { ok: true, ...(lastServerId ? { serverId: lastServerId } : {}) };
     }
     await releaseFailClosedKillSwitch();

@@ -33,6 +33,10 @@ test("a live or in-flight session keeps its lock", () => {
   assert.equal(shouldReleaseKillSwitch(status({ state: "DISCONNECTING" }), false), false);
 });
 
+test("a session held for the network to return keeps its lock", () => {
+  assert.equal(shouldReleaseKillSwitch(status({ state: "ERROR", offline: true }), false), false);
+});
+
 test("a half-built session still running keeps its lock", () => {
   assert.equal(shouldReleaseKillSwitch(status({ cloak: { running: true } }), false), false);
   assert.equal(shouldReleaseKillSwitch(status({ wireguard: { running: true } }), false), false);

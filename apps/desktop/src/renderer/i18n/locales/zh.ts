@@ -286,6 +286,7 @@ export const zh = {
   "connect.disconnected": "已断开。",
   "connect.disconnectFailed": "无法断开连接，请重试。",
   "connect.cancelled": "已取消连接。",
+  "connect.offline": "没有互联网连接。网络恢复后将自动连接。",
   "connect.expired": "您的时长已用完 — 充值后即可重新连接。",
   "connect.recovered": "连接已恢复。",
   "connect.refreshServersFailed": "无法刷新服务器列表，将自动重试。",

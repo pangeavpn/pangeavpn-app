@@ -15,6 +15,14 @@ export class TransportExhaustedError extends Error {
   }
 }
 
+/** The daemon found no route out and is holding the session until one returns. */
+export class HostOfflineError extends Error {
+  constructor() {
+    super("No internet connection");
+    this.name = "HostOfflineError";
+  }
+}
+
 export class DaemonClient {
   private readonly baseUrl: string;
   private readonly tokenProvider: () => Promise<string | string[]>;
@@ -252,8 +260,11 @@ export class DaemonClient {
             if (payload.error === "transport_exhausted") {
               throw new TransportExhaustedError();
             }
+            if (payload.error === "host_offline") {
+              throw new HostOfflineError();
+            }
           } catch (error) {
-            if (error instanceof TransportExhaustedError) throw error;
+            if (error instanceof TransportExhaustedError || error instanceof HostOfflineError) throw error;
           }
           throw new Error(`daemon request failed (${reply.status}): ${reply.text}`);
         }

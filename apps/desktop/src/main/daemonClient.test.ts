@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import test from "node:test";
-import { DaemonClient, TransportExhaustedError } from "./daemonClient.ts";
+import { DaemonClient, HostOfflineError, TransportExhaustedError } from "./daemonClient.ts";
 
 async function serve(
   t: { after: (fn: () => unknown) => void },
@@ -23,6 +23,16 @@ test("DaemonClient exposes transport exhaustion as a typed error", async (t) => 
 
   const client = new DaemonClient(baseUrl, async () => "token");
   await assert.rejects(client.connect("profile"), TransportExhaustedError);
+});
+
+test("DaemonClient exposes an offline hold as a typed error", async (t) => {
+  const { baseUrl } = await serve(t, (_req, res) => {
+    res.writeHead(500, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: false, error: "host_offline" }));
+  });
+
+  const client = new DaemonClient(baseUrl, async () => "token");
+  await assert.rejects(client.connect("profile"), HostOfflineError);
 });
 
 test("DaemonClient leaves unrelated daemon failures non-retryable", async (t) => {

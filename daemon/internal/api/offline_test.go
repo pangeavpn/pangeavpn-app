@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/state"
 )
@@ -136,5 +137,129 @@ func TestRetryDroppedSession_HoldsWhenOffline(t *testing.T) {
 	}
 	if !svc.Status(context.Background()).Offline {
 		t.Error("Offline = false in ERROR while the OS reports no internet")
+	}
+}
+
+// Connect with no internet parks the session (ERROR + offline, kill switch
+// armed, profile kept) instead of failing, and recovery connects it on a link.
+func TestConnect_HoldsOfflineUntilTheNetworkReturns(t *testing.T) {
+	naive := &fakeNaiveManager{}
+	wgMgr := &fakeWGManager{}
+	ks := &fakeKillSwitch{}
+	svc := newTestService(t, &fakeCloakManager{}, naive, wgMgr, ks, silentTunnelProfile())
+	svc.recoveryDelays = []time.Duration{0}
+	svc.networkKey = func() string { return "eth0:192.0.2.10" }
+	naive.mu.Lock()
+	naive.startErr = errors.New("dial tcp 95.179.239.1:443: connectex: A socket operation was attempted to an unreachable network.")
+	naive.mu.Unlock()
+
+	err := svc.Connect(context.Background(), "p1", ConnectOptions{PreferredTransport: "naive"})
+	if !errors.Is(err, ErrHostOffline) {
+		t.Fatalf("Connect error = %v, want ErrHostOffline", err)
+	}
+
+	status := svc.Status(context.Background())
+	if status.State != state.StateError || status.Detail != offlineHoldDetail {
+		t.Fatalf("status = %q (%s), want ERROR with %q", status.State, status.Detail, offlineHoldDetail)
+	}
+	if !status.Offline || status.Reconnecting || status.TransportsExhausted {
+		t.Errorf("Offline=%v Reconnecting=%v TransportsExhausted=%v, want a plain offline hold", status.Offline, status.Reconnecting, status.TransportsExhausted)
+	}
+	if !ks.Active() {
+		t.Error("kill switch not armed while holding for the network")
+	}
+
+	// Ticks inside the hold must not re-dial.
+	naive.mu.Lock()
+	naive.startCalled = false
+	naive.mu.Unlock()
+	svc.runHealthCheck(context.Background())
+	svc.runHealthCheck(context.Background())
+	if transportStarted(naive) {
+		t.Error("connect was re-dialled inside the offline hold")
+	}
+
+	// The hold expires with the host still offline: the re-dial fails again and
+	// the status keeps saying no internet rather than flashing a plain ERROR.
+	svc.recoveryMu.Lock()
+	svc.offlineHoldUntil = time.Time{}
+	svc.recoveryMu.Unlock()
+	svc.runHealthCheck(context.Background())
+	if !transportStarted(naive) {
+		t.Error("expected a re-dial once the hold expired")
+	}
+	status = svc.Status(context.Background())
+	if status.State != state.StateError || !status.Offline || status.Reconnecting {
+		t.Fatalf("status = %q offline=%v reconnecting=%v after a failed re-dial, want ERROR still held offline", status.State, status.Offline, status.Reconnecting)
+	}
+	if !svc.offlineHoldActive() {
+		t.Error("failed re-dial did not re-enter the offline hold")
+	}
+
+	restoreNetwork(naive)
+	svc.onNetworkChanged()
+	svc.runHealthCheck(context.Background())
+
+	status = svc.Status(context.Background())
+	if status.State != state.StateConnected {
+		t.Fatalf("state = %q (%s), want CONNECTED once the link returned", status.State, status.Detail)
+	}
+	if status.Offline || status.Reconnecting {
+		t.Errorf("Offline=%v Reconnecting=%v after connecting", status.Offline, status.Reconnecting)
+	}
+	if !ks.Active() {
+		t.Error("kill switch not armed after the held connect landed")
+	}
+}
+
+// Disconnect while parked must drop the intent: nothing re-dials afterwards.
+func TestDisconnect_WhileHoldingOfflineDropsTheSession(t *testing.T) {
+	naive := &fakeNaiveManager{}
+	svc := newTestService(t, &fakeCloakManager{}, naive, &fakeWGManager{}, &fakeKillSwitch{}, silentTunnelProfile())
+	svc.recoveryDelays = []time.Duration{0}
+	svc.networkKey = func() string { return "eth0:192.0.2.10" }
+	naive.mu.Lock()
+	naive.startErr = errors.New("dial udp 192.0.2.1:8488: connect: network is unreachable")
+	naive.mu.Unlock()
+	if err := svc.Connect(context.Background(), "p1", ConnectOptions{PreferredTransport: "naive"}); !errors.Is(err, ErrHostOffline) {
+		t.Fatalf("Connect error = %v, want ErrHostOffline", err)
+	}
+
+	if err := svc.Disconnect(context.Background(), false); err != nil {
+		t.Fatalf("disconnect failed: %v", err)
+	}
+	status := svc.Status(context.Background())
+	if status.State != state.StateDisconnected || status.Offline {
+		t.Fatalf("status = %q offline=%v, want DISCONNECTED and not offline", status.State, status.Offline)
+	}
+
+	restoreNetwork(naive)
+	svc.onNetworkChanged()
+	svc.runHealthCheck(context.Background())
+	if transportStarted(naive) {
+		t.Error("a disconnected session was re-dialled when the link returned")
+	}
+}
+
+// The first "unreachable network" dial ends the cascade: the other transports
+// would fail the same way, each after its own handshake timeout.
+func TestConnect_UnreachableNetworkStopsTheCascade(t *testing.T) {
+	svc, probe := cascadeTestService(t, map[string]bool{"shadowsocks": true})
+	probe.reality.mu.Lock()
+	probe.reality.startErr = errors.New("reality: handshake: dial tcp 95.179.239.1:443: connectex: A socket operation was attempted to an unreachable network.")
+	probe.reality.mu.Unlock()
+
+	err := svc.Connect(context.Background(), "p1", ConnectOptions{})
+	if !errors.Is(err, ErrHostOffline) {
+		t.Fatalf("Connect error = %v, want ErrHostOffline", err)
+	}
+	if errors.Is(err, ErrTransportExhausted) {
+		t.Error("an offline host must not read as exhausted transports")
+	}
+	if order := probe.order(); len(order) != 0 {
+		t.Errorf("cascade kept walking after the unreachable dial: %v", order)
+	}
+	if !svc.Status(context.Background()).Offline {
+		t.Error("Offline = false after an unreachable-network connect")
 	}
 }

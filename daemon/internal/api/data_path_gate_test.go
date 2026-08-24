@@ -338,8 +338,14 @@ func TestStatus_HostNetworkOutageIsNotExhaustion(t *testing.T) {
 	if st.TransportsExhausted {
 		t.Fatal("an outage on the host must not be reported as exhausted transports")
 	}
-	if !st.Reconnecting {
-		t.Fatal("the daemon must keep recovering the session itself")
+	if !st.Offline {
+		t.Fatal("an outage on the host must be reported as no internet")
+	}
+	if st.Reconnecting {
+		t.Fatal("an outage is a hold, not a booked reconnect attempt")
+	}
+	if _, kept := svc.getCurrentProfile(); !kept {
+		t.Fatal("the daemon must keep the session so recovery re-dials when a link returns")
 	}
 }
 

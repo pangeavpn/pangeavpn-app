@@ -286,6 +286,7 @@ export const uk = {
   "connect.disconnected": "Відключено.",
   "connect.disconnectFailed": "Не вдалося відключитися. Спробуйте ще раз.",
   "connect.cancelled": "Підключення скасовано.",
+  "connect.offline": "Немає підключення до інтернету. Підключимося, щойно воно з'явиться.",
   "connect.expired": "Ваш час вичерпано — поповніть рахунок, щоб підключитися.",
   "connect.recovered": "З'єднання відновлено.",
   "connect.refreshServersFailed": "Не вдалося оновити список серверів. Спробу буде повторено автоматично.",

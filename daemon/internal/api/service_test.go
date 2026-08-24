@@ -1809,12 +1809,8 @@ func transportStarted(naive *fakeNaiveManager) bool {
 	return naive.startCalled
 }
 
-// TestHealthCheck_RetriesAfterFailedRebuild is the laptop-wake case. The first
-// rebuild lands before the host has a route and fails, whichever transport it
-// is dialling; the session still has to come back on its own once the network
-// does. Before this the health check stopped looking at StateError, so that one
-// failure was terminal — with the kill switch left armed, i.e. no network at
-// all until the user noticed and clicked something.
+// Laptop-wake case: a rebuild that finds no route out is a hold (kill switch
+// armed, no backoff burnt), and the session comes back on its own with the link.
 func TestHealthCheck_RetriesAfterFailedRebuild(t *testing.T) {
 	svc, naive, wgMgr, ks := recoveryTestService(t)
 
@@ -1825,22 +1821,26 @@ func TestHealthCheck_RetriesAfterFailedRebuild(t *testing.T) {
 	if status.State != state.StateError {
 		t.Fatalf("state = %q, want ERROR after the first rebuild failed", status.State)
 	}
-	if !strings.Contains(status.Detail, "retrying in") {
-		t.Errorf("detail = %q, want it to say another attempt is coming", status.Detail)
+	if status.Detail != offlineHoldDetail {
+		t.Errorf("detail = %q, want %q", status.Detail, offlineHoldDetail)
 	}
-	if !status.Reconnecting {
-		t.Error("Reconnecting = false, want the error reported as one the daemon is still working on")
+	if !status.Offline {
+		t.Error("Offline = false, want the unreachable rebuild reported as no internet")
+	}
+	if status.Reconnecting {
+		t.Error("Reconnecting = true, want a hold rather than a booked attempt while offline")
 	}
 
 	restoreNetwork(naive)
+	svc.onNetworkChanged()
 	svc.runHealthCheck(context.Background())
 
 	status = svc.Status(context.Background())
 	if status.State != state.StateConnected {
 		t.Fatalf("state = %q (%s), want CONNECTED after the retry", status.State, status.Detail)
 	}
-	if status.Reconnecting {
-		t.Error("Reconnecting = true after the session came back")
+	if status.Reconnecting || status.Offline {
+		t.Errorf("Reconnecting = %v, Offline = %v after the session came back", status.Reconnecting, status.Offline)
 	}
 	if !transportStarted(naive) {
 		t.Error("expected the retry to restart the transport")
