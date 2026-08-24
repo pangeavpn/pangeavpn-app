@@ -162,6 +162,12 @@ type Service struct {
 	recoveryNextAt   time.Time
 	healthHoldUntil  time.Time
 
+	// resumeFreshUntil marks the window after a host resume in which a single
+	// failed probe round is enough to rebuild; resumeNotedAt dedupes the
+	// several notifications one wake produces. Guarded by recoveryMu.
+	resumeFreshUntil time.Time
+	resumeNotedAt    time.Time
+
 	// dnsProbe* schedule the end-to-end data-path check: when the next round is
 	// due, how many consecutive rounds have failed, and the earliest a
 	// probe-driven rebuild may fire again. Guarded by recoveryMu.
@@ -196,6 +202,14 @@ type Service struct {
 	// networkRepair is the post-disconnect route/DNS cleanup, injectable so
 	// tests don't spawn real netsh/powershell. Runs in the background.
 	networkRepair func(ctx context.Context, tunnelNames []string) ([]string, error)
+
+	// systemEvents supplies host resume/network-change signals; injectable so
+	// tests feed events without OS notifications. A nil channel disables it.
+	systemEvents func(ctx context.Context) (<-chan platform.SystemEvent, error)
+
+	// healthKick wakes the health loop ahead of its next tick after a system
+	// event, so recovery reacts in milliseconds rather than a tick later.
+	healthKick chan struct{}
 
 	// repairCancel aborts the in-flight background repair; a new connect must
 	// not race adapter renews under its fresh tunnel. Guarded by repairMu.
@@ -247,6 +261,12 @@ type wgTunnelLUIDReporter interface {
 // routes as bring-up installed them.
 type wgRouteGuard interface {
 	EnsureEndpointRoutes(ctx context.Context, profile state.WireGuardProfile) (bool, error)
+}
+
+// wgSocketRebinder reopens live device UDP binds after a host resume, when a
+// socket may still be tied to a pre-sleep address. Optional capability.
+type wgSocketRebinder interface {
+	RebindDeviceSockets(ctx context.Context) int
 }
 
 // wgDNSGuard re-asserts the tunnel's resolvers when the host has stopped
@@ -328,6 +348,8 @@ func NewService(
 		recoveryDelays:   defaultRecoveryDelays,
 		probeResolver:    probeResolverOverUDP,
 		networkRepair:    platform.RepairNetworkAfterTunnelDisconnect,
+		systemEvents:     platform.WatchSystemEvents,
+		healthKick:       make(chan struct{}, 1),
 	}
 }
 
@@ -448,6 +470,7 @@ func (s *Service) StartBackground(ctx context.Context) {
 	// the daemon.
 	go s.reconcileStartup(ctx)
 	go s.healthLoop(ctx)
+	go s.watchSystemEvents(ctx)
 }
 
 // ConnectOptions carries per-connect toggles from the client. Defaults to
@@ -2102,18 +2125,126 @@ func (s *Service) healthLoop(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
+		case <-s.healthKick:
+			s.runHealthCheck(ctx)
 		case <-ticker.C:
 			now := time.Now()
 			// Wall clock, not monotonic: on darwin/linux the monotonic clock
 			// pauses during suspend, so a monotonic diff never sees the gap.
 			if gap := now.Round(0).Sub(lastTick.Round(0)); gap > suspendGapThreshold {
-				s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf(
-					"resume detected (health check gap of %s); letting the network settle before checking the tunnel", gap.Round(time.Second)))
-				s.holdHealthChecks(resumeSettleGrace)
+				s.onSystemResume(ctx, fmt.Sprintf("health check gap of %s", gap.Round(time.Second)))
 			}
 			lastTick = now
 			s.runHealthCheck(ctx)
 		}
+	}
+}
+
+// resumeFreshWindow is how long after a resume a single failed probe round is
+// enough to rebuild: the handshake is stale and the host just woke, so the
+// usual two-round debounce only delays a near-certain recovery.
+const resumeFreshWindow = 90 * time.Second
+
+// resumeDedupeWindow collapses the burst of notifications one wake produces
+// (RESUMEAUTOMATIC, RESUMESUSPEND, and the health loop's own gap detection).
+const resumeDedupeWindow = 10 * time.Second
+
+// watchSystemEvents feeds host resume and network-change signals into the
+// recovery logic, replacing timer guesses with the OS's own notifications.
+func (s *Service) watchSystemEvents(ctx context.Context) {
+	if s.systemEvents == nil {
+		return
+	}
+	events, err := s.systemEvents(ctx)
+	if err != nil {
+		s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("system event notifications unavailable; falling back to timers: %v", err))
+		return
+	}
+	if events == nil {
+		return
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case event, ok := <-events:
+			if !ok {
+				return
+			}
+			switch event {
+			case platform.SystemEventResumed:
+				s.onSystemResume(ctx, "host resume notification")
+			case platform.SystemEventNetworkChanged:
+				s.onNetworkChanged()
+			}
+		}
+	}
+}
+
+// onSystemResume prepares recovery for the network the host is waking into:
+// rebind the device sockets off their pre-sleep addresses, hold health checks
+// while interfaces come back (a network event releases the hold early), and
+// schedule the first probe for the moment the hold ends.
+func (s *Service) onSystemResume(ctx context.Context, cause string) {
+	s.recoveryMu.Lock()
+	now := time.Now()
+	if now.Sub(s.resumeNotedAt) < resumeDedupeWindow {
+		s.recoveryMu.Unlock()
+		return
+	}
+	s.resumeNotedAt = now
+	s.resumeFreshUntil = now.Add(resumeFreshWindow)
+	s.healthHoldUntil = now.Add(resumeSettleGrace)
+	s.recoveryAttempts = 0
+	s.recoveryNextAt = time.Time{}
+	// Rounds that failed while the host was asleep say nothing about the
+	// network it woke up on, and a pre-sleep rebuild cooldown protects nothing.
+	s.dnsProbeFailures = 0
+	s.dnsProbeQuietUntil = time.Time{}
+	s.dnsProbeNextAt = s.healthHoldUntil
+	s.recoveryMu.Unlock()
+
+	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf(
+		"resume detected (%s); letting the network settle before checking the tunnel", cause))
+	if rebinder, ok := s.wg.(wgSocketRebinder); ok {
+		if rebound := rebinder.RebindDeviceSockets(ctx); rebound > 0 {
+			s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("rebound %d wireguard device socket(s) after resume", rebound))
+		}
+	}
+}
+
+// onNetworkChanged reacts to the host's connectivity moving: once the network
+// fingerprint says there is something to dial from, waiting out timers only
+// delays recovery, so the settle hold, retry backoff and probe schedule all
+// come forward to now and the health loop runs immediately.
+func (s *Service) onNetworkChanged() {
+	if !s.networkLooksUsable() {
+		return
+	}
+	s.recoveryMu.Lock()
+	now := time.Now()
+	if now.Before(s.healthHoldUntil) {
+		s.healthHoldUntil = now
+	}
+	if now.Before(s.recoveryNextAt) {
+		s.recoveryNextAt = time.Time{}
+	}
+	if now.Before(s.dnsProbeNextAt) {
+		s.dnsProbeNextAt = time.Time{}
+	}
+	s.recoveryMu.Unlock()
+	s.kickHealthCheck()
+}
+
+// kickHealthCheck asks the health loop to run now; a kick already pending is
+// enough, so this never blocks.
+func (s *Service) kickHealthCheck() {
+	if s.healthKick == nil {
+		return
+	}
+	select {
+	case s.healthKick <- struct{}{}:
+	default:
 	}
 }
 

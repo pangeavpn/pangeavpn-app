@@ -454,7 +454,13 @@ func (s *Service) recordDNSProbeFailure() (int, bool) {
 
 	s.dnsProbeFailures++
 	failures := s.dnsProbeFailures
-	if failures < dnsProbeFailuresBeforeRebuild {
+	// One miss is enough right after a resume: the host just woke, so the
+	// debounce against UDP loss only delays a near-certain rebuild.
+	threshold := dnsProbeFailuresBeforeRebuild
+	if time.Now().Before(s.resumeFreshUntil) {
+		threshold = 1
+	}
+	if failures < threshold {
 		return failures, false
 	}
 	s.dnsProbeFailures = 0

@@ -292,6 +292,29 @@ func (m *wireGuardGoManager) sessionStats(tunnelKey string) (rxBytes, txBytes, l
 	return rxBytes, txBytes, lastHandshakeUnix, true, err
 }
 
+// RebindDeviceSockets reopens every live device's UDP bind (same port), for
+// sockets a host resume left tied to a pre-sleep address. Returns the count.
+func (m *wireGuardGoManager) RebindDeviceSockets(_ context.Context) int {
+	m.mu.Lock()
+	sessions := make([]*tunnelSession, 0, len(m.sessions))
+	for _, s := range m.sessions {
+		if s != nil && s.device != nil {
+			sessions = append(sessions, s)
+		}
+	}
+	m.mu.Unlock()
+
+	rebound := 0
+	for _, s := range sessions {
+		if err := s.device.BindUpdate(); err != nil {
+			m.logs.Add(state.LogWarn, state.SourceWireGuard, fmt.Sprintf("resume socket rebind failed on %s: %v", s.interfaceName, err))
+			continue
+		}
+		rebound++
+	}
+	return rebound
+}
+
 // reserveSession atomically checks that tunnelKey has no active session and
 // claims the slot with a placeholder, so two concurrent Starts for the same
 // key can't both pass the check and leak the loser's device and routes.

@@ -404,6 +404,16 @@ type fakeWGManager struct {
 	// models a manager that cannot report one.
 	tunnelLUID uint64
 	luidErr    error
+
+	// rebindCount records post-resume socket rebinds (wgSocketRebinder).
+	rebindCount int
+}
+
+func (f *fakeWGManager) RebindDeviceSockets(_ context.Context) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.rebindCount++
+	return 1
 }
 
 // EnsureDNS models the host's interface DNS being checked, and corrected when
