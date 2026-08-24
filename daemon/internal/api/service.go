@@ -2085,7 +2085,9 @@ func (s *Service) healthLoop(ctx context.Context) {
 			return
 		case <-ticker.C:
 			now := time.Now()
-			if gap := now.Sub(lastTick); gap > suspendGapThreshold {
+			// Wall clock, not monotonic: on darwin/linux the monotonic clock
+			// pauses during suspend, so a monotonic diff never sees the gap.
+			if gap := now.Round(0).Sub(lastTick.Round(0)); gap > suspendGapThreshold {
 				s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf(
 					"resume detected (health check gap of %s); letting the network settle before checking the tunnel", gap.Round(time.Second)))
 				s.holdHealthChecks(resumeSettleGrace)
@@ -2169,6 +2171,13 @@ func (s *Service) runHealthCheck(ctx context.Context) {
 	if !routeRepaired && s.wireGuardHandshakeStale(wgStatus) {
 		age := time.Since(time.Unix(wgStatus.LastHandshakeUnix, 0)).Round(time.Second)
 		if !s.canProveDataPath(profile) {
+			// Same reasoning as escalateDeadDataPath: with no host network the
+			// rebuild fails everywhere and reads as exhaustion to the app.
+			if !s.networkLooksUsable() {
+				s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf(
+					"wireguard tunnel is silent (no handshake for %s), but the host has no network to rebuild on; waiting for it", age))
+				return
+			}
 			s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("wireguard tunnel is silent (no handshake for %s); rebuilding session", age))
 			s.attemptSessionRebuild(ctx, profile, fmt.Sprintf("wireguard tunnel is silent (no handshake for %s)", age))
 			return

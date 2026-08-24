@@ -563,7 +563,6 @@ async function recoverFromNetworkChange(): Promise<void> {
 
   networkRecoverInProgress = true;
   connectionAttemptRunning = true;
-  lastNetworkRecoverAtMs = now;
   // Tracked as a cancellable attempt so a user Disconnect (which calls
   // cancelAttempt) can interrupt this cascade instead of racing past it.
   const attempt = beginAttempt();
@@ -576,6 +575,10 @@ async function recoverFromNetworkChange(): Promise<void> {
     // The disconnect below would cancel the daemon's own cascade mid-transport.
     if (trayStatusReconnecting) return;
     if (isCancelled(attempt)) return;
+    // Stamped only when a reconnect actually runs: the AP-loss event arrives
+    // while the daemon still reports CONNECTED, and burning the cooldown on
+    // that no-op would skip the AP-up event that follows seconds later.
+    lastNetworkRecoverAtMs = Date.now();
     console.log("network change detected — attempting reconnect");
     // Tear down stale tunnel/firewall state, keeping the kill switch when
     // Lockdown is on, then bring the tunnel back on the new network.

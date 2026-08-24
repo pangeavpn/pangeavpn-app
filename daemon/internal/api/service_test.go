@@ -679,6 +679,8 @@ func newTestServiceFull(
 	svc.handshakeTimeout = 200 * time.Millisecond
 	// Never let a unit test spawn the real netsh/powershell repair chain.
 	svc.networkRepair = func(context.Context, []string) ([]string, error) { return nil, nil }
+	// Pin the fingerprint so no test depends on the host machine's network.
+	svc.networkKey = func() string { return "eth0:192.0.2.10" }
 	return svc
 }
 
@@ -2145,6 +2147,41 @@ func TestHealthCheck_HeldWhileTheHostResumes(t *testing.T) {
 	}
 	if st := svc.Status(context.Background()).State; st != state.StateConnected {
 		t.Fatalf("state = %q, want CONNECTED while health checks are held", st)
+	}
+}
+
+// TestHealthCheck_SilentTunnelWaitsForNetwork proves a silent tunnel is left
+// alone while the host has no network to rebuild on (mid-resume, AP change):
+// tearing it down there burns the cascade and reports exhaustion for nothing.
+func TestHealthCheck_SilentTunnelWaitsForNetwork(t *testing.T) {
+	svc, naive, wgMgr, _ := recoveryTestService(t)
+	svc.networkKey = func() string { return "" }
+
+	wgMgr.mu.Lock()
+	stopsBefore := wgMgr.stopCount
+	wgMgr.mu.Unlock()
+
+	goSilent(wgMgr)
+	restoreNetwork(naive)
+	svc.runHealthCheck(context.Background())
+
+	wgMgr.mu.Lock()
+	stopsAfter := wgMgr.stopCount
+	wgMgr.mu.Unlock()
+	if stopsAfter != stopsBefore {
+		t.Errorf("wireguard was torn down (%d -> %d stops) while the host had no network", stopsBefore, stopsAfter)
+	}
+	if st := svc.Status(context.Background()).State; st != state.StateConnected {
+		t.Fatalf("state = %q, want CONNECTED while waiting for the network to come back", st)
+	}
+
+	svc.networkKey = func() string { return "eth0:192.0.2.10" }
+	svc.runHealthCheck(context.Background())
+	if st := svc.Status(context.Background()).State; st != state.StateConnected {
+		t.Fatalf("state = %q, want CONNECTED after the rebuild once the network is back", st)
+	}
+	if !transportStarted(naive) {
+		t.Error("expected the rebuild to run once the network came back")
 	}
 }
 
