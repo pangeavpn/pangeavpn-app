@@ -30,41 +30,54 @@ func currentNetworkKey() string {
 // client-supplied). service.go's networkKey wiring should pass the active
 // profile's tunnel name here once it has one.
 func currentNetworkKeyExcluding(extraTunnelNames []string) string {
-	ifaces, err := net.Interfaces()
+	osIfaces, err := net.Interfaces()
 	if err != nil {
 		return ""
 	}
-
-	// Only the interface actually carrying the default route counts: a
-	// Hyper-V/VirtualBox/Docker adapter can be up with a routable address
-	// while the real NIC is still re-associating, and it must not look usable.
-	primary := defaultRouteInterfaceName()
-	if primary == "" {
-		return ""
-	}
-	gateway := defaultGatewayIP()
-
-	var parts []string
-	for _, iface := range ifaces {
-		if iface.Name != primary {
-			continue
-		}
-		if iface.Flags&net.FlagUp == 0 {
-			continue
-		}
-		if isTunnelInterfaceName(iface.Name, extraTunnelNames) {
-			continue
-		}
+	ifaces := make([]keyIface, 0, len(osIfaces))
+	for _, iface := range osIfaces {
 		addrs, err := iface.Addrs()
 		if err != nil {
 			continue
 		}
-		for _, addr := range addrs {
+		ifaces = append(ifaces, keyIface{name: iface.Name, up: iface.Flags&net.FlagUp != 0, addrs: addrs})
+	}
+	return composeNetworkKey(ifaces, defaultRouteInterfaceName(), defaultGatewayIP(), extraTunnelNames)
+}
+
+// keyIface is the slice of interface state composeNetworkKey needs, decoupled
+// from net.Interface so the composition logic is testable without live NICs.
+type keyIface struct {
+	name  string
+	up    bool
+	addrs []net.Addr
+}
+
+// composeNetworkKey keys on the default-route interface, falling back to all
+// up non-tunnel interfaces when our own tunnel is the one carrying that route.
+func composeNetworkKey(ifaces []keyIface, primary, gateway string, extraTunnelNames []string) string {
+	if primary == "" {
+		return ""
+	}
+	primaryIsTunnel := isTunnelInterfaceName(primary, extraTunnelNames)
+
+	var parts []string
+	for _, iface := range ifaces {
+		if !primaryIsTunnel && iface.name != primary {
+			continue
+		}
+		if !iface.up {
+			continue
+		}
+		if isTunnelInterfaceName(iface.name, extraTunnelNames) {
+			continue
+		}
+		for _, addr := range iface.addrs {
 			ip := ipFromAddr(addr)
 			if ip == nil || ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsMulticast() {
 				continue
 			}
-			parts = append(parts, iface.Name+":"+networkToken(ip, gateway))
+			parts = append(parts, iface.name+":"+networkToken(ip, gateway))
 		}
 	}
 	if len(parts) == 0 {
