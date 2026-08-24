@@ -137,6 +137,8 @@ declare global {
     getLockdown: () => Promise<boolean>;
     setAutoConnect: (enabled: boolean) => Promise<void>;
     getAutoConnect: () => Promise<boolean>;
+    setNotifications: (enabled: boolean) => Promise<void>;
+    getNotifications: () => Promise<boolean>;
     setDeadDrop: (enabled: boolean) => Promise<void>;
     getDeadDrop: () => Promise<boolean>;
     getLastServer: () => Promise<{ lastServerId: string | null; lastProfileId: string | null }>;

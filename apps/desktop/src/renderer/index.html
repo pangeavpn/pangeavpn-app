@@ -276,6 +276,13 @@
               <span id="setStartupValue" class="set-value"></span>
             </span>
           </button>
+          <button class="settings-nav-item" type="button" data-settings-target="secNotifications" aria-controls="secNotifications">
+            <span class="set-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 9a6 6 0 0 0-12 0c0 5-2 6-2 6h16s-2-1-2-6"/><path d="M10.3 19a2 2 0 0 0 3.4 0"/></svg></span>
+            <span class="settings-nav-copy">
+              <span class="set-title" data-i18n="settings.notifications.heading">Notifications</span>
+              <span id="setNotificationsValue" class="set-value"></span>
+            </span>
+          </button>
           <button class="settings-nav-item" type="button" data-settings-target="secLanguage" aria-controls="secLanguage">
             <span class="set-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h10"/><path d="M9 4v2c0 4-2.5 7-5 8"/><path d="M6.5 11c1.5 2.5 3.5 4 6 5"/><path d="m12.5 20 4-9 4 9"/><path d="M14 17h5"/></svg></span>
             <span class="settings-nav-copy">
@@ -435,6 +442,21 @@
                 <span class="toggle-hint" data-i18n="settings.startup.lockdown.hint">Keeps the kill switch on even after you disconnect. Nothing but VPN traffic gets out until you turn this off — including right after your computer starts.</span>
               </span>
               <input id="lockdownToggle" class="toggle-switch" type="checkbox" />
+            </label>
+          </div>
+        </section>
+
+        <!-- Notifications -->
+        <section id="secNotifications" class="settings-section">
+          <h3 class="settings-section-title" data-i18n="settings.notifications.heading">Notifications</h3>
+          <p class="settings-description" data-i18n="settings.notifications.description">System notifications about your connection.</p>
+          <div class="settings-toggles">
+            <label class="toggle-label">
+              <span class="toggle-copy">
+                <span class="toggle-title" data-i18n="settings.notifications.status.title">Connection alerts</span>
+                <span class="toggle-hint" data-i18n="settings.notifications.status.hint">Notifies you when the VPN connects, loses its connection, comes back online, or disconnects.</span>
+              </span>
+              <input id="notificationsToggle" class="toggle-switch" type="checkbox" />
             </label>
           </div>
         </section>

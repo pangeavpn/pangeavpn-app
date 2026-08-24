@@ -27,6 +27,7 @@ import { setupAutoUpdater, notifyConnectionStateChange } from "./autoUpdater";
 import { isSafeExternalUrl } from "./externalUrl";
 import { setLoginItemEnabled, isLoginItemEnabled, isHiddenLaunchArg } from "./loginItem";
 import { startNetworkWatcher, onNetworkChange } from "./networkWatcher";
+import { statusNotificationKind, type StatusSnapshot } from "./statusNotifications";
 import { mt, mtState, setMainLocale, resolveMainLocale } from "./i18n";
 import { sanitizeLog } from "./logSanitize";
 import { shouldReleaseKillSwitch } from "./killSwitchRelease";
@@ -90,6 +91,8 @@ let launchAtStartupEnabled = false;
 // as one "alwaysConnected" toggle, migrated on load below.
 let lockdownEnabled = false;
 let autoConnectEnabled = false;
+// OS notifications on connection status changes; on by default, off in Settings.
+let notificationsEnabled = true;
 // "auto" (reality, then cloak, shadowsocks, hysteria2, naive), or one of
 // "cloak"/"naive"/"reality"/"hysteria2"/"shadowsocks"/"snowflake" only.
 let preferredTransport: "auto" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "snowflake" | "wireguard" = "auto";
@@ -480,6 +483,28 @@ function stopTrayStatusPolling(): void {
   trayStatusTimer = null;
 }
 
+let lastNotifiedStatus: StatusSnapshot | null = null;
+
+// One notification per transition, decided by the pure table in
+// statusNotifications.ts; silent so a status flap never dings the user.
+function maybeNotifyStatusChange(): void {
+  const next: StatusSnapshot = { state: trayStatusState, reconnecting: trayStatusReconnecting };
+  const prev = lastNotifiedStatus;
+  lastNotifiedStatus = next;
+  if (!prev || !notificationsEnabled || !Notification.isSupported()) return;
+  const kind = statusNotificationKind(prev, next);
+  if (!kind) return;
+  const iconPath = process.platform === "darwin" ? undefined : getTrayIconPath(__dirname);
+  const notification = new Notification({
+    title: mt(`notify.${kind}Title`),
+    body: mt(`notify.${kind}Body`),
+    silent: true,
+    ...(iconPath ? { icon: iconPath } : {})
+  });
+  notification.on("click", () => showMainWindow());
+  notification.show();
+}
+
 async function refreshTrayStatus(): Promise<void> {
   // Dedupe concurrent callers onto the same in-flight refresh instead of one
   // returning immediately with a stale value while another is still fetching.
@@ -501,6 +526,7 @@ async function refreshTrayStatus(): Promise<void> {
       trayStatusDetail = "daemon unavailable";
       trayStatusReconnecting = false;
     } finally {
+      maybeNotifyStatusChange();
       updateTrayMenu();
       notifyConnectionStateChange(trayStatusState);
     }
@@ -1195,6 +1221,7 @@ async function persistStartupSettings(): Promise<void> {
   await updateSettings((settings) => {
     settings.lockdown = lockdownEnabled;
     settings.autoConnect = autoConnectEnabled;
+    settings.notifications = notificationsEnabled;
     delete settings.alwaysConnected;
   }, "lockdown/auto-connect settings");
 }
@@ -1799,6 +1826,15 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.getAutoConnect, async () => autoConnectEnabled);
 
+  ipcMain.handle(IPC_CHANNELS.setNotifications, async (_event, enabled: boolean) => {
+    notificationsEnabled = !!enabled;
+    await updateSettings((settings) => {
+      settings.notifications = notificationsEnabled;
+    }, "notifications setting");
+  });
+
+  ipcMain.handle(IPC_CHANNELS.getNotifications, async () => notificationsEnabled);
+
   ipcMain.handle(IPC_CHANNELS.getLastServer, async () => ({
     lastServerId,
     lastProfileId: lastConnectedProfileId
@@ -2132,6 +2168,9 @@ async function boot(): Promise<void> {
       autoConnectEnabled = settings.autoConnect;
     } else if (legacyAlwaysConnected !== null) {
       autoConnectEnabled = legacyAlwaysConnected;
+    }
+    if (typeof settings.notifications === "boolean") {
+      notificationsEnabled = settings.notifications;
     }
     // Last known good hub IP: the only way to reach the hub once a Lockdown
     // lock is engaged, since the lock permits that IP but blocks DNS and DoH.

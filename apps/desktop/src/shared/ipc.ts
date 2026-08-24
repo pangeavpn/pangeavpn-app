@@ -65,6 +65,8 @@ export const IPC_CHANNELS = {
   setDeadDrop: "settings:setDeadDrop",
   getDeadDrop: "settings:getDeadDrop",
   getAutoConnect: "settings:getAutoConnect",
+  setNotifications: "settings:setNotifications",
+  getNotifications: "settings:getNotifications",
   getLastServer: "settings:getLastServer",
   clearLastServer: "settings:clearLastServer",
   getLocale: "settings:getLocale",

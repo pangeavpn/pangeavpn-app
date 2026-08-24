@@ -110,6 +110,7 @@ const launchAtStartupToggle = document.getElementById("launchAtStartupToggle") a
 const autoConnectToggle = document.getElementById("autoConnectToggle") as HTMLInputElement;
 const deadDropToggle = document.getElementById("deadDropToggle") as HTMLInputElement;
 const lockdownToggle = document.getElementById("lockdownToggle") as HTMLInputElement;
+const notificationsToggle = document.getElementById("notificationsToggle") as HTMLInputElement;
 const loginScreen = document.getElementById("loginScreen") as HTMLElement;
 const loginSettingsBtn = document.getElementById("loginSettingsBtn") as HTMLButtonElement;
 const loginScreenBtn = document.getElementById("loginScreenBtn") as HTMLButtonElement;
@@ -129,6 +130,7 @@ const setProvisioningValue = document.getElementById("setProvisioningValue") as 
 const setTransportValue = document.getElementById("setTransportValue") as HTMLSpanElement;
 const setNetworkValue = document.getElementById("setNetworkValue") as HTMLSpanElement;
 const setStartupValue = document.getElementById("setStartupValue") as HTMLSpanElement;
+const setNotificationsValue = document.getElementById("setNotificationsValue") as HTMLSpanElement;
 const setLanguageValue = document.getElementById("setLanguageValue") as HTMLSpanElement;
 const checkUpdatesBtn = document.getElementById("checkUpdatesBtn") as HTMLButtonElement;
 const setAppearanceValue = document.getElementById("setAppearanceValue") as HTMLSpanElement;
@@ -226,6 +228,8 @@ function updateSettingsSummaries(): void {
   if (autoConnectToggle.checked) startup.push(t("settings.startup.autoConnect.title"));
   if (lockdownToggle.checked) startup.push(t("settings.startup.lockdown.title"));
   setStartupValue.textContent = startup.length ? startup.join(" · ") : off;
+
+  setNotificationsValue.textContent = notificationsToggle.checked ? t("settings.notifications.status.title") : off;
 
   const language = languageSelect?.selectedOptions[0];
   setLanguageValue.textContent = language ? language.textContent : "";
@@ -1551,6 +1555,19 @@ autoConnectToggle.addEventListener("change", async () => {
   }
 });
 
+notificationsToggle.addEventListener("change", async () => {
+  if (!pangeaApi) return;
+  const requested = notificationsToggle.checked;
+  try {
+    await pangeaApi.setNotifications(requested);
+  } catch (err) {
+    notificationsToggle.checked = !requested;
+    showToast(reportError("notifications", err, t("toggle.notifications.failed")));
+    return;
+  }
+  showToast(t(requested ? "toggle.notifications.on" : "toggle.notifications.off"), 4000, true);
+});
+
 deadDropToggle.addEventListener("change", async () => {
   if (!pangeaApi) return;
   const requested = deadDropToggle.checked;
@@ -1879,6 +1896,7 @@ async function init(): Promise<void> {
       lockdownLocal = await pangeaApi.getLockdown();
       lockdownToggle.checked = lockdownLocal;
       deadDropToggle.checked = await pangeaApi.getDeadDrop();
+      notificationsToggle.checked = await pangeaApi.getNotifications();
       const last = await pangeaApi.getLastServer();
       lastServerIdLocal = last.lastServerId;
     } catch {
