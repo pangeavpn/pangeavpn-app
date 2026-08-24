@@ -88,16 +88,14 @@ func registerSystemEventSources() error {
 	)
 	powerRegistered = ret == 0
 
-	// Windows 10 2004+; absence just means no connectivity events.
-	if procNotifyNetworkConnectivityHintChange.Find() == nil {
-		ret, _, _ = procNotifyNetworkConnectivityHintChange.Call(
-			windows.NewCallback(connectivityHintCallback),
-			0,
-			0,
-			uintptr(unsafe.Pointer(&connectivityHandle)),
-		)
-		connectivityHooked = ret == 0
-	}
+	// NotifyNetworkConnectivityHintChange is deliberately NOT registered: its
+	// callback receives NL_NETWORK_CONNECTIVITY_HINT by value, which Windows
+	// ARM64 passes in registers in a shape windows.NewCallback mishandles,
+	// corrupting the process (SIGSEGV) on the first connectivity change. Network
+	// recovery falls back to the polling health loop and the offline hold.
+	_ = connectivityHintCallback
+	_ = connectivityHandle
+	_ = procNotifyNetworkConnectivityHintChange
 
 	if !powerRegistered && !connectivityHooked {
 		return errors.New("no system event source could be registered")
