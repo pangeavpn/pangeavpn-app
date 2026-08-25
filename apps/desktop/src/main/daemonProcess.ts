@@ -580,6 +580,10 @@ async function startProcessElevatedWindows(filePath: string, args: string[]): Pr
     "$daemonPids += (Get-NetTCPConnection -LocalAddress '127.0.0.1' -LocalPort 8787 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess)",
     "$daemonPids = $daemonPids | Where-Object { $_ } | Select-Object -Unique",
     "foreach ($daemonPid in $daemonPids) { Stop-Process -Id $daemonPid -Force -ErrorAction SilentlyContinue }",
+    // The daemon refuses a state dir the installing user owns; give it the
+    // Administrators-owned, admin-only ACL the installer applies.
+    "$stateDir = Join-Path $env:SystemDrive 'ProgramData\\PangeaVPN'",
+    "if (Test-Path -LiteralPath $stateDir) { takeown.exe /F $stateDir /A | Out-Null; icacls.exe $stateDir /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' | Out-Null }",
     launchDaemon
   ].join("; ");
   const encodedInner = psEncodedCommand(innerCommand);

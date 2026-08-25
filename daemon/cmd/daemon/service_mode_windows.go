@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"golang.org/x/sys/windows/svc"
+	"golang.org/x/sys/windows/svc/eventlog"
 )
 
 const daemonServiceName = "PangeaDaemon"
@@ -44,6 +45,7 @@ func (w *windowsServiceRunner) Execute(args []string, requests <-chan svc.Change
 
 	runtime, err := startDaemonRuntime()
 	if err != nil {
+		reportStartFailure(err)
 		return true, serviceStartError
 	}
 
@@ -84,4 +86,16 @@ func (w *windowsServiceRunner) Execute(args []string, requests <-chan svc.Change
 			}
 		}
 	}
+}
+
+// The daemon's own log lives in the state dir, so a failure to reach that dir
+// is invisible anywhere but the Windows event log.
+func reportStartFailure(err error) {
+	_ = eventlog.InstallAsEventCreate(daemonServiceName, eventlog.Error)
+	elog, openErr := eventlog.Open(daemonServiceName)
+	if openErr != nil {
+		return
+	}
+	defer elog.Close()
+	_ = elog.Error(serviceStartError, "daemon failed to start: "+err.Error())
 }
