@@ -2803,6 +2803,8 @@ function renderStatus(status: StatusResponse): void {
   serverConnectBtn.hidden = showDisconnect;
   serverDisconnectBtn.hidden = !showDisconnect;
 
+  if (!optimisticallyOff) reconcileUiMessage(status.state);
+
   updateControlStates();
   updateBusyIndicator();
 }
@@ -2906,6 +2908,47 @@ function initAccentPicker(): void {
 
 function setUiMessage(message: string): void {
   uiMessageEl.textContent = message;
+}
+
+// Flow messages describe an operation that has ended; anything else (a real
+// error string) is sticky until the user acts, so reconciliation skips it.
+function flowMessages(): Set<string> {
+  return new Set([
+    "",
+    t("connect.cancelled"),
+    t("connect.disconnecting"),
+    t("connect.provisioning"),
+    t("connect.switching"),
+    t("connect.connected"),
+    t("connect.failed"),
+    t("connect.switchFailed"),
+    t("connect.offline"),
+    t("connect.stillConnecting"),
+    t("connect.takingLonger"),
+    t("connect.stillWorking"),
+    t("common.retrying")
+  ]);
+}
+
+// A flow writes #uiMessage once and finishes; nothing re-checked it, so a
+// "cancelled" could sit under a tunnel the daemon later brought up on its own.
+function reconcileUiMessage(state: string): void {
+  if (connectInFlight || serverWorking || connectingVisual) return;
+  const current = uiMessageEl.textContent ?? "";
+  if (!flowMessages().has(current)) return;
+
+  if (state === "CONNECTED" && getUserIntent() !== "disconnected") {
+    if (current !== t("connect.connected")) setUiMessage(t("connect.connected"));
+    return;
+  }
+  // "cancelled" stays while disconnected: it truthfully names how it ended.
+  const lies =
+    state === "DISCONNECTED"
+      ? [t("connect.connected"), t("connect.disconnecting"), t("connect.provisioning"), t("connect.switching")]
+      : state === "ERROR"
+        ? [t("connect.connected")]
+        : [];
+  if (lies.includes(current)) setUiMessage("");
 }
 
 let clearActiveConnectionMessages: (() => void) | null = null;
