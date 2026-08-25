@@ -684,6 +684,7 @@ func newTestServiceFull(
 	logs := state.NewLogStore(100)
 	config := testConfigStore(t, profiles...)
 	svc := NewService(machine, logs, config, cloak, naive, reality, hysteria2, shadowsocks, snowflake, wgMgr, ks)
+	stubSessionRecordStore(t)
 	// Keep handshake-gated failure paths fast in tests; a live fake tunnel
 	// handshakes on the first status poll, so success paths are unaffected.
 	svc.handshakeTimeout = 200 * time.Millisecond
@@ -1153,6 +1154,53 @@ func TestKillSwitchPermits_CloakOnlyProfileUnaffected(t *testing.T) {
 // PermitHosts — control-plane hole in an engaged lockdown lock
 // ---------------------------------------------------------------------------
 
+// sessionRecordStub keeps session-record persistence in memory so tests never
+// touch the machine's real state directory.
+type sessionRecordStub struct {
+	mu  sync.Mutex
+	rec sessionRecord
+	has bool
+}
+
+func (s *sessionRecordStub) get() (sessionRecord, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.rec, s.has
+}
+
+func (s *sessionRecordStub) set(rec sessionRecord) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.rec, s.has = rec, true
+}
+
+func stubSessionRecordStore(t *testing.T) *sessionRecordStub {
+	t.Helper()
+	stub := &sessionRecordStub{}
+	origSave, origLoad, origRemove := saveSessionRecord, loadSessionRecord, removeSessionRecord
+	saveSessionRecord = func(rec sessionRecord) error {
+		stub.set(rec)
+		return nil
+	}
+	loadSessionRecord = func() (sessionRecord, error) {
+		rec, has := stub.get()
+		if !has {
+			return sessionRecord{}, nil
+		}
+		return rec, nil
+	}
+	removeSessionRecord = func() error {
+		stub.mu.Lock()
+		defer stub.mu.Unlock()
+		stub.has = false
+		return nil
+	}
+	t.Cleanup(func() {
+		saveSessionRecord, loadSessionRecord, removeSessionRecord = origSave, origLoad, origRemove
+	})
+	return stub
+}
+
 // stubKillSwitchState points the persisted-state reader at a fixed value for
 // the duration of the test. PermitHosts reuses the persisted AllowLAN/Locked
 // flags so opening a hole never silently changes what kind of lock is engaged.
@@ -1314,6 +1362,98 @@ func TestReconcileStartup_ReAppliedLockdownLockRegainsHubPermit(t *testing.T) {
 	}
 	if !ks.enableLocked {
 		t.Error("Enable() locked = false, want the lockdown lock re-applied as an intentional lock")
+	}
+}
+
+// A crash while connected must stay fail-closed: the kill switch is re-armed
+// from persisted IPs and the recorded session is handed to the retry loop.
+func TestReconcileStartup_CrashKeepsKillSwitchAndReconnects(t *testing.T) {
+	profile := testProfile()
+	ks := &fakeKillSwitch{}
+	svc := newTestService(t, &fakeCloakManager{}, &fakeNaiveManager{}, &fakeWGManager{}, ks, profile)
+	stub := stubSessionRecordStore(t)
+	stub.set(sessionRecord{ProfileID: profile.ID, AllowLAN: true, PreferredTransport: "cloak"})
+	stubKillSwitchState(t, platform.KillSwitchState{Active: true, AllowLAN: true, EndpointIPs: []string{"198.51.100.9"}})
+
+	svc.reconcileStartup(context.Background())
+
+	if ks.clearCount != 0 {
+		t.Errorf("Clear() called %d times, want 0 — a crash must not drop the kill switch", ks.clearCount)
+	}
+	if ks.enableCount != 1 {
+		t.Fatalf("Enable() called %d times, want 1 (re-arm from persisted state)", ks.enableCount)
+	}
+	if !slices.Contains(ks.enableEndpoints, "198.51.100.9") {
+		t.Errorf("Enable() endpoints = %v, want the persisted endpoint kept permitted", ks.enableEndpoints)
+	}
+	if ks.enableLocked {
+		t.Error("Enable() locked = true, want a non-lockdown re-arm")
+	}
+	current, ok := svc.getCurrentProfile()
+	if !ok || current.ID != profile.ID {
+		t.Errorf("current profile = %v (ok=%v), want the recorded session's profile so recovery can rebuild it", current.ID, ok)
+	}
+	if opts := svc.getSessionOpts(); !opts.AllowLAN || opts.PreferredTransport != "cloak" {
+		t.Errorf("session opts = %+v, want the recorded AllowLAN/transport restored", opts)
+	}
+	if currentState, _ := svc.machine.Get(); currentState != state.StateError {
+		t.Errorf("state = %v, want StateError so the health loop redials the session", currentState)
+	}
+}
+
+// Without a recorded session there is nothing to rebuild toward; an armed lock
+// would strand the device forever, so the old clearing behavior remains.
+func TestReconcileStartup_CrashWithoutSessionRecordClearsKillSwitch(t *testing.T) {
+	ks := &fakeKillSwitch{active: true}
+	svc := newTestService(t, &fakeCloakManager{}, &fakeNaiveManager{}, &fakeWGManager{}, ks, testProfile())
+	stubSessionRecordStore(t)
+	stubKillSwitchState(t, platform.KillSwitchState{Active: true, EndpointIPs: []string{"198.51.100.9"}})
+
+	svc.reconcileStartup(context.Background())
+
+	if ks.clearCount != 1 {
+		t.Errorf("Clear() called %d times, want 1 — no recorded session means nothing can ever recover the lock", ks.clearCount)
+	}
+	if currentState, _ := svc.machine.Get(); currentState == state.StateError {
+		t.Error("state = StateError, want no recovery attempt without a recorded session")
+	}
+}
+
+// The recorded profile may have been removed from config (e.g. re-provisioned
+// under a new ID); recovery must fall back to clearing, not strand the device.
+func TestReconcileStartup_CrashWithUnknownProfileClearsKillSwitch(t *testing.T) {
+	ks := &fakeKillSwitch{active: true}
+	svc := newTestService(t, &fakeCloakManager{}, &fakeNaiveManager{}, &fakeWGManager{}, ks, testProfile())
+	stub := stubSessionRecordStore(t)
+	stub.set(sessionRecord{ProfileID: "gone-profile"})
+	stubKillSwitchState(t, platform.KillSwitchState{Active: true})
+
+	svc.reconcileStartup(context.Background())
+
+	if ks.clearCount != 1 {
+		t.Errorf("Clear() called %d times, want 1 when the recorded profile no longer exists", ks.clearCount)
+	}
+}
+
+func TestSessionRecord_SavedWithSessionAndRemovedOnClear(t *testing.T) {
+	profile := testProfile()
+	svc := newTestService(t, &fakeCloakManager{}, &fakeNaiveManager{}, &fakeWGManager{}, &fakeKillSwitch{}, profile)
+	stub := stubSessionRecordStore(t)
+
+	svc.setCurrentProfile(profile)
+	svc.setSessionOpts(ConnectOptions{AllowLAN: true, PreferredTransport: "naive"})
+
+	rec, has := stub.get()
+	if !has {
+		t.Fatal("session record not saved after setCurrentProfile+setSessionOpts")
+	}
+	if rec.ProfileID != profile.ID || !rec.AllowLAN || rec.PreferredTransport != "naive" {
+		t.Errorf("session record = %+v, want the live session's profile and options", rec)
+	}
+
+	svc.clearCurrentProfile()
+	if _, has := stub.get(); has {
+		t.Error("session record still present after clearCurrentProfile; a clean disconnect must not be redialled after a crash")
 	}
 }
 

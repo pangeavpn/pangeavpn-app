@@ -2995,10 +2995,8 @@ func (s *Service) reconcileStartup(ctx context.Context) {
 
 	runningProfiles := s.findRunningWireGuardProfiles(startupCtx)
 
-	// Reconcile a kill switch left from a previous session. A Lockdown lock
-	// (state.Locked) is intentional and must stay fail-closed across daemon
-	// restarts, so re-apply it when there's no tunnel. Anything else with no
-	// tunnel is stale (e.g. a crash) and is cleared to restore networking.
+	// Reconcile a kill switch left from a previous session: a Lockdown lock
+	// stays fail-closed, and a crash leaves it armed while we redial.
 	if len(runningProfiles) == 0 {
 		persisted, err := loadKillSwitchState()
 		switch {
@@ -3026,15 +3024,14 @@ func (s *Service) reconcileStartup(ctx context.Context) {
 					s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("lockdown kill switch re-apply failed: %v", err))
 				}
 			}
+		case persisted.Active:
+			// A clean exit always clears or Locks the state, so Active here
+			// means a crash mid-session: stay fail-closed and redial.
+			s.recoverSessionAfterCrash(startupCtx, persisted)
 		case s.killSwitch.Active():
 			s.logs.Add(state.LogInfo, state.SourceDaemon, "clearing stale kill switch from previous session")
 			if err := s.killSwitch.Clear(startupCtx); err != nil {
 				s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("stale kill switch clear failed: %v", err))
-			}
-		case persisted.Active:
-			s.logs.Add(state.LogInfo, state.SourceDaemon, "clearing persisted kill switch state from previous session")
-			if err := s.killSwitch.Clear(startupCtx); err != nil {
-				s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("persisted kill switch clear failed: %v", err))
 			}
 		}
 	}
@@ -3103,6 +3100,45 @@ func (s *Service) reconcileKillSwitchForAdoptedTunnel(ctx context.Context, profi
 	if err := s.killSwitch.Update(ctx, tunnel); err != nil {
 		s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("could not update kill switch tunnel ref for adopted tunnel: %v", err))
 	}
+}
+
+// recoverSessionAfterCrash handles a non-Lockdown kill switch that survived a
+// crash: keep the device fail-closed and hand the session to the retry loop.
+func (s *Service) recoverSessionAfterCrash(ctx context.Context, persisted platform.KillSwitchState) {
+	record, err := loadSessionRecord()
+	if err != nil {
+		s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("session record unreadable after crash: %v", err))
+	}
+	profile, found := state.Profile{}, false
+	if record.ProfileID != "" {
+		profile, found = s.config.FindProfile(record.ProfileID)
+	}
+	if !found {
+		// No session to rebuild toward: an armed lock would strand the device
+		// with nothing ever recovering it, so fall back to clearing.
+		s.logs.Add(state.LogWarn, state.SourceDaemon, "kill switch survived a crash but no last session is recorded; clearing it")
+		if err := s.killSwitch.Clear(ctx); err != nil {
+			s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("post-crash kill switch clear failed: %v", err))
+		}
+		return
+	}
+
+	// Re-arm from persisted IPs plus the hub (no DNS — port 53 may be closed);
+	// on Windows the WFP session died with the process, so rules must come back.
+	endpoints := mergeUniqueSorted(persisted.EndpointIPs, ipLiterals(s.storedControlPlaneHosts()))
+	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("kill switch survived a crash; keeping it armed and reconnecting to %s", profile.ID))
+	if err := s.killSwitch.Enable(ctx, endpoints, persisted.AllowLAN, false); err != nil {
+		s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("post-crash kill switch re-arm failed: %v", err))
+	}
+
+	s.setCurrentProfile(profile)
+	s.setSessionOpts(ConnectOptions{
+		AllowLAN:           record.AllowLAN,
+		Lockdown:           record.Lockdown,
+		PreferredTransport: record.PreferredTransport,
+	})
+	s.machine.Set(state.StateError, "daemon restarted unexpectedly; reconnecting")
+	s.kickHealthCheck()
 }
 
 func (s *Service) allConfiguredTunnelNames() []string {
@@ -3393,14 +3429,37 @@ func (s *Service) clearCurrentProfile() {
 	s.currentProfile = nil
 	s.profileMu.Unlock()
 
+	// A deliberate disconnect ends the session; crash recovery must not redial it.
+	if err := removeSessionRecord(); err != nil {
+		s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("could not remove session record: %v", err))
+	}
+
 	s.endDNSProbeSession()
 	s.setTransportsExhausted(false)
 }
 
 func (s *Service) setSessionOpts(opts ConnectOptions) {
 	s.profileMu.Lock()
-	defer s.profileMu.Unlock()
 	s.sessionOpts = opts
+	profileID := ""
+	if s.currentProfile != nil {
+		profileID = s.currentProfile.ID
+	}
+	s.profileMu.Unlock()
+
+	if profileID == "" {
+		return
+	}
+	// Persisted so a crashed daemon knows which session to rebuild on restart.
+	record := sessionRecord{
+		ProfileID:          profileID,
+		AllowLAN:           opts.AllowLAN,
+		Lockdown:           opts.Lockdown,
+		PreferredTransport: opts.PreferredTransport,
+	}
+	if err := saveSessionRecord(record); err != nil {
+		s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("could not persist session record: %v", err))
+	}
 }
 
 func (s *Service) getSessionOpts() ConnectOptions {
