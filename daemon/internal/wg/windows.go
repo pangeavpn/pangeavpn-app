@@ -189,14 +189,14 @@ func (m *wireGuardGoManager) trySwitchInPlace(ctx context.Context, tunnelKey str
 		m.logs.Add(state.LogWarn, state.SourceWireGuard, fmt.Sprintf("in-place reconfigure: uapi translation failed: %v", err))
 		return false
 	}
-	// Sends to the old transport's closed loopback port surface WSAECONNRESET,
-	// which kills the receive routines; rebinding revives them (same port).
-	if err := session.device.BindUpdate(); err != nil {
-		m.logs.Add(state.LogWarn, state.SourceWireGuard, fmt.Sprintf("in-place reconfigure: socket rebind failed: %v", err))
-		return false
-	}
 	if err := session.device.IpcSet(uapi); err != nil {
 		m.logs.Add(state.LogWarn, state.SourceWireGuard, fmt.Sprintf("in-place reconfigure: uapi apply failed: %v", err))
+		return false
+	}
+	// One WSAECONNRESET from a send to the old transport's closed port kills a
+	// receive routine for good; rebind after IpcSet, when no dead port remains.
+	if err := session.device.BindUpdate(); err != nil {
+		m.logs.Add(state.LogWarn, state.SourceWireGuard, fmt.Sprintf("in-place reconfigure: socket rebind failed: %v", err))
 		return false
 	}
 
