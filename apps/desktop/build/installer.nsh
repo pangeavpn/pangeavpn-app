@@ -127,6 +127,11 @@
   CreateDirectory "$APPDATA\PangeaVPN\bin"
   CreateDirectory "$APPDATA\PangeaVPN\bin\win"
 
+  ; NSIS leaves this directory owned by the installing user, and the daemon
+  ; refuses a user-owned state dir as planted: hand it to Administrators.
+  nsExec::ExecToLog 'takeown.exe /F "$APPDATA\PangeaVPN" /A'
+  nsExec::ExecToLog 'icacls.exe "$APPDATA\PangeaVPN" /inheritance:r /grant:r *S-1-5-18:(OI)(CI)F *S-1-5-32-544:(OI)(CI)F'
+
   nsExec::ExecToLog 'sc.exe stop PangeaDaemon'
   Sleep 500
   nsExec::ExecToLog 'sc.exe delete PangeaDaemon'

@@ -5,6 +5,7 @@ package platform
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"golang.org/x/sys/windows"
@@ -71,8 +72,16 @@ func TestClassifyDirSecurity(t *testing.T) {
 	}
 }
 
-// Reproduces an install whose state dir predates the lockdown: created by an
-// elevated process, so admin-owned, but still inheriting the parent's ACEs.
+func setOwner(t *testing.T, path string, owner *windows.SID) {
+	t.Helper()
+	if err := windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT,
+		windows.OWNER_SECURITY_INFORMATION, owner, nil, nil, nil); err != nil {
+		t.Fatalf("set owner: %v", err)
+	}
+}
+
+// Reproduces an install whose state dir predates the lockdown: handed to
+// Administrators by the installer, but still inheriting the parent's ACEs.
 func TestEnsureDataDirRepairsInheritedACL(t *testing.T) {
 	if !isPrivilegedProcess() {
 		t.Skip("requires an elevated process")
@@ -82,6 +91,7 @@ func TestEnsureDataDirRepairsInheritedACL(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("create dir: %v", err)
 	}
+	setOwner(t, dir, mustSid(t, windows.WinBuiltinAdministratorsSid))
 	if verdict, reason := inspectDirSecurity(dir); verdict != dirSecurityRepairable {
 		t.Fatalf("precondition: verdict = %v (%v), want repairable", verdict, reason)
 	}
@@ -121,5 +131,28 @@ func TestEnsureDataDirHonoursOverrideWhenUnprivileged(t *testing.T) {
 	}
 	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
 		t.Fatalf("stat %s: %v", dir, err)
+	}
+}
+
+// An elevated installer's plain CreateDirectory leaves the installing user as
+// owner, which is indistinguishable from a planted dir and must be refused.
+func TestEnsureDataDirRefusesUserOwnedDir(t *testing.T) {
+	if !isPrivilegedProcess() {
+		t.Skip("requires an elevated process")
+	}
+
+	dir := filepath.Join(t.TempDir(), "PangeaVPN")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("create dir: %v", err)
+	}
+	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	if err != nil {
+		t.Fatalf("token user: %v", err)
+	}
+	setOwner(t, dir, user.User.Sid)
+
+	err = ensureDataDir(dir)
+	if err == nil || !strings.Contains(err.Error(), "not owned by SYSTEM or Administrators") {
+		t.Fatalf("ensureDataDir error = %v, want a refusal for the user-owned dir", err)
 	}
 }
