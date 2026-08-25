@@ -2837,16 +2837,17 @@ func (s *Service) recoverActiveTransport(ctx context.Context, profile state.Prof
 	restartCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
+	var start func(context.Context) error
+	var running func() bool
+	var localPort int
 	switch activeKind {
 	case "cloak":
 		if s.cloak.Status().Running {
 			return nil
 		}
-		s.logs.Add(state.LogWarn, state.SourceDaemon, "health check detected cloak stopped; attempting restart")
-		if err := s.cloak.Start(restartCtx, profile.Cloak); err != nil {
-			return err
-		}
-		return s.waitForManagedTransportStable(restartCtx, func() bool { return s.cloak.Status().Running }, profile.Cloak.LocalPort, 2*time.Second)
+		start = func(ctx context.Context) error { return s.cloak.Start(ctx, profile.Cloak) }
+		running = func() bool { return s.cloak.Status().Running }
+		localPort = profile.Cloak.LocalPort
 	case "naive":
 		if s.naive.Status().Running {
 			return nil
@@ -2854,11 +2855,9 @@ func (s *Service) recoverActiveTransport(ctx context.Context, profile state.Prof
 		if profile.Naive == nil {
 			return errors.New("active transport is naive but profile has no naive config")
 		}
-		s.logs.Add(state.LogWarn, state.SourceDaemon, "health check detected naive stopped; attempting restart")
-		if err := s.naive.Start(restartCtx, *profile.Naive); err != nil {
-			return err
-		}
-		return s.waitForManagedTransportStable(restartCtx, func() bool { return s.naive.Status().Running }, profile.Naive.LocalPort, 2*time.Second)
+		start = func(ctx context.Context) error { return s.naive.Start(ctx, *profile.Naive) }
+		running = func() bool { return s.naive.Status().Running }
+		localPort = profile.Naive.LocalPort
 	case "reality":
 		if s.reality.Status().Running {
 			return nil
@@ -2866,11 +2865,9 @@ func (s *Service) recoverActiveTransport(ctx context.Context, profile state.Prof
 		if profile.Reality == nil {
 			return errors.New("active transport is reality but profile has no reality config")
 		}
-		s.logs.Add(state.LogWarn, state.SourceDaemon, "health check detected reality stopped; attempting restart")
-		if err := s.reality.Start(restartCtx, *profile.Reality); err != nil {
-			return err
-		}
-		return s.waitForManagedTransportStable(restartCtx, func() bool { return s.reality.Status().Running }, profile.Reality.LocalPort, 2*time.Second)
+		start = func(ctx context.Context) error { return s.reality.Start(ctx, *profile.Reality) }
+		running = func() bool { return s.reality.Status().Running }
+		localPort = profile.Reality.LocalPort
 	case "hysteria2":
 		if s.hysteria2.Status().Running {
 			return nil
@@ -2878,11 +2875,9 @@ func (s *Service) recoverActiveTransport(ctx context.Context, profile state.Prof
 		if profile.Hysteria2 == nil {
 			return errors.New("active transport is hysteria2 but profile has no hysteria2 config")
 		}
-		s.logs.Add(state.LogWarn, state.SourceDaemon, "health check detected hysteria2 stopped; attempting restart")
-		if err := s.hysteria2.Start(restartCtx, *profile.Hysteria2); err != nil {
-			return err
-		}
-		return s.waitForManagedTransportStable(restartCtx, func() bool { return s.hysteria2.Status().Running }, profile.Hysteria2.LocalPort, 2*time.Second)
+		start = func(ctx context.Context) error { return s.hysteria2.Start(ctx, *profile.Hysteria2) }
+		running = func() bool { return s.hysteria2.Status().Running }
+		localPort = profile.Hysteria2.LocalPort
 	case "shadowsocks":
 		if s.shadowsocks.Status().Running {
 			return nil
@@ -2890,11 +2885,9 @@ func (s *Service) recoverActiveTransport(ctx context.Context, profile state.Prof
 		if profile.Shadowsocks == nil {
 			return errors.New("active transport is shadowsocks but profile has no shadowsocks config")
 		}
-		s.logs.Add(state.LogWarn, state.SourceDaemon, "health check detected shadowsocks stopped; attempting restart")
-		if err := s.shadowsocks.Start(restartCtx, *profile.Shadowsocks); err != nil {
-			return err
-		}
-		return s.waitForManagedTransportStable(restartCtx, func() bool { return s.shadowsocks.Status().Running }, profile.Shadowsocks.LocalPort, 2*time.Second)
+		start = func(ctx context.Context) error { return s.shadowsocks.Start(ctx, *profile.Shadowsocks) }
+		running = func() bool { return s.shadowsocks.Status().Running }
+		localPort = profile.Shadowsocks.LocalPort
 	case "snowflake":
 		if s.snowflake.Status().Running {
 			return nil
@@ -2902,14 +2895,28 @@ func (s *Service) recoverActiveTransport(ctx context.Context, profile state.Prof
 		if profile.Snowflake == nil {
 			return errors.New("active transport is snowflake but profile has no snowflake config")
 		}
-		s.logs.Add(state.LogWarn, state.SourceDaemon, "health check detected snowflake stopped; attempting restart")
-		if err := s.snowflake.Start(restartCtx, *profile.Snowflake); err != nil {
-			return err
-		}
-		return s.waitForManagedTransportStable(restartCtx, func() bool { return s.snowflake.Status().Running }, profile.Snowflake.LocalPort, 2*time.Second)
+		start = func(ctx context.Context) error { return s.snowflake.Start(ctx, *profile.Snowflake) }
+		running = func() bool { return s.snowflake.Status().Running }
+		localPort = profile.Snowflake.LocalPort
 	default:
 		return fmt.Errorf("unknown active transport kind: %q", activeKind)
 	}
+
+	s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("health check detected %s stopped; attempting restart", activeKind))
+	if err := start(restartCtx); err != nil {
+		return err
+	}
+	if err := s.waitForManagedTransportStable(restartCtx, running, localPort, 2*time.Second); err != nil {
+		return err
+	}
+	// While the bridge was down, sends to its closed loopback port surfaced
+	// WSAECONNRESET and killed the device's receive routines; rebind revives them.
+	if rebinder, ok := s.wg.(wgSocketRebinder); ok {
+		if rebound := rebinder.RebindDeviceSockets(restartCtx); rebound > 0 {
+			s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("rebound %d wireguard device socket(s) after %s restart", rebound, activeKind))
+		}
+	}
+	return nil
 }
 
 // resolveTunnelRef names the live tunnel for the kill switch. The LUID matters

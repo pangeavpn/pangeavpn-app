@@ -3019,3 +3019,29 @@ func TestWithTransportBypassHosts_IncludesSnowflakeHostsWhenPresent(t *testing.T
 		}
 	}
 }
+
+// Sends to the dead bridge's closed port killed the device's receive routines
+// (WSAECONNRESET), so a restarted transport must rebind to be heard again.
+func TestHealthCheck_TransportRestartRebindsDeviceSockets(t *testing.T) {
+	svc, naive, wgMgr, _ := recoveryTestService(t)
+
+	wgMgr.mu.Lock()
+	baseline := wgMgr.rebindCount
+	wgMgr.mu.Unlock()
+
+	naive.mu.Lock()
+	naive.running = false
+	naive.mu.Unlock()
+
+	svc.runHealthCheck(context.Background())
+
+	if st, _ := svc.machine.Get(); st != state.StateConnected {
+		t.Fatalf("state = %q, want CONNECTED after the transport restart", st)
+	}
+	wgMgr.mu.Lock()
+	rebinds := wgMgr.rebindCount - baseline
+	wgMgr.mu.Unlock()
+	if rebinds != 1 {
+		t.Fatalf("RebindDeviceSockets called %d times after the restart, want 1", rebinds)
+	}
+}
