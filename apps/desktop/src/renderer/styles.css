@@ -1283,6 +1283,8 @@ body[data-theme="light"] .menu-dropdown {
   height: 6px;
   border-radius: 50%;
   flex: none;
+  /* Room for the 4px glow ring; the card clips at its left edge. */
+  margin-left: 4px;
   background: var(--pill-dot-off);
   transition: background 0.4s ease, box-shadow 0.4s ease;
 }
