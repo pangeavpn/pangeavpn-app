@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -15,8 +16,9 @@ var (
 	modPowrprof                                = windows.NewLazySystemDLL("powrprof.dll")
 	procPowerRegisterSuspendResumeNotification = modPowrprof.NewProc("PowerRegisterSuspendResumeNotification")
 
-	modIphlpapiEvents                       = windows.NewLazySystemDLL("iphlpapi.dll")
-	procNotifyNetworkConnectivityHintChange = modIphlpapiEvents.NewProc("NotifyNetworkConnectivityHintChange")
+	modIphlpapiEvents           = windows.NewLazySystemDLL("iphlpapi.dll")
+	procNotifyRouteChange2      = modIphlpapiEvents.NewProc("NotifyRouteChange2")
+	procNotifyIpInterfaceChange = modIphlpapiEvents.NewProc("NotifyIpInterfaceChange")
 )
 
 const (
@@ -60,8 +62,28 @@ func powerNotifyCallback(_, notifyType, _ uintptr) uintptr {
 	return 0
 }
 
-func connectivityHintCallback(_, _ uintptr) uintptr {
-	dispatchSystemEvent(SystemEventNetworkChanged)
+// netChangeMinGap rate-limits the burst a single link flap produces; the
+// consumer only needs one kick, not one per table mutation.
+const netChangeMinGap = time.Second
+
+var (
+	netChangeMu   sync.Mutex
+	lastNetChange time.Time
+)
+
+// netChangeCallback serves NotifyRouteChange2 and NotifyIpInterfaceChange;
+// both pass (context, row pointer, notification type), all uintptr-sized.
+func netChangeCallback(_, _, _ uintptr) uintptr {
+	netChangeMu.Lock()
+	now := time.Now()
+	fire := now.Sub(lastNetChange) >= netChangeMinGap
+	if fire {
+		lastNetChange = now
+	}
+	netChangeMu.Unlock()
+	if fire {
+		dispatchSystemEvent(SystemEventNetworkChanged)
+	}
 	return 0
 }
 
@@ -72,7 +94,8 @@ var (
 	registerErr        error
 	powerNotifyParams  *deviceNotifySubscribeParams
 	powerNotifyHandle  uintptr
-	connectivityHandle windows.Handle
+	routeChangeHandle  windows.Handle
+	ifaceChangeHandle  windows.Handle
 	powerRegistered    bool
 	connectivityHooked bool
 )
@@ -88,14 +111,16 @@ func registerSystemEventSources() error {
 	)
 	powerRegistered = ret == 0
 
-	// NotifyNetworkConnectivityHintChange is deliberately NOT registered: its
-	// callback receives NL_NETWORK_CONNECTIVITY_HINT by value, which Windows
-	// ARM64 passes in registers in a shape windows.NewCallback mishandles,
-	// corrupting the process (SIGSEGV) on the first connectivity change. Network
-	// recovery falls back to the polling health loop and the offline hold.
-	_ = connectivityHintCallback
-	_ = connectivityHandle
-	_ = procNotifyNetworkConnectivityHintChange
+	// Route and interface notifications, not the connectivity hint: the hint
+	// callback takes a struct by value, which NewCallback cannot carry (arm64).
+	const afUnspec = 0
+	netCallback := windows.NewCallback(netChangeCallback)
+	if ret, _, _ := procNotifyRouteChange2.Call(afUnspec, netCallback, 0, 0, uintptr(unsafe.Pointer(&routeChangeHandle))); ret == 0 {
+		connectivityHooked = true
+	}
+	if ret, _, _ := procNotifyIpInterfaceChange.Call(afUnspec, netCallback, 0, 0, uintptr(unsafe.Pointer(&ifaceChangeHandle))); ret == 0 {
+		connectivityHooked = true
+	}
 
 	if !powerRegistered && !connectivityHooked {
 		return errors.New("no system event source could be registered")
