@@ -33,6 +33,18 @@ test("announces a deliberate disconnect", () => {
   assert.equal(statusNotificationKind(at("DISCONNECTING"), at("DISCONNECTED")), "disconnected");
 });
 
+test("announces a blocking kill switch found on the first snapshot", () => {
+  assert.equal(statusNotificationKind(null, { state: "ERROR", reconnecting: false, killSwitchActive: true }), "blocking");
+  assert.equal(statusNotificationKind(null, { state: "CONNECTING", reconnecting: true, killSwitchActive: true }), "blocking");
+});
+
+test("stays quiet on a first snapshot that is not blocking traffic", () => {
+  assert.equal(statusNotificationKind(null, at("DISCONNECTED")), null);
+  assert.equal(statusNotificationKind(null, at("CONNECTED")), null);
+  assert.equal(statusNotificationKind(null, at("ERROR")), null);
+  assert.equal(statusNotificationKind(null, { state: "CONNECTED", reconnecting: false, killSwitchActive: true }), null);
+});
+
 test("never announces the end of a session the user never had", () => {
   assert.equal(statusNotificationKind(at("CONNECTING"), at("DISCONNECTED")), null);
   assert.equal(statusNotificationKind(at("ERROR"), at("DISCONNECTED")), null);

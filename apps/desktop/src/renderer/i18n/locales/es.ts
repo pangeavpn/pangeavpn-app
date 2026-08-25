@@ -75,6 +75,7 @@ export const es = {
   "hero.stop": "Detener",
   "hero.noServers": "No hay servidores disponibles",
   "hero.noServersForTransport": "Ningún servidor admite este transporte",
+  "hero.killSwitchBlocking": "El kill switch está activo: internet está en pausa hasta que vuelva la VPN. Pulsa Desconectar para navegar sin VPN.",
   "hero.region": "Región",
   "hero.allRegions": "Todas las regiones",
 

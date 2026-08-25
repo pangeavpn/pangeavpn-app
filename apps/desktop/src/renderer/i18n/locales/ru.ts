@@ -75,6 +75,7 @@ export const ru = {
   "hero.stop": "Остановить",
   "hero.noServers": "Нет доступных серверов",
   "hero.noServersForTransport": "Нет серверов с поддержкой этого транспорта",
+  "hero.killSwitchBlocking": "Kill switch включён — интернет приостановлен, пока VPN не восстановится. Нажмите «Отключить», чтобы выйти в сеть без VPN.",
   "hero.region": "Регион",
   "hero.allRegions": "Все регионы",
 

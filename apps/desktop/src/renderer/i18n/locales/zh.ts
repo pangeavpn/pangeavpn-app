@@ -75,6 +75,7 @@ export const zh = {
   "hero.stop": "停止",
   "hero.noServers": "没有可用的服务器",
   "hero.noServersForTransport": "没有服务器支持此传输方式",
+  "hero.killSwitchBlocking": "终止开关已启用——在 VPN 恢复前网络已暂停。点击「断开」即可在无 VPN 的情况下上网。",
   "hero.region": "区域",
   "hero.allRegions": "所有区域",
 

@@ -63,6 +63,7 @@ let trayStatusState: StatusResponse["state"] = "DISCONNECTED";
 let trayStatusDetail = "idle";
 let trayStatusReconnecting = false;
 let trayStatusOffline = false;
+let trayStatusKillSwitch = false;
 let trayActionInProgress = false;
 let trayStatusRefreshPromise: Promise<void> | null = null;
 let trayStatusTimer: NodeJS.Timeout | null = null;
@@ -412,9 +413,13 @@ function updateTrayMenu(): void {
     return;
   }
 
-  const detailLabel = trayStatusDetail.trim() || "-";
+  // While the kill switch holds traffic, the raw daemon detail can't tell the
+  // user why their internet is down or that Disconnect is the way out.
+  const killSwitchHolding = trayStatusState === "ERROR" && trayStatusKillSwitch;
+  const detailLabel = killSwitchHolding ? mt("tray.blocked") : trayStatusDetail.trim() || "-";
   const canConnect = !trayActionInProgress && (trayStatusState === "DISCONNECTED" || trayStatusState === "ERROR");
-  const canDisconnect = !trayActionInProgress && (trayStatusState === "CONNECTED" || trayStatusState === "CONNECTING");
+  const canDisconnect =
+    !trayActionInProgress && (trayStatusState === "CONNECTED" || trayStatusState === "CONNECTING" || killSwitchHolding);
   const windowVisible = Boolean(mainWindow && mainWindow.isVisible());
   tray.setContextMenu(
     Menu.buildFromTemplate([
@@ -489,10 +494,14 @@ let lastNotifiedStatus: StatusSnapshot | null = null;
 // One notification per transition, decided by the pure table in
 // statusNotifications.ts; silent so a status flap never dings the user.
 function maybeNotifyStatusChange(): void {
-  const next: StatusSnapshot = { state: trayStatusState, reconnecting: trayStatusReconnecting };
+  const next: StatusSnapshot = {
+    state: trayStatusState,
+    reconnecting: trayStatusReconnecting,
+    killSwitchActive: trayStatusKillSwitch
+  };
   const prev = lastNotifiedStatus;
   lastNotifiedStatus = next;
-  if (!prev || !notificationsEnabled || !Notification.isSupported()) return;
+  if (!notificationsEnabled || !Notification.isSupported()) return;
   // The status is already on screen when the window is open, so don't also toast
   // it. lastNotifiedStatus is updated above, so nothing fires late on re-hide.
   if (mainWindow && mainWindow.isVisible() && !mainWindow.isMinimized()) return;
@@ -502,7 +511,9 @@ function maybeNotifyStatusChange(): void {
   const notification = new Notification({
     title: mt(`notify.${kind}Title`),
     body: mt(`notify.${kind}Body`),
-    silent: true,
+    // Blocked internet is the one status worth a ding: silence here is how a
+    // user ends up debugging their router instead of pressing Disconnect.
+    silent: kind !== "blocking",
     ...(iconPath ? { icon: iconPath } : {})
   });
   notification.on("click", () => showMainWindow());
@@ -523,6 +534,7 @@ async function refreshTrayStatus(): Promise<void> {
       trayStatusDetail = status.detail;
       trayStatusReconnecting = status.reconnecting;
       trayStatusOffline = status.offline;
+      trayStatusKillSwitch = status.killSwitchActive;
       if (status.transportsExhausted) {
         void rotateAwayFromBlockedServer();
       }

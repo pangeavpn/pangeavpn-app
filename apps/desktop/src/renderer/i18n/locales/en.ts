@@ -75,6 +75,7 @@ export const en = {
   "hero.stop": "Stop",
   "hero.noServers": "No servers available",
   "hero.noServersForTransport": "No servers support this transport",
+  "hero.killSwitchBlocking": "Kill switch is on — internet is paused until the VPN is back. Press Disconnect to go online without VPN.",
   "hero.region": "Region",
   "hero.allRegions": "All regions",
 

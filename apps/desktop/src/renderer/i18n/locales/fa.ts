@@ -75,6 +75,7 @@ export const fa = {
   "hero.stop": "توقف",
   "hero.noServers": "سروری در دسترس نیست",
   "hero.noServersForTransport": "هیچ سروری از این انتقال پشتیبانی نمی‌کند",
+  "hero.killSwitchBlocking": "کلید قطع اضطراری فعال است — اینترنت تا بازگشت VPN متوقف است. «قطع اتصال» را بزنید تا بدون VPN آنلاین شوید.",
   "hero.region": "منطقه",
   "hero.allRegions": "همه مناطق",
 

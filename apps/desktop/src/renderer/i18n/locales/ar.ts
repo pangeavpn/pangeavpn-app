@@ -75,6 +75,7 @@ export const ar = {
   "hero.stop": "إيقاف",
   "hero.noServers": "لا توجد خوادم متاحة",
   "hero.noServersForTransport": "لا توجد خوادم تدعم هذا النقل",
+  "hero.killSwitchBlocking": "مفتاح الإيقاف مفعّل — الإنترنت متوقف مؤقتًا حتى يعود VPN. اضغط على قطع الاتصال للاتصال بالإنترنت بدون VPN.",
   "hero.region": "المنطقة",
   "hero.allRegions": "كل المناطق",
 

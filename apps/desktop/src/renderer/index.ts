@@ -2763,7 +2763,10 @@ function renderStatus(status: StatusResponse): void {
     stateEl.textContent = showOffline
       ? t("state.NO_INTERNET")
       : t(("state." + status.state) as MessageKey);
-    detailEl.textContent = status.detail;
+    // A raw daemon detail can't tell the user their internet is deliberately
+    // paused, nor that Disconnect is the way out — say it in their language.
+    const killSwitchHolding = !showOffline && status.state === "ERROR" && status.killSwitchActive === true;
+    detailEl.textContent = killSwitchHolding ? t("hero.killSwitchBlocking") : status.detail;
     detailEl.title = status.detail;
     heroCard.dataset.state = status.state;
     document.body.dataset.state = status.state;

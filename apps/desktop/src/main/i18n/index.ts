@@ -8,6 +8,7 @@ export type MainLocale = Locale;
 export type MainMessages = Record<
   | "tray.status"
   | "tray.detail"
+  | "tray.blocked"
   | "tray.connect"
   | "tray.disconnect"
   | "tray.show"
@@ -27,6 +28,8 @@ export type MainMessages = Record<
   | "notify.restoredBody"
   | "notify.disconnectedTitle"
   | "notify.disconnectedBody"
+  | "notify.blockingTitle"
+  | "notify.blockingBody"
   | "state.DISCONNECTED"
   | "state.CONNECTING"
   | "state.CONNECTED"
@@ -38,6 +41,7 @@ export type MainMessages = Record<
 const en: MainMessages = {
   "tray.status": "Status: {state}",
   "tray.detail": "Detail: {detail}",
+  "tray.blocked": "Kill switch is on — use Disconnect for internet without VPN",
   "tray.connect": "Connect",
   "tray.disconnect": "Disconnect",
   "tray.show": "Show PangeaVPN",
@@ -57,6 +61,8 @@ const en: MainMessages = {
   "notify.restoredBody": "Your VPN connection is restored.",
   "notify.disconnectedTitle": "Disconnected",
   "notify.disconnectedBody": "The VPN is off.",
+  "notify.blockingTitle": "Internet paused to protect you",
+  "notify.blockingBody": "The VPN was interrupted, so the kill switch is blocking traffic while PangeaVPN reconnects. Open the app and press Disconnect to go online without VPN.",
   "state.DISCONNECTED": "DISCONNECTED",
   "state.CONNECTING": "CONNECTING",
   "state.CONNECTED": "CONNECTED",
@@ -67,6 +73,7 @@ const en: MainMessages = {
 const es: MainMessages = {
   "tray.status": "Estado: {state}",
   "tray.detail": "Detalle: {detail}",
+  "tray.blocked": "Kill switch activo: usa Desconectar para tener internet sin VPN",
   "tray.connect": "Conectar",
   "tray.disconnect": "Desconectar",
   "tray.show": "Mostrar PangeaVPN",
@@ -86,6 +93,8 @@ const es: MainMessages = {
   "notify.restoredBody": "La conexión VPN se ha restablecido.",
   "notify.disconnectedTitle": "Desconectado",
   "notify.disconnectedBody": "La VPN está apagada.",
+  "notify.blockingTitle": "Internet en pausa para protegerte",
+  "notify.blockingBody": "La VPN se interrumpió, así que el kill switch está bloqueando el tráfico mientras PangeaVPN se reconecta. Abre la app y pulsa Desconectar para navegar sin VPN.",
   "state.DISCONNECTED": "DESCONECTADO",
   "state.CONNECTING": "CONECTANDO",
   "state.CONNECTED": "CONECTADO",
@@ -96,6 +105,7 @@ const es: MainMessages = {
 const fr: MainMessages = {
   "tray.status": "État : {state}",
   "tray.detail": "Détail : {detail}",
+  "tray.blocked": "Kill switch actif : utilisez Se déconnecter pour avoir Internet sans VPN",
   "tray.connect": "Se connecter",
   "tray.disconnect": "Se déconnecter",
   "tray.show": "Afficher PangeaVPN",
@@ -115,6 +125,8 @@ const fr: MainMessages = {
   "notify.restoredBody": "La connexion VPN est rétablie.",
   "notify.disconnectedTitle": "Déconnecté",
   "notify.disconnectedBody": "Le VPN est désactivé.",
+  "notify.blockingTitle": "Internet en pause pour vous protéger",
+  "notify.blockingBody": "Le VPN a été interrompu : le kill switch bloque le trafic pendant que PangeaVPN se reconnecte. Ouvrez l'app et appuyez sur Se déconnecter pour naviguer sans VPN.",
   "state.DISCONNECTED": "DÉCONNECTÉ",
   "state.CONNECTING": "CONNEXION",
   "state.CONNECTED": "CONNECTÉ",
@@ -125,6 +137,7 @@ const fr: MainMessages = {
 const ru: MainMessages = {
   "tray.status": "Статус: {state}",
   "tray.detail": "Детали: {detail}",
+  "tray.blocked": "Kill switch включён — нажмите «Отключить» для интернета без VPN",
   "tray.connect": "Подключить",
   "tray.disconnect": "Отключить",
   "tray.show": "Показать PangeaVPN",
@@ -144,6 +157,8 @@ const ru: MainMessages = {
   "notify.restoredBody": "VPN-соединение восстановлено.",
   "notify.disconnectedTitle": "Отключено",
   "notify.disconnectedBody": "VPN выключен.",
+  "notify.blockingTitle": "Интернет приостановлен для вашей защиты",
+  "notify.blockingBody": "VPN был прерван, поэтому kill switch блокирует трафик, пока PangeaVPN переподключается. Откройте приложение и нажмите «Отключить», чтобы выйти в сеть без VPN.",
   "state.DISCONNECTED": "ОТКЛЮЧЕНО",
   "state.CONNECTING": "ПОДКЛЮЧЕНИЕ",
   "state.CONNECTED": "ПОДКЛЮЧЕНО",
@@ -154,6 +169,7 @@ const ru: MainMessages = {
 const uk: MainMessages = {
   "tray.status": "Статус: {state}",
   "tray.detail": "Деталі: {detail}",
+  "tray.blocked": "Kill switch увімкнено — натисніть «Відключити» для інтернету без VPN",
   "tray.connect": "Підключити",
   "tray.disconnect": "Відключити",
   "tray.show": "Показати PangeaVPN",
@@ -173,6 +189,8 @@ const uk: MainMessages = {
   "notify.restoredBody": "VPN-з'єднання відновлено.",
   "notify.disconnectedTitle": "Відключено",
   "notify.disconnectedBody": "VPN вимкнено.",
+  "notify.blockingTitle": "Інтернет призупинено для вашого захисту",
+  "notify.blockingBody": "VPN було перервано, тому kill switch блокує трафік, поки PangeaVPN перепідключається. Відкрийте застосунок і натисніть «Відключити», щоб вийти в мережу без VPN.",
   "state.DISCONNECTED": "ВІДКЛЮЧЕНО",
   "state.CONNECTING": "ПІДКЛЮЧЕННЯ",
   "state.CONNECTED": "ПІДКЛЮЧЕНО",
@@ -183,6 +201,7 @@ const uk: MainMessages = {
 const zh: MainMessages = {
   "tray.status": "状态：{state}",
   "tray.detail": "详情：{detail}",
+  "tray.blocked": "终止开关已启用——点击「断开」即可在无 VPN 时上网",
   "tray.connect": "连接",
   "tray.disconnect": "断开",
   "tray.show": "显示 PangeaVPN",
@@ -202,6 +221,8 @@ const zh: MainMessages = {
   "notify.restoredBody": "VPN 连接已恢复。",
   "notify.disconnectedTitle": "已断开",
   "notify.disconnectedBody": "VPN 已关闭。",
+  "notify.blockingTitle": "已暂停网络以保护您",
+  "notify.blockingBody": "VPN 连接被中断，终止开关正在拦截流量，PangeaVPN 正在重新连接。打开应用并点击「断开」即可在无 VPN 的情况下上网。",
   "state.DISCONNECTED": "已断开",
   "state.CONNECTING": "连接中",
   "state.CONNECTED": "已连接",
@@ -212,6 +233,7 @@ const zh: MainMessages = {
 const ar: MainMessages = {
   "tray.status": "الحالة: {state}",
   "tray.detail": "التفاصيل: {detail}",
+  "tray.blocked": "مفتاح الإيقاف مفعّل — استخدم قطع الاتصال للإنترنت بدون VPN",
   "tray.connect": "اتصال",
   "tray.disconnect": "قطع الاتصال",
   "tray.show": "إظهار PangeaVPN",
@@ -231,6 +253,8 @@ const ar: MainMessages = {
   "notify.restoredBody": "تمت استعادة اتصال VPN.",
   "notify.disconnectedTitle": "غير متصل",
   "notify.disconnectedBody": "تم إيقاف VPN.",
+  "notify.blockingTitle": "تم إيقاف الإنترنت مؤقتًا لحمايتك",
+  "notify.blockingBody": "انقطع اتصال VPN، لذا يحجب مفتاح الإيقاف حركة البيانات بينما يعيد PangeaVPN الاتصال. افتح التطبيق واضغط على قطع الاتصال للاتصال بالإنترنت بدون VPN.",
   "state.DISCONNECTED": "غير متصل",
   "state.CONNECTING": "جارٍ الاتصال",
   "state.CONNECTED": "متصل",
@@ -241,6 +265,7 @@ const ar: MainMessages = {
 const fa: MainMessages = {
   "tray.status": "وضعیت: {state}",
   "tray.detail": "جزئیات: {detail}",
+  "tray.blocked": "کلید قطع اضطراری فعال است — برای اینترنت بدون VPN «قطع اتصال» را بزنید",
   "tray.connect": "اتصال",
   "tray.disconnect": "قطع اتصال",
   "tray.show": "نمایش PangeaVPN",
@@ -260,6 +285,8 @@ const fa: MainMessages = {
   "notify.restoredBody": "اتصال VPN بازیابی شد.",
   "notify.disconnectedTitle": "قطع شد",
   "notify.disconnectedBody": "VPN خاموش است.",
+  "notify.blockingTitle": "اینترنت برای محافظت از شما موقتاً متوقف شد",
+  "notify.blockingBody": "اتصال VPN قطع شد، بنابراین کلید قطع اضطراری ترافیک را مسدود می‌کند تا PangeaVPN دوباره متصل شود. برنامه را باز کنید و «قطع اتصال» را بزنید تا بدون VPN آنلاین شوید.",
   "state.DISCONNECTED": "قطع شده",
   "state.CONNECTING": "در حال اتصال",
   "state.CONNECTED": "متصل",
