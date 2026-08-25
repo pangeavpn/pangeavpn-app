@@ -1928,7 +1928,8 @@ export class PangeaApiClient {
         throw new Error(`Hub API error (${response.status}): ${text}`);
       }
 
-      return (await response.json()) as T;
+      const text = await response.text();
+      return (text ? JSON.parse(text) : undefined) as T;
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") {
         // Distinguish "the user stopped this" from "the hub is slow": the
