@@ -2237,7 +2237,7 @@ checkUpdatesBtn.addEventListener("click", async () => {
 
 async function copyMacInstallCommand(command: string, btn: HTMLButtonElement): Promise<void> {
   try {
-    await navigator.clipboard.writeText(command);
+    await copyTextToClipboard(command);
     btn.textContent = t("update.copied");
     btn.classList.add("copied");
     updateMessageEl.textContent = t("update.macPasteHint");
