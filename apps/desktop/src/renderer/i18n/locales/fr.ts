@@ -227,6 +227,10 @@ export const fr = {
   "settings.appearance.color.rose": "Rose",
   "settings.update.heading": "Mise à jour du logiciel",
   "settings.update.check": "Rechercher des mises à jour",
+  "settings.developer.heading": "Options développeur",
+  "settings.developer.description": "Diagnostics de débogage. Laissez-les désactivées sauf si on vous demande d'en activer une.",
+  "settings.developer.hubInTunnel.title": "Router le hub par le tunnel",
+  "settings.developer.hubInTunnel.hint": "Empêche le serveur de PangeaVPN d'être routé hors du tunnel : le trafic du compte et des serveurs passe aussi par le VPN. Peut ralentir les reconnexions et les changements de serveur. S'applique à la prochaine connexion.",
 
   // ── Server picker overlay ─────────────────────────────
   "serverPicker.title": "Sélectionner une région",
@@ -298,6 +302,8 @@ export const fr = {
   "toggle.hubMethod.off": "désactivée",
   "toggle.allowLan.on": "Autorisation du LAN activée. Reconnectez-vous pour qu'elle prenne effet.",
   "toggle.allowLan.off": "Autorisation du LAN désactivée. Reconnectez-vous pour qu'elle prenne effet.",
+  "toggle.hubInTunnel.on": "Hub routé par le tunnel. Reconnectez-vous pour que cela prenne effet.",
+  "toggle.hubInTunnel.off": "Hub routé hors du tunnel. Reconnectez-vous pour que cela prenne effet.",
   "toggle.preferredTransport.updated": "Méthode de connexion mise à jour. Reconnectez-vous pour qu'elle prenne effet.",
   "toggle.launch.on": "PangeaVPN se lancera au démarrage.",
   "toggle.launch.off": "Lancement au démarrage désactivé.",

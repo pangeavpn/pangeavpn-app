@@ -212,6 +212,9 @@ type WireGuardProfile struct {
 	TunnelName  string   `json:"tunnelName"`
 	DNS         []string `json:"dns"`
 	BypassHosts []string `json:"bypassHosts,omitempty"`
+	// HubInTunnel keeps BypassHosts out of the routing bypass so hub traffic
+	// goes through the tunnel; they stay kill-switch permitted either way.
+	HubInTunnel bool `json:"hubInTunnel,omitempty"`
 	// DirectEndpoint is the node's own WireGuard listener as host:port. ConfigText
 	// always points at a loopback transport bridge instead, so this is what the
 	// direct "wireguard" method rewrites the Endpoint line to. Empty means the

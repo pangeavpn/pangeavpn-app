@@ -514,6 +514,7 @@ export class PangeaApiClient {
   private normalHost: string = HUB_HOSTNAME;
   private wireguardMtu = MTU_DEFAULT;
   private customDnsServers: string[] | null = null;
+  private hubInTunnel = false;
   identityPubkey: string | null = null;
 
   // When DoH resolves an IP, we store it here and use fetchDohResolved()
@@ -726,6 +727,15 @@ export class PangeaApiClient {
 
   getWireguardMtu(): number {
     return this.wireguardMtu;
+  }
+
+  /** Developer option: route hub traffic through the tunnel, not around it. */
+  setHubInTunnel(enabled: unknown): void {
+    this.hubInTunnel = enabled === true;
+  }
+
+  getHubInTunnel(): boolean {
+    return this.hubInTunnel;
   }
 
   setCustomDns(value: unknown): string[] {
@@ -1855,7 +1865,10 @@ export class PangeaApiClient {
         bypassHosts: (() => {
           const hubIp = this.getHubIp();
           return hubIp ? [hubIp] : [];
-        })()
+        })(),
+        // The daemon keeps the kill-switch permit either way; this only drops
+        // the hub's bypass route, so its traffic rides the tunnel.
+        ...(this.hubInTunnel ? { hubInTunnel: true } : {})
       }
     };
   }

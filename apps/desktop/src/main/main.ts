@@ -839,6 +839,7 @@ function fingerprintForServer(serverId: string): string {
   return profileFingerprint({
     wireguardMtu: pangeaApiClient.getWireguardMtu(),
     customDns: pangeaApiClient.getCustomDns(),
+    hubInTunnel: pangeaApiClient.getHubInTunnel(),
     server: pangeaApiClient.getCachedServers().find((server) => server.id === serverId) ?? null
   });
 }
@@ -1762,6 +1763,15 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.getCustomDns, async () => pangeaApiClient.getCustomDns());
 
+  ipcMain.handle(IPC_CHANNELS.setHubInTunnel, async (_event, enabled: unknown) => {
+    pangeaApiClient.setHubInTunnel(enabled === true);
+    await updateSettings((settings) => {
+      settings.hubInTunnel = pangeaApiClient.getHubInTunnel();
+    }, "hubInTunnel setting");
+  });
+
+  ipcMain.handle(IPC_CHANNELS.getHubInTunnel, async () => pangeaApiClient.getHubInTunnel());
+
   ipcMain.handle(IPC_CHANNELS.setPreferredTransport, async (_event, value: "auto" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "snowflake" | "wireguard") => {
     preferredTransport =
       value === "cloak" ||
@@ -2185,6 +2195,7 @@ async function boot(): Promise<void> {
         // Ignore invalid hand-edited settings and use the VPN server default.
       }
     }
+    pangeaApiClient.setHubInTunnel(settings.hubInTunnel === true);
     if (
       settings.preferredTransport === "cloak" ||
       settings.preferredTransport === "naive" ||

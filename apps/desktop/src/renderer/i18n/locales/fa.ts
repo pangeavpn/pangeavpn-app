@@ -227,6 +227,10 @@ export const fa = {
   "settings.appearance.color.rose": "رز",
   "settings.update.heading": "به‌روزرسانی نرم‌افزار",
   "settings.update.check": "بررسی به‌روزرسانی‌ها",
+  "settings.developer.heading": "گزینه‌های توسعه‌دهنده",
+  "settings.developer.description": "ابزارهای عیب‌یابی. تا وقتی از شما خواسته نشده، خاموش بگذارید.",
+  "settings.developer.hubInTunnel.title": "عبور هاب از تونل",
+  "settings.developer.hubInTunnel.hint": "جلوی مسیریابی سرور خودِ PangeaVPN از بیرون تونل را می‌گیرد، بنابراین ترافیک حساب و سرورها هم از VPN عبور می‌کند. ممکن است اتصال دوباره و تعویض سرور را کند کند. در اتصال بعدی اعمال می‌شود.",
 
   // ── Server picker overlay ─────────────────────────────
   "serverPicker.title": "انتخاب منطقه",
@@ -298,6 +302,8 @@ export const fa = {
   "toggle.hubMethod.off": "غیرفعال",
   "toggle.allowLan.on": "اجازه به LAN فعال شد. برای اعمال، دوباره متصل شوید.",
   "toggle.allowLan.off": "اجازه به LAN غیرفعال شد. برای اعمال، دوباره متصل شوید.",
+  "toggle.hubInTunnel.on": "هاب از تونل عبور می‌کند. برای اعمال، دوباره متصل شوید.",
+  "toggle.hubInTunnel.off": "هاب از بیرون تونل عبور می‌کند. برای اعمال، دوباره متصل شوید.",
   "toggle.preferredTransport.updated": "روش اتصال به‌روزرسانی شد. برای اعمال، دوباره متصل شوید.",
   "toggle.launch.on": "PangeaVPN هنگام راه‌اندازی سیستم اجرا خواهد شد.",
   "toggle.launch.off": "اجرا هنگام راه‌اندازی سیستم غیرفعال شد.",

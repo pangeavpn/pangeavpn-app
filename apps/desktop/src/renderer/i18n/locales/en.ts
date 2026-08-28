@@ -227,6 +227,10 @@ export const en = {
   "settings.appearance.color.rose": "Rose",
   "settings.update.heading": "Software Update",
   "settings.update.check": "Check for Updates",
+  "settings.developer.heading": "Developer Options",
+  "settings.developer.description": "Diagnostics for debugging. Leave these off unless you were asked to turn one on.",
+  "settings.developer.hubInTunnel.title": "Route hub through tunnel",
+  "settings.developer.hubInTunnel.hint": "Stops PangeaVPN's own server from being routed around the tunnel, so account and server traffic goes through the VPN too. May slow reconnects and server switches. Applies on next connect.",
 
   // ── Server picker overlay ─────────────────────────────
   "serverPicker.title": "Select region",
@@ -298,6 +302,8 @@ export const en = {
   "toggle.hubMethod.off": "off",
   "toggle.allowLan.on": "Allow LAN enabled. Reconnect for it to take effect.",
   "toggle.allowLan.off": "Allow LAN disabled. Reconnect for it to take effect.",
+  "toggle.hubInTunnel.on": "Hub routed through the tunnel. Reconnect for it to take effect.",
+  "toggle.hubInTunnel.off": "Hub routed outside the tunnel. Reconnect for it to take effect.",
   "toggle.preferredTransport.updated": "Connection method updated. Reconnect for it to take effect.",
   "toggle.launch.on": "PangeaVPN will launch at startup.",
   "toggle.launch.off": "Launch at startup disabled.",

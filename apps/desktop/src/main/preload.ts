@@ -31,6 +31,8 @@ const CH = {
   getWireguardMtu: "settings:getWireguardMtu",
   setCustomDns: "settings:setCustomDns",
   getCustomDns: "settings:getCustomDns",
+  setHubInTunnel: "settings:setHubInTunnel",
+  getHubInTunnel: "settings:getHubInTunnel",
   setPreferredTransport: "settings:setPreferredTransport",
   getPreferredTransport: "settings:getPreferredTransport",
   setLaunchAtStartup: "settings:setLaunchAtStartup",
@@ -106,6 +108,8 @@ const pangeaApi = {
   getWireguardMtu: () => ipcRenderer.invoke(CH.getWireguardMtu),
   setCustomDns: (value: string) => ipcRenderer.invoke(CH.setCustomDns, value),
   getCustomDns: () => ipcRenderer.invoke(CH.getCustomDns),
+  setHubInTunnel: (enabled: boolean) => ipcRenderer.invoke(CH.setHubInTunnel, enabled),
+  getHubInTunnel: () => ipcRenderer.invoke(CH.getHubInTunnel),
   setPreferredTransport: (value: "auto" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "snowflake" | "wireguard") =>
     ipcRenderer.invoke(CH.setPreferredTransport, value),
   getPreferredTransport: () => ipcRenderer.invoke(CH.getPreferredTransport),

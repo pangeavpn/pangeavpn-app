@@ -55,6 +55,8 @@ export const IPC_CHANNELS = {
   getWireguardMtu: "settings:getWireguardMtu",
   setCustomDns: "settings:setCustomDns",
   getCustomDns: "settings:getCustomDns",
+  setHubInTunnel: "settings:setHubInTunnel",
+  getHubInTunnel: "settings:getHubInTunnel",
   setPreferredTransport: "settings:setPreferredTransport",
   getPreferredTransport: "settings:getPreferredTransport",
   setLaunchAtStartup: "settings:setLaunchAtStartup",
@@ -339,6 +341,9 @@ export interface PangeaApi {
   /** Empty restores the DNS servers supplied by the VPN server. */
   setCustomDns: (value: string) => Promise<string[]>;
   getCustomDns: () => Promise<string[]>;
+  /** Developer option: send hub traffic through the tunnel, not around it. */
+  setHubInTunnel: (enabled: boolean) => Promise<void>;
+  getHubInTunnel: () => Promise<boolean>;
   setPreferredTransport: (value: "auto" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "snowflake" | "wireguard") => Promise<void>;
   getPreferredTransport: () => Promise<"auto" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "snowflake" | "wireguard">;
   setLaunchAtStartup: (enabled: boolean) => Promise<void>;
