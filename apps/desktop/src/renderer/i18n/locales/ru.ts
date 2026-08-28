@@ -227,6 +227,10 @@ export const ru = {
   "settings.appearance.color.rose": "Роза",
   "settings.update.heading": "Обновление ПО",
   "settings.update.check": "Проверить обновления",
+  "settings.developer.heading": "Параметры разработчика",
+  "settings.developer.description": "Диагностика для отладки. Не включайте их без необходимости.",
+  "settings.developer.hubInTunnel.title": "Направлять хаб через туннель",
+  "settings.developer.hubInTunnel.hint": "Сервер PangeaVPN перестаёт маршрутизироваться в обход туннеля, поэтому трафик аккаунта и серверов тоже идёт через VPN. Может замедлить переподключения и смену сервера. Применяется при следующем подключении.",
 
   // ── Server picker overlay ─────────────────────────────
   "serverPicker.title": "Выбор региона",
@@ -298,6 +302,8 @@ export const ru = {
   "toggle.hubMethod.off": "выключено",
   "toggle.allowLan.on": "«Разрешить LAN» включено. Переподключитесь, чтобы изменение вступило в силу.",
   "toggle.allowLan.off": "«Разрешить LAN» выключено. Переподключитесь, чтобы изменение вступило в силу.",
+  "toggle.hubInTunnel.on": "Хаб направлен через туннель. Переподключитесь, чтобы изменение вступило в силу.",
+  "toggle.hubInTunnel.off": "Хаб направлен в обход туннеля. Переподключитесь, чтобы изменение вступило в силу.",
   "toggle.preferredTransport.updated": "Способ подключения обновлён. Переподключитесь, чтобы изменение вступило в силу.",
   "toggle.launch.on": "PangeaVPN будет запускаться при старте системы.",
   "toggle.launch.off": "Запуск при старте системы выключен.",

@@ -227,6 +227,10 @@ export const ar = {
   "settings.appearance.color.rose": "وردي",
   "settings.update.heading": "تحديث البرنامج",
   "settings.update.check": "التحقق من التحديثات",
+  "settings.developer.heading": "خيارات المطوّر",
+  "settings.developer.description": "أدوات تشخيص لتصحيح الأخطاء. اتركها معطّلة ما لم يُطلب منك تفعيل أحدها.",
+  "settings.developer.hubInTunnel.title": "توجيه المحور عبر النفق",
+  "settings.developer.hubInTunnel.hint": "يمنع توجيه خادم PangeaVPN نفسه خارج النفق، فيمر عبر الشبكة الافتراضية أيضًا تدفق الحساب والخوادم. قد يبطئ إعادة الاتصال وتبديل الخوادم. يسري عند الاتصال التالي.",
 
   // ── Server picker overlay ─────────────────────────────
   "serverPicker.title": "اختيار المنطقة",
@@ -298,6 +302,8 @@ export const ar = {
   "toggle.hubMethod.off": "مُعطَّل",
   "toggle.allowLan.on": "تم تفعيل السماح بشبكة LAN. أعد الاتصال ليسري المفعول.",
   "toggle.allowLan.off": "تم تعطيل السماح بشبكة LAN. أعد الاتصال ليسري المفعول.",
+  "toggle.hubInTunnel.on": "تم توجيه المحور عبر النفق. أعد الاتصال ليسري المفعول.",
+  "toggle.hubInTunnel.off": "تم توجيه المحور خارج النفق. أعد الاتصال ليسري المفعول.",
   "toggle.preferredTransport.updated": "تم تحديث طريقة الاتصال. أعد الاتصال ليسري المفعول.",
   "toggle.launch.on": "سيبدأ PangeaVPN عند بدء التشغيل.",
   "toggle.launch.off": "تم تعطيل التشغيل عند بدء التشغيل.",

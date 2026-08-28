@@ -6,6 +6,7 @@
 :root {
   color-scheme: dark;
   --collapse-duration: 250ms;
+  --header-h: 46px;
 
   /* surfaces — dark mode derived from #1E1C1C */
   --bg-base: #141312;
@@ -835,13 +836,16 @@ body[data-theme="light"] .login-brand {
 
 /* ── App shell ────────────────────────────────────────────── */
 
+/* Scrolls rather than clips so the debug logs panel can sit below the fold
+   instead of squeezing the stage — see .stage's min-height. */
 .shell {
   position: relative;
   z-index: 1;
   height: 100vh;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 /* Beats the display:flex above, which would otherwise defeat [hidden] — see
@@ -850,11 +854,12 @@ body[data-theme="light"] .login-brand {
 
 .shell::-webkit-scrollbar { width: 0; height: 0; }
 
-/* Map on the left, everything actionable on the right. */
+/* Map on the left, everything actionable on the right. The min-height keeps
+   the stage a full screen tall whatever is appended below it. */
 .stage {
-  flex: 1;
+  flex: none;
   display: flex;
-  min-height: 0;
+  min-height: calc(100% - var(--header-h));
 }
 
 .map-stage {
@@ -1150,7 +1155,7 @@ body[data-offline="true"] .drift-map { color: var(--warning); opacity: 0.55; }
 
 .header {
   flex: none;
-  height: 46px;
+  height: var(--header-h);
   display: flex;
   align-items: center;
   gap: 10px;
@@ -2316,6 +2321,10 @@ button.ghost:hover:not(:disabled) {
   transition: background 0.14s ease;
 }
 
+/* Beats the display:flex above, which would otherwise defeat [hidden] — see
+   settings-actions[hidden] for the same pattern. */
+.settings-nav-item[hidden] { display: none; }
+
 .settings-nav-item:hover { background: var(--bg-elevated); }
 .settings-nav-item:focus-visible { outline-offset: -2px; }
 .settings-nav-item.is-active { background: var(--accent-glow); }
@@ -2742,6 +2751,12 @@ button.ghost:hover:not(:disabled) {
 }
 
 /* ── Logs ──────────────────────────────────────────────────── */
+
+/* Sits below the full-height stage, reached by scrolling the shell. */
+.logs-panel {
+  flex: none;
+  margin: 12px 0 4px;
+}
 
 .logs-actions {
   display: flex;

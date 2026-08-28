@@ -22,6 +22,7 @@ export type ProfileRecords = Readonly<Record<string, ProfileRecord>>;
 export interface FingerprintInput {
   wireguardMtu: number;
   customDns: readonly string[];
+  hubInTunnel: boolean;
   server: unknown;
 }
 
@@ -29,6 +30,7 @@ export function profileFingerprint(input: FingerprintInput): string {
   const payload = JSON.stringify({
     mtu: input.wireguardMtu,
     dns: [...input.customDns],
+    hubInTunnel: input.hubInTunnel,
     server: input.server ?? null
   });
   return createHash("sha256").update(payload).digest("hex").slice(0, 32);

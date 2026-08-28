@@ -227,6 +227,10 @@ export const zh = {
   "settings.appearance.color.rose": "玫瑰红",
   "settings.update.heading": "软件更新",
   "settings.update.check": "检查更新",
+  "settings.developer.heading": "开发者选项",
+  "settings.developer.description": "用于调试的诊断项。除非有人要求，否则请保持关闭。",
+  "settings.developer.hubInTunnel.title": "让中枢流量走隧道",
+  "settings.developer.hubInTunnel.hint": "不再让 PangeaVPN 自己的服务器绕过隧道，账户和服务器流量也会经过 VPN。可能会拖慢重连和切换服务器。下次连接时生效。",
 
   // ── Server picker overlay ─────────────────────────────
   "serverPicker.title": "选择区域",
@@ -298,6 +302,8 @@ export const zh = {
   "toggle.hubMethod.off": "已关闭",
   "toggle.allowLan.on": "已启用允许 LAN。请重新连接以生效。",
   "toggle.allowLan.off": "已禁用允许 LAN。请重新连接以生效。",
+  "toggle.hubInTunnel.on": "中枢流量已走隧道。请重新连接以生效。",
+  "toggle.hubInTunnel.off": "中枢流量已绕过隧道。请重新连接以生效。",
   "toggle.preferredTransport.updated": "连接方式已更新。请重新连接以生效。",
   "toggle.launch.on": "PangeaVPN 将在开机时启动。",
   "toggle.launch.off": "已禁用开机启动。",

@@ -227,6 +227,10 @@ export const es = {
   "settings.appearance.color.rose": "Rosa",
   "settings.update.heading": "Actualización de software",
   "settings.update.check": "Buscar actualizaciones",
+  "settings.developer.heading": "Opciones de desarrollador",
+  "settings.developer.description": "Diagnósticos para depuración. Déjalas desactivadas salvo que te pidan activar alguna.",
+  "settings.developer.hubInTunnel.title": "Enrutar el hub por el túnel",
+  "settings.developer.hubInTunnel.hint": "Evita que el propio servidor de PangeaVPN se enrute fuera del túnel, así el tráfico de la cuenta y de los servidores también pasa por la VPN. Puede ralentizar las reconexiones y los cambios de servidor. Se aplica en la próxima conexión.",
 
   // ── Server picker overlay ─────────────────────────────
   "serverPicker.title": "Seleccionar región",
@@ -298,6 +302,8 @@ export const es = {
   "toggle.hubMethod.off": "desactivado",
   "toggle.allowLan.on": "Permitir LAN activado. Vuelve a conectar para que surta efecto.",
   "toggle.allowLan.off": "Permitir LAN desactivado. Vuelve a conectar para que surta efecto.",
+  "toggle.hubInTunnel.on": "Hub enrutado por el túnel. Vuelve a conectar para que surta efecto.",
+  "toggle.hubInTunnel.off": "Hub enrutado fuera del túnel. Vuelve a conectar para que surta efecto.",
   "toggle.preferredTransport.updated": "Método de conexión actualizado. Vuelve a conectar para que surta efecto.",
   "toggle.launch.on": "PangeaVPN se iniciará al arrancar.",
   "toggle.launch.off": "Inicio al arrancar desactivado.",

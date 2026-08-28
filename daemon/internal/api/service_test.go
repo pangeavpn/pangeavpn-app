@@ -1140,6 +1140,37 @@ func TestWithTransportBypassHosts_IncludesResolvedTransportIPs(t *testing.T) {
 	}
 }
 
+func TestWithTransportBypassHosts_HubInTunnelDropsHubRoute(t *testing.T) {
+	profile := testProfile()
+	profile.Cloak.RemoteHost = "192.0.2.50"
+	profile.TransportEndpointIPs = []string{"192.0.2.50"}
+	profile.WireGuard.BypassHosts = []string{"198.51.100.7"}
+	profile.WireGuard.HubInTunnel = true
+
+	bypass := withTransportBypassHosts(profile)
+
+	if slices.Contains(bypass.BypassHosts, "198.51.100.7") {
+		t.Errorf("withTransportBypassHosts().BypassHosts = %v, want no hub route when HubInTunnel is set", bypass.BypassHosts)
+	}
+	if !slices.Contains(bypass.BypassHosts, "192.0.2.50") {
+		t.Errorf("withTransportBypassHosts().BypassHosts = %v, want the transport endpoint route regardless of HubInTunnel", bypass.BypassHosts)
+	}
+	if permits := killSwitchPermits(profile); !slices.Contains(permits, "198.51.100.7") {
+		t.Errorf("killSwitchPermits() = %v, want the hub still permitted — HubInTunnel only moves its route", permits)
+	}
+}
+
+func TestWithTransportBypassHosts_HubRoutedAroundTunnelByDefault(t *testing.T) {
+	profile := testProfile()
+	profile.WireGuard.BypassHosts = []string{"198.51.100.7"}
+
+	bypass := withTransportBypassHosts(profile)
+
+	if !slices.Contains(bypass.BypassHosts, "198.51.100.7") {
+		t.Errorf("withTransportBypassHosts().BypassHosts = %v, want the hub route by default", bypass.BypassHosts)
+	}
+}
+
 func TestKillSwitchPermits_CloakOnlyProfileUnaffected(t *testing.T) {
 	profile := testProfile()
 

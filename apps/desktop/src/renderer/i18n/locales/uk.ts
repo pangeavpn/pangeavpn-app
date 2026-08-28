@@ -227,6 +227,10 @@ export const uk = {
   "settings.appearance.color.rose": "Троянда",
   "settings.update.heading": "Оновлення програми",
   "settings.update.check": "Перевірити оновлення",
+  "settings.developer.heading": "Параметри розробника",
+  "settings.developer.description": "Діагностика для налагодження. Не вмикайте їх без потреби.",
+  "settings.developer.hubInTunnel.title": "Спрямовувати хаб через тунель",
+  "settings.developer.hubInTunnel.hint": "Сервер PangeaVPN більше не маршрутизується в обхід тунелю, тож трафік акаунта й серверів теж іде через VPN. Може сповільнити перепідключення та зміну сервера. Застосовується при наступному підключенні.",
 
   // ── Server picker overlay ─────────────────────────────
   "serverPicker.title": "Вибір регіону",
@@ -298,6 +302,8 @@ export const uk = {
   "toggle.hubMethod.off": "вимкнено",
   "toggle.allowLan.on": "Дозвіл LAN увімкнено. Перепідключіться, щоб зміни набули чинності.",
   "toggle.allowLan.off": "Дозвіл LAN вимкнено. Перепідключіться, щоб зміни набули чинності.",
+  "toggle.hubInTunnel.on": "Хаб спрямовано через тунель. Перепідключіться, щоб зміни набули чинності.",
+  "toggle.hubInTunnel.off": "Хаб спрямовано в обхід тунелю. Перепідключіться, щоб зміни набули чинності.",
   "toggle.preferredTransport.updated": "Спосіб підключення оновлено. Перепідключіться, щоб зміни набули чинності.",
   "toggle.launch.on": "PangeaVPN запускатиметься під час старту системи.",
   "toggle.launch.off": "Запуск під час старту системи вимкнено.",

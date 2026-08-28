@@ -3691,7 +3691,12 @@ func transportPermitHosts(profile state.Profile) []string {
 func withTransportBypassHosts(profile state.Profile) state.WireGuardProfile {
 	copyProfile := profile.WireGuard
 	copyProfile.DNS = append([]string(nil), profile.WireGuard.DNS...)
-	copyProfile.BypassHosts = append([]string(nil), profile.WireGuard.BypassHosts...)
+	// HubInTunnel drops the hub's own bypass route (it keeps its kill-switch
+	// permit, which is what makes the hub reachable before the tunnel is up).
+	copyProfile.BypassHosts = nil
+	if !profile.WireGuard.HubInTunnel {
+		copyProfile.BypassHosts = append(copyProfile.BypassHosts, profile.WireGuard.BypassHosts...)
+	}
 	if host := strings.TrimSpace(profile.Cloak.RemoteHost); host != "" {
 		copyProfile.BypassHosts = append(copyProfile.BypassHosts, host)
 	}

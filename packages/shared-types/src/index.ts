@@ -92,6 +92,8 @@ export const WireGuardProfileSchema = z.object({
   tunnelName: z.string().min(1),
   dns: z.array(z.string()),
   bypassHosts: z.array(z.string()).optional(),
+  /** Routes `bypassHosts` (the hub) through the tunnel instead of around it. */
+  hubInTunnel: z.boolean().optional(),
   /**
    * The node's own WireGuard listener as host:port. `configText` always points
    * at a loopback transport bridge instead, so this is what the daemon rewrites

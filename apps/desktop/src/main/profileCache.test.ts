@@ -66,11 +66,12 @@ test("a sole provision is the latest, an unknown one is not", () => {
 });
 
 test("the fingerprint tracks MTU, custom DNS and the server entry", () => {
-  const base = { wireguardMtu: 1420, customDns: ["1.1.1.1"], server: { id: "a" } };
+  const base = { wireguardMtu: 1420, customDns: ["1.1.1.1"], hubInTunnel: false, server: { id: "a" } };
 
   assert.equal(profileFingerprint(base), profileFingerprint({ ...base }));
   assert.notEqual(profileFingerprint(base), profileFingerprint({ ...base, wireguardMtu: 1280 }));
   assert.notEqual(profileFingerprint(base), profileFingerprint({ ...base, customDns: ["9.9.9.9"] }));
+  assert.notEqual(profileFingerprint(base), profileFingerprint({ ...base, hubInTunnel: true }));
   assert.notEqual(profileFingerprint(base), profileFingerprint({ ...base, server: { id: "b" } }));
 });
 

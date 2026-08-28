@@ -105,6 +105,9 @@ const dnsPresetSelect = document.getElementById("dnsPresetSelect") as HTMLSelect
 const customDnsField = document.getElementById("customDnsField") as HTMLElement;
 const customDnsInput = document.getElementById("customDnsInput") as HTMLInputElement;
 const wireguardMtuInput = document.getElementById("wireguardMtuInput") as HTMLInputElement;
+const hubInTunnelToggle = document.getElementById("hubInTunnelToggle") as HTMLInputElement;
+const developerSection = document.getElementById("secDeveloper") as HTMLElement;
+const developerNavItem = document.getElementById("settingsNavDeveloper") as HTMLButtonElement;
 const preferredTransportSelect = document.getElementById("preferredTransportSelect") as HTMLSelectElement;
 const launchAtStartupToggle = document.getElementById("launchAtStartupToggle") as HTMLInputElement;
 const autoConnectToggle = document.getElementById("autoConnectToggle") as HTMLInputElement;
@@ -131,6 +134,7 @@ const setTransportValue = document.getElementById("setTransportValue") as HTMLSp
 const setNetworkValue = document.getElementById("setNetworkValue") as HTMLSpanElement;
 const setStartupValue = document.getElementById("setStartupValue") as HTMLSpanElement;
 const setNotificationsValue = document.getElementById("setNotificationsValue") as HTMLSpanElement;
+const setDeveloperValue = document.getElementById("setDeveloperValue") as HTMLSpanElement;
 const setLanguageValue = document.getElementById("setLanguageValue") as HTMLSpanElement;
 const checkUpdatesBtn = document.getElementById("checkUpdatesBtn") as HTMLButtonElement;
 const setAppearanceValue = document.getElementById("setAppearanceValue") as HTMLSpanElement;
@@ -230,6 +234,7 @@ function updateSettingsSummaries(): void {
   setStartupValue.textContent = startup.length ? startup.join(" · ") : off;
 
   setNotificationsValue.textContent = notificationsToggle.checked ? t("settings.notifications.status.title") : off;
+  setDeveloperValue.textContent = hubInTunnelToggle.checked ? t("settings.developer.hubInTunnel.title") : off;
 
   const language = languageSelect?.selectedOptions[0];
   setLanguageValue.textContent = language ? language.textContent : "";
@@ -407,11 +412,14 @@ function syncSettingsNav(): void {
   if (Date.now() < settingsSpyLockUntil || settingsSections.length === 0) return;
   const scrollTop = settingsPane.scrollTop;
   if (scrollTop + settingsPane.clientHeight >= settingsPane.scrollHeight - 4) {
-    markSettingsNav(settingsSections[settingsSections.length - 1].id);
+    const shown = settingsSections.filter((section) => !section.hidden);
+    if (shown.length > 0) markSettingsNav(shown[shown.length - 1].id);
     return;
   }
-  let active = settingsSections[0];
-  for (const section of settingsSections) {
+  const visible = settingsSections.filter((section) => !section.hidden);
+  if (visible.length === 0) return;
+  let active = visible[0];
+  for (const section of visible) {
     if (section.offsetTop - scrollTop <= SETTINGS_JUMP_GUTTER * 2) active = section;
   }
   markSettingsNav(active.id);
@@ -420,7 +428,8 @@ function syncSettingsNav(): void {
 /** Tail room so the last (short) section can still scroll to the top of the
  *  pane — otherwise its rail row could only ever light up at full scroll. */
 function sizeSettingsTail(): void {
-  const last = settingsSections[settingsSections.length - 1];
+  const visible = settingsSections.filter((section) => !section.hidden);
+  const last = visible[visible.length - 1];
   if (!last) return;
   const room = settingsPane.clientHeight - last.offsetHeight - SETTINGS_JUMP_GUTTER * 2;
   settingsPane.style.paddingBottom = `${Math.max(24, room)}px`;
@@ -1564,6 +1573,19 @@ allowLanToggle.addEventListener("change", async () => {
   }
 });
 
+hubInTunnelToggle.addEventListener("change", async () => {
+  if (!pangeaApi) return;
+  try {
+    await pangeaApi.setHubInTunnel(hubInTunnelToggle.checked);
+    showToast(hubInTunnelToggle.checked
+      ? t("toggle.hubInTunnel.on")
+      : t("toggle.hubInTunnel.off"), 4000, true);
+  } catch (err) {
+    hubInTunnelToggle.checked = !hubInTunnelToggle.checked;
+    showToast(reportError("hubInTunnel", err, t("toggle.updateFailed")));
+  }
+});
+
 // Commits on blur/Enter. Main owns validation and returns what it actually
 // stored, so the field always ends up showing the truth rather than the typo.
 wireguardMtuInput.addEventListener("change", async () => {
@@ -2008,6 +2030,7 @@ async function init(): Promise<void> {
       allowLanToggle.checked = await pangeaApi.getAllowLan();
       syncDnsControls(await pangeaApi.getCustomDns());
       wireguardMtuInput.value = String(await pangeaApi.getWireguardMtu());
+      hubInTunnelToggle.checked = await pangeaApi.getHubInTunnel();
       const preferredTransport = await pangeaApi.getPreferredTransport();
       preferredTransportSelect.value = preferredTransport;
       preferredTransportSelect.dataset.previousValue = preferredTransport;
@@ -2301,9 +2324,13 @@ async function renderAppVersion(): Promise<void> {
   }
 }
 
-// Logs is a debug/advanced area; reveal it only when verbose errors are on.
+// Logs and developer options are debug areas; reveal them only when verbose
+// errors are on.
 function applyVerboseErrorsUi(): void {
   logsSection.hidden = !verboseErrors;
+  developerSection.hidden = !verboseErrors;
+  developerNavItem.hidden = !verboseErrors;
+  sizeSettingsTail();
 }
 applyVerboseErrorsUi();
 

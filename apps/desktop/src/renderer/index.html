@@ -304,6 +304,13 @@
               <span id="settingsVersion" class="set-value">&mdash;</span>
             </span>
           </button>
+          <button id="settingsNavDeveloper" class="settings-nav-item" type="button" data-settings-target="secDeveloper" aria-controls="secDeveloper" hidden>
+            <span class="set-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 8-4 4 4 4"/><path d="m16 8 4 4-4 4"/><path d="m13.5 5-3 14"/></svg></span>
+            <span class="settings-nav-copy">
+              <span class="set-title" data-i18n="settings.developer.heading">Developer Options</span>
+              <span id="setDeveloperValue" class="set-value"></span>
+            </span>
+          </button>
         </nav>
 
         <div id="settingsAccountActions" class="settings-actions">
@@ -482,6 +489,21 @@
         <section id="secUpdate" class="settings-section">
           <h3 class="settings-section-title" data-i18n="settings.update.heading">Software Update</h3>
           <button id="checkUpdatesBtn" class="btn-ghost" type="button" data-i18n="settings.update.check">Check for Updates</button>
+        </section>
+
+        <!-- Developer options: revealed with verbose errors (tap the version 5x) -->
+        <section id="secDeveloper" class="settings-section" hidden>
+          <h3 class="settings-section-title" data-i18n="settings.developer.heading">Developer Options</h3>
+          <p class="settings-description" data-i18n="settings.developer.description">Diagnostics for debugging. Leave these off unless you were asked to turn one on.</p>
+          <div class="settings-toggles">
+            <label class="toggle-label">
+              <span class="toggle-copy">
+                <span class="toggle-title" data-i18n="settings.developer.hubInTunnel.title">Route hub through tunnel</span>
+                <span class="toggle-hint" data-i18n="settings.developer.hubInTunnel.hint">Stops PangeaVPN's own server from being routed around the tunnel, so account and server traffic goes through the VPN too. May slow reconnects and server switches. Applies on next connect.</span>
+              </span>
+              <input id="hubInTunnelToggle" class="toggle-switch" type="checkbox" />
+            </label>
+          </div>
         </section>
       </div>
 
