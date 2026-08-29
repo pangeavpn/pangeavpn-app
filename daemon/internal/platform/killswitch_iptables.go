@@ -232,6 +232,13 @@ func applyIPTablesRules(ctx context.Context, endpointIPs []string, tunnelInterfa
 // answer, which callers must not read as "absent".
 func liveIPTablesChain(ctx context.Context, binary, primary, alternate string) (string, bool) {
 	for _, chain := range []string{primary, alternate} {
+		exists, ok := iptablesChainExists(ctx, binary, chain)
+		if !ok {
+			return "", false
+		}
+		if !exists {
+			continue
+		}
 		jumpArgs, terminalArgs := iptablesLiveChainProbe(chain)
 
 		hooked, ok := probeIPTablesRule(ctx, binary, jumpArgs)
@@ -250,6 +257,12 @@ func liveIPTablesChain(ctx context.Context, binary, primary, alternate string) (
 		}
 	}
 	return "", true
+}
+
+// A jump probe (-C/-D OUTPUT -j X) against a chain that isn't there exits 2
+// on the nf_tables backend, not 1, so the chain is checked before its jump.
+func iptablesChainExists(ctx context.Context, binary, chain string) (exists bool, determined bool) {
+	return probeIPTablesRule(ctx, binary, withWait([]string{"-S", chain}))
 }
 
 // Only exit 1 means "no such rule". Anything else (2 usage, 3/4 resource or
@@ -317,11 +330,17 @@ func iptablesTargetAbsent(ctx context.Context, cmd iptablesCommand) (absent bool
 	}
 	switch args[0] {
 	case "-D":
+		if len(args) >= 4 && args[len(args)-2] == "-j" {
+			exists, ok := iptablesChainExists(ctx, cmd.Binary, args[len(args)-1])
+			if !ok || !exists {
+				return !exists, ok
+			}
+		}
 		present, ok := probeIPTablesRule(ctx, cmd.Binary, withWait(append([]string{"-C"}, args[1:]...)))
 		return !present, ok
 	case "-F", "-X":
-		present, ok := probeIPTablesRule(ctx, cmd.Binary, withWait([]string{"-S", args[1]}))
-		return !present, ok
+		exists, ok := iptablesChainExists(ctx, cmd.Binary, args[1])
+		return !exists, ok
 	}
 	return false, false
 }

@@ -382,8 +382,11 @@ func TestApplyIPTablesRules_RefusesWhenTheLiveChainIsUnknown(t *testing.T) {
 	var mutating []string
 	runIPTablesCommand = func(_ context.Context, binary string, args ...string) error {
 		stripped := stripWait(args)
-		if len(stripped) > 0 && stripped[0] == "-C" {
+		switch stripped[0] {
+		case "-C":
 			return locked
+		case "-S":
+			return nil
 		}
 		mutating = append(mutating, binary+" "+strings.Join(stripped, " "))
 		return nil
@@ -493,5 +496,56 @@ func TestRemoveIPTablesRules_StillReportsUsableBackendFailures(t *testing.T) {
 
 	if err := removeIPTablesRules(context.Background()); err == nil {
 		t.Fatal("xtables lock contention was reported as a complete teardown")
+	}
+}
+
+// nf_tables iptables exits 2 ("Chain 'X' does not exist") for a -D or -C jump
+// whose target chain is absent, where legacy exits 1. A clear that finds no
+// chain has nothing to do and must not report the teardown as incomplete.
+func TestRemoveIPTablesRules_TreatsAMissingChainAsAlreadyGone(t *testing.T) {
+	original := runIPTablesCommand
+	defer func() { runIPTablesCommand = original }()
+
+	noChainJump := exitCodeError(t, 2)
+	noChain := exitCodeError(t, 1)
+	runIPTablesCommand = func(_ context.Context, _ string, args ...string) error {
+		stripped := stripWait(args)
+		switch {
+		case len(stripped) >= 2 && stripped[0] == "-S" && stripped[1] == "OUTPUT":
+			return nil
+		case stripped[0] == "-D" || stripped[0] == "-C":
+			return noChainJump
+		default:
+			return noChain
+		}
+	}
+
+	if err := removeIPTablesRules(context.Background()); err != nil {
+		t.Fatalf("clearing an already-clean firewall reported a failure: %v", err)
+	}
+}
+
+// Same backend quirk on the apply side: with no chain installed yet the jump
+// probe exits 2, which must read as "nothing live", not "unanswerable".
+func TestLiveIPTablesChain_NoChainOnNfTablesMeansNothingLive(t *testing.T) {
+	original := runIPTablesCommand
+	defer func() { runIPTablesCommand = original }()
+
+	noChainJump := exitCodeError(t, 2)
+	noChain := exitCodeError(t, 1)
+	runIPTablesCommand = func(_ context.Context, _ string, args ...string) error {
+		stripped := stripWait(args)
+		if stripped[0] == "-C" {
+			return noChainJump
+		}
+		return noChain
+	}
+
+	live, ok := liveIPTablesChain(context.Background(), "iptables", iptChainName, iptChainNameAlt)
+	if !ok {
+		t.Fatal("a firewall with no kill-switch chain was reported as unanswerable")
+	}
+	if live != "" {
+		t.Fatalf("live chain = %q, want none", live)
 	}
 }
