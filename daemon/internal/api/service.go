@@ -133,6 +133,9 @@ type Service struct {
 	// hostInternet is the OS connectivity oracle (online, known); nil falls back
 	// to the network fingerprint. Injectable so offline behavior is testable.
 	hostInternet func() (bool, bool)
+	// physicalRoute answers behind an armed kill switch, where the OS oracle
+	// can't probe; see hostVerdict.
+	physicalRoute func() (string, string, error)
 
 	// shadowsocksProxy serves the hub control plane; nil leaves /ssproxy/*
 	// reporting unavailable. Set once at startup.
@@ -363,6 +366,7 @@ func NewService(
 		handshakeTimeout: defaultWireGuardHandshakeTimeout,
 		networkKey:       currentNetworkKey,
 		hostInternet:     platform.HostInternet,
+		physicalRoute:    platform.PhysicalDefaultRoute,
 		recoveryDelays:   defaultRecoveryDelays,
 		probeResolver:    probeResolverOverUDP,
 		networkRepair:    platform.RepairNetworkAfterTunnelDisconnect,
@@ -2601,10 +2605,8 @@ func (s *Service) sessionIsHealthy(ctx context.Context, profile state.Profile) b
 // the network fingerprint where the OS can't tell. An unknown answer counts as
 // usable, so the retry falls back to letting the transport itself fail.
 func (s *Service) networkLooksUsable() bool {
-	if s.hostInternet != nil {
-		if online, known := s.hostInternet(); known {
-			return online
-		}
+	if online, known := s.hostVerdict(); known {
+		return online
 	}
 	if s.networkKey == nil {
 		return true
@@ -2615,11 +2617,30 @@ func (s *Service) networkLooksUsable() bool {
 // hostOffline reports a confident "no internet" from the OS. An unknown verdict
 // counts as online, so a platform that can't tell never shows "no internet".
 func (s *Service) hostOffline() bool {
-	if s.hostInternet == nil {
-		return false
-	}
-	online, known := s.hostInternet()
+	online, known := s.hostVerdict()
 	return known && !online
+}
+
+// hostVerdict is the OS's connectivity verdict, except behind an armed kill
+// switch: the OS proves internet by probing, which the lock blocks, so a "no
+// internet" there is blind and the route table decides instead. Without this
+// a lockdown lock could never be told the link is back.
+func (s *Service) hostVerdict() (online bool, known bool) {
+	if s.hostInternet == nil {
+		return false, false
+	}
+	online, known = s.hostInternet()
+	if !known || online || s.physicalRoute == nil || !s.killSwitch.Active() {
+		return online, known
+	}
+	_, _, err := s.physicalRoute()
+	switch {
+	case err == nil:
+		return true, true
+	case errors.Is(err, platform.ErrNoDefaultRoute):
+		return false, true
+	}
+	return false, false
 }
 
 // offlineHoldInterval is how long transport recovery backs off after a dial

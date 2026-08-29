@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/platform"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/state"
 )
 
@@ -37,6 +38,7 @@ func TestOfflineForState(t *testing.T) {
 func TestHealthCheck_HoldsWhenHostOffline(t *testing.T) {
 	svc, naive, wgMgr, _ := recoveryTestService(t)
 	svc.hostInternet = func() (bool, bool) { return false, true }
+	svc.physicalRoute = func() (string, string, error) { return "", "", platform.ErrNoDefaultRoute }
 
 	dropSession(naive, wgMgr)
 	for range 4 {
@@ -56,6 +58,7 @@ func TestHealthCheck_HoldsWhenHostOffline(t *testing.T) {
 
 	// Link returns: recovery resumes and the session comes back, offline clears.
 	svc.hostInternet = func() (bool, bool) { return true, true }
+	svc.physicalRoute = func() (string, string, error) { return "eth0", "192.0.2.1", nil }
 	restoreNetwork(naive)
 	for range 3 {
 		svc.runHealthCheck(context.Background())
@@ -126,6 +129,7 @@ func TestHealthCheck_TransportRestartHoldsOnUnreachableNetwork(t *testing.T) {
 func TestRetryDroppedSession_HoldsWhenOffline(t *testing.T) {
 	svc, _, _, _ := recoveryTestService(t)
 	svc.hostInternet = func() (bool, bool) { return false, true }
+	svc.physicalRoute = func() (string, string, error) { return "", "", platform.ErrNoDefaultRoute }
 	svc.machine.Set(state.StateError, "connection lost")
 
 	svc.retryDroppedSession(context.Background())
@@ -262,5 +266,71 @@ func TestConnect_UnreachableNetworkStopsTheCascade(t *testing.T) {
 	}
 	if !svc.Status(context.Background()).Offline {
 		t.Error("Offline = false after an unreachable-network connect")
+	}
+}
+
+// Behind an armed kill switch the OS cannot probe for internet, so its "no
+// internet" is blind: the route table decides. A lockdown lock that trusted the
+// probe verdict could never be told the link is back.
+func TestConnect_BehindTheKillSwitchTheRouteTableOutranksTheOSVerdict(t *testing.T) {
+	naive := &fakeNaiveManager{}
+	wgMgr := &fakeWGManager{}
+	ks := &fakeKillSwitch{}
+	svc := newTestService(t, &fakeCloakManager{}, naive, wgMgr, ks, silentTunnelProfile())
+	svc.hostInternet = func() (bool, bool) { return false, true }
+	svc.physicalRoute = func() (string, string, error) { return "Wi-Fi", "192.0.2.1", nil }
+	naive.mu.Lock()
+	naive.startErr = errors.New("dial tcp 203.0.113.9:443: i/o timeout")
+	naive.mu.Unlock()
+
+	err := svc.Connect(context.Background(), "p1", ConnectOptions{PreferredTransport: "naive", Lockdown: true})
+	if err == nil || errors.Is(err, ErrHostOffline) {
+		t.Fatalf("Connect error = %v, want the transport's own failure rather than an offline hold", err)
+	}
+	if !ks.Active() {
+		t.Fatal("kill switch should stay armed after a failed connect")
+	}
+	if status := svc.Status(context.Background()); status.Offline {
+		t.Error("Offline = true while a physical default route exists behind the kill switch")
+	}
+
+	// No route out behind the lock is a genuine outage, whatever the OS thinks.
+	svc.physicalRoute = func() (string, string, error) { return "", "", platform.ErrNoDefaultRoute }
+	if status := svc.Status(context.Background()); !status.Offline {
+		t.Error("Offline = false with no physical default route behind the kill switch")
+	}
+}
+
+// The kill switch is armed for the whole life of a session, so a dropped
+// session under lockdown must resume on the route table, not wait for a probe
+// verdict the lock will never let through.
+func TestRetryDroppedSession_ResumesBehindTheKillSwitchOnARoute(t *testing.T) {
+	svc, naive, wgMgr, ks := recoveryTestService(t)
+	if !ks.Active() {
+		t.Fatal("expected the session to run with the kill switch armed")
+	}
+	svc.hostInternet = func() (bool, bool) { return false, true }
+	svc.physicalRoute = func() (string, string, error) { return "", "", platform.ErrNoDefaultRoute }
+
+	dropSession(naive, wgMgr)
+	for range 3 {
+		svc.runHealthCheck(context.Background())
+	}
+	if !svc.Status(context.Background()).Offline {
+		t.Fatal("Offline = false with the link down")
+	}
+
+	svc.physicalRoute = func() (string, string, error) { return "Wi-Fi", "192.0.2.1", nil }
+	restoreNetwork(naive)
+	svc.onNetworkChanged()
+	for range 3 {
+		svc.runHealthCheck(context.Background())
+	}
+	status := svc.Status(context.Background())
+	if status.State != state.StateConnected {
+		t.Fatalf("state = %q (%s), want CONNECTED once the route returned", status.State, status.Detail)
+	}
+	if status.Offline {
+		t.Error("Offline = true after the route returned")
 	}
 }

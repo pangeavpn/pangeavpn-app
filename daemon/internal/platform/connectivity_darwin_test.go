@@ -43,7 +43,7 @@ func TestHasPhysicalDefaultRoute(t *testing.T) {
 		want bool
 	}{
 		{"empty table", nil, false},
-		{"default via en0", []route.Message{defaultV4(4, syscall.RTF_UP | syscall.RTF_GATEWAY)}, true},
+		{"default via en0", []route.Message{defaultV4(4, syscall.RTF_UP|syscall.RTF_GATEWAY)}, true},
 		{"default route down", []route.Message{defaultV4(4, 0)}, false},
 		{"default on utun only", []route.Message{defaultV4(9, syscall.RTF_UP)}, false},
 		{"default on loopback only", []route.Message{defaultV4(1, syscall.RTF_UP)}, false},
@@ -70,8 +70,8 @@ func TestHasPhysicalDefaultRoute(t *testing.T) {
 		},
 	}
 	for _, c := range cases {
-		if got := hasPhysicalDefaultRoute(c.msgs, nameOf); got != c.want {
-			t.Errorf("%s: hasPhysicalDefaultRoute = %v, want %v", c.name, got, c.want)
+		if _, _, got := physicalDefaultRoute(c.msgs, nameOf); got != c.want {
+			t.Errorf("%s: physicalDefaultRoute = %v, want %v", c.name, got, c.want)
 		}
 	}
 }

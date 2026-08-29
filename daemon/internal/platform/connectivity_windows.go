@@ -3,9 +3,12 @@
 package platform
 
 import (
+	"net/netip"
+	"strings"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+	"golang.zx2c4.com/wireguard/windows/tunnel/winipcfg"
 )
 
 var (
@@ -53,4 +56,68 @@ func HostInternet() (online bool, known bool) {
 	default:
 		return false, false
 	}
+}
+
+type windowsRoute struct {
+	name    string
+	up      bool
+	gateway netip.Addr
+	metric  uint64
+}
+
+// PhysicalDefaultRoute names the physical interface holding the lowest-metric
+// IPv4 default route and its gateway. Unlike HostInternet it needs no probe,
+// so it still answers behind the kill switch.
+func PhysicalDefaultRoute() (iface, gateway string, err error) {
+	table, err := winipcfg.GetIPForwardTable2(windows.AF_INET)
+	if err != nil {
+		return "", "", err
+	}
+	rows := make([]windowsRoute, 0, 4)
+	for i := range table {
+		row := &table[i]
+		prefix := row.DestinationPrefix.Prefix()
+		if !prefix.IsValid() || prefix.Bits() != 0 || row.Loopback {
+			continue
+		}
+		r := windowsRoute{gateway: row.NextHop.Addr(), metric: uint64(row.Metric)}
+		if ifc, ifErr := row.InterfaceLUID.Interface(); ifErr == nil {
+			r.name = ifc.Alias()
+			r.up = ifc.OperStatus == winipcfg.IfOperStatusUp
+		}
+		if ipif, ipErr := row.InterfaceLUID.IPInterface(windows.AF_INET); ipErr == nil {
+			r.metric += uint64(ipif.Metric)
+		}
+		rows = append(rows, r)
+	}
+	return physicalDefaultRoute(rows)
+}
+
+func physicalDefaultRoute(rows []windowsRoute) (iface, gateway string, err error) {
+	var best *windowsRoute
+	for i := range rows {
+		r := &rows[i]
+		// An on-link default belongs to a tunnel, not a gateway.
+		if !r.up || r.name == "" || isVirtualInterface(r.name) || !r.gateway.IsValid() ||
+			r.gateway.IsUnspecified() || r.gateway.IsLoopback() || r.gateway.IsMulticast() {
+			continue
+		}
+		if best == nil || r.metric < best.metric {
+			best = r
+		}
+	}
+	if best == nil {
+		return "", "", ErrNoDefaultRoute
+	}
+	return best.name, best.gateway.String(), nil
+}
+
+func isVirtualInterface(name string) bool {
+	lower := strings.ToLower(name)
+	for _, prefix := range []string{"pangea", "wg", "tun", "tap", "loopback"} {
+		if strings.HasPrefix(lower, prefix) {
+			return true
+		}
+	}
+	return false
 }

@@ -14,15 +14,26 @@ import (
 // route. The tunnel's own 0.0.0.0/1+128.0.0.0/1 pair never matches, so the
 // verdict tracks the underlying link even while connected.
 func HostInternet() (online bool, known bool) {
+	_, _, err := PhysicalDefaultRoute()
+	return hostInternetFromRoute(err)
+}
+
+// PhysicalDefaultRoute names the physical interface holding the default route
+// (IPv4 preferred) and its gateway, "" when the route is on-link.
+func PhysicalDefaultRoute() (iface, gateway string, err error) {
 	rib, err := route.FetchRIB(syscall.AF_UNSPEC, route.RIBTypeRoute, 0)
 	if err != nil {
-		return false, false
+		return "", "", err
 	}
 	msgs, err := route.ParseRIB(route.RIBTypeRoute, rib)
 	if err != nil {
-		return false, false
+		return "", "", err
 	}
-	return hasPhysicalDefaultRoute(msgs, interfaceNameByIndex), true
+	iface, gateway, ok := physicalDefaultRoute(msgs, interfaceNameByIndex)
+	if !ok {
+		return "", "", ErrNoDefaultRoute
+	}
+	return iface, gateway, nil
 }
 
 func interfaceNameByIndex(index int) string {
@@ -33,25 +44,45 @@ func interfaceNameByIndex(index int) string {
 	return ifi.Name
 }
 
-func hasPhysicalDefaultRoute(msgs []route.Message, nameOf func(int) string) bool {
-	for _, m := range msgs {
-		rm, ok := m.(*route.RouteMessage)
-		if !ok {
-			continue
+func physicalDefaultRoute(msgs []route.Message, nameOf func(int) string) (iface, gateway string, ok bool) {
+	for _, wantV4 := range []bool{true, false} {
+		for _, m := range msgs {
+			rm, ok := m.(*route.RouteMessage)
+			if !ok {
+				continue
+			}
+			if rm.Flags&syscall.RTF_UP == 0 {
+				continue
+			}
+			if !isDefaultRoute(rm.Addrs) || isInet4(rm.Addrs[syscall.RTAX_DST]) != wantV4 {
+				continue
+			}
+			name := nameOf(rm.Index)
+			if name == "" || isVirtualInterface(name) {
+				continue
+			}
+			return name, gatewayString(rm.Addrs), true
 		}
-		if rm.Flags&syscall.RTF_UP == 0 {
-			continue
-		}
-		if !isDefaultRoute(rm.Addrs) {
-			continue
-		}
-		name := nameOf(rm.Index)
-		if name == "" || isVirtualInterface(name) {
-			continue
-		}
-		return true
 	}
-	return false
+	return "", "", false
+}
+
+func isInet4(addr route.Addr) bool {
+	_, ok := addr.(*route.Inet4Addr)
+	return ok
+}
+
+func gatewayString(addrs []route.Addr) string {
+	if len(addrs) <= syscall.RTAX_GATEWAY {
+		return ""
+	}
+	switch a := addrs[syscall.RTAX_GATEWAY].(type) {
+	case *route.Inet4Addr:
+		return net.IP(a.IP[:]).String()
+	case *route.Inet6Addr:
+		return net.IP(a.IP[:]).String()
+	}
+	return ""
 }
 
 // isDefaultRoute matches a /0 destination: an all-zero dst with a nil or

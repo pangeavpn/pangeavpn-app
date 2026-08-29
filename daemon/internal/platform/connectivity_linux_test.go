@@ -33,8 +33,8 @@ func TestHasPhysicalDefaultRoute(t *testing.T) {
 		{"tunnel default plus real default", []linuxRoute{def(3), def(2)}, true},
 	}
 	for _, c := range cases {
-		if got := hasPhysicalDefaultRoute(c.routes, nameOf); got != c.want {
-			t.Errorf("%s: hasPhysicalDefaultRoute = %v, want %v", c.name, got, c.want)
+		if _, _, got := physicalDefaultRoute(c.routes, nameOf); got != c.want {
+			t.Errorf("%s: physicalDefaultRoute = %v, want %v", c.name, got, c.want)
 		}
 	}
 }
