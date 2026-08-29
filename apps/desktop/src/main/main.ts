@@ -32,6 +32,7 @@ import { mt, mtState, setMainLocale, resolveMainLocale } from "./i18n";
 import { sanitizeLog } from "./logSanitize";
 import { shouldReleaseKillSwitch } from "./killSwitchRelease";
 import { shouldShowTrayHint, trayHintBodyKey } from "./trayHint";
+import { anchorPosition, samePoint, type AnchorRect } from "./windowAnchor";
 import {
   applyHubMethod,
   isHubMethod,
@@ -109,20 +110,85 @@ async function applyLoginItem(): Promise<void> {
   await setLoginItemEnabled(launchAtStartupEnabled || lockdownEnabled || autoConnectEnabled);
 }
 
+function getTrayBounds(): AnchorRect | null {
+  if (!tray) {
+    return null;
+  }
+  try {
+    return tray.getBounds();
+  } catch {
+    return null;
+  }
+}
+
 function getTaskbarPosition(): { x: number; y: number } {
   const { screen } = require("electron") as typeof import("electron");
-  const display = screen.getPrimaryDisplay();
-  const { width: screenW, height: screenH } = display.workAreaSize;
-  const { x: workX, y: workY } = display.workArea;
-  const winW = setWidth;
-  const winH = setHeight;
-
-  if (process.platform === "darwin") {
-    // macOS: menu bar at top, anchor top-right
-    return { x: workX + screenW - winW - 8, y: workY + 8 };
+  let cursor: { x: number; y: number } | null = null;
+  try {
+    cursor = screen.getCursorScreenPoint();
+  } catch {
+    cursor = null;
   }
-  // Windows/Linux: flush to bottom-right of work area
-  return { x: workX + screenW - winW, y: workY + screenH - winH };
+  return anchorPosition({
+    displays: screen.getAllDisplays(),
+    primary: screen.getPrimaryDisplay(),
+    cursor,
+    trayBounds: getTrayBounds(),
+    size: { width: setWidth, height: setHeight },
+    platform: process.platform
+  });
+}
+
+// Linux WMs place a frameless window where they like as they map it, and some
+// keep nudging it after, so the anchor has to be re-asserted rather than set once.
+const anchorReassertDelaysMs = [0, 60, 180, 400];
+const anchorFixupBudget = 8;
+let anchorTimers: NodeJS.Timeout[] = [];
+let anchorFixupsLeft = 0;
+
+function clearAnchorTimers(): void {
+  for (const timer of anchorTimers) {
+    clearTimeout(timer);
+  }
+  anchorTimers = [];
+}
+
+function applyAnchor(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return;
+  }
+  const pos = getTaskbarPosition();
+  mainWindow.setPosition(pos.x, pos.y);
+}
+
+function keepAnchored(): void {
+  if (process.platform !== "linux") {
+    return;
+  }
+  clearAnchorTimers();
+  anchorFixupsLeft = anchorFixupBudget;
+  for (const delay of anchorReassertDelaysMs) {
+    anchorTimers.push(
+      setTimeout(() => {
+        if (mainWindow?.isVisible() && !hiding) {
+          applyAnchor();
+        }
+      }, delay)
+    );
+  }
+}
+
+function watchDisplayChanges(): void {
+  const { screen } = require("electron") as typeof import("electron");
+  const reanchor = (): void => {
+    if (mainWindow?.isVisible() && !hiding) {
+      applyAnchor();
+      keepAnchored();
+    }
+  };
+  screen.on("display-added", reanchor);
+  screen.on("display-removed", reanchor);
+  screen.on("display-metrics-changed", reanchor);
 }
 
 function createWindow(): void {
@@ -194,6 +260,23 @@ function createWindow(): void {
     console.error(`preload failed (${preloadPath}):`, error);
   });
 
+  // A WM that drops the window elsewhere gets one correction per move, capped so
+  // a tiling WM can't turn this into a fight.
+  mainWindow.on("move", () => {
+    if (process.platform !== "linux" || hiding || anchorFixupsLeft <= 0) {
+      return;
+    }
+    if (!mainWindow?.isVisible()) {
+      return;
+    }
+    const [x, y] = mainWindow.getPosition();
+    if (samePoint({ x, y }, getTaskbarPosition())) {
+      return;
+    }
+    anchorFixupsLeft--;
+    applyAnchor();
+  });
+
   mainWindow.on("show", () => {
     updateTrayMenu();
   });
@@ -237,6 +320,7 @@ function showMainWindow(): void {
     mainWindow.show();
   }
   mainWindow.focus();
+  keepAnchored();
 
   const duration = 180;
   const steps = 12;
@@ -292,6 +376,7 @@ function hideMainWindow(fromTrayClick = false): void {
       clearInterval(timer);
       mainWindow?.hide();
       mainWindow?.setOpacity(1);
+      clearAnchorTimers();
       hiding = false;
       updateTrayMenu();
       void maybeShowTrayHint(fromTrayClick);
@@ -2349,6 +2434,7 @@ async function boot(): Promise<void> {
   // A resolver, not a snapshot, so this stays correct across window recreates.
   setupAutoUpdater(() => mainWindow);
   createTray();
+  watchDisplayChanges();
   if (!hiddenLaunch) {
     showMainWindow();
   }

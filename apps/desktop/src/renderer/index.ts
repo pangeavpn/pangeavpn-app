@@ -1777,7 +1777,7 @@ let daemonRecoveryReturnFocus: HTMLElement | null = null;
 let daemonRecoveryResolvers: Array<() => void> = [];
 const daemonRecoveryInerted = new Set<HTMLElement>();
 
-function showDaemonRecovery(): void {
+function showDaemonRecovery(reason = ""): void {
   if (!daemonRecoveryScreen.hidden) return;
 
   daemonRecoveryReturnFocus = document.activeElement as HTMLElement | null;
@@ -1790,7 +1790,7 @@ function showDaemonRecovery(): void {
   }
   daemonRecoveryScreen.hidden = false;
   daemonRecoveryScreen.dataset.state = "error";
-  daemonRecoveryMessage.textContent = "";
+  daemonRecoveryMessage.textContent = reason;
   daemonRecoveryBtn.disabled = false;
   daemonRecoveryBtn.removeAttribute("aria-busy");
   daemonRecoveryButtonLabel.textContent = t("daemonRecovery.restart");
@@ -1816,9 +1816,17 @@ function completeDaemonRecovery(force = false): void {
   for (const resolve of resolvers) resolve();
 }
 
-function waitForDaemonRecovery(): Promise<void> {
-  showDaemonRecovery();
+function waitForDaemonRecovery(reason = ""): Promise<void> {
+  showDaemonRecovery(reason);
   return new Promise((resolve) => daemonRecoveryResolvers.push(resolve));
+}
+
+// Electron reports an IPC rejection as "Error invoking remote method 'x':
+// Error: <original>". Only the original half means anything to the user.
+function daemonErrorText(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error);
+  const unwrapped = /Error invoking remote method '[^']*':\s*(?:[A-Za-z]*Error:\s*)?([\s\S]*)$/.exec(raw);
+  return (unwrapped ? unwrapped[1] : raw).trim();
 }
 
 daemonRecoveryBtn.addEventListener("click", async () => {
@@ -1980,20 +1988,25 @@ async function init(): Promise<void> {
   // Poll until daemon responds (max 30s), then offer an explicit elevated
   // recovery instead of leaving the user stranded on the loading screen.
   const maxAttempts = 60;
+  // The daemon's own reason for refusing — a permissions problem the user has
+  // to clear themselves reads as an indistinguishable hang otherwise, so show
+  // it as soon as there is one rather than counting silently down to a
+  // generic failure.
+  let lastDaemonError = "";
   for (let i = 0; i < maxAttempts; i++) {
     const remaining = Math.ceil((maxAttempts - i) * 0.5);
-    loadingMessage.textContent = t("app.loading.progress", { remaining });
+    loadingMessage.textContent = lastDaemonError || t("app.loading.progress", { remaining });
     try {
       const status = await daemonApi.getStatus();
       if (status) {
         break;
       }
-    } catch {
-      // not ready
+    } catch (error) {
+      lastDaemonError = daemonErrorText(error);
     }
     if (i === maxAttempts - 1) {
-      loadingMessage.textContent = t("app.loading.didntStart");
-      await waitForDaemonRecovery();
+      loadingMessage.textContent = lastDaemonError || t("app.loading.didntStart");
+      await waitForDaemonRecovery(lastDaemonError);
     }
     await new Promise((r) => setTimeout(r, 500));
   }

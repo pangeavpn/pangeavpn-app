@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { app } from "electron";
 import { daemonTokenCandidatePaths } from "./daemonTokenPaths";
-import { ensureRuntimeFiles } from "./runtimeFiles";
+import { DaemonNotReadyError, ensureRuntimeFiles, tokenPermissionMessage } from "./runtimeFiles";
 
 const APP_FOLDER = "pangeavpn-desktop";
 const WINDOWS_SERVICE_FOLDER = "PangeaVPN";
@@ -71,6 +71,8 @@ export function getTokenPath(): string {
 export async function readDaemonTokens(): Promise<string[]> {
   const tokens: string[] = [];
   const seen = new Set<string>();
+  const primaryTokenPath = path.normalize(getTokenPath());
+  let primaryDenied = false;
 
   for (const tokenPath of daemonTokenCandidates()) {
     try {
@@ -81,12 +83,30 @@ export async function readDaemonTokens(): Promise<string[]> {
       }
       seen.add(token);
       tokens.push(token);
-    } catch {
-      // ignore missing/unreadable token candidate
+    } catch (error) {
+      if (path.normalize(tokenPath) === primaryTokenPath && isPermissionDenied(error)) {
+        primaryDenied = true;
+      }
+      // otherwise ignore a missing/unreadable token candidate
     }
   }
 
+  // The daemon's own token is unreadable, so nothing else can authenticate
+  // against it. Any token left over from an earlier install would only earn a
+  // 401 and report itself as a mismatch, burying the real cause.
+  if (primaryDenied && daemonOwnsStateDir()) {
+    throw new DaemonNotReadyError(tokenPermissionMessage());
+  }
+
   return tokens;
+}
+
+function isPermissionDenied(error: unknown): boolean {
+  if (typeof error !== "object" || error === null || !("code" in error)) {
+    return false;
+  }
+  const code = (error as { code?: string }).code;
+  return code === "EACCES" || code === "EPERM";
 }
 
 export async function ensureUserRuntimeFiles(): Promise<void> {

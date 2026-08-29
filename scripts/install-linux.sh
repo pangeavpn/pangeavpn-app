@@ -101,6 +101,15 @@ esac
 # --- Build ---
 cd "$REPO_ROOT"
 
+# Earlier versions of this script ran the build as root under sudo, leaving
+# root-owned node_modules/, dist/, .cache/ and .git/index trees behind. The
+# build below now correctly runs as the user, so those leftovers would make it
+# fail on EACCES. Hand the checkout back before building.
+if [ -n "$RUNTIME_USER" ] && [ -n "$(find "$REPO_ROOT" -user root -print -quit 2>/dev/null)" ]; then
+  info "Repairing root-owned files left in the checkout by an earlier install..."
+  sudo chown -R "$RUNTIME_USER:" "$REPO_ROOT"
+fi
+
 info "Installing npm dependencies..."
 run_as_user npm install
 

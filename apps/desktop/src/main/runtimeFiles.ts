@@ -12,6 +12,19 @@ export interface RuntimeFileOptions {
 
 export class DaemonNotReadyError extends Error {}
 
+// The daemon's token is deliberately readable only by its own group. Hitting a
+// permission error on it means the install added the user to that group but
+// their login session still carries the group list it was created with —
+// something only they can clear, so say so rather than failing anonymously.
+export function tokenPermissionMessage(): string {
+  return process.platform === "linux"
+    ? "PangeaVPN cannot read the background service's access token. If you just installed or " +
+        "updated PangeaVPN, log out and back in (or reboot) so your 'pangeavpn' group membership " +
+        "takes effect, then reopen the app."
+    : "PangeaVPN is not allowed to read the background service's access token. Reinstall " +
+        "PangeaVPN to repair the service's permissions.";
+}
+
 export async function ensureRuntimeFiles(appDir: string, options: RuntimeFileOptions): Promise<void> {
   const tokenPath = path.join(appDir, "daemon-token.txt");
 
@@ -37,18 +50,8 @@ async function verifyTokenFile(tokenPath: string): Promise<void> {
         "PangeaVPN's background service has not finished starting up yet. Please wait a moment and try again."
       );
     }
-    // The token is deliberately readable only by the daemon's group. Hitting
-    // this means the install added us to that group but this login session
-    // still carries the group list it was created with.
     if (isPermissionDenied(error)) {
-      throw new DaemonNotReadyError(
-        process.platform === "linux"
-          ? "PangeaVPN cannot read the background service's access token. If you just installed or " +
-            "updated PangeaVPN, log out and back in (or reboot) so your new 'pangeavpn' group " +
-            "membership takes effect, then reopen the app."
-          : "PangeaVPN is not allowed to read the background service's access token. Reinstall " +
-            "PangeaVPN to repair the service's permissions."
-      );
+      throw new DaemonNotReadyError(tokenPermissionMessage());
     }
     throw error;
   }
