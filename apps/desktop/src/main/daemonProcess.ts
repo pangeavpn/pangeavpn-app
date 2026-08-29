@@ -40,6 +40,19 @@ const macLaunchDaemonPlist = `/Library/LaunchDaemons/${macLaunchDaemonLabel}.pli
 const macSystemSupportDir = "/Library/Application Support/PangeaVPN";
 const macElevationRetryBackoffMs = 10000;
 
+const linuxDaemonServiceUnitPaths = [
+  "/etc/systemd/system/pangea-daemon.service",
+  "/lib/systemd/system/pangea-daemon.service",
+  "/usr/lib/systemd/system/pangea-daemon.service"
+];
+
+// install-linux.sh installs pangea-daemon as a root-owned systemd service;
+// its presence means that service, not this process, owns the daemon's
+// lifecycle.
+function hasManagedLinuxDaemonService(): boolean {
+  return linuxDaemonServiceUnitPaths.some((servicePath) => fs.existsSync(servicePath));
+}
+
 export class DaemonProcessManager {
   private child: ChildProcess | null = null;
   private childGeneration = 0;
@@ -135,6 +148,11 @@ export class DaemonProcessManager {
       return;
     }
 
+    if (process.platform === "linux" && app.isPackaged) {
+      await this.ensureLinuxPackagedRunning(forceRestart);
+      return;
+    }
+
     const online = await this.safeApiReady();
     if (!forceRestart && online) {
       return;
@@ -152,39 +170,74 @@ export class DaemonProcessManager {
       return;
     }
 
-    if (process.platform === "win32") {
-      const daemonPath = this.resolveDaemonPath();
-      if (!daemonPath) {
-        throw new Error("daemon binary not found for this runtime");
-      }
+    // Packaged win32/darwin/linux, and dev-mode darwin/linux, all return
+    // above — only win32 dev mode reaches here.
+    const daemonPath = this.resolveDaemonPath();
+    if (!daemonPath) {
+      throw new Error("daemon binary not found for this runtime");
+    }
 
-      const elevate = await startProcessElevatedWindows(daemonPath, []);
-      if (!elevate.ok) {
-        throw new Error(elevate.message);
-      }
-    } else {
-      const daemonPath = this.resolveDaemonPath();
-      if (!daemonPath) {
-        throw new Error("daemon binary not found for this runtime");
-      }
+    const elevate = await startProcessElevatedWindows(daemonPath, []);
+    if (!elevate.ok) {
+      throw new Error(elevate.message);
+    }
 
-      if (!app.isPackaged) {
+    await this.waitForReachable();
+  }
+
+  // A systemd-managed root daemon (installed by install-linux.sh) owns state
+  // under /etc/pangeavpn and the shared port; spawning a second, unprivileged
+  // copy against the user's own app-support dir can't manage the kill switch
+  // or routing anyway, and it fights the real daemon for stale/foreign state
+  // instead of just reporting that the managed service isn't reachable.
+  private async ensureLinuxPackagedRunning(forceRestart: boolean): Promise<void> {
+    if (hasManagedLinuxDaemonService()) {
+      const online = await this.safeApiReady();
+      if (!forceRestart && online) {
         return;
       }
-
-      const generation = ++this.childGeneration;
-      this.child = spawn(daemonPath, [], {
-        windowsHide: true,
-        stdio: openDaemonLogStdio()
-      });
-
-      attachExitLogger(this.child, "linux");
-      this.child.on("exit", () => {
-        if (generation === this.childGeneration) {
-          this.child = null;
-        }
-      });
+      try {
+        await this.waitForReachable();
+      } catch {
+        throw new Error(
+          "PangeaVPN service is installed but not reachable. If you were just added to the " +
+            "pangeavpn group, log out and back in, then try again, or use Restart daemon."
+        );
+      }
+      return;
     }
+
+    // No managed service installed (a manual/dev install) — fall back to
+    // running the bundled daemon directly, as before.
+    const daemonPath = this.resolveDaemonPath();
+    if (!daemonPath) {
+      throw new Error("daemon binary not found for this runtime");
+    }
+
+    const online = await this.safeApiReady();
+    if (!forceRestart && online) {
+      return;
+    }
+    if (this.child && !forceRestart) {
+      return;
+    }
+    if (this.child && forceRestart) {
+      this.child.kill();
+      this.child = null;
+    }
+
+    const generation = ++this.childGeneration;
+    this.child = spawn(daemonPath, [], {
+      windowsHide: true,
+      stdio: openDaemonLogStdio()
+    });
+
+    attachExitLogger(this.child, "linux");
+    this.child.on("exit", () => {
+      if (generation === this.childGeneration) {
+        this.child = null;
+      }
+    });
 
     await this.waitForReachable();
   }
@@ -665,11 +718,7 @@ async function restartLinuxDaemonServiceElevated(
   daemonPath: string,
   appSupportDir: string
 ): Promise<{ ok: boolean; message: string }> {
-  const serviceInstalled = [
-    "/etc/systemd/system/pangea-daemon.service",
-    "/lib/systemd/system/pangea-daemon.service",
-    "/usr/lib/systemd/system/pangea-daemon.service"
-  ].some((servicePath) => fs.existsSync(servicePath));
+  const serviceInstalled = hasManagedLinuxDaemonService();
   if (!serviceInstalled && !fs.existsSync("/usr/bin/pkexec")) {
     return {
       ok: false,
