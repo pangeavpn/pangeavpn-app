@@ -18,6 +18,14 @@ import (
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/state"
 )
 
+// A transport cascade can outlast the server-wide write timeout; the client
+// waits this long for connect/switch/disconnect, so the deadline matches it.
+const sessionOpWriteTimeout = 150 * time.Second
+
+func extendWriteDeadline(w http.ResponseWriter) {
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(sessionOpWriteTimeout))
+}
+
 // sanitizeLog strips CR/LF and other control chars from values that may
 // originate from user-controlled input before they are written to logs.
 func sanitizeLog(s string) string {
@@ -239,6 +247,7 @@ func NewHandler(token string, service *Service) http.Handler {
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 			return
 		}
+		extendWriteDeadline(w)
 
 		r.Body = http.MaxBytesReader(w, r.Body, maxBodySize)
 		var req connectRequest
@@ -265,6 +274,7 @@ func NewHandler(token string, service *Service) http.Handler {
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 			return
 		}
+		extendWriteDeadline(w)
 
 		r.Body = http.MaxBytesReader(w, r.Body, maxBodySize)
 		var req disconnectRequest
@@ -408,6 +418,7 @@ func NewHandler(token string, service *Service) http.Handler {
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 			return
 		}
+		extendWriteDeadline(w)
 
 		r.Body = http.MaxBytesReader(w, r.Body, maxBodySize)
 		var req connectRequest
