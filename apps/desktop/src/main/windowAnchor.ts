@@ -125,3 +125,30 @@ export function anchorPosition(input: AnchorInput): AnchorPoint {
 export function samePoint(a: AnchorPoint, b: AnchorPoint, tolerance = 1): boolean {
   return Math.abs(a.x - b.x) <= tolerance && Math.abs(a.y - b.y) <= tolerance;
 }
+
+// Reads the backend Electron was told to use, from the flag or Electron's env var.
+export function requestedOzonePlatform(env: NodeJS.ProcessEnv, argv: readonly string[]): string | null {
+  const flag =
+    argv.find((arg) => arg.startsWith("--ozone-platform=")) ??
+    argv.find((arg) => arg.startsWith("--ozone-platform-hint="));
+  const value = (flag?.split("=")[1] ?? env.ELECTRON_OZONE_PLATFORM_HINT ?? "").trim().toLowerCase();
+  return value === "" ? null : value;
+}
+
+// Wayland hands placement to the compositor: a client cannot put its own window
+// next to the tray, so there the app has to be an ordinary window instead.
+export function canAnchorWindow(
+  env: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform,
+  argv: readonly string[]
+): boolean {
+  if (platform !== "linux") {
+    return true;
+  }
+  const requested = requestedOzonePlatform(env, argv);
+  if (requested === "x11" || requested === "wayland") {
+    return requested === "x11";
+  }
+  // "auto", and Electron's own default, both pick Wayland in a Wayland session.
+  return !env.WAYLAND_DISPLAY && (env.XDG_SESSION_TYPE ?? "").toLowerCase() !== "wayland";
+}

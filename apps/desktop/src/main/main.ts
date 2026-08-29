@@ -32,7 +32,7 @@ import { mt, mtState, setMainLocale, resolveMainLocale } from "./i18n";
 import { sanitizeLog } from "./logSanitize";
 import { shouldReleaseKillSwitch } from "./killSwitchRelease";
 import { shouldShowTrayHint, trayHintBodyKey } from "./trayHint";
-import { anchorPosition, samePoint, type AnchorRect } from "./windowAnchor";
+import { anchorPosition, canAnchorWindow, samePoint, type AnchorRect } from "./windowAnchor";
 import {
   applyHubMethod,
   isHubMethod,
@@ -139,6 +139,10 @@ function getTaskbarPosition(): { x: number; y: number } {
   });
 }
 
+// Wayland refuses to let a client place its own window, so there the popover
+// becomes an ordinary window that closes to the tray instead of a tray anchor.
+const anchoredWindow = canAnchorWindow(process.env, process.platform, process.argv);
+
 // Linux WMs place a frameless window where they like as they map it, and some
 // keep nudging it after, so the anchor has to be re-asserted rather than set once.
 const anchorReassertDelaysMs = [0, 60, 180, 400];
@@ -162,7 +166,7 @@ function applyAnchor(): void {
 }
 
 function keepAnchored(): void {
-  if (process.platform !== "linux") {
+  if (process.platform !== "linux" || !anchoredWindow) {
     return;
   }
   clearAnchorTimers();
@@ -179,6 +183,9 @@ function keepAnchored(): void {
 }
 
 function watchDisplayChanges(): void {
+  if (!anchoredWindow) {
+    return;
+  }
   const { screen } = require("electron") as typeof import("electron");
   const reanchor = (): void => {
     if (mainWindow?.isVisible() && !hiding) {
@@ -192,17 +199,20 @@ function watchDisplayChanges(): void {
 }
 
 function createWindow(): void {
-  const windowIconPath = getWindowsAppIconPath(__dirname);
-  const pos = getTaskbarPosition();
+  // Without an anchor the window is on its own in the window list, so it needs a
+  // frame to move and close by, a taskbar entry, and an icon to be known by.
+  const windowIconPath = anchoredWindow ? getWindowsAppIconPath(__dirname) : getTrayIconPath(__dirname);
+  const pos = anchoredWindow ? getTaskbarPosition() : null;
   mainWindow = new BrowserWindow({
     width: setWidth,
     height: setHeight,
-    x: pos.x,
-    y: pos.y,
-    frame: false,
+    ...(pos ? { x: pos.x, y: pos.y } : { center: true }),
+    frame: !anchoredWindow,
+    // Without this the titlebar eats into the 640x440 the layout is built for.
+    useContentSize: !anchoredWindow,
     resizable: false,
-    skipTaskbar: true,
-    alwaysOnTop: true,
+    skipTaskbar: anchoredWindow,
+    alwaysOnTop: anchoredWindow,
     show: false,
     ...(windowIconPath ? { icon: windowIconPath } : {}),
     webPreferences: {
@@ -231,7 +241,7 @@ function createWindow(): void {
   });
 
   mainWindow.on("blur", () => {
-    if (isQuitting || daemonRecoveryInProgress) return;
+    if (isQuitting || daemonRecoveryInProgress || !anchoredWindow) return;
     // Wait for any show animation to finish, then hide.
     const checkAndHide = () => {
       if (!isQuitting && mainWindow?.isVisible() && !hiding) {
@@ -263,7 +273,7 @@ function createWindow(): void {
   // A WM that drops the window elsewhere gets one correction per move, capped so
   // a tiling WM can't turn this into a fight.
   mainWindow.on("move", () => {
-    if (process.platform !== "linux" || hiding || anchorFixupsLeft <= 0) {
+    if (process.platform !== "linux" || !anchoredWindow || hiding || anchorFixupsLeft <= 0) {
       return;
     }
     if (!mainWindow?.isVisible()) {
@@ -305,13 +315,15 @@ function showMainWindow(): void {
   hiding = false;
   showing = true;
 
-  const pos = getTaskbarPosition();
-  const useSlide = process.platform !== "linux";
+  const pos = anchoredWindow ? getTaskbarPosition() : null;
+  const useSlide = anchoredWindow && process.platform !== "linux";
   const slideOffset = process.platform === "darwin" ? -20 : 20;
-  const startY = useSlide ? pos.y + slideOffset : pos.y;
+  const startY = pos && useSlide ? pos.y + slideOffset : pos?.y ?? 0;
 
   mainWindow.setOpacity(0);
-  mainWindow.setBounds({ x: pos.x, y: startY, width: setWidth, height: setHeight });
+  if (pos) {
+    mainWindow.setBounds({ x: pos.x, y: startY, width: setWidth, height: setHeight });
+  }
 
   if (mainWindow.isMinimized()) {
     mainWindow.restore();
@@ -332,14 +344,16 @@ function showMainWindow(): void {
     const t = step / steps;
     const ease = 1 - Math.pow(1 - t, 3);
     mainWindow?.setOpacity(ease);
-    if (useSlide) {
+    if (useSlide && pos) {
       mainWindow?.setBounds({ x: pos.x, y: Math.round(startY + (pos.y - startY) * ease), width: setWidth, height: setHeight });
     }
 
     if (step >= steps) {
       clearInterval(timer);
       mainWindow?.setOpacity(1);
-      mainWindow?.setBounds({ x: pos.x, y: pos.y, width: setWidth, height: setHeight });
+      if (pos) {
+        mainWindow?.setBounds({ x: pos.x, y: pos.y, width: setWidth, height: setHeight });
+      }
       showing = false;
     }
   }, interval);
@@ -355,7 +369,7 @@ function hideMainWindow(fromTrayClick = false): void {
   showing = false;
 
   const [startX, startY] = mainWindow.getPosition();
-  const useSlide = process.platform !== "linux";
+  const useSlide = anchoredWindow && process.platform !== "linux";
   const slideOffset = process.platform === "darwin" ? -20 : 20;
   const endY = startY + slideOffset;
   const duration = 150;
@@ -415,6 +429,11 @@ async function maybeShowTrayHint(fromTrayClick: boolean): Promise<void> {
 function toggleMainWindowVisibility(): void {
   if (!mainWindow || !mainWindow.isVisible()) {
     showMainWindow();
+    return;
+  }
+  if (!anchoredWindow && !mainWindow.isFocused()) {
+    mainWindow.show();
+    mainWindow.focus();
     return;
   }
   hideMainWindow(true);

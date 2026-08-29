@@ -1,6 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { anchorPosition, panelEdge, pickDisplay, samePoint, type AnchorDisplay, type AnchorInput } from "./windowAnchor.ts";
+import {
+  anchorPosition,
+  canAnchorWindow,
+  panelEdge,
+  pickDisplay,
+  samePoint,
+  type AnchorDisplay,
+  type AnchorInput
+} from "./windowAnchor.ts";
 
 const size = { width: 640, height: 440 };
 
@@ -146,4 +154,35 @@ test("survives a work area smaller than the window", () => {
 test("samePoint tolerates a one-pixel drift but not more", () => {
   assert.equal(samePoint({ x: 10, y: 10 }, { x: 11, y: 9 }), true);
   assert.equal(samePoint({ x: 10, y: 10 }, { x: 13, y: 10 }), false);
+});
+
+test("anchors on macOS and Windows whatever the session says", () => {
+  const wayland = { WAYLAND_DISPLAY: "wayland-0", XDG_SESSION_TYPE: "wayland" };
+  assert.equal(canAnchorWindow(wayland, "darwin", []), true);
+  assert.equal(canAnchorWindow(wayland, "win32", []), true);
+});
+
+test("gives up anchoring in a Wayland session", () => {
+  assert.equal(canAnchorWindow({ WAYLAND_DISPLAY: "wayland-0" }, "linux", []), false);
+  assert.equal(canAnchorWindow({ XDG_SESSION_TYPE: "wayland" }, "linux", []), false);
+});
+
+test("anchors on X11, and on XWayland when the backend is pinned to it", () => {
+  assert.equal(canAnchorWindow({ XDG_SESSION_TYPE: "x11", DISPLAY: ":0" }, "linux", []), true);
+  assert.equal(
+    canAnchorWindow({ WAYLAND_DISPLAY: "wayland-0" }, "linux", ["--ozone-platform=x11"]),
+    true
+  );
+  assert.equal(
+    canAnchorWindow({ WAYLAND_DISPLAY: "wayland-0", ELECTRON_OZONE_PLATFORM_HINT: "x11" }, "linux", []),
+    true
+  );
+});
+
+test("gives up anchoring when the backend is pinned to Wayland", () => {
+  assert.equal(canAnchorWindow({ DISPLAY: ":0" }, "linux", ["--ozone-platform=wayland"]), false);
+  assert.equal(
+    canAnchorWindow({ WAYLAND_DISPLAY: "wayland-0" }, "linux", ["--ozone-platform-hint=auto"]),
+    false
+  );
 });
