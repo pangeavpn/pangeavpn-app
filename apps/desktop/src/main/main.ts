@@ -266,6 +266,18 @@ function createWindow(): void {
     }
   });
 
+  mainWindow.webContents.on("before-input-event", (_event, input) => {
+    if (process.platform === "darwin" || input.type !== "keyDown") return;
+    if (!input.control || input.shift || input.alt || input.meta) return;
+    const key = input.key.toLowerCase();
+    if (key === "q") {
+      isQuitting = true;
+      app.quit();
+    } else if (key === "h") {
+      hideMainWindow();
+    }
+  });
+
   mainWindow.webContents.on("preload-error", (_event, preloadPath, error) => {
     console.error(`preload failed (${preloadPath}):`, error);
   });
@@ -2411,42 +2423,48 @@ async function boot(): Promise<void> {
   // Off the startup path: the window must not wait on a hub that may be blocked.
   refreshSubscriptionCache("launch");
 
-  const appMenu = Menu.buildFromTemplate([
-    {
-      label: "PangeaVPN",
-      submenu: [
-        { role: "about" },
-        { type: "separator" },
-        {
-          label: mt("menu.hideWindow"),
-          accelerator: "CmdOrCtrl+H",
-          click: () => hideMainWindow()
-        },
-        { type: "separator" },
-        {
-          label: mt("menu.quit"),
-          accelerator: "CmdOrCtrl+Q",
-          click: () => {
-            isQuitting = true;
-            app.quit();
+  // Only macOS has a global menu bar; elsewhere this is a strip of chrome
+  // inside the window, which a tray popover has no use for.
+  if (process.platform === "darwin") {
+    const appMenu = Menu.buildFromTemplate([
+      {
+        label: "PangeaVPN",
+        submenu: [
+          { role: "about" },
+          { type: "separator" },
+          {
+            label: mt("menu.hideWindow"),
+            accelerator: "CmdOrCtrl+H",
+            click: () => hideMainWindow()
+          },
+          { type: "separator" },
+          {
+            label: mt("menu.quit"),
+            accelerator: "CmdOrCtrl+Q",
+            click: () => {
+              isQuitting = true;
+              app.quit();
+            }
           }
-        }
-      ]
-    },
-    {
-      label: mt("menu.edit"),
-      submenu: [
-        { role: "undo" },
-        { role: "redo" },
-        { type: "separator" },
-        { role: "cut" },
-        { role: "copy" },
-        { role: "paste" },
-        { role: "selectAll" }
-      ]
-    }
-  ]);
-  Menu.setApplicationMenu(appMenu);
+        ]
+      },
+      {
+        label: mt("menu.edit"),
+        submenu: [
+          { role: "undo" },
+          { role: "redo" },
+          { type: "separator" },
+          { role: "cut" },
+          { role: "copy" },
+          { role: "paste" },
+          { role: "selectAll" }
+        ]
+      }
+    ]);
+    Menu.setApplicationMenu(appMenu);
+  } else {
+    Menu.setApplicationMenu(null);
+  }
 
   registerIpcHandlers();
   createWindow();
