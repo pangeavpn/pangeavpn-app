@@ -37,6 +37,7 @@ type EnsureDaemonOptions = {
 
 const macLaunchDaemonLabel = "com.pangea.pangeavpn.daemon";
 const macLaunchDaemonPlist = `/Library/LaunchDaemons/${macLaunchDaemonLabel}.plist`;
+const macSystemSupportDir = "/Library/Application Support/PangeaVPN";
 const macElevationRetryBackoffMs = 10000;
 
 export class DaemonProcessManager {
@@ -435,8 +436,11 @@ async function restartProcessElevatedMac(filePath: string, context: MacDaemonCon
 
   const daemonPath = shSingleQuoteMac(filePath);
   const resourcesDir = shSingleQuoteMac(path.resolve(path.dirname(filePath), ".."));
-  const appSupportDir = shSingleQuoteMac(context.appSupportDir);
-  const configPath = shSingleQuoteMac(path.join(context.appSupportDir, "config.json"));
+  // The root daemon gets the system dir (its own default, and where the app
+  // already looks for the token); chowning the user's state dir to root broke
+  // every desktop write after the first elevation.
+  const appSupportDir = shSingleQuoteMac(macSystemSupportDir);
+  const configPath = shSingleQuoteMac(path.join(macSystemSupportDir, "config.json"));
   const targetUser = shSingleQuoteMac(context.user);
   const targetHome = shSingleQuoteMac(context.home);
   const shellCommand = [
@@ -447,13 +451,12 @@ async function restartProcessElevatedMac(filePath: string, context: MacDaemonCon
     `CONFIG_PATH=${configPath}`,
     `TARGET_USER=${targetUser}`,
     `TARGET_HOME=${targetHome}`,
-    `LOG_DIR="/Library/Application Support/PangeaVPN"`,
-    `LOG_PATH="$LOG_DIR/daemon-elevated.log"`,
-    `/bin/mkdir -p "$APP_SUPPORT_DIR" "$LOG_DIR"`,
+    `LOG_PATH="$APP_SUPPORT_DIR/daemon-elevated.log"`,
+    `/bin/mkdir -p "$APP_SUPPORT_DIR"`,
     // rm -f unlinks any pre-planted symlink; the redirect below then creates a fresh root-owned file.
     `/bin/rm -f "$LOG_PATH"`,
-    // LOG_DIR is the state dir, which stays traversable, so the log needs its
-    // own mode: it carries daemon stderr and must not be world-readable.
+    // The state dir stays traversable, so the log needs its own mode: it
+    // carries daemon stderr and must not be world-readable.
     `/usr/bin/touch "$LOG_PATH" && /bin/chmod 600 "$LOG_PATH" >/dev/null 2>&1 || true`,
     // The daemon runs as root and mints its own token root:admin 0640, so the
     // dir stays root-owned and traversable rather than being handed to the user.
