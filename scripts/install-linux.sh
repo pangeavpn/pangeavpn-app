@@ -93,8 +93,24 @@ if [ -z "$APPIMAGE" ]; then
   fail "AppImage not found after build."
 fi
 
-sudo cp "$APPIMAGE" "$INSTALL_DIR/PangeaVPN.AppImage"
-sudo chmod 755 "$INSTALL_DIR/PangeaVPN.AppImage"
+# --- Quit a running app so we can safely replace the binary ---
+# If PangeaVPN is open (e.g. actively connected), the AppImage stays open for
+# execution and `cp` onto it fails with "Text file busy". Close it first.
+APP_MATCH="$INSTALL_DIR/PangeaVPN.AppImage|mount_.*/pangeavpn"
+if pgrep -f "$APP_MATCH" >/dev/null 2>&1; then
+  warn "PangeaVPN is currently running — closing it to install the update. If you're connected, the VPN will disconnect."
+  pkill -TERM -f "$APP_MATCH" 2>/dev/null || true
+  sleep 2
+  pkill -KILL -f "$APP_MATCH" 2>/dev/null || true
+fi
+
+# Install atomically: write alongside the target, then rename into place.
+# A plain `cp` onto the live path can still race with a process that reopens
+# it right after the pkill above; rename(2) succeeds even while the old
+# inode is busy/executing, so this can't hit "Text file busy".
+APPIMAGE_TMP="$INSTALL_DIR/.PangeaVPN.AppImage.new"
+sudo install -m 755 "$APPIMAGE" "$APPIMAGE_TMP"
+sudo mv -f "$APPIMAGE_TMP" "$INSTALL_DIR/PangeaVPN.AppImage"
 
 # --- Install daemon ---
 info "Installing daemon..."
@@ -125,8 +141,9 @@ if [ ! -f "$DAEMON_SRC" ]; then
   fail "Daemon binary not found at $DAEMON_SRC — build may have failed."
 fi
 sudo mkdir -p /etc/pangeavpn
-sudo cp "$DAEMON_SRC" "$DAEMON_BIN"
-sudo chmod 755 "$DAEMON_BIN"
+DAEMON_BIN_TMP="$(dirname "$DAEMON_BIN")/.$(basename "$DAEMON_BIN").new"
+sudo install -m 755 "$DAEMON_SRC" "$DAEMON_BIN_TMP"
+sudo mv -f "$DAEMON_BIN_TMP" "$DAEMON_BIN"
 
 # --- Install systemd service ---
 info "Setting up systemd service..."
