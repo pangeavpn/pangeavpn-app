@@ -24,9 +24,9 @@ const iptWaitSeconds = "5"
 // BestEffort commands may fail (clearing leftovers, retiring a chain that may
 // not exist); everything else aborts the apply.
 type iptablesCommand struct {
-	Binary         string
-	Args           []string
-	BestEffort     bool
+	Binary     string
+	Args       []string
+	BestEffort bool
 	// TolerateExists survives a create racing a leftover chain a prior -X
 	// couldn't remove because a duplicate jump still referenced it.
 	TolerateExists bool
@@ -266,11 +266,30 @@ func probeIPTablesRule(ctx context.Context, binary string, args []string) (prese
 	return false, false
 }
 
+// A backend that cannot list OUTPUT cannot be holding rules either — the
+// binary is missing, or its family is unavailable (no IPv6, no legacy tables).
+func iptablesBackendUsable(ctx context.Context, binary string) bool {
+	return runIPTablesCommand(ctx, binary, withWait([]string{"-S", "OUTPUT"})...) == nil
+}
+
 // Best-effort per command, but failures are aggregated so Clear can report a
 // half-teardown — that's how a jump ends up pointing at an emptied chain.
+//
+// Both backends are swept unconditionally because which one is live cannot be
+// trusted after a restart; an unusable one is skipped rather than counted as a
+// failure, or an nft-only host could never finish a clear.
 func removeIPTablesRules(ctx context.Context) error {
 	var failures []string
+	usable := make(map[string]bool, 2)
 	for _, cmd := range iptablesRemovePlan() {
+		ok, probed := usable[cmd.Binary]
+		if !probed {
+			ok = iptablesBackendUsable(ctx, cmd.Binary)
+			usable[cmd.Binary] = ok
+		}
+		if !ok {
+			continue
+		}
 		err := runIPTablesCommand(ctx, cmd.Binary, cmd.Args...)
 		if err == nil {
 			continue

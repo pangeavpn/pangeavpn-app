@@ -444,3 +444,54 @@ func TestIPTablesApplyPlan_LANPermitsAreIPv4Only(t *testing.T) {
 		t.Fatal("expected the IPv4 LAN permits to be present with allowLAN on")
 	}
 }
+
+// On an nft-only host the iptables chains were never created, and a sweep that
+// counted that backend's failures stranded Clear — leaving the switch "active".
+func TestRemoveIPTablesRules_SkipsAnUnusableBackend(t *testing.T) {
+	original := runIPTablesCommand
+	defer func() { runIPTablesCommand = original }()
+
+	var attempted []string
+	runIPTablesCommand = func(_ context.Context, binary string, args ...string) error {
+		stripped := stripWait(args)
+		if len(stripped) == 2 && stripped[0] == "-S" && stripped[1] == "OUTPUT" {
+			if binary == "ip6tables" {
+				return errors.New("can't initialize ip6tables table 'filter'")
+			}
+			return nil
+		}
+		attempted = append(attempted, binary)
+		if binary == "ip6tables" {
+			return errors.New("can't initialize ip6tables table 'filter'")
+		}
+		return exitCodeError(t, 1)
+	}
+
+	if err := removeIPTablesRules(context.Background()); err != nil {
+		t.Fatalf("clear failed over a backend that cannot hold rules: %v", err)
+	}
+	for _, binary := range attempted {
+		if binary == "ip6tables" {
+			t.Fatal("swept ip6tables after it failed to list OUTPUT")
+		}
+	}
+}
+
+// The usable backend still has to report a real half-teardown.
+func TestRemoveIPTablesRules_StillReportsUsableBackendFailures(t *testing.T) {
+	original := runIPTablesCommand
+	defer func() { runIPTablesCommand = original }()
+
+	locked := exitCodeError(t, 4)
+	runIPTablesCommand = func(_ context.Context, _ string, args ...string) error {
+		stripped := stripWait(args)
+		if len(stripped) == 2 && stripped[0] == "-S" && stripped[1] == "OUTPUT" {
+			return nil
+		}
+		return locked
+	}
+
+	if err := removeIPTablesRules(context.Background()); err == nil {
+		t.Fatal("xtables lock contention was reported as a complete teardown")
+	}
+}

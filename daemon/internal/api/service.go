@@ -28,6 +28,10 @@ var ErrTransportExhausted = errors.New("all configured transports failed")
 // all; the cascade stops there, since every other transport would fail the same.
 var ErrHostOffline = errors.New("no internet connection")
 
+// ErrDisconnectIncomplete reports a teardown that left the host in a state the
+// user must act on: a live tunnel, or a kill switch still blocking the internet.
+var ErrDisconnectIncomplete = errors.New("disconnect incomplete")
+
 const offlineHoldDetail = "no internet connection; connecting when the network returns"
 
 // errRebuildBusy signals rebuildSilentSession found opMu already held by a
@@ -1885,7 +1889,10 @@ func (s *Service) disconnect(ctx context.Context, shouldKeepKillSwitch func() bo
 	profile, hasProfile := s.getCurrentProfile()
 
 	s.machine.Set(state.StateDisconnecting, "stopping wireguard")
-	var cleanupErrors []string
+	// Warnings are plumbing that failed to tidy itself; the session is gone
+	// either way. Only failures — state the user is still living with — fail.
+	var cleanupWarnings []string
+	var cleanupFailures []string
 	profilesToStop := make([]state.Profile, 0, 4)
 	seenTunnelNames := make(map[string]struct{}, 4)
 
@@ -1911,8 +1918,9 @@ func (s *Service) disconnect(ctx context.Context, shouldKeepKillSwitch func() bo
 
 	for _, runningProfile := range profilesToStop {
 		if err := s.wg.Stop(teardownCtx, withTransportBypassHosts(runningProfile)); err != nil {
-			cleanupErrors = append(cleanupErrors, fmt.Sprintf("wireguard stop failed for %s: %v", runningProfile.WireGuard.TunnelName, err))
-			s.logs.Add(state.LogWarn, state.SourceDaemon, cleanupErrors[len(cleanupErrors)-1])
+			// The verify pass below decides whether the tunnel actually survived.
+			cleanupWarnings = append(cleanupWarnings, fmt.Sprintf("wireguard stop failed for %s: %v", runningProfile.WireGuard.TunnelName, err))
+			s.logs.Add(state.LogWarn, state.SourceDaemon, cleanupWarnings[len(cleanupWarnings)-1])
 		}
 	}
 
@@ -1920,13 +1928,14 @@ func (s *Service) disconnect(ctx context.Context, shouldKeepKillSwitch func() bo
 	for _, runningProfile := range profilesToStop {
 		status, err := s.wg.Status(teardownCtx, withTransportBypassHosts(runningProfile))
 		if err != nil {
-			cleanupErrors = append(cleanupErrors, fmt.Sprintf("wireguard status check failed for %s: %v", runningProfile.WireGuard.TunnelName, err))
-			s.logs.Add(state.LogWarn, state.SourceDaemon, cleanupErrors[len(cleanupErrors)-1])
+			cleanupWarnings = append(cleanupWarnings, fmt.Sprintf("wireguard status check failed for %s: %v", runningProfile.WireGuard.TunnelName, err))
+			s.logs.Add(state.LogWarn, state.SourceDaemon, cleanupWarnings[len(cleanupWarnings)-1])
 			continue
 		}
 		if status.Running {
-			cleanupErrors = append(cleanupErrors, fmt.Sprintf("wireguard tunnel %s still running (%s)", runningProfile.WireGuard.TunnelName, status.Detail))
-			s.logs.Add(state.LogWarn, state.SourceDaemon, cleanupErrors[len(cleanupErrors)-1])
+			// Traffic may still be leaving through the tunnel they just tore down.
+			cleanupFailures = append(cleanupFailures, fmt.Sprintf("wireguard tunnel %s still running (%s)", runningProfile.WireGuard.TunnelName, status.Detail))
+			s.logs.Add(state.LogError, state.SourceDaemon, cleanupFailures[len(cleanupFailures)-1])
 		}
 	}
 
@@ -1935,8 +1944,8 @@ func (s *Service) disconnect(ctx context.Context, shouldKeepKillSwitch func() bo
 	if active := s.activeTransport(); active != nil {
 		transportCtx, transportCancel := context.WithTimeout(context.Background(), 4*time.Second)
 		if err := active.Stop(transportCtx); err != nil {
-			cleanupErrors = append(cleanupErrors, fmt.Sprintf("transport stop failed: %v", err))
-			s.logs.Add(state.LogWarn, state.SourceDaemon, cleanupErrors[len(cleanupErrors)-1])
+			cleanupWarnings = append(cleanupWarnings, fmt.Sprintf("transport stop failed: %v", err))
+			s.logs.Add(state.LogWarn, state.SourceDaemon, cleanupWarnings[len(cleanupWarnings)-1])
 		}
 		transportCancel()
 	}
@@ -1962,8 +1971,10 @@ func (s *Service) disconnect(ctx context.Context, shouldKeepKillSwitch func() bo
 			// instead of reusing the persisted (still server-inclusive) permit set.
 			hubPermits := ipLiterals(s.storedControlPlaneHosts())
 			if err := s.killSwitch.Enable(teardownCtx, hubPermits, false, true); err != nil {
-				cleanupErrors = append(cleanupErrors, fmt.Sprintf("lockdown re-arm after disconnect failed: %v", err))
-				s.logs.Add(state.LogWarn, state.SourceDaemon, cleanupErrors[len(cleanupErrors)-1])
+				// Not the shape Lockdown promised: the departing server may
+				// still be permitted through.
+				cleanupFailures = append(cleanupFailures, fmt.Sprintf("lockdown re-arm after disconnect failed: %v", err))
+				s.logs.Add(state.LogError, state.SourceDaemon, cleanupFailures[len(cleanupFailures)-1])
 			} else {
 				s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("kill switch retained (lockdown mode), narrowed to control-plane hosts %v", hubPermits))
 			}
@@ -1971,8 +1982,9 @@ func (s *Service) disconnect(ctx context.Context, shouldKeepKillSwitch func() bo
 			s.machine.Set(state.StateDisconnecting, "clearing kill switch")
 			ksCtx, ksCancel := context.WithTimeout(context.Background(), 3*time.Second)
 			if err := s.killSwitch.Clear(ksCtx); err != nil {
-				cleanupErrors = append(cleanupErrors, fmt.Sprintf("kill switch clear failed: %v", err))
-				s.logs.Add(state.LogError, state.SourceDaemon, fmt.Sprintf("kill switch clear failed: %v", err))
+				// Leaves the host with no internet at all.
+				cleanupFailures = append(cleanupFailures, fmt.Sprintf("kill switch clear failed: %v", err))
+				s.logs.Add(state.LogError, state.SourceDaemon, cleanupFailures[len(cleanupFailures)-1])
 			} else {
 				s.logs.Add(state.LogInfo, state.SourceDaemon, "kill switch cleared")
 			}
@@ -1983,10 +1995,13 @@ func (s *Service) disconnect(ctx context.Context, shouldKeepKillSwitch func() bo
 	// Always transition to disconnected, even with partial cleanup failures.
 	s.machine.Set(state.StateDisconnected, "idle")
 	s.startNetworkRepair(repairTunnelNames)
-	if len(cleanupErrors) > 0 {
-		detail := fmt.Sprintf("disconnect completed with warnings: %s", strings.Join(cleanupErrors, "; "))
-		s.logs.Add(state.LogWarn, state.SourceDaemon, detail)
-		return errors.New(detail)
+	if len(cleanupWarnings) > 0 {
+		s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("disconnect completed with warnings: %s", strings.Join(cleanupWarnings, "; ")))
+	}
+	if len(cleanupFailures) > 0 {
+		detail := strings.Join(cleanupFailures, "; ")
+		s.logs.Add(state.LogError, state.SourceDaemon, fmt.Sprintf("disconnect incomplete: %s", detail))
+		return fmt.Errorf("%w: %s", ErrDisconnectIncomplete, detail)
 	}
 	s.logs.Add(state.LogInfo, state.SourceDaemon, "disconnect flow completed")
 	return nil

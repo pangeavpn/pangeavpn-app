@@ -152,6 +152,9 @@ type permitHostsRequest struct {
 type okResponse struct {
 	OK    bool   `json:"ok"`
 	Error string `json:"error,omitempty"`
+	// Error stays a stable machine code to branch on; Detail is the reason
+	// behind it, so a failure reads as more than a bare {"ok":false}.
+	Detail string `json:"detail,omitempty"`
 }
 
 // ssProxyStartRequest carries the control-plane Shadowsocks credentials. This
@@ -207,6 +210,9 @@ func serviceErrorResponse(err error) okResponse {
 	}
 	if errors.Is(err, ErrHostOffline) {
 		return okResponse{OK: false, Error: "host_offline"}
+	}
+	if errors.Is(err, ErrDisconnectIncomplete) {
+		return okResponse{OK: false, Error: "disconnect_incomplete", Detail: err.Error()}
 	}
 	return okResponse{OK: false}
 }
@@ -285,7 +291,7 @@ func NewHandler(token string, service *Service) http.Handler {
 
 		err := service.Disconnect(r.Context(), req.KeepKillSwitch)
 		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, okResponse{OK: false})
+			writeJSON(w, http.StatusInternalServerError, serviceErrorResponse(err))
 			return
 		}
 

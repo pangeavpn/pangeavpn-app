@@ -3216,3 +3216,75 @@ func TestHealthCheck_TransportRestartRebindsDeviceSockets(t *testing.T) {
 		t.Fatalf("RebindDeviceSockets called %d times after the restart, want 1", rebinds)
 	}
 }
+
+// Every imperfect cleanup step used to become a 500, so the app reported a
+// failed disconnect for one that had worked. These pin the warning/failure split.
+
+func TestDisconnect_CosmeticCleanupFailureStillSucceeds(t *testing.T) {
+	profile := testProfile()
+	wgMgr := &fakeWGManager{}
+	ks := &fakeKillSwitch{}
+	svc := newTestService(t, &fakeCloakManager{}, &fakeNaiveManager{}, wgMgr, ks, profile)
+
+	if err := svc.Connect(context.Background(), profile.ID, ConnectOptions{}); err != nil {
+		t.Fatalf("connect failed: %v", err)
+	}
+
+	// The tunnel comes down; only the verification probe is broken.
+	wgMgr.mu.Lock()
+	wgMgr.statusErr = errors.New("status probe unavailable")
+	wgMgr.mu.Unlock()
+
+	if err := svc.Disconnect(context.Background(), false); err != nil {
+		t.Fatalf("disconnect reported failure for a warning-only teardown: %v", err)
+	}
+	if got, _ := svc.machine.Get(); got != state.StateDisconnected {
+		t.Errorf("state = %v, want %v", got, state.StateDisconnected)
+	}
+}
+
+func TestDisconnect_KillSwitchStuckIsAFailure(t *testing.T) {
+	profile := testProfile()
+	ks := &fakeKillSwitch{clearErr: errors.New("nft delete table: permission denied")}
+	svc := newTestService(t, &fakeCloakManager{}, &fakeNaiveManager{}, &fakeWGManager{}, ks, profile)
+
+	if err := svc.Connect(context.Background(), profile.ID, ConnectOptions{}); err != nil {
+		t.Fatalf("connect failed: %v", err)
+	}
+
+	err := svc.Disconnect(context.Background(), false)
+	if !errors.Is(err, ErrDisconnectIncomplete) {
+		t.Fatalf("error = %v, want one wrapping ErrDisconnectIncomplete", err)
+	}
+	// The reason has to survive out to the caller.
+	if !strings.Contains(err.Error(), "permission denied") {
+		t.Errorf("error = %q, want the underlying kill switch reason", err)
+	}
+	// Still disconnected: the failure is about the firewall, not the session.
+	if got, _ := svc.machine.Get(); got != state.StateDisconnected {
+		t.Errorf("state = %v, want %v", got, state.StateDisconnected)
+	}
+}
+
+func TestDisconnect_SurvivingTunnelIsAFailure(t *testing.T) {
+	profile := testProfile()
+	wgMgr := &fakeWGManager{}
+	svc := newTestService(t, &fakeCloakManager{}, &fakeNaiveManager{}, wgMgr, &fakeKillSwitch{}, profile)
+
+	if err := svc.Connect(context.Background(), profile.ID, ConnectOptions{}); err != nil {
+		t.Fatalf("connect failed: %v", err)
+	}
+
+	// Stop fails and the tunnel keeps reporting up, so traffic may still leave.
+	wgMgr.mu.Lock()
+	wgMgr.stopErr = errors.New("device busy")
+	wgMgr.mu.Unlock()
+
+	err := svc.Disconnect(context.Background(), false)
+	if !errors.Is(err, ErrDisconnectIncomplete) {
+		t.Fatalf("error = %v, want one wrapping ErrDisconnectIncomplete", err)
+	}
+	if !strings.Contains(err.Error(), "still running") {
+		t.Errorf("error = %q, want it to name the surviving tunnel", err)
+	}
+}

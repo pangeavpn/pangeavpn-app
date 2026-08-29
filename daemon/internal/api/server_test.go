@@ -1,9 +1,12 @@
 package api
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -75,4 +78,33 @@ func TestTransportMemoryClearRoute(t *testing.T) {
 			t.Fatal("memory was cleared by a GET")
 		}
 	})
+}
+
+func TestDisconnectRouteReportsWhyItFailed(t *testing.T) {
+	const token = "0123456789abcdef"
+	profile := testProfile()
+	ks := &fakeKillSwitch{clearErr: errors.New("nft delete table: permission denied")}
+	svc := newTestService(t, &fakeCloakManager{}, &fakeNaiveManager{}, &fakeWGManager{}, ks, profile)
+	if err := svc.Connect(context.Background(), profile.ID, ConnectOptions{}); err != nil {
+		t.Fatalf("connect failed: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1/disconnect", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	NewHandler(token, svc).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
+	}
+	var body okResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode body %q: %v", rec.Body.String(), err)
+	}
+	if body.Error != "disconnect_incomplete" {
+		t.Errorf("error = %q, want disconnect_incomplete", body.Error)
+	}
+	if !strings.Contains(body.Detail, "kill switch clear failed") {
+		t.Errorf("detail = %q, want the kill switch reason", body.Detail)
+	}
 }
