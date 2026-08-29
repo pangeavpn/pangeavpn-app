@@ -43,6 +43,7 @@ import {
   runServerFallback
 } from "./serverFallback";
 import { shouldRotateServers } from "./serverRotation";
+import { shouldRecoverFromNetworkChange } from "./networkRecovery";
 import {
   commitProfileSet,
   dropExpired,
@@ -595,14 +596,26 @@ async function rotateAwayFromBlockedServer(): Promise<void> {
 
 let networkRecoverInProgress = false;
 let lastNetworkRecoverAtMs = 0;
-const NETWORK_RECOVER_COOLDOWN_MS = 10_000;
+// Set by an explicit Disconnect, cleared by any deliberate connect: the
+// renderer honors this intent, so main's own recovery must too.
+let userDisconnected = false;
 
 async function recoverFromNetworkChange(): Promise<void> {
-  if (networkRecoverInProgress || connectionAttemptRunning) return;
-  const now = Date.now();
-  if (now - lastNetworkRecoverAtMs < NETWORK_RECOVER_COOLDOWN_MS) return;
-  if (!autoConnectEnabled) return;
-  if (!lastConnectedProfileId) return;
+  const profileId = lastConnectedProfileId;
+  if (
+    profileId === null ||
+    !shouldRecoverFromNetworkChange({
+      autoConnectEnabled,
+      userDisconnected,
+      lastConnectedProfileId: profileId,
+      connectionAttemptRunning,
+      recoverInProgress: networkRecoverInProgress,
+      lastRecoverAtMs: lastNetworkRecoverAtMs,
+      nowMs: Date.now()
+    })
+  ) {
+    return;
+  }
 
   networkRecoverInProgress = true;
   connectionAttemptRunning = true;
@@ -634,7 +647,7 @@ async function recoverFromNetworkChange(): Promise<void> {
       console.warn("network recover: disconnect failed", sanitizeLog(err));
     }
     if (isCancelled(attempt)) return;
-    const result = await connectWithRecovery(lastConnectedProfileId);
+    const result = await connectWithRecovery(profileId);
     if (!result.ok) {
       console.warn("network recover: reconnect failed", sanitizeLog((result as { error?: string }).error));
       await releaseFailClosedKillSwitch();
@@ -722,6 +735,7 @@ async function connectFromTray(): Promise<void> {
     return;
   }
 
+  userDisconnected = false;
   trayActionInProgress = true;
   updateTrayMenu();
   // Tracks whether we set ERROR ourselves, so the finally below doesn't let
@@ -777,6 +791,10 @@ async function disconnectFromTray(): Promise<void> {
     return;
   }
 
+  userDisconnected = true;
+  // Same as the renderer's Disconnect: an in-flight cascade would otherwise
+  // bring the tunnel straight back up after the daemon disconnect.
+  cancelAttempt();
   trayActionInProgress = true;
   updateTrayMenu();
   let explicitFailure = false;
@@ -1456,6 +1474,7 @@ function registerIpcHandlers(): void {
     if (connectionAttemptRunning) {
       return { ok: false };
     }
+    userDisconnected = false;
     connectionAttemptRunning = true;
     const attempt = beginAttempt();
     try {
@@ -1499,6 +1518,7 @@ function registerIpcHandlers(): void {
     }
   });
   ipcMain.handle(IPC_CHANNELS.disconnect, async () => {
+    userDisconnected = true;
     // Stop any main-process cascade (network recovery, launch auto-connect)
     // so it can't silently reconnect moments after the user's Disconnect.
     cancelAttempt();
@@ -1860,6 +1880,7 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.setAutoConnect, async (_event, enabled: boolean) => {
     autoConnectEnabled = !!enabled;
+    if (autoConnectEnabled) userDisconnected = false;
     await persistStartupSettings();
     try {
       await applyLoginItem();
@@ -1992,6 +2013,7 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.handle(IPC_CHANNELS.provisionAndConnect, async (_event, serverPlan: unknown) => {
+    userDisconnected = false;
     try {
       const result = await provisionAndConnect(normalizeServerPlan(serverPlan));
       void refreshTrayStatus();
@@ -2012,6 +2034,7 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.handle(IPC_CHANNELS.provisionAndSwitch, async (_event, serverPlan: unknown) => {
+    userDisconnected = false;
     try {
       const result = await provisionAndSwitch(normalizeServerPlan(serverPlan));
       void refreshTrayStatus();
