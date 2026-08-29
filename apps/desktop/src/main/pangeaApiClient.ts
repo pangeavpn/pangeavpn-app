@@ -1299,7 +1299,9 @@ export class PangeaApiClient {
       this.hubResolutionFailedAtMs = 0;
       return response;
     } catch (err) {
-      if (err instanceof ConnectCancelledError) throw err;
+      // A user cancel says nothing about the path; the transports surface it
+      // as a plain abort, converted to ConnectCancelledError only upstream.
+      if (err instanceof ConnectCancelledError || options.cancelSignal?.aborted) throw err;
       this.hubFailureStreak++;
       if (this.hubFailureStreak >= HUB_FAILURE_LIMIT) {
         console.log("[hubFetch] Path failed repeatedly, forcing hub re-resolution");
