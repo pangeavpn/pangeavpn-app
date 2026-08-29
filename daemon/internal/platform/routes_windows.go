@@ -6,26 +6,17 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net/netip"
 	"os/exec"
 	"sort"
 	"strconv"
 	"strings"
+
+	"golang.org/x/sys/windows"
+	"golang.zx2c4.com/wireguard/windows/tunnel/winipcfg"
 )
-
-type netRouteRecord struct {
-	DestinationPrefix string
-	InterfaceAlias    string
-	InterfaceIndex    int
-	NextHop           string
-}
-
-type defaultGatewayRecord struct {
-	Gateway        string
-	InterfaceAlias string
-	InterfaceIndex int
-	Metric         int
-}
 
 // RepairNetworkAfterTunnelDisconnect performs targeted cleanup for stale tunnel networking state.
 func RepairNetworkAfterTunnelDisconnect(ctx context.Context, tunnelNames []string) ([]string, error) {
@@ -172,43 +163,109 @@ func normalizeNonEmptyStrings(values []string) []string {
 	return out
 }
 
-func removeLikelyTunnelDefaultRoutes(ctx context.Context, tunnelNames []string) ([]string, error) {
-	if len(normalizeTunnelNames(tunnelNames)) == 0 {
+// removeLikelyTunnelDefaultRoutes deletes every /0 route owned by one of the
+// named tunnel interfaces, via GetIpForwardTable2/DeleteIpForwardEntry2 rather
+// than Get-NetRoute/Remove-NetRoute — no PowerShell process on the disconnect
+// repair path.
+func removeLikelyTunnelDefaultRoutes(_ context.Context, tunnelNames []string) ([]string, error) {
+	set := tunnelNameSet(tunnelNames)
+	if len(set) == 0 {
 		return nil, nil
 	}
-
-	script := buildTunnelDefaultRouteCleanupScript(tunnelNames)
-	output, err := runHiddenCommand(ctx, "powershell.exe", psArgs(script)...)
-	if err != nil {
-		return nil, fmt.Errorf("powershell cleanup command failed: %w (%s)", err, strings.TrimSpace(output))
-	}
-
-	trimmed := strings.TrimSpace(output)
-	if trimmed == "" || strings.EqualFold(trimmed, "null") {
-		return nil, nil
-	}
-
-	var routes []netRouteRecord
-	if unmarshalErr := json.Unmarshal([]byte(trimmed), &routes); unmarshalErr != nil {
-		return nil, fmt.Errorf("parse cleanup output failed: %w (%s)", unmarshalErr, trimmed)
-	}
-	if len(routes) == 0 {
-		return nil, nil
-	}
-
-	removed := make([]string, 0, len(routes))
-	for _, route := range routes {
-		alias := strings.TrimSpace(route.InterfaceAlias)
-		if alias == "" {
-			alias = "unknown"
+	var removed []string
+	var failures []string
+	for _, family := range []winipcfg.AddressFamily{windows.AF_INET, windows.AF_INET6} {
+		rows, err := defaultRouteRows(family)
+		if err != nil {
+			return removed, fmt.Errorf("read routing table: %w", err)
 		}
-		nextHop := strings.TrimSpace(route.NextHop)
-		if nextHop == "" {
-			nextHop = "n/a"
+		for i := range rows {
+			row := &rows[i]
+			alias := routeInterfaceAlias(row)
+			if alias == "" || !set[alias] {
+				continue
+			}
+			if err := row.Delete(); err != nil && !errors.Is(err, windows.ERROR_NOT_FOUND) {
+				failures = append(failures, fmt.Sprintf("%s: %v", alias, err))
+				continue
+			}
+			nextHop := "n/a"
+			if nh := row.NextHop.Addr(); nh.IsValid() {
+				nextHop = nh.String()
+			}
+			removed = append(removed, fmt.Sprintf("%s#%d:%s", alias, row.InterfaceIndex, nextHop))
 		}
-		removed = append(removed, fmt.Sprintf("%s#%d:%s", alias, route.InterfaceIndex, nextHop))
+	}
+	if len(failures) > 0 {
+		return removed, fmt.Errorf("remove tunnel default routes: %s", strings.Join(failures, "; "))
 	}
 	return removed, nil
+}
+
+// tunnelNameSet lowercases and de-dupes the tunnel names into a lookup set.
+func tunnelNameSet(tunnelNames []string) map[string]bool {
+	names := normalizeTunnelNames(tunnelNames)
+	set := make(map[string]bool, len(names))
+	for _, name := range names {
+		set[name] = true
+	}
+	return set
+}
+
+// defaultRouteRows returns every default (/0) route for the family.
+func defaultRouteRows(family winipcfg.AddressFamily) ([]winipcfg.MibIPforwardRow2, error) {
+	table, err := winipcfg.GetIPForwardTable2(family)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]winipcfg.MibIPforwardRow2, 0, 4)
+	for i := range table {
+		prefix := table[i].DestinationPrefix.Prefix()
+		if prefix.IsValid() && prefix.Bits() == 0 {
+			out = append(out, table[i])
+		}
+	}
+	return out, nil
+}
+
+// routeInterfaceAlias is the lowercased interface alias owning a route, "" if
+// it can't be resolved.
+func routeInterfaceAlias(row *winipcfg.MibIPforwardRow2) string {
+	iface, err := row.InterfaceLUID.Interface()
+	if err != nil {
+		return ""
+	}
+	return strings.ToLower(iface.Alias())
+}
+
+// defaultRouteInfo is the slice of a default route the gateway election needs,
+// decoupled from winipcfg so the selection logic is testable.
+type defaultRouteInfo struct {
+	aliasLower string
+	nextHop    netip.Addr
+	metric     uint64
+}
+
+// selectDefaultGateway picks the lowest-metric default route whose interface is
+// not a tunnel and whose next hop is a real gateway.
+func selectDefaultGateway(rows []defaultRouteInfo, tunnelSet map[string]bool) (gateway string, metric int, ok bool) {
+	best := -1
+	for i := range rows {
+		r := rows[i]
+		if r.aliasLower == "" || tunnelSet[r.aliasLower] {
+			continue
+		}
+		if !r.nextHop.IsValid() || r.nextHop.IsUnspecified() || r.nextHop.IsLoopback() || r.nextHop.IsMulticast() {
+			continue
+		}
+		if best == -1 || r.metric < rows[best].metric {
+			best = i
+		}
+	}
+	if best == -1 {
+		return "", 0, false
+	}
+	return rows[best].nextHop.String(), int(rows[best].metric), true
 }
 
 // targetsAssignment renders the tunnel-name exclusion set shared by every
@@ -223,78 +280,6 @@ func targetsAssignment(tunnelNames []string) string {
 		return "$targets=@()"
 	}
 	return "$targets=@(" + strings.Join(quoted, ", ") + ")"
-}
-
-func buildTunnelDefaultRouteCleanupScript(tunnelNames []string) string {
-	parts := []string{
-		"$ErrorActionPreference='SilentlyContinue'",
-		targetsAssignment(tunnelNames),
-		"$families=@(@{Family='IPv4';Prefix='0.0.0.0/0'},@{Family='IPv6';Prefix='::/0'})",
-		"$removed=@()",
-		"foreach ($fam in $families) {",
-		"  $routes=Get-NetRoute -AddressFamily $fam.Family -DestinationPrefix $fam.Prefix -ErrorAction SilentlyContinue | Where-Object {",
-		"    $alias=[string]$_.InterfaceAlias",
-		"    if ([string]::IsNullOrWhiteSpace($alias)) { return $false }",
-		"    $aliasLower=$alias.ToLowerInvariant()",
-		"    foreach ($target in $targets) { if ($aliasLower -eq $target) { return $true } }",
-		"    return $false",
-		"  }",
-		"  foreach ($route in $routes) {",
-		"    Remove-NetRoute -AddressFamily $fam.Family -DestinationPrefix $route.DestinationPrefix -InterfaceIndex $route.InterfaceIndex -NextHop $route.NextHop -Confirm:$false -ErrorAction SilentlyContinue | Out-Null",
-		"    $stillPresent=Get-NetRoute -AddressFamily $fam.Family -DestinationPrefix $route.DestinationPrefix -InterfaceIndex $route.InterfaceIndex -NextHop $route.NextHop -ErrorAction SilentlyContinue",
-		"    if (-not $stillPresent) {",
-		"      $removed += [pscustomobject]@{DestinationPrefix=[string]$route.DestinationPrefix;InterfaceAlias=[string]$route.InterfaceAlias;InterfaceIndex=[int]$route.InterfaceIndex;NextHop=[string]$route.NextHop}",
-		"    }",
-		"  }",
-		"}",
-		"@($removed) | ConvertTo-Json -Compress",
-	}
-
-	return strings.Join(parts, "; ")
-}
-
-// buildTunnelDefaultRoutePresenceScript checks whether any tunnel-owned
-// default route (IPv4 or IPv6) is still present after cleanup.
-func buildTunnelDefaultRoutePresenceScript(tunnelNames []string) string {
-	parts := []string{
-		"$ErrorActionPreference='SilentlyContinue'",
-		targetsAssignment(tunnelNames),
-		"$families=@(@{Family='IPv4';Prefix='0.0.0.0/0'},@{Family='IPv6';Prefix='::/0'})",
-		"$found=$false",
-		"foreach ($fam in $families) {",
-		"  $routes=Get-NetRoute -AddressFamily $fam.Family -DestinationPrefix $fam.Prefix -ErrorAction SilentlyContinue",
-		"  foreach ($route in $routes) {",
-		"    $alias=[string]$route.InterfaceAlias",
-		"    if ([string]::IsNullOrWhiteSpace($alias)) { continue }",
-		"    $aliasLower=$alias.ToLowerInvariant()",
-		"    foreach ($target in $targets) { if ($aliasLower -eq $target) { $found=$true } }",
-		"  }",
-		"}",
-		"if ($found) { 'true' } else { 'false' }",
-	}
-
-	return strings.Join(parts, "; ")
-}
-
-// buildResolveDefaultGatewayScript finds the lowest-metric IPv4 default
-// route whose interface is not one of the excluded tunnel aliases.
-func buildResolveDefaultGatewayScript(tunnelNames []string) string {
-	parts := []string{
-		"$ErrorActionPreference='SilentlyContinue'",
-		targetsAssignment(tunnelNames),
-		"$candidates=Get-NetRoute -AddressFamily IPv4 -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue | Where-Object {",
-		"  $alias=[string]$_.InterfaceAlias",
-		"  $nextHop=[string]$_.NextHop",
-		"  if ([string]::IsNullOrWhiteSpace($alias) -or [string]::IsNullOrWhiteSpace($nextHop) -or $nextHop -eq '0.0.0.0') { return $false }",
-		"  $aliasLower=$alias.ToLowerInvariant()",
-		"  foreach ($target in $targets) { if ($aliasLower -eq $target) { return $false } }",
-		"  return $true",
-		"}",
-		"$best=$candidates | Sort-Object { [int]$_.RouteMetric + [int]$_.InterfaceMetric } | Select-Object -First 1",
-		"if ($null -eq $best) { '' } else { [pscustomobject]@{Gateway=[string]$best.NextHop;InterfaceAlias=[string]$best.InterfaceAlias;InterfaceIndex=[int]$best.InterfaceIndex;Metric=([int]$best.RouteMetric + [int]$best.InterfaceMetric)} | ConvertTo-Json -Compress }",
-	}
-
-	return strings.Join(parts, "; ")
 }
 
 func buildAdapterRenewScript(tunnelNames []string) string {
@@ -350,45 +335,55 @@ func psArgs(script string) []string {
 	return []string{"-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script}
 }
 
-// resolveDefaultGateway returns the active IPv4 default gateway, excluding
-// any route owned by a tunnel interface.
-func resolveDefaultGateway(ctx context.Context, tunnelNames []string) (gateway string, metric string, err error) {
-	script := buildResolveDefaultGatewayScript(tunnelNames)
-	output, cmdErr := runHiddenCommand(ctx, "powershell.exe", psArgs(script)...)
-	if cmdErr != nil {
-		return "", "", fmt.Errorf("query default gateway failed: %w (%s)", cmdErr, strings.TrimSpace(output))
+// resolveDefaultGateway returns the active IPv4 default gateway, excluding any
+// route owned by a tunnel interface. Native GetIpForwardTable2 read — no
+// PowerShell.
+func resolveDefaultGateway(_ context.Context, tunnelNames []string) (gateway string, metric string, err error) {
+	set := tunnelNameSet(tunnelNames)
+	rows, err := defaultRouteRows(windows.AF_INET)
+	if err != nil {
+		return "", "", fmt.Errorf("read ipv4 routing table: %w", err)
 	}
-
-	trimmed := strings.TrimSpace(output)
-	if trimmed == "" || strings.EqualFold(trimmed, "null") {
+	infos := make([]defaultRouteInfo, 0, len(rows))
+	for i := range rows {
+		row := &rows[i]
+		m := uint64(row.Metric)
+		if ipif, e := row.InterfaceLUID.IPInterface(windows.AF_INET); e == nil {
+			m += uint64(ipif.Metric)
+		}
+		infos = append(infos, defaultRouteInfo{
+			aliasLower: routeInterfaceAlias(row),
+			nextHop:    row.NextHop.Addr(),
+			metric:     m,
+		})
+	}
+	gw, met, ok := selectDefaultGateway(infos, set)
+	if !ok {
 		return "", "", fmt.Errorf("no usable ipv4 default gateway found")
 	}
-
-	var best defaultGatewayRecord
-	if unmarshalErr := json.Unmarshal([]byte(trimmed), &best); unmarshalErr != nil {
-		return "", "", fmt.Errorf("parse default gateway output failed: %w (%s)", unmarshalErr, trimmed)
-	}
-	if best.Gateway == "" {
-		return "", "", fmt.Errorf("no usable ipv4 default gateway found")
-	}
-
-	return best.Gateway, strconv.Itoa(best.Metric), nil
+	return gw, strconv.Itoa(met), nil
 }
 
 // hasStaleTunnelDefaultRoute reports whether a tunnel-owned default route
-// (IPv4 or IPv6) is still present on the system.
-func hasStaleTunnelDefaultRoute(ctx context.Context, tunnelNames []string) (bool, error) {
-	if len(normalizeTunnelNames(tunnelNames)) == 0 {
+// (IPv4 or IPv6) is still present. Native read — no PowerShell.
+func hasStaleTunnelDefaultRoute(_ context.Context, tunnelNames []string) (bool, error) {
+	set := tunnelNameSet(tunnelNames)
+	if len(set) == 0 {
 		return false, nil
 	}
-
-	script := buildTunnelDefaultRoutePresenceScript(tunnelNames)
-	output, err := runHiddenCommand(ctx, "powershell.exe", psArgs(script)...)
-	if err != nil {
-		return false, fmt.Errorf("powershell route presence check failed: %w (%s)", err, strings.TrimSpace(output))
+	for _, family := range []winipcfg.AddressFamily{windows.AF_INET, windows.AF_INET6} {
+		rows, err := defaultRouteRows(family)
+		if err != nil {
+			return false, fmt.Errorf("read routing table: %w", err)
+		}
+		for i := range rows {
+			alias := routeInterfaceAlias(&rows[i])
+			if alias != "" && set[alias] {
+				return true, nil
+			}
+		}
 	}
-
-	return strings.EqualFold(strings.TrimSpace(output), "true"), nil
+	return false, nil
 }
 
 func runHiddenCommand(ctx context.Context, command string, args ...string) (string, error) {
