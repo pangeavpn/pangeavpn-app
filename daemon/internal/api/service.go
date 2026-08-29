@@ -3422,6 +3422,9 @@ func (s *Service) setCurrentProfile(profile state.Profile) {
 	s.profileMu.Unlock()
 
 	s.resetDNSProbe()
+	// A fresh session says nothing about the last server; a stale exhausted
+	// flag would keep the app rotating away from a server that now works.
+	s.setTransportsExhausted(false)
 }
 
 func (s *Service) clearCurrentProfile() {

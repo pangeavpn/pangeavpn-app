@@ -192,6 +192,28 @@ func TestStatus_ReportsTransportsExhausted(t *testing.T) {
 	}
 }
 
+// TestConnect_ClearsTransportsExhausted: the app rotates with a plain Connect,
+// so a flag left over from the old server must not trigger another rotation.
+func TestConnect_ClearsTransportsExhausted(t *testing.T) {
+	svc, probe := cascadeTestService(t, map[string]bool{"shadowsocks": true})
+	if err := svc.Connect(context.Background(), "p1", ConnectOptions{}); err != nil {
+		t.Fatalf("connect failed: %v", err)
+	}
+	probe.reset(map[string]bool{})
+	runProbedHealthChecks(svc, dnsProbeFailuresBeforeRebuild)
+	if !svc.Status(context.Background()).TransportsExhausted {
+		t.Fatal("precondition: transports should be exhausted")
+	}
+
+	probe.reset(map[string]bool{"shadowsocks": true})
+	if err := svc.Connect(context.Background(), "p1", ConnectOptions{}); err != nil {
+		t.Fatalf("reconnect failed: %v", err)
+	}
+	if st := svc.Status(context.Background()); st.State != state.StateConnected || st.TransportsExhausted {
+		t.Fatalf("status = %s exhausted=%v, want CONNECTED and not exhausted after a new session", st.State, st.TransportsExhausted)
+	}
+}
+
 func TestNextDNSProbeDelay_IsJitteredWithinBounds(t *testing.T) {
 	seen := make(map[time.Duration]int)
 	for range 200 {
