@@ -217,8 +217,14 @@ func (ks *windowsKillSwitch) Enable(ctx context.Context, endpointHosts []string,
 		endpointIds = append(endpointIds, id)
 	}
 
-	// DHCP best-effort, only when the user opted into LAN access, scoped to
-	// the ranges already trusted for "Allow LAN" — see addPermitDHCP.
+	// A lease is what puts the default route back after a link flap, and it
+	// starts with a broadcast DISCOVER that never leaves the link.
+	if _, err := engine.addPermitDHCP("255.255.255.255/32"); err != nil {
+		KillSwitchWarn("kill switch enable: DHCP broadcast permit failed: %v", err)
+	}
+
+	// Unicast renewals to the server itself, only when the user opted into LAN
+	// access, scoped to the ranges already trusted for "Allow LAN".
 	if allowLAN {
 		for _, cidr := range LANAllowPrefixes {
 			if cidr == "224.0.0.0/4" {
