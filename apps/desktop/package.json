@@ -145,6 +145,7 @@
       ]
     },
     "linux": {
+      "executableName": "pangeavpn",
       "icon": "build/PangeaVPN_linux.png",
       "target": [
         "AppImage",
