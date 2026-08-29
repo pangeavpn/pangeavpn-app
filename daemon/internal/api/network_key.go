@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"net"
 	"os/exec"
 	"regexp"
@@ -30,6 +31,15 @@ func currentNetworkKey() string {
 // client-supplied). service.go's networkKey wiring should pass the active
 // profile's tunnel name here once it has one.
 func currentNetworkKeyExcluding(extraTunnelNames []string) string {
+	// The route table names the physical uplink even while our own tunnel
+	// holds the default route, so a switch keys the same network as a connect.
+	primary, gateway, err := platform.PhysicalDefaultRoute()
+	if errors.Is(err, platform.ErrNoDefaultRoute) {
+		return ""
+	}
+	if err != nil {
+		primary, gateway = defaultRouteInterfaceName(), defaultGatewayIP()
+	}
 	osIfaces, err := net.Interfaces()
 	if err != nil {
 		return ""
@@ -42,7 +52,7 @@ func currentNetworkKeyExcluding(extraTunnelNames []string) string {
 		}
 		ifaces = append(ifaces, keyIface{name: iface.Name, up: iface.Flags&net.FlagUp != 0, addrs: addrs})
 	}
-	return composeNetworkKey(ifaces, defaultRouteInterfaceName(), defaultGatewayIP(), extraTunnelNames)
+	return composeNetworkKey(ifaces, primary, gateway, extraTunnelNames)
 }
 
 // keyIface is the slice of interface state composeNetworkKey needs, decoupled
@@ -136,10 +146,9 @@ func ipFromAddr(addr net.Addr) net.IP {
 	}
 }
 
-// defaultRouteInterfaceName finds which interface owns the outbound default
-// route, without sending any packets: a UDP "connect" only resolves the local
-// route, it never dials out. Returns "" when no default route exists yet
-// (offline, or mid-resume before the NIC has one) or it can't be resolved.
+// defaultRouteInterfaceName is the fallback where the platform has no route
+// table reader: a UDP "connect" only resolves the local route, it never dials
+// out. Returns "" when no default route exists yet or it can't be resolved.
 func defaultRouteInterfaceName() string {
 	ip := defaultRouteLocalIP()
 	if ip == nil {
@@ -195,10 +204,6 @@ func defaultGatewayIP() string {
 	defer cancel()
 
 	switch runtime.GOOS {
-	case "windows":
-		out := runCommand(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command",
-			"(Get-NetRoute -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue | Sort-Object RouteMetric | Select-Object -First 1 -ExpandProperty NextHop)")
-		return strings.TrimSpace(out)
 	case "darwin":
 		out := runCommand(ctx, "route", "-n", "get", "default")
 		if m := darwinGatewayRe.FindStringSubmatch(out); m != nil {
