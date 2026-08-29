@@ -899,7 +899,8 @@ body[data-theme="light"] .login-brand {
 
 body[data-state="DISCONNECTED"] .drift-frag,
 body[data-state="DISCONNECTING"] .drift-frag,
-body[data-state="ERROR"] .drift-frag {
+body[data-state="ERROR"] .drift-frag,
+body[data-state="KILL_SWITCH"] .drift-frag {
   transform: translate(var(--dx), var(--dy)) rotate(var(--dr));
 }
 
@@ -916,6 +917,7 @@ body[data-state="DISCONNECTING"] .drift-map { color: var(--text-muted); opacity:
 body[data-state="CONNECTING"] .drift-map { opacity: 0.85; }
 body[data-state="CONNECTED"] .drift-map { color: var(--success); }
 body[data-state="ERROR"] .drift-map { color: var(--danger); opacity: 0.55; }
+body[data-state="KILL_SWITCH"] .drift-map { color: var(--warning); opacity: 0.55; }
 body[data-offline="true"] .drift-map { color: var(--warning); opacity: 0.55; }
 
 .drift-orbit {
@@ -1312,6 +1314,14 @@ body[data-theme="light"] .menu-dropdown {
 
 .hero-card[data-state="ERROR"] .hero-dot { background: var(--danger); }
 .hero-card[data-state="ERROR"] .hero-kicker strong { color: var(--danger); }
+
+/* Kill switch armed while idle: a deliberate block, not a fault — amber like
+   the other holds, with a steady glow rather than the pulse of an attempt. */
+.hero-card[data-state="KILL_SWITCH"] .hero-dot {
+  background: var(--warning);
+  box-shadow: 0 0 0 4px var(--warning-glow);
+}
+.hero-card[data-state="KILL_SWITCH"] .hero-kicker strong { color: var(--warning); }
 
 /* No internet is a wait, not a failure: amber wins over any state's color. */
 .hero-card[data-offline="true"] .hero-dot {

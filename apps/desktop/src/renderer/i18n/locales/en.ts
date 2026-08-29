@@ -76,6 +76,10 @@ export const en = {
   "hero.noServers": "No servers available",
   "hero.noServersForTransport": "No servers support this transport",
   "hero.killSwitchBlocking": "Kill switch is on — internet is paused until the VPN is back. Press Disconnect to go online without VPN.",
+  "hero.killSwitchLockdown": "Lockdown is on — internet stays blocked until you turn Lockdown off.",
+  "state.KILL_SWITCH": "KILL SWITCH ARMED",
+  "hero.headline.KILL_SWITCH": "Nothing gets {x}",
+  "hero.emphasis.KILL_SWITCH": "through",
   "hero.region": "Region",
   "hero.allRegions": "All regions",
 

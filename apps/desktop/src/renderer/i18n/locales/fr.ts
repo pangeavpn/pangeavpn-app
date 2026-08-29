@@ -76,6 +76,10 @@ export const fr = {
   "hero.noServers": "Aucun serveur disponible",
   "hero.noServersForTransport": "Aucun serveur ne prend en charge ce transport",
   "hero.killSwitchBlocking": "Le kill switch est actif : Internet est en pause jusqu'au retour du VPN. Appuyez sur Se déconnecter pour naviguer sans VPN.",
+  "hero.killSwitchLockdown": "Le mode Lockdown est activé : Internet reste bloqué jusqu'à ce que vous le désactiviez.",
+  "state.KILL_SWITCH": "KILL SWITCH ACTIF",
+  "hero.headline.KILL_SWITCH": "Rien ne {x}",
+  "hero.emphasis.KILL_SWITCH": "passe",
   "hero.region": "Région",
   "hero.allRegions": "Toutes les régions",
 

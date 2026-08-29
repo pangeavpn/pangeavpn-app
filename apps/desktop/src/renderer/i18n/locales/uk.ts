@@ -76,6 +76,10 @@ export const uk = {
   "hero.noServers": "Немає доступних серверів",
   "hero.noServersForTransport": "Немає серверів із підтримкою цього транспорту",
   "hero.killSwitchBlocking": "Kill switch увімкнено — інтернет призупинено, доки VPN не відновиться. Натисніть «Відключити», щоб вийти в мережу без VPN.",
+  "hero.killSwitchLockdown": "Режим Lockdown увімкнено — інтернет заблоковано, доки ви його не вимкнете.",
+  "state.KILL_SWITCH": "KILL SWITCH УВІМКНЕНО",
+  "hero.headline.KILL_SWITCH": "Нічого не {x}",
+  "hero.emphasis.KILL_SWITCH": "проходить",
   "hero.region": "Регіон",
   "hero.allRegions": "Усі регіони",
 

@@ -2564,7 +2564,7 @@ const EM_DASH = "—";
 
 /** The {x} placeholder lets each locale put the stressed word where its own
  *  grammar needs it, without putting markup in the catalogues. */
-function setHeadline(state: StatusResponse["state"]): void {
+function setHeadline(state: StatusResponse["state"] | "KILL_SWITCH"): void {
   const [before, after = ""] = t(("hero.headline." + state) as MessageKey).split("{x}");
   const strong = document.createElement("strong");
   strong.textContent = t(("hero.emphasis." + state) as MessageKey);
@@ -2803,17 +2803,28 @@ function renderStatus(status: StatusResponse): void {
   } else if (connectingVisual) {
     renderConnectingState();
   } else {
+    // A raw daemon detail can't tell the user their internet is deliberately
+    // paused, nor how to get back online — say it in their language. This must
+    // cover DISCONNECTED too: after a reinstall the daemon re-arms a Lockdown
+    // lock and sits idle-disconnected with the kill switch on, which otherwise
+    // renders as a plain "idle" screen with no sign the internet is blocked.
+    const killSwitchHolding =
+      !showOffline &&
+      status.killSwitchActive === true &&
+      status.state !== "CONNECTED" &&
+      status.state !== "CONNECTING";
     stateEl.textContent = showOffline
       ? t("state.NO_INTERNET")
-      : t(("state." + status.state) as MessageKey);
-    // A raw daemon detail can't tell the user their internet is deliberately
-    // paused, nor that Disconnect is the way out — say it in their language.
-    const killSwitchHolding = !showOffline && status.state === "ERROR" && status.killSwitchActive === true;
-    detailEl.textContent = killSwitchHolding ? t("hero.killSwitchBlocking") : status.detail;
+      : killSwitchHolding
+        ? t("state.KILL_SWITCH")
+        : t(("state." + status.state) as MessageKey);
+    detailEl.textContent = killSwitchHolding
+      ? t(lockdownLocal ? "hero.killSwitchLockdown" : "hero.killSwitchBlocking")
+      : status.detail;
     detailEl.title = status.detail;
-    heroCard.dataset.state = status.state;
-    document.body.dataset.state = status.state;
-    setHeadline(status.state);
+    heroCard.dataset.state = killSwitchHolding ? "KILL_SWITCH" : status.state;
+    document.body.dataset.state = killSwitchHolding ? "KILL_SWITCH" : status.state;
+    setHeadline(killSwitchHolding ? "KILL_SWITCH" : status.state);
   }
 
   // Throughput stats
@@ -2841,8 +2852,21 @@ function renderStatus(status: StatusResponse): void {
 
   // Show connect vs disconnect button.
   // Show disconnect in ERROR state too — kill switch may still be active.
+  // An armed kill switch while idle (e.g. a Lockdown lock re-applied after a
+  // reinstall) also needs the escape hatch, but only when Lockdown is off:
+  // with Lockdown on, Disconnect keeps the lock, so Connect is the useful
+  // action and the detail message points at the Lockdown toggle instead.
+  const killSwitchIdleArmed =
+    !optimisticallyOff &&
+    status.killSwitchActive === true &&
+    status.state !== "CONNECTED" &&
+    status.state !== "CONNECTING";
   const showDisconnect =
-    !optimisticallyOff && (connected || status.state === "CONNECTING" || status.state === "ERROR");
+    !optimisticallyOff &&
+    (connected ||
+      status.state === "CONNECTING" ||
+      status.state === "ERROR" ||
+      (killSwitchIdleArmed && !lockdownLocal));
   serverConnectBtn.hidden = showDisconnect;
   serverDisconnectBtn.hidden = !showDisconnect;
 
