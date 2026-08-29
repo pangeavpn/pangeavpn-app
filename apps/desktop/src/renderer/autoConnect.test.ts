@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   attemptInitialAutoConnect,
+  getUserIntent,
   initAutoConnect,
+  notifyConnectRequested,
   notifyStatusTick,
   notifyUserConnected,
   notifyUserDisconnected,
@@ -126,4 +128,14 @@ test("no attempt while the daemon is recovering a dropped session itself", async
   await attemptInitialAutoConnect();
   notifyStatusTick();
   assert.equal(attempts, 0);
+});
+
+test("a Connect after Disconnect restores connected intent before the attempt", () => {
+  notifyUserDisconnected();
+  assert.equal(getUserIntent(), "disconnected");
+  notifyConnectRequested();
+  assert.equal(getUserIntent(), "connected");
+  // Stop mid-attempt still wins, so a late success is discarded.
+  notifyUserDisconnected();
+  assert.equal(getUserIntent(), "disconnected");
 });

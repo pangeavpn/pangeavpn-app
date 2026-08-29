@@ -2,6 +2,7 @@ import type { LogEntry, StatusResponse } from "@pangeavpn/shared-types";
 import {
   initAutoConnect,
   notifyStatusTick,
+  notifyConnectRequested,
   notifyUserConnected,
   notifyUserDisconnected,
   notifyToggleChanged,
@@ -1272,6 +1273,7 @@ serverConnectBtn.addEventListener("click", async () => {
     return;
   }
 
+  notifyConnectRequested();
   serverWorking = true;
   connectInFlight = true;
   const connectingSince = showConnectingState();
@@ -1350,6 +1352,7 @@ async function switchToServer(serverId: string): Promise<void> {
   if (!pangeaApi || !daemonApi) return;
   if (!serverId) return;
 
+  notifyConnectRequested();
   serverWorking = true;
   connectInFlight = true;
   const connectingSince = showConnectingState();

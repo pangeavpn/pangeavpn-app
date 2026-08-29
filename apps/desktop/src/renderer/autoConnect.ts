@@ -47,6 +47,14 @@ export function notifyUserConnected(): void {
   nextAttemptAtMs = 0;
 }
 
+/** A deliberate Connect: the intent is "connected" from the click, so a Stop
+ *  during the attempt is the only thing that can leave it "disconnected". */
+export function notifyConnectRequested(): void {
+  userIntent = "connected";
+  consecutiveFailures = 0;
+  nextAttemptAtMs = 0;
+}
+
 export function notifyUserDisconnected(): void {
   userIntent = "disconnected";
   consecutiveFailures = 0;
