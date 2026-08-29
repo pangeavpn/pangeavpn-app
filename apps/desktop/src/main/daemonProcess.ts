@@ -5,7 +5,7 @@ import path from "node:path";
 import { app } from "electron";
 import { DaemonClient } from "./daemonClient";
 import { getBundledDaemonPath } from "./resourcePaths";
-import { ensureUserRuntimeFiles, getAppSupportDir } from "./platformPaths";
+import { ensureUserRuntimeFiles, getAppSupportDir, hasManagedLinuxDaemonService } from "./platformPaths";
 import { DaemonNotReadyError } from "./runtimeFiles";
 
 function openDaemonLogStdio(): ["ignore", number, number] | "ignore" {
@@ -39,19 +39,6 @@ const macLaunchDaemonLabel = "com.pangea.pangeavpn.daemon";
 const macLaunchDaemonPlist = `/Library/LaunchDaemons/${macLaunchDaemonLabel}.plist`;
 const macSystemSupportDir = "/Library/Application Support/PangeaVPN";
 const macElevationRetryBackoffMs = 10000;
-
-const linuxDaemonServiceUnitPaths = [
-  "/etc/systemd/system/pangea-daemon.service",
-  "/lib/systemd/system/pangea-daemon.service",
-  "/usr/lib/systemd/system/pangea-daemon.service"
-];
-
-// install-linux.sh installs pangea-daemon as a root-owned systemd service;
-// its presence means that service, not this process, owns the daemon's
-// lifecycle.
-function hasManagedLinuxDaemonService(): boolean {
-  return linuxDaemonServiceUnitPaths.some((servicePath) => fs.existsSync(servicePath));
-}
 
 export class DaemonProcessManager {
   private child: ChildProcess | null = null;

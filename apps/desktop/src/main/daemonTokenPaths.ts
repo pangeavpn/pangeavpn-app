@@ -33,6 +33,9 @@ export function daemonTokenCandidatePaths(
   if (platform === "linux") {
     add(path.join("/etc/pangeavpn", TOKEN_FILE));
     add(path.join("/var/lib", APP_FOLDER, TOKEN_FILE));
+    // Last, so a systemd-managed install authenticates with the root daemon's
+    // token before ever trying a stale one left in the user's own directory.
+    add(path.join(userAppDataDir, APP_FOLDER, TOKEN_FILE));
   }
 
   return candidates;

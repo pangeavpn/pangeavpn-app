@@ -11,6 +11,35 @@ warn()  { printf "${YELLOW}[!]${NC} %s\n" "$*"; }
 fail()  { printf "${RED}[x]${NC} %s\n" "$*"; exit 1; }
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
+# The account PangeaVPN is being installed for. The privileged steps below all
+# call sudo themselves, so this works whether the script is run directly or
+# under sudo.
+RUNTIME_USER="${SUDO_USER:-$(id -un)}"
+if [ "$RUNTIME_USER" = "root" ]; then
+  RUNTIME_USER=""
+fi
+
+# Builds must never run as root: npm would leave root-owned node_modules/,
+# dist/ and .cache/ trees behind in the checkout, and every later build the
+# user runs without sudo then dies on EACCES. Drop back to them for build
+# steps; only the install steps that follow need privileges.
+if [ "$(id -u)" -eq 0 ] && [ -n "$RUNTIME_USER" ]; then
+  # -H so npm's cache and config resolve under the user's home, not /root's.
+  run_as_user() { sudo -u "$RUNTIME_USER" -H --preserve-env=PATH -- "$@"; }
+else
+  run_as_user() { "$@"; }
+fi
+
+# Whether the *invoking session* already carries the group, recorded before
+# anything below can change it. A session keeps the group list it was created
+# with, so being in /etc/group is not the same as being able to use it yet.
+# Running under sudo this reads root's groups, so it is only trusted directly.
+SESSION_HAS_GROUP=0
+if [ "$(id -u)" -ne 0 ] && id -nG 2>/dev/null | tr ' ' '\n' | grep -qx pangeavpn; then
+  SESSION_HAS_GROUP=1
+fi
+
 INSTALL_DIR="/opt/PangeaVPN"
 DAEMON_BIN="/usr/local/bin/pangea-daemon"
 DESKTOP_FILE="/usr/share/applications/pangeavpn.desktop"
@@ -73,10 +102,10 @@ esac
 cd "$REPO_ROOT"
 
 info "Installing npm dependencies..."
-npm install
+run_as_user npm install
 
 info "Building project..."
-npm run build
+run_as_user npm run build
 
 # --- Install app ---
 info "Installing PangeaVPN to $INSTALL_DIR..."
@@ -84,7 +113,7 @@ sudo mkdir -p "$INSTALL_DIR"
 
 # Build the AppImage
 info "Packaging AppImage..."
-npm exec --workspace @pangeavpn/desktop electron-builder -- \
+run_as_user npm exec --workspace @pangeavpn/desktop electron-builder -- \
   --projectDir . --linux AppImage --"$(uname -m | sed 's/x86_64/x64/;s/aarch64/arm64/')" \
   --publish never --config.electronVersion=41.5.0
 
@@ -128,10 +157,17 @@ if ! getent group pangeavpn &>/dev/null; then
   sudo groupadd --system pangeavpn
 fi
 
-RUNTIME_USER="${SUDO_USER:-}"
-if [ -n "$RUNTIME_USER" ] && [ "$RUNTIME_USER" != "root" ]; then
-  info "Adding $RUNTIME_USER to the pangeavpn group..."
-  sudo usermod -aG pangeavpn "$RUNTIME_USER"
+# Tracks whether this run is what granted the group. If they already had it,
+# their session already carries it and no re-login is needed.
+GROUP_ADDED_NOW=0
+if [ -n "$RUNTIME_USER" ]; then
+  if id -nG "$RUNTIME_USER" 2>/dev/null | tr ' ' '\n' | grep -qx pangeavpn; then
+    info "$RUNTIME_USER is already in the pangeavpn group."
+  else
+    info "Adding $RUNTIME_USER to the pangeavpn group..."
+    sudo usermod -aG pangeavpn "$RUNTIME_USER"
+    GROUP_ADDED_NOW=1
+  fi
 else
   warn "Could not detect the installing user — add them to the pangeavpn group manually, e.g.: sudo usermod -aG pangeavpn <your-username>, then log out and back in."
 fi
@@ -193,6 +229,14 @@ sudo chmod 644 "$DESKTOP_FILE"
 
 info "PangeaVPN installed successfully!"
 info "Launch from your application menu or run: $INSTALL_DIR/PangeaVPN.AppImage"
-if [ -n "$RUNTIME_USER" ] && [ "$RUNTIME_USER" != "root" ]; then
-  warn "Log out and back in (or reboot) so your pangeavpn group membership takes effect — required before the app can reach the daemon."
+if [ "$GROUP_ADDED_NOW" -eq 1 ] || { [ "$(id -u)" -ne 0 ] && [ "$SESSION_HAS_GROUP" -eq 0 ]; }; then
+  echo
+  warn "=============================================================="
+  warn " ONE MORE STEP: log out and back in (or reboot) before"
+  warn " launching PangeaVPN."
+  warn ""
+  warn " $RUNTIME_USER is in the 'pangeavpn' group, but this login"
+  warn " session still carries the group list it was created with,"
+  warn " so the app cannot read the daemon's token yet."
+  warn "=============================================================="
 fi

@@ -37,6 +37,19 @@ async function verifyTokenFile(tokenPath: string): Promise<void> {
         "PangeaVPN's background service has not finished starting up yet. Please wait a moment and try again."
       );
     }
+    // The token is deliberately readable only by the daemon's group. Hitting
+    // this means the install added us to that group but this login session
+    // still carries the group list it was created with.
+    if (isPermissionDenied(error)) {
+      throw new DaemonNotReadyError(
+        process.platform === "linux"
+          ? "PangeaVPN cannot read the background service's access token. If you just installed or " +
+            "updated PangeaVPN, log out and back in (or reboot) so your new 'pangeavpn' group " +
+            "membership takes effect, then reopen the app."
+          : "PangeaVPN is not allowed to read the background service's access token. Reinstall " +
+            "PangeaVPN to repair the service's permissions."
+      );
+    }
     throw error;
   }
 
@@ -97,10 +110,19 @@ async function ensureConfigFile(configPath: string): Promise<void> {
 }
 
 function isNotFound(error: unknown): boolean {
-  return typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    (error as { code?: string }).code === "ENOENT";
+  return errorCode(error) === "ENOENT";
+}
+
+function isPermissionDenied(error: unknown): boolean {
+  const code = errorCode(error);
+  return code === "EACCES" || code === "EPERM";
+}
+
+function errorCode(error: unknown): string | undefined {
+  if (typeof error !== "object" || error === null || !("code" in error)) {
+    return undefined;
+  }
+  return (error as { code?: string }).code;
 }
 
 async function tryRemoveFile(filePath: string): Promise<void> {

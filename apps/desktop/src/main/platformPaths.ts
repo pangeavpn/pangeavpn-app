@@ -9,6 +9,23 @@ const APP_FOLDER = "pangeavpn-desktop";
 const WINDOWS_SERVICE_FOLDER = "PangeaVPN";
 const MAC_SYSTEM_FOLDER = "PangeaVPN";
 const MAC_LAUNCH_DAEMON_PLIST = "/Library/LaunchDaemons/com.pangea.pangeavpn.daemon.plist";
+const LINUX_SYSTEM_SUPPORT_DIR = "/etc/pangeavpn";
+
+// install-linux.sh installs pangea-daemon as a root-owned systemd service whose
+// unit pins PANGEA_APP_SUPPORT_DIR=/etc/pangeavpn. Its presence means that
+// service — not this process — owns the daemon's state directory.
+const linuxDaemonServiceUnitPaths = [
+  "/etc/systemd/system/pangea-daemon.service",
+  "/lib/systemd/system/pangea-daemon.service",
+  "/usr/lib/systemd/system/pangea-daemon.service"
+];
+
+export function hasManagedLinuxDaemonService(): boolean {
+  if (process.platform !== "linux") {
+    return false;
+  }
+  return linuxDaemonServiceUnitPaths.some((servicePath) => fsSync.existsSync(servicePath));
+}
 
 export function getAppSupportDir(): string {
   if (process.platform === "win32") {
@@ -16,6 +33,9 @@ export function getAppSupportDir(): string {
   }
   if (process.platform === "darwin" && shouldUseMacSystemSupportDir()) {
     return path.join("/Library/Application Support", MAC_SYSTEM_FOLDER);
+  }
+  if (hasManagedLinuxDaemonService()) {
+    return LINUX_SYSTEM_SUPPORT_DIR;
   }
   return path.join(app.getPath("appData"), APP_FOLDER);
 }
@@ -76,7 +96,7 @@ export async function ensureUserRuntimeFiles(): Promise<void> {
 // True where an elevated daemon owns the state directory. It is admin-only, so
 // the desktop reads the token there and writes nothing.
 function daemonOwnsStateDir(): boolean {
-  return process.platform === "win32" || shouldUseMacSystemSupportDir();
+  return process.platform === "win32" || shouldUseMacSystemSupportDir() || hasManagedLinuxDaemonService();
 }
 
 function getWindowsServiceSupportDir(): string {
