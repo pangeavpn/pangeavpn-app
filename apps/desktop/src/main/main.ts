@@ -43,7 +43,7 @@ import {
   buildServerRetryOrder as buildMainServerRetryOrder,
   runServerFallback
 } from "./serverFallback";
-import { shouldRotateServers } from "./serverRotation";
+import { planAfterServerExhausted, shouldRotateServers } from "./serverRotation";
 import { shouldRecoverFromNetworkChange } from "./networkRecovery";
 import {
   commitProfileSet,
@@ -693,12 +693,15 @@ async function rotateAwayFromBlockedServer(): Promise<void> {
   serverRotationInFlight = true;
   lastServerRotationAtMs = Date.now();
   try {
+    // The peer this server exhausted on may be one the hub dropped; forget it
+    // so the plan re-provisions a fresh peer here before rotating away.
+    if (blockedServerId) forgetProvisionedProfile(`auto-${blockedServerId}`);
     const plan = await resolveTrayServerPlan(blockedServerId);
     if (!plan) {
-      console.warn("rotation: no other server to try");
+      console.warn("rotation: no server to try");
       return;
     }
-    console.warn(`rotation: ${blockedServerId ?? "current server"} carries no transport; trying another server`);
+    console.warn(`rotation: ${blockedServerId ?? "current server"} carries no transport; re-provisioning it, then other servers`);
     const result = await provisionAndConnect(plan);
     if (!result.ok) {
       console.warn("rotation: reconnecting on another server failed", result.error);
@@ -873,6 +876,9 @@ async function connectFromTray(): Promise<void> {
       exhaustedServerId = lastServerId;
     }
 
+    // Force a fresh peer on the server that exhausted, in case the hub dropped
+    // the cached one; the plan retries it first before other servers.
+    if (exhaustedServerId) forgetProvisionedProfile(`auto-${exhaustedServerId}`);
     const serverPlan = await resolveTrayServerPlan(exhaustedServerId);
     if (!serverPlan) {
       trayStatusState = "ERROR";
@@ -939,15 +945,17 @@ async function disconnectFromTray(): Promise<void> {
   }
 }
 
-async function resolveTrayServerPlan(excludedServerId: string | null = null): Promise<string[] | null> {
+async function resolveTrayServerPlan(failedServerId: string | null = null): Promise<string[] | null> {
   try {
     const servers = await pangeaApiClient.getServers();
     if (servers.length > 0) {
       const initialServerId = lastServerId && servers.some((server) => server.id === lastServerId)
         ? lastServerId
         : servers[0].id;
-      const plan = buildMainServerRetryOrder(servers, initialServerId)
-        .filter((serverId) => serverId !== excludedServerId);
+      const plan = planAfterServerExhausted(
+        buildMainServerRetryOrder(servers, initialServerId),
+        failedServerId
+      );
       return plan.length > 0 ? plan : null;
     }
   } catch {

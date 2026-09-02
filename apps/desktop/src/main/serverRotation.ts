@@ -18,3 +18,16 @@ export function shouldRotateServers(decision: RotationDecision): boolean {
   if (decision.connectionAttemptRunning || decision.rotationInFlight) return false;
   return decision.nowMs - decision.lastRotationAtMs > SERVER_ROTATION_COOLDOWN_MS;
 }
+
+/** Servers to try after failedServerId ran out of transports: retry it first
+ *  (a fresh peer revives one the hub dropped), then the rest in retry order. */
+export function planAfterServerExhausted(
+  retryOrder: readonly string[],
+  failedServerId: string | null
+): string[] {
+  const rest = retryOrder.filter((serverId) => serverId !== failedServerId);
+  if (failedServerId && retryOrder.includes(failedServerId)) {
+    return [failedServerId, ...rest];
+  }
+  return rest;
+}
