@@ -2431,6 +2431,81 @@ func TestHealthCheck_SilentTunnelRebuildKeepsAllowLAN(t *testing.T) {
 	}
 }
 
+// TestHealthCheck_SilentTunnelInPlaceRebuildKeepsDevice proves an in-place
+// manager (Windows, macOS) recovers a silent tunnel without dropping the adapter.
+func TestHealthCheck_SilentTunnelInPlaceRebuildKeepsDevice(t *testing.T) {
+	profile := silentTunnelProfile()
+	naive := &fakeNaiveManager{}
+	wgMgr := &fakeInPlaceWGManager{}
+	ks := &fakeKillSwitch{}
+	machine := state.NewMachine()
+	logs := state.NewLogStore(100)
+	config := testConfigStore(t, profile)
+	svc := NewService(machine, logs, config, &fakeCloakManager{}, naive, &fakeRealityManager{}, &fakeHysteria2Manager{}, &fakeShadowsocksManager{}, &fakeSnowflakeManager{}, wgMgr, ks)
+	stubSessionRecordStore(t)
+	svc.handshakeTimeout = 200 * time.Millisecond
+	svc.networkRepair = func(context.Context, []string) ([]string, error) { return nil, nil }
+	svc.networkKey = func() string { return "eth0:192.0.2.10" }
+	svc.hostInternet = func() (bool, bool) { return false, false }
+
+	if err := svc.Connect(context.Background(), "p1", ConnectOptions{PreferredTransport: "naive"}); err != nil {
+		t.Fatalf("connect failed: %v", err)
+	}
+	wgMgr.mu.Lock()
+	stopsBefore, startsBefore := wgMgr.stopCount, wgMgr.startCount
+	wgMgr.mu.Unlock()
+
+	goSilent(&wgMgr.fakeWGManager)
+	svc.runHealthCheck(context.Background())
+
+	if st := svc.Status(context.Background()).State; st != state.StateConnected {
+		t.Fatalf("state = %q, want CONNECTED after an in-place rebuild", st)
+	}
+	wgMgr.mu.Lock()
+	defer wgMgr.mu.Unlock()
+	if wgMgr.stopCount != stopsBefore {
+		t.Errorf("in-place rebuild tore the device down (%d -> %d stops); the adapter should stay up", stopsBefore, wgMgr.stopCount)
+	}
+	if wgMgr.startCount != startsBefore+1 {
+		t.Errorf("wireguard starts during in-place rebuild = %d, want 1 (re-point over the restarted transport)", wgMgr.startCount-startsBefore)
+	}
+	if !naive.stopCalled {
+		t.Error("expected the transport to be restarted during the rebuild")
+	}
+	if !ks.Active() {
+		t.Error("kill switch must stay armed across the rebuild")
+	}
+}
+
+// TestWaitForWireGuardHandshake_MinHandshakeRejectsStaleReuse proves a device
+// reused in place is judged on a fresh handshake, not its pre-sleep one.
+func TestWaitForWireGuardHandshake_MinHandshakeRejectsStaleReuse(t *testing.T) {
+	wgMgr := &fakeWGManager{}
+	svc := newTestService(t, &fakeCloakManager{}, &fakeNaiveManager{}, wgMgr, &fakeKillSwitch{})
+	svc.handshakeTimeout = 120 * time.Millisecond
+	profile := silentTunnelProfile().WireGuard
+
+	stale := time.Now().Add(-5 * time.Minute).Unix()
+	wgMgr.mu.Lock()
+	wgMgr.running = true
+	wgMgr.handshakeUnix = stale
+	wgMgr.mu.Unlock()
+
+	if err := svc.waitForWireGuardHandshake(withMinHandshake(context.Background(), stale), profile); err == nil {
+		t.Fatal("stale reused handshake was accepted; want a timeout waiting for a newer one")
+	}
+	if err := svc.waitForWireGuardHandshake(context.Background(), profile); err != nil {
+		t.Fatalf("non-zero handshake rejected without a minimum: %v", err)
+	}
+
+	wgMgr.mu.Lock()
+	wgMgr.handshakeUnix = stale + 60
+	wgMgr.mu.Unlock()
+	if err := svc.waitForWireGuardHandshake(withMinHandshake(context.Background(), stale), profile); err != nil {
+		t.Fatalf("fresh handshake past the minimum rejected: %v", err)
+	}
+}
+
 // transportMemoryProfile builds a profile with cloak + naive + reality all
 // configured, for the per-network transport-memory tests.
 func transportMemoryProfile() state.Profile {

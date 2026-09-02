@@ -1496,17 +1496,30 @@ func handshakeTimeoutFor(ctx context.Context, configured time.Duration) time.Dur
 	return defaultWireGuardHandshakeTimeout
 }
 
+type minHandshakeKey struct{}
+
+// withMinHandshake makes the handshake wait require a timestamp strictly newer
+// than after, so a device reused in place is judged on a fresh handshake.
+func withMinHandshake(ctx context.Context, after int64) context.Context {
+	return context.WithValue(ctx, minHandshakeKey{}, after)
+}
+
+func minHandshakeFrom(ctx context.Context) int64 {
+	if after, ok := ctx.Value(minHandshakeKey{}).(int64); ok {
+		return after
+	}
+	return 0
+}
+
 // wireGuardHandshakePollInterval is how often waitForWireGuardHandshake
 // re-reads WireGuard status while waiting for the first handshake.
 const wireGuardHandshakePollInterval = 200 * time.Millisecond
 
-// waitForWireGuardHandshake blocks until WireGuard completes a peer handshake
-// (LastHandshakeUnix becomes non-zero) or the timeout elapses. A freshly
-// started device has no prior handshake, so any non-zero value belongs to this
-// session. Returns an error if the interface drops, the deadline passes, or ctx
-// is cancelled (Disconnect).
+// waitForWireGuardHandshake blocks until WireGuard reports a handshake newer
+// than the context's minimum (0 for a fresh device), or the timeout elapses.
 func (s *Service) waitForWireGuardHandshake(ctx context.Context, wireGuardProfile state.WireGuardProfile) error {
 	timeout := handshakeTimeoutFor(ctx, s.handshakeTimeout)
+	minHandshake := minHandshakeFrom(ctx)
 	deadline := time.Now().Add(timeout)
 	for {
 		status, err := s.wg.Status(ctx, wireGuardProfile)
@@ -1516,7 +1529,7 @@ func (s *Service) waitForWireGuardHandshake(ctx context.Context, wireGuardProfil
 		if !status.Running {
 			return errors.New("wireguard interface went down before handshake")
 		}
-		if status.LastHandshakeUnix > 0 {
+		if status.LastHandshakeUnix > minHandshake {
 			return nil
 		}
 		if time.Now().After(deadline) {
@@ -2836,8 +2849,19 @@ func (s *Service) rebuildSilentSession(ctx context.Context, profile state.Profil
 	}
 
 	s.machine.Set(state.StateConnecting, "rebuilding silent tunnel")
-	if err := s.wg.Stop(ctx, withTransportBypassHosts(live)); err != nil {
-		s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("rebuild: wireguard stop warning: %v", err))
+	// In-place managers (Windows, macOS) keep the adapter up across a rebuild;
+	// the reused device keeps its stale handshake, so require a newer one.
+	keepDevice := false
+	if _, inPlace := s.wg.(wgInPlaceSwitcher); inPlace {
+		if prev, statusErr := s.wg.Status(ctx, wireGuardProfile); statusErr == nil {
+			ctx = withMinHandshake(ctx, prev.LastHandshakeUnix)
+			keepDevice = true
+		}
+	}
+	if !keepDevice {
+		if err := s.wg.Stop(ctx, withTransportBypassHosts(live)); err != nil {
+			s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("rebuild: wireguard stop warning: %v", err))
+		}
 	}
 	if active := s.activeTransport(); active != nil {
 		stopCtx, stopCancel := context.WithTimeout(context.Background(), 4*time.Second)
