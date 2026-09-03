@@ -601,24 +601,38 @@ func (s *Service) Connect(ctx context.Context, profileID string, opts ConnectOpt
 	s.machine.Set(state.StateConnecting, "enabling kill switch")
 	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("connect requested with profile %s", profile.ID))
 	stepStart := time.Now()
-	permittedHosts := killSwitchPermits(profile)
+	permittedHosts := killSwitchPermitsFor(profile, opts.AllowLAN)
 	if err := s.killSwitch.Enable(ctx, permittedHosts, opts.AllowLAN, opts.Lockdown); err != nil {
 		s.setError(fmt.Sprintf("kill switch enable failed: %v", err))
 		return err
 	}
 	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("kill switch enabled (%dms)", time.Since(stepStart).Milliseconds()))
 
+	// The lock is up for this session: record it now, so a failed bring-up, a
+	// crash or a restart all rebuild toward it instead of stranding the lock.
+	s.setCurrentProfile(profile)
+	s.setSessionOpts(opts)
 	if err := s.bringUpAfterKillSwitch(ctx, profile, wireGuardProfile, opts); err != nil {
-		// The user asked for this session: remember it so recovery brings it
-		// up once the host has a network again.
-		if errors.Is(err, ErrHostOffline) {
-			s.setCurrentProfile(profile)
-			s.setSessionOpts(opts)
+		if !errors.Is(err, ErrHostOffline) {
+			s.deferRecovery(connectRetryGrace)
 		}
 		return err
 	}
 	s.logs.Add(state.LogInfo, state.SourceDaemon, "connect flow completed")
 	return nil
+}
+
+// connectRetryGrace keeps the daemon's own retry out of the way of the app's
+// server cascade right after a user-driven connect fails.
+const connectRetryGrace = 15 * time.Second
+
+// deferRecovery pushes the next automatic rebuild out to at least d from now.
+func (s *Service) deferRecovery(d time.Duration) {
+	s.recoveryMu.Lock()
+	defer s.recoveryMu.Unlock()
+	if next := time.Now().Add(d); next.After(s.recoveryNextAt) {
+		s.recoveryNextAt = next
+	}
 }
 
 // wireGuardProfileFor builds the WireGuard profile a session runs with: the
@@ -698,7 +712,7 @@ func (s *Service) armKillSwitchForAdoptedTunnel(ctx context.Context, profile sta
 		return fmt.Errorf("allow-lan config transform failed: %w", err)
 	}
 	s.machine.Set(state.StateConnecting, "arming kill switch for adopted tunnel")
-	if err := s.killSwitch.Enable(ctx, killSwitchPermits(profile), opts.AllowLAN, opts.Lockdown); err != nil {
+	if err := s.killSwitch.Enable(ctx, killSwitchPermitsFor(profile, opts.AllowLAN), opts.AllowLAN, opts.Lockdown); err != nil {
 		return fmt.Errorf("kill switch enable failed for adopted tunnel: %w", err)
 	}
 	tunnel := s.resolveTunnelRef(ctx, wireGuardProfile)
@@ -1609,7 +1623,7 @@ func (s *Service) Switch(ctx context.Context, newProfileID string, opts ConnectO
 
 	s.machine.Set(state.StateConnecting, fmt.Sprintf("switching to %s: updating kill switch", newProfile.ID))
 	stepStart := time.Now()
-	if err := s.killSwitch.Enable(ctx, killSwitchPermits(newProfile), opts.AllowLAN, opts.Lockdown); err != nil {
+	if err := s.killSwitch.Enable(ctx, killSwitchPermitsFor(newProfile, opts.AllowLAN), opts.AllowLAN, opts.Lockdown); err != nil {
 		return refuse(err, fmt.Sprintf("kill switch re-enable failed: %v", err))
 	}
 	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("kill switch re-enabled for %s (%dms)", newProfile.ID, time.Since(stepStart).Milliseconds()))
@@ -1667,6 +1681,9 @@ func (s *Service) ClearKillSwitch(ctx context.Context) error {
 	if !s.killSwitch.Active() {
 		return nil
 	}
+	if why, held := s.sessionHeld(); held {
+		return fmt.Errorf("%w: %s", ErrSessionHeld, why)
+	}
 	ksCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 	if err := s.killSwitch.Clear(ksCtx); err != nil {
@@ -1680,6 +1697,28 @@ func (s *Service) ClearKillSwitch(ctx context.Context) error {
 // loadKillSwitchState reads the persisted kill-switch state. Indirected for
 // tests.
 var loadKillSwitchState = platform.LoadKillSwitchStatePublic
+
+// ErrSessionHeld is returned when a manual clear would open the lock from
+// under a session the user never ended.
+var ErrSessionHeld = errors.New("kill switch is guarding a session; disconnect first")
+
+// sessionHeld reports whether the lock still guards a session the user has
+// not ended: a live state, a profile in recovery, or a recorded session.
+func (s *Service) sessionHeld() (string, bool) {
+	switch current, detail := s.machine.Get(); {
+	case current == state.StateConnecting || current == state.StateConnected || current == state.StateDisconnecting:
+		return "the daemon is " + strings.ToLower(string(current)), true
+	case current == state.StateError && detail == orphanedLockDetail:
+		return "the previous session's lock is still holding", true
+	}
+	if _, ok := s.getCurrentProfile(); ok {
+		return "a session is being recovered", true
+	}
+	if record, err := loadSessionRecord(); err == nil && record.ProfileID != "" {
+		return "the last session was never disconnected", true
+	}
+	return "", false
+}
 
 // PermitHosts opens a control-plane hole in an already-engaged kill switch.
 //
@@ -1848,35 +1887,34 @@ func (s *Service) markKillSwitchLocked(ctx context.Context, allowLAN bool) error
 	return nil
 }
 
+// teardownMode says who is ending the session, which decides what the lock
+// does afterwards: only the user lowers it, only the user narrows it.
+type teardownMode int
+
+const (
+	teardownUser     teardownMode = iota // Disconnect: clear the lock
+	teardownLockdown                     // Disconnect under Lockdown: keep, narrowed to the hub
+	teardownShutdown                     // process exit: keep everything for the next start
+)
+
 // Disconnect tears down the active VPN session. When keepKillSwitch is true
 // (Lockdown mode), the firewall rules stay engaged so the device has no
 // internet until the caller explicitly clears the kill switch.
 func (s *Service) Disconnect(ctx context.Context, keepKillSwitch bool) error {
-	return s.disconnect(ctx, func() bool { return keepKillSwitch })
+	mode := teardownUser
+	if keepKillSwitch {
+		mode = teardownLockdown
+	}
+	return s.disconnect(ctx, mode)
 }
 
-// Shutdown serializes with all mutating operations before deciding whether a
-// persisted Lockdown lock must survive process exit.
+// Shutdown stops the tunnel for process exit and lowers nothing: the lock and
+// the session record outlive the process, and the next start redials.
 func (s *Service) Shutdown(ctx context.Context) error {
-	return s.disconnect(ctx, func() bool {
-		persisted, err := loadKillSwitchState()
-		if err != nil {
-			if errors.Is(err, platform.ErrKillSwitchStateUnreadable) {
-				// A corrupt file says nothing about whether the lock is a
-				// deliberate Lockdown; ask the platform whether it's live
-				// instead of guessing from a file we can't trust.
-				live := s.killSwitch.Active()
-				s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("kill switch state file is corrupt during shutdown; retaining based on live rules (active=%v): %v", live, err))
-				return live
-			}
-			s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("could not read kill switch state during shutdown; retaining it: %v", err))
-			return true
-		}
-		return persisted.Active && persisted.Locked
-	})
+	return s.disconnect(ctx, teardownShutdown)
 }
 
-func (s *Service) disconnect(ctx context.Context, shouldKeepKillSwitch func() bool) error {
+func (s *Service) disconnect(ctx context.Context, mode teardownMode) error {
 	// Interrupt any in-flight Connect first so we don't queue behind a
 	// 10s WaitForSession. The cancelled connect will exit, release opMu,
 	// and run its own cleanup — Disconnect then takes the lock and does
@@ -1889,7 +1927,6 @@ func (s *Service) disconnect(ctx context.Context, shouldKeepKillSwitch func() bo
 
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
-	keepKillSwitch := shouldKeepKillSwitch()
 
 	currentState, _ := s.machine.Get()
 	if currentState == state.StateDisconnecting {
@@ -1976,12 +2013,15 @@ func (s *Service) disconnect(ctx context.Context, shouldKeepKillSwitch func() bo
 	}
 
 	// Always clear profile and kill switch regardless of earlier errors.
-	s.clearCurrentProfile()
+	s.clearCurrentProfile(mode == teardownShutdown)
 	s.resetRecovery()
 	s.resetEndpointRouteRepairs()
 
 	if s.killSwitch.Active() {
-		if keepKillSwitch {
+		switch mode {
+		case teardownShutdown:
+			s.logs.Add(state.LogInfo, state.SourceDaemon, "kill switch left armed across daemon exit; the next start reconciles it")
+		case teardownLockdown:
 			// Retaining the lock past the session is what Lockdown means, but the
 			// departing server's endpoints have no business staying permitted once
 			// its session is gone — re-arm with just the hub's control-plane hosts
@@ -1995,7 +2035,7 @@ func (s *Service) disconnect(ctx context.Context, shouldKeepKillSwitch func() bo
 			} else {
 				s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("kill switch retained (lockdown mode), narrowed to control-plane hosts %v", hubPermits))
 			}
-		} else {
+		default:
 			s.machine.Set(state.StateDisconnecting, "clearing kill switch")
 			ksCtx, ksCancel := context.WithTimeout(context.Background(), 3*time.Second)
 			if err := s.killSwitch.Clear(ksCtx); err != nil {
@@ -2863,7 +2903,7 @@ func (s *Service) rebuildSilentSession(ctx context.Context, profile state.Profil
 	// Re-arming first keeps the tunnel from coming back up wide open.
 	if !s.killSwitch.Active() {
 		s.logs.Add(state.LogWarn, state.SourceDaemon, "rebuild: kill switch was not armed; re-arming before bring-up")
-		if err := s.killSwitch.Enable(ctx, killSwitchPermits(profile), opts.AllowLAN, opts.Lockdown); err != nil {
+		if err := s.killSwitch.Enable(ctx, killSwitchPermitsFor(profile, opts.AllowLAN), opts.AllowLAN, opts.Lockdown); err != nil {
 			return fmt.Errorf("kill switch re-arm failed: %w", err)
 		}
 	}
@@ -3075,45 +3115,11 @@ func (s *Service) reconcileStartup(ctx context.Context) {
 
 	runningProfiles := s.findRunningWireGuardProfiles(startupCtx)
 
-	// Reconcile a kill switch left from a previous session: a Lockdown lock
-	// stays fail-closed, and a crash leaves it armed while we redial.
+	// Whatever lock the previous process left comes back first; only then is a
+	// running tunnel adopted or a recorded session redialled.
+	persisted := s.reconcilePersistedKillSwitch(startupCtx)
 	if len(runningProfiles) == 0 {
-		persisted, err := loadKillSwitchState()
-		switch {
-		case errors.Is(err, platform.ErrKillSwitchStateUnreadable):
-			// A corrupt file must not read as "nothing engaged" — that's
-			// exactly what turns a real lock into a machine reported as
-			// unprotected. Probe the platform for live rules instead of
-			// falling into the stale-cleanup/no-op branches below.
-			if s.killSwitch.Active() {
-				s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("kill switch state file is corrupt but firewall rules are live; leaving them in place: %v", err))
-			} else {
-				s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("kill switch state file is corrupt and no live rules found; nothing to reconcile: %v", err))
-			}
-		case persisted.Active && persisted.Locked:
-			if !s.killSwitch.Active() {
-				// On Windows the dynamic WFP session was torn down on the prior
-				// exit; on pf/nftables the rules may persist. Re-Enable is
-				// idempotent and reuses the persisted endpoint IPs (no DNS).
-				// The hub is topped up so a lock persisted without it (an older
-				// daemon, or one engaged before anything was provisioned) comes
-				// back reachable rather than leaving the app unable to bootstrap.
-				endpoints := mergeUniqueSorted(persisted.EndpointIPs, ipLiterals(s.storedControlPlaneHosts()))
-				s.logs.Add(state.LogInfo, state.SourceDaemon, "re-applying lockdown kill switch (no tunnel)")
-				if err := s.killSwitch.Enable(startupCtx, endpoints, persisted.AllowLAN, true); err != nil {
-					s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("lockdown kill switch re-apply failed: %v", err))
-				}
-			}
-		case persisted.Active:
-			// A clean exit always clears or Locks the state, so Active here
-			// means a crash mid-session: stay fail-closed and redial.
-			s.recoverSessionAfterCrash(startupCtx, persisted)
-		case s.killSwitch.Active():
-			s.logs.Add(state.LogInfo, state.SourceDaemon, "clearing stale kill switch from previous session")
-			if err := s.killSwitch.Clear(startupCtx); err != nil {
-				s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("stale kill switch clear failed: %v", err))
-			}
-		}
+		s.recoverRecordedSession(persisted)
 	}
 
 	// Clean up stale tunnel adapters from previous sessions using native APIs.
@@ -3172,7 +3178,7 @@ func (s *Service) reconcileKillSwitchForAdoptedTunnel(ctx context.Context, profi
 	locked := err == nil && persisted.Active && persisted.Locked
 	allowLAN := err == nil && persisted.AllowLAN
 
-	if err := s.killSwitch.Enable(ctx, killSwitchPermits(profile), allowLAN, locked); err != nil {
+	if err := s.killSwitch.Enable(ctx, killSwitchPermitsFor(profile, allowLAN), allowLAN, locked); err != nil {
 		s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("could not arm kill switch for adopted tunnel: %v", err))
 		return
 	}
@@ -3182,44 +3188,96 @@ func (s *Service) reconcileKillSwitchForAdoptedTunnel(ctx context.Context, profi
 	}
 }
 
-// recoverSessionAfterCrash handles a non-Lockdown kill switch that survived a
-// crash: keep the device fail-closed and hand the session to the retry loop.
-func (s *Service) recoverSessionAfterCrash(ctx context.Context, persisted platform.KillSwitchState) {
+// reconcilePersistedKillSwitch re-arms the lock the previous process left, if
+// any, and reports what it found. It never clears: only Disconnect does that.
+func (s *Service) reconcilePersistedKillSwitch(ctx context.Context) platform.KillSwitchState {
+	persisted, err := loadKillSwitchState()
+	if err != nil {
+		if s.killSwitch.Active() {
+			s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("kill switch state file is unreadable but its rules are live; leaving them in place: %v", err))
+			return platform.KillSwitchState{Active: true}
+		}
+		s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("kill switch state file is unreadable and no live rules found: %v", err))
+		return platform.KillSwitchState{}
+	}
+	if !persisted.Active {
+		if s.killSwitch.Active() {
+			s.logs.Add(state.LogWarn, state.SourceDaemon, "kill switch rules are live with no state file; leaving them in place")
+			return platform.KillSwitchState{Active: true}
+		}
+		return persisted
+	}
+
+	// No DNS here: port 53 may already be blocked, so the persisted IPs and
+	// the hub literal are all that can be permitted.
+	endpoints := mergeUniqueSorted(persisted.EndpointIPs, ipLiterals(s.storedControlPlaneHosts()))
+	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("re-applying kill switch left by the previous process (lockdown=%v)", persisted.Locked))
+	var enableErr error
+	for attempt := 1; attempt <= startupLockReapplyAttempts; attempt++ {
+		if enableErr = s.killSwitch.Enable(ctx, endpoints, persisted.AllowLAN, persisted.Locked); enableErr == nil {
+			return persisted
+		}
+		if attempt == startupLockReapplyAttempts {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			attempt = startupLockReapplyAttempts
+		case <-time.After(startupLockReapplyDelay):
+		}
+	}
+	s.logs.Add(state.LogError, state.SourceDaemon, fmt.Sprintf("kill switch re-apply failed after %d attempts; persistent rules, where the platform has them, still hold: %v", startupLockReapplyAttempts, enableErr))
+	return persisted
+}
+
+// The Base Filtering Engine and nftables can both be late at boot.
+const (
+	startupLockReapplyAttempts = 3
+	startupLockReapplyDelay    = 2 * time.Second
+)
+
+// recoverRecordedSession hands the session the previous process was running to
+// the retry loop, or holds the lock in ERROR when nothing can be redialled.
+func (s *Service) recoverRecordedSession(persisted platform.KillSwitchState) {
+	if !persisted.Active {
+		return
+	}
 	record, err := loadSessionRecord()
 	if err != nil {
-		s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("session record unreadable after crash: %v", err))
+		s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("session record unreadable after restart: %v", err))
 	}
 	profile, found := state.Profile{}, false
 	if record.ProfileID != "" {
 		profile, found = s.config.FindProfile(record.ProfileID)
 	}
 	if !found {
-		// No session to rebuild toward: an armed lock would strand the device
-		// with nothing ever recovering it, so fall back to clearing.
-		s.logs.Add(state.LogWarn, state.SourceDaemon, "kill switch survived a crash but no last session is recorded; clearing it")
-		if err := s.killSwitch.Clear(ctx); err != nil {
-			s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("post-crash kill switch clear failed: %v", err))
+		if persisted.Locked {
+			// An idle Lockdown lock; the app shows it through killSwitchActive.
+			return
 		}
+		s.holdOrphanedLock("daemon restarted with no session to rebuild")
 		return
-	}
-
-	// Re-arm from persisted IPs plus the hub (no DNS — port 53 may be closed);
-	// on Windows the WFP session died with the process, so rules must come back.
-	endpoints := mergeUniqueSorted(persisted.EndpointIPs, ipLiterals(s.storedControlPlaneHosts()))
-	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("kill switch survived a crash; keeping it armed and reconnecting to %s", profile.ID))
-	if err := s.killSwitch.Enable(ctx, endpoints, persisted.AllowLAN, false); err != nil {
-		s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("post-crash kill switch re-arm failed: %v", err))
 	}
 
 	s.setCurrentProfile(profile)
 	s.setSessionOpts(ConnectOptions{
-		AllowLAN:           record.AllowLAN,
-		Lockdown:           record.Lockdown,
+		AllowLAN:           record.AllowLAN || persisted.AllowLAN,
+		Lockdown:           record.Lockdown || persisted.Locked,
 		PreferredTransport: record.PreferredTransport,
 	})
-	s.machine.Set(state.StateError, "daemon restarted unexpectedly; reconnecting")
+	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("kill switch survived a daemon restart; keeping it armed and reconnecting to %s", profile.ID))
+	s.machine.Set(state.StateError, "daemon restarted; reconnecting")
 	s.kickHealthCheck()
 }
+
+// holdOrphanedLock keeps a lock nobody can redial armed and says so: the user
+// gets Connect or Disconnect, never a silent unlock.
+func (s *Service) holdOrphanedLock(cause string) {
+	s.logs.Add(state.LogWarn, state.SourceDaemon, cause+"; the kill switch stays armed until Connect or Disconnect")
+	s.machine.Set(state.StateError, orphanedLockDetail)
+}
+
+const orphanedLockDetail = "kill switch is holding traffic; press Connect or Disconnect"
 
 func (s *Service) allConfiguredTunnelNames() []string {
 	cfg := s.config.Get()
@@ -3507,14 +3565,17 @@ func (s *Service) setCurrentProfile(profile state.Profile) {
 	s.setTransportsExhausted(false)
 }
 
-func (s *Service) clearCurrentProfile() {
+// clearCurrentProfile forgets the live session; keepRecord leaves the on-disk
+// record for the next start, since only a user Disconnect ends a session.
+func (s *Service) clearCurrentProfile(keepRecord bool) {
 	s.profileMu.Lock()
 	s.currentProfile = nil
 	s.profileMu.Unlock()
 
-	// A deliberate disconnect ends the session; crash recovery must not redial it.
-	if err := removeSessionRecord(); err != nil {
-		s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("could not remove session record: %v", err))
+	if !keepRecord {
+		if err := removeSessionRecord(); err != nil {
+			s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("could not remove session record: %v", err))
+		}
 	}
 
 	s.endDNSProbeSession()
@@ -3706,6 +3767,23 @@ func stunHost(raw string) string {
 // transports use different remote hosts (the normal case — see
 // hub/config/nodes.json, where each transport's remoteHost is typically a
 // distinct domain).
+func killSwitchPermitsFor(profile state.Profile, allowLAN bool) []string {
+	out := killSwitchPermits(profile)
+	if !allowLAN {
+		return out
+	}
+	// Under Allow LAN the DNS block still covers the LAN, so a LAN resolver the
+	// profile names needs its own permit to keep resolving.
+	for _, server := range profile.WireGuard.DNS {
+		ip := net.ParseIP(strings.TrimSpace(server))
+		if ip == nil || ip.To4() == nil || !platform.IsLANAllowAddress(ip) {
+			continue
+		}
+		out = append(out, ip.To4().String())
+	}
+	return out
+}
+
 func killSwitchPermits(profile state.Profile) []string {
 	out := make([]string, 0, 4+len(profile.WireGuard.BypassHosts))
 	if host := strings.TrimSpace(profile.Cloak.RemoteHost); host != "" {

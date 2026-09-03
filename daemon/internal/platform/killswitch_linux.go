@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 )
 
 const (
@@ -31,7 +32,18 @@ type linuxKillSwitch struct {
 	active   bool
 	useNFT   bool // true = nftables, false = iptables
 	allowLAN bool
+
+	// Cached kernel probe under its own lock, so a 1Hz status poll neither
+	// forks nft each time nor holds up Enable/Clear behind a slow probe.
+	probeMu sync.Mutex
+	liveAt  time.Time
+	live    bool
 }
+
+const (
+	liveProbeTTL     = 1500 * time.Millisecond
+	liveProbeTimeout = 3 * time.Second
+)
 
 func (ks *linuxKillSwitch) Enable(ctx context.Context, endpointHosts []string, allowLAN bool, locked bool) error {
 	ks.mu.Lock()
@@ -159,8 +171,36 @@ func (ks *linuxKillSwitch) Clear(ctx context.Context) error {
 
 func (ks *linuxKillSwitch) Active() bool {
 	ks.mu.Lock()
-	defer ks.mu.Unlock()
-	return ks.active
+	active := ks.active
+	ks.mu.Unlock()
+	if active {
+		return true
+	}
+	return ks.lockLive()
+}
+
+// lockLive asks the kernel whether either backend still holds the lock: one
+// left by a previous process counts even though this one never armed it.
+func (ks *linuxKillSwitch) lockLive() bool {
+	ks.probeMu.Lock()
+	defer ks.probeMu.Unlock()
+	if time.Since(ks.liveAt) < liveProbeTTL {
+		return ks.live
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), liveProbeTimeout)
+	defer cancel()
+	ks.live = nftTableLive(ctx) || iptablesLockLive(ctx)
+	ks.liveAt = time.Now()
+	return ks.live
+}
+
+func nftTableLive(ctx context.Context) bool {
+	return exec.CommandContext(ctx, "nft", "list", "table", nftFamily, nftTableName).Run() == nil
+}
+
+func iptablesLockLive(ctx context.Context) bool {
+	chain, ok := liveIPTablesChain(ctx, "iptables", iptChainName, iptChainNameAlt)
+	return ok && chain != ""
 }
 
 // ---------------------------------------------------------------------------

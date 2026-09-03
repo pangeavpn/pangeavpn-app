@@ -71,6 +71,20 @@ var LANAllowPrefixesV6 = []string{
 	"fc00::/7",
 }
 
+// IsLANAllowAddress reports whether ip falls inside the Allow-LAN ranges.
+func IsLANAllowAddress(ip net.IP) bool {
+	prefixes := LANAllowPrefixes
+	if ip.To4() == nil {
+		prefixes = LANAllowPrefixesV6
+	}
+	for _, cidr := range prefixes {
+		if _, network, err := net.ParseCIDR(cidr); err == nil && network.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
 // KillSwitchState is persisted to disk so that crash/startup reconciliation
 // can restore normal networking or re-apply the lock.
 type KillSwitchState struct {

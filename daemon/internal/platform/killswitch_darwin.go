@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 )
 
 const (
@@ -39,7 +40,17 @@ type darwinKillSwitch struct {
 	stateMu  sync.Mutex
 	active   bool
 	allowLAN bool
+
+	// Cached pf probe, so a 1Hz status poll does not fork pfctl each time.
+	liveAt time.Time
+	live   bool
 }
+
+const (
+	pfProbeTTL     = 1500 * time.Millisecond
+	pfProbeTimeout = 3 * time.Second
+	pfCleanupGrace = 5 * time.Second
+)
 
 func (ks *darwinKillSwitch) snapshotState() (active, allowLAN bool) {
 	ks.stateMu.Lock()
@@ -81,7 +92,9 @@ func (ks *darwinKillSwitch) Enable(ctx context.Context, endpointHosts []string, 
 		}
 	}
 
-	firstActivation := !wasActive
+	// pf itself can be switched off under a live anchor (another tool's
+	// pfctl -d); a re-arm takes a fresh reference whenever that happened.
+	firstActivation := !wasActive || !pfEnabled(ctx)
 	var token string
 	if firstActivation {
 		token, err = enablePF(ctx)
@@ -91,10 +104,13 @@ func (ks *darwinKillSwitch) Enable(ctx context.Context, endpointHosts []string, 
 	}
 
 	if err := applyPFAnchor(ctx, ips, tunnelInterface, allowLAN); err != nil {
-		if firstActivation {
-			_ = disablePF(ctx, token)
-			_ = removePFAnchor(ctx)
-		} else if rbErr := applyPFAnchor(ctx, prev.EndpointIPs, prev.TunnelInterface, prev.AllowLAN); rbErr != nil {
+		// The caller's ctx is often the one that just died; cleanup gets its own.
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), pfCleanupGrace)
+		defer cancel()
+		if !wasActive {
+			_ = disablePF(cleanupCtx, token)
+			_ = removePFAnchor(cleanupCtx)
+		} else if rbErr := applyPFAnchor(cleanupCtx, prev.EndpointIPs, prev.TunnelInterface, prev.AllowLAN); rbErr != nil {
 			KillSwitchWarn("kill switch enable: rollback to previous ruleset failed: %v", rbErr)
 		}
 		return fmt.Errorf("kill switch enable: %w", err)
@@ -102,8 +118,12 @@ func (ks *darwinKillSwitch) Enable(ctx context.Context, endpointHosts []string, 
 
 	if firstActivation {
 		if err := savePFToken(token); err != nil {
-			_ = disablePF(ctx, token)
-			_ = removePFAnchor(ctx)
+			cleanupCtx, cancel := context.WithTimeout(context.Background(), pfCleanupGrace)
+			defer cancel()
+			_ = disablePF(cleanupCtx, token)
+			if !wasActive {
+				_ = removePFAnchor(cleanupCtx)
+			}
 			return fmt.Errorf("kill switch enable: save pf token: %w", err)
 		}
 	}
@@ -178,8 +198,37 @@ func (ks *darwinKillSwitch) Clear(ctx context.Context) error {
 }
 
 func (ks *darwinKillSwitch) Active() bool {
-	active, _ := ks.snapshotState()
-	return active
+	if active, _ := ks.snapshotState(); active {
+		return true
+	}
+	return ks.lockLive()
+}
+
+// lockLive asks pf whether a lock is enforcing right now: one left by a
+// previous process counts even though this one never armed it.
+func (ks *darwinKillSwitch) lockLive() bool {
+	ks.stateMu.Lock()
+	if time.Since(ks.liveAt) < pfProbeTTL {
+		live := ks.live
+		ks.stateMu.Unlock()
+		return live
+	}
+	ks.stateMu.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), pfProbeTimeout)
+	defer cancel()
+	live := pfEnabled(ctx) && verifyPFAnchorLive(ctx) == nil
+
+	ks.stateMu.Lock()
+	ks.live, ks.liveAt = live, time.Now()
+	ks.stateMu.Unlock()
+	return live
+}
+
+// pfEnabled reads pf's own status: loaded rules enforce nothing while pf is off.
+func pfEnabled(ctx context.Context) bool {
+	out, err := exec.CommandContext(ctx, "pfctl", "-s", "info").CombinedOutput()
+	return err == nil && strings.Contains(string(out), "Status: Enabled")
 }
 
 // ---------------------------------------------------------------------------

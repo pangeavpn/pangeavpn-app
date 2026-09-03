@@ -29,6 +29,7 @@ var (
 	procFwpmFilterAdd0           = modFwpuclnt.NewProc("FwpmFilterAdd0")
 	procFwpmFilterDeleteById0    = modFwpuclnt.NewProc("FwpmFilterDeleteById0")
 	procFwpmFilterDeleteByKey0   = modFwpuclnt.NewProc("FwpmFilterDeleteByKey0")
+	procFwpmFilterGetByKey0      = modFwpuclnt.NewProc("FwpmFilterGetByKey0")
 
 	procFwpmFilterCreateEnumHandle0  = modFwpuclnt.NewProc("FwpmFilterCreateEnumHandle0")
 	procFwpmFilterEnum0              = modFwpuclnt.NewProc("FwpmFilterEnum0")
@@ -67,6 +68,26 @@ var (
 	pangeaPermitLoopbackNetV6FilterKey     = windows.GUID{Data1: 0xa9d3e8fc, Data2: 0x4b7c, Data3: 0x4d2a, Data4: [8]byte{0x9e, 0x6f, 0x1a, 0x2b, 0x3c, 0x4d, 0x5e, 0x7a}}
 	pangeaPermitLoopbackNetInV6FilterKey   = windows.GUID{Data1: 0xa9d3e8fd, Data2: 0x4b7c, Data3: 0x4d2a, Data4: [8]byte{0x9e, 0x6f, 0x1a, 0x2b, 0x3c, 0x4d, 0x5e, 0x7b}}
 )
+
+// DNS and DHCP are part of the lock itself: a locked boot must still get a
+// lease, and must never resolve names outside the tunnel.
+var (
+	pangeaBlockDNSUDPV4FilterKey   = windows.GUID{Data1: 0xa9d3e8fe, Data2: 0x4b7c, Data3: 0x4d2a, Data4: [8]byte{0x9e, 0x6f, 0x1a, 0x2b, 0x3c, 0x4d, 0x5e, 0x7c}}
+	pangeaBlockDNSTCPV4FilterKey   = windows.GUID{Data1: 0xa9d3e8ff, Data2: 0x4b7c, Data3: 0x4d2a, Data4: [8]byte{0x9e, 0x6f, 0x1a, 0x2b, 0x3c, 0x4d, 0x5e, 0x7d}}
+	pangeaPermitDHCPOutV4FilterKey = windows.GUID{Data1: 0xa9d3e900, Data2: 0x4b7c, Data3: 0x4d2a, Data4: [8]byte{0x9e, 0x6f, 0x1a, 0x2b, 0x3c, 0x4d, 0x5e, 0x7e}}
+	pangeaPermitDHCPInV4FilterKey  = windows.GUID{Data1: 0xa9d3e901, Data2: 0x4b7c, Data3: 0x4d2a, Data4: [8]byte{0x9e, 0x6f, 0x1a, 0x2b, 0x3c, 0x4d, 0x5e, 0x7f}}
+)
+
+// Filter weights inside the sublayer; higher wins. Trusted permits sit above
+// the DNS block so loopback, the endpoints and the tunnel still resolve.
+const (
+	weightBlockAll      uint8 = 1
+	weightLANPermit     uint8 = 10
+	weightDNSBlock      uint8 = 11
+	weightTrustedPermit uint8 = 12
+)
+
+const dnsPort = 53
 
 // ---------------------------------------------------------------------------
 // wfpEngine wraps a WFP engine handle
@@ -256,6 +277,28 @@ func (e *wfpEngine) deleteFilterByKey(key windows.GUID) error {
 	return nil
 }
 
+// filterExistsByKey asks BFE whether a keyed filter is installed, which is
+// how a fresh process learns the lock a previous one left is still live.
+func (e *wfpEngine) filterExistsByKey(key windows.GUID) (bool, error) {
+	var filter *wtFwpmFilter0
+	r, _, _ := procFwpmFilterGetByKey0.Call(
+		uintptr(e.handle),
+		uintptr(unsafe.Pointer(&key)),
+		uintptr(unsafe.Pointer(&filter)),
+	)
+	runtime.KeepAlive(&key)
+	if r != 0 {
+		if uint32(r) == fwpEFilterNotFound {
+			return false, nil
+		}
+		return false, fmt.Errorf("FwpmFilterGetByKey0: %w", windows.Errno(r))
+	}
+	if filter != nil {
+		procFwpmFreeMemory0.Call(uintptr(unsafe.Pointer(&filter)))
+	}
+	return true, nil
+}
+
 func (e *wfpEngine) deleteFilter(filterId uint64) error {
 	r, _, _ := procFwpmFilterDeleteById0.Call(
 		uintptr(e.handle),
@@ -359,11 +402,11 @@ func (e *wfpEngine) deleteFiltersInSublayer(subLayer windows.GUID, keep func(*wt
 // addBlockAllOutbound and its inbound/IPv6 counterparts are persistent: they
 // are the fail-closed lock itself and must outlive this process.
 func (e *wfpEngine) addBlockAllOutbound() (uint64, error) {
-	return e.addFilterKeyed(cFWPM_LAYER_ALE_AUTH_CONNECT_V4, pangeaBlockAllOutboundV4FilterKey, "PangeaVPN Block All Outbound", 1, cFWP_ACTION_BLOCK, cFWPM_FILTER_FLAG_PERSISTENT, nil)
+	return e.addFilterKeyed(cFWPM_LAYER_ALE_AUTH_CONNECT_V4, pangeaBlockAllOutboundV4FilterKey, "PangeaVPN Block All Outbound", weightBlockAll, cFWP_ACTION_BLOCK, cFWPM_FILTER_FLAG_PERSISTENT, nil)
 }
 
 func (e *wfpEngine) addBlockAllInbound() (uint64, error) {
-	return e.addFilterKeyed(cFWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4, pangeaBlockAllInboundV4FilterKey, "PangeaVPN Block All Inbound", 1, cFWP_ACTION_BLOCK, cFWPM_FILTER_FLAG_PERSISTENT, nil)
+	return e.addFilterKeyed(cFWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4, pangeaBlockAllInboundV4FilterKey, "PangeaVPN Block All Inbound", weightBlockAll, cFWP_ACTION_BLOCK, cFWPM_FILTER_FLAG_PERSISTENT, nil)
 }
 
 func (e *wfpEngine) addPermitLoopbackAt(layer, filterKey windows.GUID, filterName string) (uint64, error) {
@@ -377,7 +420,7 @@ func (e *wfpEngine) addPermitLoopbackAt(layer, filterKey windows.GUID, filterNam
 			},
 		},
 	}
-	return e.addFilterKeyed(layer, filterKey, filterName, 10, cFWP_ACTION_PERMIT, cFWPM_FILTER_FLAG_PERSISTENT, conditions)
+	return e.addFilterKeyed(layer, filterKey, filterName, weightTrustedPermit, cFWP_ACTION_PERMIT, cFWPM_FILTER_FLAG_PERSISTENT, conditions)
 }
 
 func (e *wfpEngine) addPermitLoopback() (uint64, error) {
@@ -407,7 +450,7 @@ func (e *wfpEngine) addPermitLoopbackSubnetAt(layer, filterKey windows.GUID, fil
 			},
 		},
 	}
-	id, err := e.addFilterKeyed(layer, filterKey, filterName, 10, cFWP_ACTION_PERMIT, cFWPM_FILTER_FLAG_PERSISTENT, conditions)
+	id, err := e.addFilterKeyed(layer, filterKey, filterName, weightTrustedPermit, cFWP_ACTION_PERMIT, cFWPM_FILTER_FLAG_PERSISTENT, conditions)
 	runtime.KeepAlive(&addrMask)
 	return id, err
 }
@@ -441,7 +484,7 @@ func (e *wfpEngine) addPermitEndpointIP(ipStr string) (uint64, error) {
 			},
 		},
 	}
-	id, err := e.addFilter(cFWPM_LAYER_ALE_AUTH_CONNECT_V4, "PangeaVPN Allow Endpoint "+ipStr, 10, cFWP_ACTION_PERMIT, conditions)
+	id, err := e.addFilter(cFWPM_LAYER_ALE_AUTH_CONNECT_V4, "PangeaVPN Allow Endpoint "+ipStr, weightTrustedPermit, cFWP_ACTION_PERMIT, conditions)
 	runtime.KeepAlive(&addrMask)
 	return id, err
 }
@@ -490,7 +533,7 @@ func (e *wfpEngine) addPermitIPv4Subnet(cidr string) (uint64, error) {
 			},
 		},
 	}
-	id, err := e.addFilter(cFWPM_LAYER_ALE_AUTH_CONNECT_V4, "PangeaVPN Allow LAN "+cidr, 10, cFWP_ACTION_PERMIT, conditions)
+	id, err := e.addFilter(cFWPM_LAYER_ALE_AUTH_CONNECT_V4, "PangeaVPN Allow LAN "+cidr, weightLANPermit, cFWP_ACTION_PERMIT, conditions)
 	runtime.KeepAlive(&addrMask)
 	return id, err
 }
@@ -547,7 +590,27 @@ func (e *wfpEngine) addPermitDHCP(remoteCIDR string) (uint64, error) {
 			value: uintptr(unsafe.Pointer(&addrMask)),
 		},
 	})
-	id, err := e.addFilter(cFWPM_LAYER_ALE_AUTH_CONNECT_V4, "PangeaVPN Allow DHCP "+remoteCIDR, 10, cFWP_ACTION_PERMIT, conditions)
+	id, err := e.addFilter(cFWPM_LAYER_ALE_AUTH_CONNECT_V4, "PangeaVPN Allow DHCP "+remoteCIDR, weightLANPermit, cFWP_ACTION_PERMIT, conditions)
+	runtime.KeepAlive(&addrMask)
+	return id, err
+}
+
+// addPermitDHCPBroadcast is the persistent request-side permit: UDP 68->67 to
+// 255.255.255.255 only, so a locked boot can still take a lease.
+func (e *wfpEngine) addPermitDHCPBroadcast() (uint64, error) {
+	addrMask, err := parseV4CIDRAddrMask("255.255.255.255/32")
+	if err != nil {
+		return 0, err
+	}
+	conditions := append(dhcpClientPortConditions(), wtFwpmFilterCondition0{
+		fieldKey:  cFWPM_CONDITION_IP_REMOTE_ADDRESS,
+		matchType: cFWP_MATCH_EQUAL,
+		conditionValue: wtFwpConditionValue0{
+			_type: cFWP_V4_ADDR_MASK,
+			value: uintptr(unsafe.Pointer(&addrMask)),
+		},
+	})
+	id, err := e.addFilterKeyed(cFWPM_LAYER_ALE_AUTH_CONNECT_V4, pangeaPermitDHCPOutV4FilterKey, "PangeaVPN Allow DHCP Broadcast", weightLANPermit, cFWP_ACTION_PERMIT, cFWPM_FILTER_FLAG_PERSISTENT, conditions)
 	runtime.KeepAlive(&addrMask)
 	return id, err
 }
@@ -555,7 +618,40 @@ func (e *wfpEngine) addPermitDHCP(remoteCIDR string) (uint64, error) {
 // addPermitDHCPInbound lets the lease reply through the inbound block. The
 // request's flow cannot cover it: the reply's source is the server, not broadcast.
 func (e *wfpEngine) addPermitDHCPInbound() (uint64, error) {
-	return e.addFilter(cFWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4, "PangeaVPN Allow DHCP Reply", 10, cFWP_ACTION_PERMIT, dhcpReplyConditions())
+	return e.addFilterKeyed(cFWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4, pangeaPermitDHCPInV4FilterKey, "PangeaVPN Allow DHCP Reply", weightLANPermit, cFWP_ACTION_PERMIT, cFWPM_FILTER_FLAG_PERSISTENT, dhcpReplyConditions())
+}
+
+// dnsBlockConditions matches port 53 over one transport protocol. Only the
+// permits above weightDNSBlock (loopback, endpoint, tunnel) get past it.
+func dnsBlockConditions(proto wtIPProto) []wtFwpmFilterCondition0 {
+	return []wtFwpmFilterCondition0{
+		{
+			fieldKey:  cFWPM_CONDITION_IP_PROTOCOL,
+			matchType: cFWP_MATCH_EQUAL,
+			conditionValue: wtFwpConditionValue0{
+				_type: cFWP_UINT8,
+				value: uintptr(proto),
+			},
+		},
+		{
+			fieldKey:  cFWPM_CONDITION_IP_REMOTE_PORT,
+			matchType: cFWP_MATCH_EQUAL,
+			conditionValue: wtFwpConditionValue0{
+				_type: cFWP_UINT16,
+				value: uintptr(dnsPort),
+			},
+		},
+	}
+}
+
+// addBlockDNSUDP and addBlockDNSTCP close the Allow-LAN DNS hole: the router
+// is a resolver, and Windows will happily ask it beside the tunnel's.
+func (e *wfpEngine) addBlockDNSUDP() (uint64, error) {
+	return e.addFilterKeyed(cFWPM_LAYER_ALE_AUTH_CONNECT_V4, pangeaBlockDNSUDPV4FilterKey, "PangeaVPN Block DNS UDP", weightDNSBlock, cFWP_ACTION_BLOCK, cFWPM_FILTER_FLAG_PERSISTENT, dnsBlockConditions(cIPPROTO_UDP))
+}
+
+func (e *wfpEngine) addBlockDNSTCP() (uint64, error) {
+	return e.addFilterKeyed(cFWPM_LAYER_ALE_AUTH_CONNECT_V4, pangeaBlockDNSTCPV4FilterKey, "PangeaVPN Block DNS TCP", weightDNSBlock, cFWP_ACTION_BLOCK, cFWPM_FILTER_FLAG_PERSISTENT, dnsBlockConditions(cIPPROTO_TCP))
 }
 
 func (e *wfpEngine) addPermitTunnelInterface(luid uint64) (uint64, error) {
@@ -569,17 +665,17 @@ func (e *wfpEngine) addPermitTunnelInterface(luid uint64) (uint64, error) {
 			},
 		},
 	}
-	id, err := e.addFilter(cFWPM_LAYER_ALE_AUTH_CONNECT_V4, "PangeaVPN Allow Tunnel Interface", 10, cFWP_ACTION_PERMIT, conditions)
+	id, err := e.addFilter(cFWPM_LAYER_ALE_AUTH_CONNECT_V4, "PangeaVPN Allow Tunnel Interface", weightTrustedPermit, cFWP_ACTION_PERMIT, conditions)
 	runtime.KeepAlive(&luid)
 	return id, err
 }
 
 func (e *wfpEngine) addBlockAllOutboundV6() (uint64, error) {
-	return e.addFilterKeyed(cFWPM_LAYER_ALE_AUTH_CONNECT_V6, pangeaBlockAllOutboundV6FilterKey, "PangeaVPN Block All Outbound IPv6", 1, cFWP_ACTION_BLOCK, cFWPM_FILTER_FLAG_PERSISTENT, nil)
+	return e.addFilterKeyed(cFWPM_LAYER_ALE_AUTH_CONNECT_V6, pangeaBlockAllOutboundV6FilterKey, "PangeaVPN Block All Outbound IPv6", weightBlockAll, cFWP_ACTION_BLOCK, cFWPM_FILTER_FLAG_PERSISTENT, nil)
 }
 
 func (e *wfpEngine) addBlockAllInboundV6() (uint64, error) {
-	return e.addFilterKeyed(cFWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V6, pangeaBlockAllInboundV6FilterKey, "PangeaVPN Block All Inbound IPv6", 1, cFWP_ACTION_BLOCK, cFWPM_FILTER_FLAG_PERSISTENT, nil)
+	return e.addFilterKeyed(cFWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V6, pangeaBlockAllInboundV6FilterKey, "PangeaVPN Block All Inbound IPv6", weightBlockAll, cFWP_ACTION_BLOCK, cFWPM_FILTER_FLAG_PERSISTENT, nil)
 }
 
 func (e *wfpEngine) addPermitLoopbackV6() (uint64, error) {
@@ -613,7 +709,7 @@ func (e *wfpEngine) addPermitLoopbackSubnetV6(layer, filterKey windows.GUID, fil
 			},
 		},
 	}
-	id, err := e.addFilterKeyed(layer, filterKey, filterName, 10, cFWP_ACTION_PERMIT, cFWPM_FILTER_FLAG_PERSISTENT, conditions)
+	id, err := e.addFilterKeyed(layer, filterKey, filterName, weightTrustedPermit, cFWP_ACTION_PERMIT, cFWPM_FILTER_FLAG_PERSISTENT, conditions)
 	runtime.KeepAlive(&addrMask)
 	return id, err
 }

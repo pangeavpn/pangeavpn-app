@@ -165,6 +165,11 @@
   SetShellVarContext all
   nsExec::ExecToLog 'sc.exe stop PangeaDaemon'
   Sleep 500
+  ; The daemon keeps its lock across every stop; a real uninstall must lower
+  ; it, or the machine stays blocked with nothing left to unblock it.
+  ${ifNot} ${isUpdated}
+    nsExec::ExecToLog '"$APPDATA\PangeaVPN\PangeaDaemon.exe" --clear-killswitch'
+  ${endIf}
   nsExec::ExecToLog 'sc.exe delete PangeaDaemon'
 
   DeleteRegKey HKLM "Software\Classes\AppUserModelId\${APP_ID}"

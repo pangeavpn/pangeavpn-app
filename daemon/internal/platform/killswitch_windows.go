@@ -23,6 +23,7 @@ type windowsKillSwitch struct {
 	mu             sync.Mutex
 	active         bool
 	engine         *wfpEngine // static session — block filters are persistent and outlive this handle
+	probe          *wfpEngine // read-only handle Active() asks about the persistent block
 	tunnelFilterId uint64     // WFP filter ID for the tunnel interface permit
 
 	// Per-arm permit filter IDs so a re-arm can retire the previous set instead
@@ -47,6 +48,18 @@ func (ks *windowsKillSwitch) Enable(ctx context.Context, endpointHosts []string,
 	ips, err := resolveEndpointHosts(ctx, endpointHosts)
 	if err != nil {
 		return fmt.Errorf("kill switch enable: %w", err)
+	}
+	ips = v4Permits(ips)
+
+	// A re-arm trusts its handle only while the persistent block is still
+	// installed; otherwise the lock is rebuilt from scratch below.
+	if ks.active && ks.engine != nil {
+		if live, err := ks.engine.filterExistsByKey(pangeaBlockAllOutboundV4FilterKey); err != nil || !live {
+			KillSwitchWarn("kill switch re-arm: persistent block missing (live=%v, err=%v); rebuilding the lock", live, err)
+			_ = ks.engine.close()
+			ks.engine = nil
+			ks.active = false
+		}
 	}
 
 	// Re-entry: swap the permit set in one transaction — new permits in before
@@ -146,181 +159,8 @@ func (ks *windowsKillSwitch) Enable(ctx context.Context, endpointHosts []string,
 		_ = removeKillSwitchState()
 		return fmt.Errorf("kill switch enable: %w", err)
 	}
-
-	if err := engine.beginTransaction(); err != nil {
-		engine.close()
-		_ = removeKillSwitchState()
-		return fmt.Errorf("kill switch enable: %w", err)
-	}
-
-	if err := engine.addSublayer(); err != nil {
-		engine.abortTransaction()
-		engine.close()
-		_ = removeKillSwitchState()
-		return fmt.Errorf("kill switch enable: %w", err)
-	}
-
-	// A restarted daemon inherits the engine-keyed permits of the process
-	// before it (old nodes, old tunnel LUID); retire them in this transaction.
-	if _, err := engine.deleteFiltersInSublayer(pangeaVPNSublayerKey, isEphemeralFilter); err != nil {
-		engine.abortTransaction()
-		engine.close()
-		_ = removeKillSwitchState()
-		return fmt.Errorf("kill switch enable: sweep stale permits: %w", err)
-	}
-
-	if _, err := engine.addBlockAllOutbound(); err != nil {
-		engine.abortTransaction()
-		engine.close()
-		_ = removeKillSwitchState()
-		return fmt.Errorf("kill switch enable: %w", err)
-	}
-
-	// Symmetric with the IPv6 blocks below — otherwise inbound on the
-	// physical NIC is still accepted while "locked".
-	if _, err := engine.addBlockAllInbound(); err != nil {
-		engine.abortTransaction()
-		engine.close()
-		_ = removeKillSwitchState()
-		return fmt.Errorf("kill switch enable: %w", err)
-	}
-
-	if _, err := engine.addPermitLoopback(); err != nil {
-		engine.abortTransaction()
-		engine.close()
-		_ = removeKillSwitchState()
-		return fmt.Errorf("kill switch enable: %w", err)
-	}
-	if _, err := engine.addPermitLoopbackInboundV4(); err != nil {
-		engine.abortTransaction()
-		engine.close()
-		_ = removeKillSwitchState()
-		return fmt.Errorf("kill switch enable: %w", err)
-	}
-
-	// Permit the loopback subnet by address too — the IS_LOOPBACK flag above is
-	// not reliably set for fresh inter-process TCP connects, and the local
-	// daemon API (127.0.0.1:8787) must never be blocked.
-	if _, err := engine.addPermitLoopbackSubnet(); err != nil {
-		engine.abortTransaction()
-		engine.close()
-		_ = removeKillSwitchState()
-		return fmt.Errorf("kill switch enable: %w", err)
-	}
-	if _, err := engine.addPermitLoopbackSubnetInboundV4(); err != nil {
-		engine.abortTransaction()
-		engine.close()
-		_ = removeKillSwitchState()
-		return fmt.Errorf("kill switch enable: %w", err)
-	}
-
-	endpointIds := make([]uint64, 0, len(ips))
-	for _, ip := range ips {
-		id, err := engine.addPermitEndpointIP(ip)
-		if err != nil {
-			engine.abortTransaction()
-			engine.close()
-			_ = removeKillSwitchState()
-			return fmt.Errorf("kill switch enable: %w", err)
-		}
-		endpointIds = append(endpointIds, id)
-	}
-
-	// A lease is what puts the default route back after a link flap, and it
-	// starts with a broadcast DISCOVER that never leaves the link.
-	if _, err := engine.addPermitDHCP("255.255.255.255/32"); err != nil {
-		engine.abortTransaction()
-		engine.close()
-		_ = removeKillSwitchState()
-		return fmt.Errorf("kill switch enable: permit DHCP request: %w", err)
-	}
-	// Without the reply, a reconnect sits in DHCP retries for a minute, NLA
-	// keeps the link "Identifying", and WCM soft-disconnects the WiFi meanwhile.
-	if _, err := engine.addPermitDHCPInbound(); err != nil {
-		engine.abortTransaction()
-		engine.close()
-		_ = removeKillSwitchState()
-		return fmt.Errorf("kill switch enable: permit DHCP reply: %w", err)
-	}
-
-	// Unicast renewals to the server itself, only when the user opted into LAN
-	// access, scoped to the ranges already trusted for "Allow LAN".
-	if allowLAN {
-		for _, cidr := range LANAllowPrefixes {
-			if cidr == "224.0.0.0/4" {
-				continue // multicast — not a DHCP server/relay address
-			}
-			if _, err := engine.addPermitDHCP(cidr); err != nil {
-				engine.abortTransaction()
-				engine.close()
-				_ = removeKillSwitchState()
-				return fmt.Errorf("kill switch enable: permit DHCP renewal %s: %w", cidr, err)
-			}
-		}
-	}
-
-	// Permit LAN ranges so captive portals / gateway probes / mDNS work on
-	// restrictive WiFi. Only applied when the user opts in — fail-open would
-	// defeat the kill switch.
-	lanIds := make([]uint64, 0, len(LANAllowPrefixes))
-	if allowLAN {
-		for _, cidr := range LANAllowPrefixes {
-			id, err := engine.addPermitIPv4Subnet(cidr)
-			if err != nil {
-				engine.abortTransaction()
-				engine.close()
-				_ = removeKillSwitchState()
-				return fmt.Errorf("kill switch enable: permit LAN %s: %w", cidr, err)
-			}
-			lanIds = append(lanIds, id)
-		}
-	}
-
-	// Block all IPv6 traffic except loopback to prevent IPv6 leaks.
-	if _, err := engine.addBlockAllOutboundV6(); err != nil {
-		engine.abortTransaction()
-		engine.close()
-		_ = removeKillSwitchState()
-		return fmt.Errorf("kill switch enable: %w", err)
-	}
-	if _, err := engine.addBlockAllInboundV6(); err != nil {
-		engine.abortTransaction()
-		engine.close()
-		_ = removeKillSwitchState()
-		return fmt.Errorf("kill switch enable: %w", err)
-	}
-	if _, err := engine.addPermitLoopbackV6(); err != nil {
-		engine.abortTransaction()
-		engine.close()
-		_ = removeKillSwitchState()
-		return fmt.Errorf("kill switch enable: %w", err)
-	}
-
-	// localhost resolves to ::1 first on Windows, so IPv6 loopback needs the
-	// same treatment as IPv4: ::1 address permits alongside the IS_LOOPBACK
-	// flag (unreliable for fresh connects), and permits at the inbound layer —
-	// the inbound V6 block otherwise drops the server side of every [::1]
-	// connection, making localhost websites unreachable while connected.
-	if _, err := engine.addPermitLoopbackSubnetV6(cFWPM_LAYER_ALE_AUTH_CONNECT_V6, pangeaPermitLoopbackNetV6FilterKey, "PangeaVPN Allow Loopback Subnet IPv6"); err != nil {
-		engine.abortTransaction()
-		engine.close()
-		_ = removeKillSwitchState()
-		return fmt.Errorf("kill switch enable: %w", err)
-	}
-	if _, err := engine.addPermitLoopbackInboundV6(); err != nil {
-		engine.abortTransaction()
-		engine.close()
-		_ = removeKillSwitchState()
-		return fmt.Errorf("kill switch enable: %w", err)
-	}
-	if _, err := engine.addPermitLoopbackSubnetV6(cFWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V6, pangeaPermitLoopbackNetInV6FilterKey, "PangeaVPN Allow Loopback Subnet Inbound IPv6"); err != nil {
-		engine.abortTransaction()
-		engine.close()
-		_ = removeKillSwitchState()
-		return fmt.Errorf("kill switch enable: %w", err)
-	}
-
-	if err := engine.commitTransaction(); err != nil {
+	endpointIds, lanIds, err := installWindowsLock(engine, ips, allowLAN)
+	if err != nil {
 		engine.close()
 		_ = removeKillSwitchState()
 		return fmt.Errorf("kill switch enable: %w", err)
@@ -332,7 +172,121 @@ func (ks *windowsKillSwitch) Enable(ctx context.Context, endpointHosts []string,
 	ks.lanFilterIds = lanIds
 	ks.lastEndpointIPs = ips
 	ks.lastAllowLAN = allowLAN
+	// The sweep inside installWindowsLock retired any tunnel permit too.
+	ks.tunnelFilterId = 0
+	ks.staleTunnelFilterIds = nil
 	return nil
+}
+
+// installWindowsLock builds the whole lock in one transaction: stale permits
+// out, the persistent set replaced by this build's, this arm's permits in.
+func installWindowsLock(engine *wfpEngine, ips []string, allowLAN bool) (endpointIds, lanIds []uint64, err error) {
+	if err := engine.beginTransaction(); err != nil {
+		return nil, nil, err
+	}
+	fail := func(err error) ([]uint64, []uint64, error) {
+		engine.abortTransaction()
+		return nil, nil, err
+	}
+
+	if err := engine.addSublayer(); err != nil {
+		return fail(err)
+	}
+	// A restarted daemon inherits the engine-keyed permits of the process
+	// before it (old nodes, old tunnel LUID); retire them in this transaction.
+	if _, err := engine.deleteFiltersInSublayer(pangeaVPNSublayerKey, isEphemeralFilter); err != nil {
+		return fail(fmt.Errorf("sweep stale permits: %w", err))
+	}
+	// Delete-then-add under the same keys, so an older build's weights and
+	// filter set are replaced without the lock ever being down.
+	for _, key := range pangeaPersistentFilterKeys {
+		if err := engine.deleteFilterByKey(key); err != nil {
+			return fail(fmt.Errorf("retire persistent filter %v: %w", key, err))
+		}
+	}
+	for _, step := range persistentLockFilters {
+		if _, err := step.add(engine); err != nil {
+			return fail(fmt.Errorf("%s: %w", step.name, err))
+		}
+	}
+
+	endpointIds = make([]uint64, 0, len(ips))
+	for _, ip := range ips {
+		id, err := engine.addPermitEndpointIP(ip)
+		if err != nil {
+			return fail(fmt.Errorf("permit %s: %w", ip, err))
+		}
+		endpointIds = append(endpointIds, id)
+	}
+
+	// Unicast renewals to the server itself and the LAN ranges themselves,
+	// only when the user opted into LAN access.
+	lanIds = make([]uint64, 0, len(LANAllowPrefixes))
+	if allowLAN {
+		for _, cidr := range LANAllowPrefixes {
+			if cidr == "224.0.0.0/4" {
+				continue // multicast — not a DHCP server/relay address
+			}
+			if _, err := engine.addPermitDHCP(cidr); err != nil {
+				return fail(fmt.Errorf("permit DHCP renewal %s: %w", cidr, err))
+			}
+		}
+		for _, cidr := range LANAllowPrefixes {
+			id, err := engine.addPermitIPv4Subnet(cidr)
+			if err != nil {
+				return fail(fmt.Errorf("permit LAN %s: %w", cidr, err))
+			}
+			lanIds = append(lanIds, id)
+		}
+	}
+
+	if err := engine.commitTransaction(); err != nil {
+		engine.abortTransaction()
+		return nil, nil, err
+	}
+	return endpointIds, lanIds, nil
+}
+
+// persistentLockFilters is the lock that outlives the process, in install
+// order. Blocks first, then the permits that keep the host usable while locked.
+var persistentLockFilters = []struct {
+	name string
+	add  func(*wfpEngine) (uint64, error)
+}{
+	{"block outbound v4", (*wfpEngine).addBlockAllOutbound},
+	{"block inbound v4", (*wfpEngine).addBlockAllInbound},
+	{"block outbound v6", (*wfpEngine).addBlockAllOutboundV6},
+	{"block inbound v6", (*wfpEngine).addBlockAllInboundV6},
+	{"block DNS udp", (*wfpEngine).addBlockDNSUDP},
+	{"block DNS tcp", (*wfpEngine).addBlockDNSTCP},
+	{"permit loopback v4", (*wfpEngine).addPermitLoopback},
+	{"permit loopback inbound v4", (*wfpEngine).addPermitLoopbackInboundV4},
+	{"permit loopback subnet v4", (*wfpEngine).addPermitLoopbackSubnet},
+	{"permit loopback subnet inbound v4", (*wfpEngine).addPermitLoopbackSubnetInboundV4},
+	{"permit loopback v6", (*wfpEngine).addPermitLoopbackV6},
+	{"permit loopback inbound v6", (*wfpEngine).addPermitLoopbackInboundV6},
+	{"permit loopback subnet v6", func(e *wfpEngine) (uint64, error) {
+		return e.addPermitLoopbackSubnetV6(cFWPM_LAYER_ALE_AUTH_CONNECT_V6, pangeaPermitLoopbackNetV6FilterKey, "PangeaVPN Allow Loopback Subnet IPv6")
+	}},
+	{"permit loopback subnet inbound v6", func(e *wfpEngine) (uint64, error) {
+		return e.addPermitLoopbackSubnetV6(cFWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V6, pangeaPermitLoopbackNetInV6FilterKey, "PangeaVPN Allow Loopback Subnet Inbound IPv6")
+	}},
+	{"permit DHCP broadcast", (*wfpEngine).addPermitDHCPBroadcast},
+	{"permit DHCP reply", (*wfpEngine).addPermitDHCPInbound},
+}
+
+// v4Permits drops addresses the IPv4-only permit builders cannot express. IPv6
+// stays blocked outright, so a transport with a v6 endpoint falls back to v4.
+func v4Permits(ips []string) []string {
+	out := make([]string, 0, len(ips))
+	for _, ip := range ips {
+		if parsed := net.ParseIP(ip); parsed != nil && parsed.To4() != nil {
+			out = append(out, ip)
+			continue
+		}
+		KillSwitchWarn("kill switch: skipping non-IPv4 permit %s (IPv6 is blocked outright)", ip)
+	}
+	return out
 }
 
 func (ks *windowsKillSwitch) Update(ctx context.Context, tunnel TunnelRef) error {
@@ -424,6 +378,10 @@ var pangeaPersistentFilterKeys = []windows.GUID{
 	pangeaBlockAllInboundV4FilterKey,
 	pangeaBlockAllOutboundV6FilterKey,
 	pangeaBlockAllInboundV6FilterKey,
+	pangeaBlockDNSUDPV4FilterKey,
+	pangeaBlockDNSTCPV4FilterKey,
+	pangeaPermitDHCPOutV4FilterKey,
+	pangeaPermitDHCPInV4FilterKey,
 	pangeaPermitLoopbackV4FilterKey,
 	pangeaPermitLoopbackInboundV4FilterKey,
 	pangeaPermitLoopbackNetV4FilterKey,
@@ -493,6 +451,10 @@ func (ks *windowsKillSwitch) Clear(ctx context.Context) error {
 	} else if !ownsEngine {
 		ks.engine = nil
 	}
+	if ks.probe != nil {
+		_ = ks.probe.close()
+		ks.probe = nil
+	}
 
 	// A partial teardown must not report the lock as cleared: leave Active
 	// alone so a retry, or reconciliation after a crash here, still locks.
@@ -517,5 +479,27 @@ func (ks *windowsKillSwitch) Clear(ctx context.Context) error {
 func (ks *windowsKillSwitch) Active() bool {
 	ks.mu.Lock()
 	defer ks.mu.Unlock()
-	return ks.active
+	if ks.active {
+		return true
+	}
+	return ks.persistentLockLive()
+}
+
+// persistentLockLive asks BFE whether the block is installed: a lock left by a
+// previous process counts even though this one never armed it. Holds ks.mu.
+func (ks *windowsKillSwitch) persistentLockLive() bool {
+	if ks.probe == nil {
+		engine, err := wfpOpen()
+		if err != nil {
+			return false
+		}
+		ks.probe = engine
+	}
+	live, err := ks.probe.filterExistsByKey(pangeaBlockAllOutboundV4FilterKey)
+	if err != nil {
+		_ = ks.probe.close()
+		ks.probe = nil
+		return false
+	}
+	return live
 }

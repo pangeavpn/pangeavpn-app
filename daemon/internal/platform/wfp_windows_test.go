@@ -102,6 +102,7 @@ func TestWFPConstantsMatchSDK(t *testing.T) {
 		{"FWPM_SUBLAYER_FLAG_PERSISTENT", uint64(cFWPM_SUBLAYER_FLAG_PERSISTENT), 1},
 		{"RPC_C_AUTHN_WINNT", uint64(cRPC_C_AUTHN_WINNT), 10},
 		{"IPPROTO_UDP", uint64(cIPPROTO_UDP), 17},
+		{"IPPROTO_TCP", uint64(cIPPROTO_TCP), 6},
 		{"FWP_E_ALREADY_EXISTS", uint64(fwpEAlreadyExists), 0x80320009},
 		{"FWP_E_FILTER_NOT_FOUND", uint64(fwpEFilterNotFound), 0x80320003},
 		{"FWP_E_SUBLAYER_NOT_FOUND", uint64(fwpESublayerNotFound), 0x80320007},
@@ -172,5 +173,53 @@ func TestSweepKeepsPersistentLockFilters(t *testing.T) {
 	}
 	if !isEphemeralFilter(&ephemeral) {
 		t.Fatal("an engine-keyed permit left by a dead process must be swept")
+	}
+}
+
+func TestPersistentLockKeysAreDistinct(t *testing.T) {
+	seen := make(map[windows.GUID]bool, len(pangeaPersistentFilterKeys))
+	for _, key := range pangeaPersistentFilterKeys {
+		if seen[key] {
+			t.Fatalf("filter key %s appears twice; a shared key makes one filter silently replace another", key)
+		}
+		seen[key] = true
+	}
+	if seen[pangeaVPNSublayerKey] {
+		t.Fatal("the sublayer key doubles as a filter key")
+	}
+	if len(pangeaPersistentFilterKeys) != len(persistentLockFilters) {
+		t.Fatalf("%d persistent keys but %d persistent filters: Clear would leave one behind", len(pangeaPersistentFilterKeys), len(persistentLockFilters))
+	}
+}
+
+// The ladder is the whole DNS story: LAN permits sit under the DNS block, the
+// permits the lock trusts sit over it.
+func TestFilterWeightLadder(t *testing.T) {
+	if !(weightBlockAll < weightLANPermit && weightLANPermit < weightDNSBlock && weightDNSBlock < weightTrustedPermit) {
+		t.Fatalf("weights block=%d lan=%d dns=%d trusted=%d are not strictly ascending", weightBlockAll, weightLANPermit, weightDNSBlock, weightTrustedPermit)
+	}
+}
+
+func TestDNSBlockMatchesPortAndProtocolOnly(t *testing.T) {
+	conditions := dnsBlockConditions(cIPPROTO_UDP)
+	want := map[windows.GUID]uintptr{
+		cFWPM_CONDITION_IP_PROTOCOL:    uintptr(cIPPROTO_UDP),
+		cFWPM_CONDITION_IP_REMOTE_PORT: dnsPort,
+	}
+	if len(conditions) != len(want) {
+		t.Fatalf("got %d conditions, want %d: the block must cover every remote address", len(conditions), len(want))
+	}
+	for _, c := range conditions {
+		value, ok := want[c.fieldKey]
+		if !ok || c.conditionValue.value != value {
+			t.Fatalf("condition %v = %d, want %d", c.fieldKey, c.conditionValue.value, value)
+		}
+	}
+}
+
+func TestV4PermitsSkipsIPv6(t *testing.T) {
+	got := v4Permits([]string{"203.0.113.7", "2001:db8::1", "not-an-ip"})
+	if len(got) != 1 || got[0] != "203.0.113.7" {
+		t.Fatalf("v4Permits = %v, want only the IPv4 literal", got)
 	}
 }

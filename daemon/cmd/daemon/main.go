@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -45,6 +46,9 @@ type daemonRuntime struct {
 }
 
 func main() {
+	if hasFlag("--clear-killswitch") {
+		os.Exit(clearKillSwitchCommand())
+	}
 	if shouldRunAsService() {
 		if err := runService(); err != nil {
 			log.Fatalf("run service: %v", err)
@@ -55,6 +59,32 @@ func main() {
 	if err := runInteractive(); err != nil {
 		log.Fatalf("run daemon: %v", err)
 	}
+}
+
+func hasFlag(name string) bool {
+	for _, arg := range os.Args[1:] {
+		if strings.EqualFold(strings.TrimSpace(arg), name) {
+			return true
+		}
+	}
+	return false
+}
+
+// clearKillSwitchCommand is the uninstaller's way to lower a lock the daemon
+// deliberately leaves behind on every exit that is not a user Disconnect.
+func clearKillSwitchCommand() int {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	if err := platform.NewKillSwitch().Clear(ctx); err != nil {
+		log.Printf("clear kill switch: %v", err)
+		return 1
+	}
+	if err := api.ForgetSession(); err != nil {
+		log.Printf("forget session: %v", err)
+		return 1
+	}
+	log.Printf("kill switch cleared")
+	return 0
 }
 
 func runInteractive() error {

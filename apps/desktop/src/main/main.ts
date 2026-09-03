@@ -30,7 +30,6 @@ import { startNetworkWatcher, onNetworkChange } from "./networkWatcher";
 import { statusNotificationKind, type StatusSnapshot } from "./statusNotifications";
 import { mt, mtState, setMainLocale, resolveMainLocale } from "./i18n";
 import { sanitizeLog } from "./logSanitize";
-import { shouldReleaseKillSwitch } from "./killSwitchRelease";
 import { shouldShowTrayHint, trayHintBodyKey } from "./trayHint";
 import { anchorPosition, canAnchorWindow, samePoint, type AnchorRect } from "./windowAnchor";
 import {
@@ -744,10 +743,11 @@ async function recoverFromNetworkChange(): Promise<void> {
   try {
     // Refresh status first so we don't fire over an already-healthy tunnel.
     await refreshTrayStatus();
-    if (trayStatusState === "CONNECTED" || trayStatusState === "CONNECTING") {
+    if (trayStatusState === "CONNECTED" || trayStatusState === "CONNECTING" || trayStatusState === "DISCONNECTING") {
       return;
     }
-    // The disconnect below would cancel the daemon's own cascade mid-transport.
+    // The daemon is still rebuilding a session it owns; a connect on top of it
+    // would only cancel that cascade mid-transport.
     if (trayStatusReconnecting) return;
     // No physical link: the daemon is holding, so don't churn connect attempts
     // into a dead network — the daemon resumes on its own when a link returns.
@@ -758,18 +758,11 @@ async function recoverFromNetworkChange(): Promise<void> {
     // that no-op would skip the AP-up event that follows seconds later.
     lastNetworkRecoverAtMs = Date.now();
     console.log("network change detected — attempting reconnect");
-    // Tear down stale tunnel/firewall state, keeping the kill switch when
-    // Lockdown is on, then bring the tunnel back on the new network.
-    try {
-      await daemonClient.disconnect({ keepKillSwitch: lockdownEnabled });
-    } catch (err) {
-      console.warn("network recover: disconnect failed", sanitizeLog(err));
-    }
-    if (isCancelled(attempt)) return;
+    // No disconnect first: that would lower the kill switch for the whole
+    // reconnect. The daemon's connect re-arms over whatever it left behind.
     const result = await connectWithRecovery(profileId);
     if (!result.ok) {
       console.warn("network recover: reconnect failed", sanitizeLog((result as { error?: string }).error));
-      await releaseFailClosedKillSwitch();
     }
   } catch (err) {
     console.warn("network recover: unexpected error", sanitizeLog(err));
@@ -1220,9 +1213,6 @@ async function provisionAcrossServers(serverIds: readonly string[], mode: "conne
     const cancelledDuringCleanup = !committed && isCancelled(attempt);
     endAttempt(attempt);
     connectionAttemptRunning = false;
-    if (!committed) {
-      await releaseFailClosedKillSwitch();
-    }
     if (cancelledDuringCleanup) {
       return { ok: false, error: "cancelled" };
     }
@@ -1257,27 +1247,12 @@ async function provisionAndConnect(serverIds: readonly string[]): Promise<Connec
     if (reconnected) {
       return { ok: true, ...(lastServerId ? { serverId: lastServerId } : {}) };
     }
-    await releaseFailClosedKillSwitch();
     throw err;
   }
 }
 
 async function provisionAndSwitch(serverIds: readonly string[]): Promise<ConnectResult> {
   return provisionAcrossServers(serverIds, "switch");
-}
-
-// The daemon is fail-closed, so a cascade that gave up leaves the switch armed
-// with no tunnel to disconnect from. Lockdown means the user wanted the block.
-async function releaseFailClosedKillSwitch(): Promise<void> {
-  if (lockdownEnabled) return;
-  try {
-    const status = await daemonClient.getStatus();
-    if (!shouldReleaseKillSwitch(status, lockdownEnabled)) return;
-    await daemonClient.clearKillSwitch();
-    console.warn("cleared the kill switch a failed connect left armed");
-  } catch (err) {
-    console.warn("could not clear the kill switch after a failed connect", sanitizeLog(err));
-  }
 }
 
 /** Stop the in-flight connect attempt; never tears down a wanted connection. */
@@ -1631,8 +1606,6 @@ function registerIpcHandlers(): void {
         // The tunnel is up, so the hub is reachable through it even when it was
         // not before — the most reliable point to re-cache the renewal date.
         refreshSubscriptionCache("connect");
-      } else {
-        await releaseFailClosedKillSwitch();
       }
       return result;
     } finally {
@@ -2547,22 +2520,11 @@ app.on("before-quit", (event) => {
   trayDefaultImage = null;
   trayConnectedImage = null;
 
-  // Disconnect first (preserving the kill switch if armed) — otherwise quit
-  // SIGTERMs the daemon mid-tunnel and leaves routes/DNS/Lockdown behind.
-  void (async () => {
-    try {
-      const status = await daemonClient.getStatus();
-      if (status.state === "CONNECTED" || status.state === "CONNECTING") {
-        await daemonClient.disconnect({ keepKillSwitch: lockdownEnabled });
-      }
-    } catch (err) {
-      console.warn("quit: clean disconnect failed", sanitizeLog(err));
-    } finally {
-      daemonProcess.stop();
-      quitCleanupDone = true;
-      app.quit();
-    }
-  })();
+  // Quitting the app is not Disconnect: the daemon keeps the session and its
+  // lock, and a spawned dev daemon leaves both for its next start to resume.
+  daemonProcess.stop();
+  quitCleanupDone = true;
+  app.quit();
 });
 
 // Chromium encrypts its cookie store with a keychain key, and an ad-hoc

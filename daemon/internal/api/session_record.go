@@ -22,6 +22,12 @@ type sessionRecord struct {
 
 const sessionRecordFile = "last-session.json"
 
+// ForgetSession drops the recorded session for an uninstall. The daemon itself
+// only does this on a user Disconnect.
+func ForgetSession() error {
+	return removeSessionRecord()
+}
+
 var sessionRecordMu sync.Mutex
 
 // sessionRecordPathFn is replaced by tests to avoid touching the real install.

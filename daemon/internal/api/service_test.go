@@ -1432,40 +1432,6 @@ func TestReconcileStartup_CrashKeepsKillSwitchAndReconnects(t *testing.T) {
 	}
 }
 
-// Without a recorded session there is nothing to rebuild toward; an armed lock
-// would strand the device forever, so the old clearing behavior remains.
-func TestReconcileStartup_CrashWithoutSessionRecordClearsKillSwitch(t *testing.T) {
-	ks := &fakeKillSwitch{active: true}
-	svc := newTestService(t, &fakeCloakManager{}, &fakeNaiveManager{}, &fakeWGManager{}, ks, testProfile())
-	stubSessionRecordStore(t)
-	stubKillSwitchState(t, platform.KillSwitchState{Active: true, EndpointIPs: []string{"198.51.100.9"}})
-
-	svc.reconcileStartup(context.Background())
-
-	if ks.clearCount != 1 {
-		t.Errorf("Clear() called %d times, want 1 — no recorded session means nothing can ever recover the lock", ks.clearCount)
-	}
-	if currentState, _ := svc.machine.Get(); currentState == state.StateError {
-		t.Error("state = StateError, want no recovery attempt without a recorded session")
-	}
-}
-
-// The recorded profile may have been removed from config (e.g. re-provisioned
-// under a new ID); recovery must fall back to clearing, not strand the device.
-func TestReconcileStartup_CrashWithUnknownProfileClearsKillSwitch(t *testing.T) {
-	ks := &fakeKillSwitch{active: true}
-	svc := newTestService(t, &fakeCloakManager{}, &fakeNaiveManager{}, &fakeWGManager{}, ks, testProfile())
-	stub := stubSessionRecordStore(t)
-	stub.set(sessionRecord{ProfileID: "gone-profile"})
-	stubKillSwitchState(t, platform.KillSwitchState{Active: true})
-
-	svc.reconcileStartup(context.Background())
-
-	if ks.clearCount != 1 {
-		t.Errorf("Clear() called %d times, want 1 when the recorded profile no longer exists", ks.clearCount)
-	}
-}
-
 func TestSessionRecord_SavedWithSessionAndRemovedOnClear(t *testing.T) {
 	profile := testProfile()
 	svc := newTestService(t, &fakeCloakManager{}, &fakeNaiveManager{}, &fakeWGManager{}, &fakeKillSwitch{}, profile)
@@ -1482,7 +1448,7 @@ func TestSessionRecord_SavedWithSessionAndRemovedOnClear(t *testing.T) {
 		t.Errorf("session record = %+v, want the live session's profile and options", rec)
 	}
 
-	svc.clearCurrentProfile()
+	svc.clearCurrentProfile(false)
 	if _, has := stub.get(); has {
 		t.Error("session record still present after clearCurrentProfile; a clean disconnect must not be redialled after a crash")
 	}
