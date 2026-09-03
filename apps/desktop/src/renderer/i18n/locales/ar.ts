@@ -69,14 +69,14 @@ export const ar = {
 
   // ── Hero connection card ──────────────────────────────
   "hero.selectServer": "اختر خادمًا",
-  "hero.refreshServers": "تحديث الخوادم",
+  "hero.switchServer": "التبديل إلى خادم آخر",
   "hero.connect": "اتصال",
   "hero.disconnect": "قطع الاتصال",
   "hero.stop": "إيقاف",
   "hero.noServers": "لا توجد خوادم متاحة",
   "hero.noServersForTransport": "لا توجد خوادم تدعم هذا النقل",
   "hero.killSwitchBlocking": "مفتاح الإيقاف مفعّل — الإنترنت متوقف مؤقتًا حتى يعود VPN. اضغط على قطع الاتصال للاتصال بالإنترنت بدون VPN.",
-  "hero.killSwitchLockdown": "وضع Lockdown مفعّل — يبقى الإنترنت محظورًا حتى تُوقفه.",
+  "hero.killSwitchLockdown": "وضع Lockdown مفعّل",
   "state.KILL_SWITCH": "مفتاح الإيقاف مفعّل",
   "hero.headline.KILL_SWITCH": "لا شيء {x}",
   "hero.emphasis.KILL_SWITCH": "يمر",

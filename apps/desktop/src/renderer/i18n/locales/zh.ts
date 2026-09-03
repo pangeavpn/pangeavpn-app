@@ -69,14 +69,14 @@ export const zh = {
 
   // ── Hero connection card ──────────────────────────────
   "hero.selectServer": "选择服务器",
-  "hero.refreshServers": "刷新服务器",
+  "hero.switchServer": "切换到其他服务器",
   "hero.connect": "连接",
   "hero.disconnect": "断开连接",
   "hero.stop": "停止",
   "hero.noServers": "没有可用的服务器",
   "hero.noServersForTransport": "没有服务器支持此传输方式",
   "hero.killSwitchBlocking": "终止开关已启用——在 VPN 恢复前网络已暂停。点击「断开」即可在无 VPN 的情况下上网。",
-  "hero.killSwitchLockdown": "Lockdown 已启用——在关闭之前，网络将保持屏蔽。",
+  "hero.killSwitchLockdown": "Lockdown 已启用",
   "state.KILL_SWITCH": "终止开关已启用",
   "hero.headline.KILL_SWITCH": "流量已{x}",
   "hero.emphasis.KILL_SWITCH": "阻断",

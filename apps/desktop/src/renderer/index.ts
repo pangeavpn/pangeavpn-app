@@ -10,6 +10,7 @@ import {
   getUserIntent
 } from "./autoConnect.js";
 import { pickRandomServer, resolveSelection } from "./serverPick.js";
+import { planRotation, recordRotation } from "./serverRotation.js";
 import { buildDriftMap } from "./driftMap.js";
 import { dnsChoiceFor, dnsServersFor, type DnsChoice } from "./dnsPresets.js";
 import { buildFlag } from "./flags.js";
@@ -94,7 +95,7 @@ const serverPanel = document.getElementById("serverPanel") as HTMLElement;
 const serverSelect = document.getElementById("serverSelect") as HTMLSelectElement;
 const serverConnectBtn = document.getElementById("serverConnectBtn") as HTMLButtonElement;
 const serverDisconnectBtn = document.getElementById("serverDisconnectBtn") as HTMLButtonElement;
-const serverRefreshBtn = document.getElementById("serverRefreshBtn") as HTMLButtonElement;
+const serverRotateBtn = document.getElementById("serverRotateBtn") as HTMLButtonElement;
 const hubActiveDot = document.getElementById("hubActiveDot") as HTMLElement;
 const hubActiveTextEl = document.getElementById("hubActiveText") as HTMLElement;
 const hubDirectIpToggle = document.getElementById("hubDirectIpToggle") as HTMLInputElement;
@@ -1348,9 +1349,12 @@ async function showErrorUnlessConnected(message: string): Promise<void> {
   }
 }
 
-async function switchToServer(serverId: string): Promise<void> {
-  if (!pangeaApi || !daemonApi) return;
-  if (!serverId) return;
+async function switchToServer(
+  serverId: string,
+  plan: readonly string[] = serverRetryPlan(serverId)
+): Promise<ConnectResult | null> {
+  if (!pangeaApi || !daemonApi) return null;
+  if (!serverId) return null;
 
   notifyConnectRequested();
   serverWorking = true;
@@ -1360,7 +1364,7 @@ async function switchToServer(serverId: string): Promise<void> {
   setUiMessage(t("connect.switching"));
   const clearProgressMessages = startConnectionProgressMessages();
   try {
-    const result = await pangeaApi.provisionAndSwitch(serverRetryPlan(serverId));
+    const result = await pangeaApi.provisionAndSwitch([...plan]);
     clearProgressMessages();
     if (result.ok && getUserIntent() === "disconnected") {
       setUiMessage(t("connect.cancelled"));
@@ -1378,6 +1382,7 @@ async function switchToServer(serverId: string): Promise<void> {
     }
     await settleConnectingState(connectingSince);
     await refreshStatus();
+    return result;
   } catch (error) {
     clearProgressMessages();
     if (pangeaApi) {
@@ -1389,7 +1394,7 @@ async function switchToServer(serverId: string): Promise<void> {
           updateAuthUI();
           renderServers();
           showToast(t("auth.signedOutRetry"));
-          return;
+          return null;
         }
       } catch {
         // ignore
@@ -1398,6 +1403,7 @@ async function switchToServer(serverId: string): Promise<void> {
     const message = reportError("serverSwitch", error);
     await settleConnectingState(connectingSince);
     await showErrorUnlessConnected(message);
+    return null;
   } finally {
     clearProgressMessages();
     connectingVisual = false;
@@ -1455,9 +1461,66 @@ async function reconcileDisconnect(): Promise<void> {
   }
 }
 
-serverRefreshBtn.addEventListener("click", async () => {
-  await refreshServers();
-});
+serverRotateBtn.addEventListener("click", () => void rotateServer());
+
+// Where this rotation cycle has been. Persisted so a relaunch resumes the
+// cycle instead of handing back the server the user just left.
+const ROTATION_KEY = "pangea:rotationVisited";
+let rotationVisited: string[] = readRotation();
+
+function readRotation(): string[] {
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(ROTATION_KEY) ?? "[]");
+    return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveRotation(): void {
+  try {
+    localStorage.setItem(ROTATION_KEY, JSON.stringify(rotationVisited));
+  } catch {
+    // Losing the list costs at most one repeat, so carry on.
+  }
+}
+
+function rotationFrom(serverId: string): ReturnType<typeof planRotation> {
+  return planRotation(buildServerRetryOrder(getVisibleServers(), serverId), serverId, rotationVisited);
+}
+
+function canRotate(): boolean {
+  if (currentDaemonState !== "CONNECTED" || serverWorking || connectInFlight || disconnectingVisual) return false;
+  if (!authState.authenticated || entitled === false) return false;
+  return rotationFrom(serverSelect.value).plan.length > 0;
+}
+
+// The plan lands on the first server that answers; everything before it is
+// remembered as tried so the next press moves on rather than retrying it.
+async function rotateServer(): Promise<void> {
+  if (!canRotate()) return;
+  const leaving = serverSelect.value;
+  const { plan, visited } = rotationFrom(leaving);
+  const region = regionOfServer(visibleRegions, plan[0]);
+  if (region) rememberRegion(region.key);
+  serverSelect.value = plan[0];
+  syncServerPicker();
+  const result = await switchToServer(plan[0], plan);
+  // A Stop that raced the switch is neither a landing nor a failed attempt.
+  const cancelled = getUserIntent() === "disconnected";
+  const landed = result?.ok && !cancelled ? result.serverId ?? null : null;
+  if (!cancelled) {
+    rotationVisited = recordRotation(visited, leaving, plan, landed);
+    saveRotation();
+  }
+  if (landed) {
+    pinnedNodeId = landed;
+  } else {
+    serverSelect.value = leaving;
+    syncServerPicker();
+  }
+  renderServers();
+}
 
 // Settings toggles sit under the overlay that covers #uiMessage, so feedback
 // goes through showToast; each reverts its checkbox if the backend call fails.
@@ -3545,6 +3608,7 @@ function updateServerControlStates(): void {
   serverDisconnectBtn.disabled =
     !connectInFlight && !disconnectingVisual && fullyDisconnected && !killSwitchArmed;
   serverDisconnectBtn.textContent = connectInFlight ? t("hero.stop") : t("hero.disconnect");
+  serverRotateBtn.disabled = busy || !canRotate();
 }
 
 function updateControlStates(): void {

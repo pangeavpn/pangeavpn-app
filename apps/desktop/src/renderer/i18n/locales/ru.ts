@@ -69,14 +69,14 @@ export const ru = {
 
   // ── Hero connection card ──────────────────────────────
   "hero.selectServer": "Выбрать сервер",
-  "hero.refreshServers": "Обновить серверы",
+  "hero.switchServer": "Переключиться на другой сервер",
   "hero.connect": "Подключить",
   "hero.disconnect": "Отключить",
   "hero.stop": "Остановить",
   "hero.noServers": "Нет доступных серверов",
   "hero.noServersForTransport": "Нет серверов с поддержкой этого транспорта",
   "hero.killSwitchBlocking": "Kill switch включён — интернет приостановлен, пока VPN не восстановится. Нажмите «Отключить», чтобы выйти в сеть без VPN.",
-  "hero.killSwitchLockdown": "Режим Lockdown включён — интернет заблокирован, пока вы его не отключите.",
+  "hero.killSwitchLockdown": "Режим Lockdown включён",
   "state.KILL_SWITCH": "KILL SWITCH ВКЛЮЧЁН",
   "hero.headline.KILL_SWITCH": "Ничего не {x}",
   "hero.emphasis.KILL_SWITCH": "проходит",

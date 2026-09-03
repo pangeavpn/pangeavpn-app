@@ -69,14 +69,14 @@ export const fa = {
 
   // ── Hero connection card ──────────────────────────────
   "hero.selectServer": "انتخاب سرور",
-  "hero.refreshServers": "به‌روزرسانی سرورها",
+  "hero.switchServer": "تغییر به سرور دیگر",
   "hero.connect": "اتصال",
   "hero.disconnect": "قطع اتصال",
   "hero.stop": "توقف",
   "hero.noServers": "سروری در دسترس نیست",
   "hero.noServersForTransport": "هیچ سروری از این انتقال پشتیبانی نمی‌کند",
   "hero.killSwitchBlocking": "کلید قطع اضطراری فعال است — اینترنت تا بازگشت VPN متوقف است. «قطع اتصال» را بزنید تا بدون VPN آنلاین شوید.",
-  "hero.killSwitchLockdown": "حالت Lockdown فعال است — اینترنت تا زمانی که آن را خاموش کنید مسدود می‌ماند.",
+  "hero.killSwitchLockdown": "حالت Lockdown فعال است",
   "state.KILL_SWITCH": "کلید قطع اضطراری فعال",
   "hero.headline.KILL_SWITCH": "هیچ چیز {x}",
   "hero.emphasis.KILL_SWITCH": "عبور نمی‌کند",

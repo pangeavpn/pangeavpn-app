@@ -69,14 +69,14 @@ export const fr = {
 
   // ── Hero connection card ──────────────────────────────
   "hero.selectServer": "Sélectionner un serveur",
-  "hero.refreshServers": "Actualiser les serveurs",
+  "hero.switchServer": "Passer à un autre serveur",
   "hero.connect": "Se connecter",
   "hero.disconnect": "Se déconnecter",
   "hero.stop": "Arrêter",
   "hero.noServers": "Aucun serveur disponible",
   "hero.noServersForTransport": "Aucun serveur ne prend en charge ce transport",
   "hero.killSwitchBlocking": "Le kill switch est actif : Internet est en pause jusqu'au retour du VPN. Appuyez sur Se déconnecter pour naviguer sans VPN.",
-  "hero.killSwitchLockdown": "Le mode Lockdown est activé : Internet reste bloqué jusqu'à ce que vous le désactiviez.",
+  "hero.killSwitchLockdown": "Le mode Lockdown est activé",
   "state.KILL_SWITCH": "KILL SWITCH ACTIF",
   "hero.headline.KILL_SWITCH": "Rien ne {x}",
   "hero.emphasis.KILL_SWITCH": "passe",
