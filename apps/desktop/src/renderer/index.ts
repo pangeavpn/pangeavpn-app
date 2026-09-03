@@ -2537,11 +2537,18 @@ async function refreshLogs(): Promise<void> {
   }
 }
 
+// Steps up a unit before the mantissa reaches four digits: "1023.4 KB" is
+// both odd and too wide for the fact strip.
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+  const units = ["KB", "MB", "GB", "TB"];
+  let value = bytes / 1024;
+  let unit = 0;
+  while (value >= 999.95 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return `${value.toFixed(unit >= 2 ? 2 : 1)} ${units[unit]}`;
 }
 
 let lastCloakWasDown = false;

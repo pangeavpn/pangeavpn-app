@@ -863,7 +863,7 @@ body[data-theme="light"] .login-brand {
 }
 
 .map-stage {
-  width: 282px;
+  width: 268px;
   flex: none;
   position: relative;
   display: grid;
@@ -1365,17 +1365,19 @@ body[data-theme="light"] .menu-dropdown {
 
 /* ── Session facts ────────────────────────────────────────── */
 
+/* Columns size to content: the transport label is the widest fact and a
+   fixed quarter of the strip clips it. */
 .hero-facts {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, auto));
   margin-top: 9px;
   padding-top: 8px;
   border-top: 1px solid var(--border-subtle);
 }
 
 .fact {
-  flex: 1;
   min-width: 0;
-  padding-right: 10px;
+  padding-right: 7px;
   border-right: 1px solid var(--border-subtle);
 }
 
@@ -1384,13 +1386,13 @@ body[data-theme="light"] .menu-dropdown {
   padding-right: 0;
 }
 
-.fact + .fact { padding-left: 10px; }
+.fact + .fact { padding-left: 7px; }
 
 .fact-key {
   display: block;
-  font-size: 0.64rem;
+  font-size: 0.58rem;
   font-weight: 700;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--text-secondary);
 }
@@ -1443,7 +1445,7 @@ body[data-theme="light"] .menu-dropdown {
 .region-row {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   width: 100%;
   padding: 7px 11px;
   border-radius: 11px;
