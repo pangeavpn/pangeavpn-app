@@ -16,9 +16,10 @@ var (
 	modPowrprof                                = windows.NewLazySystemDLL("powrprof.dll")
 	procPowerRegisterSuspendResumeNotification = modPowrprof.NewProc("PowerRegisterSuspendResumeNotification")
 
-	modIphlpapiEvents           = windows.NewLazySystemDLL("iphlpapi.dll")
-	procNotifyRouteChange2      = modIphlpapiEvents.NewProc("NotifyRouteChange2")
-	procNotifyIpInterfaceChange = modIphlpapiEvents.NewProc("NotifyIpInterfaceChange")
+	modIphlpapiEvents                       = windows.NewLazySystemDLL("iphlpapi.dll")
+	procNotifyRouteChange2                  = modIphlpapiEvents.NewProc("NotifyRouteChange2")
+	procNotifyIpInterfaceChange             = modIphlpapiEvents.NewProc("NotifyIpInterfaceChange")
+	procNotifyNetworkConnectivityHintChange = modIphlpapiEvents.NewProc("NotifyNetworkConnectivityHintChange")
 )
 
 const (
@@ -90,14 +91,15 @@ func netChangeCallback(_, _, _ uintptr) uintptr {
 // OS registrations are process-lifetime: windows.NewCallback slots can never
 // be released, so re-subscribing swaps the sink rather than re-registering.
 var (
-	registerOnce       sync.Once
-	registerErr        error
-	powerNotifyParams  *deviceNotifySubscribeParams
-	powerNotifyHandle  uintptr
-	routeChangeHandle  windows.Handle
-	ifaceChangeHandle  windows.Handle
-	powerRegistered    bool
-	connectivityHooked bool
+	registerOnce           sync.Once
+	registerErr            error
+	powerNotifyParams      *deviceNotifySubscribeParams
+	powerNotifyHandle      uintptr
+	routeChangeHandle      windows.Handle
+	ifaceChangeHandle      windows.Handle
+	connectivityHintHandle windows.Handle
+	powerRegistered        bool
+	connectivityHooked     bool
 )
 
 func registerSystemEventSources() error {
@@ -111,8 +113,8 @@ func registerSystemEventSources() error {
 	)
 	powerRegistered = ret == 0
 
-	// Route and interface notifications, not the connectivity hint: the hint
-	// callback takes a struct by value, which NewCallback cannot carry (arm64).
+	// Route and interface changes say the path moved; the connectivity hint says
+	// the OS decided internet is back — the exact moment recovery needs to run.
 	const afUnspec = 0
 	netCallback := windows.NewCallback(netChangeCallback)
 	if ret, _, _ := procNotifyRouteChange2.Call(afUnspec, netCallback, 0, 0, uintptr(unsafe.Pointer(&routeChangeHandle))); ret == 0 {
@@ -120,6 +122,13 @@ func registerSystemEventSources() error {
 	}
 	if ret, _, _ := procNotifyIpInterfaceChange.Call(afUnspec, netCallback, 0, 0, uintptr(unsafe.Pointer(&ifaceChangeHandle))); ret == 0 {
 		connectivityHooked = true
+	}
+	// The hint callback is handed a by-value struct NewCallback can't carry on
+	// arm64; netChangeCallback ignores it, and the consumer re-reads the hint.
+	if procNotifyNetworkConnectivityHintChange.Find() == nil {
+		if ret, _, _ := procNotifyNetworkConnectivityHintChange.Call(netCallback, 0, 0, uintptr(unsafe.Pointer(&connectivityHintHandle))); ret == 0 {
+			connectivityHooked = true
+		}
 	}
 
 	if !powerRegistered && !connectivityHooked {
