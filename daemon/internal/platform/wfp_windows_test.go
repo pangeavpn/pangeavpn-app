@@ -6,6 +6,8 @@ import (
 	"runtime"
 	"testing"
 	"unsafe"
+
+	"golang.org/x/sys/windows"
 )
 
 func TestWFPStructSizes(t *testing.T) {
@@ -143,5 +145,52 @@ func TestWFPConstants(t *testing.T) {
 	}
 	if fwpmSublayerFlagPersistent != 0x0001 {
 		t.Errorf("fwpmSublayerFlagPersistent = 0x%x, want 0x0001", fwpmSublayerFlagPersistent)
+	}
+}
+
+func TestDHCPReplyConditionsMatchClientPortsOnly(t *testing.T) {
+	conditions := dhcpReplyConditions()
+
+	want := map[windows.GUID]uintptr{
+		fwpmConditionIpProtocol:   uintptr(ipprotoUDP),
+		fwpmConditionIpRemotePort: 67,
+		fwpmConditionIpLocalPort:  68,
+	}
+	if len(conditions) != len(want) {
+		t.Fatalf("got %d conditions, want %d (protocol + both ports, no address)", len(conditions), len(want))
+	}
+	for _, c := range conditions {
+		value, ok := want[c.fieldKey]
+		if !ok {
+			t.Fatalf("unexpected condition on %v: the reply comes from the server or relay, not the broadcast address", c.fieldKey)
+		}
+		if c.conditionValue.value != value {
+			t.Fatalf("condition %v = %d, want %d", c.fieldKey, c.conditionValue.value, value)
+		}
+	}
+}
+
+func TestWFPConditionGUIDsMatchFwpmu(t *testing.T) {
+	// FWPM_CONDITION_* keys as published in fwpmu.h; a wrong key fails every
+	// FwpmFilterAdd0 that uses it with FWP_E_CONDITION_NOT_FOUND.
+	want := map[string]struct {
+		got windows.GUID
+		key string
+	}{
+		"IP_PROTOCOL":        {fwpmConditionIpProtocol, "{3971EF2B-623E-4F9A-8CB1-6E79B806B9A7}"},
+		"IP_LOCAL_PORT":      {fwpmConditionIpLocalPort, "{0C1BA1AF-5765-453F-AF22-A8F791AC775B}"},
+		"IP_REMOTE_PORT":     {fwpmConditionIpRemotePort, "{C35A604D-D22B-4E1A-91B4-68F674EE674B}"},
+		"IP_REMOTE_ADDRESS":  {fwpmConditionIpRemoteAddress, "{B235AE9A-1D64-49B8-A44C-5FF3D9095045}"},
+		"IP_LOCAL_INTERFACE": {fwpmConditionIpLocalInterface, "{4CD62A49-59C3-4969-B7F3-BDA5D32890A4}"},
+		"FLAGS":              {fwpmConditionFlags, "{632CE23B-5167-435C-86D7-E903684AA80C}"},
+	}
+	for name, tc := range want {
+		canonical, err := windows.GUIDFromString(tc.key)
+		if err != nil {
+			t.Fatalf("%s: bad reference GUID %s: %v", name, tc.key, err)
+		}
+		if tc.got != canonical {
+			t.Errorf("FWPM_CONDITION_%s = %s, want %s", name, tc.got.String(), canonical.String())
+		}
 	}
 }

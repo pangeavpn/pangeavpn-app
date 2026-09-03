@@ -222,6 +222,11 @@ func (ks *windowsKillSwitch) Enable(ctx context.Context, endpointHosts []string,
 	if _, err := engine.addPermitDHCP("255.255.255.255/32"); err != nil {
 		KillSwitchWarn("kill switch enable: DHCP broadcast permit failed: %v", err)
 	}
+	// Without the reply, a reconnect sits in DHCP retries for a minute, NLA
+	// keeps the link "Identifying", and WCM soft-disconnects the WiFi meanwhile.
+	if _, err := engine.addPermitDHCPInbound(); err != nil {
+		KillSwitchWarn("kill switch enable: DHCP reply permit failed: %v", err)
+	}
 
 	// Unicast renewals to the server itself, only when the user opted into LAN
 	// access, scoped to the ranges already trusted for "Allow LAN".

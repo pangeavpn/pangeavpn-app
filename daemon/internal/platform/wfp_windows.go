@@ -81,9 +81,9 @@ var (
 var (
 	fwpmConditionFlags            = windows.GUID{Data1: 0x632ce23b, Data2: 0x5167, Data3: 0x435c, Data4: [8]byte{0x86, 0xd7, 0xe9, 0x03, 0x68, 0x4a, 0xa8, 0x0c}}
 	fwpmConditionIpRemoteAddress  = windows.GUID{Data1: 0xb235ae9a, Data2: 0x1d64, Data3: 0x49b8, Data4: [8]byte{0xa4, 0x4c, 0x5f, 0xf3, 0xd9, 0x09, 0x50, 0x45}}
-	fwpmConditionIpProtocol       = windows.GUID{Data1: 0x3971ef2b, Data2: 0x623e, Data3: 0x4f9a, Data4: [8]byte{0x8c, 0xb1, 0x6e, 0x79, 0xb8, 0x06, 0xb9, 0xa6}}
-	fwpmConditionIpRemotePort     = windows.GUID{Data1: 0xc35a604d, Data2: 0xd22b, Data3: 0x440d, Data4: [8]byte{0xa1, 0xd4, 0x0f, 0x22, 0x44, 0xd3, 0xb2, 0xe2}}
-	fwpmConditionIpLocalPort      = windows.GUID{Data1: 0x0c1ba1af, Data2: 0x5765, Data3: 0x453f, Data4: [8]byte{0xaf, 0x22, 0xa8, 0xf4, 0xfe, 0x04, 0x5f, 0x71}}
+	fwpmConditionIpProtocol       = windows.GUID{Data1: 0x3971ef2b, Data2: 0x623e, Data3: 0x4f9a, Data4: [8]byte{0x8c, 0xb1, 0x6e, 0x79, 0xb8, 0x06, 0xb9, 0xa7}}
+	fwpmConditionIpRemotePort     = windows.GUID{Data1: 0xc35a604d, Data2: 0xd22b, Data3: 0x4e1a, Data4: [8]byte{0x91, 0xb4, 0x68, 0xf6, 0x74, 0xee, 0x67, 0x4b}}
+	fwpmConditionIpLocalPort      = windows.GUID{Data1: 0x0c1ba1af, Data2: 0x5765, Data3: 0x453f, Data4: [8]byte{0xaf, 0x22, 0xa8, 0xf7, 0x91, 0xac, 0x77, 0x5b}}
 	fwpmConditionIpLocalInterface = windows.GUID{Data1: 0x4cd62a49, Data2: 0x59c3, Data3: 0x4969, Data4: [8]byte{0xb7, 0xf3, 0xbd, 0xa5, 0xd3, 0x28, 0x90, 0xa4}}
 )
 
@@ -618,28 +618,16 @@ func (e *wfpEngine) addPermitIPv4Subnet(cidr string) (uint64, error) {
 	return id, err
 }
 
-// addPermitDHCP permits UDP 68->67 scoped to remoteCIDR. Unscoped, this
-// outranks block-all for ANY remote IP on port 67 — must stay scoped.
-func (e *wfpEngine) addPermitDHCP(remoteCIDR string) (uint64, error) {
-	addrMask, err := parseV4CIDRAddrMask(remoteCIDR)
-	if err != nil {
-		return 0, err
-	}
-	conditions := []fwpmFilterCondition0{
+// dhcpClientPortConditions matches the DHCP client's exchange on the wire:
+// UDP between the client port (68, ours) and the server port (67, theirs).
+func dhcpClientPortConditions() []fwpmFilterCondition0 {
+	return []fwpmFilterCondition0{
 		{
 			fieldKey:  fwpmConditionIpProtocol,
 			matchType: fwpMatchEqual,
 			conditionValue: fwpValue0{
 				valueType: fwpUint8,
 				value:     uintptr(ipprotoUDP),
-			},
-		},
-		{
-			fieldKey:  fwpmConditionIpRemoteAddress,
-			matchType: fwpMatchEqual,
-			conditionValue: fwpValue0{
-				valueType: fwpV4AddrMask,
-				value:     uintptr(unsafe.Pointer(&addrMask)),
 			},
 		},
 		{
@@ -659,9 +647,38 @@ func (e *wfpEngine) addPermitDHCP(remoteCIDR string) (uint64, error) {
 			},
 		},
 	}
+}
+
+// dhcpReplyConditions matches an OFFER/ACK arriving from any server or relay:
+// it never comes from the broadcast address the request was sent to.
+func dhcpReplyConditions() []fwpmFilterCondition0 {
+	return dhcpClientPortConditions()
+}
+
+// addPermitDHCP permits UDP 68->67 scoped to remoteCIDR. Unscoped, this
+// outranks block-all for ANY remote IP on port 67 — must stay scoped.
+func (e *wfpEngine) addPermitDHCP(remoteCIDR string) (uint64, error) {
+	addrMask, err := parseV4CIDRAddrMask(remoteCIDR)
+	if err != nil {
+		return 0, err
+	}
+	conditions := append(dhcpClientPortConditions(), fwpmFilterCondition0{
+		fieldKey:  fwpmConditionIpRemoteAddress,
+		matchType: fwpMatchEqual,
+		conditionValue: fwpValue0{
+			valueType: fwpV4AddrMask,
+			value:     uintptr(unsafe.Pointer(&addrMask)),
+		},
+	})
 	id, err := e.addFilter(fwpmLayerAleAuthConnectV4, "PangeaVPN Allow DHCP "+remoteCIDR, 10, fwpActionPermit, conditions)
 	runtime.KeepAlive(&addrMask)
 	return id, err
+}
+
+// addPermitDHCPInbound lets the lease reply through the inbound block. The
+// request's flow cannot cover it: the reply's source is the server, not broadcast.
+func (e *wfpEngine) addPermitDHCPInbound() (uint64, error) {
+	return e.addFilter(fwpmLayerAleAuthRecvAcceptV4, "PangeaVPN Allow DHCP Reply", 10, fwpActionPermit, dhcpReplyConditions())
 }
 
 func (e *wfpEngine) addPermitTunnelInterface(luid uint64) (uint64, error) {
