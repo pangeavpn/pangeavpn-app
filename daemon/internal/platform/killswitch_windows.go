@@ -1,4 +1,4 @@
-//go:build windows
+//go:build windows && (amd64 || arm64)
 
 package platform
 
@@ -160,6 +160,15 @@ func (ks *windowsKillSwitch) Enable(ctx context.Context, endpointHosts []string,
 		return fmt.Errorf("kill switch enable: %w", err)
 	}
 
+	// A restarted daemon inherits the engine-keyed permits of the process
+	// before it (old nodes, old tunnel LUID); retire them in this transaction.
+	if _, err := engine.deleteFiltersInSublayer(pangeaVPNSublayerKey, isEphemeralFilter); err != nil {
+		engine.abortTransaction()
+		engine.close()
+		_ = removeKillSwitchState()
+		return fmt.Errorf("kill switch enable: sweep stale permits: %w", err)
+	}
+
 	if _, err := engine.addBlockAllOutbound(); err != nil {
 		engine.abortTransaction()
 		engine.close()
@@ -220,12 +229,18 @@ func (ks *windowsKillSwitch) Enable(ctx context.Context, endpointHosts []string,
 	// A lease is what puts the default route back after a link flap, and it
 	// starts with a broadcast DISCOVER that never leaves the link.
 	if _, err := engine.addPermitDHCP("255.255.255.255/32"); err != nil {
-		KillSwitchWarn("kill switch enable: DHCP broadcast permit failed: %v", err)
+		engine.abortTransaction()
+		engine.close()
+		_ = removeKillSwitchState()
+		return fmt.Errorf("kill switch enable: permit DHCP request: %w", err)
 	}
 	// Without the reply, a reconnect sits in DHCP retries for a minute, NLA
 	// keeps the link "Identifying", and WCM soft-disconnects the WiFi meanwhile.
 	if _, err := engine.addPermitDHCPInbound(); err != nil {
-		KillSwitchWarn("kill switch enable: DHCP reply permit failed: %v", err)
+		engine.abortTransaction()
+		engine.close()
+		_ = removeKillSwitchState()
+		return fmt.Errorf("kill switch enable: permit DHCP reply: %w", err)
 	}
 
 	// Unicast renewals to the server itself, only when the user opted into LAN
@@ -235,7 +250,12 @@ func (ks *windowsKillSwitch) Enable(ctx context.Context, endpointHosts []string,
 			if cidr == "224.0.0.0/4" {
 				continue // multicast — not a DHCP server/relay address
 			}
-			_, _ = engine.addPermitDHCP(cidr)
+			if _, err := engine.addPermitDHCP(cidr); err != nil {
+				engine.abortTransaction()
+				engine.close()
+				_ = removeKillSwitchState()
+				return fmt.Errorf("kill switch enable: permit DHCP renewal %s: %w", cidr, err)
+			}
 		}
 	}
 
@@ -281,7 +301,7 @@ func (ks *windowsKillSwitch) Enable(ctx context.Context, endpointHosts []string,
 	// flag (unreliable for fresh connects), and permits at the inbound layer —
 	// the inbound V6 block otherwise drops the server side of every [::1]
 	// connection, making localhost websites unreachable while connected.
-	if _, err := engine.addPermitLoopbackSubnetV6(fwpmLayerAleAuthConnectV6, pangeaPermitLoopbackNetV6FilterKey, "PangeaVPN Allow Loopback Subnet IPv6"); err != nil {
+	if _, err := engine.addPermitLoopbackSubnetV6(cFWPM_LAYER_ALE_AUTH_CONNECT_V6, pangeaPermitLoopbackNetV6FilterKey, "PangeaVPN Allow Loopback Subnet IPv6"); err != nil {
 		engine.abortTransaction()
 		engine.close()
 		_ = removeKillSwitchState()
@@ -293,7 +313,7 @@ func (ks *windowsKillSwitch) Enable(ctx context.Context, endpointHosts []string,
 		_ = removeKillSwitchState()
 		return fmt.Errorf("kill switch enable: %w", err)
 	}
-	if _, err := engine.addPermitLoopbackSubnetV6(fwpmLayerAleAuthRecvAcceptV6, pangeaPermitLoopbackNetInV6FilterKey, "PangeaVPN Allow Loopback Subnet Inbound IPv6"); err != nil {
+	if _, err := engine.addPermitLoopbackSubnetV6(cFWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V6, pangeaPermitLoopbackNetInV6FilterKey, "PangeaVPN Allow Loopback Subnet Inbound IPv6"); err != nil {
 		engine.abortTransaction()
 		engine.close()
 		_ = removeKillSwitchState()
@@ -435,7 +455,7 @@ func (ks *windowsKillSwitch) Clear(ctx context.Context) error {
 	// engine-assigned keys, so a daemon that died without clearing left ones
 	// only enumeration can still name — and the sublayer delete below fails
 	// while any of them survive, which would strand the machine blocked.
-	if _, err := engine.deleteFiltersInSublayer(pangeaVPNSublayerKey); err != nil {
+	if _, err := engine.deleteFiltersInSublayer(pangeaVPNSublayerKey, anyFilter); err != nil {
 		errs = append(errs, fmt.Sprintf("sublayer sweep: %v", err))
 	}
 
