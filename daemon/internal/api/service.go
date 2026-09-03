@@ -2189,24 +2189,44 @@ func (s *Service) healthLoop(ctx context.Context) {
 	ticker := time.NewTicker(healthTickInterval)
 	defer ticker.Stop()
 
-	lastTick := time.Now()
+	gaps := newSuspendGapTracker(time.Now())
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-s.healthKick:
-			s.runHealthCheck(ctx)
+			// Falls through to the shared check below.
 		case <-ticker.C:
-			now := time.Now()
-			// Wall clock, not monotonic: on darwin/linux the monotonic clock
-			// pauses during suspend, so a monotonic diff never sees the gap.
-			if gap := now.Round(0).Sub(lastTick.Round(0)); gap > suspendGapThreshold {
+			if gap, slept := gaps.tick(time.Now()); slept {
 				s.onSystemResume(ctx, fmt.Sprintf("health check gap of %s", gap.Round(time.Second)))
 			}
-			lastTick = now
-			s.runHealthCheck(ctx)
 		}
+		s.runHealthCheck(ctx)
+		gaps = gaps.checkDone(time.Now())
 	}
+}
+
+// suspendGapTracker reads host sleep off the health loop's schedule: the gap
+// from one check ending to the next tick, so a check that ran long is not sleep.
+type suspendGapTracker struct {
+	lastCheckEnd time.Time
+}
+
+func newSuspendGapTracker(now time.Time) suspendGapTracker {
+	return suspendGapTracker{lastCheckEnd: now}
+}
+
+// tick reports how long the loop was idle and whether that reads as a suspend.
+func (t suspendGapTracker) tick(now time.Time) (time.Duration, bool) {
+	// Wall clock, not monotonic: on darwin/linux the monotonic clock pauses
+	// during suspend, so a monotonic diff never sees the gap.
+	gap := now.Round(0).Sub(t.lastCheckEnd.Round(0))
+	return gap, gap > suspendGapThreshold
+}
+
+// checkDone restarts the idle clock once a check returns, however long it ran.
+func (t suspendGapTracker) checkDone(now time.Time) suspendGapTracker {
+	return suspendGapTracker{lastCheckEnd: now}
 }
 
 // resumeFreshWindow is how long after a resume a single failed probe round is
