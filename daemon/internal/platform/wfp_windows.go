@@ -78,6 +78,12 @@ var (
 	pangeaPermitDHCPInV4FilterKey  = windows.GUID{Data1: 0xa9d3e901, Data2: 0x4b7c, Data3: 0x4d2a, Data4: [8]byte{0x9e, 0x6f, 0x1a, 0x2b, 0x3c, 0x4d, 0x5e, 0x7f}}
 )
 
+// DNS over TLS or QUIC to a LAN resolver is the same Allow-LAN hole as plain DNS.
+var (
+	pangeaBlockDoTUDPV4FilterKey = windows.GUID{Data1: 0xa9d3e904, Data2: 0x4b7c, Data3: 0x4d2a, Data4: [8]byte{0x9e, 0x6f, 0x1a, 0x2b, 0x3c, 0x4d, 0x5e, 0x82}}
+	pangeaBlockDoTTCPV4FilterKey = windows.GUID{Data1: 0xa9d3e905, Data2: 0x4b7c, Data3: 0x4d2a, Data4: [8]byte{0x9e, 0x6f, 0x1a, 0x2b, 0x3c, 0x4d, 0x5e, 0x83}}
+)
+
 // Traffic the host forwards for WSL2, Hyper-V NAT or ICS guests never reaches
 // the ALE layers, so the lock has to block it at the IPFORWARD layers too.
 var (
@@ -105,7 +111,10 @@ const (
 	weightTrustedPermit uint8 = 12
 )
 
-const dnsPort = 53
+const (
+	dnsPort = 53
+	dotPort = 853
+)
 
 // ---------------------------------------------------------------------------
 // wfpEngine wraps a WFP engine handle
@@ -649,9 +658,9 @@ func (e *wfpEngine) addPermitDHCPInbound() (uint64, error) {
 	return e.addFilterKeyed(cFWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4, pangeaPermitDHCPInV4FilterKey, "PangeaVPN Allow DHCP Reply", weightLANPermit, cFWP_ACTION_PERMIT, cFWPM_FILTER_FLAG_PERSISTENT, dhcpReplyConditions())
 }
 
-// dnsBlockConditions matches port 53 over one transport protocol. Only the
-// permits above weightDNSBlock (loopback, endpoint, tunnel) get past it.
-func dnsBlockConditions(proto wtIPProto) []wtFwpmFilterCondition0 {
+// dnsBlockConditions matches one resolver port over one transport protocol. Only
+// the permits above weightDNSBlock (loopback, endpoint, tunnel) get past it.
+func dnsBlockConditions(proto wtIPProto, port uint16) []wtFwpmFilterCondition0 {
 	return []wtFwpmFilterCondition0{
 		{
 			fieldKey:  cFWPM_CONDITION_IP_PROTOCOL,
@@ -666,7 +675,7 @@ func dnsBlockConditions(proto wtIPProto) []wtFwpmFilterCondition0 {
 			matchType: cFWP_MATCH_EQUAL,
 			conditionValue: wtFwpConditionValue0{
 				_type: cFWP_UINT16,
-				value: uintptr(dnsPort),
+				value: uintptr(port),
 			},
 		},
 	}
@@ -675,11 +684,20 @@ func dnsBlockConditions(proto wtIPProto) []wtFwpmFilterCondition0 {
 // addBlockDNSUDP and addBlockDNSTCP close the Allow-LAN DNS hole: the router
 // is a resolver, and Windows will happily ask it beside the tunnel's.
 func (e *wfpEngine) addBlockDNSUDP() (uint64, error) {
-	return e.addFilterKeyed(cFWPM_LAYER_ALE_AUTH_CONNECT_V4, pangeaBlockDNSUDPV4FilterKey, "PangeaVPN Block DNS UDP", weightDNSBlock, cFWP_ACTION_BLOCK, cFWPM_FILTER_FLAG_PERSISTENT, dnsBlockConditions(cIPPROTO_UDP))
+	return e.addFilterKeyed(cFWPM_LAYER_ALE_AUTH_CONNECT_V4, pangeaBlockDNSUDPV4FilterKey, "PangeaVPN Block DNS UDP", weightDNSBlock, cFWP_ACTION_BLOCK, cFWPM_FILTER_FLAG_PERSISTENT, dnsBlockConditions(cIPPROTO_UDP, dnsPort))
 }
 
 func (e *wfpEngine) addBlockDNSTCP() (uint64, error) {
-	return e.addFilterKeyed(cFWPM_LAYER_ALE_AUTH_CONNECT_V4, pangeaBlockDNSTCPV4FilterKey, "PangeaVPN Block DNS TCP", weightDNSBlock, cFWP_ACTION_BLOCK, cFWPM_FILTER_FLAG_PERSISTENT, dnsBlockConditions(cIPPROTO_TCP))
+	return e.addFilterKeyed(cFWPM_LAYER_ALE_AUTH_CONNECT_V4, pangeaBlockDNSTCPV4FilterKey, "PangeaVPN Block DNS TCP", weightDNSBlock, cFWP_ACTION_BLOCK, cFWPM_FILTER_FLAG_PERSISTENT, dnsBlockConditions(cIPPROTO_TCP, dnsPort))
+}
+
+// addBlockDoTUDP and addBlockDoTTCP do the same for DNS over QUIC and TLS.
+func (e *wfpEngine) addBlockDoTUDP() (uint64, error) {
+	return e.addFilterKeyed(cFWPM_LAYER_ALE_AUTH_CONNECT_V4, pangeaBlockDoTUDPV4FilterKey, "PangeaVPN Block DoT UDP", weightDNSBlock, cFWP_ACTION_BLOCK, cFWPM_FILTER_FLAG_PERSISTENT, dnsBlockConditions(cIPPROTO_UDP, dotPort))
+}
+
+func (e *wfpEngine) addBlockDoTTCP() (uint64, error) {
+	return e.addFilterKeyed(cFWPM_LAYER_ALE_AUTH_CONNECT_V4, pangeaBlockDoTTCPV4FilterKey, "PangeaVPN Block DoT TCP", weightDNSBlock, cFWP_ACTION_BLOCK, cFWPM_FILTER_FLAG_PERSISTENT, dnsBlockConditions(cIPPROTO_TCP, dotPort))
 }
 
 func (e *wfpEngine) addPermitTunnelInterface(luid uint64) (uint64, error) {

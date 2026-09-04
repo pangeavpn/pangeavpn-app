@@ -37,17 +37,18 @@ func buildNFTRuleset(endpointIPs []string, tunnelInterface string, allowLAN bool
 		fmt.Fprintf(&b, "    ip daddr %s accept\n", ip)
 	}
 
-	// Allow LAN ranges so captive portals and gateway probes work on
-	// restrictive WiFi. Only applied when the user opts in.
-	if allowLAN {
-		for _, cidr := range LANAllowPrefixes {
-			fmt.Fprintf(&b, "    ip daddr %s accept\n", cidr)
-		}
-	}
-
 	// Allow IPv4 traffic on tunnel interface.
 	if tunnelInterface != "" {
 		fmt.Fprintf(&b, "    meta nfproto ipv4 oifname \"%s\" accept\n", tunnelInterface)
+	}
+
+	// Allow LAN ranges so captive portals and gateway probes work on
+	// restrictive WiFi. Only applied when the user opts in.
+	if allowLAN {
+		writeNFTResolverDrops(&b)
+		for _, cidr := range LANAllowPrefixes {
+			fmt.Fprintf(&b, "    ip daddr %s accept\n", cidr)
+		}
 	}
 
 	fmt.Fprintf(&b, "  }\n")
@@ -55,6 +56,13 @@ func buildNFTRuleset(endpointIPs []string, tunnelInterface string, allowLAN bool
 	fmt.Fprintf(&b, "}\n")
 
 	return b.String()
+}
+
+// writeNFTResolverDrops closes the Allow-LAN resolver hole. Placed after the
+// tunnel accept, so only a LAN resolver is left for it to catch.
+func writeNFTResolverDrops(b *strings.Builder) {
+	fmt.Fprintf(b, "    udp dport { 53, 853 } drop\n")
+	fmt.Fprintf(b, "    tcp dport { 53, 853 } drop\n")
 }
 
 // writeNFTForwardChain covers what the output hook never sees: packets the
@@ -74,6 +82,7 @@ func writeNFTForwardChain(b *strings.Builder, tunnelInterface string, allowLAN b
 	}
 
 	if allowLAN {
+		writeNFTResolverDrops(b)
 		for _, cidr := range LANAllowPrefixes {
 			fmt.Fprintf(b, "    ip daddr %s accept\n", cidr)
 		}

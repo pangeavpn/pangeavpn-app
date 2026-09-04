@@ -154,14 +154,15 @@ func iptablesApplyPlan(
 		plan = append(plan, ipt4("allow endpoint "+ip, "-A", staging, "-d", ip, "-j", "ACCEPT"))
 	}
 
+	if tunnelInterface != "" {
+		plan = append(plan, ipt4("allow tunnel interface", "-A", staging, "-o", tunnelInterface, "-j", "ACCEPT"))
+	}
+
 	if allowLAN {
+		plan = append(plan, iptablesResolverDrops(staging)...)
 		for _, cidr := range LANAllowPrefixes {
 			plan = append(plan, ipt4("allow LAN "+cidr, "-A", staging, "-d", cidr, "-j", "ACCEPT"))
 		}
-	}
-
-	if tunnelInterface != "" {
-		plan = append(plan, ipt4("allow tunnel interface", "-A", staging, "-o", tunnelInterface, "-j", "ACCEPT"))
 	}
 
 	// Complete from here; only now is it reachable.
@@ -435,6 +436,7 @@ func iptablesForwardPlan(staging, staging6, tunnelInterface string, allowLAN boo
 		)
 	}
 	if allowLAN {
+		plan = append(plan, iptablesResolverDrops(staging)...)
 		for _, cidr := range LANAllowPrefixes {
 			plan = append(plan, ipt4("allow forwarding to LAN "+cidr, "-A", staging, "-d", cidr, "-j", "ACCEPT"))
 		}
@@ -454,4 +456,16 @@ func iptablesForwardPlan(staging, staging6, tunnelInterface string, allowLAN boo
 		)
 	}
 	return plan
+}
+
+// iptablesResolverDrops closes the Allow-LAN resolver hole. Placed after the
+// tunnel accept, only a LAN resolver on 53/853 is left for them to catch.
+func iptablesResolverDrops(chain string) []iptablesCommand {
+	drops := make([]iptablesCommand, 0, 4)
+	for _, proto := range []string{"udp", "tcp"} {
+		for _, port := range []string{"53", "853"} {
+			drops = append(drops, ipt4("block LAN resolver "+proto+"/"+port, "-A", chain, "-p", proto, "--dport", port, "-j", "DROP"))
+		}
+	}
+	return drops
 }

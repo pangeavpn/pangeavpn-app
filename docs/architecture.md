@@ -352,6 +352,18 @@ Filtering Engine starts, Linux runs `pangea-killswitch-boot.service` before
 `network-pre.target`, and macOS enables pf from a LaunchDaemon while a
 kill-switch anchor is on disk.
 
+Allow LAN opens the local ranges but not their resolvers: DNS and DNS-over-TLS
+(ports 53 and 853) to a LAN address stay blocked on every platform, since a
+router that forwards lookups upstream is a DNS leak. A resolver the profile
+itself names is routed into the tunnel, so it needs no permit of its own. On
+macOS the pf anchor also blocks unsolicited inbound traffic, admitting loopback,
+the DHCP reply, and the LAN under Allow LAN, and flushes pf's state table when
+the lock first lands so connections established earlier cannot outlive it.
+
+While a session runs, the local permit endpoint accepts only addresses a stored
+profile already carries (the hub and the transports the hub handed out); any
+other address is refused, since the hub is reachable through the tunnel then.
+
 Lockdown mode intentionally retains the kill switch after disconnect and records
 that intent in `killswitch-state.json`. The retained lock keeps only the hub
 permitted: the departing server's endpoints and the dead tunnel's interface

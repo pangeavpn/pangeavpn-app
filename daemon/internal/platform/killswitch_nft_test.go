@@ -136,3 +136,27 @@ func TestBuildNFTRuleset_ForwardChainFollowsAllowLAN(t *testing.T) {
 		t.Fatalf("forward chain permits the LAN with allowLAN off:\n%s", without)
 	}
 }
+
+// Allow LAN must not reopen the resolver hole: a query to the LAN router on the
+// DNS or DoT port is a leak, while a tunnel-side resolver still passes via the tunnel.
+func TestBuildNFTRuleset_AllowLANStillBlocksResolversOnTheLAN(t *testing.T) {
+	ruleset := buildNFTRuleset([]string{"203.0.113.10"}, "wg-test", true)
+	for _, chain := range []string{"output", "forward"} {
+		body := nftChainBody(t, ruleset, chain)
+		udpDrop := strings.Index(body, "udp dport { 53, 853 } drop")
+		tcpDrop := strings.Index(body, "tcp dport { 53, 853 } drop")
+		tunnel := strings.Index(body, `oifname "wg-test" accept`)
+		lan := strings.Index(body, "ip daddr 10.0.0.0/8 accept")
+		if udpDrop < 0 || tcpDrop < 0 {
+			t.Fatalf("%s chain lacks the resolver drops under allowLAN:\n%s", chain, body)
+		}
+		if !(tunnel < udpDrop && udpDrop < lan && tcpDrop < lan) {
+			t.Fatalf("%s chain order wrong (tunnel=%d udpDrop=%d tcpDrop=%d lan=%d); drops must follow the tunnel accept and precede every LAN accept:\n%s", chain, tunnel, udpDrop, tcpDrop, lan, body)
+		}
+	}
+
+	without := buildNFTRuleset([]string{"203.0.113.10"}, "wg-test", false)
+	if strings.Contains(without, "dport { 53, 853 } drop") {
+		t.Fatalf("resolver drops emitted with allowLAN off, where nothing but the tunnel is reachable anyway:\n%s", without)
+	}
+}

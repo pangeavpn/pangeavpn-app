@@ -760,3 +760,36 @@ func TestLiveIPTablesChain_ProbesTheGivenHook(t *testing.T) {
 		}
 	}
 }
+
+// Allow LAN must not reopen the resolver hole in either hook: the drops sit after
+// the tunnel accept (a tunnel-side resolver still resolves) and before the LAN accepts.
+func TestIPTablesPlans_AllowLANStillBlocksResolversOnTheLAN(t *testing.T) {
+	model := newIPTablesModel()
+	model.run(iptablesApplyPlan(iptChainName, ipt6ChainName, []string{"203.0.113.5"}, "wg-test", true), false)
+	model.runHook(iptablesForwardPlan(iptFwdChainName, ipt6FwdChainName, "wg-test", true), "FORWARD", false)
+
+	chains := map[string][]string{
+		"OUTPUT":  model.liveChain("PANGEAVPN_KS"),
+		"FORWARD": model.liveHookChain("FORWARD", "iptables"),
+	}
+	for hook, rules := range chains {
+		joined := strings.Join(rules, "\n")
+		tunnel := strings.Index(joined, "-o wg-test -j ACCEPT")
+		lan := strings.Index(joined, "-d 192.168.0.0/16 -j ACCEPT")
+		for _, drop := range []string{"-p udp --dport 53 -j DROP", "-p tcp --dport 53 -j DROP", "-p udp --dport 853 -j DROP", "-p tcp --dport 853 -j DROP"} {
+			at := strings.Index(joined, drop)
+			if at < 0 {
+				t.Fatalf("%s chain lacks %q under allowLAN:\n%s", hook, drop, joined)
+			}
+			if !(tunnel < at && at < lan) {
+				t.Fatalf("%s chain: %q at %d must follow the tunnel accept (%d) and precede the LAN accepts (%d):\n%s", hook, drop, at, tunnel, lan, joined)
+			}
+		}
+	}
+
+	bare := newIPTablesModel()
+	bare.run(iptablesApplyPlan(iptChainName, ipt6ChainName, []string{"203.0.113.5"}, "wg-test", false), false)
+	if strings.Contains(strings.Join(bare.liveChain("PANGEAVPN_KS"), "\n"), "--dport 53 -j DROP") {
+		t.Fatal("resolver drops emitted with allowLAN off, where only the tunnel is reachable anyway")
+	}
+}

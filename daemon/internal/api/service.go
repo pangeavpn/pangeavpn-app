@@ -1752,6 +1752,12 @@ func (s *Service) PermitHosts(ctx context.Context, hosts []string) error {
 	if len(permits) == 0 {
 		return errors.New("no control-plane IP to permit: none supplied and no provisioned profile carries one")
 	}
+	if unknown := s.unvouchedPermits(permits); len(unknown) > 0 {
+		if s.sessionInProgress() {
+			return fmt.Errorf("%w: %v", ErrPermitUnvouched, unknown)
+		}
+		s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("kill switch: permitting control-plane address %v that no stored profile vouches for (idle lock)", unknown))
+	}
 
 	// Reuse the persisted AllowLAN/Locked flags: widening the permit set must
 	// not change what kind of lock is engaged (dropping Locked would make a
@@ -3766,21 +3772,10 @@ func stunHost(raw string) string {
 // transports use different remote hosts (the normal case — see
 // hub/config/nodes.json, where each transport's remoteHost is typically a
 // distinct domain).
-func killSwitchPermitsFor(profile state.Profile, allowLAN bool) []string {
-	out := killSwitchPermits(profile)
-	if !allowLAN {
-		return out
-	}
-	// Under Allow LAN the DNS block still covers the LAN, so a LAN resolver the
-	// profile names needs its own permit to keep resolving.
-	for _, server := range profile.WireGuard.DNS {
-		ip := net.ParseIP(strings.TrimSpace(server))
-		if ip == nil || ip.To4() == nil || !platform.IsLANAllowAddress(ip) {
-			continue
-		}
-		out = append(out, ip.To4().String())
-	}
-	return out
+// killSwitchPermitsFor adds nothing for Allow LAN: a resolver the profile names is
+// routed into the tunnel, so a permit for it would only carry queries once the tunnel is down.
+func killSwitchPermitsFor(profile state.Profile, _ bool) []string {
+	return killSwitchPermits(profile)
 }
 
 func killSwitchPermits(profile state.Profile) []string {
@@ -3883,4 +3878,59 @@ func (s *Service) dropTunnelPermit(ctx context.Context) {
 	if err := dropper.DropTunnelPermit(ctx); err != nil {
 		s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("kill switch: could not retire the tunnel permit: %v", err))
 	}
+}
+
+// ErrPermitUnvouched refuses a control-plane permit for an address no stored
+// profile carries while a session runs: the hub is reachable through the tunnel then.
+var ErrPermitUnvouched = errors.New("kill switch permit refused: not a known hub or transport address while a session is active")
+
+// vouchedHosts is every IPv4 literal the stored profiles name: hub bypass hosts
+// and the transport remotes the hub itself handed out.
+func (s *Service) vouchedHosts() map[string]bool {
+	vouched := make(map[string]bool)
+	for _, profile := range s.config.Get().Profiles {
+		hosts := append([]string{profile.Cloak.RemoteHost}, profile.WireGuard.BypassHosts...)
+		hosts = append(hosts, profile.TransportEndpointIPs...)
+		if profile.Naive != nil {
+			hosts = append(hosts, profile.Naive.RemoteHost)
+		}
+		if profile.Reality != nil {
+			hosts = append(hosts, profile.Reality.RemoteHost)
+		}
+		if profile.Hysteria2 != nil {
+			hosts = append(hosts, profile.Hysteria2.RemoteHost)
+		}
+		if profile.Shadowsocks != nil {
+			hosts = append(hosts, profile.Shadowsocks.RemoteHost)
+		}
+		if host, _, err := net.SplitHostPort(profile.WireGuard.DirectEndpoint); err == nil {
+			hosts = append(hosts, host)
+		}
+		for _, ip := range ipLiterals(hosts) {
+			vouched[ip] = true
+		}
+	}
+	return vouched
+}
+
+func (s *Service) unvouchedPermits(permits []string) []string {
+	vouched := s.vouchedHosts()
+	var unknown []string
+	for _, ip := range permits {
+		if !vouched[ip] {
+			unknown = append(unknown, ip)
+		}
+	}
+	return unknown
+}
+
+// sessionInProgress is narrower than sessionHeld: an orphaned lock has no session
+// that could reach the hub through a tunnel, so it keeps the cold-start permit.
+func (s *Service) sessionInProgress() bool {
+	switch current, _ := s.machine.Get(); current {
+	case state.StateConnecting, state.StateConnected, state.StateDisconnecting:
+		return true
+	}
+	_, ok := s.getCurrentProfile()
+	return ok
 }

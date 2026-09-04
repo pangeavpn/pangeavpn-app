@@ -207,7 +207,7 @@ func TestFilterWeightLadder(t *testing.T) {
 }
 
 func TestDNSBlockMatchesPortAndProtocolOnly(t *testing.T) {
-	conditions := dnsBlockConditions(cIPPROTO_UDP)
+	conditions := dnsBlockConditions(cIPPROTO_UDP, dnsPort)
 	want := map[windows.GUID]uintptr{
 		cFWPM_CONDITION_IP_PROTOCOL:    uintptr(cIPPROTO_UDP),
 		cFWPM_CONDITION_IP_REMOTE_PORT: dnsPort,
@@ -290,5 +290,28 @@ func TestSweepKeepsBootTimeFilters(t *testing.T) {
 	bootTime := wtFwpmFilter0{flags: cFWPM_FILTER_FLAG_BOOTTIME}
 	if isEphemeralFilter(&bootTime) {
 		t.Fatal("a boot-time block was classed as a stale permit and would be swept on every arm")
+	}
+}
+
+// A router that speaks DNS over TLS is the same Allow-LAN hole as plain DNS.
+func TestPersistentLockBlocksDNSOverTLS(t *testing.T) {
+	keys := make(map[windows.GUID]bool, len(pangeaPersistentFilterKeys))
+	for _, key := range pangeaPersistentFilterKeys {
+		keys[key] = true
+	}
+	if !keys[pangeaBlockDoTUDPV4FilterKey] || !keys[pangeaBlockDoTTCPV4FilterKey] {
+		t.Fatal("the persistent lock has no port-853 block; Allow LAN lets DoT/DoQ reach a LAN resolver")
+	}
+	names := make(map[string]bool, len(persistentLockFilters))
+	for _, step := range persistentLockFilters {
+		names[step.name] = true
+	}
+	if !names["block DoT udp"] || !names["block DoT tcp"] {
+		t.Fatalf("persistent filter steps %v lack the DoT blocks", names)
+	}
+	for _, c := range dnsBlockConditions(cIPPROTO_TCP, dotPort) {
+		if c.fieldKey == cFWPM_CONDITION_IP_REMOTE_PORT && c.conditionValue.value != 853 {
+			t.Fatalf("DoT block matches port %d, want 853", c.conditionValue.value)
+		}
 	}
 }

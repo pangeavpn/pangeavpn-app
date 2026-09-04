@@ -191,20 +191,19 @@ func TestClearKillSwitch_AllowedWhenIdle(t *testing.T) {
 	}
 }
 
-func TestKillSwitchPermits_LANDNSOnlyWithAllowLAN(t *testing.T) {
+// A resolver the profile names is routed into the tunnel (Allow LAN re-includes
+// it), so an interface-wide permit only ever lets queries out once the tunnel is down.
+func TestKillSwitchPermits_NeverPermitsAResolverOutsideTheTunnel(t *testing.T) {
 	profile := testProfile()
-	profile.WireGuard.DNS = []string{"192.168.1.2", "1.1.1.1"}
+	profile.WireGuard.DNS = []string{"192.168.1.2", "10.8.0.1", "1.1.1.1"}
 
-	withLAN := killSwitchPermitsFor(profile, true)
-	if !slices.Contains(withLAN, "192.168.1.2") {
-		t.Errorf("permits with AllowLAN = %v, want the LAN resolver permitted through the DNS block", withLAN)
-	}
-	if slices.Contains(withLAN, "1.1.1.1") {
-		t.Errorf("permits with AllowLAN = %v, must not permit a public resolver outside the tunnel", withLAN)
-	}
-	withoutLAN := killSwitchPermitsFor(profile, false)
-	if slices.Contains(withoutLAN, "192.168.1.2") {
-		t.Errorf("permits without AllowLAN = %v, want no LAN hole at all", withoutLAN)
+	for _, allowLAN := range []bool{true, false} {
+		permits := killSwitchPermitsFor(profile, allowLAN)
+		for _, resolver := range profile.WireGuard.DNS {
+			if slices.Contains(permits, resolver) {
+				t.Errorf("allowLAN=%v: permits %v include resolver %s; with the tunnel down its queries would leave on the physical NIC", allowLAN, permits, resolver)
+			}
+		}
 	}
 }
 
@@ -230,5 +229,45 @@ func TestDisconnect_LockdownDropsTheTunnelPermit(t *testing.T) {
 	}
 	if ks.clearCount != 0 || !ks.Active() {
 		t.Errorf("clears=%d active=%v, want the lock itself kept", ks.clearCount, ks.Active())
+	}
+}
+
+// While a session runs the hub is reachable through the tunnel, so a permit for
+// an address no stored profile vouches for has no honest use: it is an exfil hole.
+func TestPermitHosts_RefusesAnUnknownIPWhileASessionRuns(t *testing.T) {
+	profile := testProfile()
+	profile.WireGuard.BypassHosts = []string{"198.51.100.1"}
+	ks := &fakeKillSwitch{}
+	svc := newTestService(t, &fakeCloakManager{}, &fakeNaiveManager{}, &fakeWGManager{}, ks, profile)
+	if err := svc.Connect(context.Background(), profile.ID, ConnectOptions{Lockdown: true}); err != nil {
+		t.Fatalf("connect failed: %v", err)
+	}
+	stubKillSwitchState(t, platform.KillSwitchState{Active: true, Locked: true, EndpointIPs: []string{"198.51.100.1"}})
+	enables := ks.enableCount
+
+	if err := svc.PermitHosts(context.Background(), []string{"203.0.113.9"}); err == nil {
+		t.Fatal("PermitHosts() accepted an address no profile vouches for while connected")
+	}
+	if ks.enableCount != enables {
+		t.Errorf("Enable() called %d extra times, want the lock untouched", ks.enableCount-enables)
+	}
+}
+
+// The hub's own address, as recorded at provisioning, stays permittable at any time.
+func TestPermitHosts_AcceptsTheStoredHubIPWhileASessionRuns(t *testing.T) {
+	profile := testProfile()
+	profile.WireGuard.BypassHosts = []string{"198.51.100.1"}
+	ks := &fakeKillSwitch{}
+	svc := newTestService(t, &fakeCloakManager{}, &fakeNaiveManager{}, &fakeWGManager{}, ks, profile)
+	if err := svc.Connect(context.Background(), profile.ID, ConnectOptions{Lockdown: true}); err != nil {
+		t.Fatalf("connect failed: %v", err)
+	}
+	stubKillSwitchState(t, platform.KillSwitchState{Active: true, Locked: true, EndpointIPs: []string{"192.0.2.50"}})
+
+	if err := svc.PermitHosts(context.Background(), []string{"198.51.100.1"}); err != nil {
+		t.Fatalf("PermitHosts() refused the stored hub IP: %v", err)
+	}
+	if !slices.Contains(ks.enableEndpoints, "198.51.100.1") {
+		t.Errorf("Enable() endpoints = %v, want the hub IP permitted", ks.enableEndpoints)
 	}
 }

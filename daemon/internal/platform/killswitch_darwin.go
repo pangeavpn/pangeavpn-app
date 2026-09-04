@@ -24,7 +24,6 @@ const (
 	pfTokenFile      = "killswitch-pf-token.txt"
 )
 
-var tunnelNamePattern = regexp.MustCompile(`^[a-zA-Z0-9]+$`)
 var pfTokenPattern = regexp.MustCompile(`Token\s*:\s*(\d+)`)
 
 func init() {
@@ -126,6 +125,7 @@ func (ks *darwinKillSwitch) Enable(ctx context.Context, endpointHosts []string, 
 			}
 			return fmt.Errorf("kill switch enable: save pf token: %w", err)
 		}
+		flushPFStates(ctx)
 	}
 
 	ks.setState(true, allowLAN)
@@ -234,53 +234,6 @@ func pfEnabled(ctx context.Context) bool {
 // ---------------------------------------------------------------------------
 // PF anchor management
 // ---------------------------------------------------------------------------
-
-// buildPFRules generates a PF ruleset for the kill-switch anchor.
-func buildPFRules(endpointIPs []string, tunnelInterface string, allowLAN bool) (string, error) {
-	if tunnelInterface != "" && !tunnelNamePattern.MatchString(tunnelInterface) {
-		return "", fmt.Errorf("invalid tunnel interface name %q", tunnelInterface)
-	}
-
-	var rules []string
-
-	// Loopback must be stateless: macOS pf drops stateful loopback TCP
-	// (unchecksummed TSO segments), which cut the app off from the daemon.
-	rules = append(rules, "pass out quick on lo0 all no state")
-	rules = append(rules, "pass in quick on lo0 all no state")
-
-	// Allow traffic to VPN transport endpoint IPs, v4 and v6 alike.
-	for _, ip := range endpointIPs {
-		if strings.Contains(ip, ":") {
-			rules = append(rules, fmt.Sprintf("pass out quick inet6 proto { tcp udp } to %s", ip))
-			continue
-		}
-		rules = append(rules, fmt.Sprintf("pass out quick inet proto { tcp udp } to %s", ip))
-	}
-
-	// Allow DHCP.
-	rules = append(rules, "pass out quick inet proto udp from any port 68 to any port 67")
-
-	// Allow LAN ranges so captive portals and gateway probes work on
-	// restrictive WiFi. Only applied when the user opts in.
-	if allowLAN {
-		for _, cidr := range LANAllowPrefixes {
-			rules = append(rules, fmt.Sprintf("pass out quick inet to %s", cidr))
-		}
-		for _, cidr := range LANAllowPrefixesV6 {
-			rules = append(rules, fmt.Sprintf("pass out quick inet6 to %s", cidr))
-		}
-	}
-
-	// Allow traffic on the tunnel interface if set.
-	if tunnelInterface != "" {
-		rules = append(rules, fmt.Sprintf("pass out quick on %s all", tunnelInterface))
-	}
-
-	// Block everything else outbound.
-	rules = append(rules, "block out all")
-
-	return strings.Join(rules, "\n") + "\n", nil
-}
 
 // applyPFAnchor writes the kill-switch ruleset to disk, wires it into
 // /etc/pf.conf, reloads pf, and verifies the block rule is actually live.
@@ -503,4 +456,12 @@ func (ks *darwinKillSwitch) DropTunnelPermit(ctx context.Context) error {
 		return fmt.Errorf("kill switch drop tunnel: save state: %w", err)
 	}
 	return nil
+}
+
+// flushPFStates ends the flows pf tracked before the lock landed: with pf already
+// on for another tool, an established connection would otherwise outlive block out all.
+func flushPFStates(ctx context.Context) {
+	if out, err := exec.CommandContext(ctx, "pfctl", "-F", "states").CombinedOutput(); err != nil {
+		KillSwitchWarn("kill switch enable: could not flush pf states: %v (%s)", err, strings.TrimSpace(string(out)))
+	}
 }
