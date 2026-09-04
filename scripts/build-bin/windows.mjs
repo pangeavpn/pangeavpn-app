@@ -18,7 +18,9 @@ if (process.platform !== "win32") {
 const archTargets = selectArchTargets(allArchTargets, "Windows");
 
 await cleanOutput();
-runOrThrow(npmCmd, ["install", "--workspace", "@pangeavpn/desktop", "--include=dev"], { cwd: rootDir, shell: true });
+// No audit or fund: a release build must not wait on npm's advisory service,
+// which can 503 or hang for npm's full fetch timeout while the tree is fine.
+runOrThrow(npmCmd, ["install", "--workspace", "@pangeavpn/desktop", "--include=dev", "--no-audit", "--no-fund"], { cwd: rootDir, shell: true });
 runOrThrow(npmCmd, ["run", "build", "--workspace", "@pangeavpn/shared-types"], { cwd: rootDir, shell: true });
 runOrThrow(npmCmd, ["run", "build", "--workspace", "@pangeavpn/desktop"], { cwd: rootDir, shell: true });
 
