@@ -78,6 +78,24 @@ var (
 	pangeaPermitDHCPInV4FilterKey  = windows.GUID{Data1: 0xa9d3e901, Data2: 0x4b7c, Data3: 0x4d2a, Data4: [8]byte{0x9e, 0x6f, 0x1a, 0x2b, 0x3c, 0x4d, 0x5e, 0x7f}}
 )
 
+// Traffic the host forwards for WSL2, Hyper-V NAT or ICS guests never reaches
+// the ALE layers, so the lock has to block it at the IPFORWARD layers too.
+var (
+	pangeaBlockForwardV4FilterKey = windows.GUID{Data1: 0xa9d3e902, Data2: 0x4b7c, Data3: 0x4d2a, Data4: [8]byte{0x9e, 0x6f, 0x1a, 0x2b, 0x3c, 0x4d, 0x5e, 0x80}}
+	pangeaBlockForwardV6FilterKey = windows.GUID{Data1: 0xa9d3e903, Data2: 0x4b7c, Data3: 0x4d2a, Data4: [8]byte{0x9e, 0x6f, 0x1a, 0x2b, 0x3c, 0x4d, 0x5e, 0x81}}
+)
+
+// bootTimeKeyData2 replaces Data2 (0x4b7c in every persistent key) so the
+// boot-time twin of a filter gets a key BFE will accept beside the original.
+const bootTimeKeyData2 = 0x4b7d
+
+// bootTimeVariant derives the boot-time twin of a persistent filter, which is
+// enforced from stack start until BFE loads the persistent set.
+func bootTimeVariant(key windows.GUID, flags wtFwpmFilterFlags) (windows.GUID, wtFwpmFilterFlags) {
+	key.Data2 = bootTimeKeyData2
+	return key, (flags &^ cFWPM_FILTER_FLAG_PERSISTENT) | cFWPM_FILTER_FLAG_BOOTTIME
+}
+
 // Filter weights inside the sublayer; higher wins. Trusted permits sit above
 // the DNS block so loopback, the endpoints and the tunnel still resolve.
 const (
@@ -95,6 +113,13 @@ const dnsPort = 53
 
 type wfpEngine struct {
 	handle windows.Handle
+	// bootTime makes every keyed add write the filter's boot-time twin instead.
+	bootTime bool
+}
+
+// bootTimeView shares the handle; never close it, close the owner instead.
+func (e *wfpEngine) bootTimeView() *wfpEngine {
+	return &wfpEngine{handle: e.handle, bootTime: true}
 }
 
 func wfpOpen() (*wfpEngine, error) {
@@ -220,6 +245,9 @@ func (e *wfpEngine) addFilterKeyed(layer, filterKey windows.GUID, filterName str
 	namePtr, err := windows.UTF16PtrFromString(filterName)
 	if err != nil {
 		return 0, fmt.Errorf("filter name %q: %w", filterName, err)
+	}
+	if e.bootTime && filterKey != (windows.GUID{}) {
+		filterKey, flags = bootTimeVariant(filterKey, flags)
 	}
 
 	filter := wtFwpmFilter0{
@@ -370,7 +398,7 @@ func anyFilter(*wtFwpmFilter0) bool { return true }
 // isEphemeralFilter is true for engine-keyed permits (endpoint, LAN, DHCP,
 // tunnel): what a dead process leaves behind, unlike the persistent lock.
 func isEphemeralFilter(f *wtFwpmFilter0) bool {
-	return f.flags&cFWPM_FILTER_FLAG_PERSISTENT == 0
+	return f.flags&(cFWPM_FILTER_FLAG_PERSISTENT|cFWPM_FILTER_FLAG_BOOTTIME) == 0
 }
 
 // deleteFiltersInSublayer removes every filter in the sublayer that keep
@@ -710,6 +738,57 @@ func (e *wfpEngine) addPermitLoopbackSubnetV6(layer, filterKey windows.GUID, fil
 		},
 	}
 	id, err := e.addFilterKeyed(layer, filterKey, filterName, weightTrustedPermit, cFWP_ACTION_PERMIT, cFWPM_FILTER_FLAG_PERSISTENT, conditions)
+	runtime.KeepAlive(&addrMask)
+	return id, err
+}
+
+// addBlockAllForwardV4 and its IPv6 twin close the path the ALE blocks never
+// see: packets the host forwards for WSL2, Hyper-V NAT or ICS guests.
+func (e *wfpEngine) addBlockAllForwardV4() (uint64, error) {
+	return e.addFilterKeyed(cFWPM_LAYER_IPFORWARD_V4, pangeaBlockForwardV4FilterKey, "PangeaVPN Block Forwarded IPv4", weightBlockAll, cFWP_ACTION_BLOCK, cFWPM_FILTER_FLAG_PERSISTENT, nil)
+}
+
+func (e *wfpEngine) addBlockAllForwardV6() (uint64, error) {
+	return e.addFilterKeyed(cFWPM_LAYER_IPFORWARD_V6, pangeaBlockForwardV6FilterKey, "PangeaVPN Block Forwarded IPv6", weightBlockAll, cFWP_ACTION_BLOCK, cFWPM_FILTER_FLAG_PERSISTENT, nil)
+}
+
+// forwardToInterfaceConditions matches a forwarded packet about to leave via
+// the interface with this index; only the tunnel's is ever permitted.
+func forwardToInterfaceConditions(ifIndex uint32) []wtFwpmFilterCondition0 {
+	return []wtFwpmFilterCondition0{
+		{
+			fieldKey:  cFWPM_CONDITION_DESTINATION_INTERFACE_INDEX,
+			matchType: cFWP_MATCH_EQUAL,
+			conditionValue: wtFwpConditionValue0{
+				_type: cFWP_UINT32,
+				value: uintptr(ifIndex),
+			},
+		},
+	}
+}
+
+func (e *wfpEngine) addPermitForwardToInterface(ifIndex uint32) (uint64, error) {
+	return e.addFilter(cFWPM_LAYER_IPFORWARD_V4, "PangeaVPN Allow Forwarding To Tunnel", weightTrustedPermit, cFWP_ACTION_PERMIT, forwardToInterfaceConditions(ifIndex))
+}
+
+// addPermitForwardIPv4Subnet is the forward-layer half of Allow LAN: a guest
+// keeps reaching the local network while the lock holds, as the host does.
+func (e *wfpEngine) addPermitForwardIPv4Subnet(cidr string) (uint64, error) {
+	addrMask, err := parseV4CIDRAddrMask(cidr)
+	if err != nil {
+		return 0, err
+	}
+	conditions := []wtFwpmFilterCondition0{
+		{
+			fieldKey:  cFWPM_CONDITION_IP_DESTINATION_ADDRESS,
+			matchType: cFWP_MATCH_EQUAL,
+			conditionValue: wtFwpConditionValue0{
+				_type: cFWP_V4_ADDR_MASK,
+				value: uintptr(unsafe.Pointer(&addrMask)),
+			},
+		},
+	}
+	id, err := e.addFilter(cFWPM_LAYER_IPFORWARD_V4, "PangeaVPN Allow Forwarding To LAN "+cidr, weightLANPermit, cFWP_ACTION_PERMIT, conditions)
 	runtime.KeepAlive(&addrMask)
 	return id, err
 }

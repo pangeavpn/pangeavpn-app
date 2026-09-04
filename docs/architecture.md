@@ -339,10 +339,26 @@ is permitted.
 This ordering makes connection failure fail closed: if every transport fails,
 the kill switch remains active until disconnect or explicit recovery clears it.
 
+The lock also covers traffic the host forwards for guests (WSL2, Hyper-V NAT,
+Docker, libvirt), which never reaches the socket-level rules: Windows blocks at
+the `IPFORWARD` layers and permits forwarding only onto the tunnel interface,
+nftables and iptables carry a `forward` chain beside `output`. Bridged
+frames between containers on one bridge keep working; VMs bridged directly onto
+the physical NIC sit below the host stack and cannot be covered on any platform.
+
+At boot the lock has to be back before the network is: Windows installs
+boot-time twins of the persistent filters for the window before the Base
+Filtering Engine starts, Linux runs `pangea-killswitch-boot.service` before
+`network-pre.target`, and macOS enables pf from a LaunchDaemon while a
+kill-switch anchor is on disk.
+
 Lockdown mode intentionally retains the kill switch after disconnect and records
-that intent in `killswitch-state.json`. On startup, the daemon distinguishes an
-intentional lock from stale firewall state, attempts to adopt an existing
-tunnel, and cleans up stale platform state when safe.
+that intent in `killswitch-state.json`. The retained lock keeps only the hub
+permitted: the departing server's endpoints and the dead tunnel's interface
+permit both come out, since macOS reuses utun numbers and Windows can reuse an
+interface index. On startup, the daemon distinguishes an intentional lock from
+stale firewall state, attempts to adopt an existing tunnel, and cleans up stale
+platform state when safe.
 
 ## State machine and health
 
@@ -420,7 +436,7 @@ not torn down and re-dialled into a network that has not come back yet.
 | macOS development | Development startup runs the daemon as root while preserving the user's support directory |
 | macOS complete install | The DMG-bundled `install-mac.sh` installs a root `launchd` service; the raw `.pkg` only stages the daemon |
 | Linux development | Development startup uses a root daemon because TUN and networking changes require privilege |
-| Linux source install | `scripts/install-linux.sh` installs and enables `pangea-daemon.service` |
+| Linux source install | `scripts/install-linux.sh` installs and enables `pangea-daemon.service` plus `pangea-killswitch-boot.service`, which re-applies a held kill switch before `network-pre.target` |
 | Linux AppImage or `.deb` alone | The package contains a daemon but does not install a systemd unit; elevated recovery may use systemd or PolicyKit |
 
 See [Binaries and Packaging](binaries-and-packaging.md) for exact installer

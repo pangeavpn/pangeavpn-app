@@ -190,12 +190,33 @@ DAEMON_BIN_TMP="$(dirname "$DAEMON_BIN")/.$(basename "$DAEMON_BIN").new"
 sudo install -m 755 "$DAEMON_SRC" "$DAEMON_BIN_TMP"
 sudo mv -f "$DAEMON_BIN_TMP" "$DAEMON_BIN"
 
-# --- Install systemd service ---
-info "Setting up systemd service..."
+# --- Install systemd services ---
+info "Setting up systemd services..."
+# A lock the last session left must be back before any interface is configured;
+# the daemon itself starts too late for that, so a oneshot re-applies it first.
+sudo tee "$BOOT_LOCK_SERVICE_FILE" > /dev/null <<EOF
+[Unit]
+Description=PangeaVPN kill switch (boot re-arm)
+DefaultDependencies=no
+After=local-fs.target
+Wants=network-pre.target
+Before=network-pre.target shutdown.target
+Conflicts=shutdown.target
+
+[Service]
+Type=oneshot
+ExecStart=$DAEMON_BIN --arm-boot-lock
+Environment=HOME=/root
+Environment=PANGEA_APP_SUPPORT_DIR=/etc/pangeavpn
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
 sudo tee "$SERVICE_FILE" > /dev/null <<EOF
 [Unit]
 Description=PangeaVPN Daemon
-After=network-online.target
+After=network-online.target pangea-killswitch-boot.service
 Wants=network-online.target
 
 [Service]
@@ -211,6 +232,7 @@ WantedBy=multi-user.target
 EOF
 
 sudo systemctl daemon-reload
+sudo systemctl enable pangea-killswitch-boot
 sudo systemctl enable pangea-daemon
 sudo systemctl restart pangea-daemon
 info "Daemon service installed and started."

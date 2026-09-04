@@ -108,6 +108,9 @@ APP_PATH="/Applications/PangeaVPN.app"
 SUPPORT_DIR="/Library/Application Support/PangeaVPN"
 DAEMON_PLIST="/Library/LaunchDaemons/com.pangea.pangeavpn.daemon.plist"
 DAEMON_LABEL="com.pangea.pangeavpn.daemon"
+PF_PLIST="/Library/LaunchDaemons/com.pangea.pangeavpn.pf.plist"
+PF_LABEL="com.pangea.pangeavpn.pf"
+PF_ANCHOR_FILE="/etc/pf.anchors/com.pangeavpn.killswitch"
 DAEMON_LOG="/var/log/pangeavpn-daemon.log"
 DAEMON_PING_URL="http://127.0.0.1:8787/ping"
 
@@ -210,6 +213,7 @@ fi
 # Overwriting under KeepAlive=true makes launchd restart a half-written binary.
 log "Stopping the previous version, if any..."
 sudo launchctl bootout "system/$DAEMON_LABEL" 2>/dev/null || true
+sudo launchctl bootout "system/$PF_LABEL" 2>/dev/null || true
 sleep 1
 
 # ── Run the PKG installer ───────────────────────────────────────────────────
@@ -311,6 +315,33 @@ PLIST
 
 sudo chown root:wheel "$DAEMON_PLIST"
 sudo chmod 644 "$DAEMON_PLIST"
+
+# ── Hold a persisted lock from boot ─────────────────────────────────────────
+# macOS loads /etc/pf.conf at boot but leaves pf disabled, so a lock the last
+# session left would not hold until the daemon had started and re-armed it.
+sudo tee "$PF_PLIST" > /dev/null <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>Label</key>
+    <string>${PF_LABEL}</string>
+    <key>ProgramArguments</key>
+    <array>
+      <string>/bin/sh</string>
+      <string>-c</string>
+      <string>test -s ${PF_ANCHOR_FILE} &amp;&amp; /sbin/pfctl -f /etc/pf.conf &amp;&amp; /sbin/pfctl -E</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+  </dict>
+</plist>
+PLIST
+
+sudo chown root:wheel "$PF_PLIST"
+sudo chmod 644 "$PF_PLIST"
+sudo launchctl enable "system/$PF_LABEL" >/dev/null 2>&1 || true
+sudo launchctl bootstrap system "$PF_PLIST" >/dev/null 2>&1 || true
 
 # ── Start the service ───────────────────────────────────────────────────────
 # enable must precede bootstrap: a service left disabled refuses to bootstrap.

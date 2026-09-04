@@ -49,6 +49,9 @@ func main() {
 	if hasFlag("--clear-killswitch") {
 		os.Exit(clearKillSwitchCommand())
 	}
+	if hasFlag("--arm-boot-lock") {
+		os.Exit(armBootLockCommand())
+	}
 	if shouldRunAsService() {
 		if err := runService(); err != nil {
 			log.Fatalf("run service: %v", err)
@@ -277,4 +280,17 @@ func (r *daemonRuntime) Stop(ctx context.Context) error {
 		}
 	}
 	return errors.Join(stopErrors...)
+}
+
+// armBootLockCommand is what the Linux boot unit runs before the network comes
+// up: re-apply whatever lock the last session left, using only what is on disk.
+func armBootLockCommand() int {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	if err := api.ArmBootLock(ctx, platform.NewKillSwitch()); err != nil {
+		log.Printf("arm boot lock: %v", err)
+		return 1
+	}
+	log.Printf("boot lock reconciled")
+	return 0
 }

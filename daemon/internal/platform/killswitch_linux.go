@@ -12,11 +12,6 @@ import (
 	"time"
 )
 
-const (
-	nftTableName = "pangeavpn_killswitch"
-	nftFamily    = "inet"
-)
-
 // Matches iptables/nft interface name constraints; rejected names are never
 // interpolated into the nft script text.
 var validTunnelInterfaceName = regexp.MustCompile(`^[a-zA-Z0-9_.-]+$`).MatchString
@@ -199,7 +194,7 @@ func nftTableLive(ctx context.Context) bool {
 }
 
 func iptablesLockLive(ctx context.Context) bool {
-	chain, ok := liveIPTablesChain(ctx, "iptables", iptChainName, iptChainNameAlt)
+	chain, ok := liveIPTablesChain(ctx, "iptables", "OUTPUT", iptChainName, iptChainNameAlt)
 	return ok && chain != ""
 }
 
@@ -210,49 +205,6 @@ func iptablesLockLive(ctx context.Context) bool {
 func hasNFT(ctx context.Context) bool {
 	cmd := exec.CommandContext(ctx, "nft", "--version")
 	return cmd.Run() == nil
-}
-
-// buildNFTRuleset generates a complete nftables ruleset for the kill switch.
-func buildNFTRuleset(endpointIPs []string, tunnelInterface string, allowLAN bool) string {
-	var b strings.Builder
-
-	fmt.Fprintf(&b, "table %s %s {\n", nftFamily, nftTableName)
-	fmt.Fprintf(&b, "  chain output {\n")
-	fmt.Fprintf(&b, "    type filter hook output priority 0; policy drop;\n")
-	fmt.Fprintf(&b, "\n")
-
-	// Allow loopback.
-	fmt.Fprintf(&b, "    oifname \"lo\" accept\n")
-
-	// Allow DHCP, scoped to broadcast so it can't be used to reach an
-	// arbitrary remote host on udp/67, and to IPv4 only.
-	fmt.Fprintf(&b, "    meta nfproto ipv4 udp sport 68 udp dport 67 ip daddr 255.255.255.255 accept\n")
-
-	// Allow traffic to endpoint IPs.
-	for _, ip := range endpointIPs {
-		if strings.Contains(ip, ":") {
-			continue
-		}
-		fmt.Fprintf(&b, "    ip daddr %s accept\n", ip)
-	}
-
-	// Allow LAN ranges so captive portals and gateway probes work on
-	// restrictive WiFi. Only applied when the user opts in.
-	if allowLAN {
-		for _, cidr := range LANAllowPrefixes {
-			fmt.Fprintf(&b, "    ip daddr %s accept\n", cidr)
-		}
-	}
-
-	// Allow IPv4 traffic on tunnel interface.
-	if tunnelInterface != "" {
-		fmt.Fprintf(&b, "    meta nfproto ipv4 oifname \"%s\" accept\n", tunnelInterface)
-	}
-
-	fmt.Fprintf(&b, "  }\n")
-	fmt.Fprintf(&b, "}\n")
-
-	return b.String()
 }
 
 func applyNFTRules(ctx context.Context, endpointIPs []string, tunnelInterface string, allowLAN bool) error {
@@ -287,6 +239,37 @@ func removeNFTRules(ctx context.Context) error {
 			return nil
 		}
 		return fmt.Errorf("delete nft table: %w (%s)", err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// DropTunnelPermit removes the tunnel accepts while the lock stays, so an idle
+// Lockdown lock names no interface at all.
+func (ks *linuxKillSwitch) DropTunnelPermit(ctx context.Context) error {
+	ks.mu.Lock()
+	defer ks.mu.Unlock()
+
+	if !ks.active {
+		return nil
+	}
+	st, err := loadKillSwitchState()
+	if err != nil {
+		return fmt.Errorf("kill switch drop tunnel: load state: %w", err)
+	}
+	if st.TunnelInterface == "" {
+		return nil
+	}
+	if ks.useNFT {
+		err = applyNFTRules(ctx, st.EndpointIPs, "", ks.allowLAN)
+	} else {
+		err = applyIPTablesRules(ctx, st.EndpointIPs, "", ks.allowLAN)
+	}
+	if err != nil {
+		return fmt.Errorf("kill switch drop tunnel: %w", err)
+	}
+	st.TunnelInterface = ""
+	if err := saveKillSwitchState(st); err != nil {
+		return fmt.Errorf("kill switch drop tunnel: save state: %w", err)
 	}
 	return nil
 }

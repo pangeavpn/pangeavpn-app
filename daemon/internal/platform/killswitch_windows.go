@@ -39,6 +39,16 @@ type windowsKillSwitch struct {
 	// Tunnel permit IDs a previous Update failed to delete; Clear retries them
 	// so a reassigned LUID can't inherit a stale permit.
 	staleTunnelFilterIds []uint64
+
+	// Forward-layer permits mirroring the ALE ones: the tunnel by interface
+	// index, the LAN ranges under Allow LAN.
+	forwardTunnelFilterId uint64
+	forwardLANFilterIds   []uint64
+	// forwardLock is cleared when a forward permit fails and the forward blocks
+	// are dropped again, so guests are never worse off than with no forward filtering.
+	forwardLock bool
+	// bootTimeFailed stops retrying the best-effort boot-time twins every arm.
+	bootTimeFailed bool
 }
 
 func (ks *windowsKillSwitch) Enable(ctx context.Context, endpointHosts []string, allowLAN bool, locked bool) error {
@@ -129,6 +139,7 @@ func (ks *windowsKillSwitch) Enable(ctx context.Context, endpointHosts []string,
 			// Lock is intact, but a departing server's permit survives until Clear.
 			KillSwitchWarn("kill switch re-arm could not retire stale permits (%s)", strings.Join(staleDeletes, "; "))
 		}
+		ks.swapForwardLANPermits(allowLAN)
 
 		prev.Active = true // the load above may have failed; rules are live
 		prev.EndpointIPs = ips
@@ -175,6 +186,13 @@ func (ks *windowsKillSwitch) Enable(ctx context.Context, endpointHosts []string,
 	// The sweep inside installWindowsLock retired any tunnel permit too.
 	ks.tunnelFilterId = 0
 	ks.staleTunnelFilterIds = nil
+	ks.forwardTunnelFilterId = 0
+	ks.forwardLANFilterIds = nil
+	// The forward blocks are in the persistent set just installed; the permits
+	// that keep guests usable are best-effort on top of them.
+	ks.forwardLock = true
+	ks.swapForwardLANPermits(allowLAN)
+	ks.installBootTimeLock()
 	return nil
 }
 
@@ -257,6 +275,8 @@ var persistentLockFilters = []struct {
 	{"block inbound v4", (*wfpEngine).addBlockAllInbound},
 	{"block outbound v6", (*wfpEngine).addBlockAllOutboundV6},
 	{"block inbound v6", (*wfpEngine).addBlockAllInboundV6},
+	{"block forward v4", (*wfpEngine).addBlockAllForwardV4},
+	{"block forward v6", (*wfpEngine).addBlockAllForwardV6},
 	{"block DNS udp", (*wfpEngine).addBlockDNSUDP},
 	{"block DNS tcp", (*wfpEngine).addBlockDNSTCP},
 	{"permit loopback v4", (*wfpEngine).addPermitLoopback},
@@ -311,6 +331,12 @@ func (ks *windowsKillSwitch) Update(ctx context.Context, tunnel TunnelRef) error
 		}
 		ks.tunnelFilterId = 0
 	}
+	if ks.forwardTunnelFilterId != 0 {
+		if err := ks.engine.deleteFilter(ks.forwardTunnelFilterId); err != nil {
+			ks.staleTunnelFilterIds = append(ks.staleTunnelFilterIds, ks.forwardTunnelFilterId)
+		}
+		ks.forwardTunnelFilterId = 0
+	}
 	ks.retireStaleTunnelFilters()
 
 	// App traffic hits the WFP ALE_AUTH_CONNECT layer before reaching the TUN
@@ -322,6 +348,7 @@ func (ks *windowsKillSwitch) Update(ctx context.Context, tunnel TunnelRef) error
 		return fmt.Errorf("kill switch update: permit tunnel interface: %w", err)
 	}
 	ks.tunnelFilterId = filterId
+	ks.permitForwardingToTunnel(luid)
 
 	// A failed reload must not clobber Active/Locked with the zero value, so
 	// skip the save rather than risk reporting a live lock as cleared.
@@ -378,6 +405,8 @@ var pangeaPersistentFilterKeys = []windows.GUID{
 	pangeaBlockAllInboundV4FilterKey,
 	pangeaBlockAllOutboundV6FilterKey,
 	pangeaBlockAllInboundV6FilterKey,
+	pangeaBlockForwardV4FilterKey,
+	pangeaBlockForwardV6FilterKey,
 	pangeaBlockDNSUDPV4FilterKey,
 	pangeaBlockDNSTCPV4FilterKey,
 	pangeaPermitDHCPOutV4FilterKey,
@@ -437,9 +466,23 @@ func (ks *windowsKillSwitch) Clear(ctx context.Context) error {
 			errs = append(errs, fmt.Sprintf("stale tunnel permit %d: %v", id, err))
 		}
 	}
+	for _, id := range append(ks.forwardLANFilterIds, ks.forwardTunnelFilterId) {
+		if id == 0 {
+			continue
+		}
+		if err := engine.deleteFilter(id); err != nil {
+			errs = append(errs, fmt.Sprintf("forward permit %d: %v", id, err))
+		}
+	}
 	for _, key := range pangeaPersistentFilterKeys {
 		if err := engine.deleteFilterByKey(key); err != nil {
 			errs = append(errs, fmt.Sprintf("filter %v: %v", key, err))
+		}
+		// Boot-time twins only ever act before BFE is up, so a leftover costs a
+		// few seconds at the next boot; it must not strand a user's Disconnect.
+		bootKey, _ := bootTimeVariant(key, 0)
+		if err := engine.deleteFilterByKey(bootKey); err != nil {
+			KillSwitchWarn("kill switch clear: boot-time filter %v: %v", bootKey, err)
 		}
 	}
 	if err := engine.deleteSublayerByKey(pangeaVPNSublayerKey); err != nil {
@@ -469,6 +512,9 @@ func (ks *windowsKillSwitch) Clear(ctx context.Context) error {
 	ks.lastAllowLAN = false
 	ks.tunnelFilterId = 0
 	ks.staleTunnelFilterIds = nil
+	ks.forwardTunnelFilterId = 0
+	ks.forwardLANFilterIds = nil
+	ks.forwardLock = false
 
 	if err := removeKillSwitchState(); err != nil {
 		return fmt.Errorf("kill switch clear: remove state: %w", err)
@@ -502,4 +548,147 @@ func (ks *windowsKillSwitch) persistentLockLive() bool {
 		return false
 	}
 	return live
+}
+
+// permitForwardingToTunnel lets guest traffic the host forwards leave through
+// the tunnel. On failure the forward blocks come down again (dropForwardLock).
+func (ks *windowsKillSwitch) permitForwardingToTunnel(luid uint64) {
+	if !ks.forwardLock {
+		return
+	}
+	row, err := winipcfg.LUID(luid).Interface()
+	if err != nil {
+		ks.dropForwardLock(fmt.Errorf("interface index for LUID %d: %w", luid, err))
+		return
+	}
+	id, err := ks.engine.addPermitForwardToInterface(row.InterfaceIndex)
+	if err != nil {
+		ks.dropForwardLock(fmt.Errorf("permit forwarding to tunnel: %w", err))
+		return
+	}
+	ks.forwardTunnelFilterId = id
+}
+
+// swapForwardLANPermits mirrors the ALE LAN permits at the forward layer in a
+// transaction of their own, so a failure there cannot take the main lock down.
+func (ks *windowsKillSwitch) swapForwardLANPermits(allowLAN bool) {
+	if !ks.forwardLock {
+		return
+	}
+	if err := ks.engine.beginTransaction(); err != nil {
+		ks.dropForwardLock(err)
+		return
+	}
+	ids := make([]uint64, 0, len(LANAllowPrefixes))
+	if allowLAN {
+		for _, cidr := range LANAllowPrefixes {
+			id, err := ks.engine.addPermitForwardIPv4Subnet(cidr)
+			if err != nil {
+				ks.engine.abortTransaction()
+				ks.dropForwardLock(fmt.Errorf("permit forwarding to LAN %s: %w", cidr, err))
+				return
+			}
+			ids = append(ids, id)
+		}
+	}
+	for _, id := range ks.forwardLANFilterIds {
+		if err := ks.engine.deleteFilter(id); err != nil {
+			KillSwitchWarn("kill switch could not retire forward LAN permit %d: %v", id, err)
+		}
+	}
+	if err := ks.engine.commitTransaction(); err != nil {
+		ks.engine.abortTransaction()
+		ks.dropForwardLock(err)
+		return
+	}
+	ks.forwardLANFilterIds = ids
+}
+
+// dropForwardLock returns the forward layers to unfiltered when a permit cannot
+// be installed: a block with no way through would cut every guest off.
+func (ks *windowsKillSwitch) dropForwardLock(cause error) {
+	KillSwitchWarn("kill switch: forwarded-traffic lock disabled on this host (%v); WSL2/Hyper-V guests are not covered", cause)
+	ks.forwardLock = false
+	for _, key := range []windows.GUID{pangeaBlockForwardV4FilterKey, pangeaBlockForwardV6FilterKey} {
+		if err := ks.engine.deleteFilterByKey(key); err != nil {
+			KillSwitchWarn("kill switch: could not remove forward block %v: %v", key, err)
+		}
+	}
+	for _, id := range append(ks.forwardLANFilterIds, ks.forwardTunnelFilterId) {
+		if id != 0 {
+			_ = ks.engine.deleteFilter(id)
+		}
+	}
+	ks.forwardLANFilterIds = nil
+	ks.forwardTunnelFilterId = 0
+}
+
+// installBootTimeLock adds boot-time twins of the persistent set so the lock
+// also holds between stack start and BFE start. Best-effort, warned once.
+func (ks *windowsKillSwitch) installBootTimeLock() {
+	if ks.bootTimeFailed {
+		return
+	}
+	if err := installBootTimeTwins(ks.engine, ks.forwardLock); err != nil {
+		ks.bootTimeFailed = true
+		KillSwitchWarn("kill switch: boot-time filters not installed (%v); the lock starts when BFE does", err)
+	}
+}
+
+// installBootTimeTwins replaces the previous build's boot-time set by key in
+// one transaction, the same way installWindowsLock treats the persistent set.
+func installBootTimeTwins(engine *wfpEngine, includeForward bool) error {
+	if err := engine.beginTransaction(); err != nil {
+		return err
+	}
+	for _, key := range pangeaPersistentFilterKeys {
+		bootKey, _ := bootTimeVariant(key, 0)
+		if err := engine.deleteFilterByKey(bootKey); err != nil {
+			engine.abortTransaction()
+			return fmt.Errorf("retire boot-time filter %v: %w", bootKey, err)
+		}
+	}
+	view := engine.bootTimeView()
+	for _, step := range persistentLockFilters {
+		if !includeForward && strings.HasPrefix(step.name, "block forward") {
+			continue
+		}
+		if _, err := step.add(view); err != nil {
+			engine.abortTransaction()
+			return fmt.Errorf("%s (boot-time): %w", step.name, err)
+		}
+	}
+	if err := engine.commitTransaction(); err != nil {
+		engine.abortTransaction()
+		return err
+	}
+	return nil
+}
+
+// DropTunnelPermit retires the tunnel permits while the lock stays armed, so a
+// reassigned LUID cannot inherit them from a session that is over.
+func (ks *windowsKillSwitch) DropTunnelPermit(_ context.Context) error {
+	ks.mu.Lock()
+	defer ks.mu.Unlock()
+
+	if !ks.active || ks.engine == nil {
+		return nil
+	}
+	for _, id := range []uint64{ks.tunnelFilterId, ks.forwardTunnelFilterId} {
+		if id == 0 {
+			continue
+		}
+		if err := ks.engine.deleteFilter(id); err != nil {
+			ks.staleTunnelFilterIds = append(ks.staleTunnelFilterIds, id)
+		}
+	}
+	ks.tunnelFilterId, ks.forwardTunnelFilterId = 0, 0
+	ks.retireStaleTunnelFilters()
+	if len(ks.staleTunnelFilterIds) > 0 {
+		return fmt.Errorf("kill switch drop tunnel: %d permits could not be retired", len(ks.staleTunnelFilterIds))
+	}
+	if _, err := updateTunnelInterfaceState(""); err != nil {
+		KillSwitchWarn("kill switch drop tunnel: state reload failed, leaving persisted state untouched: %v", err)
+	}
+	return nil
 }

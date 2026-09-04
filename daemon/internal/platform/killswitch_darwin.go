@@ -477,3 +477,30 @@ func removePFToken() error {
 	}
 	return nil
 }
+
+// DropTunnelPermit removes the utun pass rule while the lock stays: macOS gives
+// the same utunN to whatever creates a tunnel next.
+func (ks *darwinKillSwitch) DropTunnelPermit(ctx context.Context) error {
+	ks.opMu.Lock()
+	defer ks.opMu.Unlock()
+
+	active, allowLAN := ks.snapshotState()
+	if !active {
+		return nil
+	}
+	st, err := loadKillSwitchState()
+	if err != nil {
+		return fmt.Errorf("kill switch drop tunnel: load state: %w", err)
+	}
+	if st.TunnelInterface == "" {
+		return nil
+	}
+	if err := applyPFAnchor(ctx, st.EndpointIPs, "", allowLAN); err != nil {
+		return fmt.Errorf("kill switch drop tunnel: %w", err)
+	}
+	st.TunnelInterface = ""
+	if err := saveKillSwitchState(st); err != nil {
+		return fmt.Errorf("kill switch drop tunnel: save state: %w", err)
+	}
+	return nil
+}

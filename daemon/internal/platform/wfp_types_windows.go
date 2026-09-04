@@ -92,6 +92,22 @@ var cFWPM_CONDITION_IP_LOCAL_INTERFACE = windows.GUID{
 	Data4: [8]byte{0xb7, 0xf3, 0xbd, 0xa5, 0xd3, 0x28, 0x90, 0xa4},
 }
 
+// Defined in fwpmu.h. 2d79133b-b390-45c6-8699-acaceaafed33
+var cFWPM_CONDITION_IP_DESTINATION_ADDRESS = windows.GUID{
+	Data1: 0x2d79133b,
+	Data2: 0xb390,
+	Data3: 0x45c6,
+	Data4: [8]byte{0x86, 0x99, 0xac, 0xac, 0xea, 0xaf, 0xed, 0x33},
+}
+
+// Defined in fwpmu.h. 35cf6522-4139-45ee-a0d5-67b80949d879
+var cFWPM_CONDITION_DESTINATION_INTERFACE_INDEX = windows.GUID{
+	Data1: 0x35cf6522,
+	Data2: 0x4139,
+	Data3: 0x45ee,
+	Data4: [8]byte{0xa0, 0xd5, 0x67, 0xb8, 0x09, 0x49, 0xd8, 0x79},
+}
+
 // Defined in fwpmu.h. b235ae9a-1d64-49b8-a44c-5ff3d9095045
 var cFWPM_CONDITION_IP_REMOTE_ADDRESS = windows.GUID{
 	Data1: 0xb235ae9a,
@@ -225,6 +241,22 @@ var cFWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V6 = windows.GUID{
 	Data2: 0x9f04,
 	Data3: 0x4672,
 	Data4: [8]byte{0xb8, 0x7e, 0xce, 0xe9, 0xc4, 0x83, 0x25, 0x7f},
+}
+
+// FWPM_LAYER_IPFORWARD_V4 (a82acc24-4ee1-4ee1-b465-fd1d25cb10a4) defined in fwpmu.h
+var cFWPM_LAYER_IPFORWARD_V4 = windows.GUID{
+	Data1: 0xa82acc24,
+	Data2: 0x4ee1,
+	Data3: 0x4ee1,
+	Data4: [8]byte{0xb4, 0x65, 0xfd, 0x1d, 0x25, 0xcb, 0x10, 0xa4},
+}
+
+// FWPM_LAYER_IPFORWARD_V6 (7b964818-19c7-493a-b71f-832c3684d28c) defined in fwpmu.h
+var cFWPM_LAYER_IPFORWARD_V6 = windows.GUID{
+	Data1: 0x7b964818,
+	Data2: 0x19c7,
+	Data3: 0x493a,
+	Data4: [8]byte{0xb7, 0x1f, 0x83, 0x2c, 0x36, 0x84, 0xd2, 0x8c},
 }
 
 // 94c44912-9d6f-4ebf-b995-05ab8a088d1b

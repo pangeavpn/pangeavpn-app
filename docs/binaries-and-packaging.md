@@ -289,7 +289,7 @@ LaunchDaemon plist, or start the daemon. The complete script:
 
 1. installs the `.pkg`;
 2. creates the machine-scoped support directory and token;
-3. installs `/Library/LaunchDaemons/com.pangea.pangeavpn.daemon.plist`;
+3. installs `/Library/LaunchDaemons/com.pangea.pangeavpn.daemon.plist`, and `com.pangea.pangeavpn.pf.plist`, which enables pf at boot while a kill-switch anchor is on disk;
 4. configures `RunAtLoad` and `KeepAlive`;
 5. bootstraps and starts the service;
 6. verifies `http://127.0.0.1:8787/ping`.
@@ -335,7 +335,8 @@ create a systemd unit. For a complete source-based installation, use:
 
 That script installs the AppImage under `/opt/PangeaVPN/`, stages the daemon at
 `/usr/local/bin/pangea-daemon`, creates `/etc/pangeavpn/`, and enables
-`pangea-daemon.service`.
+`pangea-daemon.service` together with `pangea-killswitch-boot.service`, a oneshot
+that re-applies a held kill switch before `network-pre.target`.
 
 Without a managed service, the desktop package can find or launch its bundled
 daemon, but actual tunnel creation still requires root. Recovery may use systemd

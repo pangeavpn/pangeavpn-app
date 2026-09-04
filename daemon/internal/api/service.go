@@ -2022,10 +2022,9 @@ func (s *Service) disconnect(ctx context.Context, mode teardownMode) error {
 		case teardownShutdown:
 			s.logs.Add(state.LogInfo, state.SourceDaemon, "kill switch left armed across daemon exit; the next start reconciles it")
 		case teardownLockdown:
-			// Retaining the lock past the session is what Lockdown means, but the
-			// departing server's endpoints have no business staying permitted once
-			// its session is gone — re-arm with just the hub's control-plane hosts
-			// instead of reusing the persisted (still server-inclusive) permit set.
+			// Lockdown keeps the lock, not the session's permits: the dead tunnel's
+			// interface and the departing server come out, only the hub stays.
+			s.dropTunnelPermit(teardownCtx)
 			hubPermits := ipLiterals(s.storedControlPlaneHosts())
 			if err := s.killSwitch.Enable(teardownCtx, hubPermits, false, true); err != nil {
 				// Not the shape Lockdown promised: the departing server may
@@ -3866,4 +3865,22 @@ func withTransportBypassHosts(profile state.Profile) state.WireGuardProfile {
 	// look up (see transportPermitHosts).
 	copyProfile.BypassHosts = append(copyProfile.BypassHosts, transportPermitHosts(profile)...)
 	return copyProfile
+}
+
+// tunnelPermitDropper retires the tunnel permit while the lock stays up. Asserted
+// rather than part of KillSwitch so the noop switch and test fakes may omit it.
+type tunnelPermitDropper interface {
+	DropTunnelPermit(ctx context.Context) error
+}
+
+// dropTunnelPermit is called when a session ends under Lockdown: macOS reuses
+// utun numbers and Windows can reuse a LUID index, so the permit must not linger.
+func (s *Service) dropTunnelPermit(ctx context.Context) {
+	dropper, ok := s.killSwitch.(tunnelPermitDropper)
+	if !ok {
+		return
+	}
+	if err := dropper.DropTunnelPermit(ctx); err != nil {
+		s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("kill switch: could not retire the tunnel permit: %v", err))
+	}
 }

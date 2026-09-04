@@ -131,6 +131,12 @@ func TestWFPGUIDsMatchFwpmu(t *testing.T) {
 		"CONDITION_IP_REMOTE_ADDRESS":   {cFWPM_CONDITION_IP_REMOTE_ADDRESS, "{B235AE9A-1D64-49B8-A44C-5FF3D9095045}"},
 		"CONDITION_IP_LOCAL_INTERFACE":  {cFWPM_CONDITION_IP_LOCAL_INTERFACE, "{4CD62A49-59C3-4969-B7F3-BDA5D32890A4}"},
 		"CONDITION_FLAGS":               {cFWPM_CONDITION_FLAGS, "{632CE23B-5167-435C-86D7-E903684AA80C}"},
+		// The forward layers see traffic the host routes for others (WSL2,
+		// Hyper-V NAT, ICS), which never reaches the ALE layers above.
+		"LAYER_IPFORWARD_V4":                    {cFWPM_LAYER_IPFORWARD_V4, "{A82ACC24-4EE1-4EE1-B465-FD1D25CB10A4}"},
+		"LAYER_IPFORWARD_V6":                    {cFWPM_LAYER_IPFORWARD_V6, "{7B964818-19C7-493A-B71F-832C3684D28C}"},
+		"CONDITION_IP_DESTINATION_ADDRESS":      {cFWPM_CONDITION_IP_DESTINATION_ADDRESS, "{2D79133B-B390-45C6-8699-ACACEAAFED33}"},
+		"CONDITION_DESTINATION_INTERFACE_INDEX": {cFWPM_CONDITION_DESTINATION_INTERFACE_INDEX, "{35CF6522-4139-45EE-A0D5-67B80949D879}"},
 	}
 	for name, tc := range want {
 		canonical, err := windows.GUIDFromString(tc.key)
@@ -221,5 +227,68 @@ func TestV4PermitsSkipsIPv6(t *testing.T) {
 	got := v4Permits([]string{"203.0.113.7", "2001:db8::1", "not-an-ip"})
 	if len(got) != 1 || got[0] != "203.0.113.7" {
 		t.Fatalf("v4Permits = %v, want only the IPv4 literal", got)
+	}
+}
+
+// Host-originated traffic is authorised at the ALE layers; traffic the host
+// forwards for a VM or WSL2 is not, so the lock needs its own forward blocks.
+func TestPersistentLockBlocksForwardedTraffic(t *testing.T) {
+	keys := make(map[windows.GUID]bool, len(pangeaPersistentFilterKeys))
+	for _, key := range pangeaPersistentFilterKeys {
+		keys[key] = true
+	}
+	if !keys[pangeaBlockForwardV4FilterKey] || !keys[pangeaBlockForwardV6FilterKey] {
+		t.Fatal("the persistent lock has no IPFORWARD block; NAT'd guest traffic bypasses it")
+	}
+	names := make(map[string]bool, len(persistentLockFilters))
+	for _, step := range persistentLockFilters {
+		names[step.name] = true
+	}
+	if !names["block forward v4"] || !names["block forward v6"] {
+		t.Fatalf("persistent filter steps %v lack the forward blocks", names)
+	}
+}
+
+// A forwarded packet is allowed only when it is about to leave via the tunnel.
+func TestForwardTunnelPermitMatchesDestinationInterfaceIndex(t *testing.T) {
+	conditions := forwardToInterfaceConditions(42)
+	if len(conditions) != 1 {
+		t.Fatalf("got %d conditions, want exactly the destination interface", len(conditions))
+	}
+	c := conditions[0]
+	if c.fieldKey != cFWPM_CONDITION_DESTINATION_INTERFACE_INDEX || c.matchType != cFWP_MATCH_EQUAL {
+		t.Fatalf("condition on %v/%v, want DESTINATION_INTERFACE_INDEX equal", c.fieldKey, c.matchType)
+	}
+	if c.conditionValue._type != cFWP_UINT32 || c.conditionValue.value != 42 {
+		t.Fatalf("condition value type=%v value=%d, want UINT32 42", c.conditionValue._type, c.conditionValue.value)
+	}
+}
+
+// Boot-time twins run before BFE loads the persistent set, so each needs its
+// own key and must swap PERSISTENT for BOOTTIME.
+func TestBootTimeVariantIsDistinctAndFlaggedBootTime(t *testing.T) {
+	persistent := make(map[windows.GUID]bool, len(pangeaPersistentFilterKeys))
+	for _, key := range pangeaPersistentFilterKeys {
+		persistent[key] = true
+	}
+	seen := make(map[windows.GUID]bool, len(pangeaPersistentFilterKeys))
+	for _, key := range pangeaPersistentFilterKeys {
+		bootKey, flags := bootTimeVariant(key, cFWPM_FILTER_FLAG_PERSISTENT)
+		if persistent[bootKey] || seen[bootKey] || bootKey == pangeaVPNSublayerKey {
+			t.Fatalf("boot-time key %s collides with another filter key", bootKey)
+		}
+		seen[bootKey] = true
+		if flags&cFWPM_FILTER_FLAG_PERSISTENT != 0 || flags&cFWPM_FILTER_FLAG_BOOTTIME == 0 {
+			t.Fatalf("boot-time flags = %#x, want BOOTTIME without PERSISTENT", flags)
+		}
+	}
+}
+
+// The re-arm sweep retires engine-keyed permits only; the boot-time lock is as
+// much part of the lock as the persistent one.
+func TestSweepKeepsBootTimeFilters(t *testing.T) {
+	bootTime := wtFwpmFilter0{flags: cFWPM_FILTER_FLAG_BOOTTIME}
+	if isEphemeralFilter(&bootTime) {
+		t.Fatal("a boot-time block was classed as a stale permit and would be swept on every arm")
 	}
 }

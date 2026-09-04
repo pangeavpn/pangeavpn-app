@@ -553,9 +553,18 @@ type fakeKillSwitch struct {
 	enableCount     int
 	updateCount     int
 	clearCount      int
+	dropTunnelCount int
 	enableErr       error
 	updateErr       error
 	clearErr        error
+}
+
+func (f *fakeKillSwitch) DropTunnelPermit(_ context.Context) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.dropTunnelCount++
+	f.updateTunnel = platform.TunnelRef{}
+	return nil
 }
 
 func (f *fakeKillSwitch) Enable(_ context.Context, endpoints []string, allowLAN bool, locked bool) error {

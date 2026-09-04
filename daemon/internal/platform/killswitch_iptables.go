@@ -17,6 +17,15 @@ const (
 	ipt6ChainNameAlt = "PANGEAVPN_KS6_B"
 )
 
+// The FORWARD hook gets its own pair per family: what the host routes for
+// containers and VMs never traverses OUTPUT.
+const (
+	iptFwdChainName     = "PANGEAVPN_KS_FWD"
+	iptFwdChainNameAlt  = "PANGEAVPN_KS_FWD_B"
+	ipt6FwdChainName    = "PANGEAVPN_KS6_FWD"
+	ipt6FwdChainNameAlt = "PANGEAVPN_KS6_FWD_B"
+)
+
 // Wait for the xtables lock rather than failing; a lock failure is otherwise
 // indistinguishable from "rule not present".
 const iptWaitSeconds = "5"
@@ -73,6 +82,20 @@ func iptables6StagingChain(live string) string {
 		return ipt6ChainNameAlt
 	}
 	return ipt6ChainName
+}
+
+func iptablesForwardStagingChain(live string) string {
+	if live == iptFwdChainName {
+		return iptFwdChainNameAlt
+	}
+	return iptFwdChainName
+}
+
+func iptables6ForwardStagingChain(live string) string {
+	if live == ipt6FwdChainName {
+		return ipt6FwdChainNameAlt
+	}
+	return ipt6FwdChainName
 }
 
 // iptablesApplyPlan installs the rules without ever leaving OUTPUT unfiltered.
@@ -162,7 +185,7 @@ func iptablesApplyPlan(
 }
 
 func iptablesRemovePlan() []iptablesCommand {
-	plan := make([]iptablesCommand, 0, 12)
+	plan := make([]iptablesCommand, 0, 24)
 	for _, chain := range []string{iptChainName, iptChainNameAlt} {
 		plan = append(plan,
 			ipt4Optional("-D", "OUTPUT", "-j", chain),
@@ -177,12 +200,26 @@ func iptablesRemovePlan() []iptablesCommand {
 			ipt6Optional("-X", chain),
 		)
 	}
+	for _, chain := range []string{iptFwdChainName, iptFwdChainNameAlt} {
+		plan = append(plan,
+			ipt4Optional("-D", "FORWARD", "-j", chain),
+			ipt4Optional("-F", chain),
+			ipt4Optional("-X", chain),
+		)
+	}
+	for _, chain := range []string{ipt6FwdChainName, ipt6FwdChainNameAlt} {
+		plan = append(plan,
+			ipt6Optional("-D", "FORWARD", "-j", chain),
+			ipt6Optional("-F", chain),
+			ipt6Optional("-X", chain),
+		)
+	}
 	return plan
 }
 
-// A chain is live only if the jump exists AND it still ends in DROP.
-func iptablesLiveChainProbe(chain string) (jump []string, terminal []string) {
-	return withWait([]string{"-C", "OUTPUT", "-j", chain}),
+// A chain is live only if the hook's jump exists AND it still ends in DROP.
+func iptablesLiveChainProbe(hook, chain string) (jump []string, terminal []string) {
+	return withWait([]string{"-C", hook, "-j", chain}),
 		withWait([]string{"-C", chain, "-j", "DROP"})
 }
 
@@ -201,13 +238,21 @@ var runIPTablesCommand = func(ctx context.Context, binary string, args ...string
 // Refuses rather than guesses when the live chain is unknown: guessing "nothing
 // installed" while a chain is live would stage into it and tear it down.
 func applyIPTablesRules(ctx context.Context, endpointIPs []string, tunnelInterface string, allowLAN bool) error {
-	live, ok := liveIPTablesChain(ctx, "iptables", iptChainName, iptChainNameAlt)
+	live, ok := liveIPTablesChain(ctx, "iptables", "OUTPUT", iptChainName, iptChainNameAlt)
 	if !ok {
 		return errors.New("cannot determine the live IPv4 kill-switch chain; refusing to rebuild")
 	}
-	live6, ok := liveIPTablesChain(ctx, "ip6tables", ipt6ChainName, ipt6ChainNameAlt)
+	live6, ok := liveIPTablesChain(ctx, "ip6tables", "OUTPUT", ipt6ChainName, ipt6ChainNameAlt)
 	if !ok {
 		return errors.New("cannot determine the live IPv6 kill-switch chain; refusing to rebuild")
+	}
+	liveFwd, ok := liveIPTablesChain(ctx, "iptables", "FORWARD", iptFwdChainName, iptFwdChainNameAlt)
+	if !ok {
+		return errors.New("cannot determine the live IPv4 forward chain; refusing to rebuild")
+	}
+	liveFwd6, ok := liveIPTablesChain(ctx, "ip6tables", "FORWARD", ipt6FwdChainName, ipt6FwdChainNameAlt)
+	if !ok {
+		return errors.New("cannot determine the live IPv6 forward chain; refusing to rebuild")
 	}
 
 	plan := iptablesApplyPlan(
@@ -215,6 +260,11 @@ func applyIPTablesRules(ctx context.Context, endpointIPs []string, tunnelInterfa
 		iptables6StagingChain(live6),
 		endpointIPs, tunnelInterface, allowLAN,
 	)
+	plan = append(plan, iptablesForwardPlan(
+		iptablesForwardStagingChain(liveFwd),
+		iptables6ForwardStagingChain(liveFwd6),
+		tunnelInterface, allowLAN,
+	)...)
 	for _, cmd := range plan {
 		err := runIPTablesCommand(ctx, cmd.Binary, cmd.Args...)
 		if err == nil || cmd.BestEffort {
@@ -230,7 +280,7 @@ func applyIPTablesRules(ctx context.Context, endpointIPs []string, tunnelInterfa
 
 // Returns "" when neither chain is live; ok=false when the probes couldn't
 // answer, which callers must not read as "absent".
-func liveIPTablesChain(ctx context.Context, binary, primary, alternate string) (string, bool) {
+func liveIPTablesChain(ctx context.Context, binary, hook, primary, alternate string) (string, bool) {
 	for _, chain := range []string{primary, alternate} {
 		exists, ok := iptablesChainExists(ctx, binary, chain)
 		if !ok {
@@ -239,7 +289,7 @@ func liveIPTablesChain(ctx context.Context, binary, primary, alternate string) (
 		if !exists {
 			continue
 		}
-		jumpArgs, terminalArgs := iptablesLiveChainProbe(chain)
+		jumpArgs, terminalArgs := iptablesLiveChainProbe(hook, chain)
 
 		hooked, ok := probeIPTablesRule(ctx, binary, jumpArgs)
 		if !ok {
@@ -343,4 +393,65 @@ func iptablesTargetAbsent(ctx context.Context, cmd iptablesCommand) (absent bool
 		return !exists, ok
 	}
 	return false, false
+}
+
+// iptablesForwardPlan stages the FORWARD chains the way iptablesApplyPlan stages
+// OUTPUT. The physdev accept is best-effort: a kernel without it must still arm.
+func iptablesForwardPlan(staging, staging6, tunnelInterface string, allowLAN bool) []iptablesCommand {
+	plan := make([]iptablesCommand, 0, 24)
+
+	plan = append(plan,
+		ipt6Optional("-D", "FORWARD", "-j", staging6),
+		ipt6Optional("-F", staging6),
+		ipt6Optional("-X", staging6),
+		ipt6Create("create IPv6 forward chain", "-N", staging6),
+		ipt6Optional("-A", staging6, "-m", "physdev", "--physdev-is-bridged", "-j", "ACCEPT"),
+		ipt6("add IPv6 forward drop rule", "-A", staging6, "-j", "DROP"),
+		ipt6("insert IPv6 forward jump", "-I", "FORWARD", "1", "-j", staging6),
+	)
+	for _, stale := range []string{ipt6FwdChainName, ipt6FwdChainNameAlt} {
+		if stale == staging6 {
+			continue
+		}
+		plan = append(plan,
+			ipt6Optional("-D", "FORWARD", "-j", stale),
+			ipt6Optional("-F", stale),
+			ipt6Optional("-X", stale),
+		)
+	}
+
+	plan = append(plan,
+		ipt4Optional("-D", "FORWARD", "-j", staging),
+		ipt4Optional("-F", staging),
+		ipt4Optional("-X", staging),
+		ipt4Create("create forward chain", "-N", staging),
+		ipt4Optional("-A", staging, "-m", "physdev", "--physdev-is-bridged", "-j", "ACCEPT"),
+	)
+	// The tunnel carries IPv4 only, so only the v4 chain ever names it.
+	if tunnelInterface != "" {
+		plan = append(plan,
+			ipt4("allow forwarding to tunnel", "-A", staging, "-o", tunnelInterface, "-j", "ACCEPT"),
+			ipt4("allow forwarding from tunnel", "-A", staging, "-i", tunnelInterface, "-j", "ACCEPT"),
+		)
+	}
+	if allowLAN {
+		for _, cidr := range LANAllowPrefixes {
+			plan = append(plan, ipt4("allow forwarding to LAN "+cidr, "-A", staging, "-d", cidr, "-j", "ACCEPT"))
+		}
+	}
+	plan = append(plan,
+		ipt4("add forward drop rule", "-A", staging, "-j", "DROP"),
+		ipt4("insert forward jump", "-I", "FORWARD", "1", "-j", staging),
+	)
+	for _, stale := range []string{iptFwdChainName, iptFwdChainNameAlt} {
+		if stale == staging {
+			continue
+		}
+		plan = append(plan,
+			ipt4Optional("-D", "FORWARD", "-j", stale),
+			ipt4Optional("-F", stale),
+			ipt4Optional("-X", stale),
+		)
+	}
+	return plan
 }

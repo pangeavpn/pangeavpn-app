@@ -207,3 +207,28 @@ func TestKillSwitchPermits_LANDNSOnlyWithAllowLAN(t *testing.T) {
 		t.Errorf("permits without AllowLAN = %v, want no LAN hole at all", withoutLAN)
 	}
 }
+
+// Under Lockdown the lock outlives the session, but the tunnel permit must not:
+// macOS hands the same utunN to the next creator, Windows can reuse a LUID index.
+func TestDisconnect_LockdownDropsTheTunnelPermit(t *testing.T) {
+	profile := testProfile()
+	ks := &fakeKillSwitch{}
+	svc := newTestService(t, &fakeCloakManager{}, &fakeNaiveManager{}, &fakeWGManager{}, ks, profile)
+
+	if err := svc.Connect(context.Background(), profile.ID, ConnectOptions{Lockdown: true}); err != nil {
+		t.Fatalf("connect failed: %v", err)
+	}
+	if ks.updateCount == 0 {
+		t.Fatal("connect never permitted the tunnel; the test would prove nothing")
+	}
+	if err := svc.Disconnect(context.Background(), true); err != nil {
+		t.Fatalf("lockdown disconnect failed: %v", err)
+	}
+
+	if ks.dropTunnelCount != 1 {
+		t.Errorf("DropTunnelPermit() called %d times, want 1: the dead tunnel's permit stays in the idle lock", ks.dropTunnelCount)
+	}
+	if ks.clearCount != 0 || !ks.Active() {
+		t.Errorf("clears=%d active=%v, want the lock itself kept", ks.clearCount, ks.Active())
+	}
+}
