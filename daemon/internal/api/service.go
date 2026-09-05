@@ -1370,11 +1370,13 @@ func (s *Service) bringUpTransport(ctx context.Context, profile *state.Profile, 
 			// path, wg.Stop consuming a deadline shared with mgr.Stop left the
 			// transport never killed, so the next candidate started while the
 			// previous one still held its loopback UDP port.
-			wgCleanupCtx, wgCleanupCancel := context.WithTimeout(context.Background(), 2*time.Second)
-			if stopErr := s.wg.Stop(wgCleanupCtx, *wireGuardProfile); stopErr != nil {
-				s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("%s cleanup after failed bring-up: wireguard stop warning: %v", kind, stopErr))
+			if !keepDeviceOnFailure(ctx) {
+				wgCleanupCtx, wgCleanupCancel := context.WithTimeout(context.Background(), 2*time.Second)
+				if stopErr := s.wg.Stop(wgCleanupCtx, *wireGuardProfile); stopErr != nil {
+					s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("%s cleanup after failed bring-up: wireguard stop warning: %v", kind, stopErr))
+				}
+				wgCleanupCancel()
 			}
-			wgCleanupCancel()
 
 			if mgr := s.managerForKind(kind); mgr != nil {
 				mgrCleanupCtx, mgrCleanupCancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -1525,6 +1527,19 @@ func minHandshakeFrom(ctx context.Context) int64 {
 	return 0
 }
 
+type keepDeviceKey struct{}
+
+// withKeepDeviceOnFailure keeps the WireGuard device when a candidate fails, so
+// the next one re-points it instead of recreating the adapter.
+func withKeepDeviceOnFailure(ctx context.Context) context.Context {
+	return context.WithValue(ctx, keepDeviceKey{}, true)
+}
+
+func keepDeviceOnFailure(ctx context.Context) bool {
+	keep, _ := ctx.Value(keepDeviceKey{}).(bool)
+	return keep
+}
+
 // wireGuardHandshakePollInterval is how often waitForWireGuardHandshake
 // re-reads WireGuard status while waiting for the first handshake.
 const wireGuardHandshakePollInterval = 200 * time.Millisecond
@@ -1638,6 +1653,7 @@ func (s *Service) Switch(ctx context.Context, newProfileID string, opts ConnectO
 			s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("switch: could not pre-route the new endpoints (%v); rebuilding the device", err))
 		} else {
 			keepDevice = true
+			ctx = withKeepDeviceOnFailure(ctx)
 		}
 	}
 	if !keepDevice {
@@ -1664,6 +1680,9 @@ func (s *Service) Switch(ctx context.Context, newProfileID string, opts ConnectO
 	s.setSessionOpts(opts)
 
 	if err := s.bringUpAfterKillSwitch(ctx, newProfile, wireGuardProfile, opts); err != nil {
+		if keepDevice && !errors.Is(err, ErrHostOffline) {
+			s.releaseKeptDevice(newProfile)
+		}
 		return err
 	}
 	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("switch flow completed: %s -> %s", oldProfile.ID, newProfile.ID))
@@ -2670,6 +2689,10 @@ func (s *Service) sessionIsHealthy(ctx context.Context, profile state.Profile) b
 	if !s.killSwitch.Active() {
 		return false
 	}
+	// A device kept through a failed rebuild has no transport behind it.
+	if s.activeTransportKindSnapshot() == "" {
+		return false
+	}
 	status, err := s.wg.Status(ctx, profile.WireGuard)
 	if err != nil || !status.Running || status.LastHandshakeUnix <= 0 {
 		return false
@@ -2919,7 +2942,7 @@ func (s *Service) rebuildSilentSession(ctx context.Context, profile state.Profil
 	keepDevice := false
 	if _, inPlace := s.wg.(wgInPlaceSwitcher); inPlace {
 		if prev, statusErr := s.wg.Status(ctx, wireGuardProfile); statusErr == nil {
-			ctx = withMinHandshake(ctx, prev.LastHandshakeUnix)
+			ctx = withKeepDeviceOnFailure(withMinHandshake(ctx, prev.LastHandshakeUnix))
 			keepDevice = true
 		}
 	}
@@ -2938,10 +2961,23 @@ func (s *Service) rebuildSilentSession(ctx context.Context, profile state.Profil
 	s.setActiveTransportKind("")
 
 	if err := s.bringUpAfterKillSwitch(ctx, profile, wireGuardProfile, opts); err != nil {
+		if keepDevice && !errors.Is(err, ErrHostOffline) {
+			s.releaseKeptDevice(live)
+		}
 		return err
 	}
 	s.logs.Add(state.LogInfo, state.SourceDaemon, "silent tunnel rebuilt")
 	return nil
+}
+
+// releaseKeptDevice drops a device kept through a cascade that found no
+// transport: the next connect must start clean, not adopt a dead tunnel.
+func (s *Service) releaseKeptDevice(live state.Profile) {
+	stopCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := s.wg.Stop(stopCtx, withTransportBypassHosts(live)); err != nil {
+		s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("releasing the device kept for recovery: %v", err))
+	}
 }
 
 // recoverActiveTransport restarts whichever transport is active in-place —
@@ -3315,6 +3351,16 @@ func (s *Service) attachToRunningSession(ctx context.Context, profile state.Prof
 		return false, nil
 	}
 	if !status.Running {
+		return false, nil
+	}
+	// Recovery holds this device through the offline hold; its session is
+	// dead, so a connect starts clean instead of adopting it.
+	if s.offlineHoldActive() {
+		held, ok := s.getCurrentProfile()
+		if !ok {
+			held = profile
+		}
+		s.releaseKeptDevice(held)
 		return false, nil
 	}
 
