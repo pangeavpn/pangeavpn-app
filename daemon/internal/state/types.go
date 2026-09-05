@@ -101,6 +101,9 @@ type CloakProfile struct {
 	Password         string `json:"password"`
 	// Cover SNI Cloak presents; empty => buildRawConfig defaults to www.microsoft.com.
 	ServerName string `json:"serverName,omitempty"`
+	// ProxyMethod is the server-side ProxyBook key naming where decoded
+	// traffic goes. Empty => DefaultCloakProxyMethod. Set by ApplyHop.
+	ProxyMethod string `json:"proxyMethod,omitempty"`
 }
 
 // NaiveProfile carries per-device NaiveProxy credentials, hub-provisioned
@@ -115,6 +118,9 @@ type NaiveProfile struct {
 	// ServerName is the cover SNI presented during the TLS handshake
 	// (naive's --proxy host), analogous to CloakProfile.ServerName.
 	ServerName string `json:"serverName,omitempty"`
+	// BridgePort is the remote node's framed-UDP bridge this tunnel dials
+	// through the CONNECT stream. Zero => DefaultNaiveBridgePort. Set by ApplyHop.
+	BridgePort int `json:"bridgePort,omitempty"`
 }
 
 // RealityProfile carries per-device VLESS+REALITY credentials, hub-provisioned
@@ -164,6 +170,9 @@ type Hysteria2Profile struct {
 	// PinSHA256 is a base64-encoded SHA-256 hash of the server certificate's
 	// public key; when set, the cert is pinned regardless of Insecure.
 	PinSHA256 string `json:"pinSha256,omitempty"`
+	// TargetPort is the loopback port on the remote node that decoded UDP is
+	// forwarded to. Zero => DefaultWireGuardPort. Set by ApplyHop.
+	TargetPort int `json:"targetPort,omitempty"`
 }
 
 // ShadowsocksProfile carries per-node Shadowsocks (AEAD or SS-2022) settings.
@@ -222,10 +231,35 @@ type WireGuardProfile struct {
 	DirectEndpoint string `json:"directEndpoint,omitempty"`
 }
 
+// DefaultWireGuardPort is where a node's own WireGuard listener sits, and so
+// where every transport forwards decoded traffic on a single-hop profile.
+const DefaultWireGuardPort = 51820
+
+// HopProfile makes a profile multihop: the transport terminates on an entry
+// node that relays WireGuard on to the exit node holding the peer. Nil means
+// single-hop. Selectors differ because the wire protocols do — Cloak names a
+// ProxyBook key, sing-box a destination port, naive a bridge port — and each
+// is issued by the hub, never derived client-side from a node ordering.
+type HopProfile struct {
+	// SingBoxPort is the entry's loopback hop port for REALITY, Hysteria2
+	// and Shadowsocks.
+	SingBoxPort int `json:"singBoxPort"`
+	// CloakProxyMethod is the entry's ProxyBook key routing to this exit.
+	CloakProxyMethod string `json:"cloakProxyMethod,omitempty"`
+	// NaiveBridgePort is the entry's framed-UDP bridge for this exit.
+	NaiveBridgePort int `json:"naiveBridgePort,omitempty"`
+	// EntryRegion and ExitRegion label the session for the UI. Display only;
+	// routing never reads them.
+	EntryRegion string `json:"entryRegion,omitempty"`
+	ExitRegion  string `json:"exitRegion,omitempty"`
+}
+
 type Profile struct {
 	ID    string       `json:"id"`
 	Name  string       `json:"name"`
 	Cloak CloakProfile `json:"cloak"`
+	// Hop is optional; nil means single-hop. See HopProfile.
+	Hop *HopProfile `json:"hop,omitempty"`
 	// Naive is optional; nil means this profile has no NaiveProxy fallback
 	// configured and Connect only ever tries Cloak.
 	Naive *NaiveProfile `json:"naive,omitempty"`

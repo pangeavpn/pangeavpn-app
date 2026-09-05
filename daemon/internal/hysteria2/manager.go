@@ -118,7 +118,7 @@ func (m *Manager) Start(ctx context.Context, profile state.Hysteria2Profile) err
 		}
 
 		mixedAddr := fmt.Sprintf("127.0.0.1:%d", mixedPort)
-		bridge, err = newUDPBridge(ctx, m.logs, profile.LocalPort, mixedAddr)
+		bridge, err = newUDPBridge(ctx, m.logs, profile.LocalPort, mixedAddr, profile.TargetPort)
 		if err != nil {
 			b.Close()
 			return fmt.Errorf("hysteria2: %w", err)
@@ -203,6 +203,7 @@ func (m *Manager) WaitForSession(ctx context.Context, timeout time.Duration) err
 	m.mu.RLock()
 	b := m.box
 	running := m.running && (m.bridge == nil || !m.bridge.isDead())
+	targetPort := m.profile.TargetPort
 	m.mu.RUnlock()
 	if !running || b == nil {
 		return fmt.Errorf("hysteria2: not running")
@@ -219,7 +220,7 @@ func (m *Manager) WaitForSession(ctx context.Context, timeout time.Duration) err
 	waitCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	target, err := net.ResolveUDPAddr("udp", relayDestination)
+	target, err := net.ResolveUDPAddr("udp", relayDestination(targetPort))
 	if err != nil {
 		return fmt.Errorf("hysteria2: resolve relay destination: %w", err)
 	}

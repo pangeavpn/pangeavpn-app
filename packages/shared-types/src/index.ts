@@ -103,10 +103,25 @@ export const WireGuardProfileSchema = z.object({
   directEndpoint: z.string().optional()
 });
 
+/**
+ * Present only on a multihop profile: the transport terminates on an entry
+ * node that relays WireGuard to the exit node holding the peer. The selectors
+ * differ because the wire protocols do, and every one is issued by the hub —
+ * the client never derives them from a node ordering it should not know.
+ */
+export const HopProfileSchema = z.object({
+  singBoxPort: z.number().int().positive(),
+  cloakProxyMethod: z.string().min(1),
+  naiveBridgePort: z.number().int().positive().optional(),
+  entryRegion: z.string().min(1),
+  exitRegion: z.string().min(1)
+});
+
 export const ProfileSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
   cloak: CloakProfileSchema,
+  hop: HopProfileSchema.optional(),
   /**
    * Every transport endpoint of this profile's node as a raw IP, straight from
    * the hub. The daemon permits these through the kill switch and routes them
