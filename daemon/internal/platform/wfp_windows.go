@@ -500,10 +500,13 @@ func (e *wfpEngine) addPermitLoopbackSubnetInboundV4() (uint64, error) {
 	return e.addPermitLoopbackSubnetAt(cFWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4, pangeaPermitLoopbackNetInV4FilterKey, "PangeaVPN Allow Loopback Subnet Inbound")
 }
 
-func (e *wfpEngine) addPermitEndpointIP(ipStr string) (uint64, error) {
+// Permits the endpoint at both ALE layers. CONNECT_V4 alone authorises the
+// outbound flow, but a UDP transport's replies are classified at
+// RECV_ACCEPT_V4, where addBlockAllInbound would otherwise drop them.
+func (e *wfpEngine) addPermitEndpointIP(ipStr string) ([]uint64, error) {
 	ip := net.ParseIP(ipStr).To4()
 	if ip == nil {
-		return 0, fmt.Errorf("invalid IPv4 address: %s", ipStr)
+		return nil, fmt.Errorf("invalid IPv4 address: %s", ipStr)
 	}
 
 	addrMask := wtFwpV4AddrAndMask{
@@ -521,9 +524,25 @@ func (e *wfpEngine) addPermitEndpointIP(ipStr string) (uint64, error) {
 			},
 		},
 	}
-	id, err := e.addFilter(cFWPM_LAYER_ALE_AUTH_CONNECT_V4, "PangeaVPN Allow Endpoint "+ipStr, weightTrustedPermit, cFWP_ACTION_PERMIT, conditions)
+
+	layers := []struct {
+		layer windows.GUID
+		name  string
+	}{
+		{cFWPM_LAYER_ALE_AUTH_CONNECT_V4, "PangeaVPN Allow Endpoint " + ipStr},
+		{cFWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4, "PangeaVPN Allow Endpoint Inbound " + ipStr},
+	}
+	ids := make([]uint64, 0, len(layers))
+	for _, l := range layers {
+		id, err := e.addFilter(l.layer, l.name, weightTrustedPermit, cFWP_ACTION_PERMIT, conditions)
+		if err != nil {
+			runtime.KeepAlive(&addrMask)
+			return ids, err
+		}
+		ids = append(ids, id)
+	}
 	runtime.KeepAlive(&addrMask)
-	return id, err
+	return ids, nil
 }
 
 // parseV4CIDRAddrMask converts an IPv4 CIDR string to the WFP condition's

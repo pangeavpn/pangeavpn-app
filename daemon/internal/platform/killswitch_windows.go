@@ -94,14 +94,14 @@ func (ks *windowsKillSwitch) Enable(ctx context.Context, endpointHosts []string,
 		if err := ks.engine.beginTransaction(); err != nil {
 			return fmt.Errorf("kill switch re-enable: %w", err)
 		}
-		endpointIds := make([]uint64, 0, len(ips))
+		endpointIds := make([]uint64, 0, 2*len(ips))
 		for _, ip := range ips {
-			id, err := ks.engine.addPermitEndpointIP(ip)
+			ids, err := ks.engine.addPermitEndpointIP(ip)
+			endpointIds = append(endpointIds, ids...)
 			if err != nil {
 				ks.engine.abortTransaction()
 				return fmt.Errorf("kill switch re-enable: permit %s: %w", ip, err)
 			}
-			endpointIds = append(endpointIds, id)
 		}
 		lanIds := make([]uint64, 0, len(LANAllowPrefixes))
 		if allowLAN {
@@ -228,13 +228,13 @@ func installWindowsLock(engine *wfpEngine, ips []string, allowLAN bool) (endpoin
 		}
 	}
 
-	endpointIds = make([]uint64, 0, len(ips))
+	endpointIds = make([]uint64, 0, 2*len(ips))
 	for _, ip := range ips {
-		id, err := engine.addPermitEndpointIP(ip)
+		ids, err := engine.addPermitEndpointIP(ip)
+		endpointIds = append(endpointIds, ids...)
 		if err != nil {
 			return fail(fmt.Errorf("permit %s: %w", ip, err))
 		}
-		endpointIds = append(endpointIds, id)
 	}
 
 	// Unicast renewals to the server itself and the LAN ranges themselves,
