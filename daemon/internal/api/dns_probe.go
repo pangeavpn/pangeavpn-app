@@ -90,6 +90,11 @@ var errDNSProbeInconclusive = errors.New("dns probe: round did not complete")
 // trip happened, so it counts as evidence the tunnel is carrying traffic.
 var errDNSProbeConnRefused = errors.New("dns probe: resolver refused the connection")
 
+// errDNSProbeOversizedReply marks a reply too large for the read buffer. Like a
+// refusal it is proof of a round trip: the datagram crossed the tunnel, and only
+// the copy into userspace failed.
+var errDNSProbeOversizedReply = errors.New("dns probe: reply larger than the read buffer")
+
 // ensureTunnelDNS re-asserts the session's resolvers on the host.
 //
 // This is the failure the probe cannot see: the tunnel carries traffic, so a
@@ -204,7 +209,7 @@ func probeResolverWithDialer(ctx context.Context, dialer *net.Dialer, server str
 		return err
 	}
 
-	buf := make([]byte, 1500)
+	buf := make([]byte, maxProbeReplySize)
 	for {
 		n, err := conn.Read(buf)
 		if err != nil {
@@ -230,6 +235,9 @@ func classifyProbeReadError(ctx context.Context, err error) error {
 	if errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.ECONNREFUSED) {
 		return errDNSProbeConnRefused
 	}
+	if isOversizedDatagram(err) {
+		return errDNSProbeOversizedReply
+	}
 	return err
 }
 
@@ -250,6 +258,11 @@ var rootProbeQTypes = []uint16{
 // rootProbePayloadSizes are the advertised EDNS0 buffer sizes. Which one is sent
 // decides where the resolver truncates, which varies the reply's size too.
 var rootProbePayloadSizes = []uint16{512, 1232, 1400, 4096}
+
+// maxProbeReplySize must cover the largest size the probe advertises. Windows
+// fails an oversized recvfrom outright (WSAEMSGSIZE) where Unix truncates, so a
+// buffer under the advertised ceiling rejected working tunnels there.
+const maxProbeReplySize = 4096
 
 // rootProbeQuery builds a root-zone query whose transaction ID, question,
 // DNSSEC bit, buffer size and padding are all drawn per query, so neither the
@@ -344,7 +357,7 @@ func (s *Service) dataPathIsDead(ctx context.Context, profile state.Profile) boo
 		err := s.probeResolver(probeCtx, iface, server)
 		cancel()
 		switch {
-		case err == nil, errors.Is(err, errDNSProbeConnRefused):
+		case err == nil, errors.Is(err, errDNSProbeConnRefused), errors.Is(err, errDNSProbeOversizedReply):
 			s.recordDNSProbeSuccess()
 			return false
 		case errors.Is(err, errDNSProbeInconclusive):
@@ -416,7 +429,8 @@ func (s *Service) proveDataPath(ctx context.Context, wireGuardProfile state.Wire
 		err := s.probeResolver(probeCtx, iface, server)
 		cancel()
 		switch {
-		case err == nil, errors.Is(err, errDNSProbeConnRefused), errors.Is(err, errDNSProbeInconclusive):
+		case err == nil, errors.Is(err, errDNSProbeConnRefused),
+			errors.Is(err, errDNSProbeOversizedReply), errors.Is(err, errDNSProbeInconclusive):
 			return nil
 		}
 		lastErr = fmt.Errorf("%s: %w", server, err)

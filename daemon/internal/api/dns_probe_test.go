@@ -683,3 +683,24 @@ func stubDNSServer(t *testing.T, respond func(query []byte) []byte) (string, fun
 
 	return host, func() { _ = conn.Close() }
 }
+
+// TestHealthCheck_OversizedReplyProvesTheTunnelIsLive is the running-session
+// half of the WSAEMSGSIZE case: an oversized reply is evidence of a round trip,
+// so it must never accumulate toward a rebuild.
+func TestHealthCheck_OversizedReplyProvesTheTunnelIsLive(t *testing.T) {
+	svc, _, _, wgMgr, _ := dataPathTestService(t)
+
+	wgMgr.mu.Lock()
+	startsAfterConnect := wgMgr.startCount
+	wgMgr.mu.Unlock()
+
+	svc.probeResolver = func(context.Context, string, string) error { return errDNSProbeOversizedReply }
+	runProbedHealthChecks(svc, dnsProbeFailuresBeforeRebuild*2)
+
+	wgMgr.mu.Lock()
+	restarts := wgMgr.startCount - startsAfterConnect
+	wgMgr.mu.Unlock()
+	if restarts != 0 {
+		t.Errorf("wireguard restarts = %d, want 0 — an oversized reply proves the round trip", restarts)
+	}
+}

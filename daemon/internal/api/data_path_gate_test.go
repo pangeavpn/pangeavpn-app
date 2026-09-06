@@ -399,3 +399,29 @@ func TestHostNetworkUnreachable(t *testing.T) {
 		t.Error("nil error must not be an outage")
 	}
 }
+
+// TestProveDataPath_OversizedReplyProvesTheTunnelCarriesTraffic covers the
+// Windows WSAEMSGSIZE case: the reply crossed the tunnel and only the copy into
+// userspace failed, so the gate must accept the candidate rather than reject it.
+func TestProveDataPath_OversizedReplyProvesTheTunnelCarriesTraffic(t *testing.T) {
+	wgMgr := &fakeWGManager{interfaceName: "utun7"}
+	svc := newTestServiceFull(t, &fakeCloakManager{}, &fakeNaiveManager{}, &fakeRealityManager{},
+		&fakeHysteria2Manager{}, &fakeShadowsocksManager{}, &fakeSnowflakeManager{}, wgMgr, &fakeKillSwitch{}, cascadeProfile())
+
+	svc.probeResolver = func(context.Context, string, string) error { return errDNSProbeOversizedReply }
+
+	if err := svc.proveDataPath(context.Background(), cascadeProfile().WireGuard); err != nil {
+		t.Fatalf("proveDataPath rejected a transport that carried an oversized reply: %v", err)
+	}
+}
+
+// TestMaxProbeReplySize_CoversTheLargestAdvertisedPayload keeps the read buffer
+// and the advertised EDNS0 ceiling from drifting apart: a buffer under the
+// ceiling invites replies Windows then fails the whole read on.
+func TestMaxProbeReplySize_CoversTheLargestAdvertisedPayload(t *testing.T) {
+	for _, size := range rootProbePayloadSizes {
+		if int(size) > maxProbeReplySize {
+			t.Fatalf("advertised EDNS0 payload size %d exceeds the %d byte read buffer", size, maxProbeReplySize)
+		}
+	}
+}
