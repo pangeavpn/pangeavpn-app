@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -423,5 +424,61 @@ func TestMaxProbeReplySize_CoversTheLargestAdvertisedPayload(t *testing.T) {
 		if int(size) > maxProbeReplySize {
 			t.Fatalf("advertised EDNS0 payload size %d exceeds the %d byte read buffer", size, maxProbeReplySize)
 		}
+	}
+}
+
+// gateProbeCounter counts probe calls and fails every one, so a test measures
+// how many attempts the gate spends before giving up.
+func gateProbeCounter(svc *Service) *int32 {
+	var calls int32
+	svc.probeResolver = func(context.Context, string, string) error {
+		atomic.AddInt32(&calls, 1)
+		return errors.New("i/o timeout")
+	}
+	return &calls
+}
+
+func gateTestService(t *testing.T, rxPerStatus int64) (*Service, *fakeWGManager) {
+	t.Helper()
+	wgMgr := &fakeWGManager{interfaceName: "utun7", bytesInPerStatus: rxPerStatus}
+	svc := newTestServiceFull(t, &fakeCloakManager{}, &fakeNaiveManager{}, &fakeRealityManager{},
+		&fakeHysteria2Manager{}, &fakeShadowsocksManager{}, &fakeSnowflakeManager{}, wgMgr, &fakeKillSwitch{}, cascadeProfile())
+	return svc, wgMgr
+}
+
+// TestProveDataPath_BlockedTunnelStillFailsFast proves the slow-host budget is
+// not a blanket extension: a peer sending nothing back keeps the original
+// attempt count, so a censored transport does not slow the cascade down.
+func TestProveDataPath_BlockedTunnelStillFailsFast(t *testing.T) {
+	svc, _ := gateTestService(t, 0)
+	calls := gateProbeCounter(svc)
+
+	if err := svc.proveDataPath(context.Background(), cascadeProfile().WireGuard); err == nil {
+		t.Fatal("proveDataPath accepted a transport that never carried a round trip")
+	}
+	if got := atomic.LoadInt32(calls); got != dataPathGateAttempts {
+		t.Errorf("probe attempts = %d, want %d — a flat rx counter must not buy extra tries", got, dataPathGateAttempts)
+	}
+}
+
+// TestProveDataPath_LiveTunnelEarnsMoreAttempts is the underpowered-laptop case:
+// the peer is feeding the tunnel while Windows is still making the adapter
+// usable, so the gate must keep trying past the base attempts.
+func TestProveDataPath_LiveTunnelEarnsMoreAttempts(t *testing.T) {
+	svc, _ := gateTestService(t, 4096)
+
+	var calls int32
+	svc.probeResolver = func(context.Context, string, string) error {
+		if atomic.AddInt32(&calls, 1) > int32(dataPathGateAttempts) {
+			return nil
+		}
+		return errors.New("i/o timeout")
+	}
+
+	if err := svc.proveDataPath(context.Background(), cascadeProfile().WireGuard); err != nil {
+		t.Fatalf("proveDataPath rejected a tunnel that was still taking bytes off the peer: %v", err)
+	}
+	if got := atomic.LoadInt32(&calls); got <= int32(dataPathGateAttempts) {
+		t.Errorf("probe attempts = %d, want more than the base %d", got, dataPathGateAttempts)
 	}
 }

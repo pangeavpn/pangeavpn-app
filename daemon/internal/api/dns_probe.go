@@ -48,6 +48,12 @@ const (
 	dataPathGateRetryDelay = 300 * time.Millisecond
 )
 
+// dataPathGateBudget bounds the extra attempts a still-live tunnel earns past
+// dataPathGateAttempts. Underpowered hosts finish the handshake well before
+// Windows has the adapter carrying traffic, and a fixed count spent that whole
+// window judging a tunnel that was not up yet.
+const dataPathGateBudget = 12 * time.Second
+
 // nextDNSProbeDelay draws a uniform gap in [min, max]. A failed read falls back
 // to the midpoint — a regular cadence is worse than a random one, never wrong.
 func nextDNSProbeDelay() time.Duration {
@@ -415,14 +421,19 @@ func (s *Service) proveDataPath(ctx context.Context, wireGuardProfile state.Wire
 	servers = probeServerOrder(servers)
 	iface := s.resolveWireGuardInterfaceName(ctx, wireGuardProfile)
 
+	deadline := time.Now().Add(dataPathGateBudget)
+	lastRx, rxKnown := s.tunnelBytesIn(ctx, wireGuardProfile)
+
 	var lastErr error
-	for attempt := range dataPathGateAttempts {
+	for attempt := 0; ; attempt++ {
 		if attempt > 0 {
 			select {
 			case <-ctx.Done():
 				return nil
 			case <-time.After(dataPathGateRetryDelay):
 			}
+			// A slow host can publish the adapter after the first attempt.
+			iface = s.resolveWireGuardInterfaceName(ctx, wireGuardProfile)
 		}
 		server := servers[attempt%len(servers)]
 		probeCtx, cancel := context.WithTimeout(ctx, dnsProbeTimeout)
@@ -434,8 +445,32 @@ func (s *Service) proveDataPath(ctx context.Context, wireGuardProfile state.Wire
 			return nil
 		}
 		lastErr = fmt.Errorf("%s: %w", server, err)
+
+		if attempt+1 < dataPathGateAttempts {
+			continue
+		}
+		// Past the base attempts, only a tunnel still taking bytes off the peer
+		// earns more: a blocked one stays flat and fails as fast as it always did.
+		if !rxKnown || !time.Now().Before(deadline) {
+			break
+		}
+		rx, ok := s.tunnelBytesIn(ctx, wireGuardProfile)
+		if !ok || rx <= lastRx {
+			break
+		}
+		lastRx = rx
 	}
 	return fmt.Errorf("tunnel came up but did not carry traffic: %w", lastErr)
+}
+
+// tunnelBytesIn reads the peer's received-byte counter, reporting whether it
+// could be read at all so an unavailable counter never buys extra attempts.
+func (s *Service) tunnelBytesIn(ctx context.Context, wireGuardProfile state.WireGuardProfile) (int64, bool) {
+	status, err := s.wg.Status(ctx, wireGuardProfile)
+	if err != nil {
+		return 0, false
+	}
+	return status.BytesIn, true
 }
 
 // dnsProbeDue reports whether a round is due, claiming the slot when it is so

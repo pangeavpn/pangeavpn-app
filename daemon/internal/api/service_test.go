@@ -382,6 +382,11 @@ type fakeWGManager struct {
 	handshakeOnStart int
 	handshakeUnix    int64
 
+	// Data-path counter modeling. bytesInPerStatus is added to bytesIn on every
+	// Status call; the zero default is a tunnel taking nothing off the peer.
+	bytesIn          int64
+	bytesInPerStatus int64
+
 	// lastStartConfig is the config text of the most recent Start, for
 	// asserting the peer Endpoint the tunnel was actually brought up against.
 	lastStartConfig string
@@ -475,7 +480,8 @@ func (f *fakeWGManager) Status(_ context.Context, _ state.WireGuardProfile) (sta
 	if f.statusErr != nil {
 		return state.WireGuardStatus{}, f.statusErr
 	}
-	return state.WireGuardStatus{Running: f.running, Detail: "fake", LastHandshakeUnix: f.lastHandshakeLocked()}, nil
+	f.bytesIn += f.bytesInPerStatus
+	return state.WireGuardStatus{Running: f.running, Detail: "fake", LastHandshakeUnix: f.lastHandshakeLocked(), BytesIn: f.bytesIn}, nil
 }
 
 // lastHandshakeLocked returns the handshake time the fake should report; caller
