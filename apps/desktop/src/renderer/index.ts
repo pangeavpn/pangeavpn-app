@@ -1557,6 +1557,7 @@ async function switchToServer(
   updateServerControlStates();
   setUiMessage(t("connect.switching"));
   const clearProgressMessages = startConnectionProgressMessages();
+  let switchFailed = false;
   try {
     const result = await pangeaApi.provisionAndSwitch(plan.filter((id) => id !== hop), hop);
     clearProgressMessages();
@@ -1572,10 +1573,19 @@ async function switchToServer(
     } else if (result.error === "offline") {
       setUiMessage(t("connect.offline"));
     } else {
-      setUiMessage(t("connect.switchFailed"));
+      switchFailed = true;
     }
     await settleConnectingState(connectingSince);
-    await refreshStatus();
+    const status = await refreshStatus();
+    // The daemon can rebuild the tunnel itself after a leg drops (common right
+    // after turning multihop off); a switch that still ends CONNECTED isn't a failure.
+    if (switchFailed) {
+      setUiMessage(
+        status?.state === "CONNECTED" && getUserIntent() !== "disconnected"
+          ? t("connect.connected")
+          : t("connect.switchFailed")
+      );
+    }
     return result;
   } catch (error) {
     clearProgressMessages();
