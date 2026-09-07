@@ -647,6 +647,8 @@ let multihopLocal = false;
 let entryChoiceLocal: string | null = null;
 // Entry of the live (or last) session, so the route strip shows what is really in use.
 let activeEntryId: string | null = null;
+// What the route chip last rendered; polls arrive every second and rarely change it.
+let heroPathKey = "";
 
 const hasEntryCapableServers = (): boolean => servers.some((s) => s.multihop === true);
 
@@ -760,18 +762,18 @@ function renderMultihopPanel(): void {
       : t("multihop.noEntries");
 }
 
+window.addEventListener("resize", () => {
+  heroPathKey = "";
+  renderHeroPath();
+});
+
 function fillPathNode(el: HTMLElement, server: ServerInfo | null, roleKey: MessageKey): void {
   el.classList.toggle("is-missing", !server);
-  const text = document.createElement("span");
-  text.className = "hero-path-text";
+  el.title = t(roleKey);
   const name = document.createElement("span");
   name.className = "hero-path-name";
   name.textContent = server ? regionNameOf(server) : t("multihop.none");
-  const role = document.createElement("span");
-  role.className = "hero-path-role";
-  role.textContent = t(roleKey);
-  text.append(name, role);
-  el.replaceChildren(buildFlag(server?.country ?? "", "hero-path-flag"), text);
+  el.replaceChildren(buildFlag(server?.country ?? "", "hero-path-flag"), name);
 }
 
 function renderHeroPath(): void {
@@ -783,14 +785,25 @@ function renderHeroPath(): void {
   const exitId = (connected && lastServerIdLocal) || serverSelect.value;
   const show = authState.authenticated && multihopLocal && servers.length > 0 && Boolean(exitId);
   heroPath.hidden = !show;
-  if (!show) return;
+  if (!show) {
+    heroPathKey = "";
+    return;
+  }
 
   const live = connected && activeEntryId !== null;
   const entry = live ? servers.find((s) => s.id === activeEntryId) ?? null : entryFor(exitId);
   const exit = servers.find((s) => s.id === exitId) ?? null;
+  // The state text shares the row, so a longer one leaves the chip less room.
+  const key = [live, entry?.id ?? "", exit?.id ?? "", localeTag(), stateEl.textContent].join("|");
+  if (key === heroPathKey) return;
+  heroPathKey = key;
   heroPath.dataset.live = String(live);
   fillPathNode(heroPathEntry, entry, "multihop.entry");
   fillPathNode(heroPathExit, exit, "multihop.exit");
+  // Flags alone beat clipped names when the row is tight.
+  heroPath.classList.remove("is-compact");
+  const names = Array.from(heroPath.querySelectorAll<HTMLElement>(".hero-path-name"));
+  if (names.some((name) => name.scrollWidth > name.clientWidth + 1)) heroPath.classList.add("is-compact");
   heroPath.setAttribute(
     "aria-label",
     t("multihop.pathAria", {

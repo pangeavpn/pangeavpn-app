@@ -140,7 +140,7 @@
 
         <section id="heroCard" class="hero-card" data-state="DISCONNECTED">
           <div class="hero-state" aria-live="polite">
-            <span class="hero-kicker"><i class="hero-dot" aria-hidden="true"></i><strong id="state" data-i18n="state.DISCONNECTED">DISCONNECTED</strong></span>
+            <span class="hero-kicker"><i class="hero-dot" aria-hidden="true"></i><strong id="state" data-i18n="state.DISCONNECTED">DISCONNECTED</strong><div id="heroPath" class="hero-path" role="img" aria-live="off" data-live="false" hidden><span class="hero-path-node hero-path-you"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4.5" width="18" height="12" rx="2"/><path d="M8 20h8M12 16.5V20"/></svg></span><span class="hero-path-link" aria-hidden="true"><i class="hero-path-pulse"></i></span><span id="heroPathEntry" class="hero-path-node hero-path-entry"></span><span class="hero-path-link" aria-hidden="true"><i class="hero-path-pulse"></i></span><span id="heroPathExit" class="hero-path-node hero-path-exit"></span></div></span>
             <h2 id="heroHeadline" class="hero-headline"></h2>
             <span id="detail" class="hero-detail" tabindex="0"></span>
           </div>
@@ -154,16 +154,6 @@
 
           <div id="serverPanel" class="hero-server" hidden>
             <select id="serverSelect" hidden></select>
-            <div id="heroPath" class="hero-path" role="img" data-live="false" hidden>
-              <span class="hero-path-node hero-path-you">
-                <span class="hero-path-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="12" rx="2"/><path d="M8 20h8M12 16.5V20"/></svg></span>
-                <span class="hero-path-sr" data-i18n="multihop.you">You</span>
-              </span>
-              <span class="hero-path-link" aria-hidden="true"><i class="hero-path-pulse"></i></span>
-              <span id="heroPathEntry" class="hero-path-node hero-path-entry"></span>
-              <span class="hero-path-link" aria-hidden="true"><i class="hero-path-pulse"></i></span>
-              <span id="heroPathExit" class="hero-path-node hero-path-exit"></span>
-            </div>
             <span id="heroServerLabel" class="hero-server-label" data-i18n="hero.region">Region</span>
             <div id="regionSlots" class="region-slots"></div>
             <div class="hero-server-actions">
