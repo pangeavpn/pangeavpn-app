@@ -652,6 +652,10 @@ let heroPathKey = "";
 
 const hasEntryCapableServers = (): boolean => servers.some((s) => s.multihop === true);
 
+// Plain WireGuard runs no transport, so it can't carry a hop; multihop is
+// inactive under it even when the preference stays on.
+const multihopActive = (): boolean => multihopLocal && preferredTransportSelect.value !== "wireguard";
+
 function entryFor(exitId: string): ServerInfo | null {
   return resolveEntry(getVisibleServers(), exitId, entryChoiceLocal);
 }
@@ -663,7 +667,7 @@ function entryRegionKeyFor(exitId: string): string | null {
 
 /** null: single-hop. undefined: multihop is on but nothing can serve as the entry. */
 function hopFor(exitId: string): string | null | undefined {
-  if (!multihopLocal) return null;
+  if (!multihopActive()) return null;
   return entryFor(exitId)?.id;
 }
 
@@ -739,7 +743,7 @@ function buildEntryChip(region: Region | null, selected: boolean, blocked: boole
 }
 
 function renderMultihopPanel(): void {
-  const available = authState.authenticated && hasEntryCapableServers();
+  const available = authState.authenticated && hasEntryCapableServers() && preferredTransportSelect.value !== "wireguard";
   multihopPanel.hidden = !available;
   if (!available) return;
   multihopToggle.checked = multihopLocal;
@@ -783,13 +787,13 @@ function fillPathNode(el: HTMLElement, server: ServerInfo | null, roleKey: Messa
 }
 
 function renderHeroPath(): void {
-  const labelKey: MessageKey = multihopLocal ? "multihop.exitRegions" : "hero.region";
+  const labelKey: MessageKey = multihopActive() ? "multihop.exitRegions" : "hero.region";
   heroServerLabel.dataset.i18n = labelKey;
   heroServerLabel.textContent = t(labelKey);
 
   const connected = currentDaemonState === "CONNECTED" && !disconnectingVisual;
   const exitId = (connected && lastServerIdLocal) || serverSelect.value;
-  const show = authState.authenticated && multihopLocal && servers.length > 0 && Boolean(exitId);
+  const show = authState.authenticated && multihopActive() && servers.length > 0 && Boolean(exitId);
   heroPath.hidden = !show;
   if (!show) {
     heroPathKey = "";
@@ -3605,7 +3609,7 @@ function buildRegionRow(region: Region, forPicker: boolean): HTMLElement {
   row.dataset.key = region.key;
   row.setAttribute("aria-current", String(isCurrent));
   // A hand-picked entry locks its region out of the exits (the hub refuses the pair); an auto entry just moves.
-  const isEntry = !isCurrent && multihopLocal && entryRegionKeyFor(serverSelect.value) === region.key;
+  const isEntry = !isCurrent && multihopActive() && entryRegionKeyFor(serverSelect.value) === region.key;
   const entryPinned = isEntry && entryChoiceLocal !== null && regionKeyOf({ id: entryChoiceLocal }) === region.key;
   if (entryPinned) {
     row.disabled = true;
@@ -3811,7 +3815,7 @@ function renderRegionPicker(ordered: readonly Region[]): void {
     groups.push(heading, box);
   };
 
-  const allKey: MessageKey = multihopLocal ? "multihop.exitRegions" : "serverPicker.all";
+  const allKey: MessageKey = multihopActive() ? "multihop.exitRegions" : "serverPicker.all";
   if (recent.length > 0) {
     addGroup("serverPicker.recent", recent);
     addGroup(allKey, rest);
