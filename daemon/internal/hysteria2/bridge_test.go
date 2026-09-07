@@ -74,14 +74,14 @@ func TestUDPBridgeRoundTripsThroughSocks(t *testing.T) {
 
 	// Point the bridge's fixed relay destination at our echo server for
 	// this test (production uses the package default, 127.0.0.1:51820).
-	old := relayDestination
-	relayDestination = "127.0.0.1:" + strconv.Itoa(echoPort)
-	defer func() { relayDestination = old }()
+	old := relayDestinationOverride
+	relayDestinationOverride = "127.0.0.1:" + strconv.Itoa(echoPort)
+	defer func() { relayDestinationOverride = old }()
 
 	logs := state.NewLogStore(100)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	bridge, err := newUDPBridge(ctx, logs, 0, mixedAddr)
+	bridge, err := newUDPBridge(ctx, logs, 0, mixedAddr, 0)
 	if err != nil {
 		t.Fatalf("newUDPBridge: %v", err)
 	}

@@ -73,14 +73,14 @@ func (g *rateGate) allow(interval time.Duration) bool {
 // newUDPBridge opens the WG-facing loopback socket, establishes a SOCKS5
 // UDP ASSOCIATE session against the mixed inbound at mixedAddr, and starts
 // pumping datagrams in both directions.
-func newUDPBridge(ctx context.Context, logs *state.LogStore, localPort int, mixedAddr string) (*udpBridge, error) {
+func newUDPBridge(ctx context.Context, logs *state.LogStore, localPort int, mixedAddr string, targetPort int) (*udpBridge, error) {
 	localAddr := &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: localPort}
 	local, err := listenUDPWithRetry(ctx, localAddr, 10, 100*time.Millisecond)
 	if err != nil {
 		return nil, fmt.Errorf("hysteria2: listen local udp: %w", err)
 	}
 
-	target, err := net.ResolveUDPAddr("udp", relayDestination)
+	target, err := net.ResolveUDPAddr("udp", relayDestination(targetPort))
 	if err != nil {
 		local.Close()
 		return nil, fmt.Errorf("hysteria2: resolve relay destination: %w", err)

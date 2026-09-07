@@ -134,6 +134,14 @@ interface RegisterResponse {
   assignedIP: string;
   dns: string;
   existingConfig?: boolean;
+  /** Present only when the request named an entryRegion. See HopProfileSchema. */
+  hop?: {
+    singBoxPort: number;
+    cloakProxyMethod: string;
+    naiveBridgePort?: number;
+    entryRegion: string;
+    exitRegion: string;
+  };
 }
 
 interface DohAnswer {
@@ -1709,11 +1717,25 @@ export class PangeaApiClient {
     this.onHubShadowsocks?.(this.hubShadowsocks);
   }
 
-  async provision(serverId: string, signal?: AbortSignal): Promise<Profile> {
+  async provision(
+    serverId: string,
+    signal?: AbortSignal,
+    entryServerId?: string
+  ): Promise<Profile> {
     if (!this.licenseKey) throw new Error("Not authenticated");
 
-    const server = this.cachedServers.find((s) => s.id === serverId);
-    if (!server) throw new Error(`Unknown server: ${serverId}`);
+    const exitServer = this.cachedServers.find((s) => s.id === serverId);
+    if (!exitServer) throw new Error(`Unknown server: ${serverId}`);
+
+    // Transports terminate on the entry node; the WireGuard peer lives on the
+    // exit. `server` stays the entry below, because every credential block
+    // describes where a transport dials — which is also why excludeIPs keeps
+    // naming only entry addresses.
+    const isMultihop = Boolean(entryServerId && entryServerId !== serverId);
+    const server = isMultihop
+      ? this.cachedServers.find((s) => s.id === entryServerId)
+      : exitServer;
+    if (!server) throw new Error(`Unknown entry server: ${entryServerId}`);
 
     // Ephemeral WG keypair — generated fresh per connection, never stored
     const keyPair = generateWireGuardKeyPair();
@@ -1725,7 +1747,8 @@ export class PangeaApiClient {
         licenseKey: this.licenseKey,
         identityPubkey: this.identityPubkey,
         wgPubkey: keyPair.publicKey,
-        region: serverId
+        region: serverId,
+        ...(isMultihop ? { entryRegion: entryServerId } : {})
       },
       signal
     );
@@ -1784,7 +1807,8 @@ export class PangeaApiClient {
 
     return {
       id: `auto-${serverId}`,
-      name: `${server.name} (auto)`,
+      name: `${exitServer.name} (auto)`,
+      ...(reg.hop ? { hop: reg.hop } : {}),
       cloak: {
         localPort: 51820,
         remoteHost: server.cloak.remoteHost,
