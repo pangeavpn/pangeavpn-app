@@ -164,6 +164,9 @@ type Hysteria2Profile struct {
 	// PinSHA256 is a base64-encoded SHA-256 hash of the server certificate's
 	// public key; when set, the cert is pinned regardless of Insecure.
 	PinSHA256 string `json:"pinSha256,omitempty"`
+	// RemotePorts are "start:end" UDP ranges the client hops across so a network
+	// blocking the single RemotePort can't stop the tunnel; empty disables hopping.
+	RemotePorts []string `json:"remotePorts,omitempty"`
 }
 
 // ShadowsocksProfile carries per-node Shadowsocks (AEAD or SS-2022) settings.

@@ -61,7 +61,8 @@ export const Hysteria2ProfileSchema = z.object({
   upMbps: z.number().int().nonnegative().optional(),
   downMbps: z.number().int().nonnegative().optional(),
   insecure: z.boolean().optional(),
-  pinSha256: z.string().optional()
+  pinSha256: z.string().optional(),
+  remotePorts: z.array(z.string()).optional()
 });
 
 export const ShadowsocksProfileSchema = z.object({

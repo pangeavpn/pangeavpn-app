@@ -63,7 +63,7 @@ func (m *Manager) Start(ctx context.Context, profile state.Hysteria2Profile) err
 	m.mu.RUnlock()
 
 	if running && !dead {
-		if current == profile {
+		if profilesEqual(current, profile) {
 			return nil
 		}
 		return fmt.Errorf("hysteria2: already running with a different profile; stop first")

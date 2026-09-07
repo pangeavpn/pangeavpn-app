@@ -189,6 +189,8 @@ export interface ServerInfo {
     // Base64 SPKI SHA-256 pin for the node's self-signed cert; the daemon
     // verifies against this instead of a CA chain.
     pinSha256?: string;
+    /** "start:end" UDP ranges the client hops across; absent means no hopping. */
+    remotePorts?: string[];
   };
   /**
    * Shadowsocks (AEAD / SS-2022) connection info, present only when the hub
