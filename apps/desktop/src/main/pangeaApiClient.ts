@@ -6,7 +6,7 @@ import type { ServerInfo, SubscriptionInfo } from "../shared/ipc";
 import { normalizeCustomDns, resolveWireGuardDns } from "../shared/dns";
 import { MTU_DEFAULT, normalizeMtu, normalizeMtuOrDefault } from "../shared/mtu";
 import { resolveNaiveEndpoint } from "../shared/naiveEndpoint";
-import { parseNodeWireGuardEndpoint } from "../shared/wireguardEndpoint";
+import { nodeWireGuardEndpointForRegistration } from "../shared/wireguardEndpoint";
 import { buildShadowsocksProfile } from "../shared/shadowsocksProfile";
 import {
   DEFAULT_HUB_METHODS,
@@ -1776,7 +1776,7 @@ export class PangeaApiClient {
     // The node's WireGuard listener needs the same treatment, because the direct
     // method dials it rather than a loopback bridge. Normally it is the node
     // address already on the list, and deduplicated away.
-    const wireguardEndpoint = parseNodeWireGuardEndpoint(reg.serverEndpoint);
+    const wireguardEndpoint = nodeWireGuardEndpointForRegistration(reg.serverEndpoint, Boolean(reg.hop));
     const nodeIp = server.cloak.remoteHost;
     const excludeIPs = uniqueNonEmpty([
       nodeIp,
