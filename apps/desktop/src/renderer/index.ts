@@ -686,13 +686,19 @@ async function persistMultihop(): Promise<void> {
   }
 }
 
-// A live session re-dials with the new route, the same way picking a region does.
+// Debounced so a flurry of entry/toggle clicks becomes one switch (one
+// re-registration) instead of one re-dial per click.
+let multihopRedialTimer: ReturnType<typeof setTimeout> | null = null;
 function applyMultihopChange(): void {
   renderServers();
   void persistMultihop();
-  if (currentDaemonState === "CONNECTED" && !serverWorking && !disconnectingVisual && serverSelect.value) {
-    void switchToServer(serverSelect.value);
-  }
+  if (multihopRedialTimer) clearTimeout(multihopRedialTimer);
+  multihopRedialTimer = setTimeout(() => {
+    multihopRedialTimer = null;
+    if (currentDaemonState === "CONNECTED" && !serverWorking && !disconnectingVisual && serverSelect.value) {
+      void switchToServer(serverSelect.value);
+    }
+  }, 600);
 }
 
 multihopToggle.addEventListener("change", () => {
