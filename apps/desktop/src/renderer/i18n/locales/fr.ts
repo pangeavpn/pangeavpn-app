@@ -83,6 +83,22 @@ export const fr = {
   "hero.region": "Région",
   "hero.allRegions": "Toutes les régions",
 
+  // ── Multihop ──────────────────────────────────────────
+  "multihop.title": "Multi-sauts",
+  "multihop.hint": "Entrez par un serveur, sortez par un autre. Votre réseau ne voit jamais que l'entrée.",
+  "multihop.entry": "Entrée",
+  "multihop.exit": "Sortie",
+  "multihop.exitRegions": "Région de sortie",
+  "multihop.auto": "Auto",
+  "multihop.autoVia": "Auto choisit {region}",
+  "multihop.noEntries": "Aucun serveur d'entrée disponible pour le moment",
+  "multihop.sameAsExit": "C'est votre région de sortie",
+  "multihop.you": "Vous",
+  "multihop.entryBadge": "Entrée",
+  "multihop.none": "Aucun",
+  "multihop.pathAria": "Itinéraire multi-sauts : vous, puis {entry}, puis {exit}",
+  "multihop.options": "Options multi-sauts",
+
   // ── Headline: {x} marks the emphasised word ───────────
   "hero.headline.DISCONNECTED": "Le monde est {x}",
   "hero.emphasis.DISCONNECTED": "séparé",
@@ -283,6 +299,7 @@ export const fr = {
 
   // ── Connect / disconnect flow ─────────────────────────
   "connect.noServer": "Aucun serveur sélectionné.",
+  "connect.noEntry": "Le multi-sauts est activé, mais aucun serveur d'entrée n'est disponible. Choisissez une autre sortie ou désactivez-le.",
   "connect.provisioning": "Provisionnement et connexion...",
   "connect.stillConnecting": "Connexion toujours en cours…",
   "connect.takingLonger": "Cela prend plus de temps que d'habitude…",

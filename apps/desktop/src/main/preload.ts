@@ -47,6 +47,8 @@ const CH = {
   getNotifications: "settings:getNotifications",
   getLastServer: "settings:getLastServer",
   clearLastServer: "settings:clearLastServer",
+  setMultihop: "settings:setMultihop",
+  getMultihop: "settings:getMultihop",
   getLocale: "settings:getLocale",
   setLocale: "settings:setLocale",
   getIsPackaged: "app:getIsPackaged",
@@ -85,11 +87,11 @@ const pangeaApi = {
   logout: () => ipcRenderer.invoke(CH.authLogout),
   getAuthState: () => ipcRenderer.invoke(CH.authGetState),
   getServers: () => ipcRenderer.invoke(CH.getServers),
-  provisionAndConnect: (serverIds: string[]) =>
-    ipcRenderer.invoke(CH.provisionAndConnect, serverIds),
+  provisionAndConnect: (serverIds: string[], entryServerId?: string | null) =>
+    ipcRenderer.invoke(CH.provisionAndConnect, serverIds, entryServerId ?? null),
   cancelConnect: () => ipcRenderer.invoke(CH.cancelConnect),
-  provisionAndSwitch: (serverIds: string[]) =>
-    ipcRenderer.invoke(CH.provisionAndSwitch, serverIds),
+  provisionAndSwitch: (serverIds: string[], entryServerId?: string | null) =>
+    ipcRenderer.invoke(CH.provisionAndSwitch, serverIds, entryServerId ?? null),
   setDoh: (enabled: boolean) => ipcRenderer.invoke(CH.setDoh, enabled),
   getDoh: () => ipcRenderer.invoke(CH.getDoh),
   setHubMethod: (method: string, enabled: boolean) =>
@@ -125,6 +127,8 @@ const pangeaApi = {
   getNotifications: () => ipcRenderer.invoke(CH.getNotifications),
   getLastServer: () => ipcRenderer.invoke(CH.getLastServer),
   clearLastServer: () => ipcRenderer.invoke(CH.clearLastServer),
+  setMultihop: (prefs: unknown) => ipcRenderer.invoke(CH.setMultihop, prefs),
+  getMultihop: () => ipcRenderer.invoke(CH.getMultihop),
   getLocale: () => ipcRenderer.invoke(CH.getLocale),
   setLocale: (locale: string) => ipcRenderer.invoke(CH.setLocale, locale),
   getIsPackaged: () => ipcRenderer.invoke(CH.getIsPackaged),

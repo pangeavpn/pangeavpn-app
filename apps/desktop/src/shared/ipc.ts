@@ -11,6 +11,7 @@ import type {
   HubMethodTestResult,
   HubStatus
 } from "./hubMethods";
+import type { MultihopPrefs } from "./multihop";
 
 export type {
   HubMethod,
@@ -71,6 +72,8 @@ export const IPC_CHANNELS = {
   getNotifications: "settings:getNotifications",
   getLastServer: "settings:getLastServer",
   clearLastServer: "settings:clearLastServer",
+  setMultihop: "settings:setMultihop",
+  getMultihop: "settings:getMultihop",
   getLocale: "settings:getLocale",
   setLocale: "settings:setLocale",
   getIsPackaged: "app:getIsPackaged",
@@ -123,6 +126,8 @@ export interface ServerInfo {
   country: string;
   /** Current server load 0–100 (composite CPU/memory). Absent/null when unknown or from an older hub. */
   load?: number | null;
+  /** Hub flag: this node relays multihop sessions and may be offered as an entry. */
+  multihop?: boolean;
   cloak: {
     remoteHost: string;
     uid: string;
@@ -251,6 +256,7 @@ export interface PublicServerInfo {
   region: string;
   country: string;
   load?: number | null;
+  multihop?: boolean;
   naive?: boolean;
   reality?: boolean;
   hysteria2?: boolean;
@@ -266,6 +272,7 @@ export function toPublicServerInfo(server: ServerInfo): PublicServerInfo {
     region: server.region,
     country: server.country,
     load: server.load,
+    multihop: server.multihop === true,
     naive: Boolean(server.naive),
     reality: Boolean(server.reality),
     hysteria2: Boolean(server.hysteria2),
@@ -292,6 +299,8 @@ export interface ConnectResult {
   ok: boolean;
   error?: string;
   serverId?: string;
+  /** Entry the session runs through; absent on a single-hop connection. */
+  entryServerId?: string;
 }
 
 export interface SubscriptionInfo {
@@ -315,10 +324,10 @@ export interface PangeaApi {
   logout: () => Promise<void>;
   getAuthState: () => Promise<AuthState>;
   getServers: () => Promise<PublicServerInfo[]>;
-  provisionAndConnect: (serverIds: string[]) => Promise<ConnectResult>;
+  provisionAndConnect: (serverIds: string[], entryServerId?: string | null) => Promise<ConnectResult>;
   /** Stop the in-flight connect attempt. No-op when nothing is connecting. */
   cancelConnect: () => Promise<void>;
-  provisionAndSwitch: (serverIds: string[]) => Promise<ConnectResult>;
+  provisionAndSwitch: (serverIds: string[], entryServerId?: string | null) => Promise<ConnectResult>;
   setDoh: (enabled: boolean) => Promise<void>;
   getDoh: () => Promise<boolean>;
   /**
@@ -358,8 +367,10 @@ export interface PangeaApi {
   setDeadDrop: (enabled: boolean) => Promise<void>;
   getDeadDrop: () => Promise<boolean>;
   getAutoConnect: () => Promise<boolean>;
-  getLastServer: () => Promise<{ lastServerId: string | null; lastProfileId: string | null }>;
+  getLastServer: () => Promise<{ lastServerId: string | null; lastProfileId: string | null; lastEntryServerId: string | null }>;
   clearLastServer: () => Promise<void>;
+  setMultihop: (prefs: MultihopPrefs) => Promise<void>;
+  getMultihop: () => Promise<MultihopPrefs>;
   /** Stored language preference: a locale code, or "system" when unset. */
   getLocale: () => Promise<string>;
   setLocale: (locale: string) => Promise<void>;

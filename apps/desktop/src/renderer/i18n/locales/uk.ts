@@ -83,6 +83,22 @@ export const uk = {
   "hero.region": "Регіон",
   "hero.allRegions": "Усі регіони",
 
+  // ── Multihop ──────────────────────────────────────────
+  "multihop.title": "Мультихоп",
+  "multihop.hint": "Вхід через один сервер, вихід через інший. Ваша мережа бачить лише вхідний сервер.",
+  "multihop.entry": "Вхід",
+  "multihop.exit": "Вихід",
+  "multihop.exitRegions": "Регіон виходу",
+  "multihop.auto": "Авто",
+  "multihop.autoVia": "Авто обирає {region}",
+  "multihop.noEntries": "Зараз немає доступного вхідного сервера",
+  "multihop.sameAsExit": "Це ваш регіон виходу",
+  "multihop.you": "Ви",
+  "multihop.entryBadge": "Вхід",
+  "multihop.none": "Немає",
+  "multihop.pathAria": "Маршрут мультихоп: ви, потім {entry}, потім {exit}",
+  "multihop.options": "Налаштування мультихопу",
+
   // ── Headline: {x} marks the emphasised word ───────────
   "hero.headline.DISCONNECTED": "Світ {x}",
   "hero.emphasis.DISCONNECTED": "розділений",
@@ -283,6 +299,7 @@ export const uk = {
 
   // ── Connect / disconnect flow ─────────────────────────
   "connect.noServer": "Сервер не вибрано.",
+  "connect.noEntry": "Мультихоп увімкнено, але вхідний сервер недоступний. Оберіть інший вихід або вимкніть мультихоп.",
   "connect.provisioning": "Підготовка та підключення...",
   "connect.stillConnecting": "Підключення все ще триває…",
   "connect.takingLonger": "Це займає більше часу, ніж зазвичай…",

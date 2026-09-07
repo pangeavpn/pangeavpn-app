@@ -83,6 +83,22 @@ export const zh = {
   "hero.region": "区域",
   "hero.allRegions": "所有区域",
 
+  // ── Multihop ──────────────────────────────────────────
+  "multihop.title": "多跳",
+  "multihop.hint": "从一台服务器进入，从另一台离开。你所在的网络只能看到入口。",
+  "multihop.entry": "入口",
+  "multihop.exit": "出口",
+  "multihop.exitRegions": "出口地区",
+  "multihop.auto": "自动",
+  "multihop.autoVia": "自动选择 {region}",
+  "multihop.noEntries": "当前没有可用的入口服务器",
+  "multihop.sameAsExit": "这是你的出口地区",
+  "multihop.you": "你",
+  "multihop.entryBadge": "入口",
+  "multihop.none": "无",
+  "multihop.pathAria": "多跳路线：你，然后 {entry}，然后 {exit}",
+  "multihop.options": "多跳选项",
+
   // ── Headline: {x} marks the emphasised word ───────────
   "hero.headline.DISCONNECTED": "世界是{x}的",
   "hero.emphasis.DISCONNECTED": "分离",
@@ -283,6 +299,7 @@ export const zh = {
 
   // ── Connect / disconnect flow ─────────────────────────
   "connect.noServer": "未选择服务器。",
+  "connect.noEntry": "多跳已开启，但没有可用的入口服务器。请选择其他出口或关闭多跳。",
   "connect.provisioning": "正在配置并连接...",
   "connect.stillConnecting": "仍在连接…",
   "connect.takingLonger": "这比平时花费更长时间…",

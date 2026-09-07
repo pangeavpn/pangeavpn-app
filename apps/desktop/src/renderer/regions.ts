@@ -11,7 +11,7 @@ export interface Region {
 const SUFFIX = /-(\d+)$/;
 
 /** `eu-central-1` -> `eu-central`; ids without a numeric suffix stand alone. */
-export function regionKeyOf(server: ServerInfo): string {
+export function regionKeyOf(server: { id: string }): string {
   return server.id.replace(SUFFIX, "");
 }
 

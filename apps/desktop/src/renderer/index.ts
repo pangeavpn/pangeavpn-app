@@ -10,6 +10,7 @@ import {
   getUserIntent
 } from "./autoConnect.js";
 import { pickRandomServer, resolveSelection } from "./serverPick.js";
+import { resolveEntry } from "./multihop.js";
 import { planRotation, recordRotation } from "./serverRotation.js";
 import { buildDriftMap } from "./driftMap.js";
 import { dnsChoiceFor, dnsServersFor, type DnsChoice } from "./dnsPresets.js";
@@ -21,6 +22,7 @@ import {
   orderByRecent,
   pickNode,
   promoteRecent,
+  regionKeyOf,
   regionOfServer,
   type Region
 } from "./regions.js";
@@ -96,6 +98,15 @@ const serverSelect = document.getElementById("serverSelect") as HTMLSelectElemen
 const serverConnectBtn = document.getElementById("serverConnectBtn") as HTMLButtonElement;
 const serverDisconnectBtn = document.getElementById("serverDisconnectBtn") as HTMLButtonElement;
 const serverRotateBtn = document.getElementById("serverRotateBtn") as HTMLButtonElement;
+const heroPath = document.getElementById("heroPath") as HTMLElement;
+const heroPathEntry = document.getElementById("heroPathEntry") as HTMLElement;
+const heroPathExit = document.getElementById("heroPathExit") as HTMLElement;
+const heroServerLabel = document.getElementById("heroServerLabel") as HTMLElement;
+const multihopPanel = document.getElementById("multihopPanel") as HTMLElement;
+const multihopToggle = document.getElementById("multihopToggle") as HTMLInputElement;
+const multihopEntry = document.getElementById("multihopEntry") as HTMLElement;
+const multihopEntryChips = document.getElementById("multihopEntryChips") as HTMLElement;
+const multihopEntryHint = document.getElementById("multihopEntryHint") as HTMLElement;
 const hubActiveDot = document.getElementById("hubActiveDot") as HTMLElement;
 const hubActiveTextEl = document.getElementById("hubActiveText") as HTMLElement;
 const hubDirectIpToggle = document.getElementById("hubDirectIpToggle") as HTMLInputElement;
@@ -629,6 +640,165 @@ function closeServerPicker(): void {
 
 serverPickerBtn.addEventListener("click", openServerPicker);
 serverPickerOverlayCloseBtn.addEventListener("click", closeServerPicker);
+
+// ── Multihop ───────────────────────────────────────────────
+let multihopLocal = false;
+// Entry picked by hand; null lets the lightest entry outside the exit region win.
+let entryChoiceLocal: string | null = null;
+// Entry of the live (or last) session, so the route strip shows what is really in use.
+let activeEntryId: string | null = null;
+
+const hasEntryCapableServers = (): boolean => servers.some((s) => s.multihop === true);
+
+function entryFor(exitId: string): ServerInfo | null {
+  return resolveEntry(getVisibleServers(), exitId, entryChoiceLocal);
+}
+
+function entryRegionKeyFor(exitId: string): string | null {
+  const entry = entryFor(exitId);
+  return entry ? regionKeyOf(entry) : null;
+}
+
+/** null: single-hop. undefined: multihop is on but nothing can serve as the entry. */
+function hopFor(exitId: string): string | null | undefined {
+  if (!multihopLocal) return null;
+  return entryFor(exitId)?.id;
+}
+
+function connectPlanFor(serverId: string): { exits: string[]; entry: string | null } | null {
+  const entry = hopFor(serverId);
+  if (entry === undefined) return null;
+  return { exits: serverRetryPlan(serverId).filter((id) => id !== entry), entry };
+}
+
+function regionNameOf(server: ServerInfo): string {
+  return regionOfServer(visibleRegions, server.id)?.name ?? server.name;
+}
+
+async function persistMultihop(): Promise<void> {
+  if (!pangeaApi) return;
+  try {
+    await pangeaApi.setMultihop({ enabled: multihopLocal, entryServerId: entryChoiceLocal });
+  } catch (error) {
+    console.warn("[multihop] could not save", error);
+  }
+}
+
+// A live session re-dials with the new route, the same way picking a region does.
+function applyMultihopChange(): void {
+  renderServers();
+  void persistMultihop();
+  if (currentDaemonState === "CONNECTED" && !serverWorking && !disconnectingVisual && serverSelect.value) {
+    void switchToServer(serverSelect.value);
+  }
+}
+
+multihopToggle.addEventListener("change", () => {
+  multihopLocal = multihopToggle.checked;
+  if (multihopLocal && !entryFor(serverSelect.value)) showToast(t("multihop.noEntries"));
+  applyMultihopChange();
+});
+
+function chooseEntry(entryId: string | null): void {
+  entryChoiceLocal = entryId;
+  applyMultihopChange();
+}
+
+function buildEntryChip(region: Region | null, selected: boolean, blocked: boolean): HTMLElement {
+  const chip = document.createElement("button");
+  chip.type = "button";
+  chip.className = "multihop-chip";
+  chip.setAttribute("role", "radio");
+  chip.setAttribute("aria-checked", String(selected));
+  chip.disabled = blocked;
+  const name = document.createElement("span");
+  name.className = "multihop-chip-name";
+  if (region) {
+    name.textContent = region.name;
+    chip.append(buildFlag(region.country, "multihop-chip-flag"), name);
+    if (blocked) chip.title = t("multihop.sameAsExit");
+    chip.addEventListener("click", () => chooseEntry(pickNode(region).id));
+  } else {
+    const icon = document.createElement("span");
+    icon.className = "multihop-chip-auto";
+    icon.innerHTML =
+      '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 3l1.9 5.6 5.6 1.9-5.6 1.9L12 18l-1.9-5.6-5.6-1.9 5.6-1.9z"/></svg>';
+    name.textContent = t("multihop.auto");
+    chip.append(icon, name);
+    chip.addEventListener("click", () => chooseEntry(null));
+  }
+  return chip;
+}
+
+function renderMultihopPanel(): void {
+  const available = authState.authenticated && hasEntryCapableServers();
+  multihopPanel.hidden = !available;
+  if (!available) return;
+  multihopToggle.checked = multihopLocal;
+  multihopEntry.hidden = !multihopLocal;
+  if (!multihopLocal) return;
+
+  const exitId = serverSelect.value;
+  const exitRegion = exitId ? regionKeyOf({ id: exitId }) : null;
+  const regions = groupRegions(getVisibleServers().filter((s) => s.multihop === true));
+  const chosenRegion = entryChoiceLocal ? regionKeyOf({ id: entryChoiceLocal }) : null;
+  const chosenUsable =
+    chosenRegion !== null && chosenRegion !== exitRegion && regions.some((r) => r.key === chosenRegion);
+
+  multihopEntryChips.replaceChildren(
+    buildEntryChip(null, !chosenUsable, false),
+    ...regions.map((region) =>
+      buildEntryChip(region, chosenUsable && region.key === chosenRegion, region.key === exitRegion)
+    )
+  );
+
+  const resolved = entryFor(exitId);
+  multihopEntryHint.textContent = chosenUsable
+    ? ""
+    : resolved
+      ? t("multihop.autoVia", { region: regionNameOf(resolved) })
+      : t("multihop.noEntries");
+}
+
+function fillPathNode(el: HTMLElement, server: ServerInfo | null, roleKey: MessageKey): void {
+  el.classList.toggle("is-missing", !server);
+  const text = document.createElement("span");
+  text.className = "hero-path-text";
+  const name = document.createElement("span");
+  name.className = "hero-path-name";
+  name.textContent = server ? regionNameOf(server) : t("multihop.none");
+  const role = document.createElement("span");
+  role.className = "hero-path-role";
+  role.textContent = t(roleKey);
+  text.append(name, role);
+  el.replaceChildren(buildFlag(server?.country ?? "", "hero-path-flag"), text);
+}
+
+function renderHeroPath(): void {
+  const labelKey: MessageKey = multihopLocal ? "multihop.exitRegions" : "hero.region";
+  heroServerLabel.dataset.i18n = labelKey;
+  heroServerLabel.textContent = t(labelKey);
+
+  const connected = currentDaemonState === "CONNECTED" && !disconnectingVisual;
+  const exitId = (connected && lastServerIdLocal) || serverSelect.value;
+  const show = authState.authenticated && multihopLocal && servers.length > 0 && Boolean(exitId);
+  heroPath.hidden = !show;
+  if (!show) return;
+
+  const live = connected && activeEntryId !== null;
+  const entry = live ? servers.find((s) => s.id === activeEntryId) ?? null : entryFor(exitId);
+  const exit = servers.find((s) => s.id === exitId) ?? null;
+  heroPath.dataset.live = String(live);
+  fillPathNode(heroPathEntry, entry, "multihop.entry");
+  fillPathNode(heroPathExit, exit, "multihop.exit");
+  heroPath.setAttribute(
+    "aria-label",
+    t("multihop.pathAria", {
+      entry: entry ? regionNameOf(entry) : t("multihop.none"),
+      exit: exit ? regionNameOf(exit) : t("multihop.none")
+    })
+  );
+}
 
 // Keep the server list current whenever the app comes back into view — shown
 // from the tray, restored from minimize, or otherwise unhidden.
@@ -1274,6 +1444,12 @@ serverConnectBtn.addEventListener("click", async () => {
     return;
   }
 
+  const plan = connectPlanFor(serverId);
+  if (!plan) {
+    setUiMessage(t("connect.noEntry"));
+    return;
+  }
+
   notifyConnectRequested();
   serverWorking = true;
   connectInFlight = true;
@@ -1282,14 +1458,14 @@ serverConnectBtn.addEventListener("click", async () => {
   setUiMessage(t("connect.provisioning"));
   const clearProgressMessages = startConnectionProgressMessages();
   try {
-    const result = await pangeaApi.provisionAndConnect(serverRetryPlan(serverId));
+    const result = await pangeaApi.provisionAndConnect(plan.exits, plan.entry);
     clearProgressMessages();
     if (result.ok && getUserIntent() === "disconnected") {
       // Stop landed after the tunnel came up and main couldn't cancel it — the
       // disconnect handler is tearing it down; don't resurrect "connected".
       setUiMessage(t("connect.cancelled"));
     } else if (result.ok) {
-      applyConnectedServer(result.serverId);
+      applyConnectedServer(result.serverId, result.entryServerId);
       setUiMessage(t("connect.connected"));
       notifyUserConnected();
       void refreshLastServer();
@@ -1355,6 +1531,11 @@ async function switchToServer(
 ): Promise<ConnectResult | null> {
   if (!pangeaApi || !daemonApi) return null;
   if (!serverId) return null;
+  const hop = hopFor(serverId);
+  if (hop === undefined) {
+    setUiMessage(t("connect.noEntry"));
+    return null;
+  }
 
   notifyConnectRequested();
   serverWorking = true;
@@ -1364,12 +1545,12 @@ async function switchToServer(
   setUiMessage(t("connect.switching"));
   const clearProgressMessages = startConnectionProgressMessages();
   try {
-    const result = await pangeaApi.provisionAndSwitch([...plan]);
+    const result = await pangeaApi.provisionAndSwitch(plan.filter((id) => id !== hop), hop);
     clearProgressMessages();
     if (result.ok && getUserIntent() === "disconnected") {
       setUiMessage(t("connect.cancelled"));
     } else if (result.ok) {
-      applyConnectedServer(result.serverId);
+      applyConnectedServer(result.serverId, result.entryServerId);
       setUiMessage(t("connect.connected"));
       notifyUserConnected();
       void refreshLastServer();
@@ -1820,6 +2001,7 @@ async function refreshLastServer(): Promise<void> {
   try {
     const last = await pangeaApi.getLastServer();
     lastServerIdLocal = last.lastServerId;
+    activeEntryId = last.lastEntryServerId ?? null;
   } catch {
     // best-effort
   }
@@ -2133,6 +2315,10 @@ async function init(): Promise<void> {
       notificationsToggle.checked = await pangeaApi.getNotifications();
       const last = await pangeaApi.getLastServer();
       lastServerIdLocal = last.lastServerId;
+      activeEntryId = last.lastEntryServerId ?? null;
+      const hop = await pangeaApi.getMultihop();
+      multihopLocal = hop.enabled;
+      entryChoiceLocal = hop.entryServerId;
     } catch {
       // defaults already in place
     }
@@ -2154,9 +2340,11 @@ async function init(): Promise<void> {
       // Marks the attempt in-flight so Stop can find and cancel it — otherwise
       // an auto-connect is invisible to the button and cannot be interrupted.
       provisionAndSwitch: (serverId: string) => {
+        const plan = connectPlanFor(serverId);
+        if (!plan) return Promise.resolve({ ok: false, error: "no-entry" });
         connectInFlight = true;
         updateServerControlStates();
-        return pangeaApi.provisionAndConnect(serverRetryPlan(serverId)).finally(() => {
+        return pangeaApi.provisionAndConnect(plan.exits, plan.entry).finally(() => {
           connectInFlight = false;
           updateServerControlStates();
         });
@@ -2942,6 +3130,7 @@ function renderStatus(status: StatusResponse): void {
 
   if (!optimisticallyOff) reconcileUiMessage(status.state);
 
+  renderHeroPath();
   updateControlStates();
   updateBusyIndicator();
 }
@@ -3292,9 +3481,10 @@ function serverRetryPlan(initialServerId: string): string[] {
     : [initialServerId];
 }
 
-function applyConnectedServer(serverId: string | undefined): void {
+function applyConnectedServer(serverId: string | undefined, entryServerId?: string): void {
   if (!serverId) return;
   lastServerIdLocal = serverId;
+  activeEntryId = entryServerId ?? null;
   // A pin that no longer names the active node is stale — don't let it label
   // a region the user never pinned.
   if (pinnedNodeId && pinnedNodeId !== serverId) pinnedNodeId = null;
@@ -3385,6 +3575,13 @@ function buildRegionRow(region: Region, forPicker: boolean): HTMLElement {
   row.className = "region-row";
   row.dataset.key = region.key;
   row.setAttribute("aria-current", String(isCurrent));
+  // A hand-picked entry locks its region out of the exits (the hub refuses the pair); an auto entry just moves.
+  const isEntry = !isCurrent && multihopLocal && entryRegionKeyFor(serverSelect.value) === region.key;
+  const entryPinned = isEntry && entryChoiceLocal !== null && regionKeyOf({ id: entryChoiceLocal }) === region.key;
+  if (entryPinned) {
+    row.disabled = true;
+    row.classList.add("is-entry");
+  }
 
   row.append(buildFlag(region.country));
 
@@ -3415,7 +3612,14 @@ function buildRegionRow(region: Region, forPicker: boolean): HTMLElement {
   tick.setAttribute("aria-hidden", "true");
   tick.innerHTML =
     '<path d="m5 13 4.5 4.5L19 7" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>';
-  row.append(tick);
+  if (isEntry) {
+    const badge = document.createElement("span");
+    badge.className = "region-entry-badge";
+    badge.textContent = t("multihop.entryBadge");
+    row.append(badge);
+  } else {
+    row.append(tick);
+  }
 
   row.addEventListener("click", () => activateRegion(region, null));
 
@@ -3505,6 +3709,8 @@ function renderServers(): void {
     regionSlots.replaceChildren(emptyNotice(noneForTransport));
     serverPickerOverlayList.replaceChildren(emptyNotice(noneForTransport));
     regionMoreCount.textContent = "";
+    multihopPanel.hidden = true;
+    heroPath.hidden = true;
     return;
   }
 
@@ -3552,9 +3758,12 @@ function syncServerPicker(): void {
 
   const remaining = visibleRegions.length - slots.length;
   regionMoreCount.textContent = remaining > 0 ? t("region.more", { count: String(remaining) }) : "";
-  serverPickerBtn.hidden = visibleRegions.length <= SLOT_COUNT;
+  // Multihop options live in the picker, so it stays reachable even with few regions.
+  serverPickerBtn.hidden = visibleRegions.length <= SLOT_COUNT && !hasEntryCapableServers();
 
   renderRegionPicker(ordered);
+  renderMultihopPanel();
+  renderHeroPath();
 }
 
 function renderRegionPicker(ordered: readonly Region[]): void {
@@ -3573,11 +3782,12 @@ function renderRegionPicker(ordered: readonly Region[]): void {
     groups.push(heading, box);
   };
 
+  const allKey: MessageKey = multihopLocal ? "multihop.exitRegions" : "serverPicker.all";
   if (recent.length > 0) {
     addGroup("serverPicker.recent", recent);
-    addGroup("serverPicker.all", rest);
+    addGroup(allKey, rest);
   } else {
-    addGroup("serverPicker.all", ordered);
+    addGroup(allKey, ordered);
   }
 
   serverPickerOverlayList.replaceChildren(...groups);

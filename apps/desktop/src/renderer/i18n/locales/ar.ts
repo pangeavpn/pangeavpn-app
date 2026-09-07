@@ -83,6 +83,22 @@ export const ar = {
   "hero.region": "المنطقة",
   "hero.allRegions": "كل المناطق",
 
+  // ── Multihop ──────────────────────────────────────────
+  "multihop.title": "متعدد القفزات",
+  "multihop.hint": "ادخل عبر خادم واخرج عبر آخر. شبكتك لا ترى سوى خادم الدخول.",
+  "multihop.entry": "الدخول",
+  "multihop.exit": "الخروج",
+  "multihop.exitRegions": "منطقة الخروج",
+  "multihop.auto": "تلقائي",
+  "multihop.autoVia": "التلقائي يختار {region}",
+  "multihop.noEntries": "لا يتوفر خادم دخول حاليًا",
+  "multihop.sameAsExit": "هذه منطقة الخروج الخاصة بك",
+  "multihop.you": "أنت",
+  "multihop.entryBadge": "دخول",
+  "multihop.none": "لا شيء",
+  "multihop.pathAria": "مسار متعدد القفزات: أنت، ثم {entry}، ثم {exit}",
+  "multihop.options": "خيارات تعدد القفزات",
+
   // ── Headline: {x} marks the emphasised word ───────────
   "hero.headline.DISCONNECTED": "العالم {x}",
   "hero.emphasis.DISCONNECTED": "منفصل",
@@ -283,6 +299,7 @@ export const ar = {
 
   // ── Connect / disconnect flow ─────────────────────────
   "connect.noServer": "لم يتم اختيار خادم.",
+  "connect.noEntry": "وضع تعدد القفزات مفعّل، لكن لا يتوفر خادم دخول. اختر خروجًا آخر أو أوقف الوضع.",
   "connect.provisioning": "جارٍ التجهيز والاتصال...",
   "connect.stillConnecting": "ما زال الاتصال جارياً…",
   "connect.takingLonger": "يستغرق هذا وقتاً أطول من المعتاد…",

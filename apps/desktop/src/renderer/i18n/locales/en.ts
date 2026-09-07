@@ -83,6 +83,22 @@ export const en = {
   "hero.region": "Region",
   "hero.allRegions": "All regions",
 
+  // ── Multihop ──────────────────────────────────────────
+  "multihop.title": "Multihop",
+  "multihop.hint": "Enter through one server, leave through another. The network you're on only ever sees the entry.",
+  "multihop.entry": "Entry",
+  "multihop.exit": "Exit",
+  "multihop.exitRegions": "Exit region",
+  "multihop.auto": "Auto",
+  "multihop.autoVia": "Auto picks {region}",
+  "multihop.noEntries": "No entry server is available right now",
+  "multihop.sameAsExit": "This is your exit region",
+  "multihop.you": "You",
+  "multihop.entryBadge": "Entry",
+  "multihop.none": "None",
+  "multihop.pathAria": "Multihop route: you, then {entry}, then {exit}",
+  "multihop.options": "Multihop options",
+
   // ── Headline: {x} marks the emphasised word ───────────
   "hero.headline.DISCONNECTED": "The world is {x}",
   "hero.emphasis.DISCONNECTED": "apart",
@@ -283,6 +299,7 @@ export const en = {
 
   // ── Connect / disconnect flow ─────────────────────────
   "connect.noServer": "No server selected.",
+  "connect.noEntry": "Multihop is on, but no entry server is available. Pick another exit or turn multihop off.",
   "connect.provisioning": "Provisioning and connecting...",
   "connect.stillConnecting": "Still connecting…",
   "connect.takingLonger": "This is taking longer than usual…",

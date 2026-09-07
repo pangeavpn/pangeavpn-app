@@ -83,6 +83,22 @@ export const ru = {
   "hero.region": "Регион",
   "hero.allRegions": "Все регионы",
 
+  // ── Multihop ──────────────────────────────────────────
+  "multihop.title": "Мультихоп",
+  "multihop.hint": "Вход через один сервер, выход через другой. Ваша сеть видит только входной сервер.",
+  "multihop.entry": "Вход",
+  "multihop.exit": "Выход",
+  "multihop.exitRegions": "Регион выхода",
+  "multihop.auto": "Авто",
+  "multihop.autoVia": "Авто выбирает {region}",
+  "multihop.noEntries": "Сейчас нет доступного входного сервера",
+  "multihop.sameAsExit": "Это ваш регион выхода",
+  "multihop.you": "Вы",
+  "multihop.entryBadge": "Вход",
+  "multihop.none": "Нет",
+  "multihop.pathAria": "Маршрут мультихоп: вы, затем {entry}, затем {exit}",
+  "multihop.options": "Настройки мультихопа",
+
   // ── Headline: {x} marks the emphasised word ───────────
   "hero.headline.DISCONNECTED": "Мир {x}",
   "hero.emphasis.DISCONNECTED": "разделён",
@@ -283,6 +299,7 @@ export const ru = {
 
   // ── Connect / disconnect flow ─────────────────────────
   "connect.noServer": "Сервер не выбран.",
+  "connect.noEntry": "Мультихоп включён, но входной сервер недоступен. Выберите другой выход или отключите мультихоп.",
   "connect.provisioning": "Подготовка и подключение...",
   "connect.stillConnecting": "Подключение всё ещё выполняется…",
   "connect.takingLonger": "Это занимает больше времени, чем обычно…",

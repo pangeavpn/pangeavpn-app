@@ -1806,8 +1806,9 @@ export class PangeaApiClient {
     );
 
     return {
-      id: `auto-${serverId}`,
-      name: `${exitServer.name} (auto)`,
+      // The entry is part of the id so a cached single-hop peer is never reused for a hop.
+      id: isMultihop ? `auto-${serverId}-via-${entryServerId}` : `auto-${serverId}`,
+      name: isMultihop ? `${exitServer.name} via ${server.name} (auto)` : `${exitServer.name} (auto)`,
       ...(reg.hop ? { hop: reg.hop } : {}),
       cloak: {
         localPort: 51820,

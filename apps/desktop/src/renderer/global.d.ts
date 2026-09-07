@@ -18,6 +18,14 @@ declare global {
     ok: boolean;
     error?: string;
     serverId?: string;
+    /** Entry the session runs through; absent on a single-hop connection. */
+    entryServerId?: string;
+  }
+
+  /** Mirrors MultihopPrefs in src/shared/multihop.ts. */
+  interface MultihopPrefs {
+    enabled: boolean;
+    entryServerId: string | null;
   }
 
   interface AuthState {
@@ -39,6 +47,8 @@ declare global {
     region: string;
     country: string;
     load?: number | null;
+    /** Hub flag: may be offered as a multihop entry. */
+    multihop?: boolean;
     // Never populated by the main process (kept optional only so older test
     // mocks built against the pre-redaction shape still type-check).
     cloak?: { remoteHost: string; uid: string; publicKey: string };
@@ -110,9 +120,9 @@ declare global {
     logout: () => Promise<void>;
     getAuthState: () => Promise<AuthState>;
     getServers: () => Promise<ServerInfo[]>;
-    provisionAndConnect: (serverIds: string[]) => Promise<ConnectResult>;
+    provisionAndConnect: (serverIds: string[], entryServerId?: string | null) => Promise<ConnectResult>;
     cancelConnect: () => Promise<void>;
-    provisionAndSwitch: (serverIds: string[]) => Promise<ConnectResult>;
+    provisionAndSwitch: (serverIds: string[], entryServerId?: string | null) => Promise<ConnectResult>;
     setDoh: (enabled: boolean) => Promise<void>;
     getDoh: () => Promise<boolean>;
     setHubMethod: (
@@ -146,8 +156,10 @@ declare global {
     getNotifications: () => Promise<boolean>;
     setDeadDrop: (enabled: boolean) => Promise<void>;
     getDeadDrop: () => Promise<boolean>;
-    getLastServer: () => Promise<{ lastServerId: string | null; lastProfileId: string | null }>;
+    getLastServer: () => Promise<{ lastServerId: string | null; lastProfileId: string | null; lastEntryServerId?: string | null }>;
     clearLastServer: () => Promise<void>;
+    setMultihop: (prefs: MultihopPrefs) => Promise<void>;
+    getMultihop: () => Promise<MultihopPrefs>;
     getLocale: () => Promise<string>;
     setLocale: (locale: string) => Promise<void>;
     getIsPackaged: () => Promise<boolean>;

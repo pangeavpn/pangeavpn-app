@@ -39,6 +39,12 @@ import {
   persistableHubMethods
 } from "../shared/hubMethods";
 import {
+  normalizeEntryServer,
+  normalizeMultihopPrefs,
+  resolveEntry,
+  type MultihopPrefs
+} from "../shared/multihop";
+import {
   buildServerRetryOrder as buildMainServerRetryOrder,
   runServerFallback
 } from "./serverFallback";
@@ -84,6 +90,8 @@ const pangeaApiClient = new PangeaApiClient();
 
 let managedProfileId: string | null = null;
 let lastServerId: string | null = null;
+let lastEntryServerId: string | null = null;
+let multihopPrefs: MultihopPrefs = { enabled: false, entryServerId: null };
 // Hub-registered WireGuard peers still worth reusing, keyed by profile id.
 let provisionedProfiles: ProfileRecords = {};
 let connectionAttemptRunning = false;
@@ -694,14 +702,19 @@ async function rotateAwayFromBlockedServer(): Promise<void> {
   try {
     // The peer this server exhausted on may be one the hub dropped; forget it
     // so the plan re-provisions a fresh peer here before rotating away.
-    if (blockedServerId) forgetProvisionedProfile(`auto-${blockedServerId}`);
+    if (blockedServerId) forgetProvisionedProfile(profileIdFor(blockedServerId, lastEntryServerId));
     const plan = await resolveTrayServerPlan(blockedServerId);
     if (!plan) {
       console.warn("rotation: no server to try");
       return;
     }
     console.warn(`rotation: ${blockedServerId ?? "current server"} carries no transport; re-provisioning it, then other servers`);
-    const result = await provisionAndConnect(plan);
+    const hop = entryForMain(plan[0]);
+    if (!hop.ok) {
+      console.warn("rotation: multihop is on but no entry server is available");
+      return;
+    }
+    const result = await provisionAndConnect(plan, hop.entry);
     if (!result.ok) {
       console.warn("rotation: reconnecting on another server failed", result.error);
     }
@@ -871,7 +884,7 @@ async function connectFromTray(): Promise<void> {
 
     // Force a fresh peer on the server that exhausted, in case the hub dropped
     // the cached one; the plan retries it first before other servers.
-    if (exhaustedServerId) forgetProvisionedProfile(`auto-${exhaustedServerId}`);
+    if (exhaustedServerId) forgetProvisionedProfile(profileIdFor(exhaustedServerId, lastEntryServerId));
     const serverPlan = await resolveTrayServerPlan(exhaustedServerId);
     if (!serverPlan) {
       trayStatusState = "ERROR";
@@ -880,7 +893,14 @@ async function connectFromTray(): Promise<void> {
       return;
     }
 
-    const result = await provisionAndConnect(serverPlan);
+    const hop = entryForMain(serverPlan[0]);
+    if (!hop.ok) {
+      trayStatusState = "ERROR";
+      trayStatusDetail = "multihop: no entry server available";
+      explicitFailure = true;
+      return;
+    }
+    const result = await provisionAndConnect(serverPlan, hop.entry);
     if (!result.ok) {
       trayStatusState = "ERROR";
       trayStatusDetail = "connect request failed";
@@ -970,12 +990,29 @@ async function permitHubThroughLockdown(): Promise<void> {
   }
 }
 
-function fingerprintForServer(serverId: string): string {
+/** Hop profiles carry the entry in their id; a cached single-hop peer must never stand in for one. */
+function profileIdFor(serverId: string, entryServerId: string | null): string {
+  return entryServerId ? `auto-${serverId}-via-${entryServerId}` : `auto-${serverId}`;
+}
+
+/** The entry a main-driven connect must use. Not ok: multihop is on and nothing qualifies. */
+function entryForMain(exitServerId: string): { ok: true; entry: string | null } | { ok: false } {
+  if (!multihopPrefs.enabled) return { ok: true, entry: null };
+  const chosen = multihopPrefs.entryServerId ?? lastEntryServerId;
+  const entry = resolveEntry(pangeaApiClient.getCachedServers(), exitServerId, chosen);
+  return entry ? { ok: true, entry: entry.id } : { ok: false };
+}
+
+function fingerprintForServer(serverId: string, entryServerId: string | null): string {
+  const servers = pangeaApiClient.getCachedServers();
+  const exit = servers.find((server) => server.id === serverId) ?? null;
   return profileFingerprint({
     wireguardMtu: pangeaApiClient.getWireguardMtu(),
     customDns: pangeaApiClient.getCustomDns(),
     hubInTunnel: pangeaApiClient.getHubInTunnel(),
-    server: pangeaApiClient.getCachedServers().find((server) => server.id === serverId) ?? null
+    server: entryServerId
+      ? { exit, entry: servers.find((server) => server.id === entryServerId) ?? null }
+      : exit
   });
 }
 
@@ -984,9 +1021,9 @@ function fingerprintForServer(serverId: string): string {
  * still inside its TTL and was built from the same inputs. Reusing it turns a
  * reconnect into zero hub round trips; the caller re-provisions if it fails.
  */
-async function reusableProfileForServer(serverId: string): Promise<Profile | null> {
-  const profileId = `auto-${serverId}`;
-  if (!isReusable(provisionedProfiles[profileId], fingerprintForServer(serverId), Date.now())) {
+async function reusableProfileForServer(serverId: string, entryServerId: string | null): Promise<Profile | null> {
+  const profileId = profileIdFor(serverId, entryServerId);
+  if (!isReusable(provisionedProfiles[profileId], fingerprintForServer(serverId, entryServerId), Date.now())) {
     return null;
   }
   // Registering any other server evicted this peer hub-side; dialling it would
@@ -1007,9 +1044,13 @@ async function reusableProfileForServer(serverId: string): Promise<Profile | nul
   }
 }
 
-async function provisionProfileForServer(serverId: string, signal?: AbortSignal): Promise<Profile> {
+async function provisionProfileForServer(
+  serverId: string,
+  signal: AbortSignal | undefined,
+  entryServerId: string | null
+): Promise<Profile> {
   await permitHubThroughLockdown();
-  const profile = await pangeaApiClient.provision(serverId, signal);
+  const profile = await pangeaApiClient.provision(serverId, signal, entryServerId ?? undefined);
 
   const config = await withDaemonRestartOnUnavailable(
     () => daemonClient.getConfig(),
@@ -1022,15 +1063,15 @@ async function provisionProfileForServer(serverId: string, signal?: AbortSignal)
   profiles.push(profile);
 
   await withDaemonRestartOnUnavailable(() => daemonClient.setConfig(profiles), "provision-setConfig");
-  rememberProvisionedProfile(profile.id, serverId);
+  rememberProvisionedProfile(profile.id, serverId, entryServerId);
   return profile;
 }
 
-function rememberProvisionedProfile(profileId: string, serverId: string): void {
+function rememberProvisionedProfile(profileId: string, serverId: string, entryServerId: string | null): void {
   provisionedProfiles = recordProvision(provisionedProfiles, profileId, {
     serverId,
     provisionedAt: Date.now(),
-    fingerprint: fingerprintForServer(serverId)
+    fingerprint: fingerprintForServer(serverId, entryServerId)
   });
   void persistProvisionedProfiles();
 }
@@ -1125,7 +1166,11 @@ async function dialReusedProfile(
   return null;
 }
 
-async function provisionAcrossServers(serverIds: readonly string[], mode: "connect" | "switch"): Promise<ConnectResult> {
+async function provisionAcrossServers(
+  serverIds: readonly string[],
+  mode: "connect" | "switch",
+  entryServerId: string | null
+): Promise<ConnectResult> {
   if (connectionAttemptRunning) {
     return { ok: false, error: "connect-in-progress" };
   }
@@ -1143,11 +1188,18 @@ async function provisionAcrossServers(serverIds: readonly string[], mode: "conne
       { allowRestart: false }
     );
     initialProfiles = initialConfig.profiles;
-    const candidates = preferredTransport === "auto" ? serverIds : serverIds.slice(0, 1);
+    if (entryServerId) {
+      const entry = pangeaApiClient.getCachedServers().find((server) => server.id === entryServerId);
+      if (!entry?.multihop) return { ok: false, error: "entry-unavailable" };
+    }
+    // The hub refuses a hop whose two ends are the same node.
+    const exits = serverIds.filter((serverId) => serverId !== entryServerId);
+    if (exits.length === 0) return { ok: false, error: "no-exit" };
+    const candidates = preferredTransport === "auto" ? exits : exits.slice(0, 1);
     const outcome = await runServerFallback(
       candidates,
       async (serverId, index) => {
-        const reused = await reusableProfileForServer(serverId);
+        const reused = await reusableProfileForServer(serverId, entryServerId);
         if (reused) {
           // The hub may have dropped the peer behind our back, so a failure
           // here re-provisions the same server rather than cascading away.
@@ -1156,7 +1208,7 @@ async function provisionAcrossServers(serverIds: readonly string[], mode: "conne
         }
 
         if (isCancelled(attempt)) throw new ConnectCancelledError();
-        const profile = await provisionProfileForServer(serverId, attempt.controller.signal);
+        const profile = await provisionProfileForServer(serverId, attempt.controller.signal, entryServerId);
         configChanged = true;
         return await dialServer(profile, index, mode, attempt);
       },
@@ -1185,10 +1237,15 @@ async function provisionAcrossServers(serverIds: readonly string[], mode: "conne
       commitAttempt(attempt);
       managedProfileId = outcome.value.profile.id;
       lastServerId = outcome.serverId;
+      lastEntryServerId = entryServerId;
       lastConnectedProfileId = outcome.value.profile.id;
       void persistLastConnection();
     }
-    return { ...outcome.value.result, serverId: outcome.serverId };
+    return {
+      ...outcome.value.result,
+      serverId: outcome.serverId,
+      ...(entryServerId ? { entryServerId } : {})
+    };
   } catch (err) {
     // A cancelled attempt aborts its in-flight request, which surfaces here.
     // Report it as a non-error so the UI goes idle instead of showing a toast.
@@ -1231,9 +1288,12 @@ async function provisionAcrossServers(serverIds: readonly string[], mode: "conne
  * unwinds to the connection the user already had, which is a better outcome
  * than replacing it with an older one.
  */
-async function provisionAndConnect(serverIds: readonly string[]): Promise<ConnectResult> {
+async function provisionAndConnect(
+  serverIds: readonly string[],
+  entryServerId: string | null = null
+): Promise<ConnectResult> {
   try {
-    return await provisionAcrossServers(serverIds, "connect");
+    return await provisionAcrossServers(serverIds, "connect", entryServerId);
   } catch (err) {
     if (!isHubReachabilityFailure(err)) throw err;
     console.warn("connect: hub unreachable, trying the last working profile", sanitizeLog(err));
@@ -1245,14 +1305,21 @@ async function provisionAndConnect(serverIds: readonly string[]): Promise<Connec
       throw fallbackErr;
     }
     if (reconnected) {
-      return { ok: true, ...(lastServerId ? { serverId: lastServerId } : {}) };
+      return {
+        ok: true,
+        ...(lastServerId ? { serverId: lastServerId } : {}),
+        ...(lastEntryServerId ? { entryServerId: lastEntryServerId } : {})
+      };
     }
     throw err;
   }
 }
 
-async function provisionAndSwitch(serverIds: readonly string[]): Promise<ConnectResult> {
-  return provisionAcrossServers(serverIds, "switch");
+async function provisionAndSwitch(
+  serverIds: readonly string[],
+  entryServerId: string | null = null
+): Promise<ConnectResult> {
+  return provisionAcrossServers(serverIds, "switch", entryServerId);
 }
 
 /** Stop the in-flight connect attempt; never tears down a wanted connection. */
@@ -1542,6 +1609,7 @@ async function persistLastConnection(): Promise<void> {
   await updateSettings((settings) => {
     settings.lastServerId = lastServerId;
     settings.lastProfileId = lastConnectedProfileId;
+    settings.lastEntryServerId = lastEntryServerId;
   }, "last connection");
 }
 
@@ -1999,13 +2067,24 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.getLastServer, async () => ({
     lastServerId,
-    lastProfileId: lastConnectedProfileId
+    lastProfileId: lastConnectedProfileId,
+    lastEntryServerId
   }));
 
   ipcMain.handle(IPC_CHANNELS.clearLastServer, async () => {
     lastServerId = null;
     lastConnectedProfileId = null;
+    lastEntryServerId = null;
     await persistLastConnection();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.getMultihop, async () => multihopPrefs);
+
+  ipcMain.handle(IPC_CHANNELS.setMultihop, async (_event, prefs: unknown) => {
+    multihopPrefs = normalizeMultihopPrefs(prefs);
+    await updateSettings((settings) => {
+      settings.multihop = multihopPrefs;
+    }, "multihop");
   });
 
   ipcMain.handle(IPC_CHANNELS.getLocale, async () => localePref);
@@ -2109,10 +2188,10 @@ function registerIpcHandlers(): void {
     return pangeaApiClient.getSubscription();
   });
 
-  ipcMain.handle(IPC_CHANNELS.provisionAndConnect, async (_event, serverPlan: unknown) => {
+  ipcMain.handle(IPC_CHANNELS.provisionAndConnect, async (_event, serverPlan: unknown, entryServer: unknown) => {
     userDisconnected = false;
     try {
-      const result = await provisionAndConnect(normalizeServerPlan(serverPlan));
+      const result = await provisionAndConnect(normalizeServerPlan(serverPlan), normalizeEntryServer(entryServer));
       void refreshTrayStatus();
       return result;
     } catch (err) {
@@ -2130,10 +2209,10 @@ function registerIpcHandlers(): void {
     await cancelConnectAttempt();
   });
 
-  ipcMain.handle(IPC_CHANNELS.provisionAndSwitch, async (_event, serverPlan: unknown) => {
+  ipcMain.handle(IPC_CHANNELS.provisionAndSwitch, async (_event, serverPlan: unknown, entryServer: unknown) => {
     userDisconnected = false;
     try {
-      const result = await provisionAndSwitch(normalizeServerPlan(serverPlan));
+      const result = await provisionAndSwitch(normalizeServerPlan(serverPlan), normalizeEntryServer(entryServer));
       void refreshTrayStatus();
       return result;
     } catch (err) {
@@ -2368,6 +2447,10 @@ async function boot(): Promise<void> {
     if (typeof settings.lastProfileId === "string") {
       lastConnectedProfileId = settings.lastProfileId;
     }
+    if (typeof settings.lastEntryServerId === "string") {
+      lastEntryServerId = settings.lastEntryServerId;
+    }
+    multihopPrefs = normalizeMultihopPrefs(settings.multihop);
     provisionedProfiles = dropExpired(parseProfileRecords(settings.provisionedProfiles), Date.now());
     if (typeof settings.locale === "string") {
       localePref = settings.locale;

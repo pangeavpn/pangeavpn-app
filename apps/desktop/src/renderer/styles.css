@@ -2190,7 +2190,7 @@ button:disabled {
 }
 
 .btn-primary,
-button:not(.btn-ghost):not(.btn-danger):not(.btn-icon):not(.secondary):not(.ghost):not(.collapse-toggle):not(.menu-item):not(.btn-quiet):not(.region-row):not(.region-more):not(.region-expand):not(.region-node):not(.settings-action):not(.settings-nav-item):not(.settings-picker):not(.option-row):not(.subpane-back):not(.accent-swatch):not(.hub-test-btn) {
+button:not(.btn-ghost):not(.btn-danger):not(.btn-icon):not(.secondary):not(.ghost):not(.collapse-toggle):not(.menu-item):not(.btn-quiet):not(.region-row):not(.region-more):not(.region-expand):not(.region-node):not(.settings-action):not(.settings-nav-item):not(.settings-picker):not(.option-row):not(.subpane-back):not(.accent-swatch):not(.hub-test-btn):not(.multihop-chip) {
   color: var(--accent-text);
   background: var(--accent);
   border-color: transparent;
@@ -2198,7 +2198,7 @@ button:not(.btn-ghost):not(.btn-danger):not(.btn-icon):not(.secondary):not(.ghos
 }
 
 .btn-primary:hover:not(:disabled),
-button:not(.btn-ghost):not(.btn-danger):not(.btn-icon):not(.secondary):not(.ghost):not(.collapse-toggle):not(.menu-item):not(.btn-quiet):not(.region-row):not(.region-more):not(.region-expand):not(.region-node):not(.settings-action):not(.settings-nav-item):not(.settings-picker):not(.option-row):not(.subpane-back):not(.accent-swatch):not(.hub-test-btn):hover:not(:disabled) {
+button:not(.btn-ghost):not(.btn-danger):not(.btn-icon):not(.secondary):not(.ghost):not(.collapse-toggle):not(.menu-item):not(.btn-quiet):not(.region-row):not(.region-more):not(.region-expand):not(.region-node):not(.settings-action):not(.settings-nav-item):not(.settings-picker):not(.option-row):not(.subpane-back):not(.accent-swatch):not(.hub-test-btn):not(.multihop-chip):hover:not(:disabled) {
   background: var(--accent-hover);
 }
 
@@ -2929,3 +2929,302 @@ button.ghost:hover:not(:disabled) {
 
 /* Slide toasts in from the same edge regardless of direction (top-centre). */
 
+
+/* ── Multihop: route strip on the hero card ───────────────── */
+
+.hero-path {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  margin-bottom: 8px;
+  padding: 5px 6px;
+  border-radius: 13px;
+  background: linear-gradient(135deg, rgb(var(--accent-rgb) / 0.14), rgb(var(--accent-rgb) / 0.03));
+  border: 1px solid rgb(var(--accent-rgb) / 0.28);
+}
+
+.hero-path[hidden] { display: none; }
+
+.hero-path-node {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 3px 9px 3px 6px;
+  border-radius: 999px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  transition: border-color 0.4s ease, box-shadow 0.4s ease;
+}
+
+.hero-path-you { color: var(--text-secondary); }
+
+.hero-path-icon { display: grid; place-items: center; width: 16px; height: 14px; flex: none; }
+.hero-path-icon svg { width: 15px; height: 15px; }
+
+.hero-path-flag {
+  width: 19px;
+  height: 13px;
+  flex: none;
+  border-radius: 2px;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1);
+}
+
+body[data-theme="light"] .hero-path-flag { box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.12); }
+
+.hero-path-name {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hero-path-role {
+  font-size: 0.48rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.hero-path-node.is-missing .hero-path-name { color: var(--warning); }
+
+.hero-path-link {
+  position: relative;
+  flex: 1;
+  min-width: 12px;
+  height: 2px;
+  background-image: linear-gradient(90deg, var(--text-muted) 55%, transparent 55%);
+  background-size: 7px 2px;
+  opacity: 0.55;
+}
+
+.hero-path-pulse {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 6px;
+  height: 6px;
+  margin-top: -3px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 8px 1px var(--accent);
+  opacity: 0;
+}
+
+.hero-path[data-live="true"] .hero-path-link {
+  background-image: linear-gradient(90deg, rgb(var(--accent-rgb) / 0.9) 55%, transparent 55%);
+  opacity: 1;
+}
+
+.hero-path[data-live="true"] .hero-path-pulse {
+  opacity: 1;
+  animation: hero-path-travel 1.8s linear infinite;
+}
+
+.hero-path[data-live="true"] .hero-path-link:last-of-type .hero-path-pulse { animation-delay: 0.9s; }
+
+.hero-path[data-live="true"] .hero-path-entry { border-color: rgb(var(--accent-rgb) / 0.7); }
+
+.hero-path[data-live="true"] .hero-path-exit {
+  border-color: var(--success);
+  box-shadow: 0 0 0 3px var(--success-glow);
+}
+
+@keyframes hero-path-travel {
+  from { left: 0; opacity: 0; }
+  15% { opacity: 1; }
+  85% { opacity: 1; }
+  to { left: calc(100% - 6px); opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hero-path-pulse { animation: none !important; opacity: 0 !important; }
+}
+
+/* ── Multihop: options at the top of the region picker ────── */
+
+.multihop-panel {
+  flex: none;
+  margin: 14px 6px 0 18px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+}
+
+.multihop-panel[hidden] { display: none; }
+
+.multihop-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+}
+
+.multihop-icon {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  flex: none;
+  border-radius: 11px;
+  background: var(--accent-glow);
+  color: var(--accent);
+}
+
+.multihop-icon svg { width: 22px; height: 22px; }
+
+.multihop-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.multihop-title {
+  font-size: 0.86rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.multihop-hint {
+  font-size: 0.68rem;
+  line-height: 1.35;
+  color: var(--text-secondary);
+}
+
+.multihop-entry {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.multihop-entry[hidden] { display: none; }
+
+.multihop-entry-label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 0.53rem;
+  font-weight: 700;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.multihop-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.multihop-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 11px 6px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 0.74rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.14s ease, background 0.14s ease, color 0.14s ease;
+}
+
+.multihop-chip:hover:not(:disabled) {
+  border-color: var(--text-muted);
+  color: var(--text-primary);
+}
+
+.multihop-chip[aria-checked="true"] {
+  border-color: var(--accent);
+  background: var(--accent-glow);
+  color: var(--text-primary);
+}
+
+.multihop-chip:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.multihop-chip-flag {
+  width: 20px;
+  height: 14px;
+  flex: none;
+  border-radius: 2px;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1);
+}
+
+body[data-theme="light"] .multihop-chip-flag { box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.12); }
+
+.multihop-chip-auto {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 14px;
+  flex: none;
+  color: var(--accent);
+}
+
+.multihop-chip-auto svg { width: 14px; height: 14px; }
+
+.multihop-entry-hint {
+  margin: 8px 0 0;
+  font-family: "SF Mono", "Cascadia Mono", ui-monospace, monospace;
+  font-size: 0.66rem;
+  color: var(--text-secondary);
+}
+
+.multihop-entry-hint:empty { display: none; }
+
+/* A region already serving as the entry cannot be the exit. */
+.region-row.is-entry {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.region-row.is-entry .region-text { flex: 1; }
+
+.region-entry-badge {
+  flex: none;
+  margin-left: 8px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  border: 1px solid var(--accent);
+  font-size: 0.5rem;
+  font-weight: 700;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.hero-path-you { padding: 5px 7px; }
+
+.hero-path-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.hero-path-entry,
+.hero-path-exit { padding: 2px 9px 2px 6px; }
+
+.hero-path-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.1;
+}
+
+.hero-path-name { font-size: 0.7rem; }
+
+.hero-path-role {
+  margin-top: 1px;
+  font-size: 0.45rem;
+}

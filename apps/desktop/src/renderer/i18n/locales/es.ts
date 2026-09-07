@@ -83,6 +83,22 @@ export const es = {
   "hero.region": "Región",
   "hero.allRegions": "Todas las regiones",
 
+  // ── Multihop ──────────────────────────────────────────
+  "multihop.title": "Multisalto",
+  "multihop.hint": "Entra por un servidor y sal por otro. Tu red solo ve el servidor de entrada.",
+  "multihop.entry": "Entrada",
+  "multihop.exit": "Salida",
+  "multihop.exitRegions": "Región de salida",
+  "multihop.auto": "Auto",
+  "multihop.autoVia": "Auto elige {region}",
+  "multihop.noEntries": "No hay ningún servidor de entrada disponible ahora",
+  "multihop.sameAsExit": "Esta es tu región de salida",
+  "multihop.you": "Tú",
+  "multihop.entryBadge": "Entrada",
+  "multihop.none": "Ninguno",
+  "multihop.pathAria": "Ruta multisalto: tú, luego {entry}, luego {exit}",
+  "multihop.options": "Opciones de multisalto",
+
   // ── Headline: {x} marks the emphasised word ───────────
   "hero.headline.DISCONNECTED": "El mundo está {x}",
   "hero.emphasis.DISCONNECTED": "separado",
@@ -283,6 +299,7 @@ export const es = {
 
   // ── Connect / disconnect flow ─────────────────────────
   "connect.noServer": "Ningún servidor seleccionado.",
+  "connect.noEntry": "El multisalto está activado, pero no hay ningún servidor de entrada disponible. Elige otra salida o desactívalo.",
   "connect.provisioning": "Aprovisionando y conectando...",
   "connect.stillConnecting": "La conexión sigue en curso…",
   "connect.takingLonger": "Esto está tardando más de lo habitual…",

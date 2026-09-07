@@ -83,6 +83,22 @@ export const fa = {
   "hero.region": "منطقه",
   "hero.allRegions": "همه مناطق",
 
+  // ── Multihop ──────────────────────────────────────────
+  "multihop.title": "چندپرشی",
+  "multihop.hint": "از یک سرور وارد شوید و از سرور دیگری خارج شوید. شبکهٔ شما فقط سرور ورودی را می‌بیند.",
+  "multihop.entry": "ورودی",
+  "multihop.exit": "خروجی",
+  "multihop.exitRegions": "منطقهٔ خروج",
+  "multihop.auto": "خودکار",
+  "multihop.autoVia": "خودکار {region} را انتخاب می‌کند",
+  "multihop.noEntries": "در حال حاضر سرور ورودی در دسترس نیست",
+  "multihop.sameAsExit": "این منطقهٔ خروج شماست",
+  "multihop.you": "شما",
+  "multihop.entryBadge": "ورودی",
+  "multihop.none": "هیچ",
+  "multihop.pathAria": "مسیر چندپرشی: شما، سپس {entry}، سپس {exit}",
+  "multihop.options": "گزینه‌های چندپرشی",
+
   // ── Headline: {x} marks the emphasised word ───────────
   "hero.headline.DISCONNECTED": "جهان {x} است",
   "hero.emphasis.DISCONNECTED": "جدا",
@@ -283,6 +299,7 @@ export const fa = {
 
   // ── Connect / disconnect flow ─────────────────────────
   "connect.noServer": "سروری انتخاب نشده است.",
+  "connect.noEntry": "چندپرشی روشن است، اما سرور ورودی در دسترس نیست. خروجی دیگری انتخاب کنید یا چندپرشی را خاموش کنید.",
   "connect.provisioning": "در حال آماده‌سازی و اتصال...",
   "connect.stillConnecting": "اتصال همچنان در حال انجام است…",
   "connect.takingLonger": "این کار بیشتر از معمول طول کشیده است…",
