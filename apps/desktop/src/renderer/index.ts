@@ -652,9 +652,7 @@ let heroPathKey = "";
 
 const hasEntryCapableServers = (): boolean => servers.some((s) => s.multihop === true);
 
-// Plain WireGuard runs no transport, so it can't carry a hop; multihop is
-// inactive under it even when the preference stays on.
-const multihopActive = (): boolean => multihopLocal && preferredTransportSelect.value !== "wireguard";
+const multihopActive = (): boolean => multihopLocal;
 
 function entryFor(exitId: string): ServerInfo | null {
   return resolveEntry(getVisibleServers(), exitId, entryChoiceLocal);
@@ -743,7 +741,7 @@ function buildEntryChip(region: Region | null, selected: boolean, blocked: boole
 }
 
 function renderMultihopPanel(): void {
-  const available = authState.authenticated && hasEntryCapableServers() && preferredTransportSelect.value !== "wireguard";
+  const available = authState.authenticated && hasEntryCapableServers();
   multihopPanel.hidden = !available;
   if (!available) return;
   multihopToggle.checked = multihopLocal;

@@ -39,11 +39,15 @@ export function parseNodeWireGuardEndpoint(value: unknown): NodeWireGuardEndpoin
   return { endpoint: `${host}:${port}`, host };
 }
 
-// null when the registration carries a hop: the reported endpoint is then the
-// exit, which the client never dials — keep it out of AllowedIPs, the kill switch, and direct mode.
-export function nodeWireGuardEndpointForRegistration(
+// Direct-WireGuard endpoint: single-hop, the node's own listener; multihop, the
+// ENTRY's public relay port (never the exit, which the client never dials).
+export function directWireGuardEndpoint(
   serverEndpoint: unknown,
-  hasHop: boolean
+  hop: { wireguardPort?: number } | null | undefined,
+  entryHost: string
 ): NodeWireGuardEndpoint | null {
-  return hasHop ? null : parseNodeWireGuardEndpoint(serverEndpoint);
+  if (hop) {
+    return hop.wireguardPort ? parseNodeWireGuardEndpoint(`${entryHost}:${hop.wireguardPort}`) : null;
+  }
+  return parseNodeWireGuardEndpoint(serverEndpoint);
 }

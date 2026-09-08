@@ -114,6 +114,9 @@ export const HopProfileSchema = z.object({
   singBoxPort: z.number().int().positive(),
   cloakProxyMethod: z.string().min(1),
   naiveBridgePort: z.number().int().positive().optional(),
+  // The entry's public relay port for direct-WireGuard multihop; absent means
+  // direct mode isn't offered for this hop, only the obfuscation transports.
+  wireguardPort: z.number().int().positive().optional(),
   entryRegion: z.string().min(1),
   exitRegion: z.string().min(1)
 });

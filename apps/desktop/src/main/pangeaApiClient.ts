@@ -6,7 +6,7 @@ import type { ServerInfo, SubscriptionInfo } from "../shared/ipc";
 import { normalizeCustomDns, resolveWireGuardDns } from "../shared/dns";
 import { MTU_DEFAULT, normalizeMtu, normalizeMtuOrDefault } from "../shared/mtu";
 import { resolveNaiveEndpoint } from "../shared/naiveEndpoint";
-import { nodeWireGuardEndpointForRegistration } from "../shared/wireguardEndpoint";
+import { directWireGuardEndpoint } from "../shared/wireguardEndpoint";
 import { buildShadowsocksProfile } from "../shared/shadowsocksProfile";
 import {
   DEFAULT_HUB_METHODS,
@@ -139,6 +139,7 @@ interface RegisterResponse {
     singBoxPort: number;
     cloakProxyMethod: string;
     naiveBridgePort?: number;
+    wireguardPort?: number;
     entryRegion: string;
     exitRegion: string;
   };
@@ -1776,8 +1777,10 @@ export class PangeaApiClient {
     // The node's WireGuard listener needs the same treatment, because the direct
     // method dials it rather than a loopback bridge. Normally it is the node
     // address already on the list, and deduplicated away.
-    const wireguardEndpoint = nodeWireGuardEndpointForRegistration(reg.serverEndpoint, Boolean(reg.hop));
     const nodeIp = server.cloak.remoteHost;
+    // Under a hop this is the ENTRY's public relay port (nodeIp is the entry);
+    // the exit is never dialed directly, keeping it out of the permits.
+    const wireguardEndpoint = directWireGuardEndpoint(reg.serverEndpoint, reg.hop, nodeIp);
     const excludeIPs = uniqueNonEmpty([
       nodeIp,
       wireguardEndpoint?.host,

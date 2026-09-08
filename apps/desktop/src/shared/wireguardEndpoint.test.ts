@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { nodeWireGuardEndpointForRegistration, parseNodeWireGuardEndpoint } from "./wireguardEndpoint.ts";
+import { directWireGuardEndpoint, parseNodeWireGuardEndpoint } from "./wireguardEndpoint.ts";
 
 // TEST-NET addresses only — a real node address must never land here.
 test("splits the hub's host:port", () => {
@@ -45,15 +45,23 @@ test("refuses anything that is not a string", () => {
   assert.equal(parseNodeWireGuardEndpoint(""), null);
 });
 
-// Issue #28: under multihop reg.serverEndpoint is the exit, which the client
-// never dials. It must not reach AllowedIPs, the kill switch, or direct mode.
+// Single-hop dials the node's own endpoint; the exit is never referenced.
 test("a single-hop registration keeps the node endpoint", () => {
-  assert.deepEqual(nodeWireGuardEndpointForRegistration("198.51.100.20:51820", false), {
+  assert.deepEqual(directWireGuardEndpoint("198.51.100.20:51820", null, "203.0.113.9"), {
     endpoint: "198.51.100.20:51820",
     host: "198.51.100.20"
   });
 });
 
-test("a hop drops the endpoint so it can't leak or enable direct mode", () => {
-  assert.equal(nodeWireGuardEndpointForRegistration("198.51.100.20:51820", true), null);
+// Issue #28: under multihop the direct endpoint is the ENTRY's relay port, so
+// the exit (reg.serverEndpoint) never reaches AllowedIPs, the kill switch, or direct mode.
+test("multihop dials the entry's relay port, never the exit", () => {
+  assert.deepEqual(directWireGuardEndpoint("198.51.100.20:51820", { wireguardPort: 51901 }, "203.0.113.9"), {
+    endpoint: "203.0.113.9:51901",
+    host: "203.0.113.9"
+  });
+});
+
+test("a hop without a relay port leaves direct mode unavailable", () => {
+  assert.equal(directWireGuardEndpoint("198.51.100.20:51820", {}, "203.0.113.9"), null);
 });
