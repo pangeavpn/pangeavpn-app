@@ -314,6 +314,19 @@
         </nav>
 
         <div id="settingsAccountActions" class="settings-actions">
+          <div class="settings-field">
+            <span class="settings-field-head">
+              <span class="settings-field-label" data-i18n="settings.account.number">Account Number</span>
+              <span class="settings-field-btns">
+                <button id="accountNumberCopyBtn" class="settings-inline-btn settings-icon-btn" type="button" hidden aria-label="Copy" data-i18n-aria-label="update.copy" title="Copy" data-i18n-title="update.copy">
+                  <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M5.5 3.5h6a1 1 0 0 1 1 1v6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><rect x="3" y="5.5" width="7.5" height="7.5" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
+                  <svg class="settings-icon-done" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M3 8.5l3.2 3.2L13 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </button>
+                <button id="accountNumberToggleBtn" class="settings-inline-btn" type="button" data-i18n="settings.account.show">Show</button>
+              </span>
+            </span>
+            <span id="accountNumberValue" class="settings-action-value settings-field-value">••••-••••-••••-••••-••••-••••</span>
+          </div>
           <a id="manageSubLink" class="settings-action" href="#">
             <span data-i18n="settings.account.manageSub">Manage Subscription</span>
             <span id="accountSubscription" class="settings-action-value">&mdash;</span>

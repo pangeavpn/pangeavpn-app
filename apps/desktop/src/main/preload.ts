@@ -68,6 +68,7 @@ const CH = {
   authInvalidated: "auth:invalidated",
   rememberAccountNumber: "auth:rememberAccountNumber",
   getRememberedAccountNumber: "auth:getRememberedAccountNumber",
+  getAccountNumber: "auth:getAccountNumber",
   clearRememberedAccountNumber: "auth:clearRememberedAccountNumber",
 } as const;
 
@@ -142,6 +143,7 @@ const pangeaApi = {
   rememberAccountNumber: (accountNumber: string) =>
     ipcRenderer.invoke(CH.rememberAccountNumber, accountNumber),
   getRememberedAccountNumber: () => ipcRenderer.invoke(CH.getRememberedAccountNumber),
+  getAccountNumber: () => ipcRenderer.invoke(CH.getAccountNumber),
   clearRememberedAccountNumber: () => ipcRenderer.invoke(CH.clearRememberedAccountNumber),
 };
 

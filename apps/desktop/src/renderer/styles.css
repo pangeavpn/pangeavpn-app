@@ -2039,6 +2039,75 @@ body[data-theme="light"] .region-flag {
 
 .account-subscription-warn { color: var(--warning); }
 
+.settings-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 10px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.settings-field-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 6px;
+}
+
+.settings-field-label { white-space: nowrap; }
+
+.settings-field-btns {
+  display: flex;
+  flex: none;
+  gap: 4px;
+}
+
+.settings-inline-btn {
+  padding: 1px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  font: inherit;
+  font-size: 0.62rem;
+  font-weight: 600;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: color 0.14s ease, border-color 0.14s ease;
+}
+
+.settings-inline-btn:hover {
+  color: var(--text-primary);
+  border-color: var(--text-muted);
+}
+
+.settings-inline-btn[hidden] { display: none; }
+
+.settings-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  align-self: stretch;
+  padding: 0 6px;
+}
+
+.settings-icon-btn .settings-icon-done,
+.settings-icon-btn.copied > svg:first-child { display: none; }
+.settings-icon-btn.copied .settings-icon-done { display: block; color: var(--accent); }
+
+.settings-field-value {
+  letter-spacing: 0.04em;
+}
+
+.settings-field-value.revealed {
+  color: var(--text-primary);
+  white-space: normal;
+  word-break: break-all;
+  user-select: text;
+}
+
 /* ── Hero action buttons ──────────────────────────────────── */
 
 .hero-actions {
@@ -2190,7 +2259,7 @@ button:disabled {
 }
 
 .btn-primary,
-button:not(.btn-ghost):not(.btn-danger):not(.btn-icon):not(.secondary):not(.ghost):not(.collapse-toggle):not(.menu-item):not(.btn-quiet):not(.region-row):not(.region-more):not(.region-expand):not(.region-node):not(.settings-action):not(.settings-nav-item):not(.settings-picker):not(.option-row):not(.subpane-back):not(.accent-swatch):not(.hub-test-btn):not(.multihop-chip) {
+button:not(.btn-ghost):not(.btn-danger):not(.btn-icon):not(.secondary):not(.ghost):not(.collapse-toggle):not(.menu-item):not(.btn-quiet):not(.region-row):not(.region-more):not(.region-expand):not(.region-node):not(.settings-action):not(.settings-nav-item):not(.settings-picker):not(.option-row):not(.subpane-back):not(.accent-swatch):not(.hub-test-btn):not(.multihop-chip):not(.settings-inline-btn) {
   color: var(--accent-text);
   background: var(--accent);
   border-color: transparent;
@@ -2198,7 +2267,7 @@ button:not(.btn-ghost):not(.btn-danger):not(.btn-icon):not(.secondary):not(.ghos
 }
 
 .btn-primary:hover:not(:disabled),
-button:not(.btn-ghost):not(.btn-danger):not(.btn-icon):not(.secondary):not(.ghost):not(.collapse-toggle):not(.menu-item):not(.btn-quiet):not(.region-row):not(.region-more):not(.region-expand):not(.region-node):not(.settings-action):not(.settings-nav-item):not(.settings-picker):not(.option-row):not(.subpane-back):not(.accent-swatch):not(.hub-test-btn):not(.multihop-chip):hover:not(:disabled) {
+button:not(.btn-ghost):not(.btn-danger):not(.btn-icon):not(.secondary):not(.ghost):not(.collapse-toggle):not(.menu-item):not(.btn-quiet):not(.region-row):not(.region-more):not(.region-expand):not(.region-node):not(.settings-action):not(.settings-nav-item):not(.settings-picker):not(.option-row):not(.subpane-back):not(.accent-swatch):not(.hub-test-btn):not(.multihop-chip):not(.settings-inline-btn):hover:not(:disabled) {
   background: var(--accent-hover);
 }
 

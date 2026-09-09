@@ -93,6 +93,7 @@ export const IPC_CHANNELS = {
   authInvalidated: "auth:invalidated",
   rememberAccountNumber: "auth:rememberAccountNumber",
   getRememberedAccountNumber: "auth:getRememberedAccountNumber",
+  getAccountNumber: "auth:getAccountNumber",
   clearRememberedAccountNumber: "auth:clearRememberedAccountNumber"
 } as const;
 
@@ -384,5 +385,7 @@ export interface PangeaApi {
   /** Backed by the main-process secure store — never localStorage. */
   rememberAccountNumber: (accountNumber: string) => Promise<void>;
   getRememberedAccountNumber: () => Promise<string | null>;
+  /** The credential this device is signed in with; null while signed out. */
+  getAccountNumber: () => Promise<string | null>;
   clearRememberedAccountNumber: () => Promise<void>;
 }

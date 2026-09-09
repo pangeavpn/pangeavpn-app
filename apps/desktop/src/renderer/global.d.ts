@@ -172,6 +172,7 @@ declare global {
     /** Backed by the main-process secure store — never localStorage. */
     rememberAccountNumber: (accountNumber: string) => Promise<void>;
     getRememberedAccountNumber: () => Promise<string | null>;
+    getAccountNumber: () => Promise<string | null>;
     clearRememberedAccountNumber: () => Promise<void>;
   }
 

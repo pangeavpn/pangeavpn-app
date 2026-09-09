@@ -2155,6 +2155,11 @@ function registerIpcHandlers(): void {
     }
   });
 
+  ipcMain.handle(IPC_CHANNELS.getAccountNumber, async () => {
+    if (!(await auth.getAuthState()).authenticated) return null;
+    return auth.loadLicenseKey();
+  });
+
   ipcMain.handle(IPC_CHANNELS.clearRememberedAccountNumber, async () => {
     try {
       const dir = path.join(app.getPath("appData"), "pangeavpn-desktop");

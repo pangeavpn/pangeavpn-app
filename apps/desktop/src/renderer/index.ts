@@ -364,6 +364,51 @@ function isSubModalOpen(): boolean {
   return devicesModal.classList.contains("visible") || updateOverlay.classList.contains("visible");
 }
 
+const accountNumberValue = document.getElementById("accountNumberValue") as HTMLSpanElement;
+const accountNumberToggleBtn = document.getElementById("accountNumberToggleBtn") as HTMLButtonElement;
+const accountNumberCopyBtn = document.getElementById("accountNumberCopyBtn") as HTMLButtonElement;
+const ACCOUNT_NUMBER_MASK = "••••-••••-••••-••••-••••-••••";
+let revealedAccountNumber: string | null = null;
+
+function hideAccountNumber(): void {
+  revealedAccountNumber = null;
+  accountNumberValue.textContent = ACCOUNT_NUMBER_MASK;
+  accountNumberValue.classList.remove("revealed");
+  accountNumberToggleBtn.textContent = t("settings.account.show");
+  accountNumberCopyBtn.hidden = true;
+  accountNumberCopyBtn.classList.remove("copied");
+}
+
+// Fetched only on demand so the credential never sits in the DOM unasked.
+async function revealAccountNumber(): Promise<void> {
+  const number = pangeaApi ? await pangeaApi.getAccountNumber().catch(() => null) : null;
+  if (!number) {
+    accountNumberValue.textContent = t("common.dash");
+    return;
+  }
+  revealedAccountNumber = formatAccountNumberInput(number);
+  accountNumberValue.textContent = revealedAccountNumber;
+  accountNumberValue.classList.add("revealed");
+  accountNumberToggleBtn.textContent = t("settings.account.hide");
+  accountNumberCopyBtn.hidden = false;
+}
+
+accountNumberToggleBtn.addEventListener("click", () => {
+  if (revealedAccountNumber) hideAccountNumber();
+  else void revealAccountNumber();
+});
+
+accountNumberCopyBtn.addEventListener("click", async () => {
+  if (!revealedAccountNumber) return;
+  try {
+    await copyTextToClipboard(revealedAccountNumber);
+    accountNumberCopyBtn.classList.add("copied");
+    setTimeout(() => accountNumberCopyBtn.classList.remove("copied"), 2000);
+  } catch (error) {
+    showToast(reportError("copyAccountNumber", error));
+  }
+});
+
 function openSettings(): void {
   settingsOverlay.classList.add("visible");
   settingsOverlay.setAttribute("aria-hidden", "false");
@@ -385,6 +430,7 @@ function openSettings(): void {
 function closeSettings(): void {
   settingsOverlay.classList.remove("visible");
   settingsOverlay.setAttribute("aria-hidden", "true");
+  hideAccountNumber();
   deactivateOverlay();
 }
 
