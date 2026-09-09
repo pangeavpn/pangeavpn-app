@@ -209,13 +209,15 @@ func TestSwitch_ArmsKillSwitchForNewServer(t *testing.T) {
 // re-pointed at a new server without being rebuilt.
 type fakeInPlaceWGManager struct {
 	fakeWGManager
-	pinCount int
+	pinCount    int
+	pinnedHosts [][]string
 }
 
-func (f *fakeInPlaceWGManager) PinEndpointRoutes(_ context.Context, _ state.WireGuardProfile) error {
+func (f *fakeInPlaceWGManager) PinEndpointRoutes(_ context.Context, profile state.WireGuardProfile) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.pinCount++
+	f.pinnedHosts = append(f.pinnedHosts, slices.Clone(profile.BypassHosts))
 	return nil
 }
 

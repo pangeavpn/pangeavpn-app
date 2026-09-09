@@ -149,6 +149,10 @@ type Service struct {
 	// timeout to fire.
 	cancelMu      sync.Mutex
 	cancelConnect context.CancelFunc
+	// cancelSeq identifies the registered cancel; cancelRecovery marks it as a
+	// background rebuild's, which a user operation may preempt.
+	cancelSeq      uint64
+	cancelRecovery bool
 
 	profileMu      sync.RWMutex
 	currentProfile *state.Profile
@@ -512,21 +516,60 @@ type ConnectOptions struct {
 	PreferredTransport string
 }
 
+// registerCancel publishes cancel as the interruptible operation. The returned
+// func unregisters it unless a newer operation has since taken the slot.
+func (s *Service) registerCancel(cancel context.CancelFunc, recovery bool) func() {
+	s.cancelMu.Lock()
+	defer s.cancelMu.Unlock()
+	return s.registerCancelLocked(cancel, recovery)
+}
+
+func (s *Service) registerCancelLocked(cancel context.CancelFunc, recovery bool) func() {
+	s.cancelSeq++
+	seq := s.cancelSeq
+	s.cancelConnect = cancel
+	s.cancelRecovery = recovery
+	return func() {
+		s.cancelMu.Lock()
+		defer s.cancelMu.Unlock()
+		if s.cancelSeq == seq {
+			s.cancelConnect = nil
+			s.cancelRecovery = false
+		}
+	}
+}
+
+// claimRecoveryCancel is registerCancel for a rebuild: it yields (nil) when a
+// user operation already holds the slot, so it can never displace one.
+func (s *Service) claimRecoveryCancel(cancel context.CancelFunc) func() {
+	s.cancelMu.Lock()
+	defer s.cancelMu.Unlock()
+	if s.cancelConnect != nil && !s.cancelRecovery {
+		return nil
+	}
+	return s.registerCancelLocked(cancel, true)
+}
+
+// preemptRecovery interrupts a background rebuild that holds opMu, so a user
+// operation is not queued behind a whole transport cascade.
+func (s *Service) preemptRecovery() {
+	s.cancelMu.Lock()
+	defer s.cancelMu.Unlock()
+	if s.cancelConnect != nil && s.cancelRecovery {
+		s.cancelConnect()
+		s.logs.Add(state.LogInfo, state.SourceDaemon, "interrupting the background rebuild for a user operation")
+	}
+}
+
 func (s *Service) Connect(ctx context.Context, profileID string, opts ConnectOptions) (err error) {
+	s.preemptRecovery()
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
 
 	// Make this Connect interruptible by Disconnect — see cancelConnect docs.
 	connectCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	s.cancelMu.Lock()
-	s.cancelConnect = cancel
-	s.cancelMu.Unlock()
-	defer func() {
-		s.cancelMu.Lock()
-		s.cancelConnect = nil
-		s.cancelMu.Unlock()
-	}()
+	defer s.registerCancel(cancel, false)()
 	ctx = connectCtx
 
 	profile, found := s.config.FindProfile(profileID)
@@ -1576,27 +1619,22 @@ func (s *Service) waitForWireGuardHandshake(ctx context.Context, wireGuardProfil
 // Switch hot-swaps profile without dropping the kill switch. Interruptible
 // by Disconnect.
 func (s *Service) Switch(ctx context.Context, newProfileID string, opts ConnectOptions) error {
+	s.preemptRecovery()
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
 
 	switchCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	s.cancelMu.Lock()
-	s.cancelConnect = cancel
-	s.cancelMu.Unlock()
-	defer func() {
-		s.cancelMu.Lock()
-		s.cancelConnect = nil
-		s.cancelMu.Unlock()
-	}()
+	defer s.registerCancel(cancel, false)()
 	ctx = switchCtx
 
+	// ERROR with a held profile is a session recovery has not handed back yet;
+	// re-pointing it is the user's way out, so it switches like a live one.
 	currentState, _ := s.machine.Get()
-	if currentState != state.StateConnected {
+	oldProfile, ok := s.getCurrentProfile()
+	if currentState != state.StateConnected && !(currentState == state.StateError && ok) {
 		return fmt.Errorf("switch requires connected state; currently %s", currentState)
 	}
-
-	oldProfile, ok := s.getCurrentProfile()
 	if !ok {
 		return errors.New("no active profile to switch from")
 	}
@@ -1624,7 +1662,7 @@ func (s *Service) Switch(ctx context.Context, newProfileID string, opts ConnectO
 	// make the gate at the top of Switch reject the retry.
 	refuse := func(err error, detail string) error {
 		s.logs.Add(state.LogError, state.SourceDaemon, fmt.Sprintf("switch: %s", detail))
-		s.machine.Set(state.StateConnected, fmt.Sprintf("staying on %s: %s", oldProfile.ID, detail))
+		s.machine.Set(currentState, fmt.Sprintf("staying on %s: %s", oldProfile.ID, detail))
 		return err
 	}
 
@@ -1682,8 +1720,13 @@ func (s *Service) Switch(ctx context.Context, newProfileID string, opts ConnectO
 	s.setSessionOpts(opts)
 
 	if err := s.bringUpAfterKillSwitch(ctx, newProfile, wireGuardProfile, opts); err != nil {
-		if keepDevice && !errors.Is(err, ErrHostOffline) {
-			s.releaseKeptDevice(newProfile)
+		if !errors.Is(err, ErrHostOffline) {
+			if keepDevice {
+				s.releaseKeptDevice(newProfile)
+			}
+			// Same grace as a failed Connect: the app's server cascade goes next,
+			// not a rebuild that would hold opMu against it for minutes.
+			s.deferRecovery(connectRetryGrace)
 		}
 		return err
 	}
@@ -1759,6 +1802,7 @@ func (s *Service) sessionHeld() (string, bool) {
 // the last provisioned profile's WireGuard bypass hosts is used instead.
 // No-op when no lock is engaged.
 func (s *Service) PermitHosts(ctx context.Context, hosts []string) error {
+	s.preemptRecovery()
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
 
@@ -1779,6 +1823,10 @@ func (s *Service) PermitHosts(ctx context.Context, hosts []string) error {
 		}
 		s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("kill switch: permitting control-plane address %v that no stored profile vouches for (idle lock)", unknown))
 	}
+
+	// A live tunnel would carry these itself, which is no use when that tunnel
+	// is the one the caller is leaving or the one that just died.
+	s.routeAroundTunnel(ctx, permits)
 
 	// Reuse the persisted AllowLAN/Locked flags: widening the permit set must
 	// not change what kind of lock is engaged (dropping Locked would make a
@@ -1804,6 +1852,26 @@ func (s *Service) PermitHosts(ctx context.Context, hosts []string) error {
 	}
 	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("kill switch permitted control-plane endpoints %v", permits))
 	return nil
+}
+
+// routeAroundTunnel pins bypass routes for hosts while a session is up. A no-op
+// without a live device or on managers that cannot pin routes.
+func (s *Service) routeAroundTunnel(ctx context.Context, hosts []string) {
+	pinner, ok := s.wg.(wgInPlaceSwitcher)
+	if !ok {
+		return
+	}
+	profile, ok := s.getCurrentProfile()
+	if !ok {
+		return
+	}
+	wireGuardProfile := profile.WireGuard
+	wireGuardProfile.BypassHosts = hosts
+	if err := pinner.PinEndpointRoutes(ctx, wireGuardProfile); err != nil {
+		s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("could not route control-plane endpoints %v around the tunnel: %v", hosts, err))
+		return
+	}
+	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("routed control-plane endpoints %v around the tunnel", hosts))
 }
 
 // storedControlPlaneHosts is the bypass hosts of every stored profile — where
@@ -2648,6 +2716,11 @@ func (s *Service) attemptSessionRebuild(ctx context.Context, profile state.Profi
 		// attempt or push the backoff out.
 		return
 	}
+	// Cancelled means a user operation took over and owns the state from here;
+	// booking it would stamp a stale error over that operation.
+	if errors.Is(err, context.Canceled) {
+		return
+	}
 	// No route out is a wait, not a failed attempt: bring-up already parked the
 	// session in the offline hold, and backoff here would only delay the reconnect.
 	if errors.Is(err, ErrHostOffline) {
@@ -2881,20 +2954,13 @@ func (s *Service) wireGuardHandshakeStale(status state.WireGuardStatus) bool {
 // Runs from Connected (the first rebuild) and from Error (every retry after
 // one failed); anything else means a Disconnect got here first.
 func (s *Service) rebuildSilentSession(ctx context.Context, profile state.Profile) error {
-	// Registered before TryLock, not after: Disconnect cancels cancelConnect
-	// and only then blocks on opMu.Lock(), so a cancel func that only exists
-	// once TryLock has already won is invisible to a Disconnect that landed
-	// in between — it cancels nothing and then blocks behind the whole
-	// cascade. Setting it first closes that window; if TryLock then fails,
-	// it's cleared again immediately below.
+	// Claimed before TryLock: Disconnect cancels first and only then takes opMu,
+	// so a cancel that appears after TryLock is invisible to it.
 	rebuildCtx, cancel := context.WithCancel(ctx)
-	s.cancelMu.Lock()
-	s.cancelConnect = cancel
-	s.cancelMu.Unlock()
-	clearCancel := func() {
-		s.cancelMu.Lock()
-		s.cancelConnect = nil
-		s.cancelMu.Unlock()
+	clearCancel := s.claimRecoveryCancel(cancel)
+	if clearCancel == nil {
+		cancel()
+		return errRebuildBusy
 	}
 
 	if !s.opMu.TryLock() {

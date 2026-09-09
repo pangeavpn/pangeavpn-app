@@ -94,11 +94,15 @@ const HUB_RETRY_COOLDOWN_MS = 20000;
 const HUB_FAILURE_LIMIT = 2;
 
 /** Settles as soon as `signal` aborts, however long `work` still has to run. */
-function raceAbort<T>(work: Promise<T>, signal?: AbortSignal): Promise<T> {
+function raceAbort<T>(
+  work: Promise<T>,
+  signal?: AbortSignal,
+  abortError: () => Error = () => new ConnectCancelledError()
+): Promise<T> {
   if (!signal) return work;
-  if (signal.aborted) return Promise.reject(new ConnectCancelledError());
+  if (signal.aborted) return Promise.reject(abortError());
   return new Promise<T>((resolve, reject) => {
-    const onAbort = (): void => reject(new ConnectCancelledError());
+    const onAbort = (): void => reject(abortError());
     signal.addEventListener("abort", onAbort, { once: true });
     work.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort));
   });
@@ -1298,9 +1302,11 @@ export class PangeaApiClient {
       cancelSignal?: AbortSignal;
     }
   ): Promise<Response> {
-    // Race, don't just await: the cascade is shared with other callers, so this
-    // one abandons it rather than cancelling it out from under them.
-    await raceAbort(this.ensureHub(), options.cancelSignal);
+    // Race, don't just await: the cascade is shared, so this call abandons it on
+    // its own deadline too (a dead tunnel makes the cascade last minutes).
+    await raceAbort(this.ensureHub(), options.signal ?? options.cancelSignal, () =>
+      options.cancelSignal?.aborted ? new ConnectCancelledError() : new Error("Hub API timeout (path resolution)")
+    );
 
     try {
       const response = await this.sendHubFetch(path, options);

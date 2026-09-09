@@ -30,18 +30,29 @@ type fakeCloakManager struct {
 	stopCount      int
 	startLocalPort int
 	boundLocalPort int
+	// startHook runs inside Start with the caller's context, outside the lock,
+	// so a test can park a bring-up exactly where a real dial would block.
+	startHook func(ctx context.Context) error
 }
 
-func (f *fakeCloakManager) Start(_ context.Context, profile state.CloakProfile) error {
+func (f *fakeCloakManager) Start(ctx context.Context, profile state.CloakProfile) error {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.startCalled = true
 	f.startCount++
 	f.startLocalPort = profile.LocalPort
-	if f.startErr != nil {
-		return f.startErr
+	hook, startErr := f.startHook, f.startErr
+	f.mu.Unlock()
+	if hook != nil {
+		if err := hook(ctx); err != nil {
+			return err
+		}
 	}
+	if startErr != nil {
+		return startErr
+	}
+	f.mu.Lock()
 	f.running = true
+	f.mu.Unlock()
 	return nil
 }
 

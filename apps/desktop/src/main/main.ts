@@ -978,15 +978,14 @@ async function resolveTrayServerPlan(failedServerId: string | null = null): Prom
   return null;
 }
 
-/** Lockdown's lock blocks the hub we must reach to provision, so open the hub
- *  alone. Best-effort: a failure surfaces as the real network error. */
-async function permitHubThroughLockdown(): Promise<void> {
-  if (!lockdownEnabled) return;
+/** Opens the hub through a Lockdown lock and, mid-session, routes it around the
+ *  tunnel: a switch must not depend on the tunnel it is leaving. Best-effort. */
+async function permitHubBeforeProvisioning(): Promise<void> {
   const hubIp = pangeaApiClient.getHubIp();
   try {
     await daemonClient.permitHosts(hubIp ? [hubIp] : []);
   } catch (err) {
-    console.warn("lockdown: hub permit failed", sanitizeLog(err));
+    console.warn("hub permit failed", sanitizeLog(err));
   }
 }
 
@@ -1049,7 +1048,7 @@ async function provisionProfileForServer(
   signal: AbortSignal | undefined,
   entryServerId: string | null
 ): Promise<Profile> {
-  await permitHubThroughLockdown();
+  await permitHubBeforeProvisioning();
   const profile = await pangeaApiClient.provision(serverId, signal, entryServerId ?? undefined);
 
   const config = await withDaemonRestartOnUnavailable(
