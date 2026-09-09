@@ -1688,7 +1688,7 @@ func (s *Service) Switch(ctx context.Context, newProfileID string, opts ConnectO
 	// A dial that fails before wg.Start leaves the pinned routes on the old
 	// session; the next teardown or in-place diff cleans them up.
 	keepDevice := false
-	if pinner, ok := s.wg.(wgInPlaceSwitcher); ok {
+	if pinner, ok := s.wg.(wgInPlaceSwitcher); ok && s.deviceRunning(ctx, oldProfile) {
 		if err := pinner.PinEndpointRoutes(ctx, wireGuardProfile); err != nil {
 			s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("switch: could not pre-route the new endpoints (%v); rebuilding the device", err))
 		} else {
@@ -2230,7 +2230,9 @@ func (s *Service) Status(ctx context.Context) state.StatusResponse {
 	snowflakeStatus := s.snowflake.Status()
 
 	wgStatus := state.WireGuardStatus{Running: false, Detail: "not connected"}
+	profileID := ""
 	if profile, ok := s.getCurrentProfile(); ok {
+		profileID = profile.ID
 		if activeKind == "cloak" {
 			cloakStatus = s.cloakStatusForProfile(ctx, profile)
 		}
@@ -2246,6 +2248,7 @@ func (s *Service) Status(ctx context.Context) state.StatusResponse {
 	return state.StatusResponse{
 		State:               stateValue,
 		Detail:              detail,
+		ProfileID:           profileID,
 		ActiveTransport:     activeKind,
 		ConnectingTransport: connectingKind,
 		Cloak:               cloakStatus,
@@ -2285,6 +2288,16 @@ func (s *Service) Config() state.Config {
 }
 
 func (s *Service) UpdateConfig(cfg state.Config) error {
+	// A client that timed out mid-switch restores its pre-switch snapshot; the
+	// profile the session runs on stays until the session ends.
+	if live, ok := s.getCurrentProfile(); ok && !hasProfileID(cfg.Profiles, live.ID) {
+		kept := live
+		if stored, found := s.config.FindProfile(live.ID); found {
+			kept = stored
+		}
+		cfg.Profiles = append(cfg.Profiles, kept)
+		s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("config update dropped the live profile %s; keeping it while the session runs", live.ID))
+	}
 	if err := s.config.Set(cfg); err != nil {
 		return err
 	}
@@ -3036,6 +3049,22 @@ func (s *Service) rebuildSilentSession(ctx context.Context, profile state.Profil
 	}
 	s.logs.Add(state.LogInfo, state.SourceDaemon, "silent tunnel rebuilt")
 	return nil
+}
+
+// deviceRunning reports whether profile's tunnel device is up right now; a
+// session held through recovery may have none left to re-point.
+func (s *Service) deviceRunning(ctx context.Context, profile state.Profile) bool {
+	status, err := s.wg.Status(ctx, withTransportBypassHosts(profile))
+	return err == nil && status.Running
+}
+
+func hasProfileID(profiles []state.Profile, id string) bool {
+	for _, profile := range profiles {
+		if profile.ID == id {
+			return true
+		}
+	}
+	return false
 }
 
 // releaseKeptDevice drops a device kept through a cascade that found no

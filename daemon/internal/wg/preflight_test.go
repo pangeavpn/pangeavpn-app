@@ -4,6 +4,7 @@ package wg
 
 import (
 	"context"
+	"net"
 	"strings"
 	"testing"
 
@@ -128,5 +129,22 @@ func TestResolveEndpointRoutes_LookupFailureReturnsError(t *testing.T) {
 	_, err := resolveEndpointRoutes(context.Background(), []string{"this-host-does-not-resolve.invalid"})
 	if err == nil {
 		t.Fatal("expected a resolution error, got nil")
+	}
+}
+
+// A lookup with no deadline of its own must not be allowed to hang the switch.
+func TestResolveHostIPs_BoundsLookupWithoutDeadline(t *testing.T) {
+	original := lookupHostIPs
+	t.Cleanup(func() { lookupHostIPs = original })
+	var sawDeadline bool
+	lookupHostIPs = func(ctx context.Context, _ string) ([]net.IP, error) {
+		_, sawDeadline = ctx.Deadline()
+		return []net.IP{net.ParseIP("198.51.100.10")}, nil
+	}
+	if _, err := resolveHostIPs(context.Background(), "node.example.test"); err != nil {
+		t.Fatalf("resolveHostIPs: %v", err)
+	}
+	if !sawDeadline {
+		t.Fatal("lookup ran with no deadline")
 	}
 }

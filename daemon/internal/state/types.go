@@ -64,20 +64,22 @@ type WireGuardStatus struct {
 type StatusResponse struct {
 	State  DaemonState `json:"state"`
 	Detail string      `json:"detail"`
+	// ProfileID is the profile the session runs on (or is held for), "" when idle.
+	ProfileID string `json:"profileId,omitempty"`
 	// ActiveTransport is "cloak", "naive", "reality", "hysteria2", "shadowsocks",
 	// "snowflake", "wireguard" (no transport at all), or "" when disconnected.
 	ActiveTransport string `json:"activeTransport"`
 	// ConnectingTransport is the candidate the cascade is trying right now,
 	// "" outside a bring-up. Lets clients show "via X" while connecting.
 	ConnectingTransport string          `json:"connectingTransport"`
-	Cloak            CloakStatus     `json:"cloak"`
-	Naive            TransportStatus `json:"naive"`
-	Reality          TransportStatus `json:"reality"`
-	Hysteria2        TransportStatus `json:"hysteria2"`
-	Shadowsocks      TransportStatus `json:"shadowsocks"`
-	Snowflake        TransportStatus `json:"snowflake"`
-	WireGuard        WireGuardStatus `json:"wireguard"`
-	KillSwitchActive bool            `json:"killSwitchActive"`
+	Cloak               CloakStatus     `json:"cloak"`
+	Naive               TransportStatus `json:"naive"`
+	Reality             TransportStatus `json:"reality"`
+	Hysteria2           TransportStatus `json:"hysteria2"`
+	Shadowsocks         TransportStatus `json:"shadowsocks"`
+	Snowflake           TransportStatus `json:"snowflake"`
+	WireGuard           WireGuardStatus `json:"wireguard"`
+	KillSwitchActive    bool            `json:"killSwitchActive"`
 	// Reconnecting marks an ERROR the daemon is still working on: the session
 	// dropped on its own and rebuilds are being retried on a backoff. Clients
 	// show it as a connection in progress rather than a dead one.

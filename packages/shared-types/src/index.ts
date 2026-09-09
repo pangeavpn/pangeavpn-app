@@ -196,7 +196,11 @@ export const StatusResponseSchema = z.object({
   transportsExhausted: z.boolean().default(false),
   // The OS reports no internet (link physically down) while a session is
   // intended; the client shows "no internet" and holds. Older daemons omit it.
-  offline: z.boolean().default(false)
+  offline: z.boolean().default(false),
+  // The profile the session runs on. Older daemons omit it; the desktop's main
+  // process derives serverId from it for the renderer.
+  profileId: z.string().optional(),
+  serverId: z.string().optional()
 });
 
 export const ConnectRequestSchema = z.object({

@@ -250,7 +250,7 @@ func (m *wireGuardGoManager) trySwitchInPlaceDarwin(ctx context.Context, tunnelK
 		return false
 	}
 
-	uapi, err := wgConfigToUAPI(parsed.wgConfig)
+	uapi, err := wgConfigToUAPI(stripListenPort(parsed.wgConfig))
 	if err != nil {
 		m.logs.Add(state.LogWarn, state.SourceWireGuard, fmt.Sprintf("in-place reconfigure: uapi translation failed: %v", err))
 		return false

@@ -697,7 +697,7 @@ function applyMultihopChange(): void {
   if (multihopRedialTimer) clearTimeout(multihopRedialTimer);
   multihopRedialTimer = setTimeout(() => {
     multihopRedialTimer = null;
-    if (currentDaemonState === "CONNECTED" && !serverWorking && !disconnectingVisual && serverSelect.value) {
+    if (currentDaemonState === "CONNECTED" && !serverWorking && !connectInFlight && !disconnectingVisual && serverSelect.value) {
       void switchToServer(serverSelect.value);
     }
   }, 600);
@@ -1546,6 +1546,11 @@ async function showErrorUnlessConnected(message: string): Promise<void> {
   }
 }
 
+/** The daemon is up on the requested exit (with or without a hop) and the user still wants it. */
+function landedOn(status: StatusResponse | null, serverId: string): boolean {
+  return status?.state === "CONNECTED" && status.serverId === serverId && getUserIntent() !== "disconnected";
+}
+
 async function switchToServer(
   serverId: string,
   plan: readonly string[] = serverRetryPlan(serverId)
@@ -1585,14 +1590,10 @@ async function switchToServer(
     }
     await settleConnectingState(connectingSince);
     const status = await refreshStatus();
-    // The daemon can rebuild the tunnel itself after a leg drops (common right
-    // after turning multihop off); a switch that still ends CONNECTED isn't a failure.
+    // Only a tunnel that ended up on the chosen server counts; still sitting on
+    // the old one is a failed switch, however healthy it is.
     if (switchFailed) {
-      setUiMessage(
-        status?.state === "CONNECTED" && getUserIntent() !== "disconnected"
-          ? t("connect.connected")
-          : t("connect.switchFailed")
-      );
+      setUiMessage(landedOn(status, serverId) ? t("connect.connected") : t("connect.switchFailed"));
     }
     return result;
   } catch (error) {
@@ -1614,7 +1615,12 @@ async function switchToServer(
     }
     const message = reportError("serverSwitch", error);
     await settleConnectingState(connectingSince);
-    await showErrorUnlessConnected(message);
+    if (landedOn(await refreshStatus(), serverId)) {
+      setUiMessage(t("connect.connected"));
+      notifyUserConnected();
+    } else {
+      setUiMessage(message);
+    }
     return null;
   } finally {
     clearProgressMessages();

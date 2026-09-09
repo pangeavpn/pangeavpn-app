@@ -331,3 +331,17 @@ func extractAllowedIPsFromConfig(wgConfig string) ([]string, error) {
 
 	return allowed, nil
 }
+
+// stripListenPort drops [Interface] ListenPort for an in-place apply: the device
+// keeps its bound port, and IpcSet would otherwise rebind on top of the explicit rebind.
+func stripListenPort(wgConfig string) string {
+	var out []string
+	for _, line := range strings.Split(wgConfig, "\n") {
+		key, _, hasValue := strings.Cut(line, "=")
+		if hasValue && strings.EqualFold(strings.TrimSpace(key), "ListenPort") {
+			continue
+		}
+		out = append(out, line)
+	}
+	return strings.Join(out, "\n")
+}

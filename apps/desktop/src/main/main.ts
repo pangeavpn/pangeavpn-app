@@ -60,6 +60,8 @@ import {
   profileFingerprint,
   recordProvision,
   retainOnly,
+  profileIdFor,
+  serverIdForProfile,
   type ProfileRecords
 } from "./profileCache";
 
@@ -989,11 +991,6 @@ async function permitHubBeforeProvisioning(): Promise<void> {
   }
 }
 
-/** Hop profiles carry the entry in their id; a cached single-hop peer must never stand in for one. */
-function profileIdFor(serverId: string, entryServerId: string | null): string {
-  return entryServerId ? `auto-${serverId}-via-${entryServerId}` : `auto-${serverId}`;
-}
-
 /** The entry a main-driven connect must use. Not ok: multihop is on and nothing qualifies. */
 function entryForMain(exitServerId: string): { ok: true; entry: string | null } | { ok: false } {
   if (!multihopPrefs.enabled) return { ok: true, entry: null };
@@ -1630,9 +1627,11 @@ function generateFriendlyName(): string {
 }
 
 function registerIpcHandlers(): void {
-  ipcMain.handle(IPC_CHANNELS.getStatus, async () =>
-    withDaemonRestartOnUnavailable(() => daemonClient.getStatus(), "status", { allowRestart: false })
-  );
+  ipcMain.handle(IPC_CHANNELS.getStatus, async () => {
+    const status = await withDaemonRestartOnUnavailable(() => daemonClient.getStatus(), "status", { allowRestart: false });
+    const serverId = status.profileId ? serverIdForProfile(status.profileId) : null;
+    return serverId ? { ...status, serverId } : status;
+  });
   ipcMain.handle(IPC_CHANNELS.connect, async (_event, profileId: unknown) => {
     if (typeof profileId !== "string" || profileId.trim() === "") {
       return { ok: false };

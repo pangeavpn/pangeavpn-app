@@ -10,6 +10,8 @@ import {
   isReusable,
   parseProfileRecords,
   profileFingerprint,
+  profileIdFor,
+  serverIdForProfile,
   recordProvision,
   retainOnly,
   type ProfileRecord
@@ -133,4 +135,10 @@ test("commitProfileSet keeps unmanaged profiles and reusable peers, installing t
     ),
     [{ id: "manual" }, { id: "auto-keep" }, winner]
   );
+});
+
+test("serverIdForProfile inverts profileIdFor with and without a hop", () => {
+  assert.equal(serverIdForProfile(profileIdFor("eu-west-1", null)), "eu-west-1");
+  assert.equal(serverIdForProfile(profileIdFor("eu-west-1", "us-east-1")), "eu-west-1");
+  assert.equal(serverIdForProfile("manual-office"), null);
 });

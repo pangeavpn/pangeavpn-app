@@ -120,8 +120,6 @@ func NewManager(logs *state.LogStore) *Manager {
 // wires a local UDP loopback listener to it. Returning nil means the
 // handshake already succeeded — see WaitForSession.
 func (m *Manager) Start(ctx context.Context, profile state.RealityProfile) error {
-	_ = ctx
-
 	remoteHost := strings.TrimSpace(profile.RemoteHost)
 	if remoteHost == "" {
 		return errors.New("reality remote host is required")
@@ -205,8 +203,11 @@ func (m *Manager) Start(ctx context.Context, profile state.RealityProfile) error
 	}
 
 	destination := M.ParseSocksaddrHostPort("127.0.0.1", uint16(targetPort))
+	// The engine outlives Start, so only the dial follows the caller's context.
 	dialCtx, dialCancel := context.WithTimeout(engineCtx, 10*time.Second)
+	stopPropagation := context.AfterFunc(ctx, dialCancel)
 	remote, err := outbound.ListenPacket(dialCtx, destination)
+	stopPropagation()
 	dialCancel()
 	if err != nil {
 		engine.Close()

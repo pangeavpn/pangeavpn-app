@@ -197,3 +197,68 @@ func TestRebuild_LeavesSwitchInterruptible(t *testing.T) {
 		t.Errorf("Switch error = %v, want context.Canceled", err)
 	}
 }
+
+// A switch that timed out client-side can still complete in the daemon; the
+// client's snapshot restore must not take the running profile with it.
+func TestUpdateConfig_KeepsLiveProfile(t *testing.T) {
+	a, b := switchProfilePair()
+	svc := newTestService(t, &fakeCloakManager{}, &fakeNaiveManager{}, &fakeWGManager{}, &fakeKillSwitch{}, a, b)
+	ctx := context.Background()
+	if err := svc.Connect(ctx, a.ID, ConnectOptions{PreferredTransport: "cloak"}); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	if err := svc.UpdateConfig(state.Config{Profiles: []state.Profile{b}}); err != nil {
+		t.Fatalf("UpdateConfig: %v", err)
+	}
+	if _, found := svc.config.FindProfile(a.ID); !found {
+		t.Fatal("the live profile was dropped from the config")
+	}
+	if err := svc.Disconnect(ctx, false); err != nil {
+		t.Fatalf("Disconnect: %v", err)
+	}
+	if err := svc.UpdateConfig(state.Config{Profiles: []state.Profile{b}}); err != nil {
+		t.Fatalf("UpdateConfig after disconnect: %v", err)
+	}
+	if _, found := svc.config.FindProfile(a.ID); found {
+		t.Fatal("an idle daemon must accept the client's config as sent")
+	}
+}
+
+func TestStatus_ReportsLiveProfile(t *testing.T) {
+	a, _ := switchProfilePair()
+	svc := newTestService(t, &fakeCloakManager{}, &fakeNaiveManager{}, &fakeWGManager{}, &fakeKillSwitch{}, a)
+	ctx := context.Background()
+	if got := svc.Status(ctx).ProfileID; got != "" {
+		t.Fatalf("idle ProfileID = %q, want empty", got)
+	}
+	if err := svc.Connect(ctx, a.ID, ConnectOptions{PreferredTransport: "cloak"}); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	if got := svc.Status(ctx).ProfileID; got != a.ID {
+		t.Fatalf("ProfileID = %q, want %q", got, a.ID)
+	}
+}
+
+// With no device left to re-point there is nothing to keep: the switch must
+// build a fresh device instead of pretending it pinned one.
+func TestSwitch_NoDeviceMeansNoPin(t *testing.T) {
+	a, b := switchProfilePair()
+	wgMgr := &fakeInPlaceWGManager{}
+	svc := newInPlaceTestService(t, wgMgr, &fakeKillSwitch{}, a, b)
+	opts := ConnectOptions{PreferredTransport: "cloak"}
+	ctx := context.Background()
+	if err := svc.Connect(ctx, a.ID, opts); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	wgMgr.mu.Lock()
+	wgMgr.running = false
+	wgMgr.mu.Unlock()
+	if err := svc.Switch(ctx, b.ID, opts); err != nil {
+		t.Fatalf("Switch: %v", err)
+	}
+	wgMgr.mu.Lock()
+	defer wgMgr.mu.Unlock()
+	if wgMgr.pinCount != 0 {
+		t.Errorf("PinEndpointRoutes called %d times with no running device, want 0", wgMgr.pinCount)
+	}
+}

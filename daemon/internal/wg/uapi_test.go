@@ -187,3 +187,16 @@ AllowedIPs = 0.0.0.0/0, ::/0
 		})
 	}
 }
+
+func TestStripListenPort(t *testing.T) {
+	in := "[Interface]\nPrivateKey = YWJjZGVmZw==\nListenPort = 51820\nlistenport=1\n[Peer]\nPublicKey = eHl6MTIzNDU=\n"
+	got := stripListenPort(in)
+	if strings.Contains(strings.ToLower(got), "listenport") {
+		t.Fatalf("ListenPort survived: %q", got)
+	}
+	for _, keep := range []string{"PrivateKey = YWJjZGVmZw==", "[Peer]", "PublicKey = eHl6MTIzNDU="} {
+		if !strings.Contains(got, keep) {
+			t.Fatalf("%q missing from %q", keep, got)
+		}
+	}
+}

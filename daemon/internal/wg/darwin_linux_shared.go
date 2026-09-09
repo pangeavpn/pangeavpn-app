@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"golang.zx2c4.com/wireguard/conn"
 	"golang.zx2c4.com/wireguard/device"
@@ -797,6 +798,14 @@ func shouldSkipEndpointRouteIP(ip net.IP) bool {
 		ip.IsLinkLocalMulticast() || ip.IsLinkLocalUnicast()
 }
 
+// hostResolveTimeout caps a lookup whose context has no deadline: mid-switch
+// it would otherwise hang on a tunnel that is already a black hole.
+const hostResolveTimeout = 5 * time.Second
+
+var lookupHostIPs = func(ctx context.Context, host string) ([]net.IP, error) {
+	return net.DefaultResolver.LookupIP(ctx, "ip", host)
+}
+
 func resolveHostIPs(ctx context.Context, host string) ([]net.IP, error) {
 	if host == "" {
 		return nil, nil
@@ -804,7 +813,12 @@ func resolveHostIPs(ctx context.Context, host string) ([]net.IP, error) {
 	if ip := net.ParseIP(host); ip != nil {
 		return []net.IP{ip}, nil
 	}
-	ips, err := net.DefaultResolver.LookupIP(ctx, "ip", host)
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, hostResolveTimeout)
+		defer cancel()
+	}
+	ips, err := lookupHostIPs(ctx, host)
 	if err != nil {
 		return nil, fmt.Errorf("resolve endpoint host %q: %w", host, err)
 	}

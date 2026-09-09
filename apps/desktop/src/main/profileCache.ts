@@ -136,3 +136,14 @@ export function commitProfileSet<T extends { id: string }>(
     winner
   ];
 }
+
+/** Hop profiles carry the entry in their id; a cached single-hop peer must never stand in for one. */
+export function profileIdFor(serverId: string, entryServerId: string | null): string {
+  return entryServerId ? `auto-${serverId}-via-${entryServerId}` : `auto-${serverId}`;
+}
+
+/** The exit a managed profile was provisioned for; null for anything the app did not provision. */
+export function serverIdForProfile(profileId: string): string | null {
+  const match = /^auto-(.+?)(?:-via-.+)?$/.exec(profileId);
+  return match ? match[1] : null;
+}
