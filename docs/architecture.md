@@ -115,6 +115,7 @@ client for the HTTP API registered in
 | `POST` | `/killswitch/permit` | Permit hub control-plane IPv4 addresses through Lockdown |
 | `POST` | `/killswitch/clear` | Clear an inactive-session lock |
 | `GET` | `/logs?since=<id>` | Read in-memory daemon log entries |
+| `POST` | `/pq/offer`, `/pq/finish`, `/pq/encapsulate` | ML-KEM-768 key material for the peer's pre-shared key and the hub channel |
 | `GET`, `POST` | `/config` | Read or replace stored profiles |
 
 Body-bearing routes are limited to 1 MiB, requests are rate-limited, Bearer
@@ -230,9 +231,11 @@ sequenceDiagram
 
 For each server candidate, the main process:
 
-1. generates a fresh WireGuard key pair;
-2. registers the public key with the hub;
-3. builds an `auto-<serverId>` daemon profile;
+1. generates a fresh WireGuard key pair and asks the daemon for a
+   post-quantum offer (`/pq/offer`);
+2. registers the public key and the offer with the hub;
+3. turns the node's answer into the peer's `PresharedKey` (`/pq/finish`)
+   and builds an `auto-<serverId>` daemon profile;
 4. stores the profile through `/config`;
 5. calls `/connect`, or `/switch` when replacing an active connection.
 
@@ -497,5 +500,6 @@ managed Windows and macOS installations.
 | Connection state machine | [`daemon/internal/api/service.go`](../daemon/internal/api/service.go) |
 | State and profile structures | [`daemon/internal/state/types.go`](../daemon/internal/state/types.go) |
 | WireGuard backends | [`daemon/internal/wg`](../daemon/internal/wg) |
+| Post-quantum key exchange | [`daemon/internal/pq`](../daemon/internal/pq), [Post-quantum protection](post-quantum.md) |
 | Kill-switch backends | [`daemon/internal/platform`](../daemon/internal/platform) |
 | Build and installer model | [Binaries and Packaging](binaries-and-packaging.md) |
