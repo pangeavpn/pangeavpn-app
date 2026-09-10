@@ -5,7 +5,8 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"math/rand/v2"
+	"crypto/rand"
+	"encoding/binary"
 	"net"
 	"os"
 	"strconv"
@@ -173,7 +174,12 @@ func (m *inProcessManager) Start(ctx context.Context, profile state.CloakProfile
 
 	// Seed from a fresh random value each Start so a reconnect before the
 	// server reaps the previous session doesn't reuse its SessionId.
-	sessionCounter := rand.Uint32()
+	var idBuf [4]byte
+	if _, err := rand.Read(idBuf[:]); err != nil {
+		m.logs.Add(state.LogError, state.SourceCloak, fmt.Sprintf("failed to generate random session ID: %v", err))
+		return nil
+	}
+	sessionCounter := binary.BigEndian.Uint32(idBuf[:])
 	newSession := func() *mux.Session {
 		sessionCounter++
 		authInfo.SessionId = sessionCounter
