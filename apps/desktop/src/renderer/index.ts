@@ -101,6 +101,7 @@ const serverRotateBtn = document.getElementById("serverRotateBtn") as HTMLButton
 const heroPath = document.getElementById("heroPath") as HTMLElement;
 const heroPathEntry = document.getElementById("heroPathEntry") as HTMLElement;
 const heroPathExit = document.getElementById("heroPathExit") as HTMLElement;
+const heroPq = document.getElementById("heroPq") as HTMLElement;
 const heroServerLabel = document.getElementById("heroServerLabel") as HTMLElement;
 const multihopPanel = document.getElementById("multihopPanel") as HTMLElement;
 const multihopToggle = document.getElementById("multihopToggle") as HTMLInputElement;
@@ -830,6 +831,13 @@ function fillPathNode(el: HTMLElement, server: ServerInfo | null, roleKey: Messa
   el.replaceChildren(buildFlag(server?.country ?? "", "hero-path-flag"), name);
 }
 
+/** Sub-pixel accurate: scrollWidth rounds away an overflow that still triggers the ellipsis. */
+function isTextClipped(el: HTMLElement): boolean {
+  const range = document.createRange();
+  range.selectNodeContents(el);
+  return range.getBoundingClientRect().width > el.getBoundingClientRect().width + 0.5;
+}
+
 function renderHeroPath(): void {
   const labelKey: MessageKey = multihopActive() ? "multihop.exitRegions" : "hero.region";
   heroServerLabel.dataset.i18n = labelKey;
@@ -847,8 +855,8 @@ function renderHeroPath(): void {
   const live = connected && activeEntryId !== null;
   const entry = live ? servers.find((s) => s.id === activeEntryId) ?? null : entryFor(exitId);
   const exit = servers.find((s) => s.id === exitId) ?? null;
-  // The state text shares the row, so a longer one leaves the chip less room.
-  const key = [live, entry?.id ?? "", exit?.id ?? "", localeTag(), stateEl.textContent].join("|");
+  // The state text and PQ chip share the row, so either leaves this chip less room.
+  const key = [live, entry?.id ?? "", exit?.id ?? "", localeTag(), stateEl.textContent, heroPq.hidden].join("|");
   if (key === heroPathKey) return;
   heroPathKey = key;
   heroPath.dataset.live = String(live);
@@ -857,7 +865,7 @@ function renderHeroPath(): void {
   // Flags alone beat clipped names when the row is tight.
   heroPath.classList.remove("is-compact");
   const names = Array.from(heroPath.querySelectorAll<HTMLElement>(".hero-path-name"));
-  if (names.some((name) => name.scrollWidth > name.clientWidth + 1)) heroPath.classList.add("is-compact");
+  if (names.some(isTextClipped)) heroPath.classList.add("is-compact");
   heroPath.setAttribute(
     "aria-label",
     t("multihop.pathAria", {
@@ -3183,10 +3191,9 @@ function renderStatus(status: StatusResponse): void {
     : status.connectingTransport
       ? `${TRANSPORT_LABELS[status.connectingTransport] ?? status.connectingTransport}…`
       : EM_DASH;
-  // A post-quantum keyed tunnel looks like any other; this is its only tell.
-  const postQuantum = connected && wg.postQuantum === true;
-  factViaEl.textContent = postQuantum ? `${viaLabel} · PQ` : viaLabel;
-  factViaEl.title = postQuantum ? t("hero.postQuantum") : "";
+  factViaEl.textContent = viaLabel;
+  // A post-quantum keyed tunnel looks like any other; the chip is its only tell.
+  heroPq.hidden = !(connected && wg.postQuantum === true);
   renderSessionClock();
 
   // Recovery toast — cloak was down last poll, now it's back

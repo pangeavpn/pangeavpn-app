@@ -78,6 +78,7 @@ export const fa = {
   "hero.killSwitchBlocking": "کلید قطع اضطراری فعال است — اینترنت تا بازگشت VPN متوقف است. «قطع اتصال» را بزنید تا بدون VPN آنلاین شوید.",
   "hero.killSwitchLockdown": "حالت Lockdown فعال است",
   "hero.postQuantum": "تونل با محافظت پساکوانتومی",
+  "hero.postQuantumBadge": "PQ",
   "state.KILL_SWITCH": "کلید قطع اضطراری فعال",
   "hero.headline.KILL_SWITCH": "هیچ چیز {x}",
   "hero.emphasis.KILL_SWITCH": "عبور نمی‌کند",

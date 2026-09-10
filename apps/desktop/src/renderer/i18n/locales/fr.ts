@@ -78,6 +78,7 @@ export const fr = {
   "hero.killSwitchBlocking": "Le kill switch est actif : Internet est en pause jusqu'au retour du VPN. Appuyez sur Se déconnecter pour naviguer sans VPN.",
   "hero.killSwitchLockdown": "Le mode Lockdown est activé",
   "hero.postQuantum": "Tunnel protégé post-quantique",
+  "hero.postQuantumBadge": "PQ",
   "state.KILL_SWITCH": "KILL SWITCH ACTIF",
   "hero.headline.KILL_SWITCH": "Rien ne {x}",
   "hero.emphasis.KILL_SWITCH": "passe",

@@ -78,6 +78,7 @@ export const en = {
   "hero.killSwitchBlocking": "Kill switch is on — internet is paused until the VPN is back. Press Disconnect to go online without VPN.",
   "hero.killSwitchLockdown": "Lockdown is on",
   "hero.postQuantum": "Post-quantum protected tunnel",
+  "hero.postQuantumBadge": "PQ",
   "state.KILL_SWITCH": "KILL SWITCH ARMED",
   "hero.headline.KILL_SWITCH": "Nothing gets {x}",
   "hero.emphasis.KILL_SWITCH": "through",
