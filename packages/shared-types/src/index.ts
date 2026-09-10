@@ -185,7 +185,9 @@ export const StatusResponseSchema = z.object({
     bytesIn: z.number().default(0),
     bytesOut: z.number().default(0),
     // Connection readiness gates on this; older daemons omit it.
-    lastHandshakeUnix: z.number().optional()
+    lastHandshakeUnix: z.number().optional(),
+    // Every peer carries an ML-KEM-derived pre-shared key. Older daemons omit it.
+    postQuantum: z.boolean().default(false)
   }),
   killSwitchActive: z.boolean().default(false),
   // An ERROR the daemon is still retrying by itself, after a session dropped

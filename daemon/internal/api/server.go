@@ -466,6 +466,8 @@ func NewHandler(token string, service *Service) http.Handler {
 		writeJSON(w, http.StatusOK, service.Logs(since))
 	}))
 
+	registerPostQuantumRoutes(mux, token, limiter)
+
 	mux.Handle("/config", withAuthAndLimit(token, limiter, func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:

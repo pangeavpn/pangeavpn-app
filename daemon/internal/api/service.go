@@ -2243,6 +2243,8 @@ func (s *Service) Status(ctx context.Context) state.StatusResponse {
 		} else {
 			wgStatus = result
 		}
+		// The key is write-only over the UAPI; the config is what still knows.
+		wgStatus.PostQuantum = wg.HasPresharedKey(profile.WireGuard.ConfigText)
 	}
 
 	return state.StatusResponse{

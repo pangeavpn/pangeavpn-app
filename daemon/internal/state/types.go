@@ -59,6 +59,8 @@ type WireGuardStatus struct {
 	// interface can be Running with no handshake (device up, peer unreached),
 	// which is why connection readiness gates on this, not on Running alone.
 	LastHandshakeUnix int64 `json:"lastHandshakeUnix"`
+	// PostQuantum is true when every peer carries an ML-KEM-derived pre-shared key.
+	PostQuantum bool `json:"postQuantum"`
 }
 
 type StatusResponse struct {
