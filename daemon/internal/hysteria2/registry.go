@@ -4,6 +4,7 @@ import (
 	"context"
 
 	box "github.com/sagernet/sing-box"
+	"github.com/sagernet/sing-box/adapter/certificate"
 	"github.com/sagernet/sing-box/adapter/endpoint"
 	"github.com/sagernet/sing-box/adapter/inbound"
 	"github.com/sagernet/sing-box/adapter/outbound"
@@ -47,5 +48,5 @@ func dnsTransportRegistry() *dns.TransportRegistry {
 // newBoxContext builds a context carrying the minimal registries above, the
 // prerequisite box.New expects for constructing inbounds/outbounds/DNS.
 func newBoxContext(ctx context.Context) context.Context {
-	return box.Context(ctx, inboundRegistry(), outboundRegistry(), endpoint.NewRegistry(), dnsTransportRegistry(), boxService.NewRegistry())
+	return box.Context(ctx, inboundRegistry(), outboundRegistry(), endpoint.NewRegistry(), dnsTransportRegistry(), boxService.NewRegistry(), certificate.NewRegistry())
 }

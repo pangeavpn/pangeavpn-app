@@ -13,6 +13,7 @@ import (
 	"time"
 
 	box "github.com/sagernet/sing-box"
+	"github.com/sagernet/sing-box/adapter/certificate"
 	"github.com/sagernet/sing-box/adapter/endpoint"
 	"github.com/sagernet/sing-box/adapter/inbound"
 	boxservice "github.com/sagernet/sing-box/adapter/service"
@@ -245,7 +246,7 @@ func randomProxyCredential() (string, string, error) {
 func proxyRegistryContext(ctx context.Context) context.Context {
 	inbounds := inbound.NewRegistry()
 	mixed.RegisterInbound(inbounds)
-	return box.Context(ctx, inbounds, newOutboundRegistry(), endpoint.NewRegistry(), newDNSRegistry(), boxservice.NewRegistry())
+	return box.Context(ctx, inbounds, newOutboundRegistry(), endpoint.NewRegistry(), newDNSRegistry(), boxservice.NewRegistry(), certificate.NewRegistry())
 }
 
 func proxyLoopbackAddr() *badoption.Addr {
