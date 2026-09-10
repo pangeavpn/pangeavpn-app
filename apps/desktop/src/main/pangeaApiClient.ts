@@ -37,8 +37,13 @@ import {
   restoreCachedSubscription,
   type CachedSubscription
 } from "../shared/cachedSubscription";
-import { encryptRequest, decryptResponse, type EncryptedResponse } from "./secureChannel";
+import { sealRequest, type EncryptedResponse, type SealedRequest } from "./secureChannel";
 import { sanitizeLog } from "./logSanitize";
+import {
+  parsePostQuantumAnswer,
+  type PostQuantumOffer,
+  type PostQuantumProvider
+} from "../shared/postQuantum";
 import { DOH_TLS_OPTIONS, fetchViaConnectProxy } from "./hubTransport";
 
 export class AuthError extends Error {
@@ -138,6 +143,8 @@ interface RegisterResponse {
   assignedIP: string;
   dns: string;
   existingConfig?: boolean;
+  /** The node's answer to a post-quantum offer; absent from a server without one. */
+  pq?: unknown;
   /** Present only when the request named an entryRegion. See HopProfileSchema. */
   hop?: {
     singBoxPort: number;
@@ -222,7 +229,7 @@ function uniqueNonEmpty(values: (string | undefined | null)[]): string[] {
 const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 
 // Empty SNI and no cert check are deliberate: every call posts a sealed
-// /v1/secure envelope, so TLS is carrier only. Do not "harden" this.
+// sealed envelope, so TLS is carrier only. Do not "harden" this.
 function fetchDohResolved(
   ip: string,
   hostname: string,
@@ -457,7 +464,8 @@ function buildWireGuardConfig(
   serverPubkey: string,
   cloakLocalPort: number,
   excludeIPs: string[],
-  mtu: number
+  mtu: number,
+  presharedKey: string | null
 ): string {
   const allowedIPs = allowedIPsExcludingAll(excludeIPs).join(", ");
 
@@ -470,6 +478,7 @@ function buildWireGuardConfig(
     "",
     "[Peer]",
     `PublicKey = ${serverPubkey}`,
+    ...(presharedKey ? [`PresharedKey = ${presharedKey}`] : []),
     `Endpoint = 127.0.0.1:${cloakLocalPort}`,
     `AllowedIPs = ${allowedIPs}`,
     "PersistentKeepalive = 25"
@@ -549,6 +558,9 @@ export class PangeaApiClient {
   private ssProxyUsername: string | null = null;
   private ssProxyPassword: string | null = null;
   private shadowsocksHubProxy: ShadowsocksHubProxy | null = null;
+  // The daemon's post-quantum key material. Null leaves peers unkeyed and the
+  // hub channel on v1, exactly as before the exchange existed.
+  private postQuantum: PostQuantumProvider | null = null;
   // Control-plane credentials from the last good /api/client/regions, restored
   // from settings.json at startup — a cold install behind a block has none.
   // Every node the hub named, not just one: a node whose key has rotated past
@@ -651,6 +663,39 @@ export class PangeaApiClient {
   setShadowsocksHubProxy(proxy: ShadowsocksHubProxy | null): void {
     this.shadowsocksHubProxy = proxy;
     this.resetHubResolution();
+  }
+
+  /** Supplies the daemon's post-quantum routes. */
+  setPostQuantum(provider: PostQuantumProvider | null): void {
+    this.postQuantum = provider;
+  }
+
+  /** A daemon that cannot offer an exchange is no reason not to connect. */
+  private async offerPostQuantum(): Promise<PostQuantumOffer | null> {
+    if (!this.postQuantum) return null;
+    try {
+      return await this.postQuantum.pqOffer();
+    } catch (err) {
+      console.log(`[PQ] No offer from the daemon; registering without a pre-shared key: ${sanitizeLog(err)}`);
+      return null;
+    }
+  }
+
+  // Null when nobody answered the offer; a broken answer throws, because the
+  // node has already keyed its side of the peer.
+  private async finishPostQuantum(offer: PostQuantumOffer | null, raw: unknown): Promise<string | null> {
+    const answer = parsePostQuantumAnswer(offer, raw);
+    if (!offer || !answer || !this.postQuantum) {
+      if (offer) console.log("[PQ] Server did not answer the post-quantum offer; peer is not post-quantum keyed");
+      return null;
+    }
+    return this.postQuantum.pqFinish(offer.id, answer);
+  }
+
+  /** Seals a hub request, on v2 when the daemon can encapsulate for it. */
+  private sealRequest(method: string, route: string, headers: Record<string, string>, body?: unknown): Promise<SealedRequest> {
+    const provider = this.postQuantum;
+    return sealRequest(method, route, headers, body, provider ? (algorithm, key) => provider.pqEncapsulate(algorithm, key) : null);
   }
 
   /** The proxy port currently carrying hub traffic, for diagnostics. */
@@ -827,12 +872,12 @@ export class PangeaApiClient {
   }
 
   /**
-   * Verify that /v1/secure is reachable and decryptable on the currently
+   * Verify that the secure route is reachable and decryptable on the currently
    * selected transport path (direct domain when nothing else is selected, and
    * otherwise the Shadowsocks proxy, an edge relay, or a DoH-resolved IP).
    *
    * Uses /api/client/regions as the inner probe route because the hub's
-   * /v1/secure handler enforces an ALLOWED_ROUTES whitelist; unauthenticated
+   * secure handler enforces an ALLOWED_ROUTES whitelist; unauthenticated
    * routes like /health are rejected with 403 before the crypto roundtrip
    * completes. An unauthenticated call returns inner status 401 inside a
    * successfully-decrypted envelope, which is all the probe needs.
@@ -857,13 +902,13 @@ export class PangeaApiClient {
   }
 
   private async probeSecurePath(path: HubProbePath): Promise<boolean> {
-    const { envelope, aesKey } = encryptRequest("GET", "/api/client/regions", {}, undefined);
-    const envelopeJson = JSON.stringify(envelope);
+    const sealed = await this.sealRequest("GET", "/api/client/regions", {}, undefined);
+    const envelopeJson = JSON.stringify(sealed.envelope);
 
     try {
       let rawResponse: Response;
       if (path.kind === "proxy") {
-        rawResponse = await fetchViaConnectProxy(path.port, HUB_HOSTNAME, HUB_HOSTNAME, "/v1/secure", {
+        rawResponse = await fetchViaConnectProxy(path.port, HUB_HOSTNAME, HUB_HOSTNAME, sealed.route, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: envelopeJson,
@@ -872,14 +917,14 @@ export class PangeaApiClient {
           proxyPassword: path.password
         });
       } else if (path.kind === "fronted") {
-        rawResponse = await fetchFronted(path.host, "/v1/secure", {
+        rawResponse = await fetchFronted(path.host, sealed.route, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: envelopeJson,
           timeoutMs: 8000
         });
       } else if (path.kind === "ip") {
-        rawResponse = await fetchDohResolved(path.ip, HUB_HOSTNAME, "/v1/secure", {
+        rawResponse = await fetchDohResolved(path.ip, HUB_HOSTNAME, sealed.route, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: envelopeJson,
@@ -889,7 +934,7 @@ export class PangeaApiClient {
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), 5000);
         try {
-          rawResponse = await net.fetch(`https://${path.host}/v1/secure`, {
+          rawResponse = await net.fetch(`https://${path.host}${sealed.route}`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: envelopeJson,
@@ -910,7 +955,7 @@ export class PangeaApiClient {
       }
 
       const encryptedResponse = JSON.parse(responseText) as EncryptedResponse;
-      decryptResponse(aesKey, encryptedResponse);
+      sealed.open(encryptedResponse);
       return true;
     } catch (err) {
       console.log(`[HubURL] Secure probe failed: ${sanitizeLog(err)}`);
@@ -1351,16 +1396,14 @@ export class PangeaApiClient {
     const headers = options.headers ?? {};
     const bodyObj = options.body ? JSON.parse(options.body) : undefined;
 
-    // Encrypt the inner request
-    const { envelope, aesKey } = encryptRequest(method, path, headers, bodyObj);
-    const envelopeJson = JSON.stringify(envelope);
+    const sealed = await this.sealRequest(method, path, headers, bodyObj);
+    const envelopeJson = JSON.stringify(sealed.envelope);
 
-    // Send encrypted envelope to /v1/secure
     let rawResponse: Response;
     if (this.ssProxyPort) {
       // CONNECT names the hub by hostname: the node resolves it, so a client
       // with no cached IP still gets through.
-      rawResponse = await fetchViaConnectProxy(this.ssProxyPort, HUB_HOSTNAME, HUB_HOSTNAME, "/v1/secure", {
+      rawResponse = await fetchViaConnectProxy(this.ssProxyPort, HUB_HOSTNAME, HUB_HOSTNAME, sealed.route, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: envelopeJson,
@@ -1370,7 +1413,7 @@ export class PangeaApiClient {
         proxyPassword: this.ssProxyPassword ?? undefined
       });
     } else if (this.frontedHost) {
-      rawResponse = await fetchFronted(this.frontedHost, "/v1/secure", {
+      rawResponse = await fetchFronted(this.frontedHost, sealed.route, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: envelopeJson,
@@ -1378,7 +1421,7 @@ export class PangeaApiClient {
         signal: options.signal
       });
     } else if (this.dohResolvedIp) {
-      rawResponse = await fetchDohResolved(this.dohResolvedIp, HUB_HOSTNAME, "/v1/secure", {
+      rawResponse = await fetchDohResolved(this.dohResolvedIp, HUB_HOSTNAME, sealed.route, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: envelopeJson,
@@ -1398,7 +1441,7 @@ export class PangeaApiClient {
         else options.signal.addEventListener("abort", onExternalAbort, { once: true });
       }
       try {
-        rawResponse = await net.fetch(`https://${this.normalHost}/v1/secure`, {
+        rawResponse = await net.fetch(`https://${this.normalHost}${sealed.route}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: envelopeJson,
@@ -1415,7 +1458,7 @@ export class PangeaApiClient {
               this.dohResolvedIp = resolvedIp;
               this.rememberHubIp(resolvedIp);
               this.setActiveHubMethod("directIp", resolvedIp);
-              rawResponse = await fetchDohResolved(resolvedIp, HUB_HOSTNAME, "/v1/secure", {
+              rawResponse = await fetchDohResolved(resolvedIp, HUB_HOSTNAME, sealed.route, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: envelopeJson,
@@ -1463,7 +1506,7 @@ export class PangeaApiClient {
               // best-effort teardown
             });
           }
-          const retryResponse = await fetchDohResolved(resolvedIp, HUB_HOSTNAME, "/v1/secure", {
+          const retryResponse = await fetchDohResolved(resolvedIp, HUB_HOSTNAME, sealed.route, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: envelopeJson,
@@ -1478,7 +1521,7 @@ export class PangeaApiClient {
           }
           this.rememberHubIp(resolvedIp);
           const retryEncrypted = JSON.parse(retryText) as EncryptedResponse;
-          const retryInner = decryptResponse(aesKey, retryEncrypted);
+          const retryInner = sealed.open(retryEncrypted);
           return new Response(JSON.stringify(retryInner.body), {
             status: retryInner.status,
             headers: { "Content-Type": "application/json" },
@@ -1490,7 +1533,7 @@ export class PangeaApiClient {
 
     // Decrypt the response
     const encryptedResponse = JSON.parse(responseText) as EncryptedResponse;
-    const inner = decryptResponse(aesKey, encryptedResponse);
+    const inner = sealed.open(encryptedResponse);
 
     return new Response(JSON.stringify(inner.body), {
       status: inner.status,
@@ -1746,6 +1789,8 @@ export class PangeaApiClient {
 
     // Ephemeral WG keypair — generated fresh per connection, never stored
     const keyPair = generateWireGuardKeyPair();
+    // The daemon keeps the secret half; only the public key travels.
+    const pqOffer = await this.offerPostQuantum();
 
     const reg = await this.hubRequest<RegisterResponse>(
       "POST",
@@ -1755,7 +1800,8 @@ export class PangeaApiClient {
         identityPubkey: this.identityPubkey,
         wgPubkey: keyPair.publicKey,
         region: serverId,
-        ...(isMultihop ? { entryRegion: entryServerId } : {})
+        ...(isMultihop ? { entryRegion: entryServerId } : {}),
+        ...(pqOffer ? { pq: { algorithm: pqOffer.algorithm, kemPublicKey: pqOffer.kemPublicKey } } : {})
       },
       signal
     );
@@ -1803,6 +1849,8 @@ export class PangeaApiClient {
     // It stays release-gated in the daemon (see snowflakeReleaseGated), and
     // ungating it needs its rendezvous addresses to come from the hub too.
 
+    const presharedKey = await this.finishPostQuantum(pqOffer, reg.pq);
+
     const cloakLocalPort = 51820;
     const configText = buildWireGuardConfig(
       keyPair.privateKey,
@@ -1811,7 +1859,8 @@ export class PangeaApiClient {
       reg.serverPubkey,
       cloakLocalPort,
       excludeIPs,
-      this.wireguardMtu
+      this.wireguardMtu,
+      presharedKey
     );
 
     return {

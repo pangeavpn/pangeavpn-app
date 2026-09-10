@@ -77,6 +77,7 @@ export const ru = {
   "hero.noServersForTransport": "Нет серверов с поддержкой этого транспорта",
   "hero.killSwitchBlocking": "Kill switch включён — интернет приостановлен, пока VPN не восстановится. Нажмите «Отключить», чтобы выйти в сеть без VPN.",
   "hero.killSwitchLockdown": "Режим Lockdown включён",
+  "hero.postQuantum": "Туннель с постквантовой защитой",
   "state.KILL_SWITCH": "KILL SWITCH ВКЛЮЧЁН",
   "hero.headline.KILL_SWITCH": "Ничего не {x}",
   "hero.emphasis.KILL_SWITCH": "проходит",

@@ -2356,6 +2356,10 @@ async function boot(): Promise<void> {
   pangeaApiClient.onServersResolved((servers) => void persistServers(servers));
   pangeaApiClient.onSubscriptionResolved((cached) => void persistSubscription(cached));
 
+  // Same split for post-quantum key material: the daemon holds it, the
+  // client only carries public halves to and from the hub.
+  pangeaApiClient.setPostQuantum(daemonClient);
+
   // The daemon owns the proxy; the client only decides when to ask for it.
   pangeaApiClient.setShadowsocksHubProxy({
     start: async (creds) => {

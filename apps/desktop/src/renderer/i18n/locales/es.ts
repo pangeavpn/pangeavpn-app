@@ -77,6 +77,7 @@ export const es = {
   "hero.noServersForTransport": "Ningún servidor admite este transporte",
   "hero.killSwitchBlocking": "El kill switch está activo: internet está en pausa hasta que vuelva la VPN. Pulsa Desconectar para navegar sin VPN.",
   "hero.killSwitchLockdown": "El modo Lockdown está activado",
+  "hero.postQuantum": "Túnel con protección poscuántica",
   "state.KILL_SWITCH": "KILL SWITCH ACTIVO",
   "hero.headline.KILL_SWITCH": "Nada {x}",
   "hero.emphasis.KILL_SWITCH": "pasa",

@@ -77,6 +77,7 @@ export const ar = {
   "hero.noServersForTransport": "لا توجد خوادم تدعم هذا النقل",
   "hero.killSwitchBlocking": "مفتاح الإيقاف مفعّل — الإنترنت متوقف مؤقتًا حتى يعود VPN. اضغط على قطع الاتصال للاتصال بالإنترنت بدون VPN.",
   "hero.killSwitchLockdown": "وضع Lockdown مفعّل",
+  "hero.postQuantum": "نفق محمي بتشفير ما بعد الكم",
   "state.KILL_SWITCH": "مفتاح الإيقاف مفعّل",
   "hero.headline.KILL_SWITCH": "لا شيء {x}",
   "hero.emphasis.KILL_SWITCH": "يمر",

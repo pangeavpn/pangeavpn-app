@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import test from "node:test";
-import { DaemonClient, HostOfflineError, TransportExhaustedError } from "./daemonClient.ts";
+import { DaemonClient, DaemonHttpError, HostOfflineError, TransportExhaustedError } from "./daemonClient.ts";
 
 async function serve(
   t: { after: (fn: () => unknown) => void },
@@ -89,4 +89,41 @@ test("DaemonClient reports a stalled daemon as a timeout", async (t) => {
 
   const client = new DaemonClient(baseUrl, async () => "token", { defaultRequestTimeoutMs: 200 });
   await assert.rejects(client.getStatus(), /daemon request timeout \(GET \/status\)/);
+});
+
+test("DaemonClient reports a missing post-quantum route as no offer", async (t) => {
+  const { baseUrl } = await serve(t, (_req, res) => {
+    res.writeHead(404, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "not found" }));
+  });
+
+  const client = new DaemonClient(baseUrl, async () => "token");
+  assert.equal(await client.pqOffer(), null);
+  assert.equal(await client.pqEncapsulate("ml-kem-768", "AAAA"), null);
+});
+
+test("DaemonClient surfaces a post-quantum failure other than 404", async (t) => {
+  const { baseUrl } = await serve(t, (req, res) => {
+    res.writeHead(req.url === "/pq/offer" ? 500 : 400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "pq: unknown or expired offer" }));
+  });
+
+  const client = new DaemonClient(baseUrl, async () => "token");
+  await assert.rejects(client.pqOffer(), DaemonHttpError);
+  await assert.rejects(client.pqFinish("id", { algorithm: "ml-kem-768", kemCiphertext: "AAAA" }), /expired offer/);
+});
+
+test("DaemonClient hands back the daemon's pre-shared key", async (t) => {
+  const { baseUrl } = await serve(t, (req, res) => {
+    let raw = "";
+    req.on("data", (chunk) => (raw += chunk));
+    req.on("end", () => {
+      assert.deepEqual(JSON.parse(raw), { id: "abc", algorithm: "ml-kem-768", kemCiphertext: "Y3Q=" });
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ presharedKey: "cHNr" }));
+    });
+  });
+
+  const client = new DaemonClient(baseUrl, async () => "token");
+  assert.equal(await client.pqFinish("abc", { algorithm: "ml-kem-768", kemCiphertext: "Y3Q=" }), "cHNr");
 });

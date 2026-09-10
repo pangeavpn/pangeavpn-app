@@ -8,6 +8,13 @@ import type {
   StatusResponse
 } from "@pangeavpn/shared-types";
 
+import type {
+  Encapsulation,
+  PostQuantumAnswer,
+  PostQuantumOffer,
+  PostQuantumProvider
+} from "../shared/postQuantum.ts";
+
 export class TransportExhaustedError extends Error {
   constructor() {
     super("All configured transports failed");
@@ -23,7 +30,18 @@ export class HostOfflineError extends Error {
   }
 }
 
-export class DaemonClient {
+/** Any non-2xx daemon reply; the status tells an old daemon from a broken one. */
+export class DaemonHttpError extends Error {
+  readonly status: number;
+
+  constructor(status: number, text: string) {
+    super(`daemon request failed (${status}): ${text}`);
+    this.name = "DaemonHttpError";
+    this.status = status;
+  }
+}
+
+export class DaemonClient implements PostQuantumProvider {
   private readonly baseUrl: string;
   private readonly tokenProvider: () => Promise<string | string[]>;
   private readonly defaultRequestTimeoutMs: number;
@@ -67,6 +85,34 @@ export class DaemonClient {
       body.preferredTransport = opts.preferredTransport;
     }
     return this.request<OkResponse>("POST", "/connect", body, this.connectTimeoutMs, signal);
+  }
+
+  async pqOffer(): Promise<PostQuantumOffer | null> {
+    return this.orNullOnMissingRoute(this.request<PostQuantumOffer>("POST", "/pq/offer"));
+  }
+
+  async pqFinish(id: string, answer: PostQuantumAnswer): Promise<string> {
+    const reply = await this.request<{ presharedKey: string }>("POST", "/pq/finish", { id, ...answer });
+    if (typeof reply.presharedKey !== "string" || reply.presharedKey === "") {
+      throw new Error("daemon returned no pre-shared key");
+    }
+    return reply.presharedKey;
+  }
+
+  async pqEncapsulate(algorithm: string, kemPublicKey: string): Promise<Encapsulation | null> {
+    return this.orNullOnMissingRoute(
+      this.request<Encapsulation>("POST", "/pq/encapsulate", { algorithm, kemPublicKey })
+    );
+  }
+
+  /** A daemon from before a route answers 404; callers treat that as "not offered". */
+  private async orNullOnMissingRoute<T>(pending: Promise<T>): Promise<T | null> {
+    try {
+      return await pending;
+    } catch (error) {
+      if (error instanceof DaemonHttpError && error.status === 404) return null;
+      throw error;
+    }
   }
 
   /** Starts the hub Shadowsocks proxy; resolves to its loopback port and CONNECT auth. */
@@ -266,7 +312,7 @@ export class DaemonClient {
           } catch (error) {
             if (error instanceof TransportExhaustedError || error instanceof HostOfflineError) throw error;
           }
-          throw new Error(`daemon request failed (${reply.status}): ${reply.text}`);
+          throw new DaemonHttpError(reply.status, reply.text);
         }
 
         return JSON.parse(reply.text) as T;

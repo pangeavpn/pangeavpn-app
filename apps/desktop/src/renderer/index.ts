@@ -3178,11 +3178,15 @@ function renderStatus(status: StatusResponse): void {
   txBytesEl.textContent = connected ? formatBytes(wg.bytesOut ?? 0) : EM_DASH;
   // Mid-connect, name the candidate the cascade is trying; the trailing
   // ellipsis marks it as an attempt rather than an established session.
-  factViaEl.textContent = status.activeTransport
+  const viaLabel = status.activeTransport
     ? TRANSPORT_LABELS[status.activeTransport] ?? status.activeTransport
     : status.connectingTransport
       ? `${TRANSPORT_LABELS[status.connectingTransport] ?? status.connectingTransport}…`
       : EM_DASH;
+  // A post-quantum keyed tunnel looks like any other; this is its only tell.
+  const postQuantum = connected && wg.postQuantum === true;
+  factViaEl.textContent = postQuantum ? `${viaLabel} · PQ` : viaLabel;
+  factViaEl.title = postQuantum ? t("hero.postQuantum") : "";
   renderSessionClock();
 
   // Recovery toast — cloak was down last poll, now it's back
