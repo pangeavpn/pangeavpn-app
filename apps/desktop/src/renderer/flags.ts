@@ -3,6 +3,8 @@
 
 const FLAGS: Record<string, string> = {
   NL: '<rect width="30" height="21" fill="#21468B"/><rect width="30" height="14" fill="#fff"/><rect width="30" height="7" fill="#AE1C28"/>',
+  PL: '<rect width="30" height="21" fill="#fff"/><rect y="10.5" width="30" height="10.5" fill="#DC143C"/>',
+  CH: '<rect width="30" height="21" fill="#D52B1E"/><rect x="13" y="4" width="4" height="13" fill="#fff"/><rect x="8.5" y="8.5" width="13" height="4" fill="#fff"/>',
   DE: '<rect width="30" height="7" fill="#000"/><rect y="7" width="30" height="7" fill="#DD0000"/><rect y="14" width="30" height="7" fill="#FFCE00"/>',
   FR: '<rect width="30" height="21" fill="#ED2939"/><rect width="20" height="21" fill="#fff"/><rect width="10" height="21" fill="#002395"/>',
   SE: '<rect width="30" height="21" fill="#006AA7"/><rect x="8" width="4.5" height="21" fill="#FECC00"/><rect y="8.5" width="30" height="4.5" fill="#FECC00"/>',
@@ -23,12 +25,17 @@ const GLOBE =
 
 const NS = "http://www.w3.org/2000/svg";
 
+const normalise = (country: string): string => country.trim().toUpperCase();
+
+/** True when `country` (ISO-3166 alpha-2) has a drawn flag rather than the globe. */
+export const hasFlag = (country: string): boolean => normalise(country) in FLAGS;
+
 /** 30x21 flag for an ISO-3166 alpha-2 code; a globe when unknown or absent. */
 export function buildFlag(country: string, className = "region-flag"): SVGSVGElement {
   const svg = document.createElementNS(NS, "svg");
   svg.setAttribute("viewBox", "0 0 30 21");
   svg.setAttribute("class", className);
   svg.setAttribute("aria-hidden", "true");
-  svg.innerHTML = FLAGS[country.trim().toUpperCase()] ?? GLOBE;
+  svg.innerHTML = FLAGS[normalise(country)] ?? GLOBE;
   return svg;
 }
