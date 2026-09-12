@@ -240,7 +240,8 @@ function updateSettingsSummaries(): void {
   const dnsChoice = dnsPresetSelect.selectedOptions[0];
   if (dnsPresetSelect.value !== "automatic" && dnsChoice) network.push(dnsChoice.textContent ?? "DNS");
   if (allowLanToggle.checked) network.push(t("settings.network.allowLan.title"));
-  if (postQuantumToggle.checked) network.push(t("settings.network.postQuantum.title"));
+  // The badge, not the title: the full name overflows the nav summary line.
+  if (postQuantumToggle.checked) network.push(t("hero.postQuantumBadge"));
   setNetworkValue.textContent = network.join(" · ");
 
   const startup: string[] = [];
