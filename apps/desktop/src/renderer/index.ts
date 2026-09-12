@@ -143,6 +143,7 @@ const settingsOverlayCloseBtn = document.getElementById("settingsOverlayCloseBtn
 const settingsPane = document.getElementById("settingsPane") as HTMLElement;
 const settingsNav = document.getElementById("settingsNav") as HTMLElement;
 const settingsAccountActions = document.getElementById("settingsAccountActions") as HTMLElement;
+const settingsAccountBar = document.getElementById("settingsAccountBar") as HTMLElement;
 const accountSubscription = document.getElementById("accountSubscription") as HTMLSpanElement;
 const setProvisioningValue = document.getElementById("setProvisioningValue") as HTMLSpanElement;
 const setTransportValue = document.getElementById("setTransportValue") as HTMLSpanElement;
@@ -427,6 +428,7 @@ function openSettings(): void {
   // Signed out, the account rows have nothing to act on — Settings is still
   // reachable from the sign-in screen for language, theme and bypass methods.
   settingsAccountActions.hidden = !authState.authenticated;
+  settingsAccountBar.hidden = !authState.authenticated;
   if (authState.authenticated) void refreshSubscription();
   activateOverlay(settingsOverlay);
 }
