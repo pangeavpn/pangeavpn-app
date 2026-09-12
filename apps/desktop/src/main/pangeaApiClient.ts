@@ -561,6 +561,9 @@ export class PangeaApiClient {
   // The daemon's post-quantum key material. Null leaves peers unkeyed and the
   // hub channel on v1, exactly as before the exchange existed.
   private postQuantum: PostQuantumProvider | null = null;
+  // Off unless the user asks for it. Gates the tunnel pre-shared key only; the
+  // hub channel stays on v2, which is not the user's to weaken.
+  private postQuantumEnabled = false;
   // Control-plane credentials from the last good /api/client/regions, restored
   // from settings.json at startup — a cold install behind a block has none.
   // Every node the hub named, not just one: a node whose key has rotated past
@@ -670,9 +673,18 @@ export class PangeaApiClient {
     this.postQuantum = provider;
   }
 
+  /** Takes effect on the next connect: the key is agreed at registration. */
+  setPostQuantumEnabled(enabled: boolean): void {
+    this.postQuantumEnabled = enabled;
+  }
+
+  isPostQuantumEnabled(): boolean {
+    return this.postQuantumEnabled;
+  }
+
   /** A daemon that cannot offer an exchange is no reason not to connect. */
   private async offerPostQuantum(): Promise<PostQuantumOffer | null> {
-    if (!this.postQuantum) return null;
+    if (!this.postQuantumEnabled || !this.postQuantum) return null;
     try {
       return await this.postQuantum.pqOffer();
     } catch (err) {

@@ -370,7 +370,7 @@
         <!-- Provisioning -->
         <section id="secProvisioning" class="settings-section">
           <h3 class="settings-section-title" data-i18n="settings.provisioning.heading">Provisioning</h3>
-          <p class="settings-description" data-i18n="settings.provisioning.description">How the app fetches your VPN profile. It tries each method you leave on, in order. Keep at least one on.</p>
+          <p class="settings-description" data-i18n="settings.provisioning.description">Ways to fetch your VPN profile, tried in the order listed. Keep at least one on.</p>
           <button id="provisioningPickerBtn" class="settings-picker" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="provisioningPane">
             <span id="provisioningPickerValue" class="settings-picker-value"></span>
             <span class="settings-picker-chevron" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg></span>
@@ -380,14 +380,21 @@
         <!-- Network -->
         <section id="secNetwork" class="settings-section">
           <h3 class="settings-section-title" data-i18n="settings.network.heading">Network</h3>
-          <p class="settings-description" data-i18n="settings.network.description">Fixes for restrictive Wi-Fi networks.</p>
+          <p class="settings-description" data-i18n="settings.network.description">Tunnel settings and fixes for restrictive Wi-Fi.</p>
           <div class="settings-toggles">
             <label class="toggle-label">
               <span class="toggle-copy">
                 <span class="toggle-title" data-i18n="settings.network.allowLan.title">Allow LAN</span>
-                <span class="toggle-hint" data-i18n="settings.network.allowLan.hint">Lets local traffic (router, printers, captive portals) skip the tunnel. Turn on if your Wi-Fi keeps dropping to "No internet" while connected. Applies on next connect.</span>
+                <span class="toggle-hint" data-i18n="settings.network.allowLan.hint">Lets local traffic (router, printers, captive portals) skip the tunnel. Turn it on if Wi-Fi keeps dropping to "No internet". Applies on next connect.</span>
               </span>
               <input id="allowLanToggle" class="toggle-switch" type="checkbox" />
+            </label>
+            <label class="toggle-label">
+              <span class="toggle-copy">
+                <span class="toggle-title" data-i18n="settings.network.postQuantum.title">Post-quantum key</span>
+                <span class="toggle-hint" data-i18n="settings.network.postQuantum.hint">Adds a quantum-resistant key to the tunnel, so traffic recorded today can't be decrypted later. Applies on next connect.</span>
+              </span>
+              <input id="postQuantumToggle" class="toggle-switch" type="checkbox" />
             </label>
           </div>
           <div class="settings-field">
@@ -404,7 +411,7 @@
               </select>
               <span class="select-chevron"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></span>
             </div>
-            <span class="settings-field-hint" data-i18n="settings.network.dns.provider.hint">Pick a resolver or enter your own. Any filtering comes from that service. Applies on next connect.</span>
+            <span class="settings-field-hint" data-i18n="settings.network.dns.provider.hint">Pick a resolver, or enter your own. Filtering comes from that service. Applies on next connect.</span>
           </div>
           <div id="customDnsField" class="settings-field" hidden>
             <label class="settings-field-label" for="customDnsInput" data-i18n="settings.network.dns.title">Custom DNS</label>
@@ -418,7 +425,7 @@
               data-i18n-placeholder="settings.network.dns.placeholder"
               data-i18n-aria-label="settings.network.dns.title"
             />
-            <span class="settings-field-hint" data-i18n="settings.network.dns.hint">IPv4 addresses, separated by commas. Leave blank for the VPN default. Applies on next connect.</span>
+            <span class="settings-field-hint" data-i18n="settings.network.dns.hint">IPv4 addresses, comma-separated. Blank uses the VPN default. Applies on next connect.</span>
           </div>
           <div class="settings-field">
             <label class="settings-field-label" for="wireguardMtuInput" data-i18n="settings.network.mtu.title">Tunnel MTU</label>
@@ -433,7 +440,7 @@
               inputmode="numeric"
               data-i18n-aria-label="settings.network.mtu.title"
             />
-            <span class="settings-field-hint" data-i18n="settings.network.mtu.hint">Packet size through the tunnel. Lower it if pages hang or downloads stall on a network that otherwise works. Default 1380. Applies on next connect.</span>
+            <span class="settings-field-hint" data-i18n="settings.network.mtu.hint">Packet size through the tunnel. Lower it if pages hang on a network that otherwise works. Default 1380. Applies on next connect.</span>
           </div>
         </section>
 
@@ -445,21 +452,21 @@
             <label class="toggle-label">
               <span class="toggle-copy">
                 <span class="toggle-title" data-i18n="settings.startup.launch.title">Launch at startup</span>
-                <span class="toggle-hint" data-i18n="settings.startup.launch.hint">Starts PangeaVPN when you sign in to your computer. It opens hidden, so use the tray icon.</span>
+                <span class="toggle-hint" data-i18n="settings.startup.launch.hint">Starts PangeaVPN when you sign in. It opens hidden, so use the tray icon.</span>
               </span>
               <input id="launchAtStartupToggle" class="toggle-switch" type="checkbox" />
             </label>
             <label class="toggle-label">
               <span class="toggle-copy">
                 <span class="toggle-title" data-i18n="settings.startup.autoConnect.title">Auto-connect</span>
-                <span class="toggle-hint" data-i18n="settings.startup.autoConnect.hint">Connects to your last server when PangeaVPN starts, and reconnects if the tunnel drops. Stays off until you connect again if you disconnect yourself.</span>
+                <span class="toggle-hint" data-i18n="settings.startup.autoConnect.hint">Connects to your last server on start, and reconnects if the tunnel drops. Disconnecting yourself pauses it until you connect again.</span>
               </span>
               <input id="autoConnectToggle" class="toggle-switch" type="checkbox" />
             </label>
             <label class="toggle-label">
               <span class="toggle-copy">
                 <span class="toggle-title" data-i18n="settings.startup.lockdown.title">Lockdown</span>
-                <span class="toggle-hint" data-i18n="settings.startup.lockdown.hint">Keeps the kill switch on even after you disconnect. Nothing but VPN traffic gets out until you turn this off — including right after your computer starts.</span>
+                <span class="toggle-hint" data-i18n="settings.startup.lockdown.hint">Keeps the kill switch on after you disconnect. Nothing but VPN traffic gets out until you turn it off, including right after your computer starts.</span>
               </span>
               <input id="lockdownToggle" class="toggle-switch" type="checkbox" />
             </label>
@@ -474,7 +481,7 @@
             <label class="toggle-label">
               <span class="toggle-copy">
                 <span class="toggle-title" data-i18n="settings.notifications.status.title">Connection alerts</span>
-                <span class="toggle-hint" data-i18n="settings.notifications.status.hint">Notifies you when the VPN connects, loses its connection, comes back online, or disconnects.</span>
+                <span class="toggle-hint" data-i18n="settings.notifications.status.hint">Tells you when the VPN connects, drops, comes back, or disconnects.</span>
               </span>
               <input id="notificationsToggle" class="toggle-switch" type="checkbox" />
             </label>
@@ -494,7 +501,7 @@
 
         <section id="secAppearance" class="settings-section">
           <h3 class="settings-section-title" data-i18n="settings.appearance.heading">Appearance</h3>
-          <p class="settings-description" data-i18n="settings.appearance.description">Pick the accent colour used across the app.</p>
+          <p class="settings-description" data-i18n="settings.appearance.description">The accent colour used across the app.</p>
           <div id="accentSwatches" class="accent-swatches" role="group" aria-label="Accent colour" data-i18n-aria-label="settings.appearance.accent"></div>
         </section>
 
@@ -507,12 +514,12 @@
         <!-- Developer options: revealed with verbose errors (tap the version 5x) -->
         <section id="secDeveloper" class="settings-section" hidden>
           <h3 class="settings-section-title" data-i18n="settings.developer.heading">Developer Options</h3>
-          <p class="settings-description" data-i18n="settings.developer.description">Diagnostics for debugging. Leave these off unless you were asked to turn one on.</p>
+          <p class="settings-description" data-i18n="settings.developer.description">Debugging diagnostics. Leave these off unless you were asked to turn one on.</p>
           <div class="settings-toggles">
             <label class="toggle-label">
               <span class="toggle-copy">
                 <span class="toggle-title" data-i18n="settings.developer.hubInTunnel.title">Route hub through tunnel</span>
-                <span class="toggle-hint" data-i18n="settings.developer.hubInTunnel.hint">Stops PangeaVPN's own server from being routed around the tunnel, so account and server traffic goes through the VPN too. May slow reconnects and server switches. Applies on next connect.</span>
+                <span class="toggle-hint" data-i18n="settings.developer.hubInTunnel.hint">Sends account and server traffic through the VPN instead of around it. May slow reconnects and server switches. Applies on next connect.</span>
               </span>
               <input id="hubInTunnelToggle" class="toggle-switch" type="checkbox" />
             </label>
@@ -542,7 +549,7 @@
           </button>
           <h3 class="subpane-title" data-i18n="settings.provisioning.heading">Provisioning</h3>
         </div>
-        <p class="settings-description" data-i18n="settings.provisioning.description">How the app fetches your VPN profile. It tries each method you leave on, in order. Keep at least one on.</p>
+        <p class="settings-description" data-i18n="settings.provisioning.description">Ways to fetch your VPN profile, tried in the order listed. Keep at least one on.</p>
         <div class="hub-active">
           <span class="hub-active-dot" id="hubActiveDot" aria-hidden="true"></span>
           <span class="hub-active-text" id="hubActiveText" data-i18n="settings.provisioning.active.none">No method in use yet</span>
@@ -554,7 +561,7 @@
                 <label class="option-title" for="hubDirectIpToggle" data-i18n="settings.provisioning.directIp.title">Direct IP</label>
                 <span class="hub-badge" id="hubDirectIpBadge" data-i18n="settings.provisioning.inUse" hidden>In use</span>
               </span>
-              <span class="option-desc" data-i18n="settings.provisioning.directIp.hint">Connects by IP, with no DNS lookup. The only one that works while the kill switch is locked.</span>
+              <span class="option-desc" data-i18n="settings.provisioning.directIp.hint">Connects by IP, no DNS lookup. The only one that works under lockdown.</span>
               <span class="hub-test-result" id="hubDirectIpResult" role="status" aria-live="polite" hidden></span>
             </span>
             <button id="hubDirectIpTestBtn" class="hub-test-btn" type="button" data-i18n="settings.provisioning.test">Test</button>
@@ -566,7 +573,7 @@
                 <label class="option-title" for="hubShadowsocksToggle" data-i18n="settings.provisioning.hubShadowsocks.title">Shadowsocks</label>
                 <span class="hub-badge" id="hubShadowsocksBadge" data-i18n="settings.provisioning.inUse" hidden>In use</span>
               </span>
-              <span class="option-desc" data-i18n="settings.provisioning.hubShadowsocks.hint">Tunnels account traffic through Shadowsocks, so nobody sees which server you contact. The VPN stays off.</span>
+              <span class="option-desc" data-i18n="settings.provisioning.hubShadowsocks.hint">Tunnels account traffic through Shadowsocks, so nobody sees which server you reach. The VPN stays off.</span>
               <span class="hub-test-result" id="hubShadowsocksResult" role="status" aria-live="polite" hidden></span>
             </span>
             <button id="hubShadowsocksTestBtn" class="hub-test-btn" type="button" data-i18n="settings.provisioning.test">Test</button>
@@ -578,7 +585,7 @@
                 <label class="option-title" for="hubFrontedToggle" data-i18n="settings.provisioning.hubFronted.title">Relay</label>
                 <span class="hub-badge" id="hubFrontedBadge" data-i18n="settings.provisioning.inUse" hidden>In use</span>
               </span>
-              <span class="option-desc" data-i18n="settings.provisioning.hubFronted.hint">Goes through a relay on a large content network, at an address shared with much of the web and costly to block. The relay only passes on sealed data it cannot read.</span>
+              <span class="option-desc" data-i18n="settings.provisioning.hubFronted.hint">Goes through a relay on a large content network, at an address too widely shared to block cheaply. The relay can't read what it passes on.</span>
               <span class="hub-test-result" id="hubFrontedResult" role="status" aria-live="polite" hidden></span>
             </span>
             <button id="hubFrontedTestBtn" class="hub-test-btn" type="button" data-i18n="settings.provisioning.test">Test</button>
@@ -590,21 +597,21 @@
                 <label class="option-title" for="hubNormalToggle" data-i18n="settings.provisioning.hubNormal.title">Normal connection</label>
                 <span class="hub-badge" id="hubNormalBadge" data-i18n="settings.provisioning.inUse" hidden>In use</span>
               </span>
-              <span class="option-desc" data-i18n="settings.provisioning.hubNormal.hint">Plain HTTPS with a normal DNS lookup. Tried last, because it is the only one that exposes our domain.</span>
+              <span class="option-desc" data-i18n="settings.provisioning.hubNormal.hint">Plain HTTPS and a normal DNS lookup. Tried last: it's the only one that exposes our domain.</span>
               <span class="hub-test-result" id="hubNormalResult" role="status" aria-live="polite" hidden></span>
             </span>
             <button id="hubNormalTestBtn" class="hub-test-btn" type="button" data-i18n="settings.provisioning.test">Test</button>
             <input id="hubNormalToggle" class="toggle-switch" type="checkbox" />
           </div>
         </div>
-        <p class="settings-description" data-i18n="settings.provisioning.deadDrop.description">If every method above runs out of working addresses, the app can look up replacements from a signed public file.</p>
+        <p class="settings-description" data-i18n="settings.provisioning.deadDrop.description">If the methods above run out of addresses, the app can fetch replacements from a signed public file.</p>
         <div class="option-list">
           <div class="option-row option-row-toggle">
             <span class="option-copy">
               <span class="option-title-line">
                 <label class="option-title" for="deadDropToggle" data-i18n="settings.provisioning.deadDrop.title">Recover addresses</label>
               </span>
-              <span class="option-desc" data-i18n="settings.provisioning.deadDrop.hint">Fetches a replacement address list, signed by us and checked on your device, from a public host. Used only after everything else has failed. Carries no account details.</span>
+              <span class="option-desc" data-i18n="settings.provisioning.deadDrop.hint">Fetches a signed address list from a public host, checked on your device. Last resort, and it carries no account details.</span>
             </span>
             <input id="deadDropToggle" class="toggle-switch" type="checkbox" />
           </div>

@@ -52,6 +52,8 @@ export const IPC_CHANNELS = {
   hubStatusChanged: "pangea:hubStatusChanged",
   setAllowLan: "pangea:setAllowLan",
   getAllowLan: "pangea:getAllowLan",
+  setPostQuantum: "settings:setPostQuantum",
+  getPostQuantum: "settings:getPostQuantum",
   setWireguardMtu: "settings:setWireguardMtu",
   getWireguardMtu: "settings:getWireguardMtu",
   setCustomDns: "settings:setCustomDns",
@@ -347,6 +349,9 @@ export interface PangeaApi {
   onHubStatusChanged: (callback: (status: HubStatus) => void) => () => void;
   setAllowLan: (enabled: boolean) => Promise<void>;
   getAllowLan: () => Promise<boolean>;
+  /** Post-quantum key for the tunnel. Applies on the next connect. */
+  setPostQuantum: (enabled: boolean) => Promise<void>;
+  getPostQuantum: () => Promise<boolean>;
   /** Resolves to the MTU actually stored — differs from `mtu` when it was rejected. */
   setWireguardMtu: (mtu: number) => Promise<number>;
   getWireguardMtu: () => Promise<number>;

@@ -1924,6 +1924,15 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.getAllowLan, async () => allowLanEnabled);
 
+  ipcMain.handle(IPC_CHANNELS.setPostQuantum, async (_event, enabled: boolean) => {
+    pangeaApiClient.setPostQuantumEnabled(!!enabled);
+    await updateSettings((settings) => {
+      settings.postQuantum = !!enabled;
+    }, "postQuantum setting");
+  });
+
+  ipcMain.handle(IPC_CHANNELS.getPostQuantum, async () => pangeaApiClient.isPostQuantumEnabled());
+
   // Returns the stored MTU, which differs from the requested one when it was
   // rejected — the renderer uses that mismatch to flag invalid input.
   ipcMain.handle(IPC_CHANNELS.setWireguardMtu, async (_event, mtu: unknown) => {
@@ -2391,6 +2400,7 @@ async function boot(): Promise<void> {
     if (settings.allowLan === false) {
       allowLanEnabled = false;
     }
+    pangeaApiClient.setPostQuantumEnabled(settings.postQuantum === true);
     // settings.json is hand-editable, so this goes through the same normalizer
     // as IPC input — anything unusable falls back to the default.
     pangeaApiClient.setWireguardMtu(settings.wireguardMtu);

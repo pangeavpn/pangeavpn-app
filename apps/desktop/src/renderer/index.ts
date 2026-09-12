@@ -115,6 +115,7 @@ const hubShadowsocksToggle = document.getElementById("hubShadowsocksToggle") as 
 const hubFrontedToggle = document.getElementById("hubFrontedToggle") as HTMLInputElement;
 const hubNormalToggle = document.getElementById("hubNormalToggle") as HTMLInputElement;
 const allowLanToggle = document.getElementById("allowLanToggle") as HTMLInputElement;
+const postQuantumToggle = document.getElementById("postQuantumToggle") as HTMLInputElement;
 const dnsPresetSelect = document.getElementById("dnsPresetSelect") as HTMLSelectElement;
 const customDnsField = document.getElementById("customDnsField") as HTMLElement;
 const customDnsInput = document.getElementById("customDnsInput") as HTMLInputElement;
@@ -239,6 +240,7 @@ function updateSettingsSummaries(): void {
   const dnsChoice = dnsPresetSelect.selectedOptions[0];
   if (dnsPresetSelect.value !== "automatic" && dnsChoice) network.push(dnsChoice.textContent ?? "DNS");
   if (allowLanToggle.checked) network.push(t("settings.network.allowLan.title"));
+  if (postQuantumToggle.checked) network.push(t("settings.network.postQuantum.title"));
   setNetworkValue.textContent = network.join(" · ");
 
   const startup: string[] = [];
@@ -1911,6 +1913,19 @@ allowLanToggle.addEventListener("change", async () => {
   }
 });
 
+postQuantumToggle.addEventListener("change", async () => {
+  if (!pangeaApi) return;
+  try {
+    await pangeaApi.setPostQuantum(postQuantumToggle.checked);
+    showToast(postQuantumToggle.checked
+      ? t("toggle.postQuantum.on")
+      : t("toggle.postQuantum.off"), 4000, true);
+  } catch (err) {
+    postQuantumToggle.checked = !postQuantumToggle.checked;
+    showToast(reportError("postQuantum", err, t("toggle.updateFailed")));
+  }
+});
+
 hubInTunnelToggle.addEventListener("change", async () => {
   if (!pangeaApi) return;
   try {
@@ -2380,6 +2395,7 @@ async function init(): Promise<void> {
       renderHubStatus(hubStatus);
       pangeaApi.onHubStatusChanged(renderHubStatus);
       allowLanToggle.checked = await pangeaApi.getAllowLan();
+      postQuantumToggle.checked = await pangeaApi.getPostQuantum();
       syncDnsControls(await pangeaApi.getCustomDns());
       wireguardMtuInput.value = String(await pangeaApi.getWireguardMtu());
       hubInTunnelToggle.checked = await pangeaApi.getHubInTunnel();
