@@ -1,17 +1,20 @@
-import { Menu, Notification, Tray, app, BrowserWindow, ipcMain, nativeImage, session, shell, type NativeImage } from "electron";
+import { Menu, Notification, Tray, app, BrowserWindow, ipcMain, nativeImage, net, session, shell, type NativeImage } from "electron";
+import os from "node:os";
 import path from "node:path";
 import type { ConfigResponse, OkResponse, Profile, StatusResponse } from "@pangeavpn/shared-types";
 import { DaemonClient, HostOfflineError, TransportExhaustedError } from "./daemonClient";
 import { DaemonProcessManager } from "./daemonProcess";
-import { getLegacyStateFilePath, getUserStateDir, readDaemonTokens } from "./platformPaths";
+import { getAppSupportDir, getLegacyStateFilePath, getUserStateDir, readDaemonTokens } from "./platformPaths";
 import { getConnectedTrayIconPath, getTrayIconPath, getWindowsAppIconPath } from "./resourcePaths";
 import {
   IPC_CHANNELS,
   toPublicServerInfo,
   type ConnectResult,
+  type DiagnosticsSendResult,
   type PublicServerInfo,
   type ServerInfo
 } from "../shared/ipc";
+import { normalHubHosts } from "../shared/hubHosts";
 import * as auth from "./auth";
 import { readSecret, writeSecret } from "./secureStore";
 import {
@@ -30,6 +33,9 @@ import { startNetworkWatcher, onNetworkChange } from "./networkWatcher";
 import { statusNotificationKind, type StatusSnapshot } from "./statusNotifications";
 import { mt, mtState, setMainLocale, resolveMainLocale } from "./i18n";
 import { sanitizeLog } from "./logSanitize";
+import { LOG_FILE_NAME, installConsoleFileSink } from "./logFileSink";
+import { collectDiagnostics } from "./diagnosticsReport";
+import { uploadDiagnostics } from "./diagnosticsUpload";
 import { classifyLoginError } from "./loginError";
 import { shouldShowTrayHint, trayHintBodyKey } from "./trayHint";
 import { anchorPosition, canAnchorWindow, samePoint, type AnchorRect } from "./windowAnchor";
@@ -1735,6 +1741,35 @@ function registerIpcHandlers(): void {
     }
   });
 
+  ipcMain.handle(IPC_CHANNELS.openLogsFolder, async () => {
+    const dir = app.getPath("logs");
+    const failure = await shell.openPath(dir);
+    return failure.length === 0;
+  });
+
+  ipcMain.handle(IPC_CHANNELS.sendDiagnostics, async (_event, note: unknown): Promise<DiagnosticsSendResult> => {
+    try {
+      const payload = await collectDiagnostics({
+        appVersion: app.getVersion(),
+        platform: process.platform,
+        arch: process.arch,
+        osRelease: os.release(),
+        logDir: app.getPath("logs"),
+        appSupportDir: getAppSupportDir(),
+        crashDumpsDir: app.getPath("crashDumps"),
+        logFileName: LOG_FILE_NAME,
+        note: typeof note === "string" ? note : undefined
+      });
+      return await uploadDiagnostics(payload, {
+        hosts: normalHubHosts(),
+        fetchImpl: (url, init) => net.fetch(url, init)
+      });
+    } catch (err) {
+      console.warn("sendDiagnostics failed", sanitizeLog(err));
+      return { ok: false, reason: "unreachable" };
+    }
+  });
+
   ipcMain.handle(IPC_CHANNELS.authLogin, async (_event, vpnToken: string) => {
     if (!vpnToken || typeof vpnToken !== "string" || vpnToken.trim().length === 0) {
       return { authenticated: false, user: null, error: "INVALID_ACCOUNT_NUMBER" };
@@ -1779,7 +1814,12 @@ function registerIpcHandlers(): void {
 
         await auth.clearLicenseKey();
         pangeaApiClient.clearCache();
-        return { authenticated: false, user: null, error: "REGISTRATION_FAILED" };
+        const classified = classifyLoginError(regErr);
+        return {
+          authenticated: false,
+          user: null,
+          error: classified === "UNKNOWN" ? "REGISTRATION_FAILED" : classified
+        };
       }
 
       // Registration succeeded — persist identity keypair and set on API client.
@@ -1798,7 +1838,12 @@ function registerIpcHandlers(): void {
         await pangeaApiClient.deregisterDevice(identityPublicKey).catch(() => {});
         await auth.clearLicenseKey();
         pangeaApiClient.clearCache();
-        return { authenticated: false, user: null, error: "REGISTRATION_FAILED" };
+        const classified = classifyLoginError(postRegErr);
+        return {
+          authenticated: false,
+          user: null,
+          error: classified === "UNKNOWN" ? "REGISTRATION_FAILED" : classified
+        };
       }
     } catch (err) {
       // The message stays in the log for support; the user gets a code the UI
@@ -2328,6 +2373,9 @@ async function connectWithRecovery(profileId: string): Promise<OkResponse> {
 
 async function boot(): Promise<void> {
   await app.whenReady();
+
+  // A packaged app's stdout goes nowhere, so tee it to a file support can ask for.
+  installConsoleFileSink(app.getPath("logs"));
 
   // Toasts are attributed to the AUMID's Start Menu shortcut, which only an
   // install has — an unpackaged run must claim electron.exe, not the shipped id.

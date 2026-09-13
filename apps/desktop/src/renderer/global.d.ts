@@ -7,6 +7,11 @@ import type {
 } from "@pangeavpn/shared-types";
 
 declare global {
+  /** Mirrors DiagnosticsSendResult in src/shared/ipc.ts. */
+  type DiagnosticsSendResult =
+    | { ok: true; reportCode: string }
+    | { ok: false; reason: "unreachable" | "rejected" };
+
   interface AuthUser {
     email: string;
     name: string;
@@ -206,6 +211,8 @@ declare global {
     autoUpdater?: AutoUpdaterApi;
     appPlatform?: NodeJS.Platform;
     openExternal?: (url: string) => Promise<void>;
+    openLogsFolder?: () => Promise<boolean>;
+    sendDiagnostics?: (note?: string) => Promise<DiagnosticsSendResult>;
     onAuthInvalidated?: (callback: () => void) => () => void;
   }
 }

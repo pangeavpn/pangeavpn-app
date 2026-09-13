@@ -189,6 +189,8 @@
           <div class="logs-actions">
             <button id="copyDiagnosticsBtn" type="button" class="btn-ghost" data-i18n="logs.copyDiagnostics">Copy Diagnostics</button>
             <button id="copyLogsBtn" type="button" class="btn-ghost" data-i18n="logs.copyLogs">Copy Logs</button>
+            <button id="openLogsFolderBtn" type="button" class="btn-ghost" data-i18n="logs.openFolder">Open Log Folder</button>
+            <button id="sendDiagnosticsBtn" type="button" class="btn-ghost" data-i18n="logs.sendDiagnostics">Send Diagnostics</button>
             <button id="clearLogsBtn" type="button" class="btn-ghost" data-i18n="logs.clear">Clear</button>
           </div>
           <div id="logs" class="logs"></div>
@@ -207,6 +209,32 @@
           <div class="device-list-loading"><span class="spinner"></span></div>
         </div>
         <p id="devicesModalMessage" class="devices-modal-message"></p>
+      </div>
+    </div>
+
+    <div id="diagnosticsModal" class="update-overlay" role="dialog" aria-modal="true" aria-labelledby="diagnosticsTitle">
+      <div class="update-modal diagnostics-modal-card">
+        <button id="diagnosticsCloseBtn" class="update-close" type="button" aria-label="Close" data-i18n-aria-label="settings.close">&times;</button>
+        <h2 id="diagnosticsTitle" class="update-title" data-i18n="diagnostics.title">Send Diagnostics</h2>
+        <div id="diagnosticsConfirm">
+          <p class="diagnostics-text" data-i18n="diagnostics.body">This sends your app log and the VPN service log to support.</p>
+          <p class="diagnostics-text" data-i18n="diagnostics.anonymous">The report is anonymous.</p>
+          <label class="diagnostics-note-label" for="diagnosticsNote" data-i18n="diagnostics.noteLabel">Note (optional)</label>
+          <input id="diagnosticsNote" class="diagnostics-note" type="text" maxlength="500" data-i18n-placeholder="diagnostics.notePlaceholder" placeholder="What went wrong?" />
+          <div class="diagnostics-actions">
+            <button id="diagnosticsCancelBtn" type="button" class="btn-ghost" data-i18n="diagnostics.cancel">Cancel</button>
+            <button id="diagnosticsSendBtn" type="button" class="login-button" data-i18n="diagnostics.send">Send</button>
+          </div>
+        </div>
+        <div id="diagnosticsResult" hidden>
+          <p id="diagnosticsResultTitle" class="diagnostics-result-title"></p>
+          <p id="diagnosticsCode" class="diagnostics-code" hidden></p>
+          <p id="diagnosticsResultBody" class="diagnostics-text"></p>
+          <div class="diagnostics-actions">
+            <button id="diagnosticsCopyCodeBtn" type="button" class="btn-ghost" data-i18n="diagnostics.copyCode" hidden>Copy Code</button>
+            <button id="diagnosticsDoneBtn" type="button" class="login-button" data-i18n="diagnostics.done">Close</button>
+          </div>
+        </div>
       </div>
     </div>
 

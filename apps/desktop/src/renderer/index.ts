@@ -83,6 +83,20 @@ const themeToggleBtns = Array.from(document.querySelectorAll<HTMLButtonElement>(
 const uiMessageEl = document.getElementById("uiMessage") as HTMLParagraphElement;
 const appVersionEl = document.getElementById("appVersion") as HTMLSpanElement;
 const copyDiagnosticsBtn = document.getElementById("copyDiagnosticsBtn") as HTMLButtonElement;
+const openLogsFolderBtn = document.getElementById("openLogsFolderBtn") as HTMLButtonElement;
+const sendDiagnosticsBtn = document.getElementById("sendDiagnosticsBtn") as HTMLButtonElement;
+const diagnosticsModal = document.getElementById("diagnosticsModal") as HTMLElement;
+const diagnosticsConfirm = document.getElementById("diagnosticsConfirm") as HTMLElement;
+const diagnosticsResult = document.getElementById("diagnosticsResult") as HTMLElement;
+const diagnosticsResultTitle = document.getElementById("diagnosticsResultTitle") as HTMLParagraphElement;
+const diagnosticsResultBody = document.getElementById("diagnosticsResultBody") as HTMLParagraphElement;
+const diagnosticsCode = document.getElementById("diagnosticsCode") as HTMLParagraphElement;
+const diagnosticsNote = document.getElementById("diagnosticsNote") as HTMLInputElement;
+const diagnosticsSendBtn = document.getElementById("diagnosticsSendBtn") as HTMLButtonElement;
+const diagnosticsCancelBtn = document.getElementById("diagnosticsCancelBtn") as HTMLButtonElement;
+const diagnosticsCloseBtn = document.getElementById("diagnosticsCloseBtn") as HTMLButtonElement;
+const diagnosticsDoneBtn = document.getElementById("diagnosticsDoneBtn") as HTMLButtonElement;
+const diagnosticsCopyCodeBtn = document.getElementById("diagnosticsCopyCodeBtn") as HTMLButtonElement;
 const copyLogsBtn = document.getElementById("copyLogsBtn") as HTMLButtonElement;
 const clearLogsBtn = document.getElementById("clearLogsBtn") as HTMLButtonElement;
 const logsEl = document.getElementById("logs") as HTMLDivElement;
@@ -367,7 +381,11 @@ function deactivateOverlay(): void {
 // True while a modal is stacked above the full-screen overlays, so their Escape
 // handlers can defer to the top layer instead of closing the layer beneath it.
 function isSubModalOpen(): boolean {
-  return devicesModal.classList.contains("visible") || updateOverlay.classList.contains("visible");
+  return (
+    devicesModal.classList.contains("visible") ||
+    diagnosticsModal.classList.contains("visible") ||
+    updateOverlay.classList.contains("visible")
+  );
 }
 
 const accountNumberValue = document.getElementById("accountNumberValue") as HTMLSpanElement;
@@ -909,6 +927,10 @@ document.addEventListener("keydown", (e) => {
     e.preventDefault();
     e.stopPropagation();
     devicesModal.classList.remove("visible");
+  } else if (diagnosticsModal.classList.contains("visible")) {
+    e.preventDefault();
+    e.stopPropagation();
+    closeDiagnosticsModal();
   } else if (updateOverlay.classList.contains("visible")) {
     e.preventDefault();
     e.stopPropagation();
@@ -948,6 +970,79 @@ copyDiagnosticsBtn.addEventListener("click", async () => {
   } finally {
     uiWorking = false;
     updateBusyIndicator();
+  }
+});
+
+openLogsFolderBtn.addEventListener("click", () => {
+  void window.openLogsFolder?.();
+});
+
+function closeDiagnosticsModal(): void {
+  diagnosticsModal.classList.remove("visible");
+}
+
+function openDiagnosticsModal(): void {
+  diagnosticsNote.value = "";
+  diagnosticsConfirm.hidden = false;
+  diagnosticsResult.hidden = true;
+  diagnosticsCode.hidden = true;
+  diagnosticsCopyCodeBtn.hidden = true;
+  diagnosticsSendBtn.disabled = false;
+  diagnosticsSendBtn.textContent = t("diagnostics.send");
+  diagnosticsModal.classList.add("visible");
+  diagnosticsNote.focus();
+}
+
+function showDiagnosticsResult(result: DiagnosticsSendResult): void {
+  diagnosticsConfirm.hidden = true;
+  diagnosticsResult.hidden = false;
+  if (result.ok) {
+    diagnosticsResultTitle.textContent = t("diagnostics.sentTitle");
+    diagnosticsCode.textContent = result.reportCode;
+    diagnosticsCode.hidden = false;
+    diagnosticsCopyCodeBtn.hidden = false;
+    diagnosticsResultBody.textContent = t("diagnostics.sentBody");
+    return;
+  }
+  diagnosticsResultTitle.textContent = t("diagnostics.failedTitle");
+  diagnosticsCode.hidden = true;
+  diagnosticsCopyCodeBtn.hidden = true;
+  diagnosticsResultBody.textContent =
+    result.reason === "rejected" ? t("diagnostics.rejectedBody") : t("diagnostics.failedBody");
+}
+
+sendDiagnosticsBtn.addEventListener("click", () => {
+  openDiagnosticsModal();
+});
+
+diagnosticsCancelBtn.addEventListener("click", closeDiagnosticsModal);
+diagnosticsCloseBtn.addEventListener("click", closeDiagnosticsModal);
+diagnosticsDoneBtn.addEventListener("click", closeDiagnosticsModal);
+diagnosticsModal.addEventListener("click", (e) => {
+  if (e.target === diagnosticsModal) closeDiagnosticsModal();
+});
+
+diagnosticsCopyCodeBtn.addEventListener("click", async () => {
+  try {
+    await copyTextToClipboard(diagnosticsCode.textContent ?? "");
+    setUiMessage(t("diagnostics.codeCopied"));
+  } catch (error) {
+    setUiMessage(reportError("copyReportCode", error));
+  }
+});
+
+diagnosticsSendBtn.addEventListener("click", async () => {
+  const send = window.sendDiagnostics;
+  if (!send) {
+    showDiagnosticsResult({ ok: false, reason: "unreachable" });
+    return;
+  }
+  diagnosticsSendBtn.disabled = true;
+  diagnosticsSendBtn.textContent = t("diagnostics.sending");
+  try {
+    showDiagnosticsResult(await send(diagnosticsNote.value));
+  } catch {
+    showDiagnosticsResult({ ok: false, reason: "unreachable" });
   }
 });
 

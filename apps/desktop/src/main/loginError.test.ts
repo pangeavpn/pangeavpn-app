@@ -85,6 +85,32 @@ test("a status beats a message that merely looks like a network error", () => {
   );
 });
 
+test("a filesystem errno is reported as a local storage failure", () => {
+  for (const code of ["EACCES", "EPERM", "EROFS", "ENOSPC", "EDQUOT", "EIO", "EBUSY"]) {
+    const err = new Error("write failed") as Error & { code: string };
+    err.code = code;
+    assert.equal(classifyLoginError(err), "LOCAL_STORAGE_FAILED", code);
+  }
+});
+
+test("a network errno is reachability, never local storage", () => {
+  for (const code of ["ECONNREFUSED", "ENOTFOUND", "ETIMEDOUT", "ECONNRESET", "ENETUNREACH", "EHOSTUNREACH", "EAI_AGAIN"]) {
+    const err = new Error("connect failed") as Error & { code: string };
+    err.code = code;
+    assert.notEqual(classifyLoginError(err), "LOCAL_STORAGE_FAILED", code);
+  }
+});
+
+test("a status still wins over a filesystem errno", () => {
+  const err = withStatus("LoginRejectedError", "refused", 401) as Error & { code: string };
+  err.code = "EACCES";
+  assert.equal(classifyLoginError(err), "INVALID_ACCOUNT_NUMBER");
+});
+
+test("a plain object carrying an errno is still UNKNOWN", () => {
+  assert.equal(classifyLoginError({ code: "ENOSPC" }), "UNKNOWN");
+});
+
 test("anything unrecognised stays UNKNOWN rather than guessing", () => {
   assert.equal(classifyLoginError(new Error("something else entirely")), "UNKNOWN");
   assert.equal(classifyLoginError(null), "UNKNOWN");

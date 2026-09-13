@@ -92,6 +92,8 @@ export const IPC_CHANNELS = {
   updateNotAvailable: "app:updateNotAvailable",
   updateError: "app:updateError",
   openExternal: "app:openExternal",
+  openLogsFolder: "app:openLogsFolder",
+  sendDiagnostics: "app:sendDiagnostics",
   authInvalidated: "auth:invalidated",
   rememberAccountNumber: "auth:rememberAccountNumber",
   getRememberedAccountNumber: "auth:getRememberedAccountNumber",
@@ -117,6 +119,11 @@ export interface AuthUser {
 
 /** Why a sign-in failed. A stable code, not prose: the renderer localises it,
  *  and only INVALID_ACCOUNT_NUMBER blames what the user typed. */
+/** Outcome of an anonymous diagnostics upload. */
+export type DiagnosticsSendResult =
+  | { ok: true; reportCode: string }
+  | { ok: false; reason: "unreachable" | "rejected" };
+
 export type LoginErrorCode =
   | "INVALID_ACCOUNT_NUMBER"
   | "SUBSCRIPTION_EXPIRED"
@@ -126,6 +133,7 @@ export type LoginErrorCode =
   | "HUB_UNREACHABLE"
   | "TIMEOUT"
   | "REGISTRATION_FAILED"
+  | "LOCAL_STORAGE_FAILED"
   | "UNKNOWN";
 
 export interface AuthState {

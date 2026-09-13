@@ -11,6 +11,7 @@ const LOGIN_ERROR_KEYS: Record<LoginErrorCode, MessageKey> = {
   HUB_UNREACHABLE: "login.error.hubUnreachable",
   TIMEOUT: "login.error.timeout",
   REGISTRATION_FAILED: "login.error.registrationFailed",
+  LOCAL_STORAGE_FAILED: "login.error.localStorageFailed",
   UNKNOWN: "login.error.unknown"
 };
 

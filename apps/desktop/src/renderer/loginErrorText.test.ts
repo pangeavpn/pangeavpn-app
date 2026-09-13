@@ -17,6 +17,7 @@ test("every code has its own message", () => {
     "HUB_UNREACHABLE",
     "TIMEOUT",
     "REGISTRATION_FAILED",
+    "LOCAL_STORAGE_FAILED",
     "UNKNOWN"
   ];
   const keys = codes.map((code) => loginErrorText(code, t));

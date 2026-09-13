@@ -3351,3 +3351,58 @@ body[data-theme="light"] .hero-path-flag { box-shadow: 0 0 0 1px rgba(0, 0, 0, 0
 @media (prefers-reduced-motion: reduce) {
   .hero-pq { animation: none; }
 }
+
+.diagnostics-modal-card {
+  width: 380px;
+  text-align: start;
+}
+
+.diagnostics-text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-secondary, inherit);
+}
+
+.diagnostics-note-label {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.diagnostics-note {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-elevated, transparent);
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+}
+
+.diagnostics-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.diagnostics-result-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.diagnostics-code {
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-align: center;
+  user-select: text;
+}

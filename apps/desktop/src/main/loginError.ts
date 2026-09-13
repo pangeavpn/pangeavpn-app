@@ -6,6 +6,7 @@ interface ErrorLike {
   name?: unknown;
   message?: unknown;
   status?: unknown;
+  code?: unknown;
 }
 
 const STATUS_CARRIERS = new Set(["LoginRejectedError", "AuthError"]);
@@ -14,6 +15,25 @@ const STATUS_CARRIERS = new Set(["LoginRejectedError", "AuthError"]);
 // answered has a status, which is checked first.
 const TRANSPORT_FAILURE =
   /(fetch failed|ENOTFOUND|ECONNREFUSED|ECONNRESET|ETIMEDOUT|ENETUNREACH|EHOSTUNREACH|EAI_AGAIN|certificate|CERT_|SSL|socket hang up|Hub transport unavailable)/i;
+
+// Errnos that mean this computer could not store the credential. Network
+// errnos are deliberately absent: those are reachability, not storage.
+const LOCAL_STORAGE_ERRNOS = new Set([
+  "EACCES",
+  "EPERM",
+  "EROFS",
+  "ENOSPC",
+  "EDQUOT",
+  "EXDEV",
+  "EIO",
+  "EISDIR",
+  "ENOTDIR",
+  "ELOOP",
+  "ENAMETOOLONG",
+  "EMFILE",
+  "ENFILE",
+  "EBUSY"
+]);
 
 function asErrorLike(err: unknown): ErrorLike | null {
   if (err instanceof Error) return err as ErrorLike;
@@ -51,5 +71,6 @@ export function classifyLoginError(err: unknown): LoginErrorCode {
   const message = typeof error.message === "string" ? error.message : "";
   if (name === "AbortError" || /timeout|timed out|aborted/i.test(message)) return "TIMEOUT";
   if (TRANSPORT_FAILURE.test(message)) return "HUB_UNREACHABLE";
+  if (typeof error.code === "string" && LOCAL_STORAGE_ERRNOS.has(error.code)) return "LOCAL_STORAGE_FAILED";
   return "UNKNOWN";
 }

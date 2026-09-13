@@ -67,6 +67,8 @@ const CH = {
   updateNotAvailable: "app:updateNotAvailable",
   updateError: "app:updateError",
   openExternal: "app:openExternal",
+  openLogsFolder: "app:openLogsFolder",
+  sendDiagnostics: "app:sendDiagnostics",
   authInvalidated: "auth:invalidated",
   rememberAccountNumber: "auth:rememberAccountNumber",
   getRememberedAccountNumber: "auth:getRememberedAccountNumber",
@@ -178,6 +180,10 @@ contextBridge.exposeInMainWorld("pangeaApi", pangeaApi);
 contextBridge.exposeInMainWorld("autoUpdater", autoUpdaterApi);
 contextBridge.exposeInMainWorld("appPlatform", process.platform);
 contextBridge.exposeInMainWorld("openExternal", (url: string) => ipcRenderer.invoke(CH.openExternal, url));
+contextBridge.exposeInMainWorld("openLogsFolder", () => ipcRenderer.invoke(CH.openLogsFolder));
+contextBridge.exposeInMainWorld("sendDiagnostics", (note?: string) =>
+  ipcRenderer.invoke(CH.sendDiagnostics, note)
+);
 contextBridge.exposeInMainWorld("onAuthInvalidated", (callback: () => void) => {
   const listener = () => callback();
   ipcRenderer.on(CH.authInvalidated, listener);

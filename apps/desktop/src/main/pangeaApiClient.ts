@@ -97,8 +97,8 @@ export class ConnectCancelledError extends Error {
 /** Every path to the hub failed. Thrown fast during the cooldown that follows,
  *  instead of making each caller re-run the whole probe cascade. */
 export class HubUnreachableError extends Error {
-  constructor(retryInMs: number) {
-    super(`Hub unreachable; retrying in ${Math.ceil(retryInMs / 1000)}s`);
+  constructor(retryInMs: number, detail?: string) {
+    super(detail ?? `Hub unreachable; retrying in ${Math.ceil(retryInMs / 1000)}s`);
     this.name = "HubUnreachableError";
   }
 }
@@ -1122,7 +1122,8 @@ export class PangeaApiClient {
     if (!this.hubMethods.normal) {
       // Fail closed: falling back to the domain here would leak the SNI the
       // user switched that method off to avoid.
-      throw new Error(
+      throw new HubUnreachableError(
+        HUB_RETRY_COOLDOWN_MS,
         "Hub unreachable: every enabled connection method failed, and the normal (cleartext domain) method is switched off"
       );
     }
