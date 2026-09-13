@@ -33,6 +33,7 @@ import { startNetworkWatcher, onNetworkChange } from "./networkWatcher";
 import { statusNotificationKind, type StatusSnapshot } from "./statusNotifications";
 import { mt, mtState, setMainLocale, resolveMainLocale } from "./i18n";
 import { sanitizeLog } from "./logSanitize";
+import { isMissingFile, readSettings, writeSettings } from "./settingsFile";
 import { LOG_FILE_NAME, installConsoleFileSink } from "./logFileSink";
 import { collectDiagnostics } from "./diagnosticsReport";
 import { uploadDiagnostics } from "./diagnosticsUpload";
@@ -1364,59 +1365,22 @@ async function readStateFile(fileName: string): Promise<string> {
     return await fs.readFile(path.join(getUserStateDir(), fileName), "utf8");
   } catch (err) {
     const legacyPath = getLegacyStateFilePath(fileName);
-    if (!legacyPath) {
+    if (!legacyPath || !isMissingFile(err)) {
       throw err;
     }
     return await fs.readFile(legacyPath, "utf8");
   }
 }
 
-// Settings written before the move out of the daemon's directory. Read-only:
-// the next write lands in the user directory and takes over from there.
-async function readLegacySettingsFile(): Promise<Record<string, unknown>> {
-  const legacyPath = getLegacyStateFilePath("settings.json");
-  if (!legacyPath) {
-    return {};
-  }
-  try {
-    const fs = (await import("node:fs/promises")).default;
-    return JSON.parse(await fs.readFile(legacyPath, "utf8")) as Record<string, unknown>;
-  } catch {
-    return {};
-  }
-}
-
+// Reads the user copy, falling back to one an older build left in the daemon's
+// directory. Read-only: the next write lands in the user directory for good.
 async function readSettingsFile(): Promise<Record<string, unknown>> {
-  const filePath = getSettingsPath();
-  const fs = (await import("node:fs/promises")).default;
-  let raw: string;
-  try {
-    raw = await fs.readFile(filePath, "utf8");
-  } catch {
-    // No file here yet: either a fresh install or one that predates the move
-    // off the daemon's directory, which the desktop cannot write to.
-    return readLegacySettingsFile();
-  }
-  try {
-    return JSON.parse(raw) as Record<string, unknown>;
-  } catch (err) {
-    // Corrupt, not missing: don't let the caller's write-back treat this as
-    // "no settings yet" and silently erase everything that was in it.
-    console.error("settings.json is corrupt; preserving it as .corrupt and starting fresh:", sanitizeLog(err));
-    await fs.rename(filePath, `${filePath}.corrupt-${Date.now()}`).catch(() => {});
-    return {};
-  }
+  return readSettings({ primary: getSettingsPath(), legacy: getLegacyStateFilePath("settings.json") });
 }
 
 async function writeSettingsFile(settings: Record<string, unknown>): Promise<void> {
   const dir = await (await import("./platformPaths")).ensureUserStateDir();
-  const fs = (await import("node:fs/promises")).default;
-  const finalPath = path.join(dir, "settings.json");
-  const tmpPath = `${finalPath}.tmp-${process.pid}-${Date.now()}`;
-  // Write-then-rename: a crash or power loss mid-write leaves the old file
-  // intact instead of a truncated one, since rename is atomic on both OSes.
-  await fs.writeFile(tmpPath, JSON.stringify(settings, null, 2));
-  await fs.rename(tmpPath, finalPath);
+  await writeSettings(path.join(dir, "settings.json"), settings);
 }
 
 let settingsWriteChain: Promise<void> = Promise.resolve();

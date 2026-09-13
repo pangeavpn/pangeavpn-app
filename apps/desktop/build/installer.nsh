@@ -127,6 +127,19 @@
   CreateDirectory "$APPDATA\PangeaVPN\bin"
   CreateDirectory "$APPDATA\PangeaVPN\bin\win"
 
+  Var /GLOBAL PangeaLegacySettings
+  StrCpy $PangeaLegacySettings "$APPDATA\PangeaVPN\settings.json"
+
+  ; Builds before 0.7 kept the desktop's settings in the daemon's directory,
+  ; which the lockdown below puts out of the app's reach. Rescue them first.
+  SetShellVarContext current
+  ${If} ${FileExists} "$PangeaLegacySettings"
+  ${AndIfNot} ${FileExists} "$APPDATA\pangeavpn-desktop\settings.json"
+    CreateDirectory "$APPDATA\pangeavpn-desktop"
+    CopyFiles /SILENT "$PangeaLegacySettings" "$APPDATA\pangeavpn-desktop\settings.json"
+  ${EndIf}
+  SetShellVarContext all
+
   ; NSIS leaves this directory owned by the installing user, and the daemon
   ; refuses a user-owned state dir as planted: hand it to Administrators.
   nsExec::ExecToLog 'takeown.exe /F "$APPDATA\PangeaVPN" /A'

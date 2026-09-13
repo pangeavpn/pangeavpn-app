@@ -112,13 +112,36 @@ test("writeSecret self-heals a corrupt storage key instead of failing forever", 
   assert.equal(await readSecret(file), "value-after-heal");
 });
 
-test("readSecret discards a keychain-encrypted file instead of prompting", async () => {
+// Regression: a keychain-encrypted file used to be unlinked on read, so the
+// upgrade that changed the secret format signed every user out irrecoverably.
+test("readSecret keeps a keychain-encrypted file it cannot decrypt", async () => {
   const dir = await tempDir();
   const file = path.join(dir, "session.dat");
-  await fs.writeFile(file, Buffer.concat([Buffer.from("v10", "latin1"), Buffer.from("opaque")]), { mode: 0o600 });
+  const stored = Buffer.concat([Buffer.from("v10", "latin1"), Buffer.from("opaque")]);
+  await fs.writeFile(file, stored, { mode: 0o600 });
 
   assert.equal(await readSecret(file), null);
-  await assert.rejects(fs.readFile(file));
+  assert.deepEqual(await fs.readFile(file), stored);
+});
+
+// Regression: an unreadable key file read as "no key", so the next write minted
+// a fresh one over it and left every existing .dat undecryptable for good.
+test("writeSecret never replaces a storage key it could not read", async () => {
+  const dir = await tempDir();
+  const file = path.join(dir, "session.dat");
+  await writeSecret(file, "still-signed-in");
+
+  const keyFile = path.join(dir, "storage-key.bin");
+  const key = await fs.readFile(keyFile);
+  await fs.rm(keyFile);
+  await fs.mkdir(keyFile);
+
+  await assert.rejects(writeSecret(path.join(dir, "license.dat"), "new-secret"));
+  assert.equal(await readSecret(file), null);
+
+  await fs.rmdir(keyFile);
+  await fs.writeFile(keyFile, key, { mode: 0o600 });
+  assert.equal(await readSecret(file), "still-signed-in");
 });
 
 test("a discarded keychain file cannot be replaced with plaintext", async () => {

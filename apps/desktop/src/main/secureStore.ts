@@ -17,6 +17,19 @@ function looksSafeStorageEncrypted(data: Buffer): boolean {
   return data.length > 4 && data[0] === 0x01 && data[1] === 0x00 && data[2] === 0x00 && data[3] === 0x00;
 }
 
+// DPAPI and libsecret decrypt without asking; macOS is the one platform whose
+// keychain prompts, which is why nothing else here touches safeStorage.
+async function decryptWithOsKeychain(data: Buffer): Promise<string | null> {
+  if (process.platform === "darwin") return null;
+  try {
+    const { safeStorage } = await import("electron");
+    if (!safeStorage?.isEncryptionAvailable()) return null;
+    return safeStorage.decryptString(data);
+  } catch {
+    return null;
+  }
+}
+
 // Per-path write queues so concurrent writeSecret calls on the same file
 // (e.g. saveSession racing a re-login) serialize instead of interleaving.
 const writeQueues = new Map<string, Promise<unknown>>();
@@ -58,13 +71,19 @@ async function markManaged(dir: string, basename: string): Promise<void> {
   await writeFileAtomic(manifestPath, JSON.stringify([...manifest]), 0o600);
 }
 
+// Only ENOENT is "no key yet": a key we merely failed to read must not reach
+// loadOrCreateKey as missing, which would mint over it and orphan every .dat.
 async function loadKey(dir: string): Promise<Buffer | null> {
+  let existing: Buffer;
   try {
-    const existing = await fs.readFile(path.join(dir, KEY_FILE));
-    return existing.length === KEY_BYTES ? existing : null;
-  } catch {
-    return null;
+    existing = await fs.readFile(path.join(dir, KEY_FILE));
+  } catch (error) {
+    if ((error as { code?: string } | null)?.code === "ENOENT") {
+      return null;
+    }
+    throw error;
   }
+  return existing.length === KEY_BYTES ? existing : null;
 }
 
 // Only called from the write path: mints a key when missing, and self-heals
@@ -122,7 +141,12 @@ export async function readSecret(filePath: string): Promise<string | null> {
   const basename = path.basename(filePath);
 
   if (data.subarray(0, MAGIC.length).toString("latin1") === MAGIC) {
-    const key = await loadKey(dir);
+    let key: Buffer | null;
+    try {
+      key = await loadKey(dir);
+    } catch {
+      return null;
+    }
     if (!key) return null;
     try {
       return decryptLocal(key, data);
@@ -131,11 +155,15 @@ export async function readSecret(filePath: string): Promise<string | null> {
     }
   }
 
-  // Written by an older build through the OS keychain. Unreadable without a
-  // keychain prompt, so drop it and let the caller re-acquire the secret.
+  // Written by an older build through the OS keychain. Migrated where that
+  // decrypts silently, and otherwise left alone rather than destroyed.
   if (looksSafeStorageEncrypted(data)) {
+    const recovered = await decryptWithOsKeychain(data);
+    if (recovered !== null) {
+      await writeSecret(filePath, recovered).catch(() => {});
+      return recovered;
+    }
     await markManaged(dir, basename).catch(() => {});
-    await fs.rm(filePath, { force: true }).catch(() => {});
     return null;
   }
 
