@@ -448,7 +448,13 @@ func windowsRouteIsPresent(spec windowsRouteSpec) bool {
 	if err != nil {
 		return false
 	}
-	row, err := winipcfg.LUID(spec.interfaceLUID).Route(destination, nextHop)
+	return windowsPrefixRouteIsPresent(winipcfg.LUID(spec.interfaceLUID), destination, nextHop)
+}
+
+// windowsPrefixRouteIsPresent is the same check for a route already parsed —
+// the tunnel's own on-link routes, whose next hop is the unspecified address.
+func windowsPrefixRouteIsPresent(luid winipcfg.LUID, destination netip.Prefix, nextHop netip.Addr) bool {
+	row, err := luid.Route(destination, nextHop)
 	return err == nil && row != nil
 }
 

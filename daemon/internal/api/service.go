@@ -251,6 +251,11 @@ type Service struct {
 	// defaultWireGuardHandshakeTimeout; tests set it small.
 	handshakeTimeout time.Duration
 
+	// dataPathBudget bounds how long the bring-up gate waits on a host that has
+	// no usable adapter or route yet. Defaults to dataPathGateBudget; tests set
+	// it small.
+	dataPathBudget time.Duration
+
 	// cloakStartedFor is the remote startCloakTransport last started Cloak
 	// against, so a live cloak.Status().Running is only trusted as "already
 	// bridging this server" when it actually is. Guarded by cloakMu.
@@ -292,6 +297,13 @@ type wgRouteGuard interface {
 // socket may still be tied to a pre-sleep address. Optional capability.
 type wgSocketRebinder interface {
 	RebindDeviceSockets(ctx context.Context) int
+}
+
+// wgTunnelReadiness reports whether the host has the tunnel's adapter usable —
+// address out of duplicate-address-detection and AllowedIPs routes published.
+// Optional: a manager that does not implement it is probed straight away.
+type wgTunnelReadiness interface {
+	TunnelReady(ctx context.Context, profile state.WireGuardProfile) (bool, error)
 }
 
 // wgDNSGuard re-asserts the tunnel's resolvers when the host has stopped
@@ -368,6 +380,7 @@ func NewService(
 		wg:               wgManager,
 		killSwitch:       killSwitch,
 		handshakeTimeout: defaultWireGuardHandshakeTimeout,
+		dataPathBudget:   dataPathGateBudget,
 		networkKey:       currentNetworkKey,
 		hostInternet:     platform.HostInternet,
 		physicalRoute:    platform.PhysicalDefaultRoute,

@@ -393,10 +393,14 @@ type fakeWGManager struct {
 	handshakeOnStart int
 	handshakeUnix    int64
 
-	// Data-path counter modeling. bytesInPerStatus is added to bytesIn on every
-	// Status call; the zero default is a tunnel taking nothing off the peer.
-	bytesIn          int64
-	bytesInPerStatus int64
+	// Data-path counter modeling: bytesIn moves only when a test drives it with
+	// addBytesIn, so nothing fabricates traffic for a caller merely asking.
+	bytesIn int64
+
+	// Adapter readiness modeling (TunnelReady): not ready for the first
+	// notReadyPolls polls, so the zero default is a host that is ready at once.
+	notReadyPolls int
+	readyPolls    int
 
 	// lastStartConfig is the config text of the most recent Start, for
 	// asserting the peer Endpoint the tunnel was actually brought up against.
@@ -491,7 +495,6 @@ func (f *fakeWGManager) Status(_ context.Context, _ state.WireGuardProfile) (sta
 	if f.statusErr != nil {
 		return state.WireGuardStatus{}, f.statusErr
 	}
-	f.bytesIn += f.bytesInPerStatus
 	return state.WireGuardStatus{Running: f.running, Detail: "fake", LastHandshakeUnix: f.lastHandshakeLocked(), BytesIn: f.bytesIn}, nil
 }
 
@@ -524,6 +527,21 @@ func (f *fakeWGManager) ActiveInterfaceName(_ context.Context, _ state.WireGuard
 		return "", f.interfaceErr
 	}
 	return f.interfaceName, nil
+}
+
+// addBytesIn drives the peer's received-byte counter explicitly.
+func (f *fakeWGManager) addBytesIn(n int64) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.bytesIn += n
+}
+
+// TunnelReady models the host having published the adapter's address and routes.
+func (f *fakeWGManager) TunnelReady(_ context.Context, _ state.WireGuardProfile) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.readyPolls++
+	return f.readyPolls > f.notReadyPolls, nil
 }
 
 func (f *fakeWGManager) ActiveLUIDs() map[uint64]struct{} {

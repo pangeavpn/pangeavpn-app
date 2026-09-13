@@ -4,6 +4,10 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
+	"net"
+	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -243,9 +247,8 @@ func TestRootProbeQuery_VariesInSize(t *testing.T) {
 	}
 }
 
-// TestRootProbeQuery_VariesWhatTheReplyWillLookLike covers the other half of the
-// shape: the question, DNSSEC bit and buffer size decide the reply's size, which
-// padding on the request cannot touch.
+// TestRootProbeQuery_VariesWhatTheReplyWillLookLike covers the other half of
+// the shape: the question and buffer size decide the reply's size.
 func TestRootProbeQuery_VariesWhatTheReplyWillLookLike(t *testing.T) {
 	qtypes := make(map[uint16]int)
 	payloads := make(map[uint16]int)
@@ -266,8 +269,12 @@ func TestRootProbeQuery_VariesWhatTheReplyWillLookLike(t *testing.T) {
 	if len(payloads) != len(rootProbePayloadSizes) {
 		t.Errorf("advertised %d of the %d buffer sizes: %v", len(payloads), len(rootProbePayloadSizes), payloads)
 	}
-	if len(dnssec) != 2 {
-		t.Errorf("the DNSSEC bit never varied: %v", dnssec)
+	// DO stays clear: its ~1 KB answers are what a constrained path drops.
+	if dnssec[true] != 0 {
+		t.Errorf("the DNSSEC OK bit was set on %d queries", dnssec[true])
+	}
+	if slices.Contains(rootProbeQTypes, 48) {
+		t.Error("root DNSKEY is back in the probe question set")
 	}
 }
 
@@ -438,9 +445,9 @@ func gateProbeCounter(svc *Service) *int32 {
 	return &calls
 }
 
-func gateTestService(t *testing.T, rxPerStatus int64) (*Service, *fakeWGManager) {
+func gateTestService(t *testing.T) (*Service, *fakeWGManager) {
 	t.Helper()
-	wgMgr := &fakeWGManager{interfaceName: "utun7", bytesInPerStatus: rxPerStatus}
+	wgMgr := &fakeWGManager{interfaceName: "utun7"}
 	svc := newTestServiceFull(t, &fakeCloakManager{}, &fakeNaiveManager{}, &fakeRealityManager{},
 		&fakeHysteria2Manager{}, &fakeShadowsocksManager{}, &fakeSnowflakeManager{}, wgMgr, &fakeKillSwitch{}, cascadeProfile())
 	return svc, wgMgr
@@ -450,7 +457,7 @@ func gateTestService(t *testing.T, rxPerStatus int64) (*Service, *fakeWGManager)
 // not a blanket extension: a peer sending nothing back keeps the original
 // attempt count, so a censored transport does not slow the cascade down.
 func TestProveDataPath_BlockedTunnelStillFailsFast(t *testing.T) {
-	svc, _ := gateTestService(t, 0)
+	svc, _ := gateTestService(t)
 	calls := gateProbeCounter(svc)
 
 	if err := svc.proveDataPath(context.Background(), cascadeProfile().WireGuard); err == nil {
@@ -461,24 +468,126 @@ func TestProveDataPath_BlockedTunnelStillFailsFast(t *testing.T) {
 	}
 }
 
-// TestProveDataPath_LiveTunnelEarnsMoreAttempts is the underpowered-laptop case:
-// the peer is feeding the tunnel while Windows is still making the adapter
-// usable, so the gate must keep trying past the base attempts.
-func TestProveDataPath_LiveTunnelEarnsMoreAttempts(t *testing.T) {
-	svc, _ := gateTestService(t, 4096)
+// The slow-host case: the handshake lands before the address is out of DAD and
+// the routes are published, so the gate must wait rather than spend attempts.
+func TestProveDataPath_WaitsForALateAdapter(t *testing.T) {
+	svc, wgMgr := gateTestService(t)
+	wgMgr.notReadyPolls = 2
 
-	var calls int32
+	var mu sync.Mutex
+	var probes, probesBeforeReady int
 	svc.probeResolver = func(context.Context, string, string) error {
-		if atomic.AddInt32(&calls, 1) > int32(dataPathGateAttempts) {
-			return nil
+		wgMgr.mu.Lock()
+		ready := wgMgr.readyPolls > wgMgr.notReadyPolls
+		wgMgr.mu.Unlock()
+		mu.Lock()
+		defer mu.Unlock()
+		probes++
+		if !ready {
+			probesBeforeReady++
 		}
-		return errors.New("i/o timeout")
+		return nil
 	}
 
 	if err := svc.proveDataPath(context.Background(), cascadeProfile().WireGuard); err != nil {
-		t.Fatalf("proveDataPath rejected a tunnel that was still taking bytes off the peer: %v", err)
+		t.Fatalf("proveDataPath rejected a tunnel whose adapter arrived late: %v", err)
 	}
-	if got := atomic.LoadInt32(&calls); got <= int32(dataPathGateAttempts) {
-		t.Errorf("probe attempts = %d, want more than the base %d", got, dataPathGateAttempts)
+	mu.Lock()
+	defer mu.Unlock()
+	if probesBeforeReady != 0 {
+		t.Errorf("gate spent %d attempts on an adapter that was not ready yet", probesBeforeReady)
+	}
+	if probes == 0 {
+		t.Error("gate passed without ever probing the ready adapter")
+	}
+}
+
+// A peer's passive keepalives move the received-byte counter on a tunnel that
+// carries nothing, so no extension may be bought with it.
+func TestProveDataPath_KeepaliveInflatedCounterStillFailsFast(t *testing.T) {
+	svc, wgMgr := gateTestService(t)
+
+	var calls int32
+	svc.probeResolver = func(context.Context, string, string) error {
+		atomic.AddInt32(&calls, 1)
+		wgMgr.addBytesIn(1500)
+		return errors.New("i/o timeout")
+	}
+
+	if err := svc.proveDataPath(context.Background(), cascadeProfile().WireGuard); err == nil {
+		t.Fatal("proveDataPath accepted a blocked tunnel whose peer only sent keepalives")
+	}
+	if got := atomic.LoadInt32(&calls); got != dataPathGateAttempts {
+		t.Errorf("probe attempts = %d, want %d — keepalives must not buy extra tries", got, dataPathGateAttempts)
+	}
+	if wgMgr.readyPolls == 0 {
+		t.Error("gate never checked adapter readiness")
+	}
+}
+
+// TestProveDataPath_LateRouteIsRetriedNotTreatedAsAVerdict: a route of ours that
+// is still being published must neither pass the gate nor consume an attempt.
+func TestProveDataPath_LateRouteIsRetriedNotTreatedAsAVerdict(t *testing.T) {
+	svc, _ := gateTestService(t)
+	svc.dataPathBudget = 3 * dataPathGateRetryDelay
+
+	var calls int32
+	svc.probeResolver = func(context.Context, string, string) error {
+		atomic.AddInt32(&calls, 1)
+		return fmt.Errorf("%w: the tunnel's route is not published yet", errDNSProbeNotReady)
+	}
+
+	err := svc.proveDataPath(context.Background(), cascadeProfile().WireGuard)
+	if err == nil {
+		t.Fatal("proveDataPath passed a tunnel nothing ever left the host on")
+	}
+	if hostNetworkUnreachable(err) {
+		t.Errorf("a late route of ours was reported as the host having no internet: %v", err)
+	}
+	if got := atomic.LoadInt32(&calls); int(got) <= dataPathGateAttempts {
+		t.Errorf("probe calls = %d, want more than the %d base attempts — a not-ready round must not consume one", got, dataPathGateAttempts)
+	}
+}
+
+// TestProbeResolverOverUDP_MissingInterfaceIsNotReady: a local setup failure is
+// the adapter lagging, and passing the gate on it proves nothing crossed.
+func TestProbeResolverOverUDP_MissingInterfaceIsNotReady(t *testing.T) {
+	err := probeResolverOverUDP(context.Background(), "pangea-does-not-exist0", "10.0.0.53")
+	if err == nil {
+		t.Fatal("probe reported success against an interface that does not exist")
+	}
+	if runtime.GOOS == "linux" {
+		return // SO_BINDTODEVICE fails at dial, not at bind.
+	}
+	if !errors.Is(err, errDNSProbeNotReady) {
+		t.Fatalf("error = %v, want errDNSProbeNotReady", err)
+	}
+	if hostNetworkUnreachable(err) {
+		t.Errorf("a missing adapter was reported as the host having no internet: %v", err)
+	}
+}
+
+// TestProbeResolverWithDialer_RetransmitsInsideOneAttempt: one datagram dropped
+// right after the handshake must cost a resend, not the whole attempt.
+func TestProbeResolverWithDialer_RetransmitsInsideOneAttempt(t *testing.T) {
+	var seen int32
+	server, stop := stubDNSServer(t, func(query []byte) []byte {
+		if atomic.AddInt32(&seen, 1) == 1 {
+			return nil
+		}
+		reply := make([]byte, len(query))
+		copy(reply, query)
+		reply[2] = 0x80
+		return reply
+	})
+	defer stop()
+
+	ctx, cancel := context.WithTimeout(context.Background(), dnsProbeTimeout)
+	defer cancel()
+	if err := probeResolverWithDialer(ctx, &net.Dialer{}, server); err != nil {
+		t.Fatalf("probe failed after one dropped query: %v", err)
+	}
+	if got := atomic.LoadInt32(&seen); got != 2 {
+		t.Errorf("queries sent = %d, want 2 (the original and one retransmit)", got)
 	}
 }

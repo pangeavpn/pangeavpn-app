@@ -412,6 +412,20 @@ func (m *wireGuardGoManager) ActiveTunnelLUID(_ context.Context, profile state.W
 	return session.windowsLUID, nil
 }
 
+// TunnelReady reports whether the host has made the tunnel's adapter usable.
+// Windows publishes the address and its routes well after Start returns.
+func (m *wireGuardGoManager) TunnelReady(_ context.Context, profile state.WireGuardProfile) (bool, error) {
+	if strings.TrimSpace(profile.TunnelName) == "" {
+		return false, errors.New("wireguard tunnelName is required")
+	}
+
+	session, ok := m.session(sanitizeTunnelName(profile.TunnelName))
+	if !ok || session == nil {
+		return false, fmt.Errorf("wireguard tunnel %s is not running", profile.TunnelName)
+	}
+	return tunnelSessionReady(session, profile)
+}
+
 // EnsureEndpointRoutes re-pins the session's endpoint bypass routes to the
 // host's current default route, reporting whether it had to repair anything.
 // The lock is held throughout so the repair cannot race a teardown claiming the

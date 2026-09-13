@@ -48,11 +48,13 @@ const (
 	dataPathGateRetryDelay = 300 * time.Millisecond
 )
 
-// dataPathGateBudget bounds the extra attempts a still-live tunnel earns past
-// dataPathGateAttempts. Underpowered hosts finish the handshake well before
-// Windows has the adapter carrying traffic, and a fixed count spent that whole
-// window judging a tunnel that was not up yet.
+// dataPathGateBudget bounds the wait on a host that has not made the tunnel's
+// adapter usable yet; a ready host — blocked or not — spends none of it.
 const dataPathGateBudget = 12 * time.Second
+
+// dnsProbeRetransmitAfter is when an attempt resends its query inside its own
+// timeout, so one dropped datagram costs a resend rather than a whole attempt.
+const dnsProbeRetransmitAfter = time.Second
 
 // nextDNSProbeDelay draws a uniform gap in [min, max]. A failed read falls back
 // to the midpoint — a regular cadence is worse than a random one, never wrong.
@@ -90,6 +92,10 @@ const dnsGuardCorrectionCooldown = 30 * time.Second
 // Switch or Disconnect cancelled the health check's context mid-flight — so it
 // must not be booked as either a success or a failure.
 var errDNSProbeInconclusive = errors.New("dns probe: round did not complete")
+
+// errDNSProbeNotReady marks a round that never left the host: no adapter, no
+// address to bind to, or no route yet. Retryable, and never a verdict.
+var errDNSProbeNotReady = errors.New("dns probe: the tunnel adapter is not ready")
 
 // errDNSProbeConnRefused marks an ICMP port-unreachable on the connected
 // socket: the resolver rejected the port, but that reply is proof the round
@@ -172,19 +178,19 @@ func activeTunnelInterface() (string, error) {
 // bigger than the ~150 byte handshake packets that keep passing when a path has
 // stopped carrying anything larger.
 func probeResolverOverUDP(ctx context.Context, tunnelInterface, server string) error {
-	// Local setup failures are inconclusive, not evidence: the adapter can lag
-	// the handshake, and rejecting on that would fail a working transport.
+	// A local setup failure is the host still bringing the adapter up: retryable,
+	// and never a pass on a tunnel nothing has crossed.
 	iface := strings.TrimSpace(tunnelInterface)
 	if iface == "" {
 		var err error
 		iface, err = activeTunnelInterface()
 		if err != nil {
-			return fmt.Errorf("%w: find tunnel interface: %v", errDNSProbeInconclusive, err)
+			return fmt.Errorf("%w: find tunnel interface: %v", errDNSProbeNotReady, err)
 		}
 	}
 	dialer, err := bindDialerToInterface(iface)
 	if err != nil {
-		return fmt.Errorf("%w: bind to tunnel interface %s: %v", errDNSProbeInconclusive, iface, err)
+		return fmt.Errorf("%w: bind to tunnel interface %s: %v", errDNSProbeNotReady, iface, err)
 	}
 	return probeResolverWithDialer(ctx, dialer, server)
 }
@@ -195,6 +201,9 @@ func probeResolverOverUDP(ctx context.Context, tunnelInterface, server string) e
 func probeResolverWithDialer(ctx context.Context, dialer *net.Dialer, server string) error {
 	conn, err := dialer.DialContext(ctx, "udp", net.JoinHostPort(server, currentDNSProbePort()))
 	if err != nil {
+		if isNetworkUnreachable(err) {
+			return fmt.Errorf("%w: the tunnel's route is not published yet", errDNSProbeNotReady)
+		}
 		return err
 	}
 	defer conn.Close()
@@ -215,10 +224,31 @@ func probeResolverWithDialer(ctx context.Context, dialer *net.Dialer, server str
 		return err
 	}
 
+	retransmitAt := time.Now().Add(dnsProbeRetransmitAfter)
+	if !retransmitAt.Before(deadline) {
+		retransmitAt = deadline
+	}
+	retransmitted := false
+
 	buf := make([]byte, maxProbeReplySize)
 	for {
+		readDeadline := deadline
+		if !retransmitted {
+			readDeadline = retransmitAt
+		}
+		if err := conn.SetReadDeadline(readDeadline); err != nil {
+			return err
+		}
 		n, err := conn.Read(buf)
 		if err != nil {
+			// A datagram dropped right after the handshake costs a resend, not the attempt.
+			if !retransmitted && isTimeout(err) && ctx.Err() == nil && time.Now().Before(deadline) {
+				retransmitted = true
+				if _, err := conn.Write(query); err != nil {
+					return err
+				}
+				continue
+			}
 			return classifyProbeReadError(ctx, err)
 		}
 		if isDNSReplyTo(buf[:n], query, questionEnd, id) {
@@ -226,6 +256,11 @@ func probeResolverWithDialer(ctx context.Context, dialer *net.Dialer, server str
 		}
 		// Someone else's datagram on our port; keep waiting out the deadline.
 	}
+}
+
+func isTimeout(err error) bool {
+	var netErr net.Error
+	return errors.As(err, &netErr) && netErr.Timeout()
 }
 
 // classifyProbeReadError sorts a failed read into the round's outcome: the
@@ -251,12 +286,11 @@ func classifyProbeReadError(ctx context.Context, err error) error {
 // consecutive probes never share a length, small enough to stay one datagram.
 const dnsProbeMaxPadding = 64
 
-// rootProbeQTypes are root-zone questions every recursive resolver answers from
-// its priming cache, chosen because their answers differ wildly in size.
+// Root-zone questions every resolver answers from its priming cache, sized
+// apart. DNSKEY/DNSSEC are out: their ~1 KB answers a tight path drops.
 var rootProbeQTypes = []uint16{
 	2,  // NS: the root NS set, ~500 B
 	6,  // SOA: one record, ~100 B
-	48, // DNSKEY: the root keys, ~1 KB, truncated at the smaller payload sizes
 	1,  // A: NODATA, ~50 B
 	28, // AAAA: NODATA, ~50 B
 }
@@ -270,11 +304,10 @@ var rootProbePayloadSizes = []uint16{512, 1232, 1400, 4096}
 // buffer under the advertised ceiling rejected working tunnels there.
 const maxProbeReplySize = 4096
 
-// rootProbeQuery builds a root-zone query whose transaction ID, question,
-// DNSSEC bit, buffer size and padding are all drawn per query, so neither the
-// request nor the reply it draws has a size a censor can lock onto.
+// rootProbeQuery draws the transaction ID, question, buffer size and padding
+// per query, so neither request nor reply has a size a censor can lock onto.
 func rootProbeQuery() ([]byte, int, uint16, error) {
-	var seed [6]byte
+	var seed [5]byte
 	if _, err := rand.Read(seed[:]); err != nil {
 		return nil, 0, 0, fmt.Errorf("generate probe transaction ID: %w", err)
 	}
@@ -282,13 +315,6 @@ func rootProbeQuery() ([]byte, int, uint16, error) {
 	padding := make([]byte, int(seed[2])%(dnsProbeMaxPadding+1))
 	qtype := rootProbeQTypes[int(seed[3])%len(rootProbeQTypes)]
 	payloadSize := rootProbePayloadSizes[int(seed[4])%len(rootProbePayloadSizes)]
-	// DO asks for the signatures alongside the answer, several hundred bytes of
-	// difference on the same question.
-	var ednsFlags uint32
-	if seed[5]&1 == 1 {
-		ednsFlags = 0x00008000
-	}
-
 	msg := make([]byte, 0, 17+11+len(padding))
 	msg = binary.BigEndian.AppendUint16(msg, id)
 	msg = binary.BigEndian.AppendUint16(msg, 0x0100) // standard query, recursion desired
@@ -304,7 +330,7 @@ func rootProbeQuery() ([]byte, int, uint16, error) {
 	msg = append(msg, 0)                                             // OPT owner: root
 	msg = binary.BigEndian.AppendUint16(msg, 41)                     // TYPE: OPT
 	msg = binary.BigEndian.AppendUint16(msg, payloadSize)            // advertised UDP payload size
-	msg = binary.BigEndian.AppendUint32(msg, ednsFlags)              // extended RCODE and flags
+	msg = binary.BigEndian.AppendUint32(msg, 0)                      // extended RCODE and flags, DO clear
 	msg = binary.BigEndian.AppendUint16(msg, uint16(len(padding)+4)) // RDLENGTH
 	msg = binary.BigEndian.AppendUint16(msg, 12)                     // option code: PADDING
 	msg = binary.BigEndian.AppendUint16(msg, uint16(len(padding)))   // option length
@@ -366,7 +392,7 @@ func (s *Service) dataPathIsDead(ctx context.Context, profile state.Profile) boo
 		case err == nil, errors.Is(err, errDNSProbeConnRefused), errors.Is(err, errDNSProbeOversizedReply):
 			s.recordDNSProbeSuccess()
 			return false
-		case errors.Is(err, errDNSProbeInconclusive):
+		case errors.Is(err, errDNSProbeInconclusive), errors.Is(err, errDNSProbeNotReady):
 			return false
 		}
 		lastErr = fmt.Errorf("%s: %w", server, err)
@@ -419,22 +445,27 @@ func (s *Service) proveDataPath(ctx context.Context, wireGuardProfile state.Wire
 		return nil
 	}
 	servers = probeServerOrder(servers)
+
+	budget := s.dataPathBudget
+	if budget <= 0 {
+		budget = dataPathGateBudget
+	}
+	deadline := time.Now().Add(budget)
+	s.awaitTunnelReady(ctx, wireGuardProfile, deadline)
 	iface := s.resolveWireGuardInterfaceName(ctx, wireGuardProfile)
 
-	deadline := time.Now().Add(dataPathGateBudget)
-	lastRx, rxKnown := s.tunnelBytesIn(ctx, wireGuardProfile)
-
 	var lastErr error
-	for attempt := 0; ; attempt++ {
-		if attempt > 0 {
+	delay := false
+	for attempt := 0; attempt < dataPathGateAttempts; {
+		if delay {
 			select {
 			case <-ctx.Done():
 				return nil
 			case <-time.After(dataPathGateRetryDelay):
 			}
-			// A slow host can publish the adapter after the first attempt.
-			iface = s.resolveWireGuardInterfaceName(ctx, wireGuardProfile)
 		}
+		delay = true
+
 		server := servers[attempt%len(servers)]
 		probeCtx, cancel := context.WithTimeout(ctx, dnsProbeTimeout)
 		err := s.probeResolver(probeCtx, iface, server)
@@ -443,34 +474,41 @@ func (s *Service) proveDataPath(ctx context.Context, wireGuardProfile state.Wire
 		case err == nil, errors.Is(err, errDNSProbeConnRefused),
 			errors.Is(err, errDNSProbeOversizedReply), errors.Is(err, errDNSProbeInconclusive):
 			return nil
-		}
-		lastErr = fmt.Errorf("%s: %w", server, err)
-
-		if attempt+1 < dataPathGateAttempts {
+		case errors.Is(err, errDNSProbeNotReady):
+			// Nothing left the host, so this is neither a verdict nor an attempt.
+			if !time.Now().Before(deadline) {
+				return fmt.Errorf("tunnel came up but the host had not made its adapter usable in time: %w", err)
+			}
 			continue
 		}
-		// Past the base attempts, only a tunnel still taking bytes off the peer
-		// earns more: a blocked one stays flat and fails as fast as it always did.
-		if !rxKnown || !time.Now().Before(deadline) {
-			break
-		}
-		rx, ok := s.tunnelBytesIn(ctx, wireGuardProfile)
-		if !ok || rx <= lastRx {
-			break
-		}
-		lastRx = rx
+		lastErr = fmt.Errorf("%s: %w", server, err)
+		attempt++
 	}
 	return fmt.Errorf("tunnel came up but did not carry traffic: %w", lastErr)
 }
 
-// tunnelBytesIn reads the peer's received-byte counter, reporting whether it
-// could be read at all so an unavailable counter never buys extra attempts.
-func (s *Service) tunnelBytesIn(ctx context.Context, wireGuardProfile state.WireGuardProfile) (int64, bool) {
-	status, err := s.wg.Status(ctx, wireGuardProfile)
-	if err != nil {
-		return 0, false
+// awaitTunnelReady returns the moment the host has the tunnel's adapter usable,
+// or when the budget or ctx runs out and the attempts below give the verdict.
+func (s *Service) awaitTunnelReady(ctx context.Context, wireGuardProfile state.WireGuardProfile, deadline time.Time) {
+	reporter, ok := s.wg.(wgTunnelReadiness)
+	if !ok {
+		return
 	}
-	return status.BytesIn, true
+	for {
+		ready, err := reporter.TunnelReady(ctx, wireGuardProfile)
+		if err != nil {
+			s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("could not tell whether the tunnel adapter was ready: %v", err))
+			return
+		}
+		if ready || !time.Now().Before(deadline) {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(dataPathGateRetryDelay):
+		}
+	}
 }
 
 // dnsProbeDue reports whether a round is due, claiming the slot when it is so
