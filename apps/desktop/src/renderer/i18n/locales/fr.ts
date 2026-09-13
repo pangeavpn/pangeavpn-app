@@ -27,8 +27,15 @@ export const fr = {
   "login.cachedTokenAriaLabel": "Se connecter avec le numéro enregistré",
   "login.enterToken": "Veuillez saisir votre numéro de compte.",
   "login.signingIn": "Connexion...",
-  "login.invalidToken": "Numéro de compte invalide.",
-  "login.signInFailed": "Échec de la connexion.",
+  "login.error.invalidAccountNumber": "Ce numéro de compte n'est pas reconnu. Vérifiez-le et réessayez.",
+  "login.error.subscriptionExpired": "L'abonnement de ce compte a expiré. Rechargez ou réabonnez-vous, puis reconnectez-vous.",
+  "login.error.deviceLimitReached": "Ce compte a déjà atteint le nombre maximal d'appareils. Supprimez-en un pour continuer.",
+  "login.error.rateLimited": "Trop de tentatives de connexion. Attendez une minute, puis réessayez.",
+  "login.error.serverError": "Nos serveurs rencontrent un problème. Réessayez dans un instant.",
+  "login.error.hubUnreachable": "Impossible de joindre PangeaVPN. Vérifiez votre connexion internet ou essayez une autre méthode de connexion dans les Paramètres.",
+  "login.error.timeout": "La connexion a pris trop de temps. Vérifiez votre connexion et réessayez.",
+  "login.error.registrationFailed": "Votre compte est valide, mais cet appareil n'a pas pu être enregistré. Réessayez.",
+  "login.error.unknown": "Échec de la connexion. Veuillez réessayer.",
 
   // ── Device-limit screen ───────────────────────────────
   "deviceLimit.title": "Limite d'appareils atteinte",

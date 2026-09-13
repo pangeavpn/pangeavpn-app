@@ -27,8 +27,15 @@ export const en = {
   "login.cachedTokenAriaLabel": "Sign in with saved account number",
   "login.enterToken": "Please enter your account number.",
   "login.signingIn": "Signing in...",
-  "login.invalidToken": "Invalid account number.",
-  "login.signInFailed": "Sign in failed.",
+  "login.error.invalidAccountNumber": "We don't recognise that account number. Check it and try again.",
+  "login.error.subscriptionExpired": "This account's subscription has expired. Top up or resubscribe, then sign in again.",
+  "login.error.deviceLimitReached": "This account already has the maximum number of devices. Remove one to continue.",
+  "login.error.rateLimited": "Too many sign-in attempts. Wait a minute, then try again.",
+  "login.error.serverError": "Our servers are having trouble. Please try again in a moment.",
+  "login.error.hubUnreachable": "Couldn't reach PangeaVPN. Check your internet connection, or try another connection method in Settings.",
+  "login.error.timeout": "Signing in took too long. Check your connection and try again.",
+  "login.error.registrationFailed": "Your account is fine, but this device couldn't be registered. Please try again.",
+  "login.error.unknown": "Sign in failed. Please try again.",
 
   // ── Device-limit screen ───────────────────────────────
   "deviceLimit.title": "Device Limit Reached",

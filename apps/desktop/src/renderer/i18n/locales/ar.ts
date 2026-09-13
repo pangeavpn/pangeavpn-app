@@ -27,8 +27,15 @@ export const ar = {
   "login.cachedTokenAriaLabel": "تسجيل الدخول برقم الحساب المحفوظ",
   "login.enterToken": "يرجى إدخال رقم حسابك.",
   "login.signingIn": "جارٍ تسجيل الدخول...",
-  "login.invalidToken": "رقم الحساب غير صالح.",
-  "login.signInFailed": "فشل تسجيل الدخول.",
+  "login.error.invalidAccountNumber": "رقم الحساب هذا غير معروف. تحقق منه وحاول مرة أخرى.",
+  "login.error.subscriptionExpired": "انتهى اشتراك هذا الحساب. اشحن رصيدك أو جدّد الاشتراك ثم سجّل الدخول.",
+  "login.error.deviceLimitReached": "بلغ هذا الحساب الحد الأقصى لعدد الأجهزة. أزل جهازًا للمتابعة.",
+  "login.error.rateLimited": "محاولات تسجيل دخول كثيرة. انتظر دقيقة ثم حاول مرة أخرى.",
+  "login.error.serverError": "تواجه خوادمنا مشكلة. حاول مرة أخرى بعد قليل.",
+  "login.error.hubUnreachable": "تعذّر الوصول إلى PangeaVPN. تحقق من اتصالك بالإنترنت أو جرّب طريقة اتصال أخرى من الإعدادات.",
+  "login.error.timeout": "استغرق تسجيل الدخول وقتًا طويلاً. تحقق من اتصالك وحاول مرة أخرى.",
+  "login.error.registrationFailed": "حسابك سليم، لكن تعذّر تسجيل هذا الجهاز. حاول مرة أخرى.",
+  "login.error.unknown": "فشل تسجيل الدخول. حاول مرة أخرى.",
 
   // ── Device-limit screen ───────────────────────────────
   "deviceLimit.title": "تم بلوغ حد الأجهزة",

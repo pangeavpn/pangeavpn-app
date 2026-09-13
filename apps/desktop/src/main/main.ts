@@ -30,6 +30,7 @@ import { startNetworkWatcher, onNetworkChange } from "./networkWatcher";
 import { statusNotificationKind, type StatusSnapshot } from "./statusNotifications";
 import { mt, mtState, setMainLocale, resolveMainLocale } from "./i18n";
 import { sanitizeLog } from "./logSanitize";
+import { classifyLoginError } from "./loginError";
 import { shouldShowTrayHint, trayHintBodyKey } from "./trayHint";
 import { anchorPosition, canAnchorWindow, samePoint, type AnchorRect } from "./windowAnchor";
 import {
@@ -1736,7 +1737,7 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.authLogin, async (_event, vpnToken: string) => {
     if (!vpnToken || typeof vpnToken !== "string" || vpnToken.trim().length === 0) {
-      return { authenticated: false, user: null };
+      return { authenticated: false, user: null, error: "INVALID_ACCOUNT_NUMBER" };
     }
 
     try {
@@ -1778,7 +1779,7 @@ function registerIpcHandlers(): void {
 
         await auth.clearLicenseKey();
         pangeaApiClient.clearCache();
-        return { authenticated: false, user: null, error: message };
+        return { authenticated: false, user: null, error: "REGISTRATION_FAILED" };
       }
 
       // Registration succeeded — persist identity keypair and set on API client.
@@ -1797,11 +1798,13 @@ function registerIpcHandlers(): void {
         await pangeaApiClient.deregisterDevice(identityPublicKey).catch(() => {});
         await auth.clearLicenseKey();
         pangeaApiClient.clearCache();
-        return { authenticated: false, user: null };
+        return { authenticated: false, user: null, error: "REGISTRATION_FAILED" };
       }
     } catch (err) {
+      // The message stays in the log for support; the user gets a code the UI
+      // can phrase in their language.
       console.warn("token login failed:", sanitizeLog(err));
-      return { authenticated: false, user: null };
+      return { authenticated: false, user: null, error: classifyLoginError(err) };
     }
   });
 

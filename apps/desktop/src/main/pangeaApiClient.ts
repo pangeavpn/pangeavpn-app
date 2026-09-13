@@ -55,6 +55,17 @@ export class AuthError extends Error {
   }
 }
 
+/** The hub answered a sign-in attempt and refused it. Separate from AuthError,
+ *  whose handlers log the user out — there is no session to end yet. */
+export class LoginRejectedError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "LoginRejectedError";
+    this.status = status;
+  }
+}
+
 /**
  * The account is fine, the subscription ran out.
  *
@@ -1575,7 +1586,7 @@ export class PangeaApiClient {
             "This account's subscription has expired. Top up or resubscribe, then sign in again."
           );
         }
-        throw new Error(`Token login failed (${response.status}): ${text}`);
+        throw new LoginRejectedError(`Token login failed (${response.status}): ${text}`, response.status);
       }
 
       const data = (await response.json()) as TokenLoginResponse;

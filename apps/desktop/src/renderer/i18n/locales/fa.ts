@@ -27,8 +27,15 @@ export const fa = {
   "login.cachedTokenAriaLabel": "ورود با شماره حساب ذخیره‌شده",
   "login.enterToken": "لطفاً شماره حساب خود را وارد کنید.",
   "login.signingIn": "در حال ورود...",
-  "login.invalidToken": "شماره حساب نامعتبر است.",
-  "login.signInFailed": "ورود ناموفق بود.",
+  "login.error.invalidAccountNumber": "این شماره حساب شناخته نشد. آن را بررسی کنید و دوباره تلاش کنید.",
+  "login.error.subscriptionExpired": "اشتراک این حساب به پایان رسیده است. شارژ کنید یا دوباره مشترک شوید، سپس وارد شوید.",
+  "login.error.deviceLimitReached": "این حساب به حداکثر تعداد دستگاه رسیده است. یکی را حذف کنید تا ادامه دهید.",
+  "login.error.rateLimited": "تلاش‌های ورود بیش از حد زیاد بود. یک دقیقه صبر کنید و دوباره تلاش کنید.",
+  "login.error.serverError": "سرورهای ما با مشکل مواجه شده‌اند. کمی بعد دوباره تلاش کنید.",
+  "login.error.hubUnreachable": "دسترسی به PangeaVPN ممکن نشد. اتصال اینترنت خود را بررسی کنید یا روش اتصال دیگری را در تنظیمات امتحان کنید.",
+  "login.error.timeout": "ورود بیش از حد طول کشید. اتصال خود را بررسی کنید و دوباره تلاش کنید.",
+  "login.error.registrationFailed": "حساب شما مشکلی ندارد، اما ثبت این دستگاه ممکن نشد. دوباره تلاش کنید.",
+  "login.error.unknown": "ورود ناموفق بود. دوباره تلاش کنید.",
 
   // ── Device-limit screen ───────────────────────────────
   "deviceLimit.title": "به سقف تعداد دستگاه‌ها رسیدید",

@@ -16,6 +16,7 @@ import { buildDriftMap } from "./driftMap.js";
 import { dnsChoiceFor, dnsServersFor, type DnsChoice } from "./dnsPresets.js";
 import { buildFlag } from "./flags.js";
 import { formatAccountNumberInput, normalizeAccountNumber } from "./accountNumber.js";
+import { loginErrorText } from "./loginErrorText.js";
 import {
   buildServerRetryOrder,
   groupRegions,
@@ -1420,7 +1421,7 @@ deviceLimitContinueBtn.addEventListener("click", async () => {
         // best-effort
       }
     } else {
-      deviceLimitMessage.textContent = authState.error || t("login.signInFailed");
+      deviceLimitMessage.textContent = loginErrorText(authState.error, t);
     }
   } catch (err) {
     deviceLimitMessage.textContent = reportError("deviceLimitSignIn", err);
@@ -1486,10 +1487,8 @@ loginScreenBtn.addEventListener("click", async () => {
       loginTokenInput.disabled = false;
       loginScreenMessage.textContent = "";
       await showDeviceLimitScreen(token);
-    } else if (authState.error) {
-      loginScreenMessage.textContent = authState.error;
     } else {
-      loginScreenMessage.textContent = t("login.invalidToken");
+      loginScreenMessage.textContent = loginErrorText(authState.error, t);
     }
   } catch (error) {
     loginScreenMessage.textContent = reportError("signIn", error);

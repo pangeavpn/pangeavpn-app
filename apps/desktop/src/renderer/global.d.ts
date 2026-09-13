@@ -28,10 +28,22 @@ declare global {
     entryServerId: string | null;
   }
 
+  /** Mirrors LoginErrorCode in shared/ipc.ts. */
+  type LoginErrorCode =
+    | "INVALID_ACCOUNT_NUMBER"
+    | "SUBSCRIPTION_EXPIRED"
+    | "DEVICE_LIMIT_REACHED"
+    | "RATE_LIMITED"
+    | "SERVER_ERROR"
+    | "HUB_UNREACHABLE"
+    | "TIMEOUT"
+    | "REGISTRATION_FAILED"
+    | "UNKNOWN";
+
   interface AuthState {
     authenticated: boolean;
     user: AuthUser | null;
-    error?: string;
+    error?: LoginErrorCode;
     friendlyName?: string | null;
   }
 

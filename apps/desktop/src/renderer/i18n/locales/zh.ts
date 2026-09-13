@@ -27,8 +27,15 @@ export const zh = {
   "login.cachedTokenAriaLabel": "使用已保存的账号登录",
   "login.enterToken": "请输入您的账号。",
   "login.signingIn": "正在登录...",
-  "login.invalidToken": "账号无效。",
-  "login.signInFailed": "登录失败。",
+  "login.error.invalidAccountNumber": "无法识别该账号。请检查后重试。",
+  "login.error.subscriptionExpired": "此账号的订阅已过期。请充值或重新订阅后再登录。",
+  "login.error.deviceLimitReached": "此账号的设备数量已达上限。请移除一台后继续。",
+  "login.error.rateLimited": "登录尝试过于频繁。请稍等一分钟后重试。",
+  "login.error.serverError": "我们的服务器出现问题。请稍后重试。",
+  "login.error.hubUnreachable": "无法连接到 PangeaVPN。请检查网络连接，或在设置中尝试其他连接方式。",
+  "login.error.timeout": "登录超时。请检查网络连接后重试。",
+  "login.error.registrationFailed": "账号正常，但此设备注册失败。请重试。",
+  "login.error.unknown": "登录失败。请重试。",
 
   // ── Device-limit screen ───────────────────────────────
   "deviceLimit.title": "已达设备上限",
