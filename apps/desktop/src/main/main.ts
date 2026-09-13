@@ -249,6 +249,15 @@ function createWindow(): void {
     console.error("renderer process gone:", details.reason);
   });
 
+  // The renderer has its own console; without this it never reaches the log
+  // file, so a diagnostic report would carry no UI-side history at all.
+  mainWindow.webContents.on("console-message", (details) => {
+    const line = `[renderer] ${details.message}`;
+    if (details.level === "error") console.error(line);
+    else if (details.level === "warning") console.warn(line);
+    else console.log(line);
+  });
+
   mainWindow.on("close", (event) => {
     if (isQuitting || !tray) {
       return;
