@@ -3357,6 +3357,19 @@ body[data-theme="light"] .hero-path-flag { box-shadow: 0 0 0 1px rgba(0, 0, 0, 0
   text-align: start;
 }
 
+#diagnosticsConfirm:not([hidden]),
+#diagnosticsResult:not([hidden]) {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.diagnostics-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
 .diagnostics-text {
   margin: 0;
   font-size: 13px;

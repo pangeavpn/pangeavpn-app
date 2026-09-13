@@ -85,6 +85,7 @@ const appVersionEl = document.getElementById("appVersion") as HTMLSpanElement;
 const copyDiagnosticsBtn = document.getElementById("copyDiagnosticsBtn") as HTMLButtonElement;
 const openLogsFolderBtn = document.getElementById("openLogsFolderBtn") as HTMLButtonElement;
 const sendDiagnosticsBtn = document.getElementById("sendDiagnosticsBtn") as HTMLButtonElement;
+const settingsSendDiagnosticsBtn = document.getElementById("settingsSendDiagnosticsBtn") as HTMLButtonElement;
 const diagnosticsModal = document.getElementById("diagnosticsModal") as HTMLElement;
 const diagnosticsConfirm = document.getElementById("diagnosticsConfirm") as HTMLElement;
 const diagnosticsResult = document.getElementById("diagnosticsResult") as HTMLElement;
@@ -987,6 +988,8 @@ function openDiagnosticsModal(): void {
   diagnosticsResult.hidden = true;
   diagnosticsCode.hidden = true;
   diagnosticsCopyCodeBtn.hidden = true;
+  diagnosticsCopyCodeBtn.textContent = t("diagnostics.copyCode");
+  diagnosticsCopyCodeBtn.disabled = false;
   diagnosticsSendBtn.disabled = false;
   diagnosticsSendBtn.textContent = t("diagnostics.send");
   diagnosticsModal.classList.add("visible");
@@ -1015,6 +1018,10 @@ sendDiagnosticsBtn.addEventListener("click", () => {
   openDiagnosticsModal();
 });
 
+settingsSendDiagnosticsBtn.addEventListener("click", () => {
+  openDiagnosticsModal();
+});
+
 diagnosticsCancelBtn.addEventListener("click", closeDiagnosticsModal);
 diagnosticsCloseBtn.addEventListener("click", closeDiagnosticsModal);
 diagnosticsDoneBtn.addEventListener("click", closeDiagnosticsModal);
@@ -1022,13 +1029,24 @@ diagnosticsModal.addEventListener("click", (e) => {
   if (e.target === diagnosticsModal) closeDiagnosticsModal();
 });
 
+let copyCodeResetTimer: ReturnType<typeof setTimeout> | null = null;
+
 diagnosticsCopyCodeBtn.addEventListener("click", async () => {
   try {
     await copyTextToClipboard(diagnosticsCode.textContent ?? "");
-    setUiMessage(t("diagnostics.codeCopied"));
   } catch (error) {
     setUiMessage(reportError("copyReportCode", error));
+    return;
   }
+  // The toast sits behind the modal, so the confirmation has to be on the button.
+  if (copyCodeResetTimer) clearTimeout(copyCodeResetTimer);
+  diagnosticsCopyCodeBtn.textContent = t("diagnostics.codeCopied");
+  diagnosticsCopyCodeBtn.disabled = true;
+  copyCodeResetTimer = setTimeout(() => {
+    diagnosticsCopyCodeBtn.textContent = t("diagnostics.copyCode");
+    diagnosticsCopyCodeBtn.disabled = false;
+    copyCodeResetTimer = null;
+  }, 1600);
 });
 
 diagnosticsSendBtn.addEventListener("click", async () => {

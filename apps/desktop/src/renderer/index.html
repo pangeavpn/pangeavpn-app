@@ -219,8 +219,10 @@
         <div id="diagnosticsConfirm">
           <p class="diagnostics-text" data-i18n="diagnostics.body">This sends your app log and the VPN service log to support.</p>
           <p class="diagnostics-text" data-i18n="diagnostics.anonymous">The report is anonymous.</p>
-          <label class="diagnostics-note-label" for="diagnosticsNote" data-i18n="diagnostics.noteLabel">Note (optional)</label>
-          <input id="diagnosticsNote" class="diagnostics-note" type="text" maxlength="500" data-i18n-placeholder="diagnostics.notePlaceholder" placeholder="What went wrong?" />
+          <div class="diagnostics-field">
+            <label class="diagnostics-note-label" for="diagnosticsNote" data-i18n="diagnostics.noteLabel">Note (optional)</label>
+            <input id="diagnosticsNote" class="diagnostics-note" type="text" maxlength="500" data-i18n-placeholder="diagnostics.notePlaceholder" placeholder="What went wrong?" />
+          </div>
           <div class="diagnostics-actions">
             <button id="diagnosticsCancelBtn" type="button" class="btn-ghost" data-i18n="diagnostics.cancel">Cancel</button>
             <button id="diagnosticsSendBtn" type="button" class="login-button" data-i18n="diagnostics.send">Send</button>
@@ -537,6 +539,13 @@
           <h3 class="settings-section-title" data-i18n="settings.appearance.heading">Appearance</h3>
           <p class="settings-description" data-i18n="settings.appearance.description">The accent colour used across the app.</p>
           <div id="accentSwatches" class="accent-swatches" role="group" aria-label="Accent colour" data-i18n-aria-label="settings.appearance.accent"></div>
+        </section>
+
+        <!-- Support -->
+        <section id="secSupport" class="settings-section">
+          <h3 class="settings-section-title" data-i18n="settings.support.heading">Support</h3>
+          <p class="settings-description" data-i18n="settings.support.description">Send your logs to support with personal details stripped out. You get a code to quote in your email.</p>
+          <button id="settingsSendDiagnosticsBtn" class="btn-ghost" type="button" data-i18n="settings.support.send">Send Report</button>
         </section>
 
         <!-- Software update -->
