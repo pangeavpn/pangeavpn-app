@@ -98,20 +98,36 @@ candidate_a="${volume_root%/}${install_base%/}/${APP_NAME}"
 candidate_b="${install_base%/}/${APP_NAME}"
 candidate_c="/Applications/${APP_NAME}"
 
+# We are about to stage this binary as a root daemon. An installer lays its
+# payload down root-owned, so anything else was planted rather than installed.
+is_trusted_bundle() {
+  bundle="$1"
+  daemon="${bundle}/Contents/Resources/daemon/daemon"
+  [ ! -L "${bundle}" ] || return 1
+  [ ! -L "${daemon}" ] || return 1
+  [ -x "${daemon}" ] || return 1
+  [ "$(/usr/bin/stat -f %u "${bundle}" 2>/dev/null)" = "0" ] || return 1
+  [ "$(/usr/bin/stat -f %u "${daemon}" 2>/dev/null)" = "0" ] || return 1
+}
+
 for candidate in "$candidate_a" "$candidate_b" "$candidate_c"; do
-  if [ -x "${candidate}/Contents/Resources/daemon/daemon" ]; then
+  if is_trusted_bundle "${candidate}"; then
     app_path="${candidate}"
     break
   fi
 done
 
 if [ -z "${app_path}" ]; then
+  # Scoped to the install target: an unscoped Spotlight query returns lookalike
+  # bundles planted anywhere it indexes, every user's home included.
+  search_root="${volume_root%/}${install_base%/}"
+  [ -d "${search_root}" ] || search_root="/Applications"
   # Read via a here-document rather than a pipe so the assignment survives:
   # a piped `while` runs in a subshell, and world-writable /tmp is unsafe here.
-  mdfind_output="$(/usr/bin/mdfind 'kMDItemCFBundleIdentifier == "com.pangea.pangeavpn"' 2>/dev/null || true)"
+  mdfind_output="$(/usr/bin/mdfind -onlyin "${search_root}" 'kMDItemCFBundleIdentifier == "com.pangea.pangeavpn"' 2>/dev/null || true)"
   if [ -n "${mdfind_output}" ]; then
     while IFS= read -r candidate; do
-      if [ -n "${candidate}" ] && [ -x "${candidate}/Contents/Resources/daemon/daemon" ]; then
+      if [ -n "${candidate}" ] && is_trusted_bundle "${candidate}"; then
         app_path="${candidate}"
         break
       fi
@@ -127,6 +143,12 @@ if [ -z "${app_path}" ]; then
 fi
 daemon_src="${app_path}/Contents/Resources/daemon/daemon"
 
+# A symlink here would redirect the staged root daemon somewhere else.
+if [ -L "${SYSTEM_SUPPORT_DIR}" ]; then
+  echo "'${SYSTEM_SUPPORT_DIR}' is a symlink; refusing to stage the daemon"
+  exit 1
+fi
+
 /bin/mkdir -p "${SYSTEM_SUPPORT_DIR}"
 
 # A downloaded .pkg propagates com.apple.quarantine to everything it extracts,
@@ -135,6 +157,8 @@ daemon_src="${app_path}/Contents/Resources/daemon/daemon"
 
 # WireGuard and Cloak run in-process inside the daemon, so only the daemon
 # binary itself needs to be staged.
+# rm first: install would otherwise write straight through a planted symlink.
+/bin/rm -f "${SYSTEM_DAEMON_PATH}"
 /usr/bin/install -m 755 -o root -g wheel "${daemon_src}" "${SYSTEM_DAEMON_PATH}"
 /usr/sbin/chown root:wheel "${SYSTEM_SUPPORT_DIR}"
 /bin/chmod 755 "${SYSTEM_SUPPORT_DIR}"
@@ -142,7 +166,8 @@ daemon_src="${app_path}/Contents/Resources/daemon/daemon"
 # Copying can invalidate the ad-hoc signature Apple Silicon requires, so the
 # installed daemon is stripped and re-signed here.
 /usr/bin/xattr -dr com.apple.quarantine "${SYSTEM_SUPPORT_DIR}" >/dev/null 2>&1 || true
-/usr/bin/codesign --force --sign - "${SYSTEM_DAEMON_PATH}" >/dev/null 2>&1 || true
+/usr/bin/codesign --force --sign - "${SYSTEM_DAEMON_PATH}" \
+  || echo "codesign failed for ${SYSTEM_DAEMON_PATH}"
 
 # Do NOT start the daemon here — install-mac.sh owns token creation, plist
 # registration, and startup. Starting it tokenless crash-loops under KeepAlive.
