@@ -1,8 +1,12 @@
-import { appendFileSync, mkdirSync, renameSync, statSync } from "node:fs";
+import { closeSync, constants, fstatSync, mkdirSync, openSync, renameSync, writeSync } from "node:fs";
 import path from "node:path";
 import { sanitizeLog } from "./logSanitize.ts";
 
 export const LOG_FILE_NAME = "pangeavpn.log";
+// O_NOFOLLOW refuses a symlink left in the log directory. Windows has no
+// equivalent for Node to ask for, so there it contributes nothing.
+const OPEN_FLAGS =
+  constants.O_WRONLY | constants.O_CREAT | constants.O_APPEND | (constants.O_NOFOLLOW ?? 0);
 const DEFAULT_MAX_BYTES = 512 * 1024;
 const LEVELS = ["log", "warn", "error"] as const;
 
@@ -24,24 +28,34 @@ export function createLogWriter(
   let dirReady = false;
 
   return (level, parts) => {
+    let fd = -1;
     try {
       if (!dirReady) {
         mkdirSync(dir, { recursive: true });
         dirReady = true;
       }
       const line = formatLogLine(level, parts);
-      let size = 0;
-      try {
-        size = statSync(file).size;
-      } catch {
-        size = 0;
-      }
+      fd = openSync(file, OPEN_FLAGS);
+      // Measured through the descriptor being written to, so nothing can swap
+      // the file for another one in between.
+      const { size } = fstatSync(fd);
       if (size > 0 && size + Buffer.byteLength(line) > maxBytes) {
+        closeSync(fd);
+        fd = -1;
         renameSync(file, rolled);
+        fd = openSync(file, OPEN_FLAGS);
       }
-      appendFileSync(file, line);
+      writeSync(fd, line);
     } catch {
       // Swallowed on purpose.
+    } finally {
+      if (fd !== -1) {
+        try {
+          closeSync(fd);
+        } catch {
+          // A throw here would escape the catch above.
+        }
+      }
     }
   };
 }
