@@ -40,6 +40,7 @@ DAEMON_BIN="/usr/local/bin/pangea-daemon"
 DESKTOP_FILE="/usr/share/applications/pangeavpn.desktop"
 ICON_DIR="/usr/share/icons/hicolor/256x256/apps"
 SERVICE_FILE="/etc/systemd/system/pangea-daemon.service"
+BOOT_LOCK_SERVICE_FILE="/etc/systemd/system/pangea-killswitch-boot.service"
 
 # --- Detect package manager ---
 if command -v apt-get &>/dev/null; then
