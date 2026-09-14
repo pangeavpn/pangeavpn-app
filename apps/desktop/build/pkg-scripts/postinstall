@@ -9,6 +9,82 @@ SYSTEM_SUPPORT_DIR="/Library/Application Support/PangeaVPN"
 SYSTEM_DAEMON_PATH="${SYSTEM_SUPPORT_DIR}/PangeaDaemon"
 LOG_PATH="/var/log/pangeavpn-daemon.log"
 
+# ── Give the user back their own app files ──────────────────────────────────
+# Up to 0.6.0 an app installed this way elevated its own daemon, which took
+# root ownership of these — every later write from the app then failed EACCES.
+USER_LIBRARY_ITEMS="Library/Application Support/pangeavpn-desktop
+Library/Application Support/PangeaVPN
+Library/Caches/PangeaVPN
+Library/Caches/com.pangea.pangeavpn
+Library/Containers/com.pangea.pangeavpn
+Library/HTTPStorages/com.pangea.pangeavpn
+Library/Logs/PangeaVPN
+Library/Preferences/com.pangea.pangeavpn.plist
+Library/Saved Application State/com.pangea.pangeavpn.savedState"
+
+# Those same root mkdir -p calls could have created the parents too. Fixed
+# without -R: the rest of Application Support is nothing to do with us.
+USER_LIBRARY_PARENTS="Library
+Library/Application Support
+Library/Caches"
+
+# Installer.app has no login context, so the console owner is the only clue.
+# install-mac.sh runs us under sudo, where SUDO_USER is the better answer.
+resolve_target_user() {
+  user="$(/usr/bin/stat -f %Su /dev/console 2>/dev/null || true)"
+  if [ -z "${user}" ] || [ "${user}" = "root" ]; then
+    user="${SUDO_USER:-}"
+  fi
+  printf "%s" "${user}"
+}
+
+user_home_dir() {
+  home="$(/usr/bin/dscl . -read "/Users/$1" NFSHomeDirectory 2>/dev/null \
+    | /usr/bin/sed -n 's/^NFSHomeDirectory: //p')"
+  printf "%s" "${home:-/Users/$1}"
+}
+
+repair_user_library_ownership() {
+  user="$1"
+  home="$2"
+  group="$(/usr/bin/id -gn "${user}" 2>/dev/null || true)"
+  [ -n "${group}" ] || group="staff"
+
+  # Here-documents, not pipes: a piped while runs in a subshell, and these
+  # paths hold spaces that word splitting would tear apart.
+  while IFS= read -r item; do
+    [ -n "${item}" ] || continue
+    target="${home}/${item}"
+    [ -d "${target}" ] || continue
+    [ "$(/usr/bin/stat -f %Su "${target}" 2>/dev/null)" = "root" ] || continue
+    /usr/sbin/chown "${user}:${group}" "${target}" >/dev/null 2>&1 || true
+  done <<PARENTS
+${USER_LIBRARY_PARENTS}
+PARENTS
+
+  while IFS= read -r item; do
+    [ -n "${item}" ] || continue
+    target="${home}/${item}"
+    [ -e "${target}" ] || continue
+    stray="$(/usr/bin/find "${target}" ! -user "${user}" -print 2>/dev/null | /usr/bin/head -1 || true)"
+    [ -n "${stray}" ] || continue
+    # -P leaves any symlink in the tree pointing where it did, unchowned.
+    /usr/sbin/chown -R -P "${user}:${group}" "${target}" >/dev/null 2>&1 || true
+  done <<ITEMS
+${USER_LIBRARY_ITEMS}
+ITEMS
+}
+
+# Before the app lookup below, which exits early when the bundle is missing.
+target_user="$(resolve_target_user)"
+if [ -n "${target_user}" ] && [ "${target_user}" != "root" ]; then
+  target_home="$(user_home_dir "${target_user}")"
+  if [ -d "${target_home}" ] && [ "${target_home}" != "/" ] && [ "${target_home}" != "/var/root" ]; then
+    # Never fatal under set -e: a permissions repair must not fail the install.
+    repair_user_library_ownership "${target_user}" "${target_home}" || true
+  fi
+fi
+
 install_base="${2:-/Applications}"
 volume_root="${3:-/}"
 app_path=""
