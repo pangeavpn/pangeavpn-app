@@ -32,9 +32,9 @@ Library/Caches"
 # install-mac.sh runs us under sudo, where SUDO_USER is the better answer.
 resolve_target_user() {
   user="$(/usr/bin/stat -f %Su /dev/console 2>/dev/null || true)"
-  if [ -z "${user}" ] || [ "${user}" = "root" ]; then
-    user="${SUDO_USER:-}"
-  fi
+  case "${user}" in
+    ""|root|loginwindow) user="${SUDO_USER:-}" ;;
+  esac
   printf "%s" "${user}"
 }
 
@@ -55,6 +55,9 @@ repair_user_library_ownership() {
   while IFS= read -r item; do
     [ -n "${item}" ] || continue
     target="${home}/${item}"
+    # A symlink here is tampering, never ours to repair: chown would follow it
+    # and hand the caller whatever system directory it points at.
+    [ ! -L "${target}" ] || continue
     [ -d "${target}" ] || continue
     [ "$(/usr/bin/stat -f %Su "${target}" 2>/dev/null)" = "root" ] || continue
     /usr/sbin/chown "${user}:${group}" "${target}" >/dev/null 2>&1 || true
@@ -65,10 +68,11 @@ PARENTS
   while IFS= read -r item; do
     [ -n "${item}" ] || continue
     target="${home}/${item}"
+    [ ! -L "${target}" ] || continue
     [ -e "${target}" ] || continue
     stray="$(/usr/bin/find "${target}" ! -user "${user}" -print 2>/dev/null | /usr/bin/head -1 || true)"
     [ -n "${stray}" ] || continue
-    # -P leaves any symlink in the tree pointing where it did, unchowned.
+    # -P so a symlink deeper in the tree is changed itself, never followed.
     /usr/sbin/chown -R -P "${user}:${group}" "${target}" >/dev/null 2>&1 || true
   done <<ITEMS
 ${USER_LIBRARY_ITEMS}
@@ -79,7 +83,9 @@ ITEMS
 target_user="$(resolve_target_user)"
 if [ -n "${target_user}" ] && [ "${target_user}" != "root" ]; then
   target_home="$(user_home_dir "${target_user}")"
-  if [ -d "${target_home}" ] && [ "${target_home}" != "/" ] && [ "${target_home}" != "/var/root" ]; then
+  # Their own home, or we are being pointed somewhere we have no business in.
+  if [ -d "${target_home}" ] && [ ! -L "${target_home}" ] \
+    && [ "$(/usr/bin/stat -f %Su "${target_home}" 2>/dev/null)" = "${target_user}" ]; then
     # Never fatal under set -e: a permissions repair must not fail the install.
     repair_user_library_ownership "${target_user}" "${target_home}" || true
   fi
