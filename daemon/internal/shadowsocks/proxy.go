@@ -77,8 +77,7 @@ func (p *ProxyManager) Start(ctx context.Context, profile state.ShadowsocksProfi
 			return port, nil
 		}
 		// A different profile while running means a server or credential
-		// rotation: keep serving the old (possibly revoked) node instead
-		// would be worse than the churn of a rebind.
+		// rotation: rebind rather than keep serving a possibly-revoked node.
 		if err := p.Stop(ctx); err != nil {
 			return 0, fmt.Errorf("shadowsocks proxy: stop previous session: %w", err)
 		}

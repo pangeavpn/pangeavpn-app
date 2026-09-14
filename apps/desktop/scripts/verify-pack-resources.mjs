@@ -41,10 +41,8 @@ function assertFile(filePath, errorMessage) {
   }
 }
 
-// Validate a BMP by parsing its header (BITMAPINFOHEADER): "BM" magic at 0,
-// biWidth int32 LE at offset 18, biHeight int32 LE at offset 22. Avoids any
-// image-library dependency. Run `node ./scripts/build-installer-art.mjs` to
-// (re)generate these from build/art-src/*.png.
+// Validates a BMP by parsing its BITMAPINFOHEADER directly (no image-library
+// dependency): "BM" magic at 0, biWidth/biHeight int32 LE at offsets 18/22.
 function assertBmp(filePath, expectedWidth, expectedHeight) {
   assertFile(
     filePath,

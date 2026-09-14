@@ -25,12 +25,8 @@ import (
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/transport"
 )
 
-// The node-side bridge's fixed loopback address, reached via the
-// naive-server's SOCKS5 CONNECT once the TLS+HTTP2 tunnel is up.
 // bridgeAddrFor is the node-side framed-UDP bridge this tunnel dials through
-// the CONNECT stream: one instance per exit under multihop, the default
-// otherwise. The node only listens on ports it generated, so an unconfigured
-// exit is refused there.
+// the CONNECT stream: one instance per exit under multihop, the default otherwise.
 func bridgeAddrFor(port int) string {
 	if port <= 0 {
 		port = state.DefaultNaiveBridgePort
@@ -410,9 +406,8 @@ func (m *Manager) teardown(generation uint64) {
 	m.boundLocalPort = 0
 	m.sessionCtx = nil
 	m.sessionCancel = nil
-	// Retire the generation here, not just in Start: Stop's timeout path and
-	// runSession's own exit both tear the same one down, and PangeaNaiveStop
-	// is a C entry point with no promise of being idempotent.
+	// Retire the generation here too: Stop's timeout path and runSession's
+	// own exit both tear this down, and PangeaNaiveStop's idempotency isn't guaranteed.
 	m.generation++
 	m.mu.Unlock()
 

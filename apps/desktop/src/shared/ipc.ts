@@ -117,13 +117,13 @@ export interface AuthUser {
   name: string;
 }
 
-/** Why a sign-in failed. A stable code, not prose: the renderer localises it,
- *  and only INVALID_ACCOUNT_NUMBER blames what the user typed. */
 /** Outcome of an anonymous diagnostics upload. */
 export type DiagnosticsSendResult =
   | { ok: true; reportCode: string }
   | { ok: false; reason: "unreachable" | "rejected" };
 
+/** Why a sign-in failed. A stable code, not prose: the renderer localises it,
+ *  and only INVALID_ACCOUNT_NUMBER blames what the user typed. */
 export type LoginErrorCode =
   | "INVALID_ACCOUNT_NUMBER"
   | "SUBSCRIPTION_EXPIRED"
@@ -159,21 +159,12 @@ export interface ServerInfo {
     // Optional cover SNI advertised by the hub (daemon defaults to www.microsoft.com when absent).
     serverName?: string;
   };
-  /**
-   * NaiveProxy fallback connection info, present only when the hub node has
-   * NaiveProxy configured. Static per-node config (unlike cloak's per-device
-   * `uid`) — see NaiveProfileSchema in @pangeavpn/shared-types for the full
-   * daemon-facing shape; this omits `localPort`, which is daemon-assigned.
-   */
+  /** NaiveProxy fallback, present only when the hub node has it configured. See
+   *  NaiveProfileSchema in @pangeavpn/shared-types; omits daemon-assigned `localPort`. */
   naive?: {
     remoteHost: string;
-    /**
-     * The endpoint's address, when the hub names one for this transport
-     * specifically. Absent means it terminates on the node `cloak.remoteHost`
-     * already names. Either way the client never resolves `remoteHost` itself:
-     * that would leak our node domains to a third-party resolver, and it cannot
-     * work behind an engaged Lockdown lock, which blocks DNS.
-     */
+    /** Per-transport endpoint address, when the hub names one; the client never
+     *  resolves `remoteHost` itself — that leaks node domains and breaks under Lockdown. */
     remoteIp?: string;
     remotePort: number;
     username: string;
@@ -181,13 +172,8 @@ export interface ServerInfo {
     // Cover SNI presented during the TLS handshake (naive's --proxy host).
     serverName?: string;
   };
-  /**
-   * VLESS+REALITY connection info, present only when the hub node has
-   * reality configured. Static per-node config, same shape as naive above —
-   * see RealityProfileSchema in @pangeavpn/shared-types for the full
-   * daemon-facing shape; this omits `localPort`/`targetPort`, which are
-   * daemon-assigned/defaulted.
-   */
+  /** VLESS+REALITY, present only when configured. See RealityProfileSchema in
+   *  @pangeavpn/shared-types; omits daemon-assigned/defaulted `localPort`/`targetPort`. */
   reality?: {
     remoteHost: string;
     /** Per-transport endpoint address; see naive.remoteIp above. */
@@ -200,13 +186,8 @@ export interface ServerInfo {
     // REALITY SNI / camouflage target hostname.
     serverName?: string;
   };
-  /**
-   * Hysteria2 (QUIC + Salamander obfuscation) connection info, present
-   * only when the hub node has Hysteria2 configured. Static per-node
-   * config, same as NaiveProxy — see Hysteria2ProfileSchema in
-   * @pangeavpn/shared-types for the full daemon-facing shape; this omits
-   * `localPort`, which is daemon-assigned.
-   */
+  /** Hysteria2 (QUIC + Salamander obfuscation), present only when configured.
+   *  See Hysteria2ProfileSchema in @pangeavpn/shared-types; omits daemon-assigned `localPort`. */
   hysteria2?: {
     remoteHost: string;
     /** Per-transport endpoint address; see naive.remoteIp above. */
@@ -221,11 +202,8 @@ export interface ServerInfo {
     /** "start:end" UDP ranges the client hops across; absent means no hopping. */
     remotePorts?: string[];
   };
-  /**
-   * Shadowsocks (AEAD / SS-2022) connection info, present only when the hub
-   * node has a public Shadowsocks listener. `targetHost`/`targetPort` name
-   * the node-side WireGuard listener the relay forwards to.
-   */
+  /** Shadowsocks (AEAD / SS-2022), present only when the node has a public
+   *  listener. `targetHost`/`targetPort` name the WireGuard listener it forwards to. */
   shadowsocks?: {
     remoteHost: string;
     /** Per-transport endpoint address; see naive.remoteIp above. */
@@ -237,10 +215,8 @@ export interface ServerInfo {
     targetPort?: number;
     udpOverTcp?: boolean;
   };
-  /**
-   * Shadowsocks listener that reaches the hub instead of WireGuard, used as a
-   * fallback path for account traffic. Per-region, but the same for all.
-   */
+  /** Shadowsocks listener that reaches the hub instead of WireGuard, used as a
+   *  fallback path for account traffic. Per-region, but the same for all. */
   controlPlaneShadowsocks?: {
     remoteHost: string;
     remotePort: number;
@@ -250,16 +226,8 @@ export interface ServerInfo {
   /** Edge relays, repeated per region: this route answers with a bare array,
    *  so a top-level field would break clients that expect one. */
   frontedEndpoints?: string[];
-  /**
-   * Tor Snowflake (WebRTC rendezvous) connection info, present only when the
-   * hub node has Snowflake configured. Static per-node config, same as
-   * Hysteria2 — see SnowflakeProfileSchema in @pangeavpn/shared-types for
-   * the full daemon-facing shape; this omits `localPort`, which is
-   * daemon-assigned. Unlike the other transports there is no single
-   * `remoteHost`: rendezvous happens against `brokerURL` (optionally via
-   * `frontDomains` or `ampCacheURL`), and the actual data-plane peer is a
-   * volunteer proxy discovered dynamically per-session.
-   */
+  /** Tor Snowflake (WebRTC rendezvous), present only when configured. No single
+   *  `remoteHost` — rendezvous is against `brokerURL`; the data peer is discovered per-session. */
   snowflake?: {
     brokerURL: string;
     bridgeFingerprint: string;
@@ -269,11 +237,8 @@ export interface ServerInfo {
   };
 }
 
-/**
- * Renderer-facing view of ServerInfo: display fields plus per-transport
- * booleans, none of the credentials the daemon needs to build a profile.
- * Cloak is omitted — every node has it, so its presence carries no signal.
- */
+/** Renderer-facing view of ServerInfo: display fields plus per-transport booleans,
+ *  none of the credentials. Cloak is omitted — every node has it. */
 export interface PublicServerInfo {
   id: string;
   name: string;
@@ -314,11 +279,8 @@ export interface DeviceInfo {
   isCurrentDevice?: boolean;
 }
 
-/**
- * Result of a connect attempt. `error: "cancelled"` means the user stopped it —
- * the caller should return to idle, not report a failure. Kept separate from
- * the daemon's bare OkResponse, which the zod schema pins to `{ ok }` alone.
- */
+/** Result of a connect attempt. `error: "cancelled"` means the user stopped it —
+ *  return to idle, not a failure. Kept separate from the daemon's bare OkResponse. */
 export interface ConnectResult {
   ok: boolean;
   error?: string;
@@ -329,13 +291,8 @@ export interface ConnectResult {
 
 export interface SubscriptionInfo {
   status: "trialing" | "active" | "past_due" | "canceled" | "unpaid" | "incomplete" | "none";
-  /**
-   * May this account connect right now? Computed by the hub with the same rule
-   * its register routes enforce — never re-derive it from `status`, which stays
-   * "active" forever on prepaid (crypto/guest) plans even after they lapse.
-   * Older hubs omit it; treat a missing value as entitled so the app doesn't
-   * lock out a paying customer talking to one.
-   */
+  /** May this account connect right now, per the hub. Never re-derive from `status`
+   *  (stays "active" forever on prepaid plans). Missing on old hubs means entitled. */
   entitled?: boolean;
   /** True only for auto-renewing Stripe subs not set to cancel. Crypto/guest (prepaid) plans are always false. */
   renews: boolean;
@@ -354,12 +311,8 @@ export interface PangeaApi {
   provisionAndSwitch: (serverIds: string[], entryServerId?: string | null) => Promise<ConnectResult>;
   setDoh: (enabled: boolean) => Promise<void>;
   getDoh: () => Promise<boolean>;
-  /**
-   * Toggles one hub-connection method. Resolves to the resulting state, which
-   * is unchanged with `applied: false` when the change would have left no
-   * method enabled — the renderer reflects what comes back rather than
-   * assuming the click took effect.
-   */
+  /** Toggles one hub-connection method. Resolves `applied: false` and the
+   *  unchanged state when the change would have left no method enabled. */
   setHubMethod: (method: HubMethod, enabled: boolean) => Promise<HubMethodResult>;
   getHubMethods: () => Promise<HubMethods>;
   /** Which method is carrying hub traffic right now, plus the switches. */

@@ -102,9 +102,8 @@ func reinclude(result []netip.Prefix, keep []netip.Prefix) []netip.Prefix {
 	return out
 }
 
-// collectTunnelPrefixes scans the raw config for the Interface Address and
-// DNS entries, which must stay routed into the tunnel regardless of the LAN
-// exclusion set.
+// collectTunnelPrefixes finds the Interface Address/DNS entries, which must
+// stay routed into the tunnel regardless of the LAN exclusion set.
 func collectTunnelPrefixes(configText string) []netip.Prefix {
 	var keep []netip.Prefix
 	scanner := bufio.NewScanner(strings.NewReader(configText))
@@ -119,16 +118,16 @@ func collectTunnelPrefixes(configText string) []netip.Prefix {
 		if section != "interface" {
 			continue
 		}
-		idx := strings.Index(trimmed, "=")
-		if idx < 0 {
+		rawKey, rawValue, ok := strings.Cut(trimmed, "=")
+		if !ok {
 			continue
 		}
-		key := strings.TrimSpace(trimmed[:idx])
-		value := strings.TrimSpace(trimmed[idx+1:])
+		key := strings.TrimSpace(rawKey)
+		value := strings.TrimSpace(rawValue)
 		if !strings.EqualFold(key, "Address") && !strings.EqualFold(key, "DNS") {
 			continue
 		}
-		for _, part := range strings.Split(value, ",") {
+		for part := range strings.SplitSeq(value, ",") {
 			part = strings.TrimSpace(part)
 			if part == "" {
 				continue
@@ -158,11 +157,8 @@ func sectionHeader(trimmed string) (string, bool) {
 	return strings.ToLower(strings.TrimSpace(trimmed[1:end])), true
 }
 
-// TransformWGConfigExcludeLAN rewrites every `AllowedIPs = ...` line inside
-// [Peer] sections, subtracting the LAN exclusion set while keeping the
-// tunnel's own address and DNS servers routed. Lines outside [Peer] are
-// passed through unchanged, as are IPv6 entries. Returns an error only if an
-// AllowedIPs entry is invalid.
+// TransformWGConfigExcludeLAN subtracts the LAN exclusion set from each
+// [Peer] AllowedIPs line, keeping the tunnel's own address/DNS routed.
 func TransformWGConfigExcludeLAN(configText string) (string, error) {
 	keep := collectTunnelPrefixes(configText)
 
@@ -186,18 +182,18 @@ func TransformWGConfigExcludeLAN(configText string) (string, error) {
 			continue
 		}
 
-		idx := strings.Index(rawLine, "=")
-		if idx < 0 {
+		rawKey, rawValue, ok := strings.Cut(rawLine, "=")
+		if !ok {
 			out = append(out, rawLine)
 			continue
 		}
-		key := strings.TrimSpace(rawLine[:idx])
+		key := strings.TrimSpace(rawKey)
 		if !strings.EqualFold(key, "AllowedIPs") {
 			out = append(out, rawLine)
 			continue
 		}
 
-		value := rawLine[idx+1:]
+		value := rawValue
 		comment := ""
 		for i, r := range value {
 			if r == '#' || r == ';' {
@@ -209,7 +205,7 @@ func TransformWGConfigExcludeLAN(configText string) (string, error) {
 
 		var v4Inputs, v6Passthrough []netip.Prefix
 		var v6Raw []string
-		for _, part := range strings.Split(value, ",") {
+		for part := range strings.SplitSeq(value, ",") {
 			p := strings.TrimSpace(part)
 			if p == "" {
 				continue

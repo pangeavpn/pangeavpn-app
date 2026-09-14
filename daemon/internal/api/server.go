@@ -122,14 +122,8 @@ type connectRequest struct {
 	ProfileID string `json:"profileId"`
 	AllowLAN  bool   `json:"allowLAN,omitempty"`
 	Lockdown  bool   `json:"lockdown,omitempty"`
-	// PreferredTransport: "cloak", "reality", "hysteria2", "naive",
-	// "shadowsocks", "snowflake", "wireguard" (straight to the node, no
-	// transport), or "" / "auto" (cascade in autoCascadeOrder: reality, cloak,
-	// shadowsocks, hysteria2, then naive; snowflake is gated off this release --
-	// see snowflakeReleaseGated, and "wireguard" is never in the cascade). Auto
-	// mode keeps only the transports this profile configures, then
-	// reorderByMemory may promote whatever last worked on this network.
-	// transportCandidates dispatches on this value and rejects anything else.
+	// One of the named transports, "wireguard" (no transport), or "" / "auto"
+	// for the memory-reordered autoCascadeOrder; see transportCandidates.
 	PreferredTransport string `json:"preferredTransport,omitempty"`
 }
 
@@ -142,9 +136,8 @@ type engageKillSwitchRequest struct {
 	AllowLAN  bool   `json:"allowLAN,omitempty"`
 }
 
-// permitHostsRequest carries control-plane IPs (the Pangea hub) that must stay
-// reachable through an engaged lockdown lock. IP literals only — see
-// Service.PermitHosts.
+// permitHostsRequest carries control-plane IPs that must stay reachable
+// through an engaged lockdown lock. IP literals only — see Service.PermitHosts.
 type permitHostsRequest struct {
 	Hosts []string `json:"hosts,omitempty"`
 }
@@ -157,9 +150,8 @@ type okResponse struct {
 	Detail string `json:"detail,omitempty"`
 }
 
-// ssProxyStartRequest carries the control-plane Shadowsocks credentials. This
-// is a separate listener from any tunnel transport: its node-side ACL permits
-// the hub only, so these credentials cannot reach WireGuard.
+// ssProxyStartRequest carries the control-plane Shadowsocks credentials, a
+// separate listener whose node-side ACL permits only the hub, never WireGuard.
 type ssProxyStartRequest struct {
 	RemoteHost string `json:"remoteHost"`
 	RemotePort int    `json:"remotePort"`

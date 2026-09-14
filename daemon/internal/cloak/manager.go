@@ -2,11 +2,11 @@ package cloak
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/base64"
+	"encoding/binary"
 	"errors"
 	"fmt"
-	"crypto/rand"
-	"encoding/binary"
 	"net"
 	"os"
 	"strconv"
@@ -53,21 +53,16 @@ type inProcessManager struct {
 	sesh          *mux.Session
 	sessionCtx    context.Context
 	sessionCancel context.CancelFunc
-	// boundLocalPort is the actual loopback UDP port the listener is bound
-	// to. Differs from profile.LocalPort when the caller requested dynamic
-	// allocation (LocalPort=0). Zero when not running.
+	// boundLocalPort is the actual bound port; differs from profile.LocalPort
+	// when the caller requested dynamic allocation (LocalPort=0).
 	boundLocalPort int
 	// generation bumps every Start; goroutine cleanup only clobbers shared
-	// state if its generation still matches the current one. Prevents a
-	// zombie RouteUDP goroutine from a previous Start from nuking the state
-	// owned by a fresh Start.
+	// state if its generation still matches the current one.
 	generation uint64
 }
 
-// cancellableDialer wraps a net.Dialer so that TCP dials are bound to a
-// context. When the context is cancelled, in-flight Dial calls return
-// immediately with context.Canceled, which lets MakeSession's retry loop
-// exit in bounded time during Stop().
+// cancellableDialer wraps a net.Dialer so TCP dials are bound to a context,
+// letting MakeSession's retry loop exit in bounded time during Stop().
 type cancellableDialer struct {
 	ctx    context.Context
 	dialer *net.Dialer
@@ -113,10 +108,8 @@ func (m *inProcessManager) Start(ctx context.Context, profile state.CloakProfile
 		return fmt.Errorf("resolve local UDP addr %s: %w", localAddr, err)
 	}
 
-	// Retry ListenUDP briefly in case a previous cloak instance's socket is
-	// still being released by the OS (rare race on reconnect, but seen in
-	// the wild on all platforms). Total wait <= ~1 second. Runs without
-	// holding m.mu so Status/BoundLocalPort/Stop stay responsive.
+	// Retry briefly in case a previous cloak instance's socket is still being
+	// released by the OS. Total wait <= ~1s; runs without holding m.mu.
 	udpConn, err := listenUDPWithRetry(udpAddr, 10, 100*time.Millisecond)
 	if err != nil {
 		clearStarting()
@@ -204,8 +197,7 @@ func (m *inProcessManager) Start(ctx context.Context, profile state.CloakProfile
 		m.mu.Lock()
 		wasStopping := m.stopping
 		// Only clear shared state if this goroutine still owns the current
-		// generation. A zombie goroutine from a previous Start must not
-		// clobber state belonging to a newer Start.
+		// generation; a zombie goroutine must not clobber a newer Start.
 		if m.generation == generation {
 			m.running = false
 			m.udpConn = nil
@@ -241,9 +233,7 @@ func (m *inProcessManager) Start(ctx context.Context, profile state.CloakProfile
 }
 
 // listenUDPWithRetry attempts to bind a UDP socket, retrying on transient
-// "address already in use" style errors that can occur immediately after a
-// previous cloak instance released the port. Returns the first successful
-// conn or the last error after attempts are exhausted.
+// "address already in use" errors from a just-released port.
 func listenUDPWithRetry(addr *net.UDPAddr, attempts int, delay time.Duration) (*net.UDPConn, error) {
 	if attempts < 1 {
 		attempts = 1
@@ -271,9 +261,7 @@ func isAddrInUseErr(err error) bool {
 		return true
 	}
 	s := err.Error()
-	// Covers: Linux "address already in use", macOS "address already in use",
-	// Windows "Only one usage of each socket address (protocol/network address/port)
-	// is normally permitted" (WSAEADDRINUSE).
+	// Covers Linux/macOS's message and Windows's WSAEADDRINUSE wording.
 	return strings.Contains(s, "address already in use") ||
 		strings.Contains(s, "Only one usage of each socket address")
 }
@@ -348,20 +336,15 @@ func (m *inProcessManager) Stop(ctx context.Context) error {
 	generation := m.generation
 	m.mu.Unlock()
 
-	// Cancel the session context first so any in-flight MakeSession retry
-	// loops (dialer blocked on TCP connect/sleep) unblock immediately. Then
-	// close the UDP socket which kicks RouteUDP out of its ReadFrom loop.
-	// Order matters: cancelling first prevents a racing retry from holding
-	// the dialer open while we wait.
+	// Cancel first so any in-flight MakeSession retry unblocks immediately,
+	// then close the UDP socket to kick RouteUDP out of its ReadFrom loop.
 	if sessionCancel != nil {
 		sessionCancel()
 	}
 	udpConn.Close()
 
-	// Wait for RouteUDP's goroutine to finish releasing state. It should now
-	// exit in bounded time because MakeSession honors the cancelled context.
-	// Keep a generous ceiling to avoid hanging the disconnect flow if
-	// something downstream (e.g. the underlying mux session close) misbehaves.
+	// Wait for RouteUDP's goroutine to finish; generous ceiling in case
+	// something downstream (e.g. the mux session close) misbehaves.
 	timer := time.NewTimer(5 * time.Second)
 	defer timer.Stop()
 
@@ -424,10 +407,8 @@ func (m *inProcessManager) Status() state.CloakStatus {
 	}
 }
 
-// BoundLocalPort reports the loopback UDP port the manager is currently bound
-// to, or 0 when not running. Callers that requested dynamic allocation
-// (LocalPort=0) use this to discover the kernel-assigned port so downstream
-// config (e.g. WireGuard peer endpoint) can be rewritten to match.
+// BoundLocalPort reports the loopback UDP port the manager is bound to, or 0
+// when not running; used to discover a dynamically-allocated (LocalPort=0) port.
 func (m *inProcessManager) BoundLocalPort() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -459,9 +440,8 @@ func buildRawConfig(profile state.CloakProfile, remoteHost string) (*client.RawC
 		serverName = "www.microsoft.com"
 	}
 
-	// LocalPort == 0 is intentional: it requests an ephemeral port from the
-	// kernel. Loopback-only, so any port works — this sidesteps Windows
-	// Hyper-V UDP exclusion ranges that can claim 51820 at boot.
+	// LocalPort == 0 requests an ephemeral port, sidestepping Windows Hyper-V
+	// UDP exclusion ranges that can claim 51820 at boot.
 	localPort := strconv.Itoa(profile.LocalPort)
 	if profile.LocalPort < 0 {
 		return nil, fmt.Errorf("LocalPort must be >= 0, got %d", profile.LocalPort)

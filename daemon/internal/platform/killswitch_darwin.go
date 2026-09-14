@@ -231,10 +231,6 @@ func pfEnabled(ctx context.Context) bool {
 	return err == nil && strings.Contains(string(out), "Status: Enabled")
 }
 
-// ---------------------------------------------------------------------------
-// PF anchor management
-// ---------------------------------------------------------------------------
-
 // applyPFAnchor writes the kill-switch ruleset to disk, wires it into
 // /etc/pf.conf, reloads pf, and verifies the block rule is actually live.
 func applyPFAnchor(ctx context.Context, endpointIPs []string, tunnelInterface string, allowLAN bool) error {
@@ -270,7 +266,7 @@ func verifyPFAnchorLive(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("read pf anchor rules: %w (%s)", err, strings.TrimSpace(string(out)))
 	}
-	for _, line := range strings.Split(string(out), "\n") {
+	for line := range strings.SplitSeq(string(out), "\n") {
 		if strings.Contains(line, "block") && strings.Contains(line, "out all") {
 			return nil
 		}
@@ -278,9 +274,8 @@ func verifyPFAnchorLive(ctx context.Context) error {
 	return fmt.Errorf("block rule not found in live pf anchor %s", pfAnchorName)
 }
 
-// ensurePFConf idempotently wires our anchor into /etc/pf.conf. pf only
-// evaluates anchors the main ruleset references, so without this the
-// killswitch anchor is loaded but never consulted.
+// ensurePFConf idempotently wires our anchor into /etc/pf.conf: pf only
+// evaluates anchors the main ruleset references.
 func ensurePFConf() error {
 	data, err := os.ReadFile(pfConfPath)
 	if err != nil {
@@ -331,9 +326,8 @@ func pfConfBackupPath() (string, error) {
 	return filepath.Join(dir, pfConfBackupFile), nil
 }
 
-// removePFAnchor flushes the live anchor rules and empties the on-disk
-// anchor file so a reload (including one before the daemon next starts)
-// does not resurrect a stale block-all.
+// removePFAnchor flushes the live anchor rules and empties the on-disk anchor
+// file so a later reload does not resurrect a stale block-all.
 func removePFAnchor(ctx context.Context) error {
 	cmd := exec.CommandContext(ctx, "pfctl", "-a", pfAnchorName, "-F", "all")
 	out, err := cmd.CombinedOutput()
@@ -379,13 +373,8 @@ func disablePF(ctx context.Context, token string) error {
 	return nil
 }
 
-// ---------------------------------------------------------------------------
-// PF reference-token persistence
-//
-// KillSwitchState (killswitch.go) is shared across platforms; the pf token
-// is darwin-only, so it is tracked in its own small file alongside it.
-// ---------------------------------------------------------------------------
-
+// pfTokenPath and friends track the darwin-only pf reference token in its
+// own file, alongside the cross-platform KillSwitchState in killswitch.go.
 func pfTokenPath() (string, error) {
 	dir, err := AppSupportDir()
 	if err != nil {

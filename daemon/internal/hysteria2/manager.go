@@ -1,8 +1,5 @@
-// Package hysteria2 wraps sing-box's Hysteria2 (QUIC + Salamander
-// obfuscation) client as an in-process DPI-evasion transport, mirroring
-// cloak.Manager and naive.Manager's shape: a loopback UDP listener
-// WireGuard's peer Endpoint points at, bridging its traffic through the
-// tunnel to the real WireGuard server.
+// Package hysteria2 wraps sing-box's Hysteria2 (QUIC + Salamander) client as
+// an in-process DPI-evasion transport, mirroring cloak.Manager's shape.
 package hysteria2
 
 import (
@@ -31,9 +28,8 @@ var (
 const maxPortPickAttempts = 3
 
 type Manager struct {
-	// opMu serializes Start/Stop end-to-end so a health-check restart and a
-	// connect-path Start can never build two live boxes/bridges at once, and
-	// Stop can never observe a Start that hasn't finished yet.
+	// opMu serializes Start/Stop end-to-end so concurrent restarts can never
+	// build two live boxes/bridges at once, nor Stop observe a half-finished Start.
 	opMu sync.Mutex
 
 	mu      sync.RWMutex
@@ -193,12 +189,8 @@ func (m *Manager) BoundLocalPort() int {
 	return m.bridge.boundPort()
 }
 
-// WaitForSession forces and proves the Hysteria2 QUIC handshake and
-// Salamander/password auth against the remote server by opening (then
-// immediately closing) a packet session on the same outbound instance the
-// bridge's traffic flows through. sing-quic's client caches the resulting
-// QUIC connection and reuses it for later traffic, so this is a real
-// warm-up rather than a disposable probe.
+// WaitForSession forces and proves the Hysteria2 handshake by opening (then
+// closing) a packet session on the same outbound the bridge uses.
 func (m *Manager) WaitForSession(ctx context.Context, timeout time.Duration) error {
 	m.mu.RLock()
 	b := m.box

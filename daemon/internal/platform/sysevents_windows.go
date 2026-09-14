@@ -138,8 +138,7 @@ func registerSystemEventSources() error {
 }
 
 // WatchSystemEvents delivers resume and network-change signals until ctx ends.
-// Only one subscriber is served at a time; a new call displaces the previous
-// sink. Events are best-effort: a full buffer drops rather than blocks.
+// Only one subscriber is served at a time; events are best-effort and drop rather than block.
 func WatchSystemEvents(ctx context.Context) (<-chan SystemEvent, error) {
 	registerOnce.Do(func() {
 		registerErr = registerSystemEventSources()

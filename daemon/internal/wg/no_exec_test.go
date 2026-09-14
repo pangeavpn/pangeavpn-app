@@ -33,9 +33,8 @@ func TestNoExecCommand(t *testing.T) {
 			if strings.HasSuffix(entry.Name(), "_test.go") {
 				continue
 			}
-			// Skip netconf files — platform network configuration
-			// (addresses, routes, DNS) requires system commands and is
-			// distinct from in-process tunnel operations.
+			// Skip netconf files: platform network config (addresses, routes,
+			// DNS) requires system commands, unlike in-process tunnel ops.
 			if strings.HasPrefix(entry.Name(), "netconf_") {
 				continue
 			}

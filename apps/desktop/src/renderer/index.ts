@@ -1115,9 +1115,7 @@ async function migrateLegacyLastToken(): Promise<void> {
   }
 }
 
-// Show cached token button if a previous account number exists. The value is
-// masked (the click handler reads the real value from storage) to match the
-// Settings viewer.
+// Masked (the click handler reads the real value from storage) to match Settings.
 async function refreshCachedTokenBtn(): Promise<void> {
   const cached = pangeaApi ? await pangeaApi.getRememberedAccountNumber().catch(() => null) : null;
   if (cached) {
@@ -2015,44 +2013,45 @@ function wireHubMethodTest(name: HubMethodName): void {
 
 hubMethodNames.forEach(wireHubMethodTest);
 
-allowLanToggle.addEventListener("change", async () => {
-  if (!pangeaApi) return;
-  try {
-    await pangeaApi.setAllowLan(allowLanToggle.checked);
-    showToast(allowLanToggle.checked
-      ? t("toggle.allowLan.on")
-      : t("toggle.allowLan.off"), 4000, true);
-  } catch (err) {
-    allowLanToggle.checked = !allowLanToggle.checked;
-    showToast(reportError("allowLan", err, t("toggle.updateFailed")));
-  }
-});
+/** Wires a plain boolean settings toggle: persist, toast, revert on failure. */
+function wireBooleanToggle(
+  toggle: HTMLInputElement,
+  setter: (value: boolean) => Promise<unknown>,
+  messageKeys: { on: MessageKey; off: MessageKey },
+  errorContext: string
+): void {
+  toggle.addEventListener("change", async () => {
+    if (!pangeaApi) return;
+    try {
+      await setter(toggle.checked);
+      showToast(t(toggle.checked ? messageKeys.on : messageKeys.off), 4000, true);
+    } catch (err) {
+      toggle.checked = !toggle.checked;
+      showToast(reportError(errorContext, err, t("toggle.updateFailed")));
+    }
+  });
+}
 
-postQuantumToggle.addEventListener("change", async () => {
-  if (!pangeaApi) return;
-  try {
-    await pangeaApi.setPostQuantum(postQuantumToggle.checked);
-    showToast(postQuantumToggle.checked
-      ? t("toggle.postQuantum.on")
-      : t("toggle.postQuantum.off"), 4000, true);
-  } catch (err) {
-    postQuantumToggle.checked = !postQuantumToggle.checked;
-    showToast(reportError("postQuantum", err, t("toggle.updateFailed")));
-  }
-});
+wireBooleanToggle(
+  allowLanToggle,
+  (value) => pangeaApi!.setAllowLan(value),
+  { on: "toggle.allowLan.on", off: "toggle.allowLan.off" },
+  "allowLan"
+);
 
-hubInTunnelToggle.addEventListener("change", async () => {
-  if (!pangeaApi) return;
-  try {
-    await pangeaApi.setHubInTunnel(hubInTunnelToggle.checked);
-    showToast(hubInTunnelToggle.checked
-      ? t("toggle.hubInTunnel.on")
-      : t("toggle.hubInTunnel.off"), 4000, true);
-  } catch (err) {
-    hubInTunnelToggle.checked = !hubInTunnelToggle.checked;
-    showToast(reportError("hubInTunnel", err, t("toggle.updateFailed")));
-  }
-});
+wireBooleanToggle(
+  postQuantumToggle,
+  (value) => pangeaApi!.setPostQuantum(value),
+  { on: "toggle.postQuantum.on", off: "toggle.postQuantum.off" },
+  "postQuantum"
+);
+
+wireBooleanToggle(
+  hubInTunnelToggle,
+  (value) => pangeaApi!.setHubInTunnel(value),
+  { on: "toggle.hubInTunnel.on", off: "toggle.hubInTunnel.off" },
+  "hubInTunnel"
+);
 
 // Commits on blur/Enter. Main owns validation and returns what it actually
 // stored, so the field always ends up showing the truth rather than the typo.
@@ -2227,8 +2226,6 @@ async function refreshLastServer(): Promise<void> {
     // best-effort
   }
 }
-
-
 
 const loadingScreen = document.getElementById("loadingScreen") as HTMLElement;
 const loadingMessage = document.getElementById("loadingMessage") as HTMLParagraphElement;
@@ -2454,10 +2451,8 @@ async function init(): Promise<void> {
   // Poll until daemon responds (max 30s), then offer an explicit elevated
   // recovery instead of leaving the user stranded on the loading screen.
   const maxAttempts = 60;
-  // The daemon's own reason for refusing — a permissions problem the user has
-  // to clear themselves reads as an indistinguishable hang otherwise, so show
-  // it as soon as there is one rather than counting silently down to a
-  // generic failure.
+  // Show the daemon's own refusal reason as soon as there is one, rather than
+  // counting silently down to a generic failure.
   let lastDaemonError = "";
   for (let i = 0; i < maxAttempts; i++) {
     const remaining = Math.ceil((maxAttempts - i) * 0.5);
@@ -3283,11 +3278,8 @@ function renderStatus(status: StatusResponse): void {
   } else if (connectingVisual) {
     renderConnectingState();
   } else {
-    // A raw daemon detail can't tell the user their internet is deliberately
-    // paused, nor how to get back online — say it in their language. This must
-    // cover DISCONNECTED too: after a reinstall the daemon re-arms a Lockdown
-    // lock and sits idle-disconnected with the kill switch on, which otherwise
-    // renders as a plain "idle" screen with no sign the internet is blocked.
+    // Also covers DISCONNECTED: after a reinstall the daemon can re-arm a
+    // Lockdown lock and sit idle with the kill switch on.
     const killSwitchHolding =
       !showOffline &&
       status.killSwitchActive === true &&
@@ -3333,12 +3325,8 @@ function renderStatus(status: StatusResponse): void {
   }
   lastCloakWasDown = !status.cloak.running && connected;
 
-  // Show connect vs disconnect button.
-  // Show disconnect in ERROR state too — kill switch may still be active.
-  // An armed kill switch while idle (e.g. a Lockdown lock re-applied after a
-  // reinstall) also needs the escape hatch, but only when Lockdown is off:
-  // with Lockdown on, Disconnect keeps the lock, so Connect is the useful
-  // action and the detail message points at the Lockdown toggle instead.
+  // An idle armed kill switch needs the escape hatch too, but only with
+  // Lockdown off — with it on, Disconnect would just keep the lock.
   const killSwitchIdleArmed =
     !optimisticallyOff &&
     status.killSwitchActive === true &&

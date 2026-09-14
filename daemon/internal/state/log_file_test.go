@@ -69,7 +69,7 @@ func TestFileSinkRotatesAndPrunes(t *testing.T) {
 	}
 	defer sink.Close()
 
-	for i := 0; i < 60; i++ {
+	for i := range 60 {
 		sink.write(LogEntry{TS: int64(i), Level: LogInfo, Source: SourceDaemon, Msg: strings.Repeat("x", 40)})
 	}
 
@@ -93,7 +93,7 @@ func TestFileSinkConcurrentWrites(t *testing.T) {
 	defer sink.Close()
 
 	var wg sync.WaitGroup
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		wg.Add(1)
 		go func(n int) {
 			defer wg.Done()
@@ -114,9 +114,8 @@ func TestFileSinkConcurrentWrites(t *testing.T) {
 	}
 }
 
-// A rename step in rotation can fail (locked handle, permissions); the sink
-// must keep its size counter honest against the real file instead of
-// re-arming the cap against zero, and must keep accepting writes.
+// A rename step in rotation can fail; the sink must keep its size counter
+// honest against the real file instead of re-arming the cap against zero.
 func TestFileSinkRotationSurvivesRenameFailure(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "daemon.log")
@@ -126,9 +125,8 @@ func TestFileSinkRotationSurvivesRenameFailure(t *testing.T) {
 	}
 	defer sink.Close()
 
-	// A non-empty ".1" directory can never become the rename target: the drop
-	// step can't remove it and the rename can't replace it, so every rotation
-	// attempt fails the same way for the rest of the test.
+	// A non-empty ".1" directory can never become the rename target, so every
+	// rotation attempt fails the same way for the rest of the test.
 	if err := os.Mkdir(path+".1", 0o755); err != nil {
 		t.Fatalf("mkdir %s.1: %v", path, err)
 	}
@@ -136,7 +134,7 @@ func TestFileSinkRotationSurvivesRenameFailure(t *testing.T) {
 		t.Fatalf("seed %s.1: %v", path, err)
 	}
 
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		if err := sink.write(LogEntry{TS: int64(i), Level: LogInfo, Source: SourceDaemon, Msg: strings.Repeat("x", 40)}); err != nil {
 			t.Logf("write %d: %v", i, err)
 		}
@@ -173,7 +171,7 @@ func TestLogStoreConcurrentAddPreservesOrder(t *testing.T) {
 	defer store.CloseFile()
 
 	var wg sync.WaitGroup
-	for i := 0; i < n; i++ {
+	for i := range n {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()

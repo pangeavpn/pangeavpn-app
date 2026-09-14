@@ -17,9 +17,7 @@ import (
 )
 
 // inboundRegistry registers only what the client-side box needs: a local
-// mixed (SOCKS+HTTP) inbound to front the tunnel. Deliberately narrower than
-// sing-box's own "include" package (which registers every protocol behind
-// build tags) — we want exactly one inbound type, nothing else.
+// mixed (SOCKS+HTTP) inbound, deliberately narrower than sing-box's "include" package.
 func inboundRegistry() *inbound.Registry {
 	r := inbound.NewRegistry()
 	mixed.RegisterInbound(r)
@@ -36,9 +34,8 @@ func outboundRegistry() *outbound.Registry {
 	return r
 }
 
-// dnsTransportRegistry needs at least the "local" transport registered —
-// sing-box's DNS router falls back to it and panics-via-error if it's
-// missing, even though this package never issues DNS lookups of its own.
+// dnsTransportRegistry needs at least the "local" transport registered — sing-box's
+// DNS router falls back to it and panics-via-error if it's missing.
 func dnsTransportRegistry() *dns.TransportRegistry {
 	r := dns.NewTransportRegistry()
 	dnslocal.RegisterTransport(r)

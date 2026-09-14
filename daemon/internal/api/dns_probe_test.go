@@ -98,9 +98,7 @@ func runProbedHealthChecks(svc *Service, n int) {
 }
 
 // TestHealthCheck_DeadDataPathRebuildsSession is the case the handshake check
-// cannot see: WireGuard keeps rekeying against the node every two minutes while
-// the tunnel carries nothing, which is what a browser reports as a DNS probe
-// error on a session the app still calls connected.
+// cannot see: WireGuard keeps rekeying while the tunnel carries nothing.
 func TestHealthCheck_DeadDataPathRebuildsSession(t *testing.T) {
 	svc, probe, naive, wgMgr, ks := dataPathTestService(t)
 
@@ -108,9 +106,8 @@ func TestHealthCheck_DeadDataPathRebuildsSession(t *testing.T) {
 	startsAfterConnect := wgMgr.startCount
 	wgMgr.mu.Unlock()
 
-	// Fails the health rounds, then answers again: the rebuild's own bring-up
-	// has to prove a data path too, so a probe that never recovers can only
-	// produce a failed rebuild.
+	// The rebuild's own bring-up has to prove a data path too, so this only
+	// starts answering once a rebuild has actually been attempted.
 	svc.probeResolver = func(ctx context.Context, _, server string) error {
 		wgMgr.mu.Lock()
 		rebuilt := wgMgr.startCount > startsAfterConnect
@@ -143,9 +140,8 @@ func TestHealthCheck_DeadDataPathRebuildsSession(t *testing.T) {
 	}
 }
 
-// TestHealthCheck_DeadDataPathToleratesLosingARound proves one lost round trip
-// is not a dead tunnel: UDP drops datagrams and rebuilding on the first miss
-// would tear down working sessions.
+// TestHealthCheck_DeadDataPathToleratesLosingARound proves one lost round
+// trip is not a dead tunnel: UDP drops datagrams.
 func TestHealthCheck_DeadDataPathToleratesLosingARound(t *testing.T) {
 	svc, probe, _, wgMgr, _ := dataPathTestService(t)
 
@@ -169,8 +165,7 @@ func TestHealthCheck_DeadDataPathToleratesLosingARound(t *testing.T) {
 }
 
 // TestHealthCheck_DataPathProbeRecoveryResetsTheCount proves the failure count
-// is consecutive: rounds that fail either side of a success never add up to a
-// rebuild.
+// is consecutive: rounds either side of a success never add up to a rebuild.
 func TestHealthCheck_DataPathProbeRecoveryResetsTheCount(t *testing.T) {
 	svc, probe, _, wgMgr, _ := dataPathTestService(t)
 
@@ -193,9 +188,8 @@ func TestHealthCheck_DataPathProbeRecoveryResetsTheCount(t *testing.T) {
 	}
 }
 
-// TestHealthCheck_DataPathProbeSecondResolverRescuesTheRound proves a round is
-// only failed once every resolver has been tried, so one dead resolver does not
-// look like a dead tunnel.
+// TestHealthCheck_DataPathProbeSecondResolverRescuesTheRound proves a round
+// only fails once every resolver has been tried.
 func TestHealthCheck_DataPathProbeSecondResolverRescuesTheRound(t *testing.T) {
 	svc, probe, _, wgMgr, _ := dataPathTestService(t)
 
@@ -224,12 +218,10 @@ func TestHealthCheck_DataPathProbeSecondResolverRescuesTheRound(t *testing.T) {
 }
 
 // TestHealthCheck_DataPathProbeRebuildIsRateLimited proves a node that answers
-// handshakes but never carries traffic is not rebuilt on a loop: the cooldown
-// holds off the second rebuild, and each one drops the tunnel for a moment.
+// handshakes but never carries traffic is not rebuilt on a loop.
 func TestHealthCheck_DataPathProbeRebuildIsRateLimited(t *testing.T) {
 	svc, probe, _, wgMgr, _ := dataPathTestService(t)
-	// The rebuild fails (nothing carries traffic), so without a backoff to sit
-	// in, recovery would retry every tick and hide the cooldown under test.
+	// The rebuild fails, so without a backoff recovery would retry every tick.
 	svc.recoveryDelays = []time.Duration{time.Hour}
 
 	wgMgr.mu.Lock()
@@ -249,8 +241,7 @@ func TestHealthCheck_DataPathProbeRebuildIsRateLimited(t *testing.T) {
 }
 
 // TestHealthCheck_DataPathProbeRunsOnItsOwnSchedule proves the 3s health tick
-// does not fire a probe every pass — the round trip costs real time and would
-// otherwise be a query every three seconds for as long as the VPN is up.
+// does not fire a probe every pass.
 func TestHealthCheck_DataPathProbeRunsOnItsOwnSchedule(t *testing.T) {
 	svc, probe, _, _, _ := dataPathTestService(t)
 
@@ -289,8 +280,7 @@ func TestHealthCheck_NoResolversSkipsTheProbe(t *testing.T) {
 }
 
 // TestHoldHealthChecks_ClearsProbeFailures proves a resume does not carry the
-// previous network's failed rounds into the new one — the host was asleep, the
-// rounds that failed say nothing about the link it woke up on.
+// previous network's failed rounds into the new one.
 func TestHoldHealthChecks_ClearsProbeFailures(t *testing.T) {
 	svc, probe, _, wgMgr, _ := dataPathTestService(t)
 
@@ -312,9 +302,7 @@ func TestHoldHealthChecks_ClearsProbeFailures(t *testing.T) {
 }
 
 // TestHealthCheck_ConnRefusedProvesTheTunnelIsLive proves an ICMP
-// port-unreachable arriving as ECONNRESET/ECONNREFUSED on the connected
-// socket is not booked as a failure: the round trip happened, which is the
-// evidence the probe exists to gather.
+// port-unreachable is not booked as a failure: the round trip happened.
 func TestHealthCheck_ConnRefusedProvesTheTunnelIsLive(t *testing.T) {
 	svc, _, _, wgMgr, _ := dataPathTestService(t)
 
@@ -333,9 +321,8 @@ func TestHealthCheck_ConnRefusedProvesTheTunnelIsLive(t *testing.T) {
 	}
 }
 
-// TestHealthCheck_InconclusiveRoundIsNotBookedEitherWay proves a round that
-// could not complete — its context cancelled by a Switch/Disconnect in
-// flight — is neither a success nor a failure.
+// TestHealthCheck_InconclusiveRoundIsNotBookedEitherWay proves a round
+// cancelled by a Switch/Disconnect in flight is neither a success nor a failure.
 func TestHealthCheck_InconclusiveRoundIsNotBookedEitherWay(t *testing.T) {
 	svc, _, _, wgMgr, _ := dataPathTestService(t)
 
@@ -363,9 +350,7 @@ func TestHealthCheck_InconclusiveRoundIsNotBookedEitherWay(t *testing.T) {
 }
 
 // TestHealthCheck_SessionChangedMidRoundIsNotBooked proves a failure is not
-// recorded against a session that changed while the round was in flight — the
-// resolver list a slow round just tried may belong to a profile that is no
-// longer the live one.
+// recorded against a session that changed while the round was in flight.
 func TestHealthCheck_SessionChangedMidRoundIsNotBooked(t *testing.T) {
 	svc, _, _, wgMgr, _ := dataPathTestService(t)
 
@@ -400,13 +385,11 @@ func TestHealthCheck_SessionChangedMidRoundIsNotBooked(t *testing.T) {
 }
 
 // TestRecordDNSProbeFailure_CountNeverExceedsTheThreshold proves the counter
-// resets as soon as it reaches the threshold even inside the rebuild cooldown,
-// so the log never reports an attempt past dnsProbeFailuresBeforeRebuild and
-// the round after the cooldown expires gets a fresh three-round debounce.
+// resets as soon as it reaches the threshold, even inside the cooldown.
 func TestRecordDNSProbeFailure_CountNeverExceedsTheThreshold(t *testing.T) {
 	svc, _, _, _, _ := dataPathTestService(t)
 
-	for i := 0; i < dnsProbeFailuresBeforeRebuild*3; i++ {
+	for range dnsProbeFailuresBeforeRebuild * 3 {
 		failures, _ := svc.recordDNSProbeFailure()
 		if failures > dnsProbeFailuresBeforeRebuild {
 			t.Fatalf("recordDNSProbeFailure returned %d, want at most %d", failures, dnsProbeFailuresBeforeRebuild)
@@ -415,9 +398,7 @@ func TestRecordDNSProbeFailure_CountNeverExceedsTheThreshold(t *testing.T) {
 }
 
 // TestHealthCheck_DNSGuardChecksEveryTick proves the host's interface DNS is
-// verified continuously rather than only at bring-up. On Windows the setting
-// belongs to whoever wrote last, so nothing keeps it ours for the life of a
-// session.
+// verified continuously, not only at bring-up.
 func TestHealthCheck_DNSGuardChecksEveryTick(t *testing.T) {
 	svc, _, _, wgMgr, _ := dataPathTestService(t)
 
@@ -437,10 +418,8 @@ func TestHealthCheck_DNSGuardChecksEveryTick(t *testing.T) {
 	}
 }
 
-// TestHealthCheck_DNSGuardCorrectionIsLoggedAndRateLimited proves a correction
-// leaves a trail and then backs off. The log line is the only evidence that
-// something else on the machine is taking the tunnel's DNS, and backing off
-// keeps two writers from trading corrections every three seconds.
+// TestHealthCheck_DNSGuardCorrectionIsLoggedAndRateLimited proves a
+// correction leaves a trail and then backs off.
 func TestHealthCheck_DNSGuardCorrectionIsLoggedAndRateLimited(t *testing.T) {
 	svc, _, _, wgMgr, _ := dataPathTestService(t)
 
@@ -471,9 +450,8 @@ func TestHealthCheck_DNSGuardCorrectionIsLoggedAndRateLimited(t *testing.T) {
 	}
 }
 
-// TestHealthCheck_DNSGuardErrorDoesNotDropTheSession proves a guard that cannot
-// read the interface is reported and moved past: failing to verify DNS is not a
-// reason to tear down a working tunnel.
+// TestHealthCheck_DNSGuardErrorDoesNotDropTheSession proves a guard that
+// cannot read the interface is reported and moved past, not a reason to tear down.
 func TestHealthCheck_DNSGuardErrorDoesNotDropTheSession(t *testing.T) {
 	svc, _, _, wgMgr, _ := dataPathTestService(t)
 
@@ -497,9 +475,8 @@ func TestHealthCheck_DNSGuardErrorDoesNotDropTheSession(t *testing.T) {
 	}
 }
 
-// TestProbeResolverOverUDP_AcceptsAnyReply proves the probe measures the round
-// trip, not the answer: a resolver that refuses the question still proves the
-// tunnel carries traffic, and rebuilding on that would kill a working session.
+// TestProbeResolverOverUDP_AcceptsAnyReply proves the probe measures the
+// round trip, not the answer: a REFUSED reply still proves the tunnel is live.
 func TestProbeResolverOverUDP_AcceptsAnyReply(t *testing.T) {
 	const rcodeRefused = 5
 	server, stop := stubDNSServer(t, func(query []byte) []byte {
@@ -549,8 +526,7 @@ func TestProbeResolverOverUDP_FailsWhenNothingAnswers(t *testing.T) {
 }
 
 // TestProbeResolverOverUDP_IgnoresAWrongQuestion proves the reply must echo
-// back the question we asked, not just carry our transaction ID — a same-IP
-// LAN responder that guesses or replays an ID cannot forge the question too.
+// back the question asked, not just carry our transaction ID.
 func TestProbeResolverOverUDP_IgnoresAWrongQuestion(t *testing.T) {
 	server, stop := stubDNSServer(t, func(query []byte) []byte {
 		reply := make([]byte, len(query))
@@ -647,10 +623,8 @@ func TestIsDNSReplyTo(t *testing.T) {
 	}
 }
 
-// stubDNSServer answers UDP queries on loopback with respond(query); a nil
-// return means "answer nothing". Tests cannot bind port 53, so it points
-// dnsProbePort at the ephemeral port it got and restores it afterwards, and
-// returns the host to hand the probe.
+// stubDNSServer answers UDP queries on loopback with respond(query) (nil
+// means "answer nothing"), pointing dnsProbePort at the ephemeral port it got.
 func stubDNSServer(t *testing.T, respond func(query []byte) []byte) (string, func()) {
 	t.Helper()
 
@@ -684,9 +658,8 @@ func stubDNSServer(t *testing.T, respond func(query []byte) []byte) (string, fun
 	return host, func() { _ = conn.Close() }
 }
 
-// TestHealthCheck_OversizedReplyProvesTheTunnelIsLive is the running-session
-// half of the WSAEMSGSIZE case: an oversized reply is evidence of a round trip,
-// so it must never accumulate toward a rebuild.
+// TestHealthCheck_OversizedReplyProvesTheTunnelIsLive proves an oversized
+// reply must never accumulate toward a rebuild.
 func TestHealthCheck_OversizedReplyProvesTheTunnelIsLive(t *testing.T) {
 	svc, _, _, wgMgr, _ := dataPathTestService(t)
 

@@ -7,18 +7,8 @@ import (
 	"sync/atomic"
 )
 
-// bridgeUDP relays WireGuard's UDP datagrams between the local loopback
-// socket (WireGuard's peer Endpoint) and the REALITY outbound's packet
-// connection — a single virtual UDP session carried inside the VLESS+TLS
-// stream (see manager.go). WireGuard has exactly one remote peer, so the
-// local side is a single-flow NAT: track the last sender and mirror
-// responses back to it. remoteAddr is the fixed destination (the node's
-// local WireGuard listener) every datagram is addressed to on the wire.
-//
-// Returns nil on a clean shutdown (ctx cancelled or a socket closed as part
-// of Stop), or the first unexpected I/O error otherwise. Closes both local
-// and remote on every return path, so a blocked reader on the other goroutine
-// is always kicked loose instead of leaking.
+// bridgeUDP relays WireGuard's single-peer UDP session between the local
+// loopback socket and the REALITY outbound, closing both on every return path.
 func bridgeUDP(ctx context.Context, local *net.UDPConn, remote net.PacketConn, remoteAddr net.Addr, debugf func(format string, args ...any)) error {
 	defer local.Close()
 	defer remote.Close()
@@ -95,14 +85,8 @@ func bridgeUDP(ctx context.Context, local *net.UDPConn, remote net.PacketConn, r
 // type 1 plus three zero reserved bytes, 148 bytes total.
 const wireGuardInitiationLen = 148
 
-// acceptFromPeer pins the loopback reply peer to whichever address sends the
-// first datagram, rejecting other local sources so no other process can pull
-// the return path onto itself with a stray packet.
-//
-// A well-formed handshake initiation re-pins: WireGuard's socket is recreated
-// when the device is rebuilt mid-session (failed in-place switch), and a pin
-// to the dead socket would blackhole every reply for the whole session. A
-// forged initiation only diverts ciphertext the forger cannot read.
+// acceptFromPeer pins the reply peer to the first sender, rejecting other
+// local sources; a well-formed handshake initiation re-pins after a device rebuild.
 func acceptFromPeer(peer *atomic.Pointer[net.UDPAddr], addr *net.UDPAddr, pkt []byte) bool {
 	if peer.CompareAndSwap(nil, addr) {
 		return true

@@ -9,6 +9,7 @@ import { getConnectedTrayIconPath, getTrayIconPath, getWindowsAppIconPath } from
 import {
   IPC_CHANNELS,
   toPublicServerInfo,
+  type AuthState,
   type ConnectResult,
   type DiagnosticsSendResult,
   type PublicServerInfo,
@@ -90,8 +91,8 @@ let trayConnectedImage: NativeImage | null = null;
 let lastDaemonRestartAttemptAtMs = 0;
 let daemonRecoveryInProgress = false;
 let trayHintShown = false;
-let setWidth = 640;
-let setHeight = 440;
+const setWidth = 640;
+const setHeight = 440;
 const daemonRestartBackoffMs = 5000;
 
 const daemonClient = new DaemonClient("http://127.0.0.1:8787", readDaemonTokens);
@@ -107,9 +108,8 @@ let provisionedProfiles: ProfileRecords = {};
 let connectionAttemptRunning = false;
 let allowLanEnabled = true;
 let launchAtStartupEnabled = false;
-// Two independent settings: Lockdown is the kill switch that stays armed while
-// disconnected; auto-connect reconnects on launch and after drops. They shipped
-// as one "alwaysConnected" toggle, migrated on load below.
+// Lockdown (kill switch while disconnected) and auto-connect (reconnect on
+// launch/drop) shipped as one "alwaysConnected" toggle, migrated on load below.
 let lockdownEnabled = false;
 let autoConnectEnabled = false;
 // OS notifications on connection status changes; on by default, off in Settings.
@@ -785,9 +785,8 @@ async function recoverFromNetworkChange(): Promise<void> {
     // into a dead network — the daemon resumes on its own when a link returns.
     if (trayStatusOffline) return;
     if (isCancelled(attempt)) return;
-    // Stamped only when a reconnect actually runs: the AP-loss event arrives
-    // while the daemon still reports CONNECTED, and burning the cooldown on
-    // that no-op would skip the AP-up event that follows seconds later.
+    // Stamped only when a reconnect actually runs, so burning the cooldown on
+    // a no-op (daemon still CONNECTED) can't skip the AP-up event that follows.
     lastNetworkRecoverAtMs = Date.now();
     console.log("network change detected — attempting reconnect");
     // No disconnect first: that would lower the kill switch for the whole
@@ -806,14 +805,8 @@ async function recoverFromNetworkChange(): Promise<void> {
   }
 }
 
-/**
- * Connect the profile the daemon already holds, with no hub contact at all.
- *
- * The profile carries a WireGuard key the hub registered on a previous run, so
- * it is the one way to reach a node while the hub is unreachable — provisioning
- * a new one needs a /api/register round trip, which is exactly what is blocked.
- * Assumes the caller owns connectionAttemptRunning.
- */
+// Connects the profile the daemon already holds, with no hub contact — the way
+// to reach a node while the hub (and its /api/register) is unreachable.
 async function connectExistingProfile(attempt: ReturnType<typeof beginAttempt>): Promise<boolean> {
   const profileId = lastConnectedProfileId ?? managedProfileId;
   if (!profileId) return false;
@@ -857,15 +850,8 @@ async function reconnectExistingProfile(): Promise<boolean> {
   }
 }
 
-/**
- * Is this failure worth retrying against the profile we already have?
- *
- * Only reachability failures are. A hub that answered and said no — the device
- * was removed, the subscription lapsed — will have deprovisioned the peer that
- * profile names, so retrying it wastes a handshake deadline to arrive at the
- * same answer with a worse error message. Cancellation is the user's decision
- * and must not be undone by a fallback.
- */
+// Only reachability failures are worth retrying against the existing profile —
+// a hub that answered no (removed/lapsed) already deprovisioned that peer.
 function isHubReachabilityFailure(err: unknown): boolean {
   return !(
     err instanceof AuthError ||
@@ -1029,11 +1015,8 @@ function fingerprintForServer(serverId: string, entryServerId: string | null): s
   });
 }
 
-/**
- * The peer the hub registered for this server on an earlier run, when it is
- * still inside its TTL and was built from the same inputs. Reusing it turns a
- * reconnect into zero hub round trips; the caller re-provisions if it fails.
- */
+// The still-fresh peer the hub registered on an earlier run, if any — reusing
+// it turns a reconnect into zero hub round trips; the caller re-provisions on failure.
 async function reusableProfileForServer(serverId: string, entryServerId: string | null): Promise<Profile | null> {
   const profileId = profileIdFor(serverId, entryServerId);
   if (!isReusable(provisionedProfiles[profileId], fingerprintForServer(serverId, entryServerId), Date.now())) {
@@ -1289,18 +1272,8 @@ async function provisionAcrossServers(
   }
 }
 
-/**
- * Provision and connect, falling back to the profile the daemon already holds
- * when the hub cannot be reached.
- *
- * Runs after provisionAcrossServers has fully unwound — its finally has already
- * restored the config snapshot and released connectionAttemptRunning — so the
- * fallback connects against settled state rather than racing the cleanup.
- *
- * Switching deliberately has no equivalent: a switch that cannot reach the hub
- * unwinds to the connection the user already had, which is a better outcome
- * than replacing it with an older one.
- */
+// Provisions and connects, falling back to the profile the daemon already
+// holds when the hub is unreachable. Switching has no such fallback.
 async function provisionAndConnect(
   serverIds: readonly string[],
   entryServerId: string | null = null
@@ -1411,6 +1384,48 @@ function updateSettings(mutate: (settings: Record<string, unknown>) => void, lab
   return run;
 }
 
+interface SettingChannels {
+  get: string;
+  set: string;
+}
+
+// Registers a get/set IPC pair for a simple boolean toggle. `apply` performs
+// the side effect and returns the exact value to persist and to hand back on get.
+function registerBoolSetting(
+  channels: SettingChannels,
+  settingsKey: string,
+  label: string,
+  apply: (value: unknown) => boolean,
+  read: () => boolean
+): void {
+  ipcMain.handle(channels.set, async (_event, value: unknown) => {
+    const stored = apply(value);
+    await updateSettings((settings) => {
+      settings[settingsKey] = stored;
+    }, label);
+  });
+  ipcMain.handle(channels.get, async () => read());
+}
+
+// Same as registerBoolSetting, but the set channel returns the stored value —
+// used when the renderer needs to see a request get normalized or rejected.
+function registerStoredSetting<T>(
+  channels: SettingChannels,
+  settingsKey: string,
+  label: string,
+  apply: (value: unknown) => T,
+  read: () => T
+): void {
+  ipcMain.handle(channels.set, async (_event, value: unknown) => {
+    const stored = apply(value);
+    await updateSettings((settings) => {
+      settings[settingsKey] = stored;
+    }, label);
+    return stored;
+  });
+  ipcMain.handle(channels.get, async () => read());
+}
+
 /** Writes both flags together and drops the pre-split `alwaysConnected` key. */
 async function persistStartupSettings(): Promise<void> {
   await updateSettings((settings) => {
@@ -1458,9 +1473,8 @@ async function persistServers(servers: ServerInfo[]): Promise<void> {
   }, "server list");
 }
 
-/** Reconstructs a clean object from known-safe fields only, so stray
- *  properties (e.g. leftover credentials from an older cache format) can
- *  never survive a read or write of the renderer-facing server cache. */
+// Reconstructs a clean object from known-safe fields only, so stray properties
+// (e.g. leftover credentials) never survive into the renderer-facing cache.
 const maxSetConfigProfiles = 64;
 
 function sanitizePublicServer(candidate: unknown): PublicServerInfo | null {
@@ -1497,8 +1511,6 @@ function sanitizePublicServers(stored: unknown): PublicServerInfo[] {
   return out;
 }
 
-/** Blanks WireGuard keys and per-transport passwords before a daemon config
- *  crosses into the renderer, which only ever displays it in diagnostics. */
 // The renderer is untrusted input to a privileged daemon, so validate the
 // shape here; shared-types is ESM and cannot be required from CommonJS main.
 function asProfilePayload(value: unknown): Profile[] | null {
@@ -1520,6 +1532,8 @@ function asProfilePayload(value: unknown): Profile[] | null {
   return value as Profile[];
 }
 
+// Blanks WireGuard keys and per-transport passwords before a daemon config
+// crosses into the renderer, which only ever displays it in diagnostics.
 function redactConfigForRenderer(config: ConfigResponse): ConfigResponse {
   return {
     ...config,
@@ -1606,60 +1620,187 @@ function generateFriendlyName(): string {
   return `${adj} ${noun}`;
 }
 
-function registerIpcHandlers(): void {
+async function handleConnectIpc(profileId: unknown): Promise<OkResponse> {
+  if (typeof profileId !== "string" || profileId.trim() === "") {
+    return { ok: false };
+  }
+  if (connectionAttemptRunning) {
+    return { ok: false };
+  }
+  userDisconnected = false;
+  connectionAttemptRunning = true;
+  const attempt = beginAttempt();
+  try {
+    // The daemon is the authority on which profiles exist; refuse to chase
+    // a profileId it doesn't recognize.
+    const config = await withDaemonRestartOnUnavailable(
+      () => daemonClient.getConfig(),
+      "connect-profile-check",
+      { allowRestart: false }
+    );
+    if (!config.profiles.some((profile) => profile.id === profileId)) {
+      return { ok: false };
+    }
+    if (isCancelled(attempt)) {
+      return { ok: false };
+    }
+    const result = await connectWithRecovery(profileId);
+    if (isCancelled(attempt)) {
+      // Stop landed while the daemon was connecting; it can't be un-sent.
+      if (result.ok) {
+        await daemonClient
+          .disconnect({ keepKillSwitch: lockdownEnabled })
+          .catch((err) => console.warn("cancel: connect teardown failed", sanitizeLog(err)));
+      }
+      return { ok: false };
+    }
+    if (result.ok) {
+      lastConnectedProfileId = profileId;
+      void persistLastConnection();
+      // The tunnel is up, so the hub is reachable through it even when it was
+      // not before — the most reliable point to re-cache the renewal date.
+      refreshSubscriptionCache("connect");
+    }
+    return result;
+  } finally {
+    endAttempt(attempt);
+    connectionAttemptRunning = false;
+    void refreshTrayStatus();
+  }
+}
+
+async function handleAuthLoginIpc(vpnToken: string): Promise<AuthState> {
+  if (!vpnToken || typeof vpnToken !== "string" || vpnToken.trim().length === 0) {
+    return { authenticated: false, user: null, error: "INVALID_ACCOUNT_NUMBER" };
+  }
+
+  try {
+    const data = await pangeaApiClient.tokenLogin(vpnToken.trim());
+    await auth.saveLicenseKey(data.vpnAccessToken);
+
+    // Generate identity keypair for device registration
+    const { generateKeyPairSync } = await import("node:crypto");
+    const { publicKey: pubKeyObj, privateKey: privKeyObj } = generateKeyPairSync("x25519");
+    const privDer = privKeyObj.export({ type: "pkcs8", format: "der" }) as Buffer;
+    const pubDer = pubKeyObj.export({ type: "spki", format: "der" }) as Buffer;
+    const identityPrivateKey = privDer.subarray(16).toString("base64");
+    const identityPublicKey = pubDer.subarray(12).toString("base64");
+
+    // Generate a friendly name for this device
+    const friendlyName = generateFriendlyName();
+
+    // Reserves a device slot (max 4 per user). The hub returns the *effective*
+    // name, which differs from ours if this identityPubkey already had one.
+    let effectiveFriendlyName: string | null = friendlyName;
+    try {
+      const regResponse = await pangeaApiClient.registerDevice(identityPublicKey, friendlyName);
+      if (regResponse.friendlyName) {
+        effectiveFriendlyName = regResponse.friendlyName;
+      }
+    } catch (regErr) {
+      console.warn("device registration failed:", sanitizeLog(regErr));
+      const message = regErr instanceof Error ? regErr.message : "Device registration failed";
+
+      // Device limit: keep the key in memory so the renderer can list/remove
+      // devices. The on-disk key is cleared, re-saved on a successful retry.
+      const isDeviceLimit =
+        message.includes("DEVICE_LIMIT_REACHED") || message.includes("Device limit");
+      if (isDeviceLimit) {
+        await auth.clearLicenseKey();
+        // Do NOT call pangeaApiClient.clearCache() — licenseKey must remain for device management
+        return { authenticated: false, user: null, error: "DEVICE_LIMIT_REACHED" };
+      }
+
+      await auth.clearLicenseKey();
+      pangeaApiClient.clearCache();
+      const classified = classifyLoginError(regErr);
+      return {
+        authenticated: false,
+        user: null,
+        error: classified === "UNKNOWN" ? "REGISTRATION_FAILED" : classified
+      };
+    }
+
+    // Registration succeeded — persist identity keypair and set on API client.
+    // A failure past this point must not leave the hub's device slot orphaned.
+    try {
+      await auth.saveIdentityKeyPair({ privateKey: identityPrivateKey, publicKey: identityPublicKey });
+      pangeaApiClient.identityPubkey = identityPublicKey;
+
+      const authState = await auth.loginWithToken(data.vpnAccessToken, data.user);
+      // The hub is demonstrably reachable right now — the cheapest moment this
+      // device will ever get to learn its renewal date.
+      refreshSubscriptionCache("sign-in");
+      return { ...authState, friendlyName: effectiveFriendlyName };
+    } catch (postRegErr) {
+      console.warn("post-registration setup failed:", sanitizeLog(postRegErr));
+      await pangeaApiClient.deregisterDevice(identityPublicKey).catch(() => {});
+      await auth.clearLicenseKey();
+      pangeaApiClient.clearCache();
+      const classified = classifyLoginError(postRegErr);
+      return {
+        authenticated: false,
+        user: null,
+        error: classified === "UNKNOWN" ? "REGISTRATION_FAILED" : classified
+      };
+    }
+  } catch (err) {
+    // The message stays in the log for support; the user gets a code the UI
+    // can phrase in their language.
+    console.warn("token login failed:", sanitizeLog(err));
+    return { authenticated: false, user: null, error: classifyLoginError(err) };
+  }
+}
+
+async function handleAuthLogoutIpc(): Promise<void> {
+  // Stop any in-flight cascade first, or it can resume after we've cleared
+  // the license key and claim a managed profile for the wrong account.
+  cancelAttempt();
+
+  try {
+    const status = await daemonClient.getStatus();
+    if (status.state === "CONNECTED" || status.state === "CONNECTING") {
+      await daemonClient.disconnect({ keepKillSwitch: lockdownEnabled });
+    }
+  } catch {
+    // daemon may be unavailable
+  }
+
+  // Best-effort deregister device from hub before clearing local state
+  try {
+    const identityKeys = await auth.loadIdentityKeyPair();
+    if (identityKeys && pangeaApiClient.getLicenseKey()) {
+      await pangeaApiClient.deregisterDevice(identityKeys.publicKey);
+    }
+  } catch {
+    // best-effort — server may be unreachable
+  }
+
+  if (managedProfileId) {
+    try {
+      const config = await daemonClient.getConfig();
+      const profiles = config.profiles.filter((p) => p.id !== managedProfileId);
+      await daemonClient.setConfig(profiles);
+    } catch {
+      // best-effort cleanup
+    }
+    managedProfileId = null;
+  }
+
+  // The cached peers belong to the account that is signing out.
+  await discardProvisionedProfiles();
+  pangeaApiClient.clearCache();
+  await auth.logout();
+  void refreshTrayStatus();
+}
+
+function registerConnectionHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.getStatus, async () => {
     const status = await withDaemonRestartOnUnavailable(() => daemonClient.getStatus(), "status", { allowRestart: false });
     const serverId = status.profileId ? serverIdForProfile(status.profileId) : null;
     return serverId ? { ...status, serverId } : status;
   });
-  ipcMain.handle(IPC_CHANNELS.connect, async (_event, profileId: unknown) => {
-    if (typeof profileId !== "string" || profileId.trim() === "") {
-      return { ok: false };
-    }
-    if (connectionAttemptRunning) {
-      return { ok: false };
-    }
-    userDisconnected = false;
-    connectionAttemptRunning = true;
-    const attempt = beginAttempt();
-    try {
-      // The daemon is the authority on which profiles exist; refuse to chase
-      // a profileId it doesn't recognize.
-      const config = await withDaemonRestartOnUnavailable(
-        () => daemonClient.getConfig(),
-        "connect-profile-check",
-        { allowRestart: false }
-      );
-      if (!config.profiles.some((profile) => profile.id === profileId)) {
-        return { ok: false };
-      }
-      if (isCancelled(attempt)) {
-        return { ok: false };
-      }
-      const result = await connectWithRecovery(profileId);
-      if (isCancelled(attempt)) {
-        // Stop landed while the daemon was connecting; it can't be un-sent.
-        if (result.ok) {
-          await daemonClient
-            .disconnect({ keepKillSwitch: lockdownEnabled })
-            .catch((err) => console.warn("cancel: connect teardown failed", sanitizeLog(err)));
-        }
-        return { ok: false };
-      }
-      if (result.ok) {
-        lastConnectedProfileId = profileId;
-        void persistLastConnection();
-        // The tunnel is up, so the hub is reachable through it even when it was
-        // not before — the most reliable point to re-cache the renewal date.
-        refreshSubscriptionCache("connect");
-      }
-      return result;
-    } finally {
-      endAttempt(attempt);
-      connectionAttemptRunning = false;
-      void refreshTrayStatus();
-    }
-  });
+  ipcMain.handle(IPC_CHANNELS.connect, async (_event, profileId: unknown) => handleConnectIpc(profileId));
   ipcMain.handle(IPC_CHANNELS.disconnect, async () => {
     userDisconnected = true;
     // Stop any main-process cascade (network recovery, launch auto-connect)
@@ -1742,131 +1883,12 @@ function registerIpcHandlers(): void {
       return { ok: false, reason: "unreachable" };
     }
   });
+}
 
-  ipcMain.handle(IPC_CHANNELS.authLogin, async (_event, vpnToken: string) => {
-    if (!vpnToken || typeof vpnToken !== "string" || vpnToken.trim().length === 0) {
-      return { authenticated: false, user: null, error: "INVALID_ACCOUNT_NUMBER" };
-    }
+function registerAuthHandlers(): void {
+  ipcMain.handle(IPC_CHANNELS.authLogin, async (_event, vpnToken: string) => handleAuthLoginIpc(vpnToken));
 
-    try {
-      const data = await pangeaApiClient.tokenLogin(vpnToken.trim());
-      await auth.saveLicenseKey(data.vpnAccessToken);
-
-      // Generate identity keypair for device registration
-      const { generateKeyPairSync } = await import("node:crypto");
-      const { publicKey: pubKeyObj, privateKey: privKeyObj } = generateKeyPairSync("x25519");
-      const privDer = privKeyObj.export({ type: "pkcs8", format: "der" }) as Buffer;
-      const pubDer = pubKeyObj.export({ type: "spki", format: "der" }) as Buffer;
-      const identityPrivateKey = privDer.subarray(16).toString("base64");
-      const identityPublicKey = pubDer.subarray(12).toString("base64");
-
-      // Generate a friendly name for this device
-      const friendlyName = generateFriendlyName();
-
-      // Reserves a device slot (max 4 per user). The hub returns the *effective*
-      // name, which differs from ours if this identityPubkey already had one.
-      let effectiveFriendlyName: string | null = friendlyName;
-      try {
-        const regResponse = await pangeaApiClient.registerDevice(identityPublicKey, friendlyName);
-        if (regResponse.friendlyName) {
-          effectiveFriendlyName = regResponse.friendlyName;
-        }
-      } catch (regErr) {
-        console.warn("device registration failed:", sanitizeLog(regErr));
-        const message = regErr instanceof Error ? regErr.message : "Device registration failed";
-
-        // Device limit: keep the key in memory so the renderer can list/remove
-        // devices. The on-disk key is cleared, re-saved on a successful retry.
-        const isDeviceLimit =
-          message.includes("DEVICE_LIMIT_REACHED") || message.includes("Device limit");
-        if (isDeviceLimit) {
-          await auth.clearLicenseKey();
-          // Do NOT call pangeaApiClient.clearCache() — licenseKey must remain for device management
-          return { authenticated: false, user: null, error: "DEVICE_LIMIT_REACHED" };
-        }
-
-        await auth.clearLicenseKey();
-        pangeaApiClient.clearCache();
-        const classified = classifyLoginError(regErr);
-        return {
-          authenticated: false,
-          user: null,
-          error: classified === "UNKNOWN" ? "REGISTRATION_FAILED" : classified
-        };
-      }
-
-      // Registration succeeded — persist identity keypair and set on API client.
-      // A failure past this point must not leave the hub's device slot orphaned.
-      try {
-        await auth.saveIdentityKeyPair({ privateKey: identityPrivateKey, publicKey: identityPublicKey });
-        pangeaApiClient.identityPubkey = identityPublicKey;
-
-        const authState = await auth.loginWithToken(data.vpnAccessToken, data.user);
-        // The hub is demonstrably reachable right now — the cheapest moment this
-        // device will ever get to learn its renewal date.
-        refreshSubscriptionCache("sign-in");
-        return { ...authState, friendlyName: effectiveFriendlyName };
-      } catch (postRegErr) {
-        console.warn("post-registration setup failed:", sanitizeLog(postRegErr));
-        await pangeaApiClient.deregisterDevice(identityPublicKey).catch(() => {});
-        await auth.clearLicenseKey();
-        pangeaApiClient.clearCache();
-        const classified = classifyLoginError(postRegErr);
-        return {
-          authenticated: false,
-          user: null,
-          error: classified === "UNKNOWN" ? "REGISTRATION_FAILED" : classified
-        };
-      }
-    } catch (err) {
-      // The message stays in the log for support; the user gets a code the UI
-      // can phrase in their language.
-      console.warn("token login failed:", sanitizeLog(err));
-      return { authenticated: false, user: null, error: classifyLoginError(err) };
-    }
-  });
-
-  ipcMain.handle(IPC_CHANNELS.authLogout, async () => {
-    // Stop any in-flight cascade first, or it can resume after we've cleared
-    // the license key and claim a managed profile for the wrong account.
-    cancelAttempt();
-
-    try {
-      const status = await daemonClient.getStatus();
-      if (status.state === "CONNECTED" || status.state === "CONNECTING") {
-        await daemonClient.disconnect({ keepKillSwitch: lockdownEnabled });
-      }
-    } catch {
-      // daemon may be unavailable
-    }
-
-    // Best-effort deregister device from hub before clearing local state
-    try {
-      const identityKeys = await auth.loadIdentityKeyPair();
-      if (identityKeys && pangeaApiClient.getLicenseKey()) {
-        await pangeaApiClient.deregisterDevice(identityKeys.publicKey);
-      }
-    } catch {
-      // best-effort — server may be unreachable
-    }
-
-    if (managedProfileId) {
-      try {
-        const config = await daemonClient.getConfig();
-        const profiles = config.profiles.filter((p) => p.id !== managedProfileId);
-        await daemonClient.setConfig(profiles);
-      } catch {
-        // best-effort cleanup
-      }
-      managedProfileId = null;
-    }
-
-    // The cached peers belong to the account that is signing out.
-    await discardProvisionedProfiles();
-    pangeaApiClient.clearCache();
-    await auth.logout();
-    void refreshTrayStatus();
-  });
+  ipcMain.handle(IPC_CHANNELS.authLogout, async () => handleAuthLogoutIpc());
 
   ipcMain.handle(IPC_CHANNELS.authGetState, async () => {
     const state = await auth.getAuthState();
@@ -1879,19 +1901,23 @@ function registerIpcHandlers(): void {
     }
     return state;
   });
+}
 
-  ipcMain.handle(IPC_CHANNELS.setDoh, async (_event, enabled: boolean) => {
-    pangeaApiClient.setDohEnabled(enabled);
-    await updateSettings((settings) => {
-      settings.dohEnabled = enabled;
-    }, "DoH setting");
-  });
+function registerTransportSettingsHandlers(): void {
+  registerBoolSetting(
+    { get: IPC_CHANNELS.getDoh, set: IPC_CHANNELS.setDoh },
+    "dohEnabled",
+    "DoH setting",
+    (enabled) => {
+      const value = enabled as boolean;
+      pangeaApiClient.setDohEnabled(value);
+      return value;
+    },
+    () => pangeaApiClient.isDohEnabled()
+  );
 
-  ipcMain.handle(IPC_CHANNELS.getDoh, async () => pangeaApiClient.isDohEnabled());
-
-  // The renderer disables the last remaining switch, but settings.json is
-  // hand-editable and IPC is callable directly, so the invariant is enforced
-  // here as well — this is the authority, the UI only reflects it.
+  // settings.json is hand-editable and IPC is callable directly, so this is
+  // the authority on the invariant (never zero enabled methods); the UI only reflects it.
   ipcMain.handle(IPC_CHANNELS.setHubMethod, async (_event, method: unknown, enabled: unknown) => {
     const current = pangeaApiClient.getHubMethods();
     if (!isHubMethod(method)) {
@@ -1913,15 +1939,17 @@ function registerIpcHandlers(): void {
     return { methods, applied: true };
   });
 
-  ipcMain.handle(IPC_CHANNELS.setDeadDrop, async (_event, enabled: unknown) => {
-    const on = enabled === true;
-    pangeaApiClient.setDeadDropEnabled(on);
-    await updateSettings((settings) => {
-      settings.deadDrop = on;
-    }, "dead drop setting");
-  });
-
-  ipcMain.handle(IPC_CHANNELS.getDeadDrop, async () => pangeaApiClient.getDeadDropEnabled());
+  registerBoolSetting(
+    { get: IPC_CHANNELS.getDeadDrop, set: IPC_CHANNELS.setDeadDrop },
+    "deadDrop",
+    "dead drop setting",
+    (enabled) => {
+      const on = enabled === true;
+      pangeaApiClient.setDeadDropEnabled(on);
+      return on;
+    },
+    () => pangeaApiClient.getDeadDropEnabled()
+  );
 
   ipcMain.handle(IPC_CHANNELS.getHubMethods, async () => pangeaApiClient.getHubMethods());
 
@@ -1936,54 +1964,46 @@ function registerIpcHandlers(): void {
     return pangeaApiClient.testHubMethod(method);
   });
 
-  ipcMain.handle(IPC_CHANNELS.setAllowLan, async (_event, enabled: boolean) => {
-    allowLanEnabled = !!enabled;
-    await updateSettings((settings) => {
-      settings.allowLan = allowLanEnabled;
-    }, "allowLan setting");
-  });
-
-  ipcMain.handle(IPC_CHANNELS.getAllowLan, async () => allowLanEnabled);
-
-  ipcMain.handle(IPC_CHANNELS.setPostQuantum, async (_event, enabled: boolean) => {
-    pangeaApiClient.setPostQuantumEnabled(!!enabled);
-    await updateSettings((settings) => {
-      settings.postQuantum = !!enabled;
-    }, "postQuantum setting");
-  });
-
-  ipcMain.handle(IPC_CHANNELS.getPostQuantum, async () => pangeaApiClient.isPostQuantumEnabled());
+  registerBoolSetting(
+    { get: IPC_CHANNELS.getPostQuantum, set: IPC_CHANNELS.setPostQuantum },
+    "postQuantum",
+    "postQuantum setting",
+    (enabled) => {
+      const value = !!enabled;
+      pangeaApiClient.setPostQuantumEnabled(value);
+      return value;
+    },
+    () => pangeaApiClient.isPostQuantumEnabled()
+  );
 
   // Returns the stored MTU, which differs from the requested one when it was
   // rejected — the renderer uses that mismatch to flag invalid input.
-  ipcMain.handle(IPC_CHANNELS.setWireguardMtu, async (_event, mtu: unknown) => {
-    const stored = pangeaApiClient.setWireguardMtu(mtu);
-    await updateSettings((settings) => {
-      settings.wireguardMtu = stored;
-    }, "wireguardMtu setting");
-    return stored;
-  });
+  registerStoredSetting(
+    { get: IPC_CHANNELS.getWireguardMtu, set: IPC_CHANNELS.setWireguardMtu },
+    "wireguardMtu",
+    "wireguardMtu setting",
+    (mtu) => pangeaApiClient.setWireguardMtu(mtu),
+    () => pangeaApiClient.getWireguardMtu()
+  );
 
-  ipcMain.handle(IPC_CHANNELS.getWireguardMtu, async () => pangeaApiClient.getWireguardMtu());
+  registerStoredSetting(
+    { get: IPC_CHANNELS.getCustomDns, set: IPC_CHANNELS.setCustomDns },
+    "customDns",
+    "customDns setting",
+    (value) => pangeaApiClient.setCustomDns(value),
+    () => pangeaApiClient.getCustomDns()
+  );
 
-  ipcMain.handle(IPC_CHANNELS.setCustomDns, async (_event, value: unknown) => {
-    const stored = pangeaApiClient.setCustomDns(value);
-    await updateSettings((settings) => {
-      settings.customDns = stored;
-    }, "customDns setting");
-    return stored;
-  });
-
-  ipcMain.handle(IPC_CHANNELS.getCustomDns, async () => pangeaApiClient.getCustomDns());
-
-  ipcMain.handle(IPC_CHANNELS.setHubInTunnel, async (_event, enabled: unknown) => {
-    pangeaApiClient.setHubInTunnel(enabled === true);
-    await updateSettings((settings) => {
-      settings.hubInTunnel = pangeaApiClient.getHubInTunnel();
-    }, "hubInTunnel setting");
-  });
-
-  ipcMain.handle(IPC_CHANNELS.getHubInTunnel, async () => pangeaApiClient.getHubInTunnel());
+  registerBoolSetting(
+    { get: IPC_CHANNELS.getHubInTunnel, set: IPC_CHANNELS.setHubInTunnel },
+    "hubInTunnel",
+    "hubInTunnel setting",
+    (enabled) => {
+      pangeaApiClient.setHubInTunnel(enabled === true);
+      return pangeaApiClient.getHubInTunnel();
+    },
+    () => pangeaApiClient.getHubInTunnel()
+  );
 
   ipcMain.handle(IPC_CHANNELS.setPreferredTransport, async (_event, value: "auto" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "snowflake" | "wireguard") => {
     preferredTransport =
@@ -2002,6 +2022,19 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.handle(IPC_CHANNELS.getPreferredTransport, async () => preferredTransport);
+}
+
+function registerStartupSettingsHandlers(): void {
+  registerBoolSetting(
+    { get: IPC_CHANNELS.getAllowLan, set: IPC_CHANNELS.setAllowLan },
+    "allowLan",
+    "allowLan setting",
+    (enabled) => {
+      allowLanEnabled = !!enabled;
+      return allowLanEnabled;
+    },
+    () => allowLanEnabled
+  );
 
   ipcMain.handle(IPC_CHANNELS.setLaunchAtStartup, async (_event, enabled: boolean) => {
     launchAtStartupEnabled = !!enabled;
@@ -2084,14 +2117,16 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.getAutoConnect, async () => autoConnectEnabled);
 
-  ipcMain.handle(IPC_CHANNELS.setNotifications, async (_event, enabled: boolean) => {
-    notificationsEnabled = !!enabled;
-    await updateSettings((settings) => {
-      settings.notifications = notificationsEnabled;
-    }, "notifications setting");
-  });
-
-  ipcMain.handle(IPC_CHANNELS.getNotifications, async () => notificationsEnabled);
+  registerBoolSetting(
+    { get: IPC_CHANNELS.getNotifications, set: IPC_CHANNELS.setNotifications },
+    "notifications",
+    "notifications setting",
+    (enabled) => {
+      notificationsEnabled = !!enabled;
+      return notificationsEnabled;
+    },
+    () => notificationsEnabled
+  );
 
   ipcMain.handle(IPC_CHANNELS.getLastServer, async () => ({
     lastServerId,
@@ -2127,7 +2162,9 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.handle(IPC_CHANNELS.getIsPackaged, async () => app.isPackaged);
+}
 
+function registerServerAndDeviceHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.getCachedServers, async () => {
     try {
       const raw = await readStateFile("server-cache.json");
@@ -2260,6 +2297,14 @@ function registerIpcHandlers(): void {
   });
 }
 
+function registerIpcHandlers(): void {
+  registerConnectionHandlers();
+  registerAuthHandlers();
+  registerTransportSettingsHandlers();
+  registerStartupSettingsHandlers();
+  registerServerAndDeviceHandlers();
+}
+
 type DaemonRetryOptions = {
   allowRestart?: boolean;
 };
@@ -2344,17 +2389,97 @@ async function connectWithRecovery(profileId: string): Promise<OkResponse> {
   }
 }
 
-async function boot(): Promise<void> {
-  await app.whenReady();
+// Applies settings.json (hand-editable, so every field is defensively typed)
+// onto module state at launch. Mirrors the validation each IPC setter applies.
+function applyPersistedSettings(settings: Record<string, unknown>): void {
+  if (settings.dohEnabled === true) {
+    pangeaApiClient.setDohEnabled(true);
+  }
+  // Reads the current shape, and migrates the directIpEnabled/directIpOnly
+  // pair it replaced. Always yields at least one enabled method.
+  pangeaApiClient.setHubMethods(normalizeHubMethods(settings.hubMethods ?? settings));
+  if (settings.allowLan === false) {
+    allowLanEnabled = false;
+  }
+  pangeaApiClient.setPostQuantumEnabled(settings.postQuantum === true);
+  // settings.json is hand-editable, so this goes through the same normalizer
+  // as IPC input — anything unusable falls back to the default.
+  pangeaApiClient.setWireguardMtu(settings.wireguardMtu);
+  if (settings.customDns !== undefined) {
+    try {
+      pangeaApiClient.setCustomDns(settings.customDns);
+    } catch {
+      // Ignore invalid hand-edited settings and use the VPN server default.
+    }
+  }
+  pangeaApiClient.setHubInTunnel(settings.hubInTunnel === true);
+  if (
+    settings.preferredTransport === "cloak" ||
+    settings.preferredTransport === "naive" ||
+    settings.preferredTransport === "reality" ||
+    settings.preferredTransport === "hysteria2" ||
+    settings.preferredTransport === "shadowsocks" ||
+    settings.preferredTransport === "snowflake" ||
+    settings.preferredTransport === "wireguard"
+  ) {
+    preferredTransport = settings.preferredTransport;
+  }
+  if (typeof settings.launchAtStartup === "boolean") {
+    launchAtStartupEnabled = settings.launchAtStartup;
+  }
+  // `alwaysConnected` was both settings at once; installs that predate the
+  // split inherit it for each until the user changes one.
+  const legacyAlwaysConnected =
+    typeof settings.alwaysConnected === "boolean" ? settings.alwaysConnected : null;
+  if (typeof settings.lockdown === "boolean") {
+    lockdownEnabled = settings.lockdown;
+  } else if (legacyAlwaysConnected !== null) {
+    lockdownEnabled = legacyAlwaysConnected;
+  }
+  if (typeof settings.autoConnect === "boolean") {
+    autoConnectEnabled = settings.autoConnect;
+  } else if (legacyAlwaysConnected !== null) {
+    autoConnectEnabled = legacyAlwaysConnected;
+  }
+  if (typeof settings.notifications === "boolean") {
+    notificationsEnabled = settings.notifications;
+  }
+  // Last known good hub IP: the only way to reach the hub once a Lockdown
+  // lock is engaged, since the lock permits that IP but blocks DNS and DoH.
+  pangeaApiClient.setCachedHubIp(settings.hubIp);
+  // Was a single object before every node's credentials were cached, so an
+  // existing install still has one to migrate.
+  pangeaApiClient.setCachedHubShadowsocks(settings.hubShadowsocks);
+  // Edge relays, and the last node list the hub gave us. Both are what stands
+  // between a blocked hub and a client with nowhere left to go.
+  pangeaApiClient.setCachedFrontedEndpoints(settings.frontedEndpoints);
+  // The replay guard travels with the switch: without the last accepted seq a
+  // reinstall would accept a stale blob it has already moved past.
+  pangeaApiClient.setDeadDropEnabled(settings.deadDrop !== false);
+  pangeaApiClient.setDeadDropState(settings.deadDropSeq, settings.deadDropLastAttempt);
+  pangeaApiClient.setCachedServers(settings.servers);
+  pangeaApiClient.setCachedSubscription(settings.subscription);
+  if (typeof settings.lastServerId === "string") {
+    lastServerId = settings.lastServerId;
+  }
+  if (typeof settings.lastProfileId === "string") {
+    lastConnectedProfileId = settings.lastProfileId;
+  }
+  if (typeof settings.lastEntryServerId === "string") {
+    lastEntryServerId = settings.lastEntryServerId;
+  }
+  multihopPrefs = normalizeMultihopPrefs(settings.multihop);
+  provisionedProfiles = dropExpired(parseProfileRecords(settings.provisionedProfiles), Date.now());
+  if (typeof settings.locale === "string") {
+    localePref = settings.locale;
+  }
+  if (settings.trayHintShown === true) {
+    trayHintShown = true;
+  }
+}
 
-  // A packaged app's stdout goes nowhere, so tee it to a file support can ask for.
-  installConsoleFileSink(app.getPath("logs"));
-
-  // Toasts are attributed to the AUMID's Start Menu shortcut, which only an
-  // install has — an unpackaged run must claim electron.exe, not the shipped id.
-  app.setAppUserModelId(app.isPackaged ? "com.pangea.pangeavpn" : process.execPath);
-
-  // Lock down navigation, new windows, embeds, permissions, and TLS.
+// Lock down navigation, new windows, embeds, permissions, and TLS.
+function installSecurityGuards(): void {
   app.on("web-contents-created", (_event, contents) => {
     contents.setWindowOpenHandler(({ url }) => {
       if (isSafeExternalUrl(url)) {
@@ -2376,7 +2501,11 @@ async function boot(): Promise<void> {
     event.preventDefault();
     cb(false);
   });
+}
 
+// Wires pangeaApiClient's resolved/changed events to disk persistence and the
+// renderer, and connects it to the daemon for post-quantum keys and the SS proxy.
+function wirePangeaApiClient(): void {
   // Registered before the restore below so a first run with no settings file
   // still persists the hub IP once it is learned.
   pangeaApiClient.onHubIp((ip) => void persistHubIp(ip));
@@ -2411,94 +2540,107 @@ async function boot(): Promise<void> {
       }
     }
   });
+}
+
+// Only macOS has a global menu bar; elsewhere this is a strip of chrome
+// inside the window, which a tray popover has no use for.
+function buildApplicationMenu(): void {
+  if (process.platform !== "darwin") {
+    Menu.setApplicationMenu(null);
+    return;
+  }
+  const appMenu = Menu.buildFromTemplate([
+    {
+      label: "PangeaVPN",
+      submenu: [
+        { role: "about" },
+        { type: "separator" },
+        {
+          label: mt("menu.hideWindow"),
+          accelerator: "CmdOrCtrl+H",
+          click: () => hideMainWindow()
+        },
+        { type: "separator" },
+        {
+          label: mt("menu.quit"),
+          accelerator: "CmdOrCtrl+Q",
+          click: () => {
+            isQuitting = true;
+            app.quit();
+          }
+        }
+      ]
+    },
+    {
+      label: mt("menu.edit"),
+      submenu: [
+        { role: "undo" },
+        { role: "redo" },
+        { type: "separator" },
+        { role: "cut" },
+        { role: "copy" },
+        { role: "paste" },
+        { role: "selectAll" }
+      ]
+    }
+  ]);
+  Menu.setApplicationMenu(appMenu);
+}
+
+// Ensures the daemon is running and, on first launch with no persisted lock
+// state, re-engages Lockdown. Fire-and-forget: boot() does not await this.
+async function runDaemonStartupSequence(): Promise<void> {
+  try {
+    await daemonProcess.ensureRunning();
+    // The daemon outlives the app, so its transport memory has to be dropped
+    // here rather than on quit, which a crash or force-kill never reaches.
+    try {
+      await daemonClient.clearTransportMemory();
+    } catch (err) {
+      console.warn("failed to clear transport memory on startup", sanitizeLog(err));
+    }
+
+    // Covers the case where no lock state was persisted yet; the daemon
+    // re-applies persisted locks itself. No-ops if already up or engaged.
+    if (!lockdownEnabled) return;
+    const status = await daemonClient.getStatus();
+    if (status.state !== "CONNECTED" && status.state !== "CONNECTING") {
+      await daemonClient.engageKillSwitch({
+        profileId: lastConnectedProfileId ?? undefined,
+        allowLAN: allowLanEnabled
+      });
+    }
+  } catch (err) {
+    console.error("failed to ensure daemon / engage lockdown on startup", sanitizeLog(err));
+    // Lockdown could not be confirmed engaged — surface it rather than let
+    // the UI keep reporting the kill switch as active while traffic flows.
+    if (lockdownEnabled) {
+      trayStatusState = "ERROR";
+      trayStatusDetail = "lockdown failed to engage";
+      updateTrayMenu();
+      mainWindow?.webContents.send("lockdown:engage-failed");
+    }
+  }
+}
+
+async function boot(): Promise<void> {
+  await app.whenReady();
+
+  // A packaged app's stdout goes nowhere, so tee it to a file support can ask for.
+  installConsoleFileSink(app.getPath("logs"));
+
+  // Toasts are attributed to the AUMID's Start Menu shortcut, which only an
+  // install has — an unpackaged run must claim electron.exe, not the shipped id.
+  app.setAppUserModelId(app.isPackaged ? "com.pangea.pangeavpn" : process.execPath);
+
+  installSecurityGuards();
+
+  wirePangeaApiClient();
 
   // Restore persisted settings
   try {
     const settings = JSON.parse(await readStateFile("settings.json")) as Record<string, unknown>;
-    if (settings.dohEnabled === true) {
-      pangeaApiClient.setDohEnabled(true);
-    }
-    // Reads the current shape, and migrates the directIpEnabled/directIpOnly
-    // pair it replaced. Always yields at least one enabled method.
-    pangeaApiClient.setHubMethods(normalizeHubMethods(settings.hubMethods ?? settings));
-    if (settings.allowLan === false) {
-      allowLanEnabled = false;
-    }
-    pangeaApiClient.setPostQuantumEnabled(settings.postQuantum === true);
-    // settings.json is hand-editable, so this goes through the same normalizer
-    // as IPC input — anything unusable falls back to the default.
-    pangeaApiClient.setWireguardMtu(settings.wireguardMtu);
-    if (settings.customDns !== undefined) {
-      try {
-        pangeaApiClient.setCustomDns(settings.customDns);
-      } catch {
-        // Ignore invalid hand-edited settings and use the VPN server default.
-      }
-    }
-    pangeaApiClient.setHubInTunnel(settings.hubInTunnel === true);
-    if (
-      settings.preferredTransport === "cloak" ||
-      settings.preferredTransport === "naive" ||
-      settings.preferredTransport === "reality" ||
-      settings.preferredTransport === "hysteria2" ||
-      settings.preferredTransport === "shadowsocks" ||
-      settings.preferredTransport === "snowflake" ||
-      settings.preferredTransport === "wireguard"
-    ) {
-      preferredTransport = settings.preferredTransport;
-    }
-    if (typeof settings.launchAtStartup === "boolean") {
-      launchAtStartupEnabled = settings.launchAtStartup;
-    }
-    // `alwaysConnected` was both settings at once; installs that predate the
-    // split inherit it for each until the user changes one.
-    const legacyAlwaysConnected =
-      typeof settings.alwaysConnected === "boolean" ? settings.alwaysConnected : null;
-    if (typeof settings.lockdown === "boolean") {
-      lockdownEnabled = settings.lockdown;
-    } else if (legacyAlwaysConnected !== null) {
-      lockdownEnabled = legacyAlwaysConnected;
-    }
-    if (typeof settings.autoConnect === "boolean") {
-      autoConnectEnabled = settings.autoConnect;
-    } else if (legacyAlwaysConnected !== null) {
-      autoConnectEnabled = legacyAlwaysConnected;
-    }
-    if (typeof settings.notifications === "boolean") {
-      notificationsEnabled = settings.notifications;
-    }
-    // Last known good hub IP: the only way to reach the hub once a Lockdown
-    // lock is engaged, since the lock permits that IP but blocks DNS and DoH.
-    pangeaApiClient.setCachedHubIp(settings.hubIp);
-    // Was a single object before every node's credentials were cached, so an
-    // existing install still has one to migrate.
-    pangeaApiClient.setCachedHubShadowsocks(settings.hubShadowsocks);
-    // Edge relays, and the last node list the hub gave us. Both are what stands
-    // between a blocked hub and a client with nowhere left to go.
-    pangeaApiClient.setCachedFrontedEndpoints(settings.frontedEndpoints);
-    // The replay guard travels with the switch: without the last accepted seq a
-    // reinstall would accept a stale blob it has already moved past.
-    pangeaApiClient.setDeadDropEnabled(settings.deadDrop !== false);
-    pangeaApiClient.setDeadDropState(settings.deadDropSeq, settings.deadDropLastAttempt);
-    pangeaApiClient.setCachedServers(settings.servers);
-    pangeaApiClient.setCachedSubscription(settings.subscription);
-    if (typeof settings.lastServerId === "string") {
-      lastServerId = settings.lastServerId;
-    }
-    if (typeof settings.lastProfileId === "string") {
-      lastConnectedProfileId = settings.lastProfileId;
-    }
-    if (typeof settings.lastEntryServerId === "string") {
-      lastEntryServerId = settings.lastEntryServerId;
-    }
-    multihopPrefs = normalizeMultihopPrefs(settings.multihop);
-    provisionedProfiles = dropExpired(parseProfileRecords(settings.provisionedProfiles), Date.now());
-    if (typeof settings.locale === "string") {
-      localePref = settings.locale;
-    }
-    if (settings.trayHintShown === true) {
-      trayHintShown = true;
-    }
+    applyPersistedSettings(settings);
   } catch {
     // no settings file yet
   }
@@ -2528,48 +2670,7 @@ async function boot(): Promise<void> {
   // Off the startup path: the window must not wait on a hub that may be blocked.
   refreshSubscriptionCache("launch");
 
-  // Only macOS has a global menu bar; elsewhere this is a strip of chrome
-  // inside the window, which a tray popover has no use for.
-  if (process.platform === "darwin") {
-    const appMenu = Menu.buildFromTemplate([
-      {
-        label: "PangeaVPN",
-        submenu: [
-          { role: "about" },
-          { type: "separator" },
-          {
-            label: mt("menu.hideWindow"),
-            accelerator: "CmdOrCtrl+H",
-            click: () => hideMainWindow()
-          },
-          { type: "separator" },
-          {
-            label: mt("menu.quit"),
-            accelerator: "CmdOrCtrl+Q",
-            click: () => {
-              isQuitting = true;
-              app.quit();
-            }
-          }
-        ]
-      },
-      {
-        label: mt("menu.edit"),
-        submenu: [
-          { role: "undo" },
-          { role: "redo" },
-          { type: "separator" },
-          { role: "cut" },
-          { role: "copy" },
-          { role: "paste" },
-          { role: "selectAll" }
-        ]
-      }
-    ]);
-    Menu.setApplicationMenu(appMenu);
-  } else {
-    Menu.setApplicationMenu(null);
-  }
+  buildApplicationMenu();
 
   registerIpcHandlers();
   createWindow();
@@ -2580,39 +2681,7 @@ async function boot(): Promise<void> {
   if (!hiddenLaunch) {
     showMainWindow();
   }
-  daemonProcess
-    .ensureRunning()
-    .then(async () => {
-      // The daemon outlives the app, so its transport memory has to be dropped
-      // here rather than on quit, which a crash or force-kill never reaches.
-      try {
-        await daemonClient.clearTransportMemory();
-      } catch (err) {
-        console.warn("failed to clear transport memory on startup", sanitizeLog(err));
-      }
-
-      // Covers the case where no lock state was persisted yet; the daemon
-      // re-applies persisted locks itself. No-ops if already up or engaged.
-      if (!lockdownEnabled) return;
-      const status = await daemonClient.getStatus();
-      if (status.state !== "CONNECTED" && status.state !== "CONNECTING") {
-        await daemonClient.engageKillSwitch({
-          profileId: lastConnectedProfileId ?? undefined,
-          allowLAN: allowLanEnabled
-        });
-      }
-    })
-    .catch((err) => {
-      console.error("failed to ensure daemon / engage lockdown on startup", sanitizeLog(err));
-      // Lockdown could not be confirmed engaged — surface it rather than let
-      // the UI keep reporting the kill switch as active while traffic flows.
-      if (lockdownEnabled) {
-        trayStatusState = "ERROR";
-        trayStatusDetail = "lockdown failed to engage";
-        updateTrayMenu();
-        mainWindow?.webContents.send("lockdown:engage-failed");
-      }
-    });
+  void runDaemonStartupSequence();
 
   startNetworkWatcher();
   onNetworkChange(() => {

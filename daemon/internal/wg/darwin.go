@@ -202,11 +202,8 @@ func (m *wireGuardGoManager) startDarwin(ctx context.Context, profile state.Wire
 	return nil
 }
 
-// PinEndpointRoutes installs bypass routes for profile's endpoints while the
-// previous session still owns routing, so a switch's new transport can dial
-// out before the device is re-pointed. No-op without a live session. The
-// tunnel never installs "default" (only split routes), so the gateway lookup
-// still finds the physical one.
+// PinEndpointRoutes installs bypass routes so a switch's new transport can
+// dial out before the device is re-pointed. No-op without a live session.
 func (m *wireGuardGoManager) PinEndpointRoutes(ctx context.Context, profile state.WireGuardProfile) error {
 	parsed, err := parseUserlandConfig(profile.ConfigText)
 	if err != nil {
@@ -228,14 +225,8 @@ func (m *wireGuardGoManager) PinEndpointRoutes(ctx context.Context, profile stat
 	return err
 }
 
-// trySwitchInPlaceDarwin re-points the live utun at a new server: UAPI peer
-// swap (replace_peers), endpoint and allowed-IP route diffs, and DNS/IPv6
-// changes only when the target state actually differs — the common switch
-// keeps both and skips every networksetup call. Reports false when the caller
-// should rebuild the device instead.
-//
-// Not transactional: a failure after IpcSet leaves the device on the new peer
-// briefly — bounded by the caller's immediate stop-and-rebuild.
+// trySwitchInPlaceDarwin re-points the live utun at a new server. Not
+// transactional: a failure after IpcSet is bounded by the caller's rebuild.
 func (m *wireGuardGoManager) trySwitchInPlaceDarwin(ctx context.Context, tunnelKey string, parsed parsedUserlandConfig, allowedIPs []string) bool {
 	m.guardMu.Lock()
 	defer m.guardMu.Unlock()
@@ -313,9 +304,8 @@ func (m *wireGuardGoManager) trySwitchInPlaceDarwin(ctx context.Context, tunnelK
 	return true
 }
 
-// reapplySessionDNSLocked moves the session's DNS override to want. The
-// recorded pre-tunnel state is kept: overrides written now would capture the
-// tunnel's own servers and restore the wrong thing at teardown.
+// reapplySessionDNSLocked moves the session's DNS override to want, keeping
+// the recorded pre-tunnel state so teardown restores the right thing.
 func (m *wireGuardGoManager) reapplySessionDNSLocked(session *tunnelSession, want []string) bool {
 	switch {
 	case len(want) == 0 && len(session.dnsOverrides) > 0:

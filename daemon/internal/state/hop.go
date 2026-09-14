@@ -11,9 +11,8 @@ func errHopIncomplete(field string) error {
 	return fmt.Errorf("hop is missing %s: a partial hop would egress at the entry node", field)
 }
 
-// DefaultCloakProxyMethod and DefaultNaiveBridgePort are the single-hop
-// targets: the node's own WireGuard listener, reached the way each protocol
-// names a destination.
+// DefaultCloakProxyMethod and DefaultNaiveBridgePort name the single-hop
+// target: the node's own WireGuard listener, addressed per protocol.
 const (
 	DefaultCloakProxyMethod = "wireguard"
 	DefaultNaiveBridgePort  = 9000
@@ -40,9 +39,7 @@ func (p Profile) ExitRegion() string {
 }
 
 // ApplyHop returns a copy whose transport sub-profiles carry the destination
-// each should request on the remote node. Every transport goes through here,
-// so a new transport that forgets to call it fails closed at its default
-// rather than silently egressing at the entry.
+// each should request on the remote node; every transport must go through here.
 func ApplyHop(p Profile) Profile {
 	out := p
 
@@ -99,10 +96,8 @@ func naiveBridgePort(hop *HopProfile) int {
 	return DefaultNaiveBridgePort
 }
 
-// ValidateHop rejects a hop the hub did not fully specify. A partially
-// specified hop is the dangerous case: transports without a selector would
-// fall back to their defaults and egress at the entry node, which is exactly
-// the multihop guarantee the user asked for being silently dropped.
+// ValidateHop rejects a hop the hub did not fully specify: a partial hop
+// would fall back to defaults and silently egress at the entry node.
 func ValidateHop(p Profile) error {
 	if p.Hop == nil {
 		return nil

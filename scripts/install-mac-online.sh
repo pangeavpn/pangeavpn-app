@@ -209,9 +209,8 @@ main() {
         [[ -n "$DMG_URL" ]]
     }
 
-    # One quick try each: with the VPN up, hub traffic is deliberately routed
-    # around the tunnel and a hostile network blackholes it - minutes of
-    # "returned 000" retries when GitHub (through the tunnel) works instantly.
+    # One quick try each: hub traffic is routed around the tunnel, so a hostile
+    # network blackholing it must not cost minutes before falling back to GitHub.
     if try_release_source "$HUB_LATEST_URL" 1 || try_release_source "$GITHUB_LATEST_URL" 2; then
         RELEASE_JSON="$(cat "$RELEASE_FILE")"
     elif [[ -n "$SAW_RELEASE" ]]; then

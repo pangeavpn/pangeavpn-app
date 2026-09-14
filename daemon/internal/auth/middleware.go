@@ -21,12 +21,9 @@ func RequireBearer(expectedToken string, next http.Handler) http.Handler {
 }
 
 func extractBearerToken(header string) string {
-	parts := strings.SplitN(header, " ", 2)
-	if len(parts) != 2 {
+	scheme, token, found := strings.Cut(header, " ")
+	if !found || !strings.EqualFold(scheme, "Bearer") {
 		return ""
 	}
-	if !strings.EqualFold(parts[0], "Bearer") {
-		return ""
-	}
-	return strings.TrimSpace(parts[1])
+	return strings.TrimSpace(token)
 }

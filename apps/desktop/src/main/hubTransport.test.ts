@@ -18,9 +18,8 @@ test("parseConnectStatus rejects anything that is not a status line", () => {
   assert.throws(() => parseConnectStatus("220 smtp.example.com ESMTP"), /Malformed/);
 });
 
-// Self-signed localhost cert (CN=localhost, SAN 127.0.0.1), valid to 2036.
-// Passed as `ca` so the tests validate against it, exactly as production
-// validates the hub against the system store.
+// Self-signed localhost cert (CN=localhost, SAN 127.0.0.1), valid to 2036 — passed
+// as `ca` so tests validate against it, exactly as production validates the hub.
 const TEST_CERT = `-----BEGIN CERTIFICATE-----
 MIIDJTCCAg2gAwIBAgIUAQ53rDPhTKZ1zz28ttwM2ShAHWgwDQYJKoZIhvcNAQEL
 BQAwFDESMBAGA1UEAwwJbG9jYWxob3N0MB4XDTI2MDgwNzIyNDMyNFoXDTM2MDgw
@@ -70,13 +69,8 @@ VotJKKB4wRcTvXNS85n50/F77Y11VLxMgvM30wDICByaYXZ7lPZoa2NAMU5dQgOz
 1s3vso2O8p21HDibSEv5GrA=
 -----END PRIVATE KEY-----`;
 
-/**
- * server.close() only calls back once every connection has gone, and a spliced
- * proxy keeps sockets alive past the request — so live sockets are tracked and
- * destroyed explicitly. server.closeAllConnections() is not present on every
- * Node this repo runs on, and optional-calling it hides the hang rather than
- * fixing it.
- */
+/** server.close() only calls back once every connection has gone, and a spliced
+ *  proxy keeps sockets alive past the request — so live sockets are tracked and destroyed. */
 function tracker(server: net.Server | https.Server): {
   add: (socket: net.Socket) => void;
   close: () => Promise<void>;
@@ -103,11 +97,8 @@ interface Started {
   close: () => Promise<void>;
 }
 
-/**
- * CONNECT proxy standing in for the daemon's mixed inbound. `dialPort`
- * overrides where it actually connects, since fetchViaConnectProxy always
- * names :443 for the real hub.
- */
+/** CONNECT proxy standing in for the daemon's mixed inbound. `dialPort`
+ *  overrides where it actually connects, since fetchViaConnectProxy always names :443. */
 async function startProxy(
   opts: { status?: number; dialPort?: number } = {}
 ): Promise<Started & { seen: string[]; heads: string[] }> {

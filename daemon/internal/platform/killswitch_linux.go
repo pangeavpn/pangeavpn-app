@@ -60,8 +60,7 @@ func (ks *linuxKillSwitch) Enable(ctx context.Context, endpointHosts []string, a
 	}
 
 	// Re-apply unconditionally rather than trusting in-memory state: an
-	// external actor (firewalld reload, manual flush) can remove the live
-	// rules without this process knowing. Both apply paths are idempotent.
+	// external actor can remove the live rules without this process knowing.
 	useNFT := false
 	if hasNFT(ctx) {
 		if err := applyNFTRules(ctx, ips, tunnelInterface, allowLAN); err == nil {
@@ -141,9 +140,8 @@ func (ks *linuxKillSwitch) Clear(ctx context.Context) error {
 	ks.mu.Lock()
 	defer ks.mu.Unlock()
 
-	// Tear down both backends unconditionally: which one is actually live
-	// cannot be trusted after a crash/restart (useNFT is in-memory only,
-	// never persisted), and each removal is a no-op when its backend is absent.
+	// Tear down both backends unconditionally: which one is live cannot be
+	// trusted after a restart (useNFT is in-memory only, never persisted).
 	var errs []string
 	if err := removeNFTRules(ctx); err != nil {
 		errs = append(errs, fmt.Sprintf("remove nft rules: %v", err))
@@ -198,10 +196,6 @@ func iptablesLockLive(ctx context.Context) bool {
 	return ok && chain != ""
 }
 
-// ---------------------------------------------------------------------------
-// nftables backend
-// ---------------------------------------------------------------------------
-
 func hasNFT(ctx context.Context) bool {
 	cmd := exec.CommandContext(ctx, "nft", "--version")
 	return cmd.Run() == nil
@@ -212,10 +206,8 @@ func applyNFTRules(ctx context.Context, endpointIPs []string, tunnelInterface st
 		return fmt.Errorf("invalid tunnel interface name %q", tunnelInterface)
 	}
 
-	// Replace rules atomically. nft -f processes the whole script as a single
-	// kernel transaction: `add table` is a no-op if it exists, `delete table`
-	// drops the old version, and the new `table {...}` block installs the
-	// replacement. There is never a moment with no rules in place.
+	// nft -f runs the whole script as one kernel transaction, so there is
+	// never a moment with no rules in place while the table is replaced.
 	var b strings.Builder
 	fmt.Fprintf(&b, "add table %s %s\n", nftFamily, nftTableName)
 	fmt.Fprintf(&b, "delete table %s %s\n", nftFamily, nftTableName)

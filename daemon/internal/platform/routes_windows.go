@@ -3,13 +3,11 @@
 package platform
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/netip"
-	"os/exec"
 	"sort"
 	"strconv"
 	"strings"
@@ -164,9 +162,7 @@ func normalizeNonEmptyStrings(values []string) []string {
 }
 
 // removeLikelyTunnelDefaultRoutes deletes every /0 route owned by one of the
-// named tunnel interfaces, via GetIpForwardTable2/DeleteIpForwardEntry2 rather
-// than Get-NetRoute/Remove-NetRoute — no PowerShell process on the disconnect
-// repair path.
+// named tunnel interfaces via GetIpForwardTable2/DeleteIpForwardEntry2 — no PowerShell.
 func removeLikelyTunnelDefaultRoutes(_ context.Context, tunnelNames []string) ([]string, error) {
 	set := tunnelNameSet(tunnelNames)
 	if len(set) == 0 {
@@ -336,8 +332,7 @@ func psArgs(script string) []string {
 }
 
 // resolveDefaultGateway returns the active IPv4 default gateway, excluding any
-// route owned by a tunnel interface. Native GetIpForwardTable2 read — no
-// PowerShell.
+// route owned by a tunnel interface. Native GetIpForwardTable2 read, no PowerShell.
 func resolveDefaultGateway(_ context.Context, tunnelNames []string) (gateway string, metric string, err error) {
 	set := tunnelNameSet(tunnelNames)
 	rows, err := defaultRouteRows(windows.AF_INET)
@@ -387,15 +382,5 @@ func hasStaleTunnelDefaultRoute(_ context.Context, tunnelNames []string) (bool, 
 }
 
 func runHiddenCommand(ctx context.Context, command string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, resolveSystemCommand(command), args...)
-	ConfigureBackgroundProcess(cmd)
-
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	err := cmd.Run()
-	combined := strings.TrimSpace(strings.Join([]string{stdout.String(), stderr.String()}, "\n"))
-	return combined, err
+	return RunWindowsBackgroundCommand(ctx, command, args...)
 }

@@ -88,9 +88,8 @@ func (m *wireGuardGoManager) startLinux(ctx context.Context, profile state.WireG
 		return err
 	}
 
-	// Inject FwMark into the WireGuard config so the device's UDP socket is
-	// marked. Policy routing uses this mark to let WireGuard endpoint traffic
-	// bypass the tunnel and use the real default route.
+	// Mark the device's UDP socket so policy routing lets WireGuard's own
+	// endpoint traffic bypass the tunnel and use the real default route.
 	parsed.wgConfig = injectFwMark(parsed.wgConfig, policyRoutingFwmark)
 
 	// Create in-process TUN device and WireGuard device.
@@ -128,9 +127,8 @@ func (m *wireGuardGoManager) startLinux(ctx context.Context, profile state.WireG
 		m.logs.Add(state.LogWarn, state.SourceWireGuard, fmt.Sprintf("endpoint bypass routes incomplete: %v", epErr))
 	}
 
-	// Set up policy routing (custom table + ip rules) so that all traffic,
-	// including SO_BINDTODEVICE probes from NetworkManager, goes through
-	// the tunnel.
+	// Custom table + ip rules so all traffic, including SO_BINDTODEVICE
+	// probes from NetworkManager, goes through the tunnel.
 	if err := addLinuxPolicyRouting(interfaceName, allowedIPs); err != nil {
 		removeLinuxEndpointRoutes(endpointRoutes, routeOwnership)
 		closeDevice(dev)
@@ -259,9 +257,8 @@ func (m *wireGuardGoManager) statusLinux(_ context.Context, profile state.WireGu
 	}, nil
 }
 
-// injectFwMark adds a FwMark line to the [Interface] section of a WireGuard
-// config if one is not already present. The mark lets policy routing identify
-// WireGuard's own UDP packets so they bypass the tunnel.
+// injectFwMark adds a FwMark line to the [Interface] section if not already
+// present, so policy routing can identify and bypass WireGuard's own packets.
 func injectFwMark(wgConfig string, mark uint32) string {
 	lines := strings.Split(wgConfig, "\n")
 	out := make([]string, 0, len(lines)+1)

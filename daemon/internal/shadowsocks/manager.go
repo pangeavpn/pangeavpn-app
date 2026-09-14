@@ -85,8 +85,7 @@ func (m *Manager) Start(ctx context.Context, profile state.ShadowsocksProfile) e
 	targetPort := targetPortOrDefault(profile.TargetPort)
 
 	// engineCtx is rooted independently of ctx: the engine and bridge outlive
-	// this call, and ctx is typically request-scoped (it would otherwise kill
-	// a healthy tunnel the moment the caller's request context ends).
+	// this call, which is typically request-scoped.
 	engineCtx, cancel := context.WithCancel(context.Background())
 
 	engine, err := box.New(box.Options{
@@ -268,10 +267,8 @@ func (m *Manager) Stop(ctx context.Context) error {
 	}
 }
 
-// forceResetState drops shared state to a stopped configuration even if the
-// bridge goroutine has not finished; its generation check keeps it harmless.
-// It closes the engine itself rather than leaving that to the orphaned
-// goroutine, so a subsequent Start does not race a still-live SS session.
+// forceResetState drops shared state to stopped and closes the engine itself,
+// so a subsequent Start does not race a still-live SS session.
 func (m *Manager) forceResetState() {
 	m.mu.Lock()
 	engine := m.engine

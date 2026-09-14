@@ -1,9 +1,5 @@
-/** Hostnames for the hub's own domain, and which method may use which.
- *
- *  The mirror sits behind a CDN, so only the normal method may reach it: the
- *  direct-IP and DoH paths send an empty SNI, which a shared-IP edge cannot
- *  route to a certificate. HUB_HOSTNAME is the only name those paths may use.
- */
+/** Hostnames for the hub's own domain. The mirror sits behind a CDN with no SNI
+ *  routing, so only the normal method may use it; direct-IP/DoH use HUB_HOSTNAME only. */
 
 export const HUB_HOSTNAME = "api.pangeavpn.org";
 

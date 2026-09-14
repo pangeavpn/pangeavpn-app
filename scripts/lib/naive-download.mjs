@@ -31,9 +31,8 @@ const ASSET_SHA256 = {
   }
 };
 
-// ensurePangeaNaiveLib returns { libDir, headerDir, libName } for the pinned
-// prebuilt, downloading + caching under .cache on first use, or null if it
-// can't fetch.
+// Returns { libDir, headerDir, libName } for the pinned prebuilt, downloading
+// and caching under .cache on first use, or null if it can't fetch.
 export function ensurePangeaNaiveLib(goArch, rootDir) {
   const assetArch = ASSET_ARCH[goArch];
   const osAsset = OS_ASSET[process.platform];
@@ -106,10 +105,8 @@ function sha256File(filePath) {
   return hash.digest("hex");
 }
 
-// Extracts a .zip into destDir. Prefers tar (bsdtar handles zip; the default
-// tar on macOS and Windows), falls back to PowerShell Expand-Archive on
-// Windows — GNU tar (some Git-for-Windows shells) can't read zips. Returns
-// true on success.
+// Extracts a .zip into destDir via tar (bsdtar handles zip), falling back to
+// PowerShell Expand-Archive on Windows since GNU tar can't read zips.
 function extractZip(zipPath, destDir) {
   const bsd = spawnSync("tar", ["-xf", zipPath, "-C", destDir], { stdio: "inherit", shell: false });
   if (!bsd.error && (bsd.status ?? 1) === 0) {

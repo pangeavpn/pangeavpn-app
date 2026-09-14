@@ -71,10 +71,7 @@ export function isReusable(
   return age >= 0 && age < PROFILE_TTL_MS;
 }
 
-/**
- * The hub keeps one live WireGuard peer per device identity: registering any
- * server evicts every earlier peer. Only the newest provision can still work.
- */
+/** The hub keeps one live peer per device identity; only the newest provision can still work. */
 export function isLatestProvision(records: ProfileRecords, profileId: string): boolean {
   const candidate = records[profileId];
   if (!candidate) return false;
@@ -116,11 +113,8 @@ function retainNewest(records: ProfileRecords): ProfileRecords {
   );
 }
 
-/**
- * The profile set to hand the daemon after a successful connect: the winner,
- * every profile the app does not manage, and the managed peers still worth
- * reusing. Anything else is a spent peer and is dropped.
- */
+/** The profile set to hand the daemon after connect: the winner, unmanaged
+ *  profiles, and still-reusable managed peers; anything else is dropped. */
 export function commitProfileSet<T extends { id: string }>(
   profiles: readonly T[],
   winner: T,

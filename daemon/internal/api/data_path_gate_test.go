@@ -33,10 +33,8 @@ func cascadeProfile() state.Profile {
 	}
 }
 
-// gatedProbe answers per transport kind and records the order the kinds were
-// probed in, which is the order the cascade actually attempted them. The kind
-// is read off the managers: bring-up stops a candidate before starting the
-// next, so exactly one is running while its data path is being proven.
+// gatedProbe records the order transport kinds were probed in — the order the
+// cascade attempted them, since only one candidate runs at a time.
 type gatedProbe struct {
 	mu          sync.Mutex
 	reality     *fakeRealityManager
@@ -109,8 +107,7 @@ func cascadeTestService(t *testing.T, passing map[string]bool) (*Service, *gated
 }
 
 // TestConnect_TransportThatCarriesNoTrafficIsRejected is the shipped bug: a
-// transport DPI kills right after connect still completes a WireGuard
-// handshake, so the handshake alone must not end the cascade.
+// transport DPI kills right after connect still completes a handshake.
 func TestConnect_TransportThatCarriesNoTrafficIsRejected(t *testing.T) {
 	svc, probe := cascadeTestService(t, map[string]bool{"shadowsocks": true})
 
@@ -137,9 +134,8 @@ func TestConnect_NoTransportCarriesTrafficExhaustsTheCascade(t *testing.T) {
 	}
 }
 
-// TestHealthCheck_DeadDataPathRestartsTheCascadeAtTheTop covers the mid-session
-// case: the transport that connected stops carrying traffic, and recovery walks
-// the whole cascade again rather than restarting the dead transport in place.
+// TestHealthCheck_DeadDataPathRestartsTheCascadeAtTheTop: when the connected
+// transport stops carrying traffic, recovery walks the whole cascade again.
 func TestHealthCheck_DeadDataPathRestartsTheCascadeAtTheTop(t *testing.T) {
 	svc, probe := cascadeTestService(t, map[string]bool{"shadowsocks": true})
 	if err := svc.Connect(context.Background(), "p1", ConnectOptions{}); err != nil {
@@ -309,9 +305,8 @@ func TestProveDataPath_ProbesTheLiveTunnelInterface(t *testing.T) {
 	}
 }
 
-// TestHealthCheck_DeadDataPathWaitsForUsableNetwork is the idle-laptop case: the
-// NIC drops for a moment, the probe fails, and a cascade dialled now would fail
-// on every transport and tell the app this server is blocked.
+// TestHealthCheck_DeadDataPathWaitsForUsableNetwork is the idle-laptop case:
+// dialling the cascade while the NIC is briefly down would wrongly blame the server.
 func TestHealthCheck_DeadDataPathWaitsForUsableNetwork(t *testing.T) {
 	svc, probe := cascadeTestService(t, map[string]bool{"shadowsocks": true})
 	if err := svc.Connect(context.Background(), "p1", ConnectOptions{}); err != nil {
@@ -408,9 +403,8 @@ func TestHostNetworkUnreachable(t *testing.T) {
 	}
 }
 
-// TestProveDataPath_OversizedReplyProvesTheTunnelCarriesTraffic covers the
-// Windows WSAEMSGSIZE case: the reply crossed the tunnel and only the copy into
-// userspace failed, so the gate must accept the candidate rather than reject it.
+// TestProveDataPath_OversizedReplyProvesTheTunnelCarriesTraffic covers Windows
+// WSAEMSGSIZE: the reply crossed the tunnel, only the userspace copy failed.
 func TestProveDataPath_OversizedReplyProvesTheTunnelCarriesTraffic(t *testing.T) {
 	wgMgr := &fakeWGManager{interfaceName: "utun7"}
 	svc := newTestServiceFull(t, &fakeCloakManager{}, &fakeNaiveManager{}, &fakeRealityManager{},
@@ -424,8 +418,7 @@ func TestProveDataPath_OversizedReplyProvesTheTunnelCarriesTraffic(t *testing.T)
 }
 
 // TestMaxProbeReplySize_CoversTheLargestAdvertisedPayload keeps the read buffer
-// and the advertised EDNS0 ceiling from drifting apart: a buffer under the
-// ceiling invites replies Windows then fails the whole read on.
+// at or above the advertised EDNS0 ceiling, or Windows fails the whole read.
 func TestMaxProbeReplySize_CoversTheLargestAdvertisedPayload(t *testing.T) {
 	for _, size := range rootProbePayloadSizes {
 		if int(size) > maxProbeReplySize {
@@ -436,10 +429,10 @@ func TestMaxProbeReplySize_CoversTheLargestAdvertisedPayload(t *testing.T) {
 
 // gateProbeCounter counts probe calls and fails every one, so a test measures
 // how many attempts the gate spends before giving up.
-func gateProbeCounter(svc *Service) *int32 {
-	var calls int32
+func gateProbeCounter(svc *Service) *atomic.Int32 {
+	var calls atomic.Int32
 	svc.probeResolver = func(context.Context, string, string) error {
-		atomic.AddInt32(&calls, 1)
+		calls.Add(1)
 		return errors.New("i/o timeout")
 	}
 	return &calls
@@ -453,9 +446,8 @@ func gateTestService(t *testing.T) (*Service, *fakeWGManager) {
 	return svc, wgMgr
 }
 
-// TestProveDataPath_BlockedTunnelStillFailsFast proves the slow-host budget is
-// not a blanket extension: a peer sending nothing back keeps the original
-// attempt count, so a censored transport does not slow the cascade down.
+// TestProveDataPath_BlockedTunnelStillFailsFast proves the slow-host budget
+// isn't a blanket extension: a silent peer keeps the original attempt count.
 func TestProveDataPath_BlockedTunnelStillFailsFast(t *testing.T) {
 	svc, _ := gateTestService(t)
 	calls := gateProbeCounter(svc)
@@ -463,7 +455,7 @@ func TestProveDataPath_BlockedTunnelStillFailsFast(t *testing.T) {
 	if err := svc.proveDataPath(context.Background(), cascadeProfile().WireGuard); err == nil {
 		t.Fatal("proveDataPath accepted a transport that never carried a round trip")
 	}
-	if got := atomic.LoadInt32(calls); got != dataPathGateAttempts {
+	if got := calls.Load(); got != dataPathGateAttempts {
 		t.Errorf("probe attempts = %d, want %d — a flat rx counter must not buy extra tries", got, dataPathGateAttempts)
 	}
 }
@@ -507,9 +499,9 @@ func TestProveDataPath_WaitsForALateAdapter(t *testing.T) {
 func TestProveDataPath_KeepaliveInflatedCounterStillFailsFast(t *testing.T) {
 	svc, wgMgr := gateTestService(t)
 
-	var calls int32
+	var calls atomic.Int32
 	svc.probeResolver = func(context.Context, string, string) error {
-		atomic.AddInt32(&calls, 1)
+		calls.Add(1)
 		wgMgr.addBytesIn(1500)
 		return errors.New("i/o timeout")
 	}
@@ -517,7 +509,7 @@ func TestProveDataPath_KeepaliveInflatedCounterStillFailsFast(t *testing.T) {
 	if err := svc.proveDataPath(context.Background(), cascadeProfile().WireGuard); err == nil {
 		t.Fatal("proveDataPath accepted a blocked tunnel whose peer only sent keepalives")
 	}
-	if got := atomic.LoadInt32(&calls); got != dataPathGateAttempts {
+	if got := calls.Load(); got != dataPathGateAttempts {
 		t.Errorf("probe attempts = %d, want %d — keepalives must not buy extra tries", got, dataPathGateAttempts)
 	}
 	if wgMgr.readyPolls == 0 {
@@ -531,9 +523,9 @@ func TestProveDataPath_LateRouteIsRetriedNotTreatedAsAVerdict(t *testing.T) {
 	svc, _ := gateTestService(t)
 	svc.dataPathBudget = 3 * dataPathGateRetryDelay
 
-	var calls int32
+	var calls atomic.Int32
 	svc.probeResolver = func(context.Context, string, string) error {
-		atomic.AddInt32(&calls, 1)
+		calls.Add(1)
 		return fmt.Errorf("%w: the tunnel's route is not published yet", errDNSProbeNotReady)
 	}
 
@@ -544,7 +536,7 @@ func TestProveDataPath_LateRouteIsRetriedNotTreatedAsAVerdict(t *testing.T) {
 	if hostNetworkUnreachable(err) {
 		t.Errorf("a late route of ours was reported as the host having no internet: %v", err)
 	}
-	if got := atomic.LoadInt32(&calls); int(got) <= dataPathGateAttempts {
+	if got := calls.Load(); int(got) <= dataPathGateAttempts {
 		t.Errorf("probe calls = %d, want more than the %d base attempts — a not-ready round must not consume one", got, dataPathGateAttempts)
 	}
 }
@@ -570,9 +562,9 @@ func TestProbeResolverOverUDP_MissingInterfaceIsNotReady(t *testing.T) {
 // TestProbeResolverWithDialer_RetransmitsInsideOneAttempt: one datagram dropped
 // right after the handshake must cost a resend, not the whole attempt.
 func TestProbeResolverWithDialer_RetransmitsInsideOneAttempt(t *testing.T) {
-	var seen int32
+	var seen atomic.Int32
 	server, stop := stubDNSServer(t, func(query []byte) []byte {
-		if atomic.AddInt32(&seen, 1) == 1 {
+		if seen.Add(1) == 1 {
 			return nil
 		}
 		reply := make([]byte, len(query))
@@ -587,7 +579,7 @@ func TestProbeResolverWithDialer_RetransmitsInsideOneAttempt(t *testing.T) {
 	if err := probeResolverWithDialer(ctx, &net.Dialer{}, server); err != nil {
 		t.Fatalf("probe failed after one dropped query: %v", err)
 	}
-	if got := atomic.LoadInt32(&seen); got != 2 {
+	if got := seen.Load(); got != 2 {
 		t.Errorf("queries sent = %d, want 2 (the original and one retransmit)", got)
 	}
 }

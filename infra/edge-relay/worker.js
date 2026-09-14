@@ -1,26 +1,10 @@
-/**
- * Edge relay for the hub's secure channel.
- *
- * The client's four other paths to the hub all terminate on address space we
- * own, so one enumeration sweep that blackholes it takes out every one of them
- * at once. This relay exists to have an address the censor cannot cheaply
- * blackhole: a CDN anycast IP shared with enough of the web that dropping it
- * costs them far more than it costs us.
- *
- * It is a dumb forwarder and is trusted with nothing. Every request it carries
- * is an envelope sealed against the hub's pinned X25519 key (see
- * secureChannel.ts), so it moves ciphertext it cannot read and cannot forge a
- * reply to. That is the whole reason this is safe to run on someone else's
- * infrastructure.
- *
- * Deploy: see README.md in this directory.
- */
+// Edge relay for the hub's secure channel: a CDN anycast address a censor
+// can't cheaply block. Forwards sealed ciphertext only — see README.md.
 
 const HUB_ORIGIN = "https://api.pangeavpn.org";
 
-// The only route worth relaying. Hardcoded rather than proxying whatever path
-// arrives: a relay that forwards arbitrary paths to arbitrary hosts is an open
-// proxy, and it would be found and abused within days of going up.
+// The only route relayed — hardcoded rather than proxied, so this can't
+// become an open proxy for arbitrary paths/hosts.
 const RELAY_PATH = "/v1/secure";
 
 // Envelopes are small — a few KB at most. Anything larger is not our client.
@@ -44,11 +28,8 @@ export default {
       return new Response("Bad request", { status: 400 });
     }
 
-    // Only what the hub needs. Nothing is copied from the incoming request:
-    // headers a CDN adds on the way in (CF-Connecting-IP, CF-IPCountry, the
-    // trace headers) would tell the hub things this path exists precisely to
-    // avoid putting on the wire. See README.md if per-IP rate limiting on the
-    // hub needs the client address back.
+    // Only what the hub needs — no CDN-added client-identifying headers are
+    // copied through. See README.md if the hub ever needs the client address.
     let upstream;
     try {
       upstream = await fetch(`${HUB_ORIGIN}${RELAY_PATH}`, {

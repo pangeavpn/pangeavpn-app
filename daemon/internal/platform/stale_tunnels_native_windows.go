@@ -27,10 +27,7 @@ var deviceClassNetGUID = windows.GUID{
 }
 
 // CleanupStaleTunnelArtifactsNative removes stale WireGuard/Wintun adapter
-// artifacts using native Windows APIs (no PowerShell). It only acts on a
-// tunnel target when Windows already shows a duplicate/numbered adapter for
-// it, flushes and removes the adapters that are not currently active, and
-// then removes the matching network profile registry entries.
+// artifacts natively, acting only on inactive duplicate/numbered adapters.
 func CleanupStaleTunnelArtifactsNative(tunnelNames []string, activeLUIDs map[uint64]struct{}) ([]string, error) {
 	totalStart := time.Now()
 
@@ -130,9 +127,8 @@ func CleanupStaleTunnelArtifactsNative(tunnelNames []string, activeLUIDs map[uin
 	return actions, errors.Join(errs...)
 }
 
-// matchTunnelTarget reports whether alias matches one of the target tunnel
-// names exactly, or is a numbered variant like "name 12", and returns the
-// base target name it matched.
+// matchTunnelTarget reports whether alias matches a target name exactly or as
+// a numbered variant like "name 12", and returns the base name it matched.
 func matchTunnelTarget(alias string, targetSet map[string]struct{}) (string, bool) {
 	normalized := strings.ToLower(strings.TrimSpace(alias))
 	if _, ok := targetSet[normalized]; ok {
@@ -147,9 +143,7 @@ func matchTunnelTarget(alias string, targetSet map[string]struct{}) (string, boo
 }
 
 // hasDuplicateAdapter reports whether the group for target actually shows a
-// duplicate: more than one matching adapter, or a numbered alias like
-// "name 12". A single, non-numbered adapter is the healthy case and is left
-// alone.
+// duplicate: more than one matching adapter, or a numbered alias like "name 12".
 func hasDuplicateAdapter(target string, aliases []string) bool {
 	if len(aliases) > 1 {
 		return true
@@ -192,9 +186,8 @@ func flushStaleLUID(luid winipcfg.LUID, alias string) ([]string, []error) {
 	return actions, errs
 }
 
-// removeStaleAdapter closes the wintun handle and removes the underlying PnP
-// device node, then re-checks that the adapter is actually gone before
-// reporting success.
+// removeStaleAdapter closes the wintun handle, removes the PnP device node,
+// then re-checks that the adapter is actually gone before reporting success.
 func removeStaleAdapter(name string, guid windows.GUID) ([]string, error) {
 	adapter, err := wintun.OpenAdapter(name)
 	if err != nil {
@@ -219,9 +212,8 @@ func removeStaleAdapter(name string, guid windows.GUID) ([]string, error) {
 	return []string{fmt.Sprintf("removed wintun adapter %s", name)}, nil
 }
 
-// removeWintunDeviceNode deletes the PnP device node matching guid.
-// WintunCloseAdapter only deletes device nodes it created in this process,
-// so a leftover adapter needs SetupAPI removal to actually disappear.
+// removeWintunDeviceNode deletes the PnP device node matching guid: a
+// leftover adapter needs SetupAPI removal since WintunCloseAdapter won't.
 func removeWintunDeviceNode(guid windows.GUID) error {
 	devInfoSet, err := windows.SetupDiGetClassDevsEx(&deviceClassNetGUID, "", 0, windows.DIGCF_PRESENT, windows.DevInfo(0), "")
 	if err != nil {
@@ -256,9 +248,8 @@ const (
 	unmanagedSignaturesPath = `SOFTWARE\Microsoft\Windows NT\CurrentVersion\NetworkList\Signatures\Unmanaged`
 )
 
-// cleanupNetworkProfiles removes Windows network profile and signature
-// registry entries whose ProfileName exactly matches one of the adapter
-// aliases we just confirmed stale, never a still-active adapter's name.
+// cleanupNetworkProfiles removes network profile/signature registry entries
+// whose ProfileName matches an adapter alias just confirmed stale.
 func cleanupNetworkProfiles(staleAliases map[string]struct{}) ([]string, []error) {
 	var actions []string
 	var errs []error
@@ -369,9 +360,8 @@ func cleanupSignatures(sigRoot string, removedGUIDs []string) ([]string, []error
 	return actions, errs
 }
 
-// deleteRegistryKeyRecursive deletes path and all of its subkeys, since
-// RegDeleteKey fails with ERROR_ACCESS_DENIED on a key that still has
-// children.
+// deleteRegistryKeyRecursive deletes path and its subkeys: RegDeleteKey fails
+// with ERROR_ACCESS_DENIED on a key that still has children.
 func deleteRegistryKeyRecursive(baseKey registry.Key, path string) error {
 	key, err := registry.OpenKey(baseKey, path, registry.ENUMERATE_SUB_KEYS|registry.READ)
 	if err == nil {

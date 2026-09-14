@@ -24,9 +24,7 @@ func connectedRouteGuardService(t *testing.T) (*Service, *fakeWGManager, *fakeNa
 }
 
 // TestHealthCheck_EndpointRoutesCheckedEveryTick proves the route carrying
-// WireGuard to its node is verified continuously rather than only at bring-up.
-// The OS can drop it on a media-sense flap or move the gateway under it, and
-// nothing inside the tunnel can see that.
+// WireGuard to its node is verified continuously, not only at bring-up.
 func TestHealthCheck_EndpointRoutesCheckedEveryTick(t *testing.T) {
 	svc, wgMgr, _ := connectedRouteGuardService(t)
 
@@ -47,10 +45,7 @@ func TestHealthCheck_EndpointRoutesCheckedEveryTick(t *testing.T) {
 }
 
 // TestHealthCheck_RepairedEndpointRouteIsPreferredOverARebuild proves a silent
-// tunnel whose bypass route was lost gets the route back instead of a full
-// session rebuild. Rewriting the route restores the same session in one tick;
-// the rebuild drops the tunnel, restarts the transport, and re-arms the
-// firewall to reach the same place.
+// tunnel whose bypass route was lost gets the route back instead of a rebuild.
 func TestHealthCheck_RepairedEndpointRouteIsPreferredOverARebuild(t *testing.T) {
 	svc, wgMgr, naive := connectedRouteGuardService(t)
 
@@ -89,9 +84,8 @@ func TestHealthCheck_RepairedEndpointRouteIsPreferredOverARebuild(t *testing.T) 
 	}
 }
 
-// TestHealthCheck_StillRebuildsWhenTheRouteWasFine proves the repair path does
-// not swallow the silence detector: a tunnel silent for some other reason has
-// nothing to re-pin, so the rebuild still runs.
+// TestHealthCheck_StillRebuildsWhenTheRouteWasFine proves a tunnel silent for
+// some other reason, with nothing to re-pin, still gets rebuilt.
 func TestHealthCheck_StillRebuildsWhenTheRouteWasFine(t *testing.T) {
 	svc, wgMgr, _ := connectedRouteGuardService(t)
 
@@ -111,9 +105,7 @@ func TestHealthCheck_StillRebuildsWhenTheRouteWasFine(t *testing.T) {
 }
 
 // TestHealthCheck_EndlessRouteRepairsStopDeferringTheRebuild proves a route
-// that never settles cannot suppress recovery forever. Deferring the rebuild is
-// worth it while a repair is plausibly about to work; a route being re-pinned
-// every tick is its own fault, and the session still needs rescuing.
+// that never settles cannot suppress recovery forever.
 func TestHealthCheck_EndlessRouteRepairsStopDeferringTheRebuild(t *testing.T) {
 	svc, wgMgr, _ := connectedRouteGuardService(t)
 
@@ -136,8 +128,7 @@ func TestHealthCheck_EndlessRouteRepairsStopDeferringTheRebuild(t *testing.T) {
 }
 
 // TestHealthCheck_RouteGuardErrorDoesNotDropTheSession proves a guard that
-// cannot read the routing table is reported and moved past. Failing to verify a
-// route is not a reason to tear down a working tunnel.
+// cannot read the routing table is reported and moved past, not a reason to tear down.
 func TestHealthCheck_RouteGuardErrorDoesNotDropTheSession(t *testing.T) {
 	svc, wgMgr, _ := connectedRouteGuardService(t)
 
@@ -161,11 +152,8 @@ func TestHealthCheck_RouteGuardErrorDoesNotDropTheSession(t *testing.T) {
 	}
 }
 
-// TestHealthCheck_RouteGuardErrorsAccumulateAndEscalate proves an error tick
-// is not treated as settled: repeated errors keep booking against the
-// deferral counter instead of resetting it, so a guard that cannot read the
-// routing table every tick eventually escalates rather than warning forever
-// with no other signal.
+// TestHealthCheck_RouteGuardErrorsAccumulateAndEscalate proves repeated guard
+// errors keep booking against the deferral counter until it escalates.
 func TestHealthCheck_RouteGuardErrorsAccumulateAndEscalate(t *testing.T) {
 	svc, wgMgr, _ := connectedRouteGuardService(t)
 
@@ -189,10 +177,7 @@ func TestHealthCheck_RouteGuardErrorsAccumulateAndEscalate(t *testing.T) {
 }
 
 // TestHealthCheck_PartialRepairDoesNotSkipTheRebuild proves a repair that
-// only partly worked (e.g. the IPv4 route was re-pinned but the IPv6 one
-// failed) is not treated as a clean success: the session must still reach
-// the silence detector and rebuild, not be given a tick to handshake on a
-// path that is still partly broken.
+// only partly worked is not treated as a clean success and still rebuilds.
 func TestHealthCheck_PartialRepairDoesNotSkipTheRebuild(t *testing.T) {
 	svc, wgMgr, _ := connectedRouteGuardService(t)
 

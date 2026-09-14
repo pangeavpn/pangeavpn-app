@@ -13,13 +13,8 @@ import (
 // so a genuinely dead socket still exits instead of spinning.
 const maxConsecutiveBridgeErrors = 32
 
-// bridgeUDP relays datagrams between WireGuard's loopback socket and the SS
-// outbound. One remote peer, so the local side is a single-flow NAT.
-//
-// A datagram that cannot be delivered — oversized for the path (EMSGSIZE), or
-// an ICMP-driven reset — is dropped, not fatal: UDP is lossy by contract and
-// WireGuard retransmits. Tearing the transport down per packet would put the
-// health check into a restart loop instead.
+// bridgeUDP relays datagrams between WireGuard's loopback socket and the SS outbound as a
+// single-flow NAT. A delivery failure is dropped, not fatal: UDP is lossy and WireGuard retries.
 func bridgeUDP(ctx context.Context, local *net.UDPConn, remote net.PacketConn, remoteAddr net.Addr) error {
 	errCh := make(chan error, 2)
 	var peer atomic.Pointer[net.UDPAddr]
@@ -44,9 +39,8 @@ func bridgeUDP(ctx context.Context, local *net.UDPConn, remote net.PacketConn, r
 				}
 				continue
 			}
-			// Pin the peer to whoever spoke first; other local sources are
-			// rejected unless they open with a fresh WireGuard initiation
-			// (the device was rebuilt mid-session and has a new socket).
+			// Pin the peer to whoever spoke first; a later source is rejected
+			// unless it opens with a fresh WireGuard initiation.
 			if known := peer.Load(); known == nil {
 				peer.Store(addr)
 			} else if !sameUDPAddr(known, addr) {

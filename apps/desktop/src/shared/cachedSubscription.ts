@@ -44,10 +44,8 @@ const MAX_OFFLINE_GRACE_MS = 14 * 24 * 60 * 60 * 1000;
 const RENEWAL_GRACE_MS = 3 * 24 * 60 * 60 * 1000;
 const ENTITLED_STATUSES = new Set(["trialing", "active"]);
 
-/** An unreachable hub is not evidence that a paid account stopped being paid,
- *  but the benefit of the doubt is bounded: a renewing sub survives a missed
- *  renewal by RENEWAL_GRACE_MS, and any cache older than MAX_OFFLINE_GRACE_MS
- *  stops granting entitlement outright. */
+/** Bounded benefit of the doubt: a renewing sub survives a missed renewal by
+ *  RENEWAL_GRACE_MS, and anything past MAX_OFFLINE_GRACE_MS loses entitlement outright. */
 export function cachedEntitlement(cached: CachedSubscription, nowMs: number): boolean {
   const { subscription, cachedAt } = cached;
   if (nowMs - cachedAt > MAX_OFFLINE_GRACE_MS) return false;

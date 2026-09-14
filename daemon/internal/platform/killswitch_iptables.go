@@ -98,15 +98,8 @@ func iptables6ForwardStagingChain(live string) string {
 	return ipt6FwdChainName
 }
 
-// iptablesApplyPlan installs the rules without ever leaving OUTPUT unfiltered.
-// iptables has no transaction, so ordering is the safety property: build the
-// replacement under an unreferenced name, hook it up only after its terminal
-// DROP, then retire the old one. Rebuilding in place would leave the host
-// unfiltered for the length of the rebuild.
-//
-// IPv6 is rebuilt too (a jump says nothing about whether the chain behind it
-// still ends in DROP) and runs first, so a v6 failure aborts before the v4
-// permits move to the new server.
+// iptablesApplyPlan never leaves OUTPUT unfiltered: it builds the replacement
+// under an unreferenced name, hooking it up only after its terminal DROP.
 func iptablesApplyPlan(
 	staging string,
 	staging6 string,
@@ -116,6 +109,7 @@ func iptablesApplyPlan(
 ) []iptablesCommand {
 	plan := make([]iptablesCommand, 0, 32)
 
+	// IPv6 rebuilds first so a v6 failure aborts before v4 permits move.
 	plan = append(plan,
 		ipt6Optional("-D", "OUTPUT", "-j", staging6),
 		ipt6Optional("-F", staging6),
@@ -336,12 +330,8 @@ func iptablesBackendUsable(ctx context.Context, binary string) bool {
 	return runIPTablesCommand(ctx, binary, withWait([]string{"-S", "OUTPUT"})...) == nil
 }
 
-// Best-effort per command, but failures are aggregated so Clear can report a
-// half-teardown — that's how a jump ends up pointing at an emptied chain.
-//
-// Both backends are swept unconditionally because which one is live cannot be
-// trusted after a restart; an unusable one is skipped rather than counted as a
-// failure, or an nft-only host could never finish a clear.
+// Both backends are swept unconditionally (which is live cannot be trusted
+// after a restart); an unusable one is skipped rather than counted as a failure.
 func removeIPTablesRules(ctx context.Context) error {
 	var failures []string
 	usable := make(map[string]bool, 2)

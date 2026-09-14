@@ -10,8 +10,7 @@ SYSTEM_DAEMON_PATH="${SYSTEM_SUPPORT_DIR}/PangeaDaemon"
 LOG_PATH="/var/log/pangeavpn-daemon.log"
 
 # ── Give the user back their own app files ──────────────────────────────────
-# Up to 0.6.0 an app installed this way elevated its own daemon, which took
-# root ownership of these — every later write from the app then failed EACCES.
+# Up to 0.6.0's daemon took root ownership of these, breaking later app writes.
 USER_LIBRARY_ITEMS="Library/Application Support/pangeavpn-desktop
 Library/Application Support/PangeaVPN
 Library/Caches/PangeaVPN

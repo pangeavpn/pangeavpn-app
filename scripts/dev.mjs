@@ -446,20 +446,7 @@ function startDesktopProcess() {
   }
 
   console.log(`Detected sudo launch; starting desktop process as ${sudoContext.user}.`);
-  const args = [
-    "-u",
-    sudoContext.user,
-    "env",
-    `HOME=${sudoContext.home}`,
-    `USER=${sudoContext.user}`,
-    `LOGNAME=${sudoContext.user}`,
-    `PATH=${process.env.PATH ?? ""}`,
-    npmCmd,
-    "run",
-    "dev",
-    "--workspace",
-    "@pangeavpn/desktop"
-  ];
+  const args = sudoUserCommandArgs([npmCmd, "run", "dev", "--workspace", "@pangeavpn/desktop"]);
   return spawn("sudo", args, {
     stdio: "inherit",
     shell: false,
@@ -474,17 +461,7 @@ function runNpmOrExit(args) {
     return;
   }
 
-  const commandArgs = [
-    "-u",
-    sudoContext.user,
-    "env",
-    `HOME=${sudoContext.home}`,
-    `USER=${sudoContext.user}`,
-    `LOGNAME=${sudoContext.user}`,
-    `PATH=${process.env.PATH ?? ""}`,
-    npmCmd,
-    ...args
-  ];
+  const commandArgs = sudoUserCommandArgs([npmCmd, ...args]);
   runOrExit("sudo", commandArgs, { shell: false });
 }
 
@@ -492,6 +469,19 @@ function buildSudoEnvArgs(env) {
   const keys = ["HOME", "USER", "LOGNAME", "PATH", "GOMODCACHE", "GOCACHE", "GOTMPDIR"];
   const pairs = keys.filter((k) => env[k] != null).map((k) => `${k}=${env[k]}`);
   return ["env", ...pairs];
+}
+
+function sudoUserCommandArgs(command) {
+  return [
+    "-u",
+    sudoContext.user,
+    "env",
+    `HOME=${sudoContext.home}`,
+    `USER=${sudoContext.user}`,
+    `LOGNAME=${sudoContext.user}`,
+    `PATH=${process.env.PATH ?? ""}`,
+    ...command
+  ];
 }
 
 function resolveAppSupportDir(home) {
@@ -525,28 +515,12 @@ function ensureSudoUserRuntimeFiles() {
       "}"
     ].join(" ");
 
-    const args = [
-      "-u",
-      sudoContext.user,
-      "env",
-      `HOME=${sudoContext.home}`,
-      `USER=${sudoContext.user}`,
-      `LOGNAME=${sudoContext.user}`,
-      `PATH=${process.env.PATH ?? ""}`,
-      "node",
-      "-e",
-      initScript,
-      appDir,
-      tokenPath,
-      configPath
-    ];
-
+    const args = sudoUserCommandArgs(["node", "-e", initScript, appDir, tokenPath, configPath]);
     runOrExit("sudo", args, { shell: false });
     return;
   }
 
-  // Running as normal user — daemon will be elevated via sudo later.
-  // Create runtime files now so the daemon (as root) reads the existing
+  // Create runtime files now so an elevated daemon reads the existing
   // token instead of creating a root-owned one the user cannot read.
   if (isWin) {
     return;

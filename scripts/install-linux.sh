@@ -12,18 +12,15 @@ fail()  { printf "${RED}[x]${NC} %s\n" "$*"; exit 1; }
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
-# The account PangeaVPN is being installed for. The privileged steps below all
-# call sudo themselves, so this works whether the script is run directly or
-# under sudo.
+# The account PangeaVPN is being installed for. The privileged steps below
+# call sudo themselves, so this works whether run directly or under sudo.
 RUNTIME_USER="${SUDO_USER:-$(id -un)}"
 if [ "$RUNTIME_USER" = "root" ]; then
   RUNTIME_USER=""
 fi
 
 # Builds must never run as root: npm would leave root-owned node_modules/,
-# dist/ and .cache/ trees behind in the checkout, and every later build the
-# user runs without sudo then dies on EACCES. Drop back to them for build
-# steps; only the install steps that follow need privileges.
+# dist/, and .cache/ behind, breaking later unprivileged builds with EACCES.
 if [ "$(id -u)" -eq 0 ] && [ -n "$RUNTIME_USER" ]; then
   # -H so npm's cache and config resolve under the user's home, not /root's.
   run_as_user() { sudo -u "$RUNTIME_USER" -H --preserve-env=PATH -- "$@"; }
@@ -32,9 +29,7 @@ else
 fi
 
 # Whether the *invoking session* already carries the group, recorded before
-# anything below can change it. A session keeps the group list it was created
-# with, so being in /etc/group is not the same as being able to use it yet.
-# Running under sudo this reads root's groups, so it is only trusted directly.
+# anything below can change it (a session keeps the group list it started with).
 SESSION_HAS_GROUP=0
 if [ "$(id -u)" -ne 0 ] && id -nG 2>/dev/null | tr ' ' '\n' | grep -qx pangeavpn; then
   SESSION_HAS_GROUP=1
@@ -101,10 +96,8 @@ esac
 # --- Build ---
 cd "$REPO_ROOT"
 
-# Earlier versions of this script ran the build as root under sudo, leaving
-# root-owned node_modules/, dist/, .cache/ and .git/index trees behind. The
-# build below now correctly runs as the user, so those leftovers would make it
-# fail on EACCES. Hand the checkout back before building.
+# Earlier versions built as root, leaving root-owned trees that would make
+# the now-unprivileged build below fail on EACCES. Hand the checkout back first.
 if [ -n "$RUNTIME_USER" ] && [ -n "$(find "$REPO_ROOT" -user root -print -quit 2>/dev/null)" ]; then
   info "Repairing root-owned files left in the checkout by an earlier install..."
   sudo chown -R "$RUNTIME_USER:" "$REPO_ROOT"
@@ -132,8 +125,7 @@ if [ -z "$APPIMAGE" ]; then
 fi
 
 # --- Quit a running app so we can safely replace the binary ---
-# If PangeaVPN is open (e.g. actively connected), the AppImage stays open for
-# execution and `cp` onto it fails with "Text file busy". Close it first.
+# A running AppImage stays open for execution, so `cp` onto it fails EBUSY.
 APP_MATCH="$INSTALL_DIR/PangeaVPN.AppImage|mount_.*/pangeavpn"
 if pgrep -f "$APP_MATCH" >/dev/null 2>&1; then
   warn "PangeaVPN is currently running — closing it to install the update. If you're connected, the VPN will disconnect."
@@ -142,10 +134,8 @@ if pgrep -f "$APP_MATCH" >/dev/null 2>&1; then
   pkill -KILL -f "$APP_MATCH" 2>/dev/null || true
 fi
 
-# Install atomically: write alongside the target, then rename into place.
-# A plain `cp` onto the live path can still race with a process that reopens
-# it right after the pkill above; rename(2) succeeds even while the old
-# inode is busy/executing, so this can't hit "Text file busy".
+# Install atomically: write alongside the target, then rename into place —
+# rename(2) succeeds even if a process reopens the old inode right after pkill.
 APPIMAGE_TMP="$INSTALL_DIR/.PangeaVPN.AppImage.new"
 sudo install -m 755 "$APPIMAGE" "$APPIMAGE_TMP"
 sudo mv -f "$APPIMAGE_TMP" "$INSTALL_DIR/PangeaVPN.AppImage"

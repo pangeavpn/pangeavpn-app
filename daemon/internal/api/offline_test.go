@@ -32,9 +32,8 @@ func TestOfflineForState(t *testing.T) {
 	}
 }
 
-// When the OS reports no internet, a dropped session must hold — not churn
-// through rebuild attempts flipping between ERROR/CONNECTED/CONNECTING — and the
-// status must carry the offline flag so the UI can say "no internet".
+// When the OS reports no internet, a dropped session must hold, not churn
+// through rebuild attempts, and status must carry the offline flag.
 func TestHealthCheck_HoldsWhenHostOffline(t *testing.T) {
 	svc, naive, wgMgr, _ := recoveryTestService(t)
 	svc.hostInternet = func() (bool, bool) { return false, true }
@@ -72,10 +71,8 @@ func TestHealthCheck_HoldsWhenHostOffline(t *testing.T) {
 	}
 }
 
-// The exact churn a link drop caused: the active transport dies, its restart
-// gets "unreachable network", and instead of stamping ERROR every ~3s (which a
-// still-recent handshake flips back to CONNECTED) the daemon parks in a stable
-// offline hold and reports offline, then recovers when the link returns.
+// A link drop makes the transport's restart hit "unreachable network"; instead
+// of thrashing ERROR/CONNECTED every ~3s, the daemon parks in an offline hold.
 func TestHealthCheck_TransportRestartHoldsOnUnreachableNetwork(t *testing.T) {
 	svc, naive, _, _ := recoveryTestService(t)
 
@@ -269,9 +266,8 @@ func TestConnect_UnreachableNetworkStopsTheCascade(t *testing.T) {
 	}
 }
 
-// Behind an armed kill switch the OS cannot probe for internet, so its "no
-// internet" is blind: the route table decides. A lockdown lock that trusted the
-// probe verdict could never be told the link is back.
+// Behind an armed kill switch the OS can't probe for internet, so the route
+// table decides — trusting the probe verdict would never learn the link is back.
 func TestConnect_BehindTheKillSwitchTheRouteTableOutranksTheOSVerdict(t *testing.T) {
 	naive := &fakeNaiveManager{}
 	wgMgr := &fakeWGManager{}
@@ -301,9 +297,8 @@ func TestConnect_BehindTheKillSwitchTheRouteTableOutranksTheOSVerdict(t *testing
 	}
 }
 
-// The kill switch is armed for the whole life of a session, so a dropped
-// session under lockdown must resume on the route table, not wait for a probe
-// verdict the lock will never let through.
+// The kill switch stays armed for the whole session, so a drop under lockdown
+// must resume on the route table, not a probe verdict the lock never lets through.
 func TestRetryDroppedSession_ResumesBehindTheKillSwitchOnARoute(t *testing.T) {
 	svc, naive, wgMgr, ks := recoveryTestService(t)
 	if !ks.Active() {

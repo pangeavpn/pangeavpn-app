@@ -1,11 +1,7 @@
 //go:build transport_e2e
 
-// Server-switch proof: the daemon's Switch stops the active transport and
-// starts it again against a different node inside the same process. This
-// exercises that Stop/Start cycle against two real, independently-keyed
-// VLESS+REALITY servers and proves traffic actually reaches the second one.
-//
-// Run: go test -tags "transport_e2e with_utls" ./internal/reality/... -run Switch -v
+// Server-switch proof: exercises the Stop/Start cycle against two real,
+// independently-keyed VLESS+REALITY servers and proves traffic reaches the second one.
 package reality
 
 import (
@@ -100,8 +96,7 @@ func roundTrip(t *testing.T, mgr *Manager, payload string) string {
 }
 
 // TestSwitchBetweenNodesInOneProcess is the Switch flow: connected to node A,
-// user picks node B. The manager must tear down cleanly and come back up
-// against B's completely different keys, UUID and port.
+// user picks node B; the manager must tear down and come back up against B's completely different config.
 func TestSwitchBetweenNodesInOneProcess(t *testing.T) {
 	nodeA := startRealityNode(t, "reality-a.internal.test")
 	defer nodeA.close()

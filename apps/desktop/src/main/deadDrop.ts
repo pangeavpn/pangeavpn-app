@@ -1,6 +1,5 @@
-/** Fetches the dead-drop bootstrap file. Unlike the direct-IP hub path this is
- *  ordinary HTTPS with certificate validation on: these are real hosts with
- *  real certificates, and there is no hub name to keep off the wire. */
+/** Fetches the dead-drop bootstrap file over ordinary HTTPS with certificate
+ *  validation on: these are real hosts, unlike the direct-IP hub path. */
 
 import https from "node:https";
 import { verifyDeadDropBlob, type DeadDropKeys, type DeadDropPayload } from "../shared/deadDropBlob.ts";
@@ -83,13 +82,8 @@ export interface DeadDropResult {
   url: string;
 }
 
-/**
- * The first published file that passes every check, with the URL it came from
- * so the caller can log which host is still working.
- *
- * A host that fails, throws, or serves something unacceptable never ends the
- * search: one blocked or poisoned mirror must not cost us the other.
- */
+/** The first published file that passes every check, with the URL it came
+ *  from. A failing host never ends the search: one bad mirror costs nothing. */
 export async function fetchDeadDropPayload(
   options: DeadDropFetchOptions
 ): Promise<DeadDropResult | null> {

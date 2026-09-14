@@ -14,10 +14,8 @@ import (
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/state"
 )
 
-// newTestSocksBox starts a minimal local box with just a mixed (SOCKS)
-// inbound fronting a direct outbound — enough to exercise bridge.go's real
-// SOCKS5 UDP ASSOCIATE framing without pulling in Hysteria2/QUIC/TLS. That
-// full path is covered separately by the transport_e2e test.
+// newTestSocksBox starts a minimal local box with just a mixed (SOCKS) inbound
+// fronting a direct outbound, enough to exercise bridge.go's real SOCKS5 UDP ASSOCIATE framing.
 func newTestSocksBox(t *testing.T) (mixedAddr string, closeFn func()) {
 	t.Helper()
 	mixedPort, err := pickFreeLoopbackPort()

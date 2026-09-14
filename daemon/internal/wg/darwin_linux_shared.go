@@ -23,9 +23,8 @@ import (
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/state"
 )
 
-// wireGuardGoManager is the in-process WireGuard backend for supported OSes.
-// It creates a TUN device and WireGuard device entirely within the daemon
-// process using the imported wireguard-go packages.
+// wireGuardGoManager is the in-process WireGuard backend for supported OSes,
+// using the imported wireguard-go packages to create the TUN and device.
 type wireGuardGoManager struct {
 	logs     *state.LogStore
 	mu       sync.Mutex
@@ -185,14 +184,10 @@ func (m *wireGuardGoManager) Preflight(_ context.Context, profile state.WireGuar
 	return nil
 }
 
-// ---------------------------------------------------------------------------
-// In-process device lifecycle
-// ---------------------------------------------------------------------------
+// In-process device lifecycle.
 
-// createInProcessDeviceWithFactory creates a TUN device via the supplied
-// factory and a WireGuard device, applies the UAPI configuration, and brings
-// the device up. The caller is responsible for platform-specific
-// address/route/DNS configuration on the returned interface.
+// createInProcessDeviceWithFactory creates a TUN and WireGuard device, applies
+// the UAPI config, and brings it up; the caller handles address/route/DNS.
 func (m *wireGuardGoManager) createInProcessDeviceWithFactory(
 	interfaceName string,
 	mtu int,
@@ -235,9 +230,7 @@ func closeDevice(dev *device.Device) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Session management
-// ---------------------------------------------------------------------------
+// Session management.
 
 func (m *wireGuardGoManager) session(tunnelKey string) (*tunnelSession, bool) {
 	m.mu.Lock()
@@ -246,11 +239,8 @@ func (m *wireGuardGoManager) session(tunnelKey string) (*tunnelSession, bool) {
 	return s, ok
 }
 
-// peerStats reads aggregate rx/tx bytes and the most recent peer handshake
-// time (Unix seconds; 0 if no peer has ever handshaked) from all peers via
-// UAPI. WireGuard's UAPI dump reports these per peer; we sum the byte counters
-// and take the newest handshake across peers. A failed UAPI read is returned
-// as an error rather than silently reported as a fresh, healthy device.
+// peerStats sums rx/tx bytes and the newest peer handshake time (Unix
+// seconds; 0 if none) across all peers via UAPI. A failed read is an error.
 func peerStats(dev *device.Device) (rxBytes, txBytes, lastHandshakeUnix int64, err error) {
 	if dev == nil {
 		return 0, 0, 0, nil
@@ -259,7 +249,7 @@ func peerStats(dev *device.Device) (rxBytes, txBytes, lastHandshakeUnix int64, e
 	if err != nil {
 		return 0, 0, 0, fmt.Errorf("read wireguard device stats: %w", err)
 	}
-	for _, line := range strings.Split(ipcData, "\n") {
+	for line := range strings.SplitSeq(ipcData, "\n") {
 		switch {
 		case strings.HasPrefix(line, "rx_bytes="):
 			if v, err := strconv.ParseInt(line[len("rx_bytes="):], 10, 64); err == nil {
@@ -279,9 +269,7 @@ func peerStats(dev *device.Device) (rxBytes, txBytes, lastHandshakeUnix int64, e
 }
 
 // sessionStats resolves the session and its peer stats under a single lock,
-// so a caller can never observe "active" and then race a concurrent Stop
-// into dereferencing a session that was torn down in between. active is
-// false when the tunnel isn't running; err surfaces a failed UAPI read.
+// so it can never race a concurrent Stop tearing the session down mid-read.
 func (m *wireGuardGoManager) sessionStats(tunnelKey string) (rxBytes, txBytes, lastHandshakeUnix int64, active bool, err error) {
 	m.mu.Lock()
 	s, ok := m.sessions[tunnelKey]
@@ -316,11 +304,8 @@ func (m *wireGuardGoManager) RebindDeviceSockets(_ context.Context) int {
 	return rebound
 }
 
-// reserveSession atomically checks that tunnelKey has no active session and
-// claims the slot with a placeholder, so two concurrent Starts for the same
-// key can't both pass the check and leak the loser's device and routes.
-// Callers must follow with storeSession on success or removeSession on
-// failure to release the reservation.
+// reserveSession claims tunnelKey with a placeholder so two concurrent Starts
+// can't both pass; follow with storeSession or removeSession to release it.
 func (m *wireGuardGoManager) reserveSession(tunnelKey string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -344,9 +329,7 @@ func (m *wireGuardGoManager) removeSession(tunnelKey string) {
 }
 
 // takeSession claims a session for teardown, dropping it from the map in the
-// same step. Guards that repair a live session hold the same lock, so a repair
-// either finishes before teardown claims the session or finds nothing left —
-// it can never re-install networking that teardown has just removed.
+// same step, so a repair guard sharing the lock never redoes what teardown just removed.
 func (m *wireGuardGoManager) takeSession(tunnelKey string) (*tunnelSession, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -395,11 +378,8 @@ func (m *wireGuardGoManager) ActiveInterfaceName(_ context.Context, profile stat
 	return interfaceName, nil
 }
 
-// ActiveTunnelLUID reports the Windows interface LUID of the live tunnel device.
-// It identifies the adapter exactly, where a name does not: a rebuild destroys
-// and recreates the adapter under the same name a second apart, so a name
-// resolved through the OS can still land on the one that is going away. Zero on
-// other platforms.
+// ActiveTunnelLUID reports the Windows interface LUID of the live tunnel device, naming the
+// adapter exactly where a rebuilt name still resolves to the old one. Zero on other platforms.
 func (m *wireGuardGoManager) ActiveTunnelLUID(_ context.Context, profile state.WireGuardProfile) (uint64, error) {
 	if strings.TrimSpace(profile.TunnelName) == "" {
 		return 0, errors.New("wireguard tunnelName is required")
@@ -426,10 +406,8 @@ func (m *wireGuardGoManager) TunnelReady(_ context.Context, profile state.WireGu
 	return tunnelSessionReady(session, profile)
 }
 
-// EnsureEndpointRoutes re-pins the session's endpoint bypass routes to the
-// host's current default route, reporting whether it had to repair anything.
-// The lock is held throughout so the repair cannot race a teardown claiming the
-// same session.
+// EnsureEndpointRoutes re-pins the session's endpoint bypass routes to the host's current default
+// route. The lock is held throughout so the repair cannot race a teardown of the same session.
 func (m *wireGuardGoManager) EnsureEndpointRoutes(ctx context.Context, profile state.WireGuardProfile) (bool, error) {
 	if strings.TrimSpace(profile.TunnelName) == "" {
 		return false, nil
@@ -456,9 +434,7 @@ func (m *wireGuardGoManager) EnsureEndpointRoutes(ctx context.Context, profile s
 	return ensureSessionEndpointRoutesFn(ctx, session, excludeLUIDs)
 }
 
-// ---------------------------------------------------------------------------
-// Config parsing
-// ---------------------------------------------------------------------------
+// Config parsing.
 
 func parseUserlandConfig(input string) (parsedUserlandConfig, error) {
 	scanner := bufio.NewScanner(strings.NewReader(input))
@@ -536,13 +512,13 @@ func parseKeyValue(line string) (string, string, bool) {
 	if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
 		return "", "", false
 	}
-	index := strings.Index(line, "=")
-	if index < 0 {
+	rawKey, rawValue, ok := strings.Cut(line, "=")
+	if !ok {
 		return "", "", false
 	}
 
-	key := strings.TrimSpace(line[:index])
-	value := stripInlineComment(line[index+1:])
+	key := strings.TrimSpace(rawKey)
+	value := stripInlineComment(rawValue)
 	if key == "" {
 		return "", "", false
 	}
@@ -595,9 +571,7 @@ func parseEndpointHost(value string) string {
 	return strings.TrimSpace(strings.Trim(cleaned, "[]"))
 }
 
-// ---------------------------------------------------------------------------
-// Merge and normalize utilities
-// ---------------------------------------------------------------------------
+// Merge and normalize utilities.
 
 func mergeEndpointHosts(endpointHosts []string, bypassHosts []string) []string {
 	if len(bypassHosts) == 0 {
@@ -623,10 +597,8 @@ func mergeDNSServers(configDNS []string, profileDNS []string) []string {
 	return uniqueStringsPreserveOrder(merged)
 }
 
-// EnsureDNS re-asserts the live session's resolvers on the host and reports
-// whether it had to correct anything. A tunnel can carry traffic perfectly and
-// still leave the user with nothing resolving, if the host stops pointing at the
-// resolvers bring-up gave it; the tunnel cannot see that from the inside.
+// EnsureDNS re-asserts the live session's resolvers on the host: a tunnel can
+// carry traffic fine while the host silently stops pointing at those resolvers.
 func (m *wireGuardGoManager) EnsureDNS(_ context.Context, profile state.WireGuardProfile) (bool, error) {
 	if strings.TrimSpace(profile.TunnelName) == "" {
 		return false, nil
@@ -651,9 +623,7 @@ func (m *wireGuardGoManager) EnsureDNS(_ context.Context, profile state.WireGuar
 }
 
 // Resolvers reports the DNS servers a session brings the interface up with,
-// applying the same config-then-profile merge Start does. The health check uses
-// them to probe the tunnel end to end; an unparseable config falls back to the
-// profile's own list rather than reporting none.
+// applying the same config-then-profile merge Start does; an unparseable config falls back to the profile's own list.
 func Resolvers(profile state.WireGuardProfile) []string {
 	parsed, err := parseUserlandConfig(profile.ConfigText)
 	if err != nil {
@@ -754,9 +724,7 @@ func uniqueStringsPreserveOrder(values []string) []string {
 	return out
 }
 
-// ---------------------------------------------------------------------------
-// Endpoint route resolution (shared logic, platform apply/remove is separate)
-// ---------------------------------------------------------------------------
+// Endpoint route resolution (shared logic, platform apply/remove is separate).
 
 func resolveEndpointRoutes(ctx context.Context, endpointHosts []string) ([]routeSpec, error) {
 	if len(endpointHosts) == 0 {

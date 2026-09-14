@@ -14,8 +14,7 @@ func fullProfile() Profile {
 }
 
 // A single-hop profile must resolve to exactly the destinations the daemon
-// used before multihop existed. This is the regression guard for every
-// existing user: if it fails, shipping multihop changed single-hop routing.
+// used before multihop existed; this guards every existing user's routing.
 func TestApplyHopSingleHopKeepsTodaysTargets(t *testing.T) {
 	got := ApplyHop(fullProfile())
 

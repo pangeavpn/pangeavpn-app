@@ -1,17 +1,6 @@
 #!/usr/bin/env node
-/**
- * Builds and signs the dead-drop bootstrap file. The signing key is read from
- * the environment and never written anywhere. See docs/deaddrop-bootstrap-design.md.
- *
- * Usage:
- *   PANGEA_DEADDROP_KEY_FILE=/path/to/deaddrop-active.pem \
- *   node scripts/publish-deaddrop.mjs \
- *     --out ../PangeaConfig/bootstrap-v1.json \
- *     --hub-ip 203.0.113.4 --fronted reserve-a.example.workers.dev [--days 90] [--key reserve]
- *
- * Publish only reserve capacity: everything in this file is world-readable and
- * is burned the moment it ships. Never put credentials in it.
- */
+// Builds and signs the dead-drop bootstrap file (see docs/deaddrop-bootstrap-design.md).
+// Publish only reserve capacity: the output is world-readable and burned on shipping.
 
 import { createPrivateKey, sign } from "node:crypto";
 import { readFileSync, writeFileSync, existsSync } from "node:fs";

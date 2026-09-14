@@ -10,9 +10,8 @@ import (
 	"golang.org/x/net/route"
 )
 
-// HostInternet reports whether a physical interface holds a true default
-// route. The tunnel's own 0.0.0.0/1+128.0.0.0/1 pair never matches, so the
-// verdict tracks the underlying link even while connected.
+// HostInternet reports whether a physical interface holds a true default route. The tunnel's own
+// 0.0.0.0/1+128.0.0.0/1 pair never matches, so the verdict tracks the link even while connected.
 func HostInternet() (online bool, known bool) {
 	_, _, err := PhysicalDefaultRoute()
 	return hostInternetFromRoute(err)
@@ -34,14 +33,6 @@ func PhysicalDefaultRoute() (iface, gateway string, err error) {
 		return "", "", ErrNoDefaultRoute
 	}
 	return iface, gateway, nil
-}
-
-func interfaceNameByIndex(index int) string {
-	ifi, err := net.InterfaceByIndex(index)
-	if err != nil {
-		return ""
-	}
-	return ifi.Name
 }
 
 func physicalDefaultRoute(msgs []route.Message, nameOf func(int) string) (iface, gateway string, ok bool) {

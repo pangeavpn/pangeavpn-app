@@ -22,9 +22,8 @@ type linuxRoute struct {
 	gateway  net.IP
 }
 
-// HostInternet reports whether a physical interface holds a main-table
-// default route. The tunnel's 0.0.0.0/1+128.0.0.0/1 pair never matches, so
-// the verdict tracks the underlying link even while connected.
+// HostInternet reports whether a physical interface holds a main-table default route. The tunnel's
+// 0.0.0.0/1+128.0.0.0/1 pair never matches, so the verdict tracks the link even while connected.
 func HostInternet() (online bool, known bool) {
 	_, _, err := PhysicalDefaultRoute()
 	return hostInternetFromRoute(err)
@@ -81,14 +80,6 @@ func decodeRoute(m *syscall.NetlinkMessage) (linuxRoute, bool) {
 		}
 	}
 	return r, true
-}
-
-func interfaceNameByIndex(index int) string {
-	ifi, err := net.InterfaceByIndex(index)
-	if err != nil {
-		return ""
-	}
-	return ifi.Name
 }
 
 func physicalDefaultRoute(routes []linuxRoute, nameOf func(int) string) (linuxRoute, string, bool) {

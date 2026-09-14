@@ -20,15 +20,12 @@ import (
 // failures, so a persistent outage floods neither the log sink nor its mutex.
 const logRateLimit = 5 * time.Second
 
-// wsaeaddrinuse is WSAEADDRINUSE (10048): Windows returns this numeric
-// error, not the POSIX EADDRINUSE errors.Is otherwise matches on non-English
-// systems.
+// wsaeaddrinuse is WSAEADDRINUSE (10048), the numeric code Windows returns
+// where errors.Is otherwise expects POSIX EADDRINUSE on non-English systems.
 const wsaeaddrinuse = 10048
 
-// udpBridge is the loopback UDP listener WireGuard's peer Endpoint points
-// at. It translates each raw UDP datagram to/from a SOCKS5 UDP ASSOCIATE
-// session against the local mixed inbound, which routes it through the
-// Hysteria2 tunnel to relayDestination.
+// udpBridge is the loopback UDP listener WireGuard's peer Endpoint points at,
+// bridging it to a SOCKS5 UDP ASSOCIATE session routed through the Hysteria2 tunnel.
 type udpBridge struct {
 	local  *net.UDPConn
 	tunnel net.PacketConn
@@ -70,9 +67,8 @@ func (g *rateGate) allow(interval time.Duration) bool {
 	return false
 }
 
-// newUDPBridge opens the WG-facing loopback socket, establishes a SOCKS5
-// UDP ASSOCIATE session against the mixed inbound at mixedAddr, and starts
-// pumping datagrams in both directions.
+// newUDPBridge opens the WG-facing loopback socket, establishes a SOCKS5 UDP
+// ASSOCIATE session against the mixed inbound at mixedAddr, and starts pumping.
 func newUDPBridge(ctx context.Context, logs *state.LogStore, localPort int, mixedAddr string, targetPort int) (*udpBridge, error) {
 	localAddr := &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: localPort}
 	local, err := listenUDPWithRetry(ctx, localAddr, 10, 100*time.Millisecond)
@@ -131,8 +127,7 @@ func (b *udpBridge) isDead() bool {
 }
 
 // pumpFromWG forwards datagrams WireGuard sends to the loopback socket into
-// the tunnel, pinning the first sender as the peer and ignoring any other
-// local source so another process can't hijack the tunnel by sending here.
+// the tunnel, pinning the first sender as the peer so no other local process can hijack it.
 func (b *udpBridge) pumpFromWG() {
 	defer b.wg.Done()
 	buf := make([]byte, 65535)
@@ -232,10 +227,8 @@ func addrEqual(a, b *net.UDPAddr) bool {
 	return a.IP.Equal(b.IP) && a.Port == b.Port
 }
 
-// isRecoverableUDPErr reports transient per-datagram failures a pump should
-// retry past rather than exit on — notably WSAECONNRESET, which an
-// unconnected Windows UDP socket surfaces after an ICMP port-unreachable
-// from an earlier write, with no bearing on the socket's own health.
+// isRecoverableUDPErr reports transient per-datagram failures a pump should retry
+// past — notably WSAECONNRESET, which an unconnected Windows UDP socket can surface.
 func isRecoverableUDPErr(err error) bool {
 	if errors.Is(err, syscall.ECONNRESET) {
 		return true
@@ -262,9 +255,7 @@ func (systemDialer) ListenPacket(ctx context.Context, destination M.Socksaddr) (
 }
 
 // listenUDPWithRetry retries briefly on transient "address already in use"
-// errors (e.g. a just-stopped previous instance still releasing its
-// socket), honoring ctx cancellation between attempts. Mirrors cloak's
-// listener retry helper.
+// errors, honoring ctx cancellation between attempts. Mirrors cloak's listener retry helper.
 func listenUDPWithRetry(ctx context.Context, addr *net.UDPAddr, attempts int, delay time.Duration) (*net.UDPConn, error) {
 	if attempts < 1 {
 		attempts = 1

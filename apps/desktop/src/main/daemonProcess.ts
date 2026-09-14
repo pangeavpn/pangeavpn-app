@@ -140,17 +140,8 @@ export class DaemonProcessManager {
       return;
     }
 
-    const online = await this.safeApiReady();
-    if (!forceRestart && online) {
+    if (await this.reuseOrKillStaleChild(forceRestart)) {
       return;
-    }
-
-    if (this.child && !forceRestart) {
-      return;
-    }
-    if (this.child && forceRestart) {
-      this.child.kill();
-      this.child = null;
     }
 
     if (!app.isPackaged && process.platform !== "win32") {
@@ -172,11 +163,8 @@ export class DaemonProcessManager {
     await this.waitForReachable();
   }
 
-  // A systemd-managed root daemon (installed by install-linux.sh) owns state
-  // under /etc/pangeavpn and the shared port; spawning a second, unprivileged
-  // copy against the user's own app-support dir can't manage the kill switch
-  // or routing anyway, and it fights the real daemon for stale/foreign state
-  // instead of just reporting that the managed service isn't reachable.
+  // A systemd-managed root daemon owns /etc/pangeavpn and the shared port; a
+  // second unprivileged copy can't manage the kill switch and fights it for state.
   private async ensureLinuxPackagedRunning(forceRestart: boolean): Promise<void> {
     if (hasManagedLinuxDaemonService()) {
       const online = await this.safeApiReady();
@@ -201,16 +189,8 @@ export class DaemonProcessManager {
       throw new Error("daemon binary not found for this runtime");
     }
 
-    const online = await this.safeApiReady();
-    if (!forceRestart && online) {
+    if (await this.reuseOrKillStaleChild(forceRestart)) {
       return;
-    }
-    if (this.child && !forceRestart) {
-      return;
-    }
-    if (this.child && forceRestart) {
-      this.child.kill();
-      this.child = null;
     }
 
     const generation = ++this.childGeneration;
@@ -328,6 +308,23 @@ export class DaemonProcessManager {
     }
   }
 
+  // True when the caller should return without spawning: already reachable,
+  // or an existing child is still trusted. Kills a stale child otherwise.
+  private async reuseOrKillStaleChild(forceRestart: boolean): Promise<boolean> {
+    const online = await this.safeApiReady();
+    if (!forceRestart && online) {
+      return true;
+    }
+    if (this.child && !forceRestart) {
+      return true;
+    }
+    if (this.child && forceRestart) {
+      this.child.kill();
+      this.child = null;
+    }
+    return false;
+  }
+
   private async safeApiReady(): Promise<boolean> {
     try {
       await this.client.getStatus();
@@ -413,9 +410,8 @@ function stripMacQuarantine(daemonPath: string): void {
     return;
   }
 
-  // Strip com.apple.quarantine from the daemon and helper binaries.
-  // Downloaded zip archives propagate this xattr to all extracted files
-  // and macOS Gatekeeper silently kills quarantined unsigned binaries.
+  // Downloaded zip archives propagate com.apple.quarantine to extracted files,
+  // and Gatekeeper silently kills a quarantined unsigned binary.
   const resourcesDir = path.resolve(path.dirname(daemonPath), "..");
   const targets = [
     path.dirname(daemonPath),
@@ -476,9 +472,8 @@ async function restartProcessElevatedMac(filePath: string, context: MacDaemonCon
 
   const daemonPath = shSingleQuoteMac(filePath);
   const resourcesDir = shSingleQuoteMac(path.resolve(path.dirname(filePath), ".."));
-  // The root daemon gets the system dir (its own default, and where the app
-  // already looks for the token); chowning the user's state dir to root broke
-  // every desktop write after the first elevation.
+  // The root daemon gets the system dir (its own default, where the app looks
+  // for the token) — chowning the user's state dir to root broke desktop writes.
   const appSupportDir = shSingleQuoteMac(macSystemSupportDir);
   const configPath = shSingleQuoteMac(path.join(macSystemSupportDir, "config.json"));
   const targetUser = shSingleQuoteMac(context.user);
@@ -614,9 +609,8 @@ async function startProcessElevatedWindows(filePath: string, args: string[]): Pr
     : `Start-Process -FilePath '${escapedPath}' -WorkingDirectory '${escapedWorkingDir}' -WindowStyle Hidden`;
   const innerCommand = [
     "$ErrorActionPreference = 'SilentlyContinue'",
-    // The elevated daemon inherits this process's environment, so clear the
-    // state-dir override — otherwise user-level code could redirect the
-    // elevated daemon's token/config/kill-switch state to a directory it owns.
+    // Clear the inherited state-dir override — otherwise user-level code could
+    // redirect the elevated daemon's token/config/kill-switch state to a dir it owns.
     "Remove-Item Env:PANGEA_APP_SUPPORT_DIR -ErrorAction SilentlyContinue",
     "$daemonPids = @()",
     "$daemonPids += (Get-Process -Name daemon,PangeaDaemon -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id)",

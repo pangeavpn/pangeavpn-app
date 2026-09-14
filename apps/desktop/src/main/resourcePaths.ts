@@ -18,19 +18,29 @@ export function getBundledDaemonPath(): string {
   return path.join(process.resourcesPath, "daemon", name);
 }
 
+function firstExisting(candidates: string[]): string | undefined {
+  return candidates.find((candidate) => fs.existsSync(candidate));
+}
+
+function windowsIconCandidates(mainModuleDir: string, iconName: string): string[] {
+  return app.isPackaged
+    ? [path.join(process.resourcesPath, "build", iconName), path.join(process.resourcesPath, iconName)]
+    : [path.resolve(mainModuleDir, "..", "..", "build", iconName)];
+}
+
+function packagedNamePairs(names: string[]): string[] {
+  return names.flatMap((name) => [
+    path.join(process.resourcesPath, "build", name),
+    path.join(process.resourcesPath, name)
+  ]);
+}
+
 export function getWindowsAppIconPath(mainModuleDir: string): string | undefined {
   if (process.platform !== "win32") {
     return undefined;
   }
 
-  const candidates = app.isPackaged
-    ? [
-        path.join(process.resourcesPath, "build", windowsIconName),
-        path.join(process.resourcesPath, windowsIconName)
-      ]
-    : [path.resolve(mainModuleDir, "..", "..", "build", windowsIconName)];
-
-  return candidates.find((candidate) => fs.existsSync(candidate));
+  return firstExisting(windowsIconCandidates(mainModuleDir, windowsIconName));
 }
 
 export function getTrayIconPath(mainModuleDir: string): string | undefined {
@@ -41,28 +51,12 @@ export function getTrayIconPath(mainModuleDir: string): string | undefined {
     return undefined;
   }
 
-  const linuxPrefix = process.platform === "linux"
-    ? (app.isPackaged
-        ? [
-            path.join(process.resourcesPath, "build", linuxPngIconName),
-            path.join(process.resourcesPath, linuxPngIconName)
-          ]
-        : [path.resolve(mainModuleDir, "..", "..", "build", linuxPngIconName)])
-    : [];
+  const linuxPrefix = process.platform === "linux" ? windowsIconCandidates(mainModuleDir, linuxPngIconName) : [];
 
   const candidates = [
     ...linuxPrefix,
     ...(app.isPackaged
-      ? [
-          path.join(process.resourcesPath, "build", macPngIconName),
-          path.join(process.resourcesPath, macPngIconName),
-          path.join(process.resourcesPath, "build", "PangeaVPNTemplate.png"),
-          path.join(process.resourcesPath, "PangeaVPNTemplate.png"),
-          path.join(process.resourcesPath, "build", macIconName),
-          path.join(process.resourcesPath, macIconName),
-          path.join(process.resourcesPath, "build", macIcoFallbackName),
-          path.join(process.resourcesPath, macIcoFallbackName)
-        ]
+      ? packagedNamePairs([macPngIconName, "PangeaVPNTemplate.png", macIconName, macIcoFallbackName])
       : [
           path.resolve(mainModuleDir, "..", "..", "build", macPngIconName),
           path.resolve(mainModuleDir, "..", "..", "build", "PangeaVPNTemplate.png"),
@@ -72,46 +66,29 @@ export function getTrayIconPath(mainModuleDir: string): string | undefined {
         ])
   ];
 
-  return candidates.find((candidate) => fs.existsSync(candidate));
+  return firstExisting(candidates);
 }
 
 export function getConnectedTrayIconPath(mainModuleDir: string): string | undefined {
   if (process.platform === "win32") {
-    const candidates = app.isPackaged
-      ? [
-          path.join(process.resourcesPath, "build", windowsConnectedIconName),
-          path.join(process.resourcesPath, windowsConnectedIconName)
-        ]
-      : [path.resolve(mainModuleDir, "..", "..", "build", windowsConnectedIconName)];
-
-    return candidates.find((candidate) => fs.existsSync(candidate));
+    return firstExisting(windowsIconCandidates(mainModuleDir, windowsConnectedIconName));
   }
   if (process.platform !== "darwin" && process.platform !== "linux") {
     return undefined;
   }
 
-  const linuxPrefix = process.platform === "linux"
-    ? (app.isPackaged
-        ? [
-            path.join(process.resourcesPath, "build", linuxConnectedPngIconName),
-            path.join(process.resourcesPath, linuxConnectedPngIconName)
-          ]
-        : [path.resolve(mainModuleDir, "..", "..", "build", linuxConnectedPngIconName)])
-    : [];
+  const linuxPrefix =
+    process.platform === "linux" ? windowsIconCandidates(mainModuleDir, linuxConnectedPngIconName) : [];
 
   const candidates = [
     ...linuxPrefix,
     ...(app.isPackaged
-      ? [
-          path.join(process.resourcesPath, "build", macConnectedPngIconName),
-          path.join(process.resourcesPath, macConnectedPngIconName),
-          path.join(process.resourcesPath, "build", "PangeaVPN_connectedTemplate.png"),
-          path.join(process.resourcesPath, "PangeaVPN_connectedTemplate.png"),
-          path.join(process.resourcesPath, "build", macConnectedIconName),
-          path.join(process.resourcesPath, macConnectedIconName),
-          path.join(process.resourcesPath, "build", macConnectedIcoFallbackName),
-          path.join(process.resourcesPath, macConnectedIcoFallbackName)
-        ]
+      ? packagedNamePairs([
+          macConnectedPngIconName,
+          "PangeaVPN_connectedTemplate.png",
+          macConnectedIconName,
+          macConnectedIcoFallbackName
+        ])
       : [
           path.resolve(mainModuleDir, "..", "..", "build", macConnectedPngIconName),
           path.resolve(mainModuleDir, "..", "..", "build", "PangeaVPN_connectedTemplate.png"),
@@ -121,5 +98,5 @@ export function getConnectedTrayIconPath(mainModuleDir: string): string | undefi
         ])
   ];
 
-  return candidates.find((candidate) => fs.existsSync(candidate));
+  return firstExisting(candidates);
 }

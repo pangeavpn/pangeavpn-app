@@ -10,9 +10,8 @@ import (
 	"testing"
 )
 
-// Replays a command plan against a model of the kernel's chain state, so a test
-// can assert what the real firewall looked like at every step. Untagged on
-// purpose: the fallback is Linux-only but there is no Linux CI job.
+// Replays a command plan against a model of the kernel's chain state, so a
+// test can assert what the real firewall looked like at every step.
 type iptablesModel struct {
 	chains       map[string][]string
 	outputJumps  []string
@@ -391,10 +390,6 @@ func TestIPTablesRemovePlan_ClearsEveryChainName(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Probe behaviour — the difference between "no such rule" and "couldn't tell"
-// ---------------------------------------------------------------------------
-
 // Wraps a real *exec.ExitError, matching how runIPTablesCommand wraps failures.
 func exitCodeError(t *testing.T, code int) error {
 	t.Helper()
@@ -574,9 +569,8 @@ func TestRemoveIPTablesRules_StillReportsUsableBackendFailures(t *testing.T) {
 	}
 }
 
-// nf_tables iptables exits 2 ("Chain 'X' does not exist") for a -D or -C jump
-// whose target chain is absent, where legacy exits 1. A clear that finds no
-// chain has nothing to do and must not report the teardown as incomplete.
+// nf_tables iptables exits 2 for a -D/-C jump whose chain is absent (legacy
+// exits 1); a clear that finds no chain must not report teardown incomplete.
 func TestRemoveIPTablesRules_TreatsAMissingChainAsAlreadyGone(t *testing.T) {
 	original := runIPTablesCommand
 	defer func() { runIPTablesCommand = original }()

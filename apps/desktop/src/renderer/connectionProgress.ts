@@ -4,8 +4,7 @@ type ScheduleTimer<Timer> = (callback: () => void, delayMs: number) => Timer;
 type ClearTimer<Timer> = (timer: Timer) => void;
 
 /** Schedules reassurance copy at absolute offsets and returns one cleanup function.
- *  `Timer` is inferred from `schedule`, so `cancel` is checked against the same
- *  handle type instead of collapsing to `unknown`. */
+ *  `Timer` is inferred from `schedule` so `cancel` shares its handle type. */
 export function scheduleConnectionMessages<Timer = ReturnType<typeof setTimeout>>(
   messages: readonly [string, string, string],
   showMessage: (message: string) => void,

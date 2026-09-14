@@ -27,14 +27,12 @@ const (
 // dnsProbeTimeout bounds one resolver query.
 const dnsProbeTimeout = 3 * time.Second
 
-// dnsProbeFailuresBeforeRebuild is how many consecutive rounds must fail before
-// the session is rebuilt. UDP loses datagrams and a resolver may drop one, so a
-// single miss is not a dead tunnel; two in a row is.
+// dnsProbeFailuresBeforeRebuild: UDP loses datagrams, so one miss isn't a dead
+// tunnel, but two in a row is.
 const dnsProbeFailuresBeforeRebuild = 2
 
-// dnsProbeRebuildCooldown is the minimum gap between probe-driven rebuilds. A
-// node that keeps answering handshakes but never carries traffic would otherwise
-// be rebuilt every 90s forever, and each rebuild drops the tunnel for a second.
+// dnsProbeRebuildCooldown keeps a node that answers handshakes but never
+// carries traffic from being rebuilt every 90s forever.
 const dnsProbeRebuildCooldown = 5 * time.Minute
 
 // dnsProbeServers is how many of the session's resolvers one round tries before
@@ -68,9 +66,8 @@ func nextDNSProbeDelay() time.Duration {
 	return dnsProbeIntervalMin + time.Duration(offset)
 }
 
-// dnsProbePort is the resolver port, held in an atomic.Value so tests may point
-// the probe at a stub on an ephemeral port from a goroutine without racing the
-// health loop's reads; nothing reconfigures it at runtime otherwise.
+// dnsProbePort is atomic so tests may point the probe at a stub port from a
+// goroutine without racing the health loop's reads.
 var dnsProbePort atomic.Value
 
 func init() {
@@ -81,40 +78,28 @@ func currentDNSProbePort() string {
 	return dnsProbePort.Load().(string)
 }
 
-// dnsGuardCorrectionCooldown is how long the DNS guard waits after correcting
-// the interface's resolvers. Normally the check runs every health tick and finds
-// nothing to do; when something else is writing DNS too, this keeps the two from
-// trading writes three seconds apart and turns the fight into a readable trail
-// of log lines instead.
+// dnsGuardCorrectionCooldown keeps this guard and another DNS writer from
+// trading writes seconds apart, turning a fight into a readable log trail.
 const dnsGuardCorrectionCooldown = 30 * time.Second
 
-// errDNSProbeInconclusive marks a round that could not run to completion — a
-// Switch or Disconnect cancelled the health check's context mid-flight — so it
-// must not be booked as either a success or a failure.
+// errDNSProbeInconclusive marks a round cancelled mid-flight by a Switch or
+// Disconnect: neither a success nor a failure.
 var errDNSProbeInconclusive = errors.New("dns probe: round did not complete")
 
-// errDNSProbeNotReady marks a round that never left the host: no adapter, no
-// address to bind to, or no route yet. Retryable, and never a verdict.
+// errDNSProbeNotReady marks a round that never left the host: retryable, and
+// never a verdict.
 var errDNSProbeNotReady = errors.New("dns probe: the tunnel adapter is not ready")
 
-// errDNSProbeConnRefused marks an ICMP port-unreachable on the connected
-// socket: the resolver rejected the port, but that reply is proof the round
-// trip happened, so it counts as evidence the tunnel is carrying traffic.
+// errDNSProbeConnRefused marks an ICMP port-unreachable: proof the round trip
+// happened, so it counts as evidence the tunnel carries traffic.
 var errDNSProbeConnRefused = errors.New("dns probe: resolver refused the connection")
 
-// errDNSProbeOversizedReply marks a reply too large for the read buffer. Like a
-// refusal it is proof of a round trip: the datagram crossed the tunnel, and only
-// the copy into userspace failed.
+// errDNSProbeOversizedReply marks a reply too large for the read buffer: also
+// proof of a round trip, since only the userspace copy failed.
 var errDNSProbeOversizedReply = errors.New("dns probe: reply larger than the read buffer")
 
-// ensureTunnelDNS re-asserts the session's resolvers on the host.
-//
-// This is the failure the probe cannot see: the tunnel carries traffic, so a
-// query aimed at a resolver over it is answered, but the host has stopped
-// sending its queries there. Windows gives interface DNS to whoever wrote last,
-// so another VPN client's DNS enforcement — or a Windows component re-profiling
-// the adapter — takes it over silently, and every name lookup on the machine
-// fails while the VPN reports a healthy connection.
+// ensureTunnelDNS re-asserts the session's resolvers on the host: the tunnel
+// can carry traffic while the host has silently stopped querying it.
 func (s *Service) ensureTunnelDNS(ctx context.Context, profile state.Profile) {
 	guard, ok := s.wg.(wgDNSGuard)
 	if !ok || !s.dnsGuardDue() {
@@ -145,10 +130,8 @@ func (s *Service) holdDNSGuard(d time.Duration) {
 	s.dnsGuardNextAt = time.Now().Add(d)
 }
 
-// activeTunnelInterface finds the host's VPN adapter by name. Allow-LAN
-// subtracts RFC1918 ranges (including the tunnel's own resolvers) from
-// AllowedIPs and routes them off-tunnel, so the probe must be pinned to this
-// interface rather than trusting whatever currently owns the default route.
+// activeTunnelInterface finds the host's VPN adapter by name, since Allow-LAN
+// routes RFC1918 ranges off-tunnel and the default route can't be trusted.
 func activeTunnelInterface() (string, error) {
 	ifaces, err := net.Interfaces()
 	if err != nil {
@@ -165,18 +148,8 @@ func activeTunnelInterface() (string, error) {
 	return "", errors.New("no tunnel interface is up")
 }
 
-// probeResolverOverUDP asks a resolver a root-zone question and reports whether
-// a matching reply comes back. The socket is pinned to tunnelInterface (see
-// bindDialerToInterface's platform variants), so the query provably leaves —
-// and the reply is provably read — over the tunnel rather than the LAN.
-//
-// Any well-formed reply counts, including an error RCODE. The probe asks whether
-// the tunnel still carries a round trip, not whether the resolver liked the
-// question, and treating REFUSED as a dead tunnel would rebuild a working
-// session. The root zone belongs to no third party and every recursive resolver
-// answers it from its priming cache, and even the smallest of these replies is
-// bigger than the ~150 byte handshake packets that keep passing when a path has
-// stopped carrying anything larger.
+// probeResolverOverUDP asks a resolver a root-zone question over a socket
+// pinned to tunnelInterface; any well-formed reply, even REFUSED, counts.
 func probeResolverOverUDP(ctx context.Context, tunnelInterface, server string) error {
 	// A local setup failure is the host still bringing the adapter up: retryable,
 	// and never a pass on a tunnel nothing has crossed.
@@ -195,9 +168,8 @@ func probeResolverOverUDP(ctx context.Context, tunnelInterface, server string) e
 	return probeResolverWithDialer(ctx, dialer, server)
 }
 
-// probeResolverWithDialer is probeResolverOverUDP's dial-and-match core, split
-// out so protocol behavior (reply matching, timeouts) can be tested against an
-// unbound dialer without depending on a real tunnel interface being up.
+// probeResolverWithDialer is the dial-and-match core, split out so it can be
+// tested against an unbound dialer without a real tunnel interface.
 func probeResolverWithDialer(ctx context.Context, dialer *net.Dialer, server string) error {
 	conn, err := dialer.DialContext(ctx, "udp", net.JoinHostPort(server, currentDNSProbePort()))
 	if err != nil {
@@ -263,10 +235,8 @@ func isTimeout(err error) bool {
 	return errors.As(err, &netErr) && netErr.Timeout()
 }
 
-// classifyProbeReadError sorts a failed read into the round's outcome: the
-// health check's own context ending mid-round proves nothing, while an ICMP
-// port-unreachable arriving as ECONNRESET/ECONNREFUSED on the connected socket
-// proves the opposite of what it looks like — the tunnel carried the round trip.
+// classifyProbeReadError sorts a failed read into the round's outcome: an
+// ECONNRESET/ECONNREFUSED actually proves the tunnel carried the round trip.
 func classifyProbeReadError(ctx context.Context, err error) error {
 	// Only a deliberate cancel (Switch/Disconnect) is inconclusive; the probe's
 	// own deadline expiring IS the no-answer the round exists to detect.
@@ -299,9 +269,8 @@ var rootProbeQTypes = []uint16{
 // decides where the resolver truncates, which varies the reply's size too.
 var rootProbePayloadSizes = []uint16{512, 1232, 1400, 4096}
 
-// maxProbeReplySize must cover the largest size the probe advertises. Windows
-// fails an oversized recvfrom outright (WSAEMSGSIZE) where Unix truncates, so a
-// buffer under the advertised ceiling rejected working tunnels there.
+// maxProbeReplySize must cover the largest advertised size: Windows fails an
+// oversized recvfrom outright (WSAEMSGSIZE) where Unix just truncates.
 const maxProbeReplySize = 4096
 
 // rootProbeQuery draws the transaction ID, question, buffer size and padding
@@ -338,11 +307,8 @@ func rootProbeQuery() ([]byte, int, uint16, error) {
 	return msg, questionEnd, id, nil
 }
 
-// isDNSReplyTo reports whether msg is a response to query: same transaction ID,
-// QR set, and the same question section echoed back. Matching on ID alone lets
-// a same-IP LAN responder — reached because the query leaked off-tunnel — pass
-// as the tunnel resolver; the question section is spoofed far less cheaply.
-// Only the question is compared — the reply carries its own OPT record.
+// isDNSReplyTo checks the transaction ID, QR bit, and echoed question; ID
+// alone would let a same-IP LAN responder pass as the tunnel resolver.
 func isDNSReplyTo(msg, query []byte, questionEnd int, id uint16) bool {
 	const headerLen = 12
 	if len(msg) < questionEnd || questionEnd > len(query) {
@@ -358,17 +324,7 @@ func isDNSReplyTo(msg, query []byte, questionEnd int, id uint16) bool {
 }
 
 // dataPathIsDead reports whether the tunnel has stopped carrying traffic while
-// WireGuard still handshakes.
-//
-// The handshake alone is a weak liveness signal: its packets are ~150 bytes and
-// the peer answers them from the node itself, so a relay that has stopped
-// forwarding, or a path that has stopped passing anything full-sized, leaves the
-// session rekeying happily every two minutes while nothing the user does works.
-// That is the state a browser reports as a DNS probe error. Resolving over the
-// tunnel is the cheapest end-to-end check and covers exactly what breaks first.
-//
-// Rounds run on the jittered dnsProbe schedule and only escalate after
-// dnsProbeFailuresBeforeRebuild consecutive failures.
+// WireGuard still handshakes: a relay can keep rekeying while forwarding nothing.
 func (s *Service) dataPathIsDead(ctx context.Context, profile state.Profile) bool {
 	if s.probeResolver == nil {
 		return false
@@ -398,9 +354,8 @@ func (s *Service) dataPathIsDead(ctx context.Context, profile state.Profile) boo
 		lastErr = fmt.Errorf("%s: %w", server, err)
 	}
 
-	// A round takes up to dnsProbeServers*dnsProbeTimeout with opMu unheld; if a
-	// Switch landed during it, the failure belongs to a resolver list — and a
-	// rebuild would hit a session — that is no longer the live one.
+	// A round runs with opMu unheld; if a Switch landed during it, the failure
+	// belongs to a session that is no longer the live one.
 	if current, ok := s.getCurrentProfile(); !ok || current.ID != profile.ID {
 		return false
 	}
@@ -432,10 +387,7 @@ func (s *Service) canProveDataPath(profile state.Profile) bool {
 }
 
 // proveDataPath is the bring-up gate: a candidate must carry a round trip, not
-// just handshake, because a censor kills the flow the moment traffic starts.
-//
-// No resolvers and an inconclusive round both pass: neither is evidence against
-// the transport, and rejecting on them would fail working ones.
+// just handshake. No resolvers or an inconclusive round both pass as non-evidence.
 func (s *Service) proveDataPath(ctx context.Context, wireGuardProfile state.WireGuardProfile) error {
 	if s.probeResolver == nil {
 		return nil
@@ -529,12 +481,8 @@ func (s *Service) recordDNSProbeSuccess() {
 	s.dnsProbeFailures = 0
 }
 
-// recordDNSProbeFailure books a failed round and reports the running count plus
-// whether it is time to rebuild: enough consecutive failures, and outside the
-// cooldown that keeps a node which never recovers from being rebuilt on a loop.
-// The count resets as soon as it reaches the threshold, in or out of cooldown,
-// so it never climbs past dnsProbeFailuresBeforeRebuild and the first failure
-// after the cooldown expires starts a fresh three-round debounce.
+// recordDNSProbeFailure books a failed round and reports the count plus whether
+// it is time to rebuild: enough consecutive failures, and outside the cooldown.
 func (s *Service) recordDNSProbeFailure() (int, bool) {
 	s.recoveryMu.Lock()
 	defer s.recoveryMu.Unlock()
@@ -567,12 +515,8 @@ func (s *Service) deferDataPathRebuild() {
 	s.dnsProbeQuietUntil = time.Time{}
 }
 
-// resetDNSProbe restarts the schedule for a tunnel that has just come up, so it
-// is not judged on the previous one's failures and gets a round to settle.
-//
-// The cooldown deliberately survives: a rebuild ends here too, and clearing it
-// would let a node that answers handshakes but never carries traffic be rebuilt
-// every dnsProbeFailuresBeforeRebuild rounds forever.
+// resetDNSProbe restarts the schedule for a tunnel that has just come up. The
+// cooldown deliberately survives, since a rebuild ends here too.
 func (s *Service) resetDNSProbe() {
 	s.recoveryMu.Lock()
 	defer s.recoveryMu.Unlock()

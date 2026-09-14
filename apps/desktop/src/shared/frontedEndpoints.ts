@@ -1,10 +1,5 @@
-/** Hostnames of edge workers that relay the secure envelope to the hub, out of
- *  pangeaApiClient so the cache rules are testable without electron.
- *
- *  Only the host is stored. The relay always answers on 443 at /v1/secure, and
- *  accepting a scheme, port or path from disk or from the hub would let a
- *  hand-edited file or a compromised response aim the client somewhere the
- *  validation below cannot reason about. */
+/** Hostnames of edge workers that relay the secure envelope to the hub. Only
+ *  the host is stored — the relay always answers on 443 at /v1/secure. */
 
 /** Shipped relays. Without them an install that has never reached the hub has
  *  no relay at all; the hub's list replaces them once one arrives. */
@@ -20,11 +15,8 @@ const LABEL = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
 // pass as four valid labels; reject it explicitly.
 const IPV4_LIKE = /^\d{1,3}(\.\d{1,3}){3}$/;
 
-/**
- * A public DNS name, lowercased. Rejects anything without a dot: the relay is
- * always a real registered host, never a bare label an attacker on a hostile
- * LAN could claim through a local search domain.
- */
+/** A public DNS name, lowercased. Rejects anything without a dot so a hostile
+ *  LAN's search domain cannot pass a bare label off as the relay. */
 export function normalizeFrontedEndpoint(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const host = value.trim().toLowerCase();
@@ -58,13 +50,8 @@ export function seedFrontedEndpoints(stored: unknown): string[] {
   return restored.length > 0 ? restored : [...DEFAULT_FRONTED_ENDPOINTS];
 }
 
-/**
- * Every relay the hub named. Returns null when nothing changed, so callers can
- * skip a disk write. An empty or entirely invalid advertisement leaves the
- * cache alone: a hub that has stopped naming relays is far more likely to be a
- * rollback or a truncated response than an instruction to discard the only
- * addresses that still work when everything else is blocked.
- */
+/** Every relay the hub named, or null when nothing changed or the advertisement
+ *  is empty/invalid — never treated as an instruction to discard what still works. */
 export function mergeFrontedEndpoints(
   current: readonly string[],
   advertised: unknown

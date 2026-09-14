@@ -35,16 +35,11 @@ var ErrDisconnectIncomplete = errors.New("disconnect incomplete")
 const offlineHoldDetail = "no internet connection; connecting when the network returns"
 
 // errRebuildBusy signals rebuildSilentSession found opMu already held by a
-// real operation (Connect/Switch, or an overlapping rebuild). It is not a
-// failed rebuild — attemptSessionRebuild must not book it against the retry
-// backoff or stamp an error over whatever that other operation is doing.
+// real operation (Connect/Switch, or an overlapping rebuild). It is not a failed rebuild.
 var errRebuildBusy = errors.New("operation in progress")
 
 // cloakManager is transport.Manager (Stop) plus Start/Status with Cloak's
-// concrete types. cloak.Manager's real signature — Start(ctx,
-// state.CloakProfile) error; Stop(ctx) error; Status() state.CloakStatus
-// (daemon/internal/cloak/manager.go:24-28) — already satisfies this exactly,
-// zero changes needed to the cloak package.
+// concrete types. cloak.Manager's real signature — Start(ctx, state.CloakProfile) error; Stop(ctx) error;
 type cloakManager interface {
 	transport.Manager
 	Start(ctx context.Context, profile state.CloakProfile) error
@@ -52,8 +47,7 @@ type cloakManager interface {
 }
 
 // naiveManager is transport.Manager (Stop) plus Start/Status with
-// NaiveProxy's concrete types. naive.Manager (Task 5) is built to satisfy
-// this directly.
+// NaiveProxy's concrete types. naive.Manager (Task 5) is built to satisfy this directly.
 type naiveManager interface {
 	transport.Manager
 	Start(ctx context.Context, profile state.NaiveProfile) error
@@ -103,9 +97,8 @@ type snowflakeManager interface {
 	Status() state.TransportStatus
 }
 
-// transportMemory records and recalls the transport that last established a
-// tunnel on a given network, so auto-connect can try it first. Satisfied by
-// *state.TransportMemoryStore; a nil field disables the optimization.
+// transportMemory records and recalls the transport that last established a tunnel
+// on a given network, so auto-connect can try it first. A nil field disables this.
 type transportMemory interface {
 	Lookup(networkKey string) (string, bool)
 	Record(networkKey, transport string) error
@@ -125,9 +118,8 @@ type Service struct {
 	wg          wg.Manager
 	killSwitch  platform.KillSwitch
 
-	// transportMemory remembers the last-good transport per network; nil
-	// disables the reorder/record optimization. networkKey fingerprints the
-	// current network. Both are set once and read-only thereafter.
+	// transportMemory remembers the last-good transport per network; nil disables
+	// the reorder/record optimization. Both fields are set once and read-only after.
 	transportMemory transportMemory
 	networkKey      func() string
 	// hostInternet is the OS connectivity oracle (online, known); nil falls back
@@ -143,10 +135,8 @@ type Service struct {
 
 	opMu sync.Mutex
 
-	// cancelConnect aborts the in-flight Connect when set. Disconnect uses
-	// it to interrupt a connect that's still inside WaitForSession (up to
-	// the 10s cloak timeout) so the user can bail without waiting for the
-	// timeout to fire.
+	// cancelConnect aborts the in-flight Connect when set, so Disconnect can
+	// bail out of a connect stuck inside WaitForSession without waiting for its timeout.
 	cancelMu      sync.Mutex
 	cancelConnect context.CancelFunc
 	// cancelSeq identifies the registered cancel; cancelRecovery marks it as a
@@ -157,52 +147,44 @@ type Service struct {
 	profileMu      sync.RWMutex
 	currentProfile *state.Profile
 
-	// sessionOpts are the options the live session was brought up with, so a
-	// health-check rebuild can reproduce it rather than guess (AllowLAN shapes
-	// both the kill switch and the WireGuard AllowedIPs). Guarded by profileMu.
+	// sessionOpts are the options the live session was brought up with, so a health-check
+	// rebuild can reproduce it (AllowLAN shapes both the kill switch and AllowedIPs).
 	sessionOpts ConnectOptions
 
-	// activeMu guards activeTransportKind, which of {cloak, naive, reality,
-	// hysteria2, shadowsocks, snowflake} is live for the current session.
-	// Empty string when disconnected.
+	// activeMu guards activeTransportKind, which of {cloak, naive, reality, hysteria2,
+	// shadowsocks, snowflake} is live for the session; empty when disconnected.
 	activeMu            sync.RWMutex
 	activeTransportKind string
 	// connectingTransportKind is the cascade candidate currently being tried,
 	// "" outside a bring-up. Also guarded by activeMu.
 	connectingTransportKind string
 
-	// recoveryMu guards the reconnect schedule for a session that dropped on
-	// its own: how many rebuilds have been tried, when the next one is due, and
-	// how long health checks are held off after a host resume.
+	// recoveryMu guards the reconnect schedule for a session that dropped on its own:
+	// rebuilds tried, when the next is due, and the post-resume health-check hold.
 	recoveryMu       sync.Mutex
 	recoveryAttempts int
 	recoveryNextAt   time.Time
 	healthHoldUntil  time.Time
-	// offlineHoldUntil backs off transport recovery while the host has no route
-	// out (a dial that returns "unreachable network"), so a link drop parks in a
-	// stable "no internet" hold instead of hammering restart every tick. It is
-	// the instant signal GetNetworkConnectivityHint lags behind. Guarded by recoveryMu.
+	// offlineHoldUntil backs off recovery while the host has no route out (a dial
+	// returning "unreachable network"), so a link drop holds instead of hammering restart.
 	offlineHoldUntil time.Time
 	// offlineHeld outlives the hold timer, until a bring-up succeeds or fails for
 	// another reason, so paced re-dials keep reporting "no internet". Guarded by recoveryMu.
 	offlineHeld bool
 
-	// resumeFreshUntil marks the window after a host resume in which a single
-	// failed probe round is enough to rebuild; resumeNotedAt dedupes the
-	// several notifications one wake produces. Guarded by recoveryMu.
+	// resumeFreshUntil marks the window after a host resume in which a single failed
+	// probe round is enough to rebuild; resumeNotedAt dedupes one wake's notifications.
 	resumeFreshUntil time.Time
 	resumeNotedAt    time.Time
 
-	// dnsProbe* schedule the end-to-end data-path check: when the next round is
-	// due, how many consecutive rounds have failed, and the earliest a
-	// probe-driven rebuild may fire again. Guarded by recoveryMu.
+	// dnsProbe* schedule the end-to-end data-path check: next round due, consecutive
+	// failures, and the earliest a probe-driven rebuild may fire again.
 	dnsProbeNextAt     time.Time
 	dnsProbeFailures   int
 	dnsProbeQuietUntil time.Time
 
-	// dnsGuardNextAt is the earliest the DNS guard may run again. Zero means
-	// every health tick, which is the normal state; it is pushed out only after
-	// a correction. Guarded by recoveryMu.
+	// dnsGuardNextAt is the earliest the DNS guard may run again. Zero (the normal
+	// state) means every health tick; it is pushed out only after a correction.
 	dnsGuardNextAt time.Time
 
 	// demotedTransport is sent to the back of the next cascade; transportsExhausted
@@ -210,14 +192,12 @@ type Service struct {
 	demotedTransport    string
 	transportsExhausted bool
 
-	// endpointRouteRepairs counts consecutive health checks that had to re-pin
-	// the tunnel's endpoint routes, so a route that never settles cannot hold
-	// off recovery forever. Guarded by recoveryMu.
+	// endpointRouteRepairs counts consecutive health checks that had to re-pin the
+	// tunnel's endpoint routes, so a route that never settles can't hold off recovery.
 	endpointRouteRepairs int
 
 	// probeResolver resolves over the live tunnel to prove it still carries
-	// traffic. Defaults to probeResolverOverUDP; tests stub it, and a nil value
-	// disables the check.
+	// traffic. Defaults to probeResolverOverUDP; tests stub it, and a nil value disables the check.
 	probeResolver func(ctx context.Context, tunnelInterface, server string) error
 
 	// recoveryDelays is the backoff between reconnect attempts; the last entry
@@ -247,18 +227,15 @@ type Service struct {
 	repairSeq   int
 
 	// handshakeTimeout bounds how long a single transport is given to carry a
-	// first WireGuard handshake during bring-up. Defaults to
-	// defaultWireGuardHandshakeTimeout; tests set it small.
+	// first WireGuard handshake during bring-up. Defaults to defaultWireGuardHandshakeTimeout; tests set it small.
 	handshakeTimeout time.Duration
 
 	// dataPathBudget bounds how long the bring-up gate waits on a host that has
-	// no usable adapter or route yet. Defaults to dataPathGateBudget; tests set
-	// it small.
+	// no usable adapter or route yet. Defaults to dataPathGateBudget; tests set it small.
 	dataPathBudget time.Duration
 
-	// cloakStartedFor is the remote startCloakTransport last started Cloak
-	// against, so a live cloak.Status().Running is only trusted as "already
-	// bridging this server" when it actually is. Guarded by cloakMu.
+	// cloakStartedFor is the remote startCloakTransport last started Cloak against, so
+	// a live cloak.Status().Running is trusted as "already bridging this server" only then.
 	cloakMu         sync.Mutex
 	cloakStartedFor state.CloakProfile
 }
@@ -279,16 +256,12 @@ type wgActiveInterfaceReporter interface {
 
 // wgTunnelLUIDReporter reports the Windows interface LUID of the live tunnel
 // device, which identifies the adapter exactly where its name does not.
-// Optional: a manager that does not implement it leaves the kill switch to
-// resolve the name itself.
 type wgTunnelLUIDReporter interface {
 	ActiveTunnelLUID(ctx context.Context, profile state.WireGuardProfile) (uint64, error)
 }
 
 // wgRouteGuard re-pins the tunnel's endpoint bypass routes when the host has
-// moved or dropped the default route they hang off, reporting whether it
-// corrected anything. Optional: a manager that does not implement it leaves the
-// routes as bring-up installed them.
+// moved or dropped the default route they hang off, reporting whether it corrected anything.
 type wgRouteGuard interface {
 	EnsureEndpointRoutes(ctx context.Context, profile state.WireGuardProfile) (bool, error)
 }
@@ -299,25 +272,22 @@ type wgSocketRebinder interface {
 	RebindDeviceSockets(ctx context.Context) int
 }
 
-// wgTunnelReadiness reports whether the host has the tunnel's adapter usable —
-// address out of duplicate-address-detection and AllowedIPs routes published.
-// Optional: a manager that does not implement it is probed straight away.
+// wgTunnelReadiness reports whether the tunnel's adapter is usable — address out of
+// DAD and AllowedIPs routes published. Optional: a manager without it is probed straight away.
 type wgTunnelReadiness interface {
 	TunnelReady(ctx context.Context, profile state.WireGuardProfile) (bool, error)
 }
 
-// wgDNSGuard re-asserts the tunnel's resolvers when the host has stopped
-// pointing at them, reporting whether it corrected anything. Optional: a manager
-// that does not implement it leaves host DNS alone after bring-up.
+// wgDNSGuard re-asserts the tunnel's resolvers when the host stops pointing at them.
+// Optional: a manager without it leaves host DNS alone after bring-up.
 type wgDNSGuard interface {
 	EnsureDNS(ctx context.Context, profile state.WireGuardProfile) (bool, error)
 }
 
 var wgListenPortPattern = regexp.MustCompile(`(?im)^\s*ListenPort\s*=\s*(\d+)\s*$`)
 
-// wgLoopbackEndpointPattern matches "Endpoint = 127.0.0.1:<port>" lines in a
-// WireGuard config's [Peer] section. We rewrite the port when cloak's
-// loopback UDP socket binds to an ephemeral port instead of the default.
+// wgLoopbackEndpointPattern matches "Endpoint = 127.0.0.1:<port>" lines in a WireGuard
+// [Peer] section, rewritten when cloak's loopback socket binds an ephemeral port.
 var wgLoopbackEndpointPattern = regexp.MustCompile(`(?im)^(\s*Endpoint\s*=\s*127\.0\.0\.1:)\d+(\s*)$`)
 
 // wgEndpointPattern matches an "Endpoint = <host:port>" line whatever it points
@@ -327,15 +297,8 @@ var wgEndpointPattern = regexp.MustCompile(`(?im)^(\s*Endpoint\s*=\s*)\S+(\s*)$`
 // wgMTUPattern matches the "MTU = N" line in a WireGuard config's [Interface].
 var wgMTUPattern = regexp.MustCompile(`(?im)^(\s*MTU\s*=\s*)(\d+)(\s*)$`)
 
-// shadowsocksMaxMTU caps the tunnel MTU while Shadowsocks carries it. SS wraps
-// each datagram in a salt, address header and AEAD tag (~55 B for
-// chacha20-ietf-poly1305, more for SS-2022), on top of WireGuard's own 32 B.
-// At the 1380 default that lands within a few bytes of a 1500 B path, and any
-// link below it (PPPoE at 1492, another tunnel) makes the OS refuse the send
-// outright — EMSGSIZE on Windows — as soon as a full-size packet appears. The
-// handshake is small enough to succeed first, so it fails only once traffic
-// flows. 1280 is IPv6's guaranteed minimum, and this is the cascade's last
-// resort: reaching the node at all beats a wider MTU that sometimes cannot.
+// shadowsocksMaxMTU caps the tunnel MTU while Shadowsocks carries it: SS wraps each
+// datagram in a salt, address header and AEAD tag on top of WireGuard's own 32 B.
 const shadowsocksMaxMTU = 1280
 
 // clampWireGuardMTU lowers an existing MTU line to max, leaving a lower one
@@ -392,9 +355,8 @@ func NewService(
 	}
 }
 
-// SetTransportMemory wires in the per-network last-good-transport cache. Called
-// once at startup; a nil store (or never calling this) leaves the optimization
-// off, in which case connects always walk the full cascade.
+// SetTransportMemory wires in the per-network last-good-transport cache. Called once
+// at startup; a nil store leaves it off, so connects always walk the full cascade.
 func (s *Service) SetTransportMemory(store transportMemory) {
 	s.transportMemory = store
 }
@@ -437,11 +399,7 @@ func (s *Service) StopShadowsocksProxy(ctx context.Context) error {
 }
 
 // ShadowsocksProxyCredentials returns the live proxy's Basic Auth
-// username/password, both empty if no proxy is running. The server.go
-// /ssproxy/start handler must surface these to the caller (as proxyUsername/
-// proxyPassword) alongside the port from StartShadowsocksProxy, or the
-// desktop client has no way to send the now-mandatory Proxy-Authorization
-// header and hub-over-Shadowsocks starts failing with 407.
+// username/password, both empty if no proxy is running.
 func (s *Service) ShadowsocksProxyCredentials() (string, string) {
 	if s.shadowsocksProxy == nil {
 		return "", ""
@@ -449,9 +407,8 @@ func (s *Service) ShadowsocksProxyCredentials() (string, string) {
 	return s.shadowsocksProxy.Credentials()
 }
 
-// activeTransport returns whichever manager is live for the current session,
-// or nil if disconnected. Most call sites (health check, Disconnect, Status)
-// use this instead of branching on transport kind.
+// activeTransport returns whichever manager is live for the current session, or nil
+// if disconnected. Most call sites use this instead of branching on transport kind.
 func (s *Service) activeTransport() transport.Manager {
 	s.activeMu.RLock()
 	kind := s.activeTransportKind
@@ -502,11 +459,8 @@ func (s *Service) activeTransportKindSnapshot() string {
 }
 
 func (s *Service) StartBackground(ctx context.Context) {
-	// Run reconciliation off the startup path so the HTTP API starts serving
-	// immediately. The kill-switch re-apply makes blocking WFP syscalls that
-	// ignore ctx and can stall at boot (Base Filtering Engine not ready);
-	// gating ListenAndServe behind it would leave the frontend unable to reach
-	// the daemon.
+	// Run reconciliation off the startup path so the HTTP API starts serving immediately:
+	// the kill-switch re-apply can block on WFP syscalls that stall until boot finishes.
 	go s.reconcileStartup(ctx)
 	go s.healthLoop(ctx)
 	go s.watchSystemEvents(ctx)
@@ -516,8 +470,7 @@ func (s *Service) StartBackground(ctx context.Context) {
 // strict behavior (no LAN bypass) when zero-valued.
 type ConnectOptions struct {
 	// AllowLAN permits local-network IPv4 ranges both at the kill switch
-	// and in the WireGuard AllowedIPs, so captive-portal re-checks and
-	// gateway liveness probes work on restrictive WiFi.
+	// and in the WireGuard AllowedIPs, so captive-portal re-checks and gateway liveness probes work on restrictive WiFi.
 	AllowLAN bool
 
 	// Lockdown marks the kill switch as an intentional lock that survives
@@ -693,8 +646,7 @@ func (s *Service) deferRecovery(d time.Duration) {
 }
 
 // wireGuardProfileFor builds the WireGuard profile a session runs with: the
-// transport's own endpoints bypass the tunnel, and AllowLAN carves local
-// ranges out of AllowedIPs.
+// transport's own endpoints bypass the tunnel, and AllowLAN carves local ranges out of AllowedIPs.
 func wireGuardProfileFor(profile state.Profile, allowLAN bool) (state.WireGuardProfile, error) {
 	wireGuardProfile := withTransportBypassHosts(profile)
 	if !allowLAN {
@@ -709,10 +661,7 @@ func wireGuardProfileFor(profile state.Profile, allowLAN bool) (state.WireGuardP
 }
 
 // bringUpAfterKillSwitch starts the transport + WireGuard and updates the
-// kill switch. Assumes opMu held, kill switch already Enable()d. Shared by
-// Connect and Switch. StateConnected is reached only after a real WireGuard
-// handshake (proven per transport inside startTransportWithHandshake), so a
-// started-but-dead tunnel never reports connected.
+// kill switch. Assumes opMu held, kill switch already Enable()d. Shared by Connect and Switch.
 func (s *Service) bringUpAfterKillSwitch(ctx context.Context, profile state.Profile, wireGuardProfile state.WireGuardProfile, opts ConnectOptions) (err error) {
 	// Cancelled here too because Switch and the recovery rebuild reach this
 	// without going through Connect; restarted on failure for the same reason.
@@ -759,10 +708,7 @@ func (s *Service) holdBringUpOffline(err error) {
 }
 
 // armKillSwitchForAdoptedTunnel enables and updates the kill switch for a
-// tunnel Connect just adopted rather than built. Without this, adopting a
-// running session skips Enable entirely: opts.Lockdown is silently ignored
-// and any permit left from a previous run never gets Update()'d onto the
-// adapter actually in use.
+// tunnel Connect just adopted rather than built.
 func (s *Service) armKillSwitchForAdoptedTunnel(ctx context.Context, profile state.Profile, opts ConnectOptions) error {
 	wireGuardProfile, err := wireGuardProfileFor(profile, opts.AllowLAN)
 	if err != nil {
@@ -781,9 +727,7 @@ func (s *Service) armKillSwitchForAdoptedTunnel(ctx context.Context, profile sta
 }
 
 // tearDownFailedBringUp stops the tunnel a bring-up had running before it
-// failed, so the next Connect is not refused by a session nobody owns —
-// ensureNoRunningWireGuard would otherwise make the user disconnect by hand
-// first. The kill switch stays armed: a failed connect is fail-closed.
+// failed, so the next Connect is not refused by a session nobody owns.
 func (s *Service) tearDownFailedBringUp(wireGuardProfile state.WireGuardProfile) {
 	// Not the caller's context: it may already be cancelled, and this cleanup
 	// still has to run.
@@ -801,13 +745,8 @@ func (s *Service) tearDownFailedBringUp(wireGuardProfile state.WireGuardProfile)
 	s.setActiveTransportKind("")
 }
 
-// rebindWireGuardEndpoint checks whether mgr bound a different local port
-// than configured (LocalPort=0 requests dynamic allocation from the kernel)
-// and, if so, rewrites the WireGuard peer Endpoint to match. mgr is checked
-// via type assertion against transport.BoundPortReporter — passing `any`
-// here (rather than a shared interface method) is fine because the check is
-// optional/best-effort, exactly like the pre-existing cloakBoundPortReporter
-// type assertion this replaces.
+// rebindWireGuardEndpoint checks whether mgr bound a different local port than
+// configured (LocalPort=0 requests dynamic allocation) and rewrites the peer Endpoint to match.
 func (s *Service) rebindWireGuardEndpoint(mgr any, configuredLocalPort int, wireGuardProfile *state.WireGuardProfile) int {
 	reporter, ok := mgr.(transport.BoundPortReporter)
 	if !ok {
@@ -827,10 +766,8 @@ func (s *Service) rebindWireGuardEndpoint(mgr any, configuredLocalPort int, wire
 	return boundPort
 }
 
-// waitForManagedTransportStable polls isRunning until it reports true or
-// duration elapses, catching the case where Start() returned nil but the
-// underlying process/session exited immediately after (e.g. local port
-// already occupied by something else).
+// waitForManagedTransportStable polls isRunning until it reports true or duration elapses,
+// catching Start() returning nil but the process exiting right after (e.g. a port conflict).
 func (s *Service) waitForManagedTransportStable(ctx context.Context, isRunning func() bool, localPort int, duration time.Duration) error {
 	if isRunning() {
 		return nil
@@ -876,20 +813,13 @@ func (s *Service) startCloakTransport(ctx context.Context, profile *state.Profil
 	if err := s.waitForManagedTransportStable(ctx, cloakRunning, profile.Cloak.LocalPort, 200*time.Millisecond); err != nil {
 		return err
 	}
-	// NOTE: deliberately do NOT wait for a Cloak session here. Cloak's RouteUDP
-	// only dials the server (MakeSession) after the first WireGuard packet
-	// reaches the local listener, and WireGuard starts *after* this returns.
-	// Blocking on WaitForSession would therefore always deadlock until timeout.
-	// Cloak is ready once its process is up; the session forms as soon as WG
-	// traffic flows, and a genuinely unreachable server surfaces as a failed
-	// WireGuard handshake, which the health check then recovers/reports.
+	// Deliberately do not wait for a Cloak session here: RouteUDP only dials after
+	// the first WireGuard packet arrives, and WireGuard starts only after this returns.
 	return nil
 }
 
 // cloakStartedForRemote reports whether Cloak was last started against the
 // same server as target (ignoring LocalPort, which is rebound per session).
-// A live cloak.Status().Running says a process is up, not which server it is
-// bridging — after a failed teardown that can still be the old remote.
 func (s *Service) cloakStartedForRemote(target state.CloakProfile) bool {
 	s.cloakMu.Lock()
 	defer s.cloakMu.Unlock()
@@ -905,8 +835,7 @@ func (s *Service) rememberCloakRemote(target state.CloakProfile) {
 }
 
 // startNaiveTransport runs NaiveProxy's start sequence, mirroring
-// startCloakTransport. Cleans up (stops naive) on its own failure, since
-// it's always the last transport tried.
+// startCloakTransport. Cleans up (stops naive) on its own failure, since it's always the last transport tried.
 func (s *Service) startNaiveTransport(ctx context.Context, profile *state.Profile, wireGuardProfile *state.WireGuardProfile) error {
 	// De-alias from the config store's shared *NaiveProfile before mutating LocalPort.
 	naiveCopy := *profile.Naive
@@ -941,8 +870,7 @@ func (s *Service) startNaiveTransport(ctx context.Context, profile *state.Profil
 }
 
 // startRealityTransport runs VLESS+REALITY's start sequence, mirroring
-// startNaiveTransport. Cleans up (stops reality) on its own failure, since
-// it's always the last transport tried.
+// startNaiveTransport. Cleans up (stops reality) on its own failure, since it's always the last transport tried.
 func (s *Service) startRealityTransport(ctx context.Context, profile *state.Profile, wireGuardProfile *state.WireGuardProfile) error {
 	// De-alias from the config store's shared *RealityProfile before mutating LocalPort.
 	realityCopy := *profile.Reality
@@ -1063,9 +991,8 @@ func (s *Service) startSnowflakeTransport(ctx context.Context, profile *state.Pr
 		return err
 	}
 	if waiter, ok := s.snowflake.(transport.SessionWaiter); ok {
-		// Snowflake rendezvous (broker polling, ICE gathering, DTLS/SCTP
-		// handshake) is noticeably slower than the other transports' TLS/QUIC
-		// handshakes, so it gets a longer session timeout.
+		// Snowflake rendezvous (broker polling, ICE gathering, DTLS/SCTP handshake) is
+		// noticeably slower than other transports' TLS/QUIC, so it gets a longer timeout.
 		waitCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		err := waiter.WaitForSession(waitCtx, 30*time.Second)
 		cancel()
@@ -1080,17 +1007,11 @@ func (s *Service) startSnowflakeTransport(ctx context.Context, profile *state.Pr
 }
 
 // transportKindWireGuard names the direct method: WireGuard straight to the
-// node's own UDP listener, with nothing in front of it. It is a transport kind
-// only so the rest of the session machinery (status, health checks, recovery)
-// can name what is carrying the tunnel; there is no transport process.
+// node's own UDP listener, with nothing in front of it.
 const transportKindWireGuard = "wireguard"
 
 // startDirectWireGuard points the tunnel at the node itself instead of a
-// loopback bridge. Nothing to start — the "transport" is the absence of one — so
-// all this does is rewrite the Endpoint line the other transports would have
-// bound a local port for. Faster and lower-overhead than every other method,
-// and trivially recognizable on the wire, which is why the user has to ask for
-// it by name (it is not in autoCascadeOrder).
+// loopback bridge. Nothing to start — the "transport" is the absence of one.
 func (s *Service) startDirectWireGuard(_ context.Context, _ *state.Profile, wireGuardProfile *state.WireGuardProfile) error {
 	endpoint, err := validDirectEndpoint(wireGuardProfile.DirectEndpoint)
 	if err != nil {
@@ -1107,8 +1028,7 @@ func (s *Service) startDirectWireGuard(_ context.Context, _ *state.Profile, wire
 }
 
 // validDirectEndpoint accepts a host:port with a numeric port, the shape a WireGuard
-// Endpoint line needs. Checked here so a malformed profile fails the connect
-// with something readable instead of producing a config WireGuard rejects.
+// Endpoint line needs, so a malformed profile fails with a readable error, not a rejected config.
 func validDirectEndpoint(endpoint string) (string, error) {
 	endpoint = strings.TrimSpace(endpoint)
 	if endpoint == "" {
@@ -1124,18 +1044,12 @@ func validDirectEndpoint(endpoint string) (string, error) {
 	return endpoint, nil
 }
 
-// snowflakeReleaseGated disables the Snowflake transport for this release. Its
-// WebRTC data plane is dropped by the always-on kill switch: the negotiated
-// volunteer-proxy peer IP is discovered dynamically and is never permitted, so
-// it cannot connect in production. All Snowflake code and wiring is retained;
-// re-enable by removing the guards that read this flag (or setting it false)
-// once the kill switch can permit the dynamic peer.
+// snowflakeReleaseGated disables the Snowflake transport for this release: its
+// WebRTC peer IP is discovered dynamically, so the always-on kill switch can never permit it.
 const snowflakeReleaseGated = true
 
 // transportStartFn starts one transport's process/session and rebinds the
-// WireGuard endpoint to its loopback port. It is the transport-level half of a
-// bring-up; the WireGuard handshake in bringUpTransport is the tunnel-level
-// half. Matches the signature of startCloakTransport and friends.
+// WireGuard endpoint to its loopback port. It is the transport-level half of a bring-up;
 type transportStartFn func(ctx context.Context, profile *state.Profile, wireGuardProfile *state.WireGuardProfile) error
 
 type transportCandidate struct {
@@ -1145,8 +1059,6 @@ type transportCandidate struct {
 
 // transportCandidates returns the ordered transports to attempt for the given
 // selection. "" / "auto" = the censorship-resistance cascade (see autoCascade).
-// A specific selection = just that transport, with an error if the profile has
-// no configuration for it.
 func (s *Service) transportCandidates(profile *state.Profile, preferredTransport string) ([]transportCandidate, error) {
 	switch preferredTransport {
 	case "", "auto":
@@ -1194,31 +1106,7 @@ func (s *Service) transportCandidates(profile *state.Profile, preferredTransport
 }
 
 // autoCascadeOrder is the auto-mode fallback order, chosen for censorship
-// resistance rather than build history — because the transports hide in
-// different ways, a block that stops one often stops others that hide the same
-// way, so consecutive attempts favor a different mechanism:
-//
-//   - reality: the strongest TLS disguise — borrows a real site's TLS
-//     handshake, so active probing and SNI blocking see a genuine site. First
-//     because it survives the probing that catches the others.
-//   - cloak: the reliable fallback (TLS obfuscation to a decoy cover site), and
-//     the only transport every profile carries, so it is what auto mode lands
-//     on when reality is unprovisioned or blocked.
-//   - shadowsocks: SS-2022, which presents no TLS at all on its own port, so it
-//     is the first attempt that shares nothing with a TLS block above it.
-//   - hysteria2: a different wire protocol (UDP/QUIC + Salamander), so a block
-//     that kills the TCP transports does not kill every attempt.
-//   - naive: real Chromium TLS+HTTP/2 — a different TLS fingerprint than
-//     reality, for when UDP is blocked and reality's approach was the problem.
-//   - snowflake: heavy-artillery last resort (WebRTC rendezvous, no fixed
-//     endpoint); currently gated off (see snowflakeReleaseGated).
-//
-// The direct wireguard method is deliberately absent: a bare WireGuard handshake
-// is the single easiest thing on this list for a censor to fingerprint and drop,
-// so auto mode never falls back to it — only an explicit request selects it.
-//
-// Per-network memory can still promote whatever last worked here ahead of this
-// default (see reorderByMemory).
+// resistance rather than build history.
 var autoCascadeOrder = []string{"reality", "cloak", "shadowsocks", "hysteria2", "naive", "snowflake"}
 
 // autoCascade builds the auto-mode candidate list in autoCascadeOrder, keeping
@@ -1233,9 +1121,8 @@ func (s *Service) autoCascade(profile *state.Profile) []transportCandidate {
 	return candidates
 }
 
-// transportStarter returns the start func for kind if the profile can attempt
-// it: Cloak is always available; the others require their optional profile
-// block, and Snowflake is additionally gated off for this release.
+// transportStarter returns the start func for kind if the profile can attempt it:
+// Cloak is always available, the others need their profile block, Snowflake is also release-gated.
 func (s *Service) transportStarter(profile *state.Profile, kind string) (transportStartFn, bool) {
 	switch kind {
 	case "cloak":
@@ -1271,13 +1158,7 @@ func (s *Service) transportStarter(profile *state.Profile, kind string) (transpo
 }
 
 // startTransportWithHandshake brings up the first candidate transport that
-// carries a real WireGuard handshake, and returns its kind. Because a mere
-// started transport process is no longer accepted as "connected" (a dead or
-// blocked server can start the process and never carry traffic), each
-// candidate is proven end-to-end by bringUpTransport; a candidate that starts
-// but never handshakes is torn down and the next is tried. In auto mode this
-// is the fallback chain; with a specific transport there is a single candidate
-// and no fallback.
+// carries a real WireGuard handshake, and returns its kind.
 func (s *Service) startTransportWithHandshake(ctx context.Context, profile *state.Profile, wireGuardProfile *state.WireGuardProfile, preferredTransport, networkKey string) (string, error) {
 	autoMode := preferredTransport == "" || preferredTransport == "auto"
 	candidates, err := s.transportCandidates(profile, preferredTransport)
@@ -1291,11 +1172,8 @@ func (s *Service) startTransportWithHandshake(ctx context.Context, profile *stat
 	var failures []string
 	for i, candidate := range candidates {
 		s.setConnectingTransportKind(candidate.kind)
-		// A fresh copy per candidate: bringUpTransport's start funcs mutate
-		// ConfigText (MTU clamp, loopback Endpoint rewrite), and without this
-		// a failed candidate's rewrite leaked into whichever one succeeded
-		// after it — a permanently clamped MTU, or an Endpoint still pointing
-		// at the dead candidate's port.
+		// A fresh copy per candidate: start funcs mutate ConfigText (MTU clamp, loopback
+		// rewrite), and without this a failed candidate's rewrite leaked into the next.
 		attempt := *wireGuardProfile
 		if err := s.bringUpTransport(ctx, profile, &attempt, candidate.kind, candidate.start); err != nil {
 			// A cancelled context means Disconnect interrupted us; stop trying.
@@ -1323,8 +1201,7 @@ func (s *Service) startTransportWithHandshake(ctx context.Context, profile *stat
 }
 
 // currentNetworkKey returns the fingerprint of the network the host is on, or
-// "" when it can't be determined. Nil-safe wrapper around the injectable
-// networkKey func.
+// "" when it can't be determined. Nil-safe wrapper around the injectable networkKey func.
 func (s *Service) currentNetworkKey() string {
 	if s.networkKey == nil {
 		return ""
@@ -1332,10 +1209,8 @@ func (s *Service) currentNetworkKey() string {
 	return s.networkKey()
 }
 
-// reorderByMemory moves the transport last known to work on this network to the
-// front of the auto-mode candidate list, so a repeat connect on a familiar
-// network tries the winner first instead of walking the whole cascade. Only
-// applies in auto mode; a specific-transport request is left untouched.
+// reorderByMemory moves the transport last known to work on this network to the front
+// of the auto-mode candidate list, so a repeat connect tries the winner first.
 func (s *Service) reorderByMemory(candidates []transportCandidate, preferredTransport, networkKey string) []transportCandidate {
 	if s.transportMemory == nil || len(candidates) < 2 {
 		return candidates
@@ -1395,16 +1270,14 @@ func (s *Service) takeDemotedTransport() string {
 	return kind
 }
 
-// rememberTransport records kind as the last-good transport for networkKey so
-// the next auto-connect on this network tries it first. Best-effort: a nil
-// store, empty key, or persist error only forfeits the optimization.
+// rememberTransport records kind as the last-good transport for networkKey so the
+// next auto-connect tries it first. Best-effort: any failure just forfeits the optimization.
 func (s *Service) rememberTransport(networkKey, kind string) {
 	if s.transportMemory == nil || networkKey == "" || kind == "" {
 		return
 	}
 	// A direct connection says nothing about which obfuscated transport gets
-	// through here, and auto mode never offers it — recording it would only
-	// displace a memory that is useful.
+	// through here, and auto mode never offers it — recording it would only displace a memory that is useful.
 	if kind == transportKindWireGuard {
 		return
 	}
@@ -1414,19 +1287,12 @@ func (s *Service) rememberTransport(networkKey, kind string) {
 }
 
 // bringUpTransport starts one transport, brings WireGuard up over it, and waits
-// for a real WireGuard handshake — the proof the tunnel reaches the server
-// through this transport. On any failure it tears WireGuard and the transport
-// back down so the caller can try the next candidate. Making the handshake
-// (not a merely started process) the success criterion is what lets a dead
-// server fall through to the next transport, and what lets Cloak — which
-// cannot prove its own session at start time — be validated here instead.
+// for a real WireGuard handshake — the proof the tunnel reaches the server through this transport.
 func (s *Service) bringUpTransport(ctx context.Context, profile *state.Profile, wireGuardProfile *state.WireGuardProfile, kind string, start transportStartFn) (err error) {
 	defer func() {
 		if err != nil {
 			// Each stop gets its own deadline: on the common handshake-timeout
-			// path, wg.Stop consuming a deadline shared with mgr.Stop left the
-			// transport never killed, so the next candidate started while the
-			// previous one still held its loopback UDP port.
+			// path, wg.Stop consuming a deadline shared with mgr.Stop left the transport never killed.
 			if !keepDeviceOnFailure(ctx) {
 				wgCleanupCtx, wgCleanupCancel := context.WithTimeout(context.Background(), 2*time.Second)
 				if stopErr := s.wg.Stop(wgCleanupCtx, *wireGuardProfile); stopErr != nil {
@@ -1443,8 +1309,7 @@ func (s *Service) bringUpTransport(ctx context.Context, profile *state.Profile, 
 				mgrCleanupCancel()
 
 				// Best-effort: a transport that didn't release its local port
-				// in time would otherwise block the next candidate from
-				// binding it.
+				// in time would otherwise block the next candidate from binding it.
 				if port := transportLocalPort(profile, kind); port > 0 {
 					killCtx, killCancel := context.WithTimeout(context.Background(), 2*time.Second)
 					if killed, killErr := platform.KillUDPPortOwners(killCtx, port, []int{os.Getpid()}); killErr == nil && len(killed) > 0 {
@@ -1474,9 +1339,8 @@ func (s *Service) bringUpTransport(ctx context.Context, profile *state.Profile, 
 		return err
 	}
 
-	// The permit must open before the probe: WFP blocks the daemon's own
-	// packets out the tunnel adapter, so probing a locked tunnel always times
-	// out. It doesn't depend on the handshake, so it runs alongside the wait.
+	// The permit must open before the probe: WFP blocks the daemon's own packets out the
+	// tunnel adapter, so a locked probe always times out. It runs alongside the wait.
 	updateDone := make(chan error, 1)
 	go func() {
 		updateStart := time.Now()
@@ -1511,8 +1375,7 @@ func (s *Service) bringUpTransport(ctx context.Context, profile *state.Profile, 
 }
 
 // transportLocalPort reads the local port a candidate was configured to bind,
-// or 0 if kind isn't configured on profile. Used only for best-effort cleanup
-// after a failed bring-up.
+// or 0 if kind isn't configured on profile. Used only for best-effort cleanup after a failed bring-up.
 func transportLocalPort(profile *state.Profile, kind string) int {
 	switch kind {
 	case "cloak":
@@ -1542,9 +1405,7 @@ func transportLocalPort(profile *state.Profile, kind string) int {
 }
 
 // defaultWireGuardHandshakeTimeout bounds how long a single transport is given
-// to carry a first WireGuard handshake before it is abandoned for the next
-// candidate. Matches the per-transport session timeouts (Cloak dials its server
-// on the first WireGuard packet, so the handshake also covers Cloak's session).
+// to carry a first WireGuard handshake before it is abandoned for the next candidate.
 const defaultWireGuardHandshakeTimeout = 10 * time.Second
 
 // rebuildHandshakeTimeout is the per-transport budget when recovering a dropped session:
@@ -1667,12 +1528,8 @@ func (s *Service) Switch(ctx context.Context, newProfileID string, opts ConnectO
 
 	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("switch requested: %s -> %s (kill switch stays active)", oldProfile.ID, newProfile.ID))
 
-	// Anything that can refuse the new server runs before the teardown, so a
-	// failure costs nothing. Re-arming while the old tunnel is up is safe: every
-	// backend applies the new set atomically, so the lock is never down.
-	// Rejected before any teardown, so the old session is still live: go back to
-	// Connected. StateError would stop healthLoop watching a working tunnel and
-	// make the gate at the top of Switch reject the retry.
+	// Anything that can refuse the new server runs before the teardown, so a failure
+	// costs nothing. Re-arming while the old tunnel is up is safe: the lock is never down.
 	refuse := func(err error, detail string) error {
 		s.logs.Add(state.LogError, state.SourceDaemon, fmt.Sprintf("switch: %s", detail))
 		s.machine.Set(currentState, fmt.Sprintf("staying on %s: %s", oldProfile.ID, detail))
@@ -1698,8 +1555,6 @@ func (s *Service) Switch(ctx context.Context, newProfileID string, opts ConnectO
 
 	// Adapter reuse: pin the new server's bypass routes while the old tunnel
 	// still owns the default route, then let wg.Start re-point the live device.
-	// A dial that fails before wg.Start leaves the pinned routes on the old
-	// session; the next teardown or in-place diff cleans them up.
 	keepDevice := false
 	if pinner, ok := s.wg.(wgInPlaceSwitcher); ok && s.deviceRunning(ctx, oldProfile) {
 		if err := pinner.PinEndpointRoutes(ctx, wireGuardProfile); err != nil {
@@ -1726,9 +1581,8 @@ func (s *Service) Switch(ctx context.Context, newProfileID string, opts ConnectO
 	}
 	s.setActiveTransportKind("")
 
-	// Set eagerly, not cleared: a failed bring-up below still needs a current
-	// profile for retryDroppedSession to rebuild toward, or the kill switch
-	// stays armed with nothing to recover it (see attemptSessionRebuild).
+	// Set eagerly, not cleared: a failed bring-up below still needs a current profile
+	// for retryDroppedSession to rebuild toward, or the kill switch has nothing to recover to.
 	s.setCurrentProfile(newProfile)
 	s.setSessionOpts(opts)
 
@@ -1748,9 +1602,7 @@ func (s *Service) Switch(ctx context.Context, newProfileID string, opts ConnectO
 }
 
 // ClearKillSwitch removes any active kill-switch rules without touching VPN
-// session state. Used when the renderer turns Lockdown off while already
-// disconnected: the daemon's last disconnect left the firewall in place, and
-// the user now wants their network back.
+// session state, for when Lockdown is turned off while already disconnected.
 func (s *Service) ClearKillSwitch(ctx context.Context) error {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
@@ -1798,22 +1650,7 @@ func (s *Service) sessionHeld() (string, bool) {
 }
 
 // PermitHosts opens a control-plane hole in an already-engaged kill switch.
-//
-// A Lockdown lock engaged while disconnected blocks everything, including the
-// Pangea hub — but the app must reach the hub to provision a profile before it
-// has anything to connect to, so without this the lock is a trap: no
-// provisioning, therefore no connection, therefore no way out but turning
-// Lockdown off. The app calls this just before it provisions, so the hole opens
-// on a connection attempt rather than sitting open the whole time the device is
-// locked. The chosen server's own endpoints stay blocked until Connect permits
-// them.
-//
-// Only IP literals are accepted: the lock blocks DNS, so a hostname could not
-// be resolved while it is engaged, and the lock must never depend on a lookup.
-// hosts is what the app knows (its resolved hub IP); when it has none — a cold
-// start under lockdown, before it has reached the hub — the hub IP carried by
-// the last provisioned profile's WireGuard bypass hosts is used instead.
-// No-op when no lock is engaged.
+// A Lockdown lock engaged while disconnected blocks everything, including the Pangea hub.
 func (s *Service) PermitHosts(ctx context.Context, hosts []string) error {
 	s.preemptRecovery()
 	s.opMu.Lock()
@@ -1841,9 +1678,8 @@ func (s *Service) PermitHosts(ctx context.Context, hosts []string) error {
 	// is the one the caller is leaving or the one that just died.
 	s.routeAroundTunnel(ctx, permits)
 
-	// Reuse the persisted AllowLAN/Locked flags: widening the permit set must
-	// not change what kind of lock is engaged (dropping Locked would make a
-	// deliberate lockdown lock look like crash leftover to the next startup).
+	// Reuse the persisted AllowLAN/Locked flags: widening the permit set must not change
+	// the lock kind (dropping Locked would make a deliberate lockdown look like crash leftover).
 	persisted, err := loadKillSwitchState()
 	if err != nil {
 		return fmt.Errorf("read kill switch state: %w", err)
@@ -1888,9 +1724,7 @@ func (s *Service) routeAroundTunnel(ctx context.Context, hosts []string) {
 }
 
 // storedControlPlaneHosts is the bypass hosts of every stored profile — where
-// the app records the hub IP it provisioned through (see the desktop client's
-// provision()). Transport endpoints are deliberately excluded: those are the
-// server's own IPs and are only unblocked once Connect picks that server.
+// the app records the hub IP it provisioned through (see the desktop client's provision()).
 func (s *Service) storedControlPlaneHosts() []string {
 	var out []string
 	for _, profile := range s.config.Get().Profiles {
@@ -1930,19 +1764,7 @@ func mergeUniqueSorted(a, b []string) []string {
 }
 
 // EngageKillSwitch turns on the kill switch without starting a VPN session,
-// giving the device a fail-closed network lock. Used when Lockdown is enabled
-// while disconnected: internet is blocked immediately even though nothing is
-// connected yet. Only the Pangea hub is reachable through it — the app talks to
-// nothing else while disconnected, and cutting that off would leave it unable to
-// list servers or provision, with no way to re-resolve anything since the lock
-// blocks DNS too. VPN endpoints stay blocked: a server's IP is unblocked by
-// Connect, once that server is the one being connected to.
-//
-// The hub IP comes from the stored profiles (see storedControlPlaneHosts) and
-// is used as an IP literal, so the lock still lands with no DNS lookup to wait
-// on — a lookup would delay the block and leak traffic until it landed. Before
-// anything has ever been provisioned there is no hub IP to permit and this is a
-// pure block-all; the app tops the permit up via PermitHosts when it provisions.
+// giving the device a fail-closed network lock.
 func (s *Service) EngageKillSwitch(ctx context.Context, profileID string, allowLAN bool) error {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
@@ -1953,10 +1775,7 @@ func (s *Service) EngageKillSwitch(ctx context.Context, profileID string, allowL
 	}
 
 	// IP literals only, so the lock lands instantly with no DNS resolution —
-	// which would otherwise delay the block (leaking until it lands) and can
-	// hang the request. profileID is unused: every profile records the same hub,
-	// and the VPN endpoints this profile would use are permitted later by
-	// Connect, which re-enters Enable.
+	// which would otherwise delay the block (leaking until it lands) and can hang the request.
 	_ = profileID
 	hubPermits := ipLiterals(s.storedControlPlaneHosts())
 	ksCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -1969,9 +1788,8 @@ func (s *Service) EngageKillSwitch(ctx context.Context, profileID string, allowL
 	return nil
 }
 
-// Records an already-engaged lock as a Lockdown lock so reconcileStartup
-// re-applies it instead of clearing it as stale. Re-arms with the persisted
-// endpoints, which the backends see as unchanged (flag-only write).
+// Records an already-engaged lock as a Lockdown lock so reconcileStartup re-applies
+// it instead of clearing it as stale. Re-arms with the persisted endpoints, unchanged.
 func (s *Service) markKillSwitchLocked(ctx context.Context, allowLAN bool) error {
 	persisted, err := loadKillSwitchState()
 	if errors.Is(err, platform.ErrKillSwitchStateUnreadable) {
@@ -2005,9 +1823,8 @@ const (
 	teardownShutdown                     // process exit: keep everything for the next start
 )
 
-// Disconnect tears down the active VPN session. When keepKillSwitch is true
-// (Lockdown mode), the firewall rules stay engaged so the device has no
-// internet until the caller explicitly clears the kill switch.
+// Disconnect tears down the active VPN session. When keepKillSwitch is true (Lockdown
+// mode), the firewall rules stay engaged until the caller explicitly clears them.
 func (s *Service) Disconnect(ctx context.Context, keepKillSwitch bool) error {
 	mode := teardownUser
 	if keepKillSwitch {
@@ -2024,9 +1841,7 @@ func (s *Service) Shutdown(ctx context.Context) error {
 
 func (s *Service) disconnect(ctx context.Context, mode teardownMode) error {
 	// Interrupt any in-flight Connect first so we don't queue behind a
-	// 10s WaitForSession. The cancelled connect will exit, release opMu,
-	// and run its own cleanup — Disconnect then takes the lock and does
-	// the rest (kill switch teardown, etc).
+	// 10s WaitForSession. The cancelled connect will exit, release opMu, and run its own cleanup.
 	s.cancelMu.Lock()
 	if cancel := s.cancelConnect; cancel != nil {
 		cancel()
@@ -2041,10 +1856,8 @@ func (s *Service) disconnect(ctx context.Context, mode teardownMode) error {
 		return nil
 	}
 
-	// Teardown must finish regardless of the caller's context: an HTTP
-	// request abort (app quit, renderer timeout) must not leave WireGuard up
-	// with the kill switch already cleared and no profile left for recovery
-	// to find. Every mutating step below uses this instead of ctx.
+	// Teardown must finish regardless of the caller's context, or an HTTP
+	// abort could leave WireGuard up with no profile left for recovery.
 	teardownCtx, teardownCancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer teardownCancel()
 
@@ -2328,16 +2141,11 @@ const healthTickInterval = 3 * time.Second
 const suspendGapThreshold = 30 * time.Second
 
 // resumeSettleGrace is how long health checks pause after a detected resume.
-// The tunnel is almost certainly dead, but the host's interfaces and routes
-// come back over several seconds — tearing the session down and re-dialing into
-// a network that is not up yet just fails, and on an unlucky wake that failure
-// used to be the last thing the daemon ever did about it.
+// The tunnel is almost certainly dead, but the host's interfaces and routes come back over several seconds.
 const resumeSettleGrace = 15 * time.Second
 
 // defaultRecoveryDelays is the backoff between attempts to rebuild a session
-// that dropped on its own. The last entry repeats: recovery does not give up
-// while the session is still the user's, because the kill switch stays armed
-// the whole time and stopping would leave the device with no network at all.
+// that dropped on its own.
 var defaultRecoveryDelays = []time.Duration{
 	2 * time.Second,
 	5 * time.Second,
@@ -2391,9 +2199,8 @@ func (t suspendGapTracker) checkDone(now time.Time) suspendGapTracker {
 	return suspendGapTracker{lastCheckEnd: now}
 }
 
-// resumeFreshWindow is how long after a resume a single failed probe round is
-// enough to rebuild: the handshake is stale and the host just woke, so the
-// usual two-round debounce only delays a near-certain recovery.
+// resumeFreshWindow is how long after a resume a single failed probe round is enough
+// to rebuild: the host just woke, so the usual two-round debounce only delays the inevitable.
 const resumeFreshWindow = 90 * time.Second
 
 // resumeDedupeWindow collapses the burst of notifications one wake produces
@@ -2433,9 +2240,7 @@ func (s *Service) watchSystemEvents(ctx context.Context) {
 }
 
 // onSystemResume prepares recovery for the network the host is waking into:
-// rebind the device sockets off their pre-sleep addresses, hold health checks
-// while interfaces come back (a network event releases the hold early), and
-// schedule the first probe for the moment the hold ends.
+// rebind sockets, hold health checks until interfaces return, then re-probe.
 func (s *Service) onSystemResume(ctx context.Context, cause string) {
 	s.recoveryMu.Lock()
 	now := time.Now()
@@ -2465,9 +2270,7 @@ func (s *Service) onSystemResume(ctx context.Context, cause string) {
 }
 
 // onNetworkChanged reacts to the host's connectivity moving: once the network
-// fingerprint says there is something to dial from, waiting out timers only
-// delays recovery, so the settle hold, retry backoff and probe schedule all
-// come forward to now and the health loop runs immediately.
+// fingerprint says there is something to dial from, waiting out timers only delays recovery.
 func (s *Service) onNetworkChanged() {
 	if !s.networkLooksUsable() {
 		return
@@ -2548,9 +2351,7 @@ func (s *Service) runHealthCheck(ctx context.Context) {
 
 	if !transportRunning {
 		// No route out: park in a stable offline hold instead of restarting the
-		// transport every tick and flip-flopping the state through ERROR. This is
-		// the churn a link drop caused — the restart fails "unreachable network",
-		// stamps ERROR, and a still-recent handshake flips it back, every ~3s.
+		// transport every tick and flip-flopping the state through ERROR. This is the churn a link drop caused.
 		if s.offlineHoldActive() {
 			return
 		}
@@ -2578,10 +2379,7 @@ func (s *Service) runHealthCheck(ctx context.Context) {
 		return
 	}
 	// Checked before the silence detector because a lost bypass route is one of
-	// the things that silences a tunnel, and re-pinning it is far cheaper than
-	// the rebuild below. A repair earns the session this tick to handshake on
-	// the restored path; a route that needed no repair reports nothing, so a
-	// tunnel silent for another reason still reaches the rebuild.
+	// the things that silences a tunnel, and re-pinning it is far cheaper than the rebuild below.
 	routeRepaired := s.ensureEndpointRoutes(ctx, profile)
 
 	// A stale handshake is a hint, never the verdict: WireGuard's counters say
@@ -2616,8 +2414,7 @@ func (s *Service) runHealthCheck(ctx context.Context) {
 	}
 
 	// Everything above says the session is up; these two ask whether it still
-	// works — whether the host still resolves through it, and whether the tunnel
-	// still carries anything.
+	// works — whether the host still resolves through it, and whether the tunnel still carries anything.
 	s.ensureTunnelDNS(ctx, profile)
 
 	if s.dataPathIsDead(ctx, profile) {
@@ -2688,31 +2485,19 @@ func (s *Service) transportsAreExhausted() bool {
 }
 
 // retryDroppedSession keeps rebuilding a session that dropped on its own until
-// it comes back. Without it a single failed rebuild is terminal: the health
-// check stops at StateError, so nothing looks at the session again, and the
-// kill switch it deliberately left armed means the device has no network until
-// the user notices and clicks something. The common trigger is a laptop waking
-// up — the first rebuild lands before the NIC has a route and fails with
-// "unreachable network", whichever transport it happens to be dialling.
-//
-// Only a session that is still the user's is retried: Disconnect clears the
-// current profile, and a first Connect that never landed never set one, so both
-// are left alone.
+// it comes back. Without it a single failed rebuild is terminal: the health check stops at StateError.
 func (s *Service) retryDroppedSession(ctx context.Context) {
 	profile, ok := s.getCurrentProfile()
 	if !ok {
 		return
 	}
-	// No internet at all (wifi/ethernet physically down): hold. Don't rebuild
-	// into a dead network, and don't let a still-recent handshake flip this to a
-	// transient CONNECTED — that flip-flop is exactly the offline thrash. The
-	// offline status flag drives the UI; recovery resumes when a link returns.
+	// No internet at all (wifi/ethernet physically down): hold. Don't rebuild into a dead
+	// network, and don't let a still-recent handshake flip this to a transient CONNECTED.
 	if s.offlineHoldActive() || s.hostOffline() {
 		return
 	}
-	// Not every error means a broken tunnel — a refused Connect stamps one on a
-	// session that is still carrying traffic. Rebuilding that would tear down a
-	// working tunnel, so a live, fail-closed session just gets its state back.
+	// Not every error means a broken tunnel — a refused Connect stamps one on a session
+	// still carrying traffic. A live, fail-closed session just gets its state back.
 	if s.sessionIsHealthy(ctx, profile) {
 		if s.machine.CompareAndSet([]state.DaemonState{state.StateError}, state.StateConnected, "tunnel active") {
 			s.logs.Add(state.LogInfo, state.SourceDaemon, "tunnel is still handshaking; clearing the error state")
@@ -2732,16 +2517,13 @@ func (s *Service) retryDroppedSession(ctx context.Context) {
 }
 
 // attemptSessionRebuild runs one rebuild and books the result against the retry
-// schedule: success clears it, failure backs the next attempt off. cause says
-// why the session needs rebuilding and is carried into the error detail so the
-// UI keeps naming the original fault rather than just the latest retry.
+// schedule: success clears it, failure backs the next attempt off.
 func (s *Service) attemptSessionRebuild(ctx context.Context, profile state.Profile, cause string) {
 	s.setTransportsExhausted(false)
 	err := s.rebuildSilentSession(ctx, profile)
 	if errors.Is(err, errRebuildBusy) {
 		// A real operation (or an overlapping rebuild) already owns opMu;
-		// this tick simply didn't get to run, which must not burn a retry
-		// attempt or push the backoff out.
+		// this tick simply didn't get to run, which must not burn a retry attempt or push the backoff out.
 		return
 	}
 	// Cancelled means a user operation took over and owns the state from here;
@@ -2767,9 +2549,7 @@ func (s *Service) attemptSessionRebuild(ctx context.Context, profile state.Profi
 		delay := s.scheduleNextRecovery(attempt)
 		detail := fmt.Sprintf("%s and reconnect attempt %d failed: %v; retrying in %s", cause, attempt, err, delay)
 		// A Disconnect can land mid-rebuild and interrupt it; CompareAndSet
-		// only stamps Error over Connected/Error, so a Disconnect that
-		// already moved the state on wins the race instead of being
-		// silently overwritten by this stale failure.
+		// only stamps Error over Connected/Error.
 		if !s.machine.CompareAndSet([]state.DaemonState{state.StateConnected, state.StateError}, state.StateError, detail) {
 			s.resetRecovery()
 			return
@@ -2784,10 +2564,8 @@ func (s *Service) attemptSessionRebuild(ctx context.Context, profile state.Profi
 	s.resetRecovery()
 }
 
-// sessionIsHealthy reports whether the session is in fact carrying traffic
-// fail-closed: the interface is up, its newest handshake is inside the stale
-// window, and the kill switch is still armed. An unarmed kill switch is not
-// healthy — the rebuild path re-arms it, so let it run.
+// sessionIsHealthy reports whether the session is in fact carrying traffic fail-closed:
+// interface up, newest handshake inside the stale window, kill switch still armed.
 func (s *Service) sessionIsHealthy(ctx context.Context, profile state.Profile) bool {
 	if !s.killSwitch.Active() {
 		return false
@@ -2804,10 +2582,7 @@ func (s *Service) sessionIsHealthy(ctx context.Context, profile state.Profile) b
 }
 
 // networkLooksUsable reports whether the host has a path to dial out on. It
-// prefers the OS's own connectivity verdict (which ignores the tunnel and
-// virtual adapters that fool an interface-address scan), and only falls back to
-// the network fingerprint where the OS can't tell. An unknown answer counts as
-// usable, so the retry falls back to letting the transport itself fail.
+// prefers the OS's connectivity verdict over an interface scan; unknown counts as usable.
 func (s *Service) networkLooksUsable() bool {
 	if online, known := s.hostVerdict(); known {
 		return online
@@ -2825,10 +2600,8 @@ func (s *Service) hostOffline() bool {
 	return known && !online
 }
 
-// hostVerdict is the OS's connectivity verdict, except behind an armed kill
-// switch: the OS proves internet by probing, which the lock blocks, so a "no
-// internet" there is blind and the route table decides instead. Without this
-// a lockdown lock could never be told the link is back.
+// hostVerdict is the OS's connectivity verdict, except behind an armed kill switch:
+// the OS proves internet by probing, which the lock blocks, so the route table decides instead.
 func (s *Service) hostVerdict() (online bool, known bool) {
 	if s.hostInternet == nil {
 		return false, false
@@ -2871,9 +2644,8 @@ func (s *Service) clearOfflineHold() {
 	s.offlineHeld = false
 }
 
-// offlineNow reports "no internet" from either the instant unreachable-dial hold
-// or the OS oracle. The hold leads by ~a minute: GetNetworkConnectivityHint only
-// downgrades after its own probes time out, well after a dial already said so.
+// offlineNow reports "no internet" from either the instant unreachable-dial hold, or
+// the OS oracle, which lags: it downgrades only once its own probes finally time out.
 func (s *Service) offlineNow() bool {
 	s.recoveryMu.Lock()
 	held := s.offlineHeld
@@ -2948,16 +2720,11 @@ func (s *Service) healthHeld() bool {
 }
 
 // wireGuardHandshakeStaleAfter is how long a Connected tunnel may go without a
-// completed handshake before it is treated as dead. WireGuard rekeys well
-// inside this on a live link — REKEY_AFTER_TIME is 120s and a session is
-// unusable after REJECT_AFTER_TIME (180s), so with keepalive traffic a fresh
-// handshake always lands sooner. An older one means the peer is unreachable.
+// completed handshake before it is treated as dead. WireGuard rekeys well inside this on a live link.
 const wireGuardHandshakeStaleAfter = 180 * time.Second
 
 // wireGuardHandshakeStale reports whether a Connected tunnel has gone silent:
-// it handshaked at least once (so this isn't a still-connecting tunnel — that
-// case is gated at connect time) but the newest handshake is older than
-// wireGuardHandshakeStaleAfter.
+// it handshaked at least once (so this isn't a still-connecting tunnel.
 func (s *Service) wireGuardHandshakeStale(status state.WireGuardStatus) bool {
 	if status.LastHandshakeUnix <= 0 {
 		return false
@@ -2966,21 +2733,7 @@ func (s *Service) wireGuardHandshakeStale(status state.WireGuardStatus) bool {
 }
 
 // rebuildSilentSession restarts the transport and WireGuard in place after the
-// tunnel has gone silent. The usual cause is a suspend/resume: the transport's
-// session dies with the host's network (a Hysteria2 QUIC connection especially,
-// which the server times out while the machine sleeps) while the transport
-// itself stays up, so WireGuard keeps handshaking into a loopback socket whose
-// far side leads nowhere. Only a fresh transport session recovers that, and no
-// transport can see the breakage from the inside — its local writes still
-// succeed — so a silent WireGuard is the signal to act on.
-//
-// The kill switch is deliberately left armed for the whole rebuild, so the
-// device stays fail-closed while the tunnel is down. Same profile and same
-// options as the live session: this restores what the user asked for, it does
-// not renegotiate it.
-//
-// Runs from Connected (the first rebuild) and from Error (every retry after
-// one failed); anything else means a Disconnect got here first.
+// tunnel has gone silent.
 func (s *Service) rebuildSilentSession(ctx context.Context, profile state.Profile) error {
 	// Claimed before TryLock: Disconnect cancels first and only then takes opMu,
 	// so a cancel that appears after TryLock is invisible to it.
@@ -3006,10 +2759,7 @@ func (s *Service) rebuildSilentSession(ctx context.Context, profile state.Profil
 	}
 
 	// Bring up from the stored profile, not the live copy: bring-up mutates the
-	// live copy's transport LocalPort to whatever port the bridge bound, which
-	// no longer agrees with its own Endpoint line and would make the next
-	// rebind think there is nothing to rewrite. The teardown below still uses
-	// the live copy, since that's what names the tunnel actually running.
+	// live copy's transport LocalPort to whatever port the bridge bound.
 	live := profile
 	if stored, found := s.config.FindProfile(profile.ID); found {
 		profile = stored
@@ -3021,10 +2771,8 @@ func (s *Service) rebuildSilentSession(ctx context.Context, profile state.Profil
 		return fmt.Errorf("allow-lan config transform failed: %w", err)
 	}
 
-	// Bring-up assumes the kill switch is already armed — true across a rebuild
-	// of a live session, but not when recovery is retrying after the firewall
-	// was cleared out from under us (a resume can take the WFP session with it).
-	// Re-arming first keeps the tunnel from coming back up wide open.
+	// Bring-up assumes the kill switch is already armed — true across a rebuild of a
+	// live session, but not when a resume has taken the WFP session out from under us.
 	if !s.killSwitch.Active() {
 		s.logs.Add(state.LogWarn, state.SourceDaemon, "rebuild: kill switch was not armed; re-arming before bring-up")
 		if err := s.killSwitch.Enable(ctx, killSwitchPermitsFor(profile, opts.AllowLAN), opts.AllowLAN, opts.Lockdown); err != nil {
@@ -3093,9 +2841,7 @@ func (s *Service) releaseKeptDevice(live state.Profile) {
 }
 
 // recoverActiveTransport restarts whichever transport is active in-place —
-// v1 has no mid-session hot failover (design spec non-goal), so a dead
-// cloak session gets a fresh cloak restart, a dead naive/reality session
-// gets a fresh naive/reality restart; it never switches kind mid-session.
+// v1 has no mid-session hot failover (design spec non-goal).
 func (s *Service) recoverActiveTransport(ctx context.Context, profile state.Profile, activeKind string) error {
 	if !s.opMu.TryLock() {
 		return errors.New("operation in progress")
@@ -3193,9 +2939,7 @@ func (s *Service) recoverActiveTransport(ctx context.Context, profile state.Prof
 }
 
 // resolveTunnelRef names the live tunnel for the kill switch. The LUID matters
-// most: it points at the device the manager actually created, where a name has
-// to be resolved back through the OS and can land on an adapter of the same name
-// that a rebuild is still tearing down.
+// most, since a name can land on a same-named adapter a rebuild is still tearing down.
 func (s *Service) resolveTunnelRef(ctx context.Context, profile state.WireGuardProfile) platform.TunnelRef {
 	return platform.TunnelRef{
 		Name:        s.resolveWireGuardInterfaceName(ctx, profile),
@@ -3245,9 +2989,7 @@ func (s *Service) setError(detail string) {
 }
 
 // setErrorFromHealthCheck stamps StateError only if the machine is still
-// StateConnected, so a Disconnect that finished inside the health check's
-// unlocked read-then-act window (runHealthCheck holds no lock across it)
-// cannot have its StateDisconnected overwritten by a stale failure.
+// StateConnected, so a concurrent Disconnect can't have its result overwritten.
 func (s *Service) setErrorFromHealthCheck(detail string) {
 	if !s.machine.CompareAndSet([]state.DaemonState{state.StateConnected}, state.StateError, detail) {
 		return
@@ -3308,9 +3050,7 @@ func (s *Service) reconcileStartup(ctx context.Context) {
 		s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("startup tunnel recovery encountered an issue: %v", err))
 		if adopted {
 			// attachToRunningSession already stamped StateConnecting and
-			// attached the profile; left alone that's a permanent stuck
-			// state with a live, unmanaged tunnel and no kill switch. Move
-			// to Error so the health loop's retryDroppedSession takes over.
+			// attached the profile; left alone that's a permanent stuck state with a live, unmanaged tunnel and no kill switch.
 			s.setError(fmt.Sprintf("startup tunnel recovery failed: %v", err))
 		}
 		return
@@ -3321,11 +3061,8 @@ func (s *Service) reconcileStartup(ctx context.Context) {
 	}
 }
 
-// reconcileKillSwitchForAdoptedTunnel arms the kill switch for a tunnel
-// adopted on startup. Without this, adopting a running session on restart
-// skips kill-switch reconciliation entirely (it only ran in the no-tunnel
-// branch above), reaching Connected with the lock unarmed and any persisted
-// Lockdown silently downgraded.
+// reconcileKillSwitchForAdoptedTunnel arms the kill switch for a tunnel adopted on
+// startup, which otherwise reaches Connected with the lock unarmed and Lockdown lost.
 func (s *Service) reconcileKillSwitchForAdoptedTunnel(ctx context.Context, profile state.Profile) {
 	persisted, err := loadKillSwitchState()
 	locked := err == nil && persisted.Active && persisted.Locked
@@ -3444,18 +3181,13 @@ func (s *Service) allConfiguredTunnelNames() []string {
 }
 
 // nonDisconnectingStates is every machine state a background/adoption path is
-// allowed to stamp Connected over; StateDisconnecting is deliberately absent
-// so a Disconnect racing this codepath always wins instead of being
-// overwritten by a stale "recovered active tunnel".
+// allowed to stamp Connected over;
 var nonDisconnectingStates = []state.DaemonState{
 	state.StateDisconnected, state.StateConnecting, state.StateConnected, state.StateError,
 }
 
-// attachToRunningSession adopts a WireGuard tunnel that is already up rather
-// than rebuilding it. preferredTransport is what the user asked for, which
-// decides what the adopted session is taken to be running over; "" (the
-// startup path, which has no record of it) falls back to cloak, the one
-// transport every profile carries.
+// attachToRunningSession adopts a WireGuard tunnel already up rather than rebuilding
+// it. preferredTransport decides what it's taken to run over; "" falls back to cloak.
 func (s *Service) attachToRunningSession(ctx context.Context, profile state.Profile, preferredTransport string) (bool, error) {
 	status, err := s.wg.Status(ctx, profile.WireGuard)
 	if err != nil {
@@ -3503,11 +3235,7 @@ func (s *Service) attachToRunningSession(ctx context.Context, profile state.Prof
 }
 
 // restoreTransportForAdoption makes sure kind's bridge is actually live for a
-// tunnel adopted from a previous session, starting it if the manager reports
-// it down. Previously this only ever restored Cloak regardless of what the
-// caller asked for, so adopting a reality/hysteria2/naive/shadowsocks session
-// silently ran Cloak instead — a bridge the tunnel's Endpoint was never
-// pointed at.
+// tunnel adopted from a previous session, starting it if the manager reports it down.
 func (s *Service) restoreTransportForAdoption(ctx context.Context, profile *state.Profile, kind string) error {
 	switch kind {
 	case "cloak":
@@ -3658,9 +3386,8 @@ func (s *Service) cloakStatusForProfile(ctx context.Context, profile state.Profi
 	owners, err := platform.UDPPortOwners(ctx, profile.Cloak.LocalPort, []int{os.Getpid()})
 	if err != nil {
 		if errors.Is(err, platform.ErrUDPPortOwnersUnsupported) {
-			// Unknown, not "no owner": on platforms where the probe itself is
-			// unsupported this always errors, and treating that as confirmed-dead
-			// would restart a Cloak that may well still be alive on this port.
+			// Unknown, not "no owner": where the probe itself is unsupported this always
+			// errors, and treating that as confirmed-dead could restart a still-live Cloak.
 			cloakStatus.Running = true
 			return cloakStatus
 		}
@@ -3676,16 +3403,8 @@ func (s *Service) cloakStatusForProfile(ctx context.Context, profile state.Profi
 	return cloakStatus
 }
 
-// setCurrentProfile and clearCurrentProfile release profileMu before touching
-// the probe schedule: recoveryMu is taken on its own everywhere else, and
-// nesting it under profileMu here would be the only place with an ordering.
-// deepCopyProfile independently copies profile's slices and its transport
-// pointers (Naive, Reality, Hysteria2, Shadowsocks, Snowflake), mirroring what
-// state's own (unexported) cloneProfile does for the config store. Without
-// this, setCurrentProfile/getCurrentProfile only copied the WireGuard slices
-// and left every transport pointer aliased, so e.g. rebuildSilentSession's
-// profile.Naive.LocalPort write could clobber a copy another caller was
-// concurrently reading, outside profileMu.
+// deepCopyProfile independently copies profile's slices and transport pointers, mirroring
+// state's own cloneProfile so setCurrentProfile/getCurrentProfile never alias caller state.
 func deepCopyProfile(profile state.Profile) state.Profile {
 	out := profile
 	out.WireGuard.DNS = append([]string(nil), profile.WireGuard.DNS...)
@@ -3832,8 +3551,7 @@ func parseWireGuardListenPort(configText string) (int, bool) {
 }
 
 // rewriteLoopbackEndpointPort replaces the port in "Endpoint = 127.0.0.1:<n>"
-// lines of a WireGuard config. Returns the rewritten text and whether any
-// replacement was made.
+// lines of a WireGuard config. Returns the rewritten text and whether any replacement was made.
 func rewriteLoopbackEndpointPort(configText string, newPort int) (string, bool) {
 	if !wgLoopbackEndpointPattern.MatchString(configText) {
 		return configText, false
@@ -3844,8 +3562,6 @@ func rewriteLoopbackEndpointPort(configText string, newPort int) (string, bool) 
 
 // rewriteWireGuardEndpoint repoints every "Endpoint =" line at endpoint.
 // Returns the rewritten text and whether there was a line to rewrite.
-// ReplaceAllStringFunc rather than ReplaceAllString so a "$" in endpoint is
-// never read as a capture-group reference.
 func rewriteWireGuardEndpoint(configText, endpoint string) (string, bool) {
 	if !wgEndpointPattern.MatchString(configText) {
 		return configText, false
@@ -3860,14 +3576,8 @@ func rewriteWireGuardEndpoint(configText, endpoint string) (string, bool) {
 	return rewritten, true
 }
 
-// snowflakeHosts extracts the static hostnames Snowflake rendezvous touches
-// directly: the broker (or its front domains, when domain fronting is
-// configured), the AMP cache, and any STUN/TURN servers. Unlike the other
-// transports' single fixed RemoteHost, these are rendezvous-only endpoints —
-// once WebRTC negotiation completes, the actual data plane runs to a
-// volunteer proxy peer whose address is discovered dynamically per-session
-// and can't be known (or permitted by hostname) ahead of time. Kill-switch
-// coverage here is therefore best-effort for the rendezvous phase only.
+// snowflakeHosts extracts the static hostnames Snowflake rendezvous touches directly:
+// the broker (or its front domains), the AMP cache, and any STUN/TURN servers.
 func snowflakeHosts(p *state.SnowflakeProfile) []string {
 	if p == nil {
 		return nil
@@ -3924,19 +3634,8 @@ func stunHost(raw string) string {
 	return raw
 }
 
-// killSwitchPermits is the cloak, naive, reality, hysteria2, and snowflake
-// endpoints (whichever are configured) plus any bypassHosts that need direct
-// reachability (e.g. Pangea hub for re-provisioning during a switch). All
-// configured transport endpoints must be permitted here — the kill switch
-// arms once, before Connect knows which transport will actually succeed
-// (bringUpAfterKillSwitch / startTransport runs after this), so permitting
-// only Cloak's host would have the kill switch itself block a fallback or
-// explicitly-selected transport's very first connection attempt whenever
-// transports use different remote hosts (the normal case — see
-// hub/config/nodes.json, where each transport's remoteHost is typically a
-// distinct domain).
-// killSwitchPermitsFor adds nothing for Allow LAN: a resolver the profile names is
-// routed into the tunnel, so a permit for it would only carry queries once the tunnel is down.
+// killSwitchPermits is the cloak, naive, reality, hysteria2, and snowflake endpoints
+// (whichever are configured) plus any bypassHosts needing direct reachability.
 func killSwitchPermitsFor(profile state.Profile, _ bool) []string {
 	return killSwitchPermits(profile)
 }
@@ -3955,16 +3654,8 @@ func killSwitchPermits(profile state.Profile) []string {
 	return out
 }
 
-// transportPermitHosts is where each non-Cloak transport can be reached.
-//
-// The hub's own addresses (TransportEndpointIPs) are used whenever it sent
-// any, and then the node hostnames are left out entirely: resolving one costs
-// a cleartext DNS query that tells the user's ISP exactly which node they are
-// about to use, and behind an engaged Lockdown lock it cannot be answered at
-// all — leaving every transport but Cloak blocked by our own kill switch.
-//
-// Hostnames remain the fallback for a profile the hub gave no addresses for
-// (one provisioned by an older build, or hand-written).
+// transportPermitHosts is where each non-Cloak transport can be reached. Node hostnames
+// are left out entirely, since resolving one leaks the node to the ISP.
 func transportPermitHosts(profile state.Profile) []string {
 	out := make([]string, 0, 4)
 	for _, ip := range profile.TransportEndpointIPs {
@@ -3972,9 +3663,8 @@ func transportPermitHosts(profile state.Profile) []string {
 			out = append(out, ip)
 		}
 	}
-	// Snowflake's rendezvous hosts are never covered by the hub's endpoint
-	// IPs (those name the node, not the broker/STUN infrastructure), so they
-	// must be appended regardless of which branch below runs.
+	// Snowflake's rendezvous hosts are never covered by the hub's endpoint IPs (those
+	// name the node, not the broker), so they're appended regardless of which branch runs.
 	if len(out) > 0 {
 		return append(out, snowflakeHosts(profile.Snowflake)...)
 	}
@@ -4002,10 +3692,7 @@ func transportPermitHosts(profile state.Profile) []string {
 }
 
 // withTransportBypassHosts adds the cloak, naive, reality, hysteria2,
-// shadowsocks and snowflake (whichever are configured) remote hosts to the bypass
-// list, so no transport's own connection to its remote endpoint gets routed
-// back through the tunnel it's establishing — same "arm before the transport
-// is chosen" reasoning as killSwitchPermits above.
+// shadowsocks and snowflake (whichever are configured) remote hosts to the bypass list.
 func withTransportBypassHosts(profile state.Profile) state.WireGuardProfile {
 	copyProfile := profile.WireGuard
 	copyProfile.DNS = append([]string(nil), profile.WireGuard.DNS...)
@@ -4019,8 +3706,7 @@ func withTransportBypassHosts(profile state.Profile) state.WireGuardProfile {
 		copyProfile.BypassHosts = append(copyProfile.BypassHosts, host)
 	}
 	// Same source as the kill-switch permits, and for the same reason: the
-	// hub's addresses when it sent any, never a node hostname we would have to
-	// look up (see transportPermitHosts).
+	// hub's addresses when it sent any, never a node hostname we would have to look up (see transportPermitHosts).
 	copyProfile.BypassHosts = append(copyProfile.BypassHosts, transportPermitHosts(profile)...)
 	return copyProfile
 }

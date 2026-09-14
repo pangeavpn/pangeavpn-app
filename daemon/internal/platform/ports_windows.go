@@ -13,10 +13,8 @@ import (
 	"strings"
 )
 
-// ErrUDPPortOwnersUnsupported mirrors ports_other.go's sentinel so
-// cross-platform callers can reference it unconditionally with errors.Is; the
-// Windows implementations below never return it, since the lookup here is
-// actually supported.
+// ErrUDPPortOwnersUnsupported mirrors ports_other.go's sentinel so callers can
+// reference it with errors.Is; Windows never returns it, since the lookup here works.
 var ErrUDPPortOwnersUnsupported = errors.New("udp port owner lookup unsupported on this platform")
 
 // taskkillProcessNotFoundExitCode is what taskkill.exe returns when the PID
@@ -128,7 +126,7 @@ func queryUDPPortOwners(ctx context.Context, port int) (map[int]struct{}, error)
 	}
 
 	pids := map[int]struct{}{}
-	for _, line := range strings.Split(strings.ReplaceAll(output, "\r\n", "\n"), "\n") {
+	for line := range strings.SplitSeq(strings.ReplaceAll(output, "\r\n", "\n"), "\n") {
 		fields := strings.Fields(strings.TrimSpace(line))
 		if len(fields) < 4 {
 			continue

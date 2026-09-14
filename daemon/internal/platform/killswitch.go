@@ -15,17 +15,10 @@ import (
 )
 
 // KillSwitch enforces a network lock that blocks all outbound traffic except
-// loopback and the VPN transport endpoint. It is enabled automatically during
-// the connect flow, kept active on connect failure (fail-closed), and cleared
-// only by an explicit disconnect.
+// loopback and the VPN transport endpoint; only an explicit disconnect clears it.
 type KillSwitch interface {
-	// Enable blocks all outbound except loopback + resolved IPs from each
-	// endpointHost. When allowLAN, also permits RFC1918/link-local/multicast/broadcast.
-	// An empty endpointHosts engages a pure block-all lock (no VPN session) —
-	// used when Lockdown is turned on while disconnected. When locked, the
-	// persisted state is marked so startup reconciliation re-applies the lock
-	// instead of clearing it as stale.
-	// Re-entrant: re-applies rules with new endpoints without opening the lock.
+	// Enable blocks outbound traffic except loopback and resolved endpointHost IPs
+	// (empty hosts = pure block-all Lockdown); re-entrant, and locked persists.
 	Enable(ctx context.Context, endpointHosts []string, allowLAN bool, locked bool) error
 
 	// Update adds an allow rule for the active tunnel interface so that
@@ -40,19 +33,15 @@ type KillSwitch interface {
 	Active() bool
 }
 
-// TunnelRef identifies the tunnel adapter a permit is scoped to: Name is what
-// pf and nftables match on, WindowsLUID is the WFP condition. The LUID is
-// carried rather than resolved from Name because a rebuild recreates the
-// adapter under the same name a second after destroying it, and a lookup in
-// that window can still return the one on its way out.
+// TunnelRef scopes a permit to an adapter: Name is what pf/nftables match on;
+// WindowsLUID avoids a by-name lookup racing a rebuild that reuses the name.
 type TunnelRef struct {
 	Name        string
 	WindowsLUID uint64
 }
 
 // LANAllowPrefixes are the ranges the kill switch permits when allowLAN is
-// set. Keep in sync with wg.LANExcludePrefixes — traffic that leaves the
-// tunnel must also be allowed by the firewall.
+// set. Keep in sync with wg.LANExcludePrefixes.
 var LANAllowPrefixes = []string{
 	"10.0.0.0/8",
 	"172.16.0.0/12",
@@ -93,8 +82,7 @@ type KillSwitchState struct {
 	EndpointIPs     []string `json:"endpointIPs"`
 	TunnelInterface string   `json:"tunnelInterface,omitempty"`
 	// Locked marks an intentional Lockdown lock that must survive daemon
-	// restarts — startup reconciliation re-applies it rather than clearing it
-	// as stale crash leftover.
+	// restarts rather than being cleared as stale crash leftover.
 	Locked bool `json:"locked,omitempty"`
 }
 
@@ -112,9 +100,7 @@ var lookupResolverIP = func(ctx context.Context, network, host string) ([]net.IP
 var endpointResolveTimeout = 15 * time.Second
 
 // EndpointResolveWarn, when set, is called for each endpoint host that could
-// not be resolved and was therefore skipped instead of being permitted through
-// the kill switch. Wired to the daemon log store in cmd/daemon so a transport
-// silently losing its permit is visible in support logs.
+// not be resolved and was therefore skipped. Wired to the daemon log store.
 var EndpointResolveWarn func(host string, err error)
 
 // KillSwitchWarnf reports a degraded-but-still-closed kill switch (stale permit
@@ -143,15 +129,10 @@ func (n *noopKillSwitch) Update(_ context.Context, _ TunnelRef) error           
 func (n *noopKillSwitch) Clear(_ context.Context) error                              { return nil }
 func (n *noopKillSwitch) Active() bool                                               { return false }
 
-// ---------------------------------------------------------------------------
-// Shared helpers for state persistence
-// ---------------------------------------------------------------------------
-
 var stateMu sync.Mutex
 
-// killSwitchStatePathFn is replaced by tests. AppSupportDir ignores its env
-// override when privileged, which would leave an elevated test run sharing the
-// real installation's state file.
+// killSwitchStatePathFn is replaced by tests: AppSupportDir ignores its env
+// override when privileged, which would share the real installation's file.
 var killSwitchStatePathFn = defaultKillSwitchStatePath
 
 func killSwitchStatePath() (string, error) {
@@ -212,10 +193,8 @@ func saveKillSwitchState(st KillSwitchState) error {
 	return nil
 }
 
-// ErrKillSwitchStateUnreadable distinguishes "state file absent" (nil error,
-// zero value — nothing was ever engaged) from "state file present but could
-// not be read" (this sentinel) so callers don't treat the latter as a clean
-// slate: a stuck lock may still be live on the platform and needs probing.
+// ErrKillSwitchStateUnreadable distinguishes "state file absent" (nothing was
+// ever engaged) from "present but unreadable" (a stuck lock may still be live).
 var ErrKillSwitchStateUnreadable = errors.New("kill switch state file exists but could not be read")
 
 func loadKillSwitchState() (KillSwitchState, error) {
@@ -263,9 +242,8 @@ func LoadKillSwitchStatePublic() (KillSwitchState, error) {
 	return loadKillSwitchState()
 }
 
-// persistLockedUpgrade records a Lockdown flag change on a re-arm that needs
-// no rule change. Callers pass the caller's actual desired Locked state (not
-// a value echoed from disk), so raising and lowering are both intentional.
+// persistLockedUpgrade records a Lockdown flag change on a re-arm that needs no
+// rule change. locked is the caller's desired state, not one echoed from disk.
 func persistLockedUpgrade(prev KillSwitchState, locked bool) error {
 	if prev.Locked == locked {
 		return nil
@@ -278,9 +256,7 @@ func persistLockedUpgrade(prev KillSwitchState, locked bool) error {
 }
 
 // updateTunnelInterfaceState records the tunnel interface permitted through an
-// already-engaged kill switch. Callers that then re-apply rules from the
-// returned state must check err — a fallback to a stale/empty
-// TunnelInterface silently drops the tunnel's permit.
+// already-engaged kill switch. Callers must check err, not fall back to prev.
 func updateTunnelInterfaceState(tunnel string) (KillSwitchState, error) {
 	prev, err := loadKillSwitchState()
 	if err != nil {

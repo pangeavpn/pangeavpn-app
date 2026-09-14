@@ -12,10 +12,8 @@ export interface HubMethods {
   normal: boolean;
 }
 
-// Attempt order. directIp is first because it needs no lookup; fronted comes
-// after our own paths because it hands a third party the timing of our traffic
-// (never its content — see secureChannel), but before normal, which is the only
-// one that puts the hub's name on the wire in cleartext.
+// Attempt order: directIp needs no lookup, fronted only leaks timing (see
+// secureChannel), normal puts the hub's name on the wire in cleartext.
 export const HUB_METHOD_ORDER: readonly HubMethod[] = [
   "directIp",
   "shadowsocks",
@@ -30,14 +28,8 @@ export const DEFAULT_HUB_METHODS: HubMethods = {
   normal: false
 };
 
-/**
- * Bumped when a method's default changes in a way existing installs should
- * inherit. Everything the old default wrote to disk looks identical to a
- * deliberate choice, so without this an install would stay frozen on a value
- * the user never actually picked. normalizeHubMethods re-applies the changed
- * defaults once for anything stored below this; from then on the stored value
- * wins. Persisted inside the hubMethods object as `rev`.
- */
+/** Bumped when a method's default changes; normalizeHubMethods re-applies the
+ *  new default once for anything stored below this. Persisted as `rev`. */
 export const HUB_METHODS_REV = 1;
 
 /** Methods whose default flipped on at HUB_METHODS_REV 1. */
@@ -86,9 +78,8 @@ export function normalizeHubMethods(raw: unknown): HubMethods {
       }
     }
   } else {
-    // Migration: directIpEnabled defaulted true, and directIpOnly defaulted
-    // true meaning "never touch the domain", so normal is its inverse. A file
-    // this old predates both newer methods, which take their current default.
+    // Migration: directIpOnly defaulted true ("never touch the domain"), so
+    // normal is its inverse; a file this old predates the two newer methods.
     methods = {
       directIp: source.directIpEnabled !== false,
       shadowsocks: DEFAULT_HUB_METHODS.shadowsocks,

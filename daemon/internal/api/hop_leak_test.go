@@ -1,6 +1,7 @@
 package api
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -8,9 +9,7 @@ import (
 )
 
 // The exit node's address must never reach the kill-switch permit list or the
-// WireGuard bypass list. The client dials only the entry; permitting the exit
-// would punch a hole for a host nothing connects to, and exclude it from
-// AllowedIPs so traffic aimed at it would leave in the clear.
+// WireGuard bypass list — that would leak traffic aimed at a host nothing dials.
 const (
 	entryIP = "192.0.2.10"
 	exitIP  = "198.51.100.20"
@@ -48,7 +47,7 @@ func TestKillSwitchPermitsExcludeTheExitNode(t *testing.T) {
 			t.Errorf("kill switch permits the exit node %q: %v", exitIP, permits)
 		}
 	}
-	if !containsHost(permits, entryIP) {
+	if !slices.Contains(permits, entryIP) {
 		t.Errorf("kill switch does not permit the entry node %q: %v", entryIP, permits)
 	}
 }
@@ -61,7 +60,7 @@ func TestBypassHostsExcludeTheExitNode(t *testing.T) {
 			t.Errorf("bypass list routes the exit node %q outside the tunnel: %v", exitIP, bypass)
 		}
 	}
-	if !containsHost(bypass, entryIP) {
+	if !slices.Contains(bypass, entryIP) {
 		t.Errorf("bypass list omits the entry node %q, so its dial would recurse: %v", entryIP, bypass)
 	}
 }
@@ -76,13 +75,4 @@ func TestMultihopWireGuardEndpointStaysLoopback(t *testing.T) {
 	if !strings.Contains(config, "Endpoint = 127.0.0.1") {
 		t.Errorf("wireguard peer endpoint is not loopback:\n%s", config)
 	}
-}
-
-func containsHost(hosts []string, want string) bool {
-	for _, host := range hosts {
-		if host == want {
-			return true
-		}
-	}
-	return false
 }

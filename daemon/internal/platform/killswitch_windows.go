@@ -341,10 +341,8 @@ func (ks *windowsKillSwitch) Update(ctx context.Context, tunnel TunnelRef) error
 	}
 	ks.retireStaleTunnelFilters()
 
-	// App traffic hits the WFP ALE_AUTH_CONNECT layer before reaching the TUN
-	// adapter. Without a permit scoped to the tunnel interface LUID, the
-	// block-all-outbound rule drops every packet at socket level — explaining
-	// "general failure" on ping even though the WireGuard handshake succeeds.
+	// Without a permit scoped to the tunnel interface LUID, block-all-outbound
+	// drops every app socket at the ALE_AUTH_CONNECT layer despite a live handshake.
 	filterId, err := ks.engine.addPermitTunnelInterface(luid)
 	if err != nil {
 		return fmt.Errorf("kill switch update: permit tunnel interface: %w", err)
@@ -374,12 +372,7 @@ func (ks *windowsKillSwitch) retireStaleTunnelFilters() {
 }
 
 // resolveTunnelLUID prefers the LUID the caller already holds for the live
-// device, falling back to a name lookup only when it has none.
-//
-// The fallback is what this exists to avoid: after a rebuild
-// GetAdaptersAddresses can still return the dying adapter's index, and a permit
-// naming an interface that no longer exists leaves block-all-outbound dropping
-// every application socket while WireGuard goes on handshaking.
+// device: after a rebuild, a name lookup can still return the dying adapter's index.
 func resolveTunnelLUID(tunnel TunnelRef) (uint64, error) {
 	if tunnel.WindowsLUID != 0 {
 		return tunnel.WindowsLUID, nil
@@ -442,10 +435,8 @@ func (ks *windowsKillSwitch) Clear(ctx context.Context) error {
 		engine, ownsEngine = opened, true
 	}
 
-	// Sweep the whole sublayer first. Endpoint, LAN and tunnel permits carry
-	// engine-assigned keys, so a daemon that died without clearing left ones
-	// only enumeration can still name — and the sublayer delete below fails
-	// while any of them survive, which would strand the machine blocked.
+	// Sweep the whole sublayer first: engine-keyed permits from a dead daemon
+	// are only reachable by enumeration, and the sublayer delete fails while any survive.
 	if _, err := engine.deleteFiltersInSublayer(pangeaVPNSublayerKey, anyFilter); err != nil {
 		errs = append(errs, fmt.Sprintf("sublayer sweep: %v", err))
 	}

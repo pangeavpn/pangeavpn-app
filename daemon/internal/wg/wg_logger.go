@@ -12,9 +12,8 @@ import (
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/state"
 )
 
-// newWGLogger routes wireguard-go log output into the daemon LogStore. Neither
-// field may be nil: the device calls both without a nil check, so silence has
-// to be DiscardLogf rather than an absent function.
+// newWGLogger routes wireguard-go log output into the daemon LogStore.
+// Both fields must be non-nil: the device calls them without a nil check.
 func newWGLogger(logs *state.LogStore) *device.Logger {
 	logger := &device.Logger{
 		Verbosef: device.DiscardLogf,

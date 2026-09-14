@@ -22,9 +22,8 @@ export const DOH_TLS_OPTIONS = {
 const MAX_CONNECT_HEAD = 8192;
 const MAX_RESPONSE_BODY = 25 * 1024 * 1024;
 
-// host:port or bare host, no CRLF/whitespace/control characters — used for
-// both the CONNECT target and the Host header, since an injected value in
-// either opens a tunnel to an arbitrary destination.
+// host:port or bare host, no CRLF/whitespace/control characters — an injected
+// value in either the CONNECT target or Host header opens a tunnel to any destination.
 const SAFE_HOST_PATTERN = /^[A-Za-z0-9.:_-]+$/;
 
 function isSafeHost(value: string): boolean {
@@ -117,9 +116,7 @@ export interface ConnectProxyOptions {
 }
 
 /** HTTPS to `target` (hostname or IP) through a local CONNECT proxy. Unlike
- *  fetchDohResolved this validates the certificate normally: that one dials an
- *  IP with an empty SNI to hide the host from DPI, whereas here the tunnel
- *  already hides it, so there is nothing to trade the check away for. */
+ *  fetchDohResolved this validates the cert normally: the tunnel already hides the host. */
 export function fetchViaConnectProxy(
   proxyPort: number,
   ip: string,
@@ -179,9 +176,8 @@ export function fetchViaConnectProxy(
 
           const req = https.request(
             {
-              // No `agent` key at all: Node consults createConnection only
-              // when the request has no agent. Passing agent:false makes it
-              // build one, which then dials host:port itself and ignores this.
+              // No `agent` key at all: Node consults createConnection only when the
+              // request has no agent; agent:false would build one and ignore this.
               createConnection: () => tlsSocket as tls.TLSSocket,
               // Ignored because createConnection supplies the socket, but the
               // client still builds a request authority from them.

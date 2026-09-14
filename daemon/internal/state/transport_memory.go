@@ -11,9 +11,8 @@ import (
 	"time"
 )
 
-// maxTransportMemoryEntries caps how many networks are remembered; the
-// least-recently-updated entries are pruned past it. High enough to cover every
-// network a user realistically revisits, low enough to bound the file.
+// maxTransportMemoryEntries caps how many networks are remembered; entries
+// past it are pruned least-recently-updated first.
 const maxTransportMemoryEntries = 64
 
 // TransportMemoryEntry records which transport last established a tunnel on a
@@ -28,9 +27,7 @@ type transportMemoryData struct {
 }
 
 // TransportMemoryStore is a small persisted map of network key -> last-good
-// transport. It is a best-effort optimization cache, not authoritative config:
-// a missing or corrupt file resets to empty rather than failing, since the
-// cascade always falls back to trying every transport.
+// transport; a best-effort cache, not authoritative config.
 type TransportMemoryStore struct {
 	mu   sync.Mutex
 	path string

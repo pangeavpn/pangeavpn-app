@@ -221,9 +221,8 @@ func (f *fakeInPlaceWGManager) PinEndpointRoutes(_ context.Context, profile stat
 	return nil
 }
 
-// TestSwitch_InPlaceManagerKeepsDevice proves a switch neither stops the
-// device nor skips pre-routing the new endpoints when the manager can
-// reconfigure in place.
+// TestSwitch_InPlaceManagerKeepsDevice proves a switch neither stops the device
+// nor skips pre-routing new endpoints when the manager can reconfigure in place.
 func TestSwitch_InPlaceManagerKeepsDevice(t *testing.T) {
 	a, b := switchProfilePair()
 	wgMgr := &fakeInPlaceWGManager{}

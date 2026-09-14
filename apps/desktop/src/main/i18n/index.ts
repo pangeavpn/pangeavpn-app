@@ -1,6 +1,5 @@
-// Separate from the renderer catalogue: CommonJS here can't import its ESM
-// at runtime, but a type-only import is erased and stays a compile-time link.
-// Non-English values are machine translations pending native review.
+// CommonJS here can't import the renderer's ESM catalogue at runtime, but a
+// type-only import is erased and stays a compile-time link.
 import type { Locale } from "../../renderer/i18n/messages.js";
 
 export type MainLocale = Locale;

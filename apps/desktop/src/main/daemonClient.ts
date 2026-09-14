@@ -162,13 +162,8 @@ export class DaemonClient implements PostQuantumProvider {
     return this.request<OkResponse>("POST", "/killswitch/clear", undefined, 15000);
   }
 
-  /**
-   * Ask the daemon to let these IPs through an engaged kill switch. Used before
-   * provisioning under Lockdown: the lock blocks everything, including the hub
-   * the app must reach to get a profile. IP literals only — the lock blocks DNS
-   * too, so a hostname could never be resolved behind it. An empty list lets
-   * the daemon fall back to the hub IP stored with the last profile.
-   */
+  /** IP literals only: a Lockdown kill switch blocks DNS too, so a hostname
+   *  could never resolve. Empty list falls back to the last profile's hub IP. */
   async permitHosts(hosts: string[]): Promise<OkResponse> {
     return this.request<OkResponse>("POST", "/killswitch/permit", { hosts }, 15000);
   }

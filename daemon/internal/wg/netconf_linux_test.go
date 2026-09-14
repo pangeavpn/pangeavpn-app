@@ -57,10 +57,8 @@ func TestEnsureSessionEndpointRoutes_NoRoutesIsANoOp(t *testing.T) {
 	}
 }
 
-// TestLinuxBypassGateway_ReadsTheLiveTable exercises the election against
-// whatever the machine actually has. It asserts shape rather than a specific
-// gateway, since CI runners differ, but a reported gateway must be a usable
-// unicast address rather than the unspecified one a tunnel route carries.
+// TestLinuxBypassGateway_ReadsTheLiveTable checks shape rather than a specific
+// gateway (CI runners differ): it must be usable unicast, never unspecified.
 func TestLinuxBypassGateway_ReadsTheLiveTable(t *testing.T) {
 	gateway, found, err := linuxBypassGateway(0)
 	if err != nil {
@@ -79,9 +77,8 @@ func TestLinuxBypassGateway_ReadsTheLiveTable(t *testing.T) {
 	}
 }
 
-// TestLinuxBypassGateway_SkipsTheTunnelsOwnDefault proves the election cannot
-// pick the tunnel it is meant to bypass. Excluding the live default's own link
-// must change the answer rather than return it again.
+// TestLinuxBypassGateway_SkipsTheTunnelsOwnDefault proves excluding the live
+// default's own link changes the answer rather than returning it again.
 func TestLinuxBypassGateway_SkipsTheTunnelsOwnDefault(t *testing.T) {
 	gateway, found, err := linuxBypassGateway(0)
 	if err != nil || !found {

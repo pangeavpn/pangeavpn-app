@@ -35,10 +35,8 @@ type nlNetworkConnectivityHint struct {
 	Roaming              byte
 }
 
-// HostInternet reports the OS's own aggregate connectivity verdict — the same
-// signal behind the Windows "no internet" tray indicator. online is meaningful
-// only when known is true; known is false on pre-2004 Windows (no such API) or
-// an Unknown/Hidden verdict, so callers fall back to their interface heuristic.
+// HostInternet reports the OS's aggregate connectivity verdict — the "no
+// internet" tray signal. known is false when online would be meaningless.
 func HostInternet() (online bool, known bool) {
 	if err := procGetNetworkConnectivityHint.Find(); err != nil {
 		return false, false
@@ -66,8 +64,7 @@ type windowsRoute struct {
 }
 
 // PhysicalDefaultRoute names the physical interface holding the lowest-metric
-// IPv4 default route and its gateway. Unlike HostInternet it needs no probe,
-// so it still answers behind the kill switch.
+// IPv4 default route and its gateway; unlike HostInternet it needs no probe.
 func PhysicalDefaultRoute() (iface, gateway string, err error) {
 	table, err := winipcfg.GetIPForwardTable2(windows.AF_INET)
 	if err != nil {

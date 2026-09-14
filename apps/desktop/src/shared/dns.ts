@@ -1,8 +1,5 @@
-/**
- * Parse custom DNS servers from the settings UI or settings.json.
- * An empty value means "use the VPN server default"; null means invalid input.
- * The WireGuard daemon currently supports IPv4 DNS servers only.
- */
+/** Empty means "use the VPN server default"; null means invalid input.
+ *  The WireGuard daemon currently supports IPv4 DNS servers only. */
 export function normalizeCustomDns(value: unknown): string[] | null {
   let values: unknown[];
   if (typeof value === "string") {

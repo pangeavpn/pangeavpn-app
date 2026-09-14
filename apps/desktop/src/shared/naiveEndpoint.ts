@@ -1,13 +1,7 @@
 import { isIpLiteral } from "./ipLiteral.ts";
 
-/**
- * Splits the naive endpoint into the address to dial and the TLS name.
- *
- * The engine builds its `--proxy` URL from `serverName` and, when that differs
- * from `remoteHost`, installs a `MAP <serverName> <remoteHost>` resolver rule,
- * so the dial needs no DNS. Passing the node domain as `remoteHost` collapses
- * both, drops the MAP rule, and forces a lookup the kill switch blocks.
- */
+/** Splits the naive endpoint into the address to dial and the TLS name. The
+ *  engine MAPs serverName to remoteHost, so remoteHost must be an address, not a domain. */
 export interface NaiveEndpointInput {
   remoteHost: string;
   remoteIp?: string;
@@ -29,11 +23,7 @@ function firstNonBlank(...values: (string | undefined)[]): string {
   return "";
 }
 
-
-/**
- * @param naive the hub's naive block for this node
- * @param nodeIp the node address the hub already named (cloak.remoteHost)
- */
+/** nodeIp is the node address the hub already named (cloak.remoteHost). */
 export function resolveNaiveEndpoint(naive: NaiveEndpointInput, nodeIp: string): NaiveEndpoint {
   const host = firstNonBlank(naive.remoteHost);
   // nodeIp is the last resort so serverName is never blank even when the hub
@@ -41,9 +31,7 @@ export function resolveNaiveEndpoint(naive: NaiveEndpointInput, nodeIp: string):
   const serverName = firstNonBlank(naive.serverName, host, nodeIp);
   const perTransportIp = firstNonBlank(naive.remoteIp);
 
-  // remoteIp first, the same precedence Reality and Hysteria2 use — the hub
-  // naming an address for naive specifically always wins. It must still be an
-  // address: junk here must not become the dial target.
+  // remoteIp first, same precedence as Reality/Hysteria2, but only if it's an address.
   if (perTransportIp && isIpLiteral(perTransportIp)) {
     return { remoteHost: perTransportIp, serverName };
   }

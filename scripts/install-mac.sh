@@ -273,8 +273,7 @@ if ! sudo codesign --force --sign - "$SUPPORT_DIR/PangeaDaemon"; then
 fi
 
 # ── Auth token ───────────────────────────────────────────────────────────
-# The daemon creates its own token on first start, owned root:admin, mode
-# 640 — any pre-created file here would just be overwritten and discarded.
+# The daemon creates its own token on first start; nothing to pre-create here.
 REAL_USER="${SUDO_USER:-}"
 if [[ -z "$REAL_USER" || "$REAL_USER" == "root" ]]; then
     REAL_USER="$(id -un)"
@@ -317,8 +316,7 @@ sudo chown root:wheel "$DAEMON_PLIST"
 sudo chmod 644 "$DAEMON_PLIST"
 
 # ── Hold a persisted lock from boot ─────────────────────────────────────────
-# macOS loads /etc/pf.conf at boot but leaves pf disabled, so a lock the last
-# session left would not hold until the daemon had started and re-armed it.
+# pf loads at boot but stays disabled, so a persisted lock needs re-arming here.
 sudo tee "$PF_PLIST" > /dev/null <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

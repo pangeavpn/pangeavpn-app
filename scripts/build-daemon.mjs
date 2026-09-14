@@ -70,10 +70,8 @@ try {
   process.exitCode = 1;
 }
 
-// Strips comments so a commented-out <supportedOS> cannot satisfy the check
-// below. Repeats because one pass can splice a fresh <!-- out of the
-// surrounding text, and rejects a leftover opener: that means an unterminated
-// comment, so the rest of the file is not trustworthy to pattern-match.
+// Strips comments (repeatedly, since one pass can splice a fresh <!-- together) so a
+// commented-out <supportedOS> can't pass; a leftover opener means the file is untrustworthy.
 function stripHtmlComments(text) {
   let out = text;
   let previous;

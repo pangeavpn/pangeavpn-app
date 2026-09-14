@@ -52,9 +52,7 @@ const (
 // be read, so restore leaves it untouched instead of assuming automatic.
 const darwinDNSUnknownMarker = "?"
 
-// ---------------------------------------------------------------------------
-// Interface configuration via ifconfig (non-cgo)
-// ---------------------------------------------------------------------------
+// Interface configuration via ifconfig (non-cgo).
 
 // configureDarwinAddresses assigns CIDR addresses to the named interface.
 func configureDarwinAddresses(interfaceName string, addresses []string) error {
@@ -97,9 +95,7 @@ func bringDarwinInterfaceUp(interfaceName string) error {
 	return nil
 }
 
-// ---------------------------------------------------------------------------
-// Route management via route(8)
-// ---------------------------------------------------------------------------
+// Route management via route(8).
 
 // darwinDefaultGatewayV4 returns the IPv4 default gateway address.
 func darwinDefaultGatewayV4() (string, error) {
@@ -111,8 +107,8 @@ func darwinDefaultGatewayV4() (string, error) {
 	scanner := bufio.NewScanner(bytes.NewReader(out))
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
-		if strings.HasPrefix(line, "gateway:") {
-			gw := strings.TrimSpace(strings.TrimPrefix(line, "gateway:"))
+		if rest, ok := strings.CutPrefix(line, "gateway:"); ok {
+			gw := strings.TrimSpace(rest)
 			if gw != "" {
 				return gw, nil
 			}
@@ -171,9 +167,8 @@ func removeDarwinEndpointRoutes(routes []routeSpec) {
 	}
 }
 
-// allowedIPsHaveIPv6 reports whether any AllowedIPs prefix is IPv6. The
-// tunnel interface only ever gets IPv4 addresses, so such a prefix can never
-// actually be routed into it.
+// allowedIPsHaveIPv6 reports whether any AllowedIPs prefix is IPv6; such a
+// prefix can never be routed since the tunnel only gets IPv4 addresses.
 func allowedIPsHaveIPv6(allowedIPs []string) bool {
 	for _, prefix := range allowedIPs {
 		if _, family, err := normalizedRoutesForPrefix(prefix); err == nil && family == "inet6" {
@@ -183,12 +178,8 @@ func allowedIPsHaveIPv6(allowedIPs []string) bool {
 	return false
 }
 
-// addDarwinAllowedIPRoutes adds routes for WireGuard allowed-IP prefixes
-// through the tunnel interface.
-//
-// IPv6 prefixes are not installed here since the tunnel has no v6 address to
-// route them to; the caller disables IPv6 system-wide instead (see
-// disableDarwinIPv6ForSession) so that traffic doesn't silently leak.
+// addDarwinAllowedIPRoutes routes WireGuard allowed-IP prefixes through the tunnel. IPv6 is
+// skipped because the tunnel has no v6 address; disableDarwinIPv6ForSession covers that leak.
 func addDarwinAllowedIPRoutes(interfaceName string, allowedIPs []string) error {
 	for _, prefix := range allowedIPs {
 		routePrefixes, family, err := normalizedRoutesForPrefix(prefix)
@@ -220,9 +211,8 @@ func addDarwinAllowedIPRoutes(interfaceName string, allowedIPs []string) error {
 	return nil
 }
 
-// removeDarwinAllowedIPRoutes removes allowed-IP routes. Deletion is scoped
-// to interfaceName so it can never match a physical route with the same
-// prefix (e.g. a split-tunnel 192.168.1.0/24 matching the real LAN route).
+// removeDarwinAllowedIPRoutes removes allowed-IP routes, scoped to
+// interfaceName so it can never match a same-prefix physical route.
 func removeDarwinAllowedIPRoutes(interfaceName string, allowedIPs []string) {
 	for _, prefix := range allowedIPs {
 		routePrefixes, family, err := normalizedRoutesForPrefix(prefix)
@@ -244,9 +234,7 @@ func removeDarwinAllowedIPRoutes(interfaceName string, allowedIPs []string) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// IPv6 lockdown via networksetup (non-cgo)
-// ---------------------------------------------------------------------------
+// IPv6 lockdown via networksetup (non-cgo).
 
 // darwinIPv6State records a network service's IPv6 mode before it was
 // disabled for the session, so it can be restored afterwards.
@@ -262,10 +250,10 @@ func getDarwinIPv6Mode(serviceName string) string {
 	if err != nil {
 		return ""
 	}
-	for _, line := range strings.Split(string(out), "\n") {
+	for line := range strings.SplitSeq(string(out), "\n") {
 		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "IPv6:") {
-			return strings.TrimSpace(strings.TrimPrefix(line, "IPv6:"))
+		if rest, ok := strings.CutPrefix(line, "IPv6:"); ok {
+			return strings.TrimSpace(rest)
 		}
 	}
 	return ""
@@ -293,9 +281,8 @@ func disableDarwinIPv6ForSession() ([]darwinIPv6State, error) {
 	return states, nil
 }
 
-// restoreDarwinIPv6 re-enables IPv6 on services that were disabled for the
-// session. Manual configurations are restored as automatic rather than
-// replayed, since the original address/router are not captured.
+// restoreDarwinIPv6 re-enables IPv6 on services disabled for the session.
+// Manual configs are restored as automatic since the original values aren't captured.
 func restoreDarwinIPv6(states []darwinIPv6State) {
 	for _, s := range states {
 		if strings.EqualFold(s.mode, "LinkLocal") {
@@ -306,9 +293,7 @@ func restoreDarwinIPv6(states []darwinIPv6State) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// DNS management via networksetup (non-cgo)
-// ---------------------------------------------------------------------------
+// DNS management via networksetup (non-cgo).
 
 // listDarwinNetworkServices returns all non-hardware-port network service names.
 func listDarwinNetworkServices() ([]string, error) {
@@ -330,9 +315,8 @@ func listDarwinNetworkServices() ([]string, error) {
 	return services, nil
 }
 
-// getDarwinDNSServers returns the current DNS servers for a network service.
-// Returns nil if DNS is automatic/DHCP, or a single unknown-marker entry if
-// the state could not be determined at all (as opposed to being empty).
+// getDarwinDNSServers returns the current DNS servers for a network service:
+// nil if automatic/DHCP, or a single unknown-marker entry if unreadable.
 func getDarwinDNSServers(serviceName string) []string {
 	out, err := darwinCmdCombined(networksetupPath, "-getdnsservers", serviceName)
 	if err != nil {
@@ -346,7 +330,7 @@ func getDarwinDNSServers(serviceName string) []string {
 	}
 
 	var servers []string
-	for _, line := range strings.Split(trimmed, "\n") {
+	for line := range strings.SplitSeq(trimmed, "\n") {
 		server := strings.TrimSpace(line)
 		if server != "" && net.ParseIP(server) != nil {
 			servers = append(servers, server)
@@ -421,8 +405,7 @@ func applyDarwinDNSServers(dnsServers []string) ([]darwinDNSOverride, error) {
 }
 
 // restoreDarwinDNSServers restores original DNS settings for all overridden
-// services. A service whose original state could not be read is left alone
-// rather than reset to automatic, to avoid destroying a static resolver.
+// services; one whose original state was unreadable is left alone.
 func restoreDarwinDNSServers(overrides []darwinDNSOverride) error {
 	if len(overrides) == 0 {
 		return nil
@@ -455,8 +438,7 @@ func restoreDarwinDNSServers(overrides []darwinDNSOverride) error {
 }
 
 // ensureSessionDNS re-applies want to every active network service, covering
-// both drift on services already overridden and services that joined after
-// bring-up (e.g. Wi-Fi connected while wired was active).
+// drift on already-overridden services and ones that joined after bring-up.
 func ensureSessionDNS(session *tunnelSession, want []string) (bool, error) {
 	if session == nil || len(want) == 0 {
 		return false, nil
@@ -501,9 +483,7 @@ func ensureSessionDNS(session *tunnelSession, want []string) (bool, error) {
 	return changed, errors.Join(errs...)
 }
 
-// ---------------------------------------------------------------------------
-// DNS pre-state persistence, so a fresh daemon can restore after a crash
-// ---------------------------------------------------------------------------
+// DNS pre-state persistence, so a fresh daemon can restore after a crash.
 
 // darwinDNSStateEntry is the on-disk form of a darwinDNSOverride; the struct
 // itself has unexported fields and lives in the shared session type.
@@ -581,8 +561,7 @@ func loadDarwinDNSState() ([]darwinDNSOverride, error) {
 }
 
 // restoreOrphanedDarwinDNSState restores DNS from a previous session's
-// pre-state if the daemon starts and finds one on disk (e.g. after a crash
-// or an app update replaced the process while a tunnel was connected).
+// pre-state if the daemon starts and finds one on disk (e.g. after a crash).
 func restoreOrphanedDarwinDNSState() {
 	overrides, err := loadDarwinDNSState()
 	if err != nil || len(overrides) == 0 {
@@ -602,12 +581,8 @@ type darwinRouteEntry struct {
 	viaGateway  bool
 }
 
-// darwinIPv4Routes reads the kernel's IPv4 routing table.
-//
-// The table is scanned rather than asking `route get` which entry would be
-// used, because the tunnel's own 0.0.0.0/1 covers the addresses such a lookup
-// would be made against — including 0.0.0.0 itself. Matching prefixes here
-// keeps the default route and the tunnel's half-default distinguishable.
+// darwinIPv4Routes reads the kernel's IPv4 routing table directly, rather
+// than asking `route get`, since the tunnel's own 0.0.0.0/1 would shadow it.
 func darwinIPv4Routes() ([]darwinRouteEntry, error) {
 	rib, err := route.FetchRIB(syscall.AF_INET, route.RIBTypeRoute, 0)
 	if err != nil {
@@ -666,13 +641,8 @@ func darwinMaskBits(addrs []route.Addr) int {
 	return ones
 }
 
-// darwinDefaultGateway picks the next hop the bypass should hang off: a real
-// 0.0.0.0/0 with a usable gateway address, never the tunnel's own.
-//
-// Interface-scoped defaults are skipped because they have no address to pin to,
-// which is also what a tunnel's half-default looks like. Ties break on the
-// lower interface index so repeated calls agree and the guard cannot re-pin
-// back and forth.
+// darwinDefaultGateway picks the next hop the bypass hangs off: a real 0.0.0.0/0 with a usable
+// gateway, never the tunnel's own. Ties break on the lower interface index so calls agree.
 func darwinDefaultGateway(entries []darwinRouteEntry, tunnelIndex int) (netip.Addr, bool) {
 	var best netip.Addr
 	bestIndex := 0
@@ -705,9 +675,7 @@ func darwinHostRoute(entries []darwinRouteEntry, destination netip.Addr) (darwin
 }
 
 // endpointRouteNeedsRepair reports whether the bypass has stopped doing its
-// job. An on-link entry counts as healthy: the endpoint is directly reachable,
-// so it needs no gateway and re-pinning one would fight the kernel's own ARP
-// entry every tick.
+// job. An on-link entry counts as healthy: re-pinning it would fight the ARP entry.
 func endpointRouteNeedsRepair(current darwinRouteEntry, found bool, tunnelIndex int, gateway netip.Addr) bool {
 	if !found {
 		return true
@@ -721,13 +689,8 @@ func endpointRouteNeedsRepair(current darwinRouteEntry, found bool, tunnelIndex 
 	return current.gateway != gateway
 }
 
-// ensureSessionEndpointRoutes re-pins the endpoint bypass routes to the host's
-// current default gateway, reporting whether it had to repair anything.
-//
-// macOS drops an interface's routes when the link goes down, and a roam or DHCP
-// renewal moves the gateway out from under them. Either way the endpoint falls
-// back to matching the tunnel's own 0.0.0.0/1 and WireGuard ends up routed into
-// the tunnel it is trying to establish.
+// ensureSessionEndpointRoutes re-pins the endpoint bypass routes to the host's current default
+// gateway. Without it a link drop or gateway change lets the endpoint fall back to the tunnel.
 func ensureSessionEndpointRoutes(ctx context.Context, session *tunnelSession, _ map[uint64]struct{}) (bool, error) {
 	if session == nil || len(session.endpointRoutes) == 0 {
 		return false, nil
@@ -765,9 +728,8 @@ func ensureSessionEndpointRoutes(ctx context.Context, session *tunnelSession, _ 
 			continue
 		}
 
-		// Only an existing host route is removed, and only after it has been
-		// found in the table by exact address, so this can never take out the
-		// covering route the endpoint would otherwise fall back to.
+		// Only a route already found by exact address is removed, so this can
+		// never take out the covering route the endpoint would fall back to.
 		if found {
 			if err := runDarwinRoute(ctx, "delete", "-host", endpointRoute.destination); err != nil {
 				errs = append(errs, err)
@@ -784,9 +746,8 @@ func ensureSessionEndpointRoutes(ctx context.Context, session *tunnelSession, _ 
 	return repaired, errors.Join(errs...)
 }
 
-// runDarwinRoute runs one route(8) command under a deadline. The guard runs on
-// the health tick, so a wedged routing socket would otherwise stall silence
-// detection and every other recovery check behind it.
+// runDarwinRoute runs one route(8) command under a deadline: it runs on the
+// health tick, so a wedged routing socket would stall every check behind it.
 func runDarwinRoute(ctx context.Context, args ...string) error {
 	commandCtx, cancel := context.WithTimeout(ctx, darwinRouteTimeout)
 	defer cancel()

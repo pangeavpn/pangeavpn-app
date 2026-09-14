@@ -1,13 +1,5 @@
 // Package reality embeds sing-box as a Go library to provide a VLESS+REALITY
-// DPI-evasion transport: a VLESS outbound wrapped in REALITY, dialed
-// in-process (no local SOCKS/mixed inbound — bridge.go relays UDP directly
-// against the outbound's packet connection, mirroring cloak's in-process
-// UDP-loopback-listener shape rather than naive's external-process one).
-//
-// REALITY requires sing-box's with_utls build tag (uTLS is not compiled in
-// by default); without it, Start returns a clear "rebuild with -tags
-// with_utls" error at the TLS layer rather than failing to build. See
-// manager_test.go / e2e_test.go for the exact tags this package needs.
+// DPI-evasion transport, dialed in-process; it requires sing-box's with_utls build tag.
 package reality
 
 import (
@@ -39,12 +31,8 @@ import (
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/transport"
 )
 
-// registryContext wires a minimal sing-box protocol registry into ctx: just
-// the VLESS outbound this package needs, rather than sing-box/include's
-// register-everything convenience (which pulls in shadowsocks, tor, anytls,
-// etc. — unnecessary weight for a single-outbound in-process engine). The
-// "local" DNS transport is required unconditionally: box.New always wires it
-// as the DNS transport manager's fallback, even when nothing ever queries it.
+// registryContext wires a minimal sing-box protocol registry into ctx: just the
+// VLESS outbound this package needs, plus the "local" DNS transport box.New always requires.
 func registryContext(ctx context.Context) context.Context {
 	outboundRegistry := outbound.NewRegistry()
 	vless.RegisterOutbound(outboundRegistry)
@@ -53,10 +41,8 @@ func registryContext(ctx context.Context) context.Context {
 	return box.Context(ctx, inbound.NewRegistry(), outboundRegistry, endpoint.NewRegistry(), dnsRegistry, boxservice.NewRegistry(), certificate.NewRegistry())
 }
 
-// defaultTargetPort is where the remote node's sing-box VLESS+REALITY server
-// forwards decoded UDP when RealityProfile.TargetPort is unset: the node's
-// own local WireGuard listener, the same "server always forwards to its own
-// loopback WireGuard" convention cloak/naive's server-side counterparts use.
+// defaultTargetPort is where the remote node forwards decoded UDP when
+// RealityProfile.TargetPort is unset: the node's own local WireGuard listener.
 const defaultTargetPort = 51820
 
 const outboundTag = "reality-out"
@@ -65,28 +51,23 @@ const outboundTag = "reality-out"
 // "chrome" is the common default across VLESS+REALITY clients.
 const utlsFingerprint = "chrome"
 
-// defaultCoverSNI is the REALITY SNI presented when a profile carries none.
-// A REALITY SNI must name a real cover site the node borrows its TLS handshake
-// from (one of the server's server_names) — never the node's own host/IP, so
-// the previous remoteHost fallback guaranteed the server rejected the
-// handshake. Mirrors cloak.Manager's www.microsoft.com cover-SNI default.
+// defaultCoverSNI is the REALITY SNI presented when a profile carries none; it
+// must name one of the server's server_names, never the node's own host/IP.
 const defaultCoverSNI = "www.microsoft.com"
 
 var _ transport.Manager = (*Manager)(nil)
 var _ transport.SessionWaiter = (*Manager)(nil)
 var _ transport.BoundPortReporter = (*Manager)(nil)
 
-// Manager satisfies transport.Manager (+ SessionWaiter, BoundPortReporter),
-// mirroring cloak.inProcessManager's field shape: a loopback UDP listener
-// WireGuard's peer Endpoint points at, owned entirely on the Go side.
+// Manager satisfies transport.Manager (+ SessionWaiter, BoundPortReporter): a
+// loopback UDP listener WireGuard's peer Endpoint points at.
 type Manager struct {
 	mu      sync.RWMutex
 	logs    *state.LogStore
 	running bool
 
-	// starting guards the window where Start has released mu to run the
-	// slow engine/handshake setup, so a second concurrent Start can't race
-	// past the running check while the first is still in flight.
+	// starting guards the window where Start has released mu to run the slow
+	// engine/handshake setup, so a second concurrent Start can't race past the running check.
 	starting bool
 	profile  state.RealityProfile
 
@@ -96,19 +77,16 @@ type Manager struct {
 	remote      net.PacketConn
 	cancel      context.CancelFunc
 
-	// boundLocalPort is the actual loopback UDP port bound. Differs from
-	// profile.LocalPort when the caller requested dynamic allocation
-	// (LocalPort=0). Zero when not running.
+	// boundLocalPort is the actual loopback UDP port bound; differs from
+	// profile.LocalPort when dynamically allocated (LocalPort=0), zero when not running.
 	boundLocalPort int
 
 	done       chan struct{}
 	session    chan struct{}
 	hasSession bool
 
-	// generation bumps every Start; the bridge goroutine's cleanup only
-	// clobbers shared state if its generation still matches the current
-	// one, same guard cloak uses against a zombie goroutine from a
-	// previous Start.
+	// generation bumps every Start; the bridge goroutine's cleanup only clobbers
+	// shared state if its generation still matches, guarding against a zombie goroutine.
 	generation uint64
 }
 
@@ -116,10 +94,8 @@ func NewManager(logs *state.LogStore) *Manager {
 	return &Manager{logs: logs}
 }
 
-// Start builds a single-outbound sing-box engine (VLESS+REALITY), performs
-// the REALITY handshake synchronously (via the first ListenPacket call), and
-// wires a local UDP loopback listener to it. Returning nil means the
-// handshake already succeeded — see WaitForSession.
+// Start builds a single-outbound sing-box engine (VLESS+REALITY), performs the
+// handshake synchronously via the first ListenPacket call, and wires a local UDP listener to it.
 func (m *Manager) Start(ctx context.Context, profile state.RealityProfile) error {
 	remoteHost := strings.TrimSpace(profile.RemoteHost)
 	if remoteHost == "" {
@@ -298,9 +274,8 @@ func (m *Manager) Start(ctx context.Context, profile state.RealityProfile) error
 	return nil
 }
 
-// clearStarting rolls back the in-flight guard set at the top of Start when
-// engine setup fails before commit, so a subsequent Start isn't rejected by
-// a stale "start already in progress".
+// clearStarting rolls back the in-flight guard when engine setup fails before
+// commit, so a subsequent Start isn't rejected by a stale guard.
 func (m *Manager) clearStarting() {
 	m.mu.Lock()
 	m.starting = false
@@ -308,16 +283,13 @@ func (m *Manager) clearStarting() {
 }
 
 // buildOutboundOptions constructs the VLESS+REALITY outbound sing-box's
-// registry expects: option.Outbound.Options must be a pointer matching the
-// type registered for the outbound's Type (protocol/vless.RegisterOutbound
-// registers option.VLESSOutboundOptions).
+// registry expects: a pointer matching the type registered for the outbound's Type.
 func buildOutboundOptions(profile state.RealityProfile, remoteHost string, remotePort int, serverName string) *option.VLESSOutboundOptions {
 	return &option.VLESSOutboundOptions{
 		ServerOptions: option.ServerOptions{Server: remoteHost, ServerPort: uint16(remotePort)},
 		UUID:          profile.UUID,
-		// This transport only relays WireGuard UDP. xtls-rprx-vision (and any
-		// XTLS flow) is TCP-only and makes the VLESS UDP relay handshake fail
-		// with EOF, so the flow is forced empty regardless of profile.Flow.
+		// XTLS flow is TCP-only and breaks the VLESS UDP relay handshake, so
+		// it's forced empty regardless of profile.Flow.
 		Flow: "",
 		OutboundTLSOptionsContainer: option.OutboundTLSOptionsContainer{
 			TLS: &option.OutboundTLSOptions{
@@ -335,9 +307,7 @@ func buildOutboundOptions(profile state.RealityProfile, remoteHost string, remot
 }
 
 // resolveServerName returns the REALITY SNI to present: the profile's own when
-// set, otherwise defaultCoverSNI. The second return reports whether the default
-// was used, so Start can warn — a cover SNI the node doesn't list still fails
-// the handshake, just less silently than the old remoteHost fallback did.
+// set, otherwise defaultCoverSNI; the second return reports whether the default was used.
 func resolveServerName(profileServerName string) (name string, defaulted bool) {
 	if name = strings.TrimSpace(profileServerName); name != "" {
 		return name, false
@@ -346,11 +316,7 @@ func resolveServerName(profileServerName string) (name string, defaulted bool) {
 }
 
 // annotateHandshakeError explains the opaque io.EOF a REALITY handshake returns
-// when the node rejects the client. A rejected REALITY client is transparently
-// proxied to the cover site (the server_names dest), so the VLESS association
-// that follows lands on a plain web server and is closed — surfacing as a bare
-// "EOF" that gives the operator nothing to act on. Point them at the actual
-// cause: a credential/config mismatch between the profile and the node.
+// when the node rejects the client and falls back to proxying the cover site.
 func annotateHandshakeError(err error) error {
 	if err == nil {
 		return nil
@@ -408,9 +374,8 @@ func (m *Manager) Stop(ctx context.Context) error {
 	done := m.done
 	m.mu.Unlock()
 
-	// Cancel the engine context first so any in-flight dial/handshake retry
-	// unblocks immediately, then close both sockets to kick the bridge
-	// goroutine's blocked reads. Order mirrors cloak.Stop.
+	// Cancel the engine context first to unblock any in-flight dial/handshake,
+	// then close both sockets to kick the bridge goroutine's blocked reads.
 	if cancel != nil {
 		cancel()
 	}
@@ -437,11 +402,8 @@ func (m *Manager) Stop(ctx context.Context) error {
 	}
 }
 
-// forceResetStateLocked drops shared state to a stopped configuration even
-// if the bridge goroutine has not finished, and closes the engine itself so
-// a wedged goroutine can't leave it relaying after Stop reports success. The
-// sockets are already closed by the caller; engineClose is shared with the
-// bridge goroutine's own cleanup so the engine is never closed twice.
+// forceResetStateLocked drops shared state to a stopped configuration even if
+// the bridge goroutine hasn't finished, and closes the engine so a wedged goroutine can't leave it relaying.
 func (m *Manager) forceResetStateLocked(engine *box.Box, engineClose *sync.Once) {
 	m.mu.Lock()
 	m.running = false

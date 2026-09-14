@@ -52,11 +52,8 @@ function fromStatus(status: number): LoginErrorCode {
   return "UNKNOWN";
 }
 
-/**
- * Turns whatever the sign-in path threw into one code the UI can explain.
- * Unrecognised failures stay UNKNOWN — guessing here is how an expired
- * subscription ended up telling people their account number was wrong.
- */
+/** Turns whatever the sign-in path threw into one code the UI can explain.
+ *  Unrecognised failures stay UNKNOWN rather than guess at a cause. */
 export function classifyLoginError(err: unknown): LoginErrorCode {
   const error = asErrorLike(err);
   if (!error) return "UNKNOWN";

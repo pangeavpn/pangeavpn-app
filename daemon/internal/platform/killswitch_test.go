@@ -126,9 +126,7 @@ func TestResolveEndpointIPs_Deduplication(t *testing.T) {
 }
 
 // A transport whose remote host can't be resolved must not take the whole
-// Enable down with it: under an active lockdown lock the kill switch blocks
-// DNS itself, so every hostname permit (naive/reality/hysteria2/snowflake)
-// fails to resolve and Connect could never re-arm the switch.
+// Enable down with it: an active lockdown lock blocks DNS itself.
 func TestResolveEndpointHosts_SkipsUnresolvableHostname(t *testing.T) {
 	isolateStateDir(t)
 	originalLookup := lookupResolverIP
@@ -244,11 +242,8 @@ func TestNoopKillSwitch(t *testing.T) {
 	}
 }
 
-// isolateStateDir points the kill-switch state file at a temp directory for the
-// duration of a test. Without it these tests write to — and then delete — the
-// state file of a real installation on the developer's machine, which for an
-// engaged Lockdown lock destroys the Locked record and makes the next daemon
-// start clear the lock as stale.
+// isolateStateDir points the kill-switch state file at a temp directory for
+// the test, so it can't destroy a real installation's engaged Lockdown record.
 func isolateStateDir(t *testing.T) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), killSwitchStateFile)
@@ -299,10 +294,7 @@ func TestKillSwitchStatePersistence(t *testing.T) {
 }
 
 // TestPersistLockedUpgrade_RecordsLockdownOnUnchangedRules covers the one way
-// this design can fail open: Enable short-circuits when the permit set is
-// unchanged, so a lock re-armed as a Lockdown lock would never get Locked onto
-// disk, and startup reconciliation would clear a deliberate lockdown as crash
-// leftover — restoring unprotected internet the user asked to keep shut.
+// this design can fail open: an unchanged-rules short-circuit dropping Locked.
 func TestPersistLockedUpgrade_RecordsLockdownOnUnchangedRules(t *testing.T) {
 	isolateStateDir(t)
 
@@ -327,8 +319,7 @@ func TestPersistLockedUpgrade_RecordsLockdownOnUnchangedRules(t *testing.T) {
 	}
 }
 
-// An explicit Lockdown-off request (locked=false passed by the caller, not
-// echoed from disk) must actually clear a stale Locked=true on disk, or
+// An explicit Lockdown-off request must clear a stale Locked=true on disk, or
 // reconciliation re-applies a block-all lock the user turned off.
 func TestPersistLockedUpgrade_LowersOnExplicitUnlock(t *testing.T) {
 	isolateStateDir(t)

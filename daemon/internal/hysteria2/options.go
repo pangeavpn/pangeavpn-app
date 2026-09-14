@@ -33,9 +33,7 @@ const (
 var relayDestinationOverride string
 
 // relayDestination is the SOCKS5 UDP ASSOCIATE destination requested through
-// the tunnel: the remote node's own WireGuard listener, or the entry node's
-// loopback hop port when the profile is multihop. The node allowlists which
-// of these it will honour, so an unconfigured port is refused server-side.
+// the tunnel: the remote node's WireGuard listener, or its multihop loopback hop port.
 func relayDestination(targetPort int) string {
 	if relayDestinationOverride != "" {
 		return relayDestinationOverride
@@ -104,10 +102,8 @@ func profilesEqual(a, b state.Hysteria2Profile) bool {
 	return reflect.DeepEqual(a, b)
 }
 
-// buildClientOptions constructs the client-side box config: a loopback
-// mixed inbound (bound to mixedPort, an internal implementation detail
-// never exposed to WireGuard) fronting a hysteria2 outbound with Salamander
-// obfuscation.
+// buildClientOptions constructs the client-side box config: a loopback mixed
+// inbound (bound to mixedPort, never exposed to WireGuard) fronting a hysteria2 outbound.
 func buildClientOptions(profile state.Hysteria2Profile, mixedPort int) (option.Options, error) {
 	tlsOptions := &option.OutboundTLSOptions{
 		Enabled:    true,

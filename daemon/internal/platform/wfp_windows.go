@@ -12,10 +12,7 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// ---------------------------------------------------------------------------
-// fwpuclnt.dll — Windows Filtering Platform user-mode API
-// ---------------------------------------------------------------------------
-
+// fwpuclnt.dll — Windows Filtering Platform user-mode API.
 var (
 	modFwpuclnt = windows.NewLazySystemDLL("fwpuclnt.dll")
 
@@ -116,10 +113,7 @@ const (
 	dotPort = 853
 )
 
-// ---------------------------------------------------------------------------
-// wfpEngine wraps a WFP engine handle
-// ---------------------------------------------------------------------------
-
+// wfpEngine wraps a WFP engine handle.
 type wfpEngine struct {
 	handle windows.Handle
 	// bootTime makes every keyed add write the filter's boot-time twin instead.
@@ -352,13 +346,8 @@ func (e *wfpEngine) deleteFilter(filterId uint64) error {
 	return nil
 }
 
-// sublayerFilterIds lists every filter currently in one of our sublayers,
-// including ones this process never added.
-//
-// Filters added with an engine-assigned key are only ever reachable by the id
-// the adding process held in memory, so a daemon that died without a Clear
-// leaves permits nothing can name. Enumeration is how a fresh process finds
-// them again.
+// sublayerFilterIds lists every filter in one of our sublayers, including
+// engine-keyed ones a dead process left behind that only enumeration can name.
 func (e *wfpEngine) sublayerFilterIds(subLayer windows.GUID, keep func(*wtFwpmFilter0) bool) ([]uint64, error) {
 	var enumHandle windows.Handle
 	r, _, _ := procFwpmFilterCreateEnumHandle0.Call(
@@ -432,10 +421,6 @@ func (e *wfpEngine) deleteFiltersInSublayer(subLayer windows.GUID, keep func(*wt
 	return deleted, nil
 }
 
-// ---------------------------------------------------------------------------
-// Kill switch filter builders
-// ---------------------------------------------------------------------------
-
 // addBlockAllOutbound and its inbound/IPv6 counterparts are persistent: they
 // are the fail-closed lock itself and must outlive this process.
 func (e *wfpEngine) addBlockAllOutbound() (uint64, error) {
@@ -500,9 +485,8 @@ func (e *wfpEngine) addPermitLoopbackSubnetInboundV4() (uint64, error) {
 	return e.addPermitLoopbackSubnetAt(cFWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4, pangeaPermitLoopbackNetInV4FilterKey, "PangeaVPN Allow Loopback Subnet Inbound")
 }
 
-// Permits the endpoint at both ALE layers. CONNECT_V4 alone authorises the
-// outbound flow, but a UDP transport's replies are classified at
-// RECV_ACCEPT_V4, where addBlockAllInbound would otherwise drop them.
+// addPermitEndpointIP permits the endpoint at both ALE layers: a UDP
+// transport's replies are classified at RECV_ACCEPT_V4, not just CONNECT_V4.
 func (e *wfpEngine) addPermitEndpointIP(ipStr string) ([]uint64, error) {
 	ip := net.ParseIP(ipStr).To4()
 	if ip == nil {
@@ -747,20 +731,14 @@ func (e *wfpEngine) addPermitLoopbackV6() (uint64, error) {
 	return e.addPermitLoopbackAt(cFWPM_LAYER_ALE_AUTH_CONNECT_V6, pangeaPermitLoopbackV6FilterKey, "PangeaVPN Allow Loopback IPv6")
 }
 
-// addPermitLoopbackInboundV6 permits IPv6 traffic carrying the IS_LOOPBACK
-// flag at the recv/accept layer. The inbound V6 block otherwise drops the
-// server side of every [::1] connection — localhost resolves to ::1 first on
-// Windows, so local web servers become unreachable while the kill switch is
-// active.
+// addPermitLoopbackInboundV6 mirrors addPermitLoopbackInboundV4: without it
+// the inbound V6 block drops the server side of every [::1] connection.
 func (e *wfpEngine) addPermitLoopbackInboundV6() (uint64, error) {
 	return e.addPermitLoopbackAt(cFWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V6, pangeaPermitLoopbackInboundV6FilterKey, "PangeaVPN Allow Loopback Inbound IPv6")
 }
 
-// addPermitLoopbackSubnetV6 permits ::1/128 by remote address on the given
-// layer. Complements the IS_LOOPBACK flag permits, which are not reliably set
-// for fresh inter-process TCP connects — the same quirk that required
-// addPermitLoopbackSubnet on IPv4. Loopback is non-routable, so there is no
-// leak risk.
+// addPermitLoopbackSubnetV6 permits ::1/128 by remote address, the IPv6 twin
+// of addPermitLoopbackSubnet — the IS_LOOPBACK flag alone misses fresh connects.
 func (e *wfpEngine) addPermitLoopbackSubnetV6(layer, filterKey windows.GUID, filterName string) (uint64, error) {
 	addrMask := wtFwpV6AddrAndMask{prefixLength: 128}
 	addrMask.addr[15] = 1 // ::1

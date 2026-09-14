@@ -110,9 +110,8 @@ func (m *wireGuardGoManager) startWindows(ctx context.Context, profile state.Wir
 	excludeLUIDs := m.ActiveLUIDs()
 	excludeLUIDs[tunnelLUID] = struct{}{}
 
-	// Best-effort: keep whatever bypass routes did install, but don't abort the
-	// connect on a partial/failed resolve. A truly unusable path still fails the
-	// downstream WireGuard handshake, so this can't report a false Connected.
+	// Best-effort: a partial/failed resolve doesn't abort the connect, since an
+	// unusable path still fails the downstream WireGuard handshake.
 	endpointRoutes, endpointErr := addWindowsEndpointRoutes(ctx, excludeLUIDs, parsed.endpointHosts)
 	if endpointErr != nil {
 		m.logs.Add(state.LogWarn, state.SourceWireGuard, fmt.Sprintf("endpoint bypass route setup warning: %v", endpointErr))
@@ -141,9 +140,8 @@ func (m *wireGuardGoManager) startWindows(ctx context.Context, profile state.Wir
 	return nil
 }
 
-// PinEndpointRoutes installs bypass routes for profile's endpoints while the
-// previous session still owns the routing table, so a switch's new transport
-// can dial out before the device is re-pointed. No-op without a live session.
+// PinEndpointRoutes installs bypass routes so a switch's new transport can
+// dial out before the device is re-pointed. No-op without a live session.
 func (m *wireGuardGoManager) PinEndpointRoutes(ctx context.Context, profile state.WireGuardProfile) error {
 	parsed, err := parseUserlandConfig(profile.ConfigText)
 	if err != nil {
@@ -165,12 +163,8 @@ func (m *wireGuardGoManager) PinEndpointRoutes(ctx context.Context, profile stat
 	return err
 }
 
-// trySwitchInPlace re-points the live device at a new server: UAPI peer swap
-// (replace_peers), endpoint bypass route diff, interface reconfigure. Reports
-// false when the caller should rebuild the device instead.
-//
-// Not transactional: a failure after IpcSet leaves the device on the new peer
-// briefly — bounded by the caller's immediate stop-and-rebuild.
+// trySwitchInPlace re-points the live device at a new server. Not
+// transactional: a failure after IpcSet is bounded by the caller's rebuild.
 func (m *wireGuardGoManager) trySwitchInPlace(ctx context.Context, tunnelKey string, parsed parsedUserlandConfig, allowedIPs []string) bool {
 	m.guardMu.Lock()
 	defer m.guardMu.Unlock()

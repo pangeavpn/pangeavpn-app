@@ -9,9 +9,8 @@ export type AutoConnectDeps = {
   getDaemonReconnecting?: () => boolean;
   getUserIntent: () => "connected" | "disconnected";
   getConnectionInFlight: () => boolean;
-  /** Reports the attempt's own busy state to the rest of the UI, so a manual
-   *  Disconnect click can reach `cancelConnect()` instead of a plain disconnect,
-   *  and a manual Connect click can see an auto-connect attempt in progress. */
+  /** Reports the attempt's own busy state, so a manual Disconnect can reach
+   *  `cancelConnect()` and a manual Connect can see an attempt in progress. */
   setConnectionInFlight?: (inFlight: boolean) => void;
   getLastServerId: () => string | null;
   /** Server to use when nothing has been connected to yet. Re-rolled per attempt. */
@@ -69,11 +68,8 @@ export function notifyToggleChanged(enabled: boolean): void {
   }
 }
 
-// Last connected server, or a fresh random one when there isn't one yet. Each
-// call re-rolls the fallback, so a fresh install that hits a dead node moves on
-// instead of retrying it forever. A stored id that dropped out of the visible
-// set (decommissioned, or unsupported by the current transport) is treated the
-// same as having none, so it doesn't saturate backoff on a dead target.
+// Last connected server, else a fresh random one, re-rolled per attempt so a
+// dead or decommissioned target doesn't saturate backoff forever.
 function resolveServerId(): string | null {
   if (!deps) return null;
   const lastId = deps.getLastServerId();

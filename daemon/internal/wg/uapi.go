@@ -18,15 +18,8 @@ type kv struct {
 	value string
 }
 
-// wgConfigToUAPI converts a stripped wg-quick INI config (containing only
-// WireGuard-native keys: PrivateKey, ListenPort, PublicKey, PresharedKey,
-// Endpoint, AllowedIPs, PersistentKeepalive) into the UAPI format accepted
-// by device.IpcSet.
-//
-// Keys are converted from base64 to hex. AllowedIPs CSV values are split into
-// separate allowed_ip= lines. The first [Peer] block emits replace_peers=true,
-// public_key= is always emitted first within a peer regardless of source
-// order (IpcSetOperation stays in device-config mode until it sees one).
+// wgConfigToUAPI converts a stripped wg-quick config into the UAPI format for
+// device.IpcSet: keys become hex, and public_key= is always emitted first per peer.
 func wgConfigToUAPI(wgConfig string) (string, error) {
 	ifaceKV, peers, err := parseUAPISource(wgConfig)
 	if err != nil {
@@ -87,12 +80,12 @@ func parseUAPISource(wgConfig string) ([]kv, [][]kv, error) {
 			continue
 		}
 
-		idx := strings.Index(line, "=")
-		if idx < 0 {
+		rawKey, rawValue, ok := strings.Cut(line, "=")
+		if !ok {
 			continue
 		}
-		key := strings.TrimSpace(line[:idx])
-		value := strings.TrimSpace(line[idx+1:])
+		key := strings.TrimSpace(rawKey)
+		value := strings.TrimSpace(rawValue)
 		for i, r := range value {
 			if r == '#' || r == ';' {
 				value = strings.TrimSpace(value[:i])
@@ -229,9 +222,8 @@ func expandAllowedIPs(csv string) ([]string, error) {
 	return lines, nil
 }
 
-// filterIPv4AllowedIPs parses a comma-separated AllowedIPs value, drops any
-// IPv6 entries (with a warning, since dual-stack peers are the norm), and
-// errors only if that leaves an entry-bearing value with no IPv4 addresses.
+// filterIPv4AllowedIPs parses AllowedIPs, drops IPv6 entries (warning to
+// stderr; dual-stack peers are the norm), and errors if nothing IPv4 remains.
 func filterIPv4AllowedIPs(csv string) ([]string, error) {
 	parts := strings.Split(csv, ",")
 	var v4 []string
@@ -303,12 +295,12 @@ func extractAllowedIPsFromConfig(wgConfig string) ([]string, error) {
 			continue
 		}
 
-		idx := strings.Index(line, "=")
-		if idx < 0 {
+		rawKey, rawValue, ok := strings.Cut(line, "=")
+		if !ok {
 			continue
 		}
-		key := strings.TrimSpace(line[:idx])
-		value := strings.TrimSpace(line[idx+1:])
+		key := strings.TrimSpace(rawKey)
+		value := strings.TrimSpace(rawValue)
 		for i, r := range value {
 			if r == '#' || r == ';' {
 				value = strings.TrimSpace(value[:i])
@@ -336,7 +328,7 @@ func extractAllowedIPsFromConfig(wgConfig string) ([]string, error) {
 // keeps its bound port, and IpcSet would otherwise rebind on top of the explicit rebind.
 func stripListenPort(wgConfig string) string {
 	var out []string
-	for _, line := range strings.Split(wgConfig, "\n") {
+	for line := range strings.SplitSeq(wgConfig, "\n") {
 		key, _, hasValue := strings.Cut(line, "=")
 		if hasValue && strings.EqualFold(strings.TrimSpace(key), "ListenPort") {
 			continue

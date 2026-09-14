@@ -8,9 +8,8 @@ import (
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/state"
 )
 
-// directWireGuardProfile is a profile that can be connected either way: over
-// cloak through the loopback bridge its config text points at, or straight to
-// the node named by DirectEndpoint.
+// directWireGuardProfile connects either over cloak through the loopback bridge
+// its config points at, or straight to the node named by DirectEndpoint.
 func directWireGuardProfile() state.Profile {
 	return state.Profile{
 		ID:    "p1",

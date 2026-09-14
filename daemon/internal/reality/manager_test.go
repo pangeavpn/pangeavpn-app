@@ -70,10 +70,8 @@ func TestBuildOutboundOptionsPropagatesProfileFields(t *testing.T) {
 	if opts.UUID != profile.UUID {
 		t.Fatalf("UUID = %q, want %q", opts.UUID, profile.UUID)
 	}
-	// Flow is always forced empty, even when the profile carries one: this
-	// transport relays only WireGuard UDP, and xtls-rprx-vision (any XTLS flow)
-	// is TCP-only, which makes the UDP-association handshake fail with EOF. See
-	// buildOutboundOptions.
+	// Flow is always forced empty, even when the profile carries one: XTLS
+	// flows are TCP-only and break the UDP-association handshake.
 	if opts.Flow != "" {
 		t.Fatalf("Flow = %q, want \"\" (forced empty for the UDP relay)", opts.Flow)
 	}

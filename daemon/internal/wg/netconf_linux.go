@@ -20,10 +20,7 @@ import (
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/platform"
 )
 
-// ---------------------------------------------------------------------------
-// Policy routing constants (mirrors wg-quick behaviour)
-// ---------------------------------------------------------------------------
-
+// Policy routing constants mirror wg-quick behaviour.
 const (
 	// policyRoutingTable is the custom routing table ID for tunnel routes.
 	policyRoutingTable = 51820
@@ -37,9 +34,7 @@ const (
 	suppressRulePriority = 32765
 )
 
-// ---------------------------------------------------------------------------
-// Interface configuration via netlink
-// ---------------------------------------------------------------------------
+// Interface configuration via netlink.
 
 // configureLinuxAddresses assigns CIDR addresses to the named interface
 // using netlink. The interface must already exist (created by tun.CreateTUN).
@@ -85,9 +80,7 @@ func setLinuxMTU(interfaceName string, mtu int) error {
 	return nil
 }
 
-// ---------------------------------------------------------------------------
-// Route management via netlink
-// ---------------------------------------------------------------------------
+// Route management via netlink.
 
 // routeOwnership records whether this process created a bypass route's entry
 // in each table (vs. finding it via EEXIST); only owned entries get deleted.
@@ -427,9 +420,7 @@ func deleteLinuxInterface(interfaceName string) error {
 	return netlink.LinkDel(link)
 }
 
-// ---------------------------------------------------------------------------
-// DNS management via D-Bus (systemd-resolved) or resolv.conf fallback
-// ---------------------------------------------------------------------------
+// DNS management via D-Bus (systemd-resolved) or resolv.conf fallback.
 
 // linuxResolvSymlinkBackup records whether /etc/resolv.conf was a symlink and
 // where it pointed; tracked in linuxExtra since linuxDNSOverride has no field.

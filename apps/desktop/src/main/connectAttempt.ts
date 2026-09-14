@@ -1,18 +1,5 @@
-/**
- * Tracks the one in-flight connect attempt so the user can stop it.
- *
- * Pressing Connect starts a sequence of hub calls and then a daemon connect.
- * Before this existed, "stop" only told the daemon to disconnect: the main
- * process carried on provisioning and called connect() anyway, so the tunnel
- * came UP a second or two after the user had cancelled. The guard that
- * actually makes stop mean stopped is `isCancelled` being checked immediately
- * before the daemon connect — everything else here is just plumbing to abort
- * in-flight work sooner.
- *
- * Deliberately a tiny, dependency-free module: it holds the whole
- * cancellation rule in one testable place, with no Electron or network
- * imports.
- */
+/** Tracks the one in-flight connect attempt so the user can stop it: `isCancelled`
+ *  checked immediately before the daemon connect is what makes stop mean stopped. */
 
 export interface ConnectAttempt {
   /** Monotonic id. Cancelling by id can't kill a newer attempt. */
@@ -27,10 +14,8 @@ export interface ConnectAttempt {
 let current: ConnectAttempt | null = null;
 let nextId = 1;
 
-/**
- * Open a new attempt, replacing (and cancelling) any previous one — a second
- * Connect press supersedes the first rather than racing it.
- */
+/** Open a new attempt, replacing (and cancelling) any previous one — a second
+ *  Connect press supersedes the first rather than racing it. */
 export const beginAttempt = (): ConnectAttempt => {
   if (current && !current.cancelled) {
     cancelAttempt();
@@ -39,23 +24,16 @@ export const beginAttempt = (): ConnectAttempt => {
   return current;
 };
 
-/**
- * Mark the attempt past its point of no return: once the tunnel is actually
- * up, Stop must disconnect explicitly rather than race a cancel that assumes
- * nothing landed yet. Only the attempt that owns the slot can commit it.
- */
+/** Marks the attempt past its point of no return: once the tunnel is up, Stop
+ *  must disconnect explicitly instead of racing a cancel. */
 export const commitAttempt = (attempt: ConnectAttempt): void => {
   if (current && current.id === attempt.id) {
     current.committed = true;
   }
 };
 
-/**
- * Cancel the in-flight attempt, if any. Returns the attempt that was
- * cancelled so the caller knows whether there was anything to stop (and can
- * decide whether to tear a tunnel down). A committed attempt can no longer be
- * cancelled this way — the caller must disconnect explicitly instead.
- */
+/** Cancels the in-flight attempt, if any, and returns it so the caller knows
+ *  whether to tear a tunnel down. A committed attempt cannot be cancelled here. */
 export const cancelAttempt = (): ConnectAttempt | null => {
   if (!current || current.cancelled || current.committed) return null;
   current.cancelled = true;
@@ -65,18 +43,13 @@ export const cancelAttempt = (): ConnectAttempt | null => {
   return current;
 };
 
-/**
- * True once this attempt has been cancelled, or superseded by a newer one.
- * Checked between steps, and above all immediately before the daemon connect.
- */
+/** True once this attempt has been cancelled, or superseded by a newer one.
+ *  Checked above all immediately before the daemon connect. */
 export const isCancelled = (attempt: ConnectAttempt): boolean =>
   attempt.cancelled || current === null || current.id !== attempt.id;
 
-/**
- * Clear the attempt when it finishes normally, so a later cancel press is a
- * no-op instead of tearing down a connection the user wants to keep. Only the
- * attempt that owns the slot may clear it.
- */
+/** Clears the attempt when it finishes normally, so a later cancel press is a
+ *  no-op. Only the attempt that owns the slot may clear it. */
 export const endAttempt = (attempt: ConnectAttempt): void => {
   if (current && current.id === attempt.id) {
     current = null;

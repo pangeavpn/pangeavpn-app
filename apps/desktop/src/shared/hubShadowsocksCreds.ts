@@ -57,11 +57,8 @@ export function sameHubShadowsocks(a: HubShadowsocksCreds, b: HubShadowsocksCred
   );
 }
 
-/**
- * Every node the hub named, deduplicated. Caching one node's credentials means
- * a rotation past that node locks the client out of the only path it has left.
- * Returns null when nothing changed, so callers can skip a disk write.
- */
+/** Every node the hub named, deduplicated, or null when nothing changed. Caches
+ *  every one, since one node's credentials would strand the client on rotation. */
 export function mergeAdvertisedCreds(
   current: HubShadowsocksCreds[],
   advertised: unknown[]
@@ -99,12 +96,8 @@ export function promoteCreds(
   return next;
 }
 
-/**
- * Tries every cached node until one answers, reporting which index won so the
- * caller can promote it. A node whose key has rotated, or that throws, must not
- * end the search — it is usually the only thing standing between the client and
- * a hub it can no longer reach any other way.
- */
+/** Tries every cached node until one answers, reporting which index won. A node
+ *  that throws or has a rotated key must not end the search. */
 export async function firstWorkingCreds<T>(
   list: HubShadowsocksCreds[],
   attempt: (creds: HubShadowsocksCreds, index: number) => Promise<T | null>,

@@ -52,12 +52,8 @@ declare global {
     friendlyName?: string | null;
   }
 
-  /**
-   * Renderer-facing view of a server: display fields plus per-transport
-   * booleans, none of the node credentials. Mirrors PublicServerInfo in
-   * shared/ipc.ts — the renderer never receives the full credential-bearing
-   * shape, which stays in the main process.
-   */
+  /** Renderer-facing view of a server: display fields plus per-transport
+   *  booleans, none of the node credentials. Mirrors PublicServerInfo in shared/ipc.ts. */
   interface ServerInfo {
     id: string;
     name: string;
@@ -98,9 +94,8 @@ declare global {
 
   interface SubscriptionInfo {
     status: "trialing" | "active" | "past_due" | "canceled" | "unpaid" | "incomplete" | "none";
-    /** Hub's verdict on whether this account may connect. Never re-derive from
-     *  status: prepaid plans stay "active" after they lapse. Absent on older
-     *  hubs — treat that as entitled. */
+    /** Hub's verdict on whether this account may connect — never re-derive from
+     *  status, since prepaid plans stay "active" after they lapse. */
     entitled?: boolean;
     renews: boolean;
     expiresAt: string | null;

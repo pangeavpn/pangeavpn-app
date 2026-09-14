@@ -7,20 +7,12 @@ import (
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/state"
 )
 
-// maxEndpointRouteRepairDeferrals bounds how many ticks in a row a repair may
-// hold the recovery path off. A route that settles needs one; one that keeps
-// changing (two default routes trading places, something else rewriting the
-// table) must not be able to suppress the silence detector indefinitely.
+// maxEndpointRouteRepairDeferrals bounds how many ticks a repair may hold the
+// recovery path off, so a route that never settles can't suppress it forever.
 const maxEndpointRouteRepairDeferrals = 3
 
-// ensureEndpointRoutes re-pins the routes that carry WireGuard to its node, and
-// reports whether the caller should give the repair a tick to take effect.
-//
-// Those routes are the tunnel's only way out, and they hang off a gateway that
-// the OS can drop or move mid-session. When that happens the handshakes are
-// routed into the tunnel they are trying to establish and the session goes
-// silent with every layer below still reporting healthy, so it has to be
-// checked from out here.
+// ensureEndpointRoutes re-pins the routes carrying WireGuard to its node (the
+// OS can drop or move them), reporting whether to give the repair a tick.
 func (s *Service) ensureEndpointRoutes(ctx context.Context, profile state.Profile) bool {
 	guard, ok := s.wg.(wgRouteGuard)
 	if !ok {
@@ -28,9 +20,8 @@ func (s *Service) ensureEndpointRoutes(ctx context.Context, profile state.Profil
 	}
 
 	repaired, err := guard.EnsureEndpointRoutes(ctx, profile.WireGuard)
-	// An error — even alongside repaired=true, e.g. one address family's route
-	// re-pinned but the other's add/remove failed — means the routes are not
-	// verified. Neither settles the counter nor earns the caller a skip tick.
+	// An error means the routes are unverified even if repaired=true; it
+	// neither settles the counter nor earns the caller a skip tick.
 	if err != nil {
 		s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("could not verify the tunnel's endpoint routes: %v", err))
 		if repairs := s.recordEndpointRouteRepair(); repairs > maxEndpointRouteRepairDeferrals {
@@ -66,10 +57,8 @@ func (s *Service) recordEndpointRoutesSettled() {
 	s.resetEndpointRouteRepairs()
 }
 
-// resetEndpointRouteRepairs clears the deferral counter for a new session.
-// service.go's resetRecovery, Connect and Disconnect should call this too —
-// otherwise a session torn down above maxEndpointRouteRepairDeferrals leaves
-// the next session's first genuine repair refused its settle tick.
+// resetEndpointRouteRepairs clears the deferral counter for a new session;
+// callers include service.go's resetRecovery, Connect and Disconnect.
 func (s *Service) resetEndpointRouteRepairs() {
 	s.recoveryMu.Lock()
 	defer s.recoveryMu.Unlock()

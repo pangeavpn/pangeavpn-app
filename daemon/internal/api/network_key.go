@@ -14,22 +14,14 @@ import (
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/platform"
 )
 
-// currentNetworkKey fingerprints the physical network the host is attached to,
-// so the daemon can remember which transport last worked here and try it first
-// next time. It mirrors the desktop networkWatcher's approach — a stable
-// signature of the non-tunnel interfaces' addresses — but keys IPv6 on the /64
-// prefix so privacy-extension address rotation within one network does not
-// change the key. Returns "" when nothing usable is found; the caller then
-// skips the memory optimization (and the cascade still tries every transport).
+// currentNetworkKey fingerprints the physical network so the daemon can
+// remember which transport last worked here; "" means try every transport.
 func currentNetworkKey() string {
 	return currentNetworkKeyExcluding(nil)
 }
 
-// currentNetworkKeyExtraTunnelNames lets a caller name additional interfaces to
-// treat as the VPN's own, for a tunnel whose configured name doesn't match
-// isTunnelInterfaceName's fixed prefixes (profile.WireGuard.TunnelName is
-// client-supplied). service.go's networkKey wiring should pass the active
-// profile's tunnel name here once it has one.
+// currentNetworkKeyExcluding lets a caller name additional interfaces to treat
+// as the VPN's own, for a tunnel name that isTunnelInterfaceName won't match.
 func currentNetworkKeyExcluding(extraTunnelNames []string) string {
 	// The route table names the physical uplink even while our own tunnel
 	// holds the default route, so a switch keys the same network as a connect.
@@ -97,10 +89,8 @@ func composeNetworkKey(ifaces []keyIface, primary, gateway string, extraTunnelNa
 	return strings.Join(parts, "|")
 }
 
-// isTunnelInterfaceName reports whether name looks like a VPN/tunnel interface,
-// which must be excluded so the daemon's own tunnel bring-up/tear-down (or an
-// unrelated VPN client) does not change the network key. extraTunnelNames adds
-// exact, case-insensitive matches beyond the fixed prefixes below.
+// isTunnelInterfaceName reports whether name looks like a VPN/tunnel
+// interface, excluded so our own tunnel's bring-up/tear-down never changes the key.
 func isTunnelInterfaceName(name string, extraTunnelNames []string) bool {
 	lower := strings.ToLower(name)
 	for _, extra := range extraTunnelNames {
@@ -116,11 +106,8 @@ func isTunnelInterfaceName(name string, extraTunnelNames []string) bool {
 	return false
 }
 
-// networkToken renders an address into the stable part of the key. With a
-// known default gateway it uses the /24 (or /64) network plus that gateway —
-// two networks handing out the same RFC1918 range are distinguished by their
-// gateway, and a same-LAN DHCP lease change no longer produces a new key.
-// Without a gateway it falls back to the full address, as before.
+// networkToken renders an address into the stable part of the key: with a
+// gateway it uses the /24 or /64 network plus that gateway, else the full address.
 func networkToken(ip net.IP, gateway string) string {
 	if v4 := ip.To4(); v4 != nil {
 		if gateway == "" {
@@ -147,8 +134,7 @@ func ipFromAddr(addr net.Addr) net.IP {
 }
 
 // defaultRouteInterfaceName is the fallback where the platform has no route
-// table reader: a UDP "connect" only resolves the local route, it never dials
-// out. Returns "" when no default route exists yet or it can't be resolved.
+// table reader; a UDP "connect" only resolves the local route, never dials out.
 func defaultRouteInterfaceName() string {
 	ip := defaultRouteLocalIP()
 	if ip == nil {
@@ -172,9 +158,8 @@ func defaultRouteInterfaceName() string {
 	return ""
 }
 
-// defaultRouteLocalIP is the local address the OS would use to reach the
-// public internet, resolved via routing table only (RFC 5737/3849 addresses
-// are never actually dialed).
+// defaultRouteLocalIP resolves via routing table only; the RFC 5737/3849
+// addresses below are never actually dialed.
 func defaultRouteLocalIP() net.IP {
 	if conn, err := net.DialTimeout("udp4", "203.0.113.1:9", 200*time.Millisecond); err == nil {
 		defer conn.Close()
@@ -196,9 +181,8 @@ var (
 	linuxGatewayRe  = regexp.MustCompile(`via\s+(\S+)`)
 )
 
-// defaultGatewayIP best-effort resolves the current default gateway's address
-// for use as a network discriminator. Any failure (missing tool, no route,
-// unparsable output) is silent and just drops the gateway from the key.
+// defaultGatewayIP best-effort resolves the gateway; any failure is silent
+// and just drops the gateway from the key.
 func defaultGatewayIP() string {
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()

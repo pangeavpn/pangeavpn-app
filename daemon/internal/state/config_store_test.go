@@ -23,19 +23,8 @@ func testProfile(id string) state.Profile {
 	}
 }
 
-// TestFindProfile_ClonesNaiveProfile is the regression test for the
-// cloneProfile aliasing bug: cloneProfile deep-copies WireGuard.DNS and
-// WireGuard.BypassHosts but, before this fix, left the Naive pointer
-// pointing straight at the config store's own internal *state.NaiveProfile.
-// Any caller that mutated the returned profile's Naive field (as
-// api.Service's fallbackToNaive used to, before being patched locally at
-// that one call site) would silently corrupt the store's data without its
-// lock.
-//
-// This test proves the fix by fetching the same profile twice via
-// FindProfile, mutating the first copy's Naive.LocalPort, and asserting the
-// second copy is unaffected — which only holds if each call returns an
-// independent *NaiveProfile.
+// TestFindProfile_ClonesNaiveProfile guards against a Naive pointer aliasing
+// the store's internal state; each FindProfile call must return an independent copy.
 func TestFindProfile_ClonesNaiveProfile(t *testing.T) {
 	dir := t.TempDir()
 	cs, err := state.NewConfigStore(dir + "/config.json")
@@ -95,13 +84,8 @@ func TestFindProfile_ClonesNaiveProfile(t *testing.T) {
 	}
 }
 
-// TestGet_ClonesTransportProfiles is the regression test for cloneProfile
-// leaving the Reality/Hysteria2/Snowflake pointer fields (and Snowflake's
-// FrontDomains/ICEServers slices) shallow-copied and thus aliased to the
-// config store's internal state — the same aliasing bug cloneNaiveProfile
-// fixed for Naive. It stores a profile carrying all three transports, fetches
-// it via Get(), mutates the returned copy's transport pointers and Snowflake
-// slices, then Get()s again and asserts the store's snapshot is untouched.
+// TestGet_ClonesTransportProfiles guards against Reality/Hysteria2/Snowflake
+// pointers (and Snowflake's slices) aliasing the store's internal state.
 func TestGet_ClonesTransportProfiles(t *testing.T) {
 	dir := t.TempDir()
 	cs, err := state.NewConfigStore(dir + "/config.json")
@@ -213,10 +197,7 @@ func TestGet_ClonesTransportProfiles(t *testing.T) {
 }
 
 // TestNewConfigStore_RecoversFromBackupWhenPrimaryMissing simulates a crash
-// that lost config.json entirely (the old code's window between renaming it
-// away and renaming the temp file into place) but left a good
-// config.json.bak on disk. The store must recover the saved profile instead
-// of silently starting from DefaultConfig.
+// that lost config.json but left config.json.bak; the store must recover it.
 func TestNewConfigStore_RecoversFromBackupWhenPrimaryMissing(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")
@@ -256,11 +237,8 @@ func TestNewConfigStore_RecoversFromBackupWhenPrimaryMissing(t *testing.T) {
 	}
 }
 
-// TestNewConfigStore_EmptyFileRecoversOrErrors covers the destructive-reset
-// bug: an empty config.json (the most likely crash outcome of a
-// non-fsynced write) must never be treated as "no config yet". With a
-// backup present it recovers; with no backup it must fail loudly instead of
-// silently writing an empty profile list.
+// TestNewConfigStore_EmptyFileRecoversOrErrors: an empty config.json must
+// never be treated as "no config yet" — recover from backup, or fail loudly.
 func TestNewConfigStore_EmptyFileRecoversOrErrors(t *testing.T) {
 	t.Run("with backup", func(t *testing.T) {
 		dir := t.TempDir()
@@ -307,9 +285,8 @@ func TestNewConfigStore_EmptyFileRecoversOrErrors(t *testing.T) {
 	})
 }
 
-// TestNewConfigStore_CleansUpStaleTempFile covers a temp file left behind
-// by a persist that crashed before its rename: it must not stop the daemon
-// from starting, and must not be mistaken for the real config.
+// TestNewConfigStore_CleansUpStaleTempFile: a leftover temp file from a
+// crashed persist must not stop startup or be mistaken for the real config.
 func TestNewConfigStore_CleansUpStaleTempFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")

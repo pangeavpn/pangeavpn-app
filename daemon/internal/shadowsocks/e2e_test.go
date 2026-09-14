@@ -55,13 +55,8 @@ var dualPortCursor = func() *atomic.Int32 {
 	return c
 }()
 
-// pickFreeLoopbackDualPort returns a port free for BOTH protocols. The SS
-// inbound binds tcp_and_udp on one number, so a port free for only one is
-// useless. Candidates come from below Windows' dynamic range (49152+), where
-// Hyper-V reserves blocks that reject binds with WSAEACCES even when the port
-// looks free — asking the OS for an ephemeral port lands in exactly that
-// window. Both protocols are held at once before releasing, so a number that
-// passes really does accept both.
+// pickFreeLoopbackDualPort returns a port free for BOTH protocols, avoiding
+// Windows' Hyper-V reserved blocks that reject binds even when ephemeral.
 func pickFreeLoopbackDualPort(t *testing.T) int {
 	t.Helper()
 	for range 400 {
@@ -155,131 +150,81 @@ func roundTrip(t *testing.T, localPort int, payload []byte, timeout time.Duratio
 	return buf[:n], nil
 }
 
-// TestE2EClientToServerRoundTrip proves the full path: this package's Manager,
-// a real SS server, and an echo listener standing in for WireGuard.
-func TestE2EClientToServerRoundTrip(t *testing.T) {
-	const method = "chacha20-ietf-poly1305"
-	const password = "e2e-shadowsocks-password"
+// TestE2ERoundTrip proves the full path: this package's Manager, a real SS
+// server, and an echo listener standing in for WireGuard, per cipher/mode.
+func TestE2ERoundTrip(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		method     string
+		password   string
+		udpOverTCP bool
+		payload    []byte
+	}{
+		{
+			name:     "aead2017",
+			method:   "chacha20-ietf-poly1305",
+			password: "e2e-shadowsocks-password",
+			payload:  []byte("real-wireguard-shaped-payload-through-shadowsocks-aead-tunnel"),
+		},
+		{
+			// 2022-blake3-aes-128-gcm keys are base64 of exactly 16 bytes, not a passphrase.
+			name:     "ss2022",
+			method:   "2022-blake3-aes-128-gcm",
+			password: "MTIzNDU2Nzg5MGFiY2RlZg==",
+			payload:  []byte("ss-2022-payload"),
+		},
+		{
+			name:       "udp-over-tcp",
+			method:     "chacha20-ietf-poly1305",
+			password:   "e2e-uot-password",
+			udpOverTCP: true,
+			payload:    []byte("wireguard-udp-inside-the-ss-tcp-stream"),
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ssPort := pickFreeLoopbackDualPort(t)
+			echoPort, closeEcho := startUDPEcho(t)
+			defer closeEcho()
 
-	ssPort := pickFreeLoopbackDualPort(t)
-	echoPort, closeEcho := startUDPEcho(t)
-	defer closeEcho()
+			stopServer := startShadowsocksTestServer(t, ssPort, tc.method, tc.password)
+			defer stopServer()
 
-	stopServer := startShadowsocksTestServer(t, ssPort, method, password)
-	defer stopServer()
+			profile := state.ShadowsocksProfile{
+				RemoteHost: "127.0.0.1",
+				RemotePort: ssPort,
+				Method:     tc.method,
+				Password:   tc.password,
+				TargetHost: "127.0.0.1",
+				TargetPort: echoPort,
+				UDPOverTCP: tc.udpOverTCP,
+			}
 
-	profile := state.ShadowsocksProfile{
-		LocalPort:  0,
-		RemoteHost: "127.0.0.1",
-		RemotePort: ssPort,
-		Method:     method,
-		Password:   password,
-		TargetHost: "127.0.0.1",
-		TargetPort: echoPort,
-	}
+			mgr := NewManager(state.NewLogStore(200))
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			if err := mgr.Start(ctx, profile); err != nil {
+				t.Fatalf("Manager.Start: %v", err)
+			}
+			defer mgr.Stop(context.Background())
 
-	mgr := NewManager(state.NewLogStore(200))
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
+			localPort := mgr.BoundLocalPort()
+			if localPort <= 0 {
+				t.Fatalf("BoundLocalPort() = %d, want > 0", localPort)
+			}
 
-	if err := mgr.Start(ctx, profile); err != nil {
-		t.Fatalf("Manager.Start: %v", err)
-	}
-	defer mgr.Stop(context.Background())
-
-	localPort := mgr.BoundLocalPort()
-	if localPort <= 0 {
-		t.Fatalf("BoundLocalPort() = %d, want > 0", localPort)
-	}
-
-	payload := []byte("real-wireguard-shaped-payload-through-shadowsocks-aead-tunnel")
-	got, err := roundTrip(t, localPort, payload, 10*time.Second)
-	if err != nil {
-		t.Fatalf("read round-tripped payload: %v", err)
-	}
-	if string(got) != string(payload) {
-		t.Fatalf("round trip mismatch: got %q, want %q", got, payload)
-	}
-	t.Logf("client-to-server round trip OK: %d bytes through the shadowsocks tunnel", len(got))
-}
-
-func TestE2ESS2022RoundTrip(t *testing.T) {
-	// 2022-blake3-aes-128-gcm keys are base64 of exactly 16 bytes, not a passphrase.
-	const method = "2022-blake3-aes-128-gcm"
-	const password = "MTIzNDU2Nzg5MGFiY2RlZg=="
-
-	ssPort := pickFreeLoopbackDualPort(t)
-	echoPort, closeEcho := startUDPEcho(t)
-	defer closeEcho()
-
-	stopServer := startShadowsocksTestServer(t, ssPort, method, password)
-	defer stopServer()
-
-	profile := state.ShadowsocksProfile{
-		RemoteHost: "127.0.0.1",
-		RemotePort: ssPort,
-		Method:     method,
-		Password:   password,
-		TargetHost: "127.0.0.1",
-		TargetPort: echoPort,
-	}
-
-	mgr := NewManager(state.NewLogStore(200))
-	if err := mgr.Start(context.Background(), profile); err != nil {
-		t.Fatalf("Manager.Start: %v", err)
-	}
-	defer mgr.Stop(context.Background())
-
-	payload := []byte("ss-2022-payload")
-	got, err := roundTrip(t, mgr.BoundLocalPort(), payload, 10*time.Second)
-	if err != nil {
-		t.Fatalf("read round-tripped payload: %v", err)
-	}
-	if string(got) != string(payload) {
-		t.Fatalf("round trip mismatch: got %q, want %q", got, payload)
+			got, err := roundTrip(t, localPort, tc.payload, 10*time.Second)
+			if err != nil {
+				t.Fatalf("read round-tripped payload: %v", err)
+			}
+			if string(got) != string(tc.payload) {
+				t.Fatalf("round trip mismatch: got %q, want %q", got, tc.payload)
+			}
+		})
 	}
 }
 
-func TestE2EUDPOverTCPRoundTrip(t *testing.T) {
-	const method = "chacha20-ietf-poly1305"
-	const password = "e2e-uot-password"
-
-	ssPort := pickFreeLoopbackDualPort(t)
-	echoPort, closeEcho := startUDPEcho(t)
-	defer closeEcho()
-
-	stopServer := startShadowsocksTestServer(t, ssPort, method, password)
-	defer stopServer()
-
-	profile := state.ShadowsocksProfile{
-		RemoteHost: "127.0.0.1",
-		RemotePort: ssPort,
-		Method:     method,
-		Password:   password,
-		TargetHost: "127.0.0.1",
-		TargetPort: echoPort,
-		UDPOverTCP: true,
-	}
-
-	mgr := NewManager(state.NewLogStore(200))
-	if err := mgr.Start(context.Background(), profile); err != nil {
-		t.Fatalf("Manager.Start: %v", err)
-	}
-	defer mgr.Stop(context.Background())
-
-	payload := []byte("wireguard-udp-inside-the-ss-tcp-stream")
-	got, err := roundTrip(t, mgr.BoundLocalPort(), payload, 10*time.Second)
-	if err != nil {
-		t.Fatalf("read round-tripped payload: %v", err)
-	}
-	if string(got) != string(payload) {
-		t.Fatalf("round trip mismatch: got %q, want %q", got, payload)
-	}
-}
-
-// TestE2EProxyCarriesHTTPConnect proves the hub control-plane path: the app
-// speaks HTTP CONNECT to ProxyManager's loopback port, the SS server relays to
-// an ordinary TCP listener, and bytes flow both ways.
+// TestE2EProxyCarriesHTTPConnect proves the hub control-plane path: HTTP
+// CONNECT through ProxyManager's loopback port, relayed by the SS server.
 func TestE2EProxyCarriesHTTPConnect(t *testing.T) {
 	const method = "chacha20-ietf-poly1305"
 	const password = "e2e-proxy-password"
@@ -460,9 +405,8 @@ func startUDPSizeProbe(t *testing.T, dstPort int) (port int, maxSent func() int,
 		func() { front.Close(); back.Close() }
 }
 
-// The daemon clamps WireGuard to MTU 1280 whenever Shadowsocks carries it
-// (shadowsocksMaxMTU, internal/api). SS-2022 frames UDP differently from
-// AEAD-2017, so measure the real datagram rather than trusting the old margin.
+// The daemon clamps WireGuard to MTU 1280 over Shadowsocks (shadowsocksMaxMTU,
+// internal/api); this measures the real per-cipher datagram size against it.
 func TestE2EClampedMTUFitsA1500PathPerCipher(t *testing.T) {
 	const (
 		clampedMTU        = 1280

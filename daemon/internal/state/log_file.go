@@ -35,8 +35,7 @@ func newFileSink(path string, maxSize int64, keep int) (*fileSink, error) {
 }
 
 // openLocked (re)opens s.path and syncs s.size to what is actually on disk,
-// rather than assuming a fresh file — callers may be recovering from a
-// rotation that failed to move the old file out of the way.
+// since callers may be recovering from a rotation that failed midway.
 func (s *fileSink) openLocked() error {
 	f, err := os.OpenFile(s.path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
@@ -87,18 +86,14 @@ func (s *fileSink) write(entry LogEntry) error {
 	return nil
 }
 
-// rotateLocked shifts daemon.log -> .1 -> .2, dropping anything past keep. It
-// always leaves s.f pointing at a real, size-accounted file: if a rename step
-// fails (locked handle, cross-device, permissions), the original file stays
-// at s.path and gets reopened with its true size, so the caller keeps
-// retrying rotation instead of silently re-arming the cap against stale data.
+// rotateLocked shifts daemon.log -> .1 -> .2, dropping anything past keep.
+// It always leaves s.f pointing at a real, size-accounted file.
 func (s *fileSink) rotateLocked() error {
 	if s.f == nil {
 		return nil
 	}
-	// This handle has log lines behind it, so a close error means entries were
-	// lost. Report to stderr, which the daemon points at its crash log — writing
-	// it back through the sink being rotated would recurse.
+	// A close error here means log entries were lost; report to stderr since
+	// writing it back through the sink being rotated would recurse.
 	if err := s.f.Close(); err != nil {
 		fmt.Fprintf(os.Stderr, "log rotation: closing %s failed, entries may be lost: %v\n", s.path, err)
 	}

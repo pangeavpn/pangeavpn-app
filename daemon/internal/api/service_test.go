@@ -16,8 +16,7 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// Fake implementations
-// ---------------------------------------------------------------------------
+// Fake implementations ---------------------------------------------------------------------------
 
 type fakeCloakManager struct {
 	mu             sync.Mutex
@@ -93,15 +92,12 @@ type fakeNaiveManager struct {
 	stopCalled     bool
 	running        bool
 
-	// stayDown makes Start succeed (no startErr) without ever flipping
-	// running to true, simulating a transport process that exits
-	// immediately after a successful launch (waitForManagedTransportStable
-	// then times out).
+	// stayDown makes Start succeed without ever flipping running to true, simulating a
+	// process that exits right after launch (waitForManagedTransportStable then times out).
 	stayDown bool
 
 	// waitErr, when set, is returned by WaitForSession — simulating a
-	// transport whose process/session came up (Start + stability check both
-	// succeeded) but never completed its handshake.
+	// transport whose process/session came up (Start + stability check both succeeded) but never completed its handshake.
 	waitErr error
 
 	// boundLocalPort, when non-zero, overrides the default BoundLocalPort
@@ -383,12 +379,8 @@ type fakeWGManager struct {
 	stopCount      int
 	preflightCount int
 
-	// Handshake modeling for the connection-readiness gate. Default (all zero,
-	// noHandshake false) = a live tunnel that handshakes as soon as it is
-	// running. noHandshake = a dead tunnel that never handshakes. handshakeOnStart
-	// = only handshake once startCount reaches it (to model a transport whose
-	// server is dead so an earlier candidate fails and a later one succeeds).
-	// handshakeUnix overrides the reported handshake time (e.g. a stale one).
+	// Handshake modeling for the connection-readiness gate. Default (all zero) is a live
+	// tunnel that handshakes as soon as running; noHandshake makes it never handshake.
 	noHandshake      bool
 	handshakeOnStart int
 	handshakeUnix    int64
@@ -406,16 +398,14 @@ type fakeWGManager struct {
 	// asserting the peer Endpoint the tunnel was actually brought up against.
 	lastStartConfig string
 
-	// DNS guard modeling. The method below is what makes fakeWGManager satisfy
-	// wgDNSGuard, so every connected health tick exercises the guard; the
-	// defaults report a host still pointing at the tunnel's resolvers.
+	// DNS guard modeling. The method below is what makes fakeWGManager satisfy wgDNSGuard,
+	// so every health tick exercises it; defaults model a host already using tunnel DNS.
 	dnsGuardCorrected bool
 	dnsGuardErr       error
 	dnsGuardCalls     int
 
-	// Endpoint route guard modeling, the same shape as the DNS guard: the method
-	// below is what makes fakeWGManager satisfy wgRouteGuard, and the defaults
-	// report bypass routes still pointing where bring-up left them.
+	// Endpoint route guard modeling, same shape as the DNS guard above: the method below
+	// satisfies wgRouteGuard, and defaults model bypass routes still where bring-up left them.
 	routeGuardRepaired bool
 	routeGuardErr      error
 	routeGuardCalls    int
@@ -648,8 +638,7 @@ func (f *fakeKillSwitch) Active() bool {
 var _ platform.KillSwitch = (*fakeKillSwitch)(nil)
 
 // ---------------------------------------------------------------------------
-// Test helpers
-// ---------------------------------------------------------------------------
+// Test helpers ---------------------------------------------------------------------------
 
 func testProfile() state.Profile {
 	return state.Profile{
@@ -683,9 +672,7 @@ func testConfigStore(t *testing.T, profiles ...state.Profile) *state.ConfigStore
 }
 
 // newTestService keeps its original signature (cloak + naive only) so the
-// existing call sites below don't need touching; it wires in a no-op
-// fakeRealityManager. Tests that specifically exercise reality behavior use
-// newTestServiceWithReality instead.
+// existing call sites below don't need touching; it wires in a no-op fakeRealityManager.
 func newTestService(
 	t *testing.T,
 	cloak *fakeCloakManager,
@@ -743,8 +730,7 @@ func newTestServiceFull(
 }
 
 // ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
+// Tests ---------------------------------------------------------------------------
 
 func TestConnect_KillSwitchEnabledBeforeCloakAndWG(t *testing.T) {
 	profile := testProfile()
@@ -844,12 +830,8 @@ func TestConnect_WGFailure_KillSwitchStaysActive(t *testing.T) {
 	}
 }
 
-// TestConnect_KillSwitchIsScopedToTheReportedTunnelLUID proves the permit that
-// lets application traffic through the lock is scoped to the device the manager
-// created, not to a name resolved back through the OS. A rebuild recreates the
-// adapter under the same name a second after destroying it, and a name lookup in
-// that window can still return the dead one — leaving the permit on an interface
-// that no longer exists and every application socket blocked.
+// TestConnect_KillSwitchIsScopedToTheReportedTunnelLUID proves the permit is scoped to
+// the device the manager created, not a name a rebuild's adapter recreation can reuse.
 func TestConnect_KillSwitchIsScopedToTheReportedTunnelLUID(t *testing.T) {
 	profile := testProfile()
 	wgMgr := &fakeWGManager{interfaceName: "PangeaVPN Tunnel", tunnelLUID: 1688849860263936}
@@ -870,11 +852,8 @@ func TestConnect_KillSwitchIsScopedToTheReportedTunnelLUID(t *testing.T) {
 	}
 }
 
-// TestConnect_KillSwitchUpdateFailureFailsTheConnect proves a session whose
-// permit never landed is not reported as connected. Without it the lock blocks
-// every application socket while WireGuard — permitted separately by endpoint
-// IP — goes on handshaking, so the tunnel looks healthy from every angle the
-// daemon checks while nothing on the machine works.
+// TestConnect_KillSwitchUpdateFailureFailsTheConnect proves a session whose permit never
+// landed is not reported connected, even though WireGuard goes on handshaking fine.
 func TestConnect_KillSwitchUpdateFailureFailsTheConnect(t *testing.T) {
 	profile := testProfile()
 	wgMgr := &fakeWGManager{}
@@ -892,8 +871,7 @@ func TestConnect_KillSwitchUpdateFailureFailsTheConnect(t *testing.T) {
 	}
 
 	// Left running, the tunnel belongs to nobody: no profile was ever recorded
-	// for the health loop to recover, and the next Connect is refused outright
-	// by ensureNoRunningWireGuard.
+	// for the health loop to recover, and the next Connect is refused outright by ensureNoRunningWireGuard.
 	status, err := wgMgr.Status(context.Background(), profile.WireGuard)
 	if err != nil {
 		t.Fatalf("wireguard status failed: %v", err)
@@ -1123,9 +1101,7 @@ func TestKillSwitchPermits_IncludesNaiveHostWhenPresent(t *testing.T) {
 }
 
 // Under a lockdown lock the daemon cannot resolve a transport's remote host —
-// the lock blocks DNS — so the client hands over the IPs it resolved while the
-// network was open. Without them, only Cloak (whose endpoint is a raw IP) can
-// be permitted and every DPI fallback is blocked by our own kill switch.
+// the lock blocks DNS — so the client hands over the IPs it resolved while the network was open.
 func TestKillSwitchPermits_IncludesResolvedTransportIPs(t *testing.T) {
 	profile := testProfile()
 	profile.Naive = &state.NaiveProfile{RemoteHost: "naive.example.com", RemotePort: 8443, Username: "u", Password: "p"}
@@ -1141,8 +1117,7 @@ func TestKillSwitchPermits_IncludesResolvedTransportIPs(t *testing.T) {
 }
 
 // With the hub's addresses in hand the daemon must not ask a resolver where a
-// node is: a system lookup goes out in cleartext and hands our node domains to
-// the user's ISP.
+// node is: a system lookup goes out in cleartext and hands our node domains to the user's ISP.
 func TestKillSwitchPermits_HubIPsReplaceNodeHostnames(t *testing.T) {
 	profile := testProfile()
 	profile.Cloak.RemoteHost = "192.0.2.50"
@@ -1225,9 +1200,7 @@ func TestKillSwitchPermits_CloakOnlyProfileUnaffected(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// PermitHosts — control-plane hole in an engaged lockdown lock
-// ---------------------------------------------------------------------------
+// PermitHosts — control-plane hole in an engaged lockdown lock.
 
 // sessionRecordStub keeps session-record persistence in memory so tests never
 // touch the machine's real state directory.
@@ -1277,8 +1250,7 @@ func stubSessionRecordStore(t *testing.T) *sessionRecordStub {
 }
 
 // stubKillSwitchState points the persisted-state reader at a fixed value for
-// the duration of the test. PermitHosts reuses the persisted AllowLAN/Locked
-// flags so opening a hole never silently changes what kind of lock is engaged.
+// the duration of the test.
 func stubKillSwitchState(t *testing.T, st platform.KillSwitchState) {
 	t.Helper()
 	original := loadKillSwitchState
@@ -1330,8 +1302,7 @@ func TestPermitHosts_IgnoresHostnames(t *testing.T) {
 }
 
 // The app only learns the hub's IP after it has talked to the hub, so on a cold
-// start under lockdown it has none to send. The daemon falls back to the hub IP
-// the last provisioned profile already carries in its WireGuard bypass hosts.
+// start under lockdown it has none to send.
 func TestPermitHosts_FallsBackToStoredBypassHosts(t *testing.T) {
 	profile := testProfile()
 	profile.Cloak.RemoteHost = "192.0.2.50"
@@ -1377,9 +1348,8 @@ func TestPermitHosts_SkipsWhenAlreadyPermitted(t *testing.T) {
 	}
 }
 
-// Engaging a lock must not cut the app off from the hub: the server list, the
-// subscription state and provisioning all run through it, and none of them can
-// re-resolve anything while the lock blocks DNS.
+// Engaging a lock must not cut the app off from the hub: the server list, subscription
+// state, and provisioning all run through it and can't re-resolve while the lock blocks DNS.
 func TestEngageKillSwitch_PermitsStoredHubIPOnly(t *testing.T) {
 	profile := testProfile()
 	profile.Cloak.RemoteHost = "192.0.2.50"
@@ -1421,8 +1391,7 @@ func TestEngageKillSwitch_BlocksAllWhenNoHubIPKnown(t *testing.T) {
 }
 
 // A lock persisted by an older daemon carries no hub permit. Restarting into it
-// must not leave the app unable to reach the hub — that is the state a stuck
-// user upgrades from.
+// must not leave the app unable to reach the hub — that is the state a stuck user upgrades from.
 func TestReconcileStartup_ReAppliedLockdownLockRegainsHubPermit(t *testing.T) {
 	profile := testProfile()
 	profile.WireGuard.BypassHosts = []string{"203.0.113.7"}
@@ -1760,9 +1729,8 @@ func TestConnect_PreferredTransportNaive_ErrorsWhenProfileHasNoNaiveConfig(t *te
 	}
 }
 
-// TestConnect_NoWireGuardHandshake_DoesNotConnect proves the readiness gate:
-// a transport whose process starts but whose tunnel never handshakes does not
-// count as connected, and WireGuard is torn back down.
+// TestConnect_NoWireGuardHandshake_DoesNotConnect proves the readiness gate: a transport
+// whose process starts but never handshakes doesn't count as connected, and WireGuard is torn down.
 func TestConnect_NoWireGuardHandshake_DoesNotConnect(t *testing.T) {
 	profile := testProfile()
 	cloak := &fakeCloakManager{}
@@ -1785,9 +1753,8 @@ func TestConnect_NoWireGuardHandshake_DoesNotConnect(t *testing.T) {
 	}
 }
 
-// TestConnect_FallsBackWhenTransportStartsButHandshakeNeverCompletes proves the
-// handshake is the fallback trigger: cloak starts cleanly but no handshake ever
-// lands through it, so the daemon advances to naive, which does handshake.
+// TestConnect_FallsBackWhenTransportStartsButHandshakeNeverCompletes proves handshake is
+// the fallback trigger: cloak starts cleanly but never lands one, so the daemon tries naive.
 func TestConnect_FallsBackWhenTransportStartsButHandshakeNeverCompletes(t *testing.T) {
 	profile := state.Profile{
 		ID:    "p1",
@@ -1868,10 +1835,8 @@ func goSilent(wgMgr *fakeWGManager) {
 	wgMgr.handshakeUnix = time.Now().Add(-(wireGuardHandshakeStaleAfter + time.Minute)).Unix()
 }
 
-// TestHealthCheck_SilentTunnelRebuildsSession proves the ongoing health check
-// recovers a tunnel that goes silent mid-session: the transport's session is
-// dead even though the transport and interface both still report running, so
-// only a full transport restart brings traffic back.
+// TestHealthCheck_SilentTunnelRebuildsSession proves the health check recovers a tunnel
+// that goes silent mid-session: dead even though the transport and interface still report running.
 func TestHealthCheck_SilentTunnelRebuildsSession(t *testing.T) {
 	profile := silentTunnelProfile()
 	cloak := &fakeCloakManager{}
@@ -1918,8 +1883,7 @@ func TestHealthCheck_SilentTunnelRebuildsSession(t *testing.T) {
 }
 
 // TestHealthCheck_SilentTunnelRebuildFailureMarksError proves a silent tunnel
-// that cannot be rebuilt still surfaces as an error rather than sitting there
-// reporting connected.
+// that cannot be rebuilt still surfaces as an error rather than sitting there reporting connected.
 func TestHealthCheck_SilentTunnelRebuildFailureMarksError(t *testing.T) {
 	profile := silentTunnelProfile()
 	cloak := &fakeCloakManager{}
@@ -2052,8 +2016,7 @@ func TestHealthCheck_RecoveryWaitsOutTheBackoff(t *testing.T) {
 }
 
 // TestHealthCheck_RecoveryWaitsForUsableNetwork proves a host with no address
-// to dial from is waited on rather than retried against: burning attempts (and
-// backoff) while the WiFi is still re-associating only delays the reconnect.
+// to dial from is waited on rather than retried against while the WiFi re-associates.
 func TestHealthCheck_RecoveryWaitsForUsableNetwork(t *testing.T) {
 	svc, naive, wgMgr, _ := recoveryTestService(t)
 
@@ -2291,9 +2254,8 @@ func TestHealthCheck_DisconnectEndsRecovery(t *testing.T) {
 	}
 }
 
-// TestHealthCheck_RecoveryLeavesALiveTunnelAlone proves recovery only rebuilds
-// broken sessions. A refused Connect stamps an error on a session that is still
-// carrying traffic; tearing that down to "recover" it would be the bug.
+// TestHealthCheck_RecoveryLeavesALiveTunnelAlone proves recovery only rebuilds broken
+// sessions: tearing down one still carrying traffic just because Connect was refused is the bug.
 func TestHealthCheck_RecoveryLeavesALiveTunnelAlone(t *testing.T) {
 	svc, naive, wgMgr, _ := recoveryTestService(t)
 
@@ -2320,8 +2282,7 @@ func TestHealthCheck_RecoveryLeavesALiveTunnelAlone(t *testing.T) {
 }
 
 // TestHealthCheck_HeldWhileTheHostResumes proves the grace period after a
-// detected resume: the tunnel is stale because the machine was asleep, and
-// rebuilding into a network that has not come back yet just wastes the session.
+// detected resume holds off rebuilding into a network that has not come back yet.
 func TestHealthCheck_HeldWhileTheHostResumes(t *testing.T) {
 	svc, _, wgMgr, _ := recoveryTestService(t)
 
@@ -2345,8 +2306,7 @@ func TestHealthCheck_HeldWhileTheHostResumes(t *testing.T) {
 }
 
 // TestHealthCheck_SilentTunnelWaitsForNetwork proves a silent tunnel is left
-// alone while the host has no network to rebuild on (mid-resume, AP change):
-// tearing it down there burns the cascade and reports exhaustion for nothing.
+// alone while the host has no network to rebuild on (mid-resume, AP change).
 func TestHealthCheck_SilentTunnelWaitsForNetwork(t *testing.T) {
 	svc, naive, wgMgr, _ := recoveryTestService(t)
 	svc.networkKey = func() string { return "" }
@@ -2379,10 +2339,8 @@ func TestHealthCheck_SilentTunnelWaitsForNetwork(t *testing.T) {
 	}
 }
 
-// TestHealthCheck_SilentTunnelRebuildRepointsEndpoint proves the rebuilt tunnel
-// is aimed at the port the *new* bridge bound. The live profile's LocalPort was
-// mutated to the previous session's bound port, so rebuilding from it would
-// leave WireGuard talking to a port nothing listens on any more.
+// TestHealthCheck_SilentTunnelRebuildRepointsEndpoint proves the rebuilt tunnel is aimed
+// at the *new* bridge's bound port, not the stale one mutated into the live profile.
 func TestHealthCheck_SilentTunnelRebuildRepointsEndpoint(t *testing.T) {
 	profile := silentTunnelProfile()
 	profile.Naive.LocalPort = 51821
@@ -2396,9 +2354,8 @@ func TestHealthCheck_SilentTunnelRebuildRepointsEndpoint(t *testing.T) {
 		t.Fatalf("connect failed: %v", err)
 	}
 
-	// The second bridge binds the same ephemeral port as the first — the case
-	// that catches a rebuild seeded from the mutated live profile, because then
-	// bound == configured and the rebind sees nothing to rewrite.
+	// The second bridge binds the same ephemeral port as the first — the case that catches
+	// a rebuild seeded from the mutated profile, where bound == configured and nothing rewrites.
 	goSilent(wgMgr)
 	svc.runHealthCheck(context.Background())
 
@@ -2414,9 +2371,7 @@ func TestHealthCheck_SilentTunnelRebuildRepointsEndpoint(t *testing.T) {
 }
 
 // TestHealthCheck_SilentTunnelRebuildKeepsAllowLAN proves the rebuild restores
-// the session the user asked for: AllowLAN shapes both the WireGuard
-// AllowedIPs and the kill switch, so losing it would silently tighten the
-// tunnel on recovery.
+// the session the user asked for: AllowLAN shapes both the WireGuard AllowedIPs and the kill switch.
 func TestHealthCheck_SilentTunnelRebuildKeepsAllowLAN(t *testing.T) {
 	profile := silentTunnelProfile()
 	cloak := &fakeCloakManager{}
@@ -2532,9 +2487,8 @@ func transportMemoryProfile() state.Profile {
 	}
 }
 
-// TestConnect_RecordsLastGoodTransportForNetwork proves the daemon remembers
-// which transport actually established a tunnel, keyed by network: cloak fails
-// to handshake, naive succeeds, so naive is recorded for this network.
+// TestConnect_RecordsLastGoodTransportForNetwork proves the daemon remembers which
+// transport established the tunnel, keyed by network: cloak fails, naive succeeds and is recorded.
 func TestConnect_RecordsLastGoodTransportForNetwork(t *testing.T) {
 	// cloak + naive only, so the second transport attempted is deterministically
 	// naive regardless of the wider cascade order.
@@ -2569,9 +2523,8 @@ func TestConnect_RecordsLastGoodTransportForNetwork(t *testing.T) {
 	}
 }
 
-// TestConnect_TriesRememberedTransportFirst proves the remembered transport is
-// attempted before the rest of the cascade: naive is remembered and works, so
-// neither reality (normally first) nor cloak is ever started.
+// TestConnect_TriesRememberedTransportFirst proves the remembered transport is attempted
+// before the rest of the cascade: naive works, so neither reality nor cloak ever starts.
 func TestConnect_TriesRememberedTransportFirst(t *testing.T) {
 	profile := transportMemoryProfile()
 	cloak := &fakeCloakManager{}
@@ -2605,9 +2558,7 @@ func TestConnect_TriesRememberedTransportFirst(t *testing.T) {
 }
 
 // TestConnect_RememberedTransportFailsNow_FallsBackAndRerecords proves a stale
-// memory doesn't strand the connection: naive is remembered but no longer
-// handshakes, so the daemon falls through the rest of the cascade and updates
-// the memory to the new winner.
+// memory doesn't strand the connection: naive is remembered but no longer handshakes.
 func TestConnect_RememberedTransportFailsNow_FallsBackAndRerecords(t *testing.T) {
 	profile := transportMemoryProfile()
 	cloak := &fakeCloakManager{}
@@ -2639,9 +2590,6 @@ func TestConnect_RememberedTransportFailsNow_FallsBackAndRerecords(t *testing.T)
 
 // naiveFallbackProfile builds a profile that falls back to naive (cloak
 // always fails to start) for the fallbackToNaive regression tests below.
-// Naive.LocalPort and the WireGuard config's loopback Endpoint line are
-// both set to origNaiveLocalPort so rebindWireGuardEndpoint has a matching
-// line to rewrite when the fake reports a different bound port.
 func naiveFallbackProfile(origNaiveLocalPort int) state.Profile {
 	return state.Profile{
 		ID:   "p1",
@@ -2665,17 +2613,8 @@ func naiveFallbackProfile(origNaiveLocalPort int) state.Profile {
 	}
 }
 
-// TestFallbackToNaive_DoesNotMutateConfigStoreProfile is the regression test
-// for the config-store aliasing bug: state.ConfigStore's clone-on-read
-// (cloneProfile in config_store.go) only deep-copies
-// WireGuard.DNS/BypassHosts, not the Naive pointer, so profile.Naive
-// returned by FindProfile aliases the config store's own internal
-// *state.NaiveProfile. Before the fix, fallbackToNaive's
-// `profile.Naive.LocalPort = s.rebindWireGuardEndpoint(...)` wrote straight
-// through that alias, mutating the config store's data without its lock.
-// This test proves that after a fallback-to-naive connect with a rebound
-// local port, re-fetching the profile from s.config still shows the
-// ORIGINAL LocalPort.
+// TestFallbackToNaive_DoesNotMutateConfigStoreProfile guards against config-store aliasing:
+// cloneProfile's shallow Naive pointer copy let fallbackToNaive mutate the store's own profile.
 func TestFallbackToNaive_DoesNotMutateConfigStoreProfile(t *testing.T) {
 	const origNaiveLocalPort = 51821
 	profile := naiveFallbackProfile(origNaiveLocalPort)
@@ -2696,8 +2635,7 @@ func TestFallbackToNaive_DoesNotMutateConfigStoreProfile(t *testing.T) {
 	}
 
 	// Sanity check: the in-flight session's profile really did get rebound
-	// to the fake's bound port (otherwise this test wouldn't be exercising
-	// the aliasing path at all).
+	// to the fake's bound port (otherwise this test wouldn't be exercising the aliasing path at all).
 	active, ok := svc.getCurrentProfile()
 	if !ok {
 		t.Fatal("expected an active profile after connect")
@@ -2720,12 +2658,8 @@ func TestFallbackToNaive_DoesNotMutateConfigStoreProfile(t *testing.T) {
 	}
 }
 
-// TestFallbackToNaive_StopsNaiveWhenStabilityCheckFails is a regression test
-// for the leaked-naive-transport bug: when s.naive.Start succeeds but the
-// transport never reports Running (waitForManagedTransportStable times
-// out), fallbackToNaive must call s.naive.Stop before returning its error,
-// so a failed connect attempt doesn't leave an orphaned naive process
-// running in the background.
+// TestFallbackToNaive_StopsNaiveWhenStabilityCheckFails guards against a leaked naive process:
+// Start succeeds but stability never reports Running, so fallbackToNaive must Stop it anyway.
 func TestFallbackToNaive_StopsNaiveWhenStabilityCheckFails(t *testing.T) {
 	profile := naiveFallbackProfile(51821)
 
@@ -2753,10 +2687,8 @@ func TestFallbackToNaive_StopsNaiveWhenStabilityCheckFails(t *testing.T) {
 	}
 }
 
-// TestFallbackToNaive_StopsNaiveWhenSessionWaitFails is a regression test
-// for the same leaked-naive-transport bug, covering the other failure path:
+// TestFallbackToNaive_StopsNaiveWhenSessionWaitFails covers the other leaked-process path:
 // Start and the stability check both succeed, but WaitForSession fails.
-// fallbackToNaive must still call s.naive.Stop before returning its error.
 func TestFallbackToNaive_StopsNaiveWhenSessionWaitFails(t *testing.T) {
 	profile := naiveFallbackProfile(51821)
 
@@ -2785,8 +2717,7 @@ func TestFallbackToNaive_StopsNaiveWhenSessionWaitFails(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Reality tests
-// ---------------------------------------------------------------------------
+// Reality tests ---------------------------------------------------------------------------
 
 func realityProfile() state.Profile {
 	return state.Profile{
@@ -2893,9 +2824,7 @@ func TestConnect_RealityFails_FallsBackToCloakBeforeNaive(t *testing.T) {
 }
 
 // TestConnect_AutoCascadeAttemptsTransportsInCensorshipOrder pins the auto-mode
-// order: reality, cloak, shadowsocks, hysteria2, then naive (snowflake is gated
-// off). With every transport configured but none able to handshake, the
-// aggregated failure records the order they were attempted in.
+// order: reality, cloak, shadowsocks, hysteria2, then naive (snowflake is gated off).
 func TestConnect_AutoCascadeAttemptsTransportsInCensorshipOrder(t *testing.T) {
 	profile := state.Profile{
 		ID:          "p1",
@@ -3027,8 +2956,7 @@ func TestConnect_CloakNaiveRealityHysteria2Fail_DoesNotFallBackToSnowflake_WhenG
 	svc := newTestServiceFull(t, cloakMgr, naiveMgr, realityMgr, hysteria2Mgr, &fakeShadowsocksManager{}, snowflakeMgr, wgMgr, ks, profile)
 
 	// Snowflake is gated off this release (see snowflakeReleaseGated in
-	// service.go): AUTO mode must fail once the other transports fail rather
-	// than fall back to snowflake.
+	// service.go): AUTO mode must fail once the other transports fail rather than fall back to snowflake.
 	if err := svc.Connect(context.Background(), "p1", ConnectOptions{}); err == nil {
 		t.Fatal("expected Connect to fail: all non-snowflake transports failed and snowflake is gated")
 	}
@@ -3046,9 +2974,7 @@ func TestConnect_CloakNaiveRealityHysteria2Fail_DoesNotFallBackToSnowflake_WhenG
 }
 
 // TestConnect_PreferredTransportSnowflake_IsGated also covers the former
-// no-snowflake-config case: the gate precedes the config check, so an explicit
-// preferredTransport="snowflake" errors and starts no transport whether or not
-// the profile carries snowflake config.
+// no-snowflake-config case: the gate precedes the config check.
 func TestConnect_PreferredTransportSnowflake_IsGated(t *testing.T) {
 	tests := []struct {
 		name    string

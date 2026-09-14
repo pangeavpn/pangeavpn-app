@@ -23,9 +23,7 @@ func TestRequestedWindowsTunnelGUIDChangesForDifferentNames(t *testing.T) {
 }
 
 func TestRequestedWindowsTunnelGUIDStableAcrossConfigs(t *testing.T) {
-	// GUID should be the same regardless of config content — only the
-	// tunnel name determines adapter identity. This prevents adapter
-	// proliferation when the WireGuard config changes between connections.
+	// GUID depends only on tunnel name, so config content changes never cause adapter proliferation.
 	first := requestedWindowsTunnelGUID("vps-1")
 	second := requestedWindowsTunnelGUID("vps-1")
 

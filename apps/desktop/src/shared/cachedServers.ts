@@ -1,17 +1,7 @@
 import type { ServerInfo } from "./ipc";
 
-/** Validation for the node list cached to settings.json, out of pangeaApiClient
- *  so the rules are testable without electron.
- *
- *  Only the fields provision() cannot build a profile without are checked. The
- *  optional transport blocks are passed through as long as they are objects:
- *  the daemon validates every profile it is given, so a malformed block fails
- *  there with a real error rather than being silently dropped here, which would
- *  look to the user like a transport that simply vanished.
- *
- *  Nothing here is a new secret on disk. The daemon's own config store already
- *  holds full profiles, credentials included, and the control-plane Shadowsocks
- *  cache already sits in this same file. */
+/** Validation for the node list cached to settings.json. Only the fields
+ *  provision() needs are checked; the daemon rejects a malformed transport block itself. */
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;

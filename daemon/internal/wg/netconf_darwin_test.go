@@ -29,8 +29,7 @@ func physicalDefault() darwinRouteEntry {
 }
 
 // tunnelHalfDefault is what the tunnel installs: 0.0.0.0/1 scoped to the utun
-// with no gateway. It shares a destination with the real default, so only the
-// mask and the missing gateway tell them apart.
+// with no gateway; only the mask and missing gateway distinguish it from the real default.
 func tunnelHalfDefault() darwinRouteEntry {
 	return darwinRouteEntry{
 		destination: addr("0.0.0.0"),
@@ -39,9 +38,8 @@ func tunnelHalfDefault() darwinRouteEntry {
 	}
 }
 
-// TestDarwinDefaultGateway_IgnoresTheTunnelsHalfDefault is the case that makes
-// the table scan necessary: asking the kernel which route serves 0.0.0.0 would
-// answer with the tunnel's 0.0.0.0/1, not the gateway the bypass needs.
+// TestDarwinDefaultGateway_IgnoresTheTunnelsHalfDefault is why the table scan
+// is necessary: `route get 0.0.0.0` would answer with the tunnel's own route.
 func TestDarwinDefaultGateway_IgnoresTheTunnelsHalfDefault(t *testing.T) {
 	entries := []darwinRouteEntry{tunnelHalfDefault(), physicalDefault()}
 

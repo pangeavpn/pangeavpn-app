@@ -1,6 +1,5 @@
-/** Verification for the dead-drop bootstrap file: a signed blob, published
- *  publicly, carrying replacement addresses for a client that can no longer
- *  reach the hub by any of its usual paths. See docs/deaddrop-bootstrap-design.md. */
+/** Verification for the dead-drop bootstrap file: a signed blob carrying
+ *  replacement addresses. See docs/deaddrop-bootstrap-design.md. */
 
 import { createPublicKey, verify } from "node:crypto";
 import { isIPv4Literal } from "./ipLiteral.ts";
@@ -89,14 +88,8 @@ function cleanList(value: unknown, normalize: (entry: string) => string | null):
   return out;
 }
 
-/**
- * The verified payload, or null for anything that fails a check. Null always
- * means "carry on as before" — a rejected blob must never leave the client
- * worse off than not having fetched one.
- *
- * The blob's authority is enumerated, not merged: it contributes addresses and
- * nothing else. It cannot name a hub, supply a key, or change which methods run.
- */
+/** The verified payload, or null for anything that fails a check — never worse
+ *  off than not having fetched one. Contributes only addresses, nothing else. */
 export function verifyDeadDropBlob(
   raw: string | Buffer,
   options: VerifyDeadDropOptions

@@ -105,8 +105,7 @@ func configureWindowsInterface(luidValue uint64, addresses []string, allowedIPs 
 }
 
 // setWindowsRoutesForFamily replaces the family's routes, retrying once on
-// ERROR_NOT_FOUND: FlushRoutes reports a row the OS already removed and
-// SetRoutesForFamily then returns before installing anything.
+// ERROR_NOT_FOUND since FlushRoutes can report a row the OS already removed.
 func setWindowsRoutesForFamily(luid winipcfg.LUID, family winipcfg.AddressFamily, routes []*winipcfg.RouteData) error {
 	err := luid.SetRoutesForFamily(family, routes)
 	if err != nil && errors.Is(err, windows.ERROR_NOT_FOUND) {
@@ -161,11 +160,8 @@ func configureWindowsIPInterface(luid winipcfg.LUID, mtu int) error {
 const windowsIPInterfaceRetries = 20
 const windowsIPInterfaceRetryDelay = 50 * time.Millisecond
 
-// tuneWindowsIPInterface waits for the family's MIB_IPINTERFACE_ROW to be
-// published, then forces the metric to 0. Metric tuning is a route/DNS
-// preference optimization, not a correctness gate, so a family whose row never
-// appears or whose metric won't stick is best-effort — the handshake proves the
-// tunnel, and aborting the whole connect here regressed every Windows connect.
+// tuneWindowsIPInterface waits for the row to publish, then forces metric 0;
+// best-effort, since aborting on a metric that won't stick regressed connects.
 func tuneWindowsIPInterface(luid winipcfg.LUID, family winipcfg.AddressFamily, mtu int) error {
 	var row *winipcfg.MibIPInterfaceRow
 	var err error
@@ -245,15 +241,8 @@ func applyWindowsDNSServers(luid winipcfg.LUID, dnsServers []string) error {
 	return errors.Join(errs...)
 }
 
-// ensureSessionDNS re-applies want to the tunnel interface when the host has
-// stopped pointing at exactly those resolvers, reporting whether it had to
-// correct anything.
-//
-// Windows hands interface DNS to whoever wrote last and tells nobody. Another
-// VPN client's DNS enforcement, or a Windows component re-profiling the adapter,
-// can take it over mid-session — and a tunnel carrying traffic perfectly still
-// leaves the user with no name resolution when that happens. Nothing inside the
-// tunnel can see it, so the health loop has to look.
+// ensureSessionDNS re-applies want when the host has stopped pointing at
+// exactly those resolvers, reporting whether it had to correct anything.
 func ensureSessionDNS(session *tunnelSession, want []string) (bool, error) {
 	if session == nil || session.windowsLUID == 0 {
 		return false, nil
@@ -287,8 +276,7 @@ func ensureSessionDNS(session *tunnelSession, want []string) (bool, error) {
 }
 
 // windowsDNSMatches reports whether the interface's resolvers are exactly
-// want4 followed by want6, in order — order is preference, so a reordered
-// list is a real change, and a stray v6 resolver from elsewhere is too.
+// want4 followed by want6, in order — order is preference, so it matters.
 func windowsDNSMatches(current []netip.Addr, want4, want6 []netip.Addr) bool {
 	got4 := make([]netip.Addr, 0, len(want4))
 	got6 := make([]netip.Addr, 0, len(want6))
@@ -351,13 +339,8 @@ func addWindowsEndpointRoutes(ctx context.Context, excludeLUIDs map[uint64]struc
 	return added, errors.Join(errs...)
 }
 
-// ensureSessionEndpointRoutes re-pins the endpoint bypass routes to the host's
-// current default route, reporting whether it had to repair anything.
-//
-// Windows drops an interface's routes on a media-sense flap, and a roam or DHCP
-// renewal moves the gateway out from under them. Either way the node's address
-// falls back to matching the tunnel's own AllowedIPs and WireGuard ends up
-// routed into the tunnel it is trying to establish.
+// ensureSessionEndpointRoutes re-pins bypass routes to the host's current
+// default route, reporting whether it had to repair anything.
 func ensureSessionEndpointRoutes(_ context.Context, session *tunnelSession, excludeLUIDs map[uint64]struct{}) (bool, error) {
 	if session == nil || session.windowsLUID == 0 || len(session.windowsRoutes) == 0 {
 		return false, nil
@@ -381,19 +364,16 @@ func ensureSessionEndpointRoutes(_ context.Context, session *tunnelSession, excl
 			continue
 		}
 
-		// New route in before the old one goes out. When the gateway has merely
-		// moved the old route is still installed and still the session's only way
-		// out, so removing it first would mean a failed add leaves the node with
-		// no path at all — the very failure this repairs.
+		// New route in before the old one goes out: removing first risks a
+		// failed add leaving the node with no path at all.
 		created, err := addWindowsRoute(want)
 		if err != nil {
 			errs = append(errs, err)
 			continue
 		}
 		if want == current && !created {
-			// The route was there all along and the lookup simply could not
-			// confirm it. Reporting a repair here would have the health check
-			// deferring to a fix that never happened, every tick.
+			// The route was there all along; the lookup just couldn't confirm it,
+			// so reporting a repair here would be a false positive every tick.
 			continue
 		}
 		if want != current {
@@ -414,10 +394,8 @@ func ensureSessionEndpointRoutes(_ context.Context, session *tunnelSession, excl
 	return repaired, errors.Join(errs...)
 }
 
-// plannedEndpointRoute reports where a recorded bypass route should point given
-// the host's default routes now. ok is false when there is nothing to pin it to
-// — mid-roam, or the link is down — which leaves the recorded spec for a later
-// pass rather than tearing up a route with nowhere to put it.
+// plannedEndpointRoute reports where a recorded bypass route should point now.
+// ok is false mid-roam or when the link is down, leaving the spec as-is.
 func plannedEndpointRoute(spec windowsRouteSpec, defaultRoutes map[string]windowsDefaultRoute) (windowsRouteSpec, bool) {
 	destination, err := netip.ParsePrefix(strings.TrimSpace(spec.destination))
 	if err != nil {
@@ -441,8 +419,7 @@ func plannedEndpointRoute(spec windowsRouteSpec, defaultRoutes map[string]window
 }
 
 // windowsRouteIsPresent reports whether the route is still in the forwarding
-// table. Anything it cannot confirm counts as absent: re-adding a route that is
-// in fact there is free, while skipping one that is gone costs the session.
+// table; anything it cannot confirm counts as absent, since re-adding is free.
 func windowsRouteIsPresent(spec windowsRouteSpec) bool {
 	destination, nextHop, err := parseWindowsRouteSpec(spec)
 	if err != nil {
@@ -458,9 +435,8 @@ func windowsPrefixRouteIsPresent(luid winipcfg.LUID, destination netip.Prefix, n
 	return err == nil && row != nil
 }
 
-// addWindowsRoute installs the route and reports whether it created it. An
-// route that was already there is not an error, but it is not a change either —
-// callers use that to tell a real repair from a no-op.
+// addWindowsRoute installs the route and reports whether it created it, so
+// callers can tell a real repair from a no-op.
 func addWindowsRoute(spec windowsRouteSpec) (bool, error) {
 	destination, nextHop, err := parseWindowsRouteSpec(spec)
 	if err != nil {
@@ -551,9 +527,8 @@ func bestWindowsDefaultRoute(family winipcfg.AddressFamily, excludeLUIDs map[uin
 		if !nextHop.IsValid() || nextHop.IsLoopback() || nextHop.IsMulticast() {
 			continue
 		}
-		// An on-link default belongs to a tunnel, not a gateway. Pinning the
-		// node's bypass to one would route WireGuard through a tunnel — its own
-		// after a rebuild, or another VPN's — which is the loop this avoids.
+		// An on-link default belongs to a tunnel, not a gateway; pinning the
+		// bypass to one would route WireGuard through a tunnel.
 		if nextHop.IsUnspecified() {
 			continue
 		}
@@ -568,10 +543,8 @@ func bestWindowsDefaultRoute(family winipcfg.AddressFamily, excludeLUIDs map[uin
 			metric += uint64(ipif.Metric)
 		}
 
-		// Ties break on the lower LUID rather than on table order, so repeated
-		// elections agree with each other. An answer that alternated between
-		// two equal-metric gateways would have the route guard re-pinning the
-		// bypass on every health check.
+		// Ties break on the lower LUID, not table order, so repeated elections
+		// agree instead of flapping the bypass on every health check.
 		if !bestFound || metric < best.metric ||
 			(metric == best.metric && row.InterfaceLUID < best.interfaceLUID) {
 			best = windowsDefaultRoute{

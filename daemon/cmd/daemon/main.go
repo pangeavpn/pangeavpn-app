@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -65,12 +66,9 @@ func main() {
 }
 
 func hasFlag(name string) bool {
-	for _, arg := range os.Args[1:] {
-		if strings.EqualFold(strings.TrimSpace(arg), name) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(os.Args[1:], func(arg string) bool {
+		return strings.EqualFold(strings.TrimSpace(arg), name)
+	})
 }
 
 // clearKillSwitchCommand is the uninstaller's way to lower a lock the daemon
@@ -139,9 +137,8 @@ func stopDaemonRuntime(ctx context.Context, runtime *daemonRuntime) error {
 }
 
 func startDaemonRuntime() (*daemonRuntime, error) {
-	// Attached before anything that can fail (token/config resolution), so the
-	// most common startup errors land in daemon.log/crash log, not a
-	// --service-mode stderr that doesn't exist.
+	// Attached before anything that can fail, so the most common startup errors land in
+	// daemon.log and the crash log rather than a --service-mode stderr that doesn't exist.
 	logs := state.NewLogStore(4000)
 	attachLogFile(logs)
 	log.SetOutput(os.Stderr)

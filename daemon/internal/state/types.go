@@ -54,10 +54,8 @@ type WireGuardStatus struct {
 	Detail   string `json:"detail"`
 	BytesIn  int64  `json:"bytesIn"`
 	BytesOut int64  `json:"bytesOut"`
-	// LastHandshakeUnix is the most recent successful WireGuard handshake with
-	// any peer, in Unix seconds; 0 means no handshake has completed yet. The
-	// interface can be Running with no handshake (device up, peer unreached),
-	// which is why connection readiness gates on this, not on Running alone.
+	// LastHandshakeUnix is the latest handshake with any peer, in Unix seconds
+	// (0 = none yet); readiness gates on this since the interface can be up unreached.
 	LastHandshakeUnix int64 `json:"lastHandshakeUnix"`
 	// PostQuantum is true when every peer carries an ML-KEM-derived pre-shared key.
 	PostQuantum bool `json:"postQuantum"`
@@ -82,16 +80,14 @@ type StatusResponse struct {
 	Snowflake           TransportStatus `json:"snowflake"`
 	WireGuard           WireGuardStatus `json:"wireguard"`
 	KillSwitchActive    bool            `json:"killSwitchActive"`
-	// Reconnecting marks an ERROR the daemon is still working on: the session
-	// dropped on its own and rebuilds are being retried on a backoff. Clients
-	// show it as a connection in progress rather than a dead one.
+	// Reconnecting marks an ERROR the daemon is still working on via backoff
+	// retries; clients show it as in-progress rather than a dead connection.
 	Reconnecting bool `json:"reconnecting"`
 	// TransportsExhausted marks a session no transport gets traffic through here.
 	// Clients rotate servers on it; the daemon cannot, a server being a profile.
 	TransportsExhausted bool `json:"transportsExhausted"`
-	// Offline marks a confident OS verdict of no internet (link physically down)
-	// while a session is intended. Clients show "no internet" and hold, rather
-	// than reading the retry backoff as a connection endlessly failing.
+	// Offline marks a confident OS verdict of no internet while a session is
+	// intended; clients show "no internet" instead of an endlessly failing retry.
 	Offline bool `json:"offline"`
 }
 
@@ -111,8 +107,7 @@ type CloakProfile struct {
 }
 
 // NaiveProfile carries per-device NaiveProxy credentials, hub-provisioned
-// the same way CloakProfile is. Nil on a Profile means no NaiveProxy
-// fallback is configured for that profile.
+// the same way CloakProfile is. Nil means no NaiveProxy fallback configured.
 type NaiveProfile struct {
 	LocalPort  int    `json:"localPort"`
 	RemoteHost string `json:"remoteHost"`
@@ -128,8 +123,7 @@ type NaiveProfile struct {
 }
 
 // RealityProfile carries per-device VLESS+REALITY credentials, hub-provisioned
-// the same way NaiveProfile is. Nil on a Profile means no REALITY transport
-// is configured for that profile.
+// the same way NaiveProfile is. Nil means no REALITY transport configured.
 type RealityProfile struct {
 	LocalPort  int    `json:"localPort"`
 	RemoteHost string `json:"remoteHost"`
@@ -144,17 +138,12 @@ type RealityProfile struct {
 	// ServerName is the REALITY SNI / camouflage target hostname.
 	ServerName string `json:"serverName,omitempty"`
 	// TargetPort is the loopback port on the remote node that decoded UDP
-	// is forwarded to (the node's local WireGuard listener). Defaults to
-	// 51820 (WireGuard's standard port) when zero.
+	// is forwarded to (the node's WireGuard listener). Defaults to 51820.
 	TargetPort int `json:"targetPort,omitempty"`
 }
 
-// Hysteria2Profile carries per-device Hysteria2 (QUIC transport, Salamander
-// obfuscation) credentials, hub-provisioned the same way NaiveProfile is.
-// Nil on a Profile means no Hysteria2 transport is configured for that
-// profile. The real destination this tunnel relays WireGuard traffic to
-// (the node's WireGuard listener) is not carried here — same convention as
-// Cloak/NaiveProxy: it is a fixed server-side detail, not client config.
+// Hysteria2Profile carries per-device Hysteria2 (QUIC, Salamander obfuscation)
+// credentials, hub-provisioned the same way NaiveProfile is; nil means unconfigured.
 type Hysteria2Profile struct {
 	LocalPort  int    `json:"localPort"`
 	RemoteHost string `json:"remoteHost"`
@@ -200,11 +189,7 @@ type ShadowsocksProfile struct {
 }
 
 // SnowflakeProfile carries per-device Tor Snowflake (WebRTC rendezvous)
-// settings. Unlike Cloak/NaiveProxy/REALITY/Hysteria2, Snowflake has no
-// single fixed remote host: rendezvous happens against a broker (optionally
-// via domain fronting or an AMP cache), and the actual data-plane peer is a
-// volunteer WebRTC proxy discovered dynamically per-session. Nil on a
-// Profile means no Snowflake transport is configured for that profile.
+// settings; unlike other transports it has no fixed remote host, only a broker.
 type SnowflakeProfile struct {
 	LocalPort int    `json:"localPort"`
 	BrokerURL string `json:"brokerURL"`
@@ -231,10 +216,8 @@ type WireGuardProfile struct {
 	// HubInTunnel keeps BypassHosts out of the routing bypass so hub traffic
 	// goes through the tunnel; they stay kill-switch permitted either way.
 	HubInTunnel bool `json:"hubInTunnel,omitempty"`
-	// DirectEndpoint is the node's own WireGuard listener as host:port. ConfigText
-	// always points at a loopback transport bridge instead, so this is what the
-	// direct "wireguard" method rewrites the Endpoint line to. Empty means the
-	// profile cannot be connected without a transport in front of it.
+	// DirectEndpoint is the node's own WireGuard listener as host:port, used
+	// by the direct "wireguard" method; empty requires a transport in front.
 	DirectEndpoint string `json:"directEndpoint,omitempty"`
 }
 
@@ -243,10 +226,7 @@ type WireGuardProfile struct {
 const DefaultWireGuardPort = 51820
 
 // HopProfile makes a profile multihop: the transport terminates on an entry
-// node that relays WireGuard on to the exit node holding the peer. Nil means
-// single-hop. Selectors differ because the wire protocols do — Cloak names a
-// ProxyBook key, sing-box a destination port, naive a bridge port — and each
-// is issued by the hub, never derived client-side from a node ordering.
+// node relaying WireGuard to the exit node holding the peer. Nil means single-hop.
 type HopProfile struct {
 	// SingBoxPort is the entry's loopback hop port for REALITY, Hysteria2
 	// and Shadowsocks.
@@ -282,11 +262,8 @@ type Profile struct {
 	// Snowflake is optional; nil means this profile has no Snowflake
 	// transport configured.
 	Snowflake *SnowflakeProfile `json:"snowflake,omitempty"`
-	// TransportEndpointIPs are this node's transport endpoints as raw IPs, as
-	// the hub reported them. The kill switch permits these and WireGuard routes
-	// them outside the tunnel with no DNS lookup — a lookup is impossible
-	// behind an engaged Lockdown lock, which blocks DNS, so without these only
-	// Cloak (whose remote host is already an IP) could get out.
+	// TransportEndpointIPs are this node's transport endpoints as raw IPs. The
+	// kill switch permits these with no DNS lookup, which Lockdown mode blocks.
 	TransportEndpointIPs []string         `json:"transportEndpointIPs,omitempty"`
 	WireGuard            WireGuardProfile `json:"wireguard"`
 }

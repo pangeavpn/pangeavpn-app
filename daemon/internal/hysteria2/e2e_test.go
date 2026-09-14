@@ -26,9 +26,8 @@ import (
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/state"
 )
 
-// generateSelfSignedCert builds an in-memory ECDSA cert/key pair for the
-// test's Hysteria2 server, so no filesystem temp files or external CA are
-// needed.
+// generateSelfSignedCert builds an in-memory ECDSA cert/key pair for the test's
+// Hysteria2 server, so no filesystem temp files or external CA are needed.
 func generateSelfSignedCert(t *testing.T, commonName string) (certPEM, keyPEM string) {
 	t.Helper()
 	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -71,9 +70,7 @@ func pinFor(t *testing.T, certPEM string) string {
 }
 
 // startHysteria2TestServer runs a real sing-box Hysteria2 server (Salamander
-// obfs + TLS) that forwards everything through a direct outbound, exactly
-// like a production node's transport server would forward decrypted traffic
-// to its co-located WireGuard listener.
+// obfs + TLS) that forwards everything through a direct outbound, like a production node.
 func startHysteria2TestServer(t *testing.T, port int, certPEM, keyPEM, serverName, authPassword, obfsPassword string) func() {
 	t.Helper()
 	opts := option.Options{
@@ -131,12 +128,8 @@ func startUDPEcho(t *testing.T) (port int, closeFn func()) {
 	return conn.LocalAddr().(*net.UDPAddr).Port, func() { conn.Close() }
 }
 
-// TestE2EClientToServerRoundTrip proves the full client-to-server path:
-// real self-signed cert, real Hysteria2 server with Salamander obfs, this
-// package's Manager (mixed inbound + hysteria2 outbound + UDP bridge)
-// talking to it, a byte payload pushed through the bridge's loopback UDP
-// socket (exactly where WireGuard's peer Endpoint would point), relayed by
-// the server to an echo listener, and read back.
+// TestE2EClientToServerRoundTrip proves the full client-to-server path: a real
+// cert, a real Hysteria2 server, and this package's Manager relaying through the bridge.
 func TestE2EClientToServerRoundTrip(t *testing.T) {
 	const serverName = "hysteria2-e2e.pangeavpn.test"
 	certPEM, keyPEM := generateSelfSignedCert(t, serverName)
@@ -154,9 +147,8 @@ func TestE2EClientToServerRoundTrip(t *testing.T) {
 	stopServer := startHysteria2TestServer(t, hyPort, certPEM, keyPEM, serverName, authPassword, obfsPassword)
 	defer stopServer()
 
-	// Server forwards to the echo listener regardless of what destination
-	// the client requests (route.Final defaults to the sole "direct"
-	// outbound), so point the bridge's fixed relay target at it.
+	// Server forwards to the echo listener regardless of requested destination,
+	// so point the bridge's fixed relay target at it.
 	old := relayDestinationOverride
 	relayDestinationOverride = net.JoinHostPort("127.0.0.1", strconv.Itoa(echoPort))
 	defer func() { relayDestinationOverride = old }()

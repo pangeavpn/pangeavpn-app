@@ -6,9 +6,8 @@ import (
 	"io"
 )
 
-// maxSaneFramePayload catches a desynced stream (e.g. plaintext HTTP from a
-// failed CONNECT) fast instead of blocking on a length that never arrives;
-// real payloads are WireGuard datagrams, ~1420 bytes.
+// maxSaneFramePayload catches a desynced stream fast instead of blocking on
+// a length that never arrives; real payloads are WireGuard datagrams, ~1420 bytes.
 const maxSaneFramePayload = 4096
 
 // WriteFrame writes one [2-byte big-endian length][payload] frame in a single

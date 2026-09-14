@@ -5,9 +5,8 @@ import (
 	"net"
 )
 
-// bindDialerToInterface binds the probe's socket to iface's own IPv4 address:
-// Windows has no per-socket SO_BINDTODEVICE, but a local-address bind still
-// keeps the query from leaving — or a reply from being accepted — off-tunnel.
+// bindDialerToInterface binds to iface's own IPv4 address, since Windows has
+// no per-socket SO_BINDTODEVICE.
 func bindDialerToInterface(iface string) (*net.Dialer, error) {
 	ifi, err := net.InterfaceByName(iface)
 	if err != nil {
