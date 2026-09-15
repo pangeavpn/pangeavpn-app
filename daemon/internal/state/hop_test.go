@@ -10,6 +10,7 @@ func fullProfile() Profile {
 		Reality:     &RealityProfile{RemoteHost: "192.0.2.10", RemotePort: 8444},
 		Hysteria2:   &Hysteria2Profile{RemoteHost: "192.0.2.10", RemotePort: 443},
 		Shadowsocks: &ShadowsocksProfile{RemoteHost: "192.0.2.10", RemotePort: 8488},
+		AnyTLS:      &AnyTLSProfile{RemoteHost: "192.0.2.10", RemotePort: 8443},
 	}
 }
 
@@ -29,6 +30,9 @@ func TestApplyHopSingleHopKeepsTodaysTargets(t *testing.T) {
 	}
 	if got.Shadowsocks.TargetPort != 51820 {
 		t.Errorf("shadowsocks targetPort = %d, want 51820", got.Shadowsocks.TargetPort)
+	}
+	if got.AnyTLS.TargetPort != 51820 {
+		t.Errorf("anytls targetPort = %d, want 51820", got.AnyTLS.TargetPort)
 	}
 	if got.Naive.BridgePort != 9000 {
 		t.Errorf("naive bridgePort = %d, want 9000", got.Naive.BridgePort)
@@ -57,6 +61,7 @@ func TestApplyHopRoutesEveryTransportToTheEntryHopPort(t *testing.T) {
 		"reality":     got.Reality.TargetPort,
 		"hysteria2":   got.Hysteria2.TargetPort,
 		"shadowsocks": got.Shadowsocks.TargetPort,
+		"anytls":      got.AnyTLS.TargetPort,
 	} {
 		if port != 51831 {
 			t.Errorf("%s targetPort = %d, want 51831", name, port)
@@ -69,6 +74,11 @@ func TestApplyHopRoutesEveryTransportToTheEntryHopPort(t *testing.T) {
 	// is a loopback service on the entry, never the exit's public address.
 	if got.Shadowsocks.TargetHost != "127.0.0.1" {
 		t.Errorf("shadowsocks targetHost = %q, want 127.0.0.1", got.Shadowsocks.TargetHost)
+	}
+	// AnyTLS carries a target host too; like Shadowsocks it must resolve to the
+	// entry's loopback hop port, never the exit's public address.
+	if got.AnyTLS.TargetHost != "127.0.0.1" {
+		t.Errorf("anytls targetHost = %q, want 127.0.0.1", got.AnyTLS.TargetHost)
 	}
 	if !got.IsMultihop() || got.EntryRegion() != "eu-west-1" || got.ExitRegion() != "us-east-1" {
 		t.Errorf("hop labels not surfaced: %v/%v", got.EntryRegion(), got.ExitRegion())
@@ -87,8 +97,8 @@ func TestApplyHopDoesNotMutateInput(t *testing.T) {
 	_ = ApplyHop(profile)
 
 	if profile.Reality.TargetPort != 0 || profile.Hysteria2.TargetPort != 0 ||
-		profile.Shadowsocks.TargetPort != 0 || profile.Naive.BridgePort != 0 ||
-		profile.Cloak.ProxyMethod != "" {
+		profile.Shadowsocks.TargetPort != 0 || profile.AnyTLS.TargetPort != 0 ||
+		profile.Naive.BridgePort != 0 || profile.Cloak.ProxyMethod != "" {
 		t.Error("ApplyHop mutated the profile it was given")
 	}
 }

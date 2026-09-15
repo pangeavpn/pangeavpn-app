@@ -1,4 +1,4 @@
-package shadowsocks
+package transport
 
 import (
 	"context"
@@ -67,7 +67,7 @@ func TestBridgeUDP_UndeliverableDatagramDoesNotKillTheBridge(t *testing.T) {
 	defer cancel()
 
 	done := make(chan error, 1)
-	go func() { done <- bridgeUDP(ctx, local, remote, &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 51820}) }()
+	go func() { done <- BridgeUDP(ctx, local, remote, &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 51820}) }()
 
 	sender, err := net.DialUDP("udp", nil, local.LocalAddr().(*net.UDPAddr))
 	if err != nil {
@@ -104,7 +104,7 @@ func TestBridgeUDP_ClosedSocketEndsCleanly(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		done <- bridgeUDP(context.Background(), local, remote, &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 51820})
+		done <- BridgeUDP(context.Background(), local, remote, &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 51820})
 	}()
 
 	time.Sleep(30 * time.Millisecond)
@@ -135,7 +135,7 @@ func TestBridgeUDP_PermanentFailureGivesUp(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		done <- bridgeUDP(context.Background(), local, remote, &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 51820})
+		done <- BridgeUDP(context.Background(), local, remote, &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 51820})
 	}()
 
 	sender, err := net.DialUDP("udp", nil, local.LocalAddr().(*net.UDPAddr))
@@ -143,7 +143,7 @@ func TestBridgeUDP_PermanentFailureGivesUp(t *testing.T) {
 		t.Fatalf("dial: %v", err)
 	}
 	defer sender.Close()
-	for range maxConsecutiveBridgeErrors + 5 {
+	for range MaxConsecutiveBridgeErrors + 5 {
 		sender.Write([]byte("x"))
 	}
 
@@ -158,13 +158,13 @@ func TestBridgeUDP_PermanentFailureGivesUp(t *testing.T) {
 }
 
 func TestIsBridgeShutdown(t *testing.T) {
-	if !isBridgeShutdown(net.ErrClosed) {
+	if !IsBridgeShutdown(net.ErrClosed) {
 		t.Error("net.ErrClosed should end the bridge")
 	}
-	if !isBridgeShutdown(context.Canceled) {
+	if !IsBridgeShutdown(context.Canceled) {
 		t.Error("context.Canceled should end the bridge")
 	}
-	if isBridgeShutdown(errors.New("wsasend: message too large")) {
+	if IsBridgeShutdown(errors.New("wsasend: message too large")) {
 		t.Error("a per-datagram failure must not end the bridge")
 	}
 }

@@ -1,12 +1,14 @@
-package shadowsocks
+package anytls
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -21,11 +23,16 @@ import (
 
 var (
 	_ transport.Manager           = (*Manager)(nil)
+	_ transport.SessionWaiter     = (*Manager)(nil)
 	_ transport.BoundPortReporter = (*Manager)(nil)
 )
 
+// dialTimeout caps the TLS handshake plus session open that Start performs,
+// independently of a caller whose ctx is context.Background().
+const dialTimeout = 10 * time.Second
+
 // Manager owns a loopback UDP listener WireGuard's peer Endpoint points at,
-// bridged to a single in-process Shadowsocks outbound.
+// bridged to a single in-process AnyTLS outbound over UDP-over-TCP.
 type Manager struct {
 	// startMu serializes Start/Stop end to end so two callers can't both pass
 	// the running check and race to bind the same local port.
@@ -34,7 +41,7 @@ type Manager struct {
 	mu      sync.RWMutex
 	logs    *state.LogStore
 	running bool
-	profile state.ShadowsocksProfile
+	profile state.AnyTLSProfile
 
 	engine    *box.Box
 	localConn *net.UDPConn
@@ -56,9 +63,12 @@ func NewManager(logs *state.LogStore) *Manager {
 	return &Manager{logs: logs}
 }
 
-// Start builds a single-outbound engine and wires a local UDP listener to it.
-// No SessionWaiter on purpose: ListenPacket succeeds on a wrong password.
-func (m *Manager) Start(ctx context.Context, profile state.ShadowsocksProfile) error {
+// Start builds a single-outbound engine, dials the AnyTLS session (TLS
+// handshake plus the UDP-over-TCP stream) synchronously, and wires a local
+// UDP listener to it. A node that is unreachable or presents the wrong
+// certificate fails here; a wrong password does not, since the server closes
+// the session silently and the first datagram is what discovers it.
+func (m *Manager) Start(ctx context.Context, profile state.AnyTLSProfile) error {
 	m.startMu.Lock()
 	defer m.startMu.Unlock()
 
@@ -73,7 +83,7 @@ func (m *Manager) Start(ctx context.Context, profile state.ShadowsocksProfile) e
 		// A different profile while running is a server/credential switch,
 		// not a no-op: tear down the old session before building a new one.
 		if err := m.Stop(ctx); err != nil {
-			return fmt.Errorf("shadowsocks: stop previous session: %w", err)
+			return fmt.Errorf("anytls: stop previous session: %w", err)
 		}
 	}
 
@@ -84,6 +94,11 @@ func (m *Manager) Start(ctx context.Context, profile state.ShadowsocksProfile) e
 	targetHost := targetHostOrDefault(profile.TargetHost)
 	targetPort := targetPortOrDefault(profile.TargetPort)
 
+	outboundOptions, err := buildOutboundOptions(profile)
+	if err != nil {
+		return err
+	}
+
 	// engineCtx is rooted independently of ctx: the engine and bridge outlive
 	// this call, which is typically request-scoped.
 	engineCtx, cancel := context.WithCancel(context.Background())
@@ -93,39 +108,45 @@ func (m *Manager) Start(ctx context.Context, profile state.ShadowsocksProfile) e
 		Options: option.Options{
 			Log: &option.LogOptions{Level: "warn"},
 			Outbounds: []option.Outbound{{
-				Type:    C.TypeShadowsocks,
+				Type:    C.TypeAnyTLS,
 				Tag:     outboundTag,
-				Options: buildOutboundOptions(profile),
+				Options: outboundOptions,
 			}},
 		},
 	})
 	if err != nil {
 		cancel()
-		return fmt.Errorf("shadowsocks: build engine: %w", err)
+		return fmt.Errorf("anytls: build engine: %w", err)
 	}
 	if err := engine.Start(); err != nil {
 		engine.Close()
 		cancel()
-		return fmt.Errorf("shadowsocks: start engine: %w", err)
+		return fmt.Errorf("anytls: start engine: %w", err)
 	}
 
 	outbound, loaded := engine.Outbound().Outbound(outboundTag)
 	if !loaded {
 		engine.Close()
 		cancel()
-		return errors.New("shadowsocks: outbound not registered")
+		return errors.New("anytls: outbound not registered")
 	}
 
-	// Bound by both the caller's ctx (so an aborted connect attempt gives up
-	// promptly) and a hard cap in case ctx is context.Background().
+	// The engine outlives Start, so only the dial follows the caller's ctx
+	// (an aborted connect gives up promptly), with a hard cap in case ctx is
+	// context.Background().
 	destination := M.ParseSocksaddrHostPort(targetHost, uint16(targetPort))
-	dialCtx, dialCancel := context.WithTimeout(ctx, 10*time.Second)
+	dialCtx, dialCancel := context.WithTimeout(engineCtx, dialTimeout)
+	stopPropagation := context.AfterFunc(ctx, dialCancel)
 	remote, err := outbound.ListenPacket(dialCtx, destination)
+	stopPropagation()
 	dialCancel()
 	if err != nil {
 		engine.Close()
 		cancel()
-		return fmt.Errorf("shadowsocks: listen packet: %w", err)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return fmt.Errorf("anytls: handshake: %w", ctxErr)
+		}
+		return fmt.Errorf("anytls: handshake: %w", annotateHandshakeError(err))
 	}
 
 	localAddr, err := net.ResolveUDPAddr("udp", net.JoinHostPort("127.0.0.1", strconv.Itoa(profile.LocalPort)))
@@ -133,14 +154,14 @@ func (m *Manager) Start(ctx context.Context, profile state.ShadowsocksProfile) e
 		remote.Close()
 		engine.Close()
 		cancel()
-		return fmt.Errorf("shadowsocks: resolve local addr: %w", err)
+		return fmt.Errorf("anytls: resolve local addr: %w", err)
 	}
 	localConn, err := net.ListenUDP("udp", localAddr)
 	if err != nil {
 		remote.Close()
 		engine.Close()
 		cancel()
-		return fmt.Errorf("shadowsocks: listen local udp: %w", err)
+		return fmt.Errorf("anytls: listen local udp: %w", err)
 	}
 
 	boundPort := localAddr.Port
@@ -163,8 +184,8 @@ func (m *Manager) Start(ctx context.Context, profile state.ShadowsocksProfile) e
 	m.done = done
 	m.mu.Unlock()
 
-	m.logs.Add(state.LogInfo, state.SourceShadowsocks, fmt.Sprintf(
-		"shadowsocks started, listening on 127.0.0.1:%d, relaying to %s:%d (target %s:%d)",
+	m.logs.Add(state.LogInfo, state.SourceAnyTLS, fmt.Sprintf(
+		"anytls started, listening on 127.0.0.1:%d, relaying to %s:%d (target %s:%d)",
 		boundPort, profile.RemoteHost, profile.RemotePort, targetHost, targetPort))
 
 	remoteAddr := destinationUDPAddr(targetHost, targetPort)
@@ -187,9 +208,9 @@ func (m *Manager) Start(ctx context.Context, profile state.ShadowsocksProfile) e
 		m.mu.Unlock()
 
 		if bridgeErr != nil {
-			m.logs.Add(state.LogWarn, state.SourceShadowsocks, fmt.Sprintf("shadowsocks bridge exited: %v", bridgeErr))
+			m.logs.Add(state.LogWarn, state.SourceAnyTLS, fmt.Sprintf("anytls bridge exited: %v", bridgeErr))
 		} else {
-			m.logs.Add(state.LogInfo, state.SourceShadowsocks, "shadowsocks stopped")
+			m.logs.Add(state.LogInfo, state.SourceAnyTLS, "anytls stopped")
 		}
 		engine.Close()
 		close(done)
@@ -198,13 +219,39 @@ func (m *Manager) Start(ctx context.Context, profile state.ShadowsocksProfile) e
 	return nil
 }
 
-// destinationUDPAddr resolves the relay target for transport.BridgeUDP's WriteTo. A
-// non-literal host is passed through unresolved as a hostname Socksaddr.
+// destinationUDPAddr resolves the relay target for transport.BridgeUDP's
+// WriteTo. A non-literal host is passed through unresolved as a hostname
+// Socksaddr: the node resolves it, and a lookup here would leak under Lockdown.
 func destinationUDPAddr(host string, port int) net.Addr {
 	if ip := net.ParseIP(host); ip != nil {
 		return &net.UDPAddr{IP: ip, Port: port}
 	}
 	return M.ParseSocksaddrHostPort(host, uint16(port))
+}
+
+// annotateHandshakeError names the likely cause of the opaque EOF the dial
+// returns when the node accepts TCP but drops the session before answering.
+func annotateHandshakeError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) || strings.Contains(err.Error(), "EOF") {
+		return fmt.Errorf("%w (node closed the AnyTLS session before answering; verify the node's password, certificate pin and server name match the provisioned profile)", err)
+	}
+	return err
+}
+
+// WaitForSession reports whether the TLS session Start dialed is still up.
+// The handshake itself already completed inside Start, so this never blocks.
+func (m *Manager) WaitForSession(ctx context.Context, timeout time.Duration) error {
+	_ = ctx
+	_ = timeout
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if !m.running {
+		return errors.New("anytls is not running")
+	}
+	return nil
 }
 
 func (m *Manager) BoundLocalPort() int {
@@ -239,7 +286,7 @@ func (m *Manager) Stop(ctx context.Context) error {
 	m.mu.Unlock()
 
 	// Cancel first so an in-flight dial unblocks, then close both sockets to
-	// kick the bridge goroutine's blocked reads. Order mirrors reality.Stop.
+	// kick the bridge goroutine's blocked reads. Order mirrors shadowsocks.Stop.
 	if cancel != nil {
 		cancel()
 	}
@@ -258,17 +305,17 @@ func (m *Manager) Stop(ctx context.Context) error {
 		return nil
 	case <-timer.C:
 		m.forceResetState()
-		m.logs.Add(state.LogWarn, state.SourceShadowsocks, "shadowsocks stop timed out; forced shutdown")
+		m.logs.Add(state.LogWarn, state.SourceAnyTLS, "anytls stop timed out; forced shutdown")
 		return nil
 	case <-ctx.Done():
 		m.forceResetState()
-		m.logs.Add(state.LogWarn, state.SourceShadowsocks, "shadowsocks stop cancelled; forced shutdown")
+		m.logs.Add(state.LogWarn, state.SourceAnyTLS, "anytls stop cancelled; forced shutdown")
 		return ctx.Err()
 	}
 }
 
 // forceResetState drops shared state to stopped and closes the engine itself,
-// so a subsequent Start does not race a still-live SS session.
+// so a subsequent Start does not race a still-live AnyTLS session.
 func (m *Manager) forceResetState() {
 	m.mu.Lock()
 	engine := m.engine
@@ -279,7 +326,7 @@ func (m *Manager) forceResetState() {
 	m.cancel = nil
 	m.boundLocalPort = 0
 	m.done = nil
-	m.profile = state.ShadowsocksProfile{}
+	m.profile = state.AnyTLSProfile{}
 	m.generation++
 	m.mu.Unlock()
 

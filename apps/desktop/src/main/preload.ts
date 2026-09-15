@@ -119,7 +119,7 @@ const pangeaApi = {
   getCustomDns: () => ipcRenderer.invoke(CH.getCustomDns),
   setHubInTunnel: (enabled: boolean) => ipcRenderer.invoke(CH.setHubInTunnel, enabled),
   getHubInTunnel: () => ipcRenderer.invoke(CH.getHubInTunnel),
-  setPreferredTransport: (value: "auto" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "snowflake" | "wireguard") =>
+  setPreferredTransport: (value: "auto" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "anytls" | "snowflake" | "wireguard") =>
     ipcRenderer.invoke(CH.setPreferredTransport, value),
   getPreferredTransport: () => ipcRenderer.invoke(CH.getPreferredTransport),
   setLaunchAtStartup: (enabled: boolean) => ipcRenderer.invoke(CH.setLaunchAtStartup, enabled),

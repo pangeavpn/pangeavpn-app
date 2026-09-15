@@ -78,6 +78,23 @@ export const ShadowsocksProfileSchema = z.object({
   udpOverTcp: z.boolean().optional()
 });
 
+export const AnyTLSProfileSchema = z.object({
+  localPort: z.number().int().nonnegative(),
+  remoteHost: z.string().min(1),
+  remotePort: z.number().int().positive(),
+  password: z.string().min(1),
+  // SNI presented during the handshake and the name the certificate is
+  // verified against; the daemon falls back to remoteHost when absent.
+  serverName: z.string().optional(),
+  insecure: z.boolean().optional(),
+  // Base64 SPKI SHA-256 pin; required by the daemon whenever insecure is set.
+  pinSha256: z.string().optional(),
+  // Where the AnyTLS server relays decoded packets (the node's WireGuard
+  // listener); hub-configurable because the node's ACL scopes it.
+  targetHost: z.string().optional(),
+  targetPort: z.number().int().positive().optional()
+});
+
 export const SnowflakeProfileSchema = z.object({
   localPort: z.number().int().nonnegative(),
   brokerURL: z.string().min(1),
@@ -138,6 +155,7 @@ export const ProfileSchema = z.object({
   reality: RealityProfileSchema.optional(),
   hysteria2: Hysteria2ProfileSchema.optional(),
   shadowsocks: ShadowsocksProfileSchema.optional(),
+  anytls: AnyTLSProfileSchema.optional(),
   snowflake: SnowflakeProfileSchema.optional(),
   wireguard: WireGuardProfileSchema
 });
@@ -150,10 +168,10 @@ export const StatusResponseSchema = z.object({
   state: DaemonStateSchema,
   detail: z.string(),
   activeTransport: z
-    .enum(["cloak", "naive", "reality", "hysteria2", "shadowsocks", "snowflake", "wireguard", ""])
+    .enum(["cloak", "naive", "reality", "hysteria2", "shadowsocks", "anytls", "snowflake", "wireguard", ""])
     .default(""),
   connectingTransport: z
-    .enum(["cloak", "naive", "reality", "hysteria2", "shadowsocks", "snowflake", "wireguard", ""])
+    .enum(["cloak", "naive", "reality", "hysteria2", "shadowsocks", "anytls", "snowflake", "wireguard", ""])
     .default(""),
   cloak: z.object({
     running: z.boolean(),
@@ -172,6 +190,10 @@ export const StatusResponseSchema = z.object({
     pid: z.number().nullable()
   }),
   shadowsocks: z.object({
+    running: z.boolean(),
+    pid: z.number().nullable()
+  }),
+  anytls: z.object({
     running: z.boolean(),
     pid: z.number().nullable()
   }),
@@ -210,7 +232,7 @@ export const ConnectRequestSchema = z.object({
   // "wireguard" is the direct method: no transport, straight to the node. Only
   // ever set when the user asks for it — the daemon's auto cascade never picks it.
   preferredTransport: z
-    .enum(["cloak", "naive", "reality", "hysteria2", "shadowsocks", "snowflake", "wireguard"])
+    .enum(["cloak", "naive", "reality", "hysteria2", "shadowsocks", "anytls", "snowflake", "wireguard"])
     .optional(),
   allowLAN: z.boolean().optional(),
   lockdown: z.boolean().optional()
@@ -246,6 +268,7 @@ export type NaiveProfile = z.infer<typeof NaiveProfileSchema>;
 export type RealityProfile = z.infer<typeof RealityProfileSchema>;
 export type Hysteria2Profile = z.infer<typeof Hysteria2ProfileSchema>;
 export type ShadowsocksProfile = z.infer<typeof ShadowsocksProfileSchema>;
+export type AnyTLSProfile = z.infer<typeof AnyTLSProfileSchema>;
 export type SnowflakeProfile = z.infer<typeof SnowflakeProfileSchema>;
 export type WireGuardProfile = z.infer<typeof WireGuardProfileSchema>;
 export type Profile = z.infer<typeof ProfileSchema>;

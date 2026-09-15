@@ -70,7 +70,7 @@ export class DaemonClient implements PostQuantumProvider {
     opts?: {
       allowLAN?: boolean;
       lockdown?: boolean;
-      preferredTransport?: "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "snowflake" | "wireguard";
+      preferredTransport?: "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "anytls" | "snowflake" | "wireguard";
     },
     signal?: AbortSignal
   ): Promise<OkResponse> {
@@ -185,7 +185,7 @@ export class DaemonClient implements PostQuantumProvider {
     opts?: {
       allowLAN?: boolean;
       lockdown?: boolean;
-      preferredTransport?: "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "snowflake" | "wireguard";
+      preferredTransport?: "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "anytls" | "snowflake" | "wireguard";
     },
     signal?: AbortSignal
   ): Promise<OkResponse> {

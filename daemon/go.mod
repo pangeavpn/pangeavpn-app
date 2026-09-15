@@ -22,6 +22,7 @@ require (
 
 require (
 	github.com/ajg/form v1.5.1 // indirect
+	github.com/anytls/sing-anytls v0.0.11 // indirect
 	github.com/aws/aws-sdk-go-v2 v1.43.7 // indirect
 	github.com/aws/aws-sdk-go-v2/config v1.32.38 // indirect
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.37 // indirect

@@ -36,7 +36,7 @@ flowchart LR
         Renderer[Sandboxed renderer] <-->|contextBridge + IPC| Main[Electron main process]
         Main -->|Bearer-authenticated HTTP<br/>127.0.0.1:8787| Daemon[Privileged Go daemon]
         OS[Application traffic and OS networking] --> WG[In-process WireGuard]
-        WG --> Transport[In-process transport<br/>Cloak / REALITY / Hysteria2 / Naive / Shadowsocks]
+        WG --> Transport[In-process transport<br/>Cloak / REALITY / Hysteria2 / Naive / Shadowsocks / AnyTLS]
         Daemon -. owns .-> OS
         Daemon -. owns .-> WG
         Daemon -. owns .-> Transport
@@ -254,7 +254,8 @@ The daemon's automatic preference is:
 3. Shadowsocks
 4. Hysteria2
 5. NaiveProxy
-6. Snowflake
+6. AnyTLS
+7. Snowflake
 
 Only transports configured in the selected profile are candidates. Cloak is
 required by the current profile model. Snowflake is implemented but removed
@@ -303,6 +304,7 @@ Application traffic
 | Hysteria2 | [`daemon/internal/hysteria2`](../daemon/internal/hysteria2) using embedded sing-box/QUIC | Enabled when provisioned |
 | NaiveProxy | [`daemon/internal/naive`](../daemon/internal/naive) with a CGO-linked native engine and in-process relay | Windows/macOS builds when native inputs resolve; release CI requires it |
 | Shadowsocks | [`daemon/internal/shadowsocks`](../daemon/internal/shadowsocks) using embedded sing-box (AEAD / SS-2022) | Enabled when provisioned |
+| AnyTLS | [`daemon/internal/anytls`](../daemon/internal/anytls) using embedded sing-box (padded TLS session, WireGuard carried as UDP-over-TCP) | Enabled when provisioned |
 | Snowflake | [`daemon/internal/snowflake`](../daemon/internal/snowflake) using the Tor Snowflake library | Implemented but release-gated |
 | Plain WireGuard | None — the tunnel dials the node directly, skipping the loopback listener above | Enabled on explicit user selection only |
 
