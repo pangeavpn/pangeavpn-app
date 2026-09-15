@@ -42,7 +42,7 @@ func TestSwitch_PerTransport(t *testing.T) {
 			sfMgr := &fakeSnowflakeManager{}
 			wgMgr := &fakeWGManager{}
 			ks := &fakeKillSwitch{}
-			svc := newTestServiceFull(t, cloakMgr, naiveMgr, realityMgr, hy2Mgr, &fakeShadowsocksManager{}, sfMgr, wgMgr, ks, a, b)
+			svc := newTestServiceFull(t, cloakMgr, naiveMgr, realityMgr, hy2Mgr, &fakeShadowsocksManager{}, &fakeAnyTLSManager{}, sfMgr, wgMgr, ks, a, b)
 
 			opts := ConnectOptions{PreferredTransport: kind}
 			if err := svc.Connect(context.Background(), a.ID, opts); err != nil {
@@ -83,7 +83,7 @@ func TestSwitch_KillSwitchReEnableFailure_KeepsWorkingSession(t *testing.T) {
 	sfMgr := &fakeSnowflakeManager{}
 	wgMgr := &fakeWGManager{}
 	ks := &fakeKillSwitch{}
-	svc := newTestServiceFull(t, cloakMgr, naiveMgr, realityMgr, hy2Mgr, &fakeShadowsocksManager{}, sfMgr, wgMgr, ks, a, b)
+	svc := newTestServiceFull(t, cloakMgr, naiveMgr, realityMgr, hy2Mgr, &fakeShadowsocksManager{}, &fakeAnyTLSManager{}, sfMgr, wgMgr, ks, a, b)
 
 	opts := ConnectOptions{PreferredTransport: "hysteria2"}
 	if err := svc.Connect(context.Background(), a.ID, opts); err != nil {
@@ -139,7 +139,7 @@ func TestSwitch_PreflightFailure_KeepsWorkingSession(t *testing.T) {
 	wgMgr := &fakeWGManager{}
 	ks := &fakeKillSwitch{}
 	svc := newTestServiceFull(t, &fakeCloakManager{}, &fakeNaiveManager{}, &fakeRealityManager{},
-		hy2Mgr, &fakeShadowsocksManager{}, &fakeSnowflakeManager{}, wgMgr, ks, a, b)
+		hy2Mgr, &fakeShadowsocksManager{}, &fakeAnyTLSManager{}, &fakeSnowflakeManager{}, wgMgr, ks, a, b)
 
 	opts := ConnectOptions{PreferredTransport: "hysteria2"}
 	if err := svc.Connect(context.Background(), a.ID, opts); err != nil {
@@ -183,7 +183,7 @@ func TestSwitch_ArmsKillSwitchForNewServer(t *testing.T) {
 
 	ks := &fakeKillSwitch{}
 	svc := newTestServiceFull(t, &fakeCloakManager{}, &fakeNaiveManager{}, &fakeRealityManager{},
-		&fakeHysteria2Manager{}, &fakeShadowsocksManager{}, &fakeSnowflakeManager{}, &fakeWGManager{}, ks, a, b)
+		&fakeHysteria2Manager{}, &fakeShadowsocksManager{}, &fakeAnyTLSManager{}, &fakeSnowflakeManager{}, &fakeWGManager{}, ks, a, b)
 
 	opts := ConnectOptions{PreferredTransport: "hysteria2"}
 	if err := svc.Connect(context.Background(), a.ID, opts); err != nil {
@@ -230,7 +230,7 @@ func TestSwitch_InPlaceManagerKeepsDevice(t *testing.T) {
 	machine := state.NewMachine()
 	logs := state.NewLogStore(100)
 	config := testConfigStore(t, a, b)
-	svc := NewService(machine, logs, config, &fakeCloakManager{}, &fakeNaiveManager{}, &fakeRealityManager{}, &fakeHysteria2Manager{}, &fakeShadowsocksManager{}, &fakeSnowflakeManager{}, wgMgr, ks)
+	svc := NewService(machine, logs, config, &fakeCloakManager{}, &fakeNaiveManager{}, &fakeRealityManager{}, &fakeHysteria2Manager{}, &fakeShadowsocksManager{}, &fakeAnyTLSManager{}, &fakeSnowflakeManager{}, wgMgr, ks)
 	svc.handshakeTimeout = 200 * time.Millisecond
 	svc.networkRepair = func(context.Context, []string) ([]string, error) { return nil, nil }
 

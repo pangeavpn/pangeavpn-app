@@ -8,6 +8,7 @@ import { MTU_DEFAULT, normalizeMtu, normalizeMtuOrDefault } from "../shared/mtu"
 import { resolveNaiveEndpoint } from "../shared/naiveEndpoint";
 import { directWireGuardEndpoint } from "../shared/wireguardEndpoint";
 import { buildShadowsocksProfile } from "../shared/shadowsocksProfile";
+import { buildAnyTLSProfile } from "../shared/anytlsProfile";
 import {
   DEFAULT_HUB_METHODS,
   type HubMethod,
@@ -1721,7 +1722,8 @@ export class PangeaApiClient {
       server.naive?.remoteIp ?? server.naive?.remoteHost,
       server.reality?.remoteIp,
       server.hysteria2?.remoteIp,
-      server.shadowsocks?.remoteIp
+      server.shadowsocks?.remoteIp,
+      server.anytls?.remoteIp
     ]).filter(isIPv4Literal);
     // Snowflake is the exception and is left out: neither its broker nor its
     // per-session volunteer proxy is an address ours to know up front.
@@ -1796,6 +1798,9 @@ export class PangeaApiClient {
       } : {}),
       ...(server.shadowsocks ? {
         shadowsocks: buildShadowsocksProfile(server.shadowsocks, nodeIp)
+      } : {}),
+      ...(server.anytls ? {
+        anytls: buildAnyTLSProfile(server.anytls, nodeIp)
       } : {}),
       ...(server.snowflake ? {
         snowflake: {

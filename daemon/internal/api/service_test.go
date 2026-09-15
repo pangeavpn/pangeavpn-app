@@ -310,6 +310,64 @@ func (f *fakeShadowsocksManager) BoundLocalPort() int {
 	return 51824
 }
 
+// fakeAnyTLSManager mirrors fakeHysteria2Manager: AnyTLS implements
+// SessionWaiter (the handshake happens in Start, WaitForSession just confirms
+// the session is still up).
+type fakeAnyTLSManager struct {
+	mu             sync.Mutex
+	startCalled    bool
+	startLocalPort int
+	startErr       error
+	stopCalled     bool
+	running        bool
+	stayDown       bool
+	waitErr        error
+	boundLocalPort int
+}
+
+func (f *fakeAnyTLSManager) Start(ctx context.Context, profile state.AnyTLSProfile) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.startCalled = true
+	f.startLocalPort = profile.LocalPort
+	if f.startErr != nil {
+		return f.startErr
+	}
+	if !f.stayDown {
+		f.running = true
+	}
+	return nil
+}
+
+func (f *fakeAnyTLSManager) Stop(ctx context.Context) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.stopCalled = true
+	f.running = false
+	return nil
+}
+
+func (f *fakeAnyTLSManager) Status() state.TransportStatus {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return state.TransportStatus{Running: f.running}
+}
+
+func (f *fakeAnyTLSManager) WaitForSession(ctx context.Context, timeout time.Duration) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.waitErr
+}
+
+func (f *fakeAnyTLSManager) BoundLocalPort() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.boundLocalPort != 0 {
+		return f.boundLocalPort
+	}
+	return 51825
+}
+
 // fakeSnowflakeManager mirrors fakeNaiveManager; see its fields for docs.
 type fakeSnowflakeManager struct {
 	mu             sync.Mutex
@@ -695,7 +753,7 @@ func newTestServiceWithReality(
 	profiles ...state.Profile,
 ) *Service {
 	t.Helper()
-	return newTestServiceFull(t, cloak, naive, reality, &fakeHysteria2Manager{}, &fakeShadowsocksManager{}, &fakeSnowflakeManager{}, wgMgr, ks, profiles...)
+	return newTestServiceFull(t, cloak, naive, reality, &fakeHysteria2Manager{}, &fakeShadowsocksManager{}, &fakeAnyTLSManager{}, &fakeSnowflakeManager{}, wgMgr, ks, profiles...)
 }
 
 func newTestServiceFull(
@@ -705,6 +763,7 @@ func newTestServiceFull(
 	reality *fakeRealityManager,
 	hysteria2 *fakeHysteria2Manager,
 	shadowsocks *fakeShadowsocksManager,
+	anytls *fakeAnyTLSManager,
 	snowflake *fakeSnowflakeManager,
 	wgMgr *fakeWGManager,
 	ks *fakeKillSwitch,
@@ -714,7 +773,7 @@ func newTestServiceFull(
 	machine := state.NewMachine()
 	logs := state.NewLogStore(100)
 	config := testConfigStore(t, profiles...)
-	svc := NewService(machine, logs, config, cloak, naive, reality, hysteria2, shadowsocks, snowflake, wgMgr, ks)
+	svc := NewService(machine, logs, config, cloak, naive, reality, hysteria2, shadowsocks, anytls, snowflake, wgMgr, ks)
 	stubSessionRecordStore(t)
 	// Keep handshake-gated failure paths fast in tests; a live fake tunnel
 	// handshakes on the first status poll, so success paths are unaffected.
@@ -2406,7 +2465,7 @@ func TestHealthCheck_SilentTunnelInPlaceRebuildKeepsDevice(t *testing.T) {
 	machine := state.NewMachine()
 	logs := state.NewLogStore(100)
 	config := testConfigStore(t, profile)
-	svc := NewService(machine, logs, config, &fakeCloakManager{}, naive, &fakeRealityManager{}, &fakeHysteria2Manager{}, &fakeShadowsocksManager{}, &fakeSnowflakeManager{}, wgMgr, ks)
+	svc := NewService(machine, logs, config, &fakeCloakManager{}, naive, &fakeRealityManager{}, &fakeHysteria2Manager{}, &fakeShadowsocksManager{}, &fakeAnyTLSManager{}, &fakeSnowflakeManager{}, wgMgr, ks)
 	stubSessionRecordStore(t)
 	svc.handshakeTimeout = 200 * time.Millisecond
 	svc.networkRepair = func(context.Context, []string) ([]string, error) { return nil, nil }
@@ -2841,7 +2900,7 @@ func TestConnect_AutoCascadeAttemptsTransportsInCensorshipOrder(t *testing.T) {
 	}
 	wgMgr := &fakeWGManager{noHandshake: true} // every transport starts but no tunnel handshakes
 	ks := &fakeKillSwitch{}
-	svc := newTestServiceFull(t, &fakeCloakManager{}, &fakeNaiveManager{}, &fakeRealityManager{}, &fakeHysteria2Manager{}, &fakeShadowsocksManager{}, &fakeSnowflakeManager{}, wgMgr, ks, profile)
+	svc := newTestServiceFull(t, &fakeCloakManager{}, &fakeNaiveManager{}, &fakeRealityManager{}, &fakeHysteria2Manager{}, &fakeShadowsocksManager{}, &fakeAnyTLSManager{}, &fakeSnowflakeManager{}, wgMgr, ks, profile)
 
 	err := svc.Connect(context.Background(), "p1", ConnectOptions{})
 	if err == nil {
@@ -2906,7 +2965,7 @@ func TestConnect_CloakNaiveRealityFail_FallsBackToHysteria2(t *testing.T) {
 	snowflakeMgr := &fakeSnowflakeManager{}
 	wgMgr := &fakeWGManager{}
 	ks := &fakeKillSwitch{}
-	svc := newTestServiceFull(t, cloakMgr, naiveMgr, realityMgr, hysteria2Mgr, &fakeShadowsocksManager{}, snowflakeMgr, wgMgr, ks, profile)
+	svc := newTestServiceFull(t, cloakMgr, naiveMgr, realityMgr, hysteria2Mgr, &fakeShadowsocksManager{}, &fakeAnyTLSManager{}, snowflakeMgr, wgMgr, ks, profile)
 
 	if err := svc.Connect(context.Background(), "p1", ConnectOptions{}); err != nil {
 		t.Fatalf("Connect: %v", err)
@@ -2953,7 +3012,7 @@ func TestConnect_CloakNaiveRealityHysteria2Fail_DoesNotFallBackToSnowflake_WhenG
 	snowflakeMgr := &fakeSnowflakeManager{}
 	wgMgr := &fakeWGManager{}
 	ks := &fakeKillSwitch{}
-	svc := newTestServiceFull(t, cloakMgr, naiveMgr, realityMgr, hysteria2Mgr, &fakeShadowsocksManager{}, snowflakeMgr, wgMgr, ks, profile)
+	svc := newTestServiceFull(t, cloakMgr, naiveMgr, realityMgr, hysteria2Mgr, &fakeShadowsocksManager{}, &fakeAnyTLSManager{}, snowflakeMgr, wgMgr, ks, profile)
 
 	// Snowflake is gated off this release (see snowflakeReleaseGated in
 	// service.go): AUTO mode must fail once the other transports fail rather than fall back to snowflake.
@@ -2992,7 +3051,7 @@ func TestConnect_PreferredTransportSnowflake_IsGated(t *testing.T) {
 			snowflakeMgr := &fakeSnowflakeManager{}
 			wgMgr := &fakeWGManager{}
 			ks := &fakeKillSwitch{}
-			svc := newTestServiceFull(t, cloakMgr, naiveMgr, realityMgr, hysteria2Mgr, &fakeShadowsocksManager{}, snowflakeMgr, wgMgr, ks, tt.profile)
+			svc := newTestServiceFull(t, cloakMgr, naiveMgr, realityMgr, hysteria2Mgr, &fakeShadowsocksManager{}, &fakeAnyTLSManager{}, snowflakeMgr, wgMgr, ks, tt.profile)
 
 			if err := svc.Connect(context.Background(), tt.profile.ID, ConnectOptions{PreferredTransport: "snowflake"}); err == nil {
 				t.Fatal("expected Connect to fail: snowflake transport is gated off")
@@ -3054,7 +3113,7 @@ func TestConnect_AllOthersFail_FallsBackToShadowsocks(t *testing.T) {
 	shadowsocksMgr := &fakeShadowsocksManager{}
 	wgMgr := &fakeWGManager{}
 	ks := &fakeKillSwitch{}
-	svc := newTestServiceFull(t, cloakMgr, naiveMgr, realityMgr, hysteria2Mgr, shadowsocksMgr, &fakeSnowflakeManager{}, wgMgr, ks, profile)
+	svc := newTestServiceFull(t, cloakMgr, naiveMgr, realityMgr, hysteria2Mgr, shadowsocksMgr, &fakeAnyTLSManager{}, &fakeSnowflakeManager{}, wgMgr, ks, profile)
 
 	if err := svc.Connect(context.Background(), "p1", ConnectOptions{}); err != nil {
 		t.Fatalf("Connect: %v", err)
@@ -3081,7 +3140,7 @@ func TestConnect_AutoMode_DoesNotReachShadowsocksWhenCloakWorks(t *testing.T) {
 	profile := shadowsocksProfile()
 	shadowsocksMgr := &fakeShadowsocksManager{}
 	svc := newTestServiceFull(t, &fakeCloakManager{}, &fakeNaiveManager{}, &fakeRealityManager{},
-		&fakeHysteria2Manager{}, shadowsocksMgr, &fakeSnowflakeManager{}, &fakeWGManager{}, &fakeKillSwitch{}, profile)
+		&fakeHysteria2Manager{}, shadowsocksMgr, &fakeAnyTLSManager{}, &fakeSnowflakeManager{}, &fakeWGManager{}, &fakeKillSwitch{}, profile)
 
 	if err := svc.Connect(context.Background(), "p1", ConnectOptions{}); err != nil {
 		t.Fatalf("Connect: %v", err)
@@ -3098,7 +3157,7 @@ func TestConnect_PreferredTransportShadowsocks_WithoutConfigErrors(t *testing.T)
 	profile := testProfile()
 	shadowsocksMgr := &fakeShadowsocksManager{}
 	svc := newTestServiceFull(t, &fakeCloakManager{}, &fakeNaiveManager{}, &fakeRealityManager{},
-		&fakeHysteria2Manager{}, shadowsocksMgr, &fakeSnowflakeManager{}, &fakeWGManager{}, &fakeKillSwitch{}, profile)
+		&fakeHysteria2Manager{}, shadowsocksMgr, &fakeAnyTLSManager{}, &fakeSnowflakeManager{}, &fakeWGManager{}, &fakeKillSwitch{}, profile)
 
 	err := svc.Connect(context.Background(), profile.ID, ConnectOptions{PreferredTransport: "shadowsocks"})
 	if err == nil {
@@ -3121,7 +3180,7 @@ func TestRecoverActiveTransport_RestartsShadowsocks(t *testing.T) {
 	profile := shadowsocksProfile()
 	shadowsocksMgr := &fakeShadowsocksManager{}
 	svc := newTestServiceFull(t, &fakeCloakManager{}, &fakeNaiveManager{}, &fakeRealityManager{},
-		&fakeHysteria2Manager{}, shadowsocksMgr, &fakeSnowflakeManager{}, &fakeWGManager{}, &fakeKillSwitch{}, profile)
+		&fakeHysteria2Manager{}, shadowsocksMgr, &fakeAnyTLSManager{}, &fakeSnowflakeManager{}, &fakeWGManager{}, &fakeKillSwitch{}, profile)
 
 	if err := svc.Connect(context.Background(), "p1", ConnectOptions{PreferredTransport: "shadowsocks"}); err != nil {
 		t.Fatalf("Connect: %v", err)
@@ -3171,6 +3230,140 @@ func TestTransportPermitHosts_HubIPsSupersedeShadowsocksHostname(t *testing.T) {
 	}
 	if slices.Contains(permits, "ss.example.com") {
 		t.Errorf("transportPermitHosts() = %v, must not resolve a node hostname when the hub sent IPs", permits)
+	}
+}
+
+func anytlsProfile() state.Profile {
+	return state.Profile{
+		ID:     "p1",
+		Name:   "p1",
+		Cloak:  state.CloakProfile{RemoteHost: "example.com", RemotePort: 443, LocalPort: 51821},
+		AnyTLS: &state.AnyTLSProfile{RemoteHost: "at.example.com", RemotePort: 8443, Password: "p"},
+		WireGuard: state.WireGuardProfile{
+			TunnelName: "pangea0",
+			ConfigText: "[Interface]\nPrivateKey=x\n[Peer]\nEndpoint=127.0.0.1:51821\nPublicKey=y\nAllowedIPs=0.0.0.0/0\n",
+		},
+	}
+}
+
+func TestConnect_AllOthersFail_FallsBackToAnyTLS(t *testing.T) {
+	profile := anytlsProfile()
+	profile.Naive = &state.NaiveProfile{RemoteHost: "naive.example.com", RemotePort: 8443, Username: "u", Password: "p"}
+	profile.Reality = &state.RealityProfile{RemoteHost: "reality.example.com", RemotePort: 8443, UUID: "u", PublicKey: "k", ShortID: "ab12"}
+	profile.Hysteria2 = &state.Hysteria2Profile{RemoteHost: "hysteria2.example.com", RemotePort: 8443, Password: "p", ObfsPassword: "o"}
+	profile.Shadowsocks = &state.ShadowsocksProfile{RemoteHost: "ss.example.com", RemotePort: 8488, Method: "chacha20-ietf-poly1305", Password: "p"}
+
+	cloakMgr := &fakeCloakManager{startErr: errors.New("cloak boom")}
+	naiveMgr := &fakeNaiveManager{startErr: errors.New("naive boom")}
+	realityMgr := &fakeRealityManager{startErr: errors.New("reality boom")}
+	hysteria2Mgr := &fakeHysteria2Manager{startErr: errors.New("hysteria2 boom")}
+	shadowsocksMgr := &fakeShadowsocksManager{startErr: errors.New("shadowsocks boom")}
+	anytlsMgr := &fakeAnyTLSManager{}
+	wgMgr := &fakeWGManager{}
+	ks := &fakeKillSwitch{}
+	svc := newTestServiceFull(t, cloakMgr, naiveMgr, realityMgr, hysteria2Mgr, shadowsocksMgr, anytlsMgr, &fakeSnowflakeManager{}, wgMgr, ks, profile)
+
+	if err := svc.Connect(context.Background(), "p1", ConnectOptions{}); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	anytlsMgr.mu.Lock()
+	startCalled := anytlsMgr.startCalled
+	anytlsMgr.mu.Unlock()
+	if !startCalled {
+		t.Fatal("expected anytls.Start after every earlier transport failed")
+	}
+
+	status := svc.Status(context.Background())
+	if status.ActiveTransport != "anytls" {
+		t.Fatalf("ActiveTransport = %q, want anytls", status.ActiveTransport)
+	}
+	if !status.AnyTLS.Running {
+		t.Fatal("Status().AnyTLS.Running = false, want true")
+	}
+}
+
+// AnyTLS sits at the tail of the cascade: with cloak healthy the cascade stops
+// there and anytls is never touched.
+func TestConnect_AutoMode_DoesNotReachAnyTLSWhenCloakWorks(t *testing.T) {
+	profile := anytlsProfile()
+	anytlsMgr := &fakeAnyTLSManager{}
+	svc := newTestServiceFull(t, &fakeCloakManager{}, &fakeNaiveManager{}, &fakeRealityManager{},
+		&fakeHysteria2Manager{}, &fakeShadowsocksManager{}, anytlsMgr, &fakeSnowflakeManager{}, &fakeWGManager{}, &fakeKillSwitch{}, profile)
+
+	if err := svc.Connect(context.Background(), "p1", ConnectOptions{}); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	anytlsMgr.mu.Lock()
+	startCalled := anytlsMgr.startCalled
+	anytlsMgr.mu.Unlock()
+	if startCalled {
+		t.Fatal("anytls must sit behind cloak in the cascade, not run alongside it")
+	}
+}
+
+func TestConnect_PreferredTransportAnyTLS_WithoutConfigErrors(t *testing.T) {
+	profile := testProfile()
+	anytlsMgr := &fakeAnyTLSManager{}
+	svc := newTestServiceFull(t, &fakeCloakManager{}, &fakeNaiveManager{}, &fakeRealityManager{},
+		&fakeHysteria2Manager{}, &fakeShadowsocksManager{}, anytlsMgr, &fakeSnowflakeManager{}, &fakeWGManager{}, &fakeKillSwitch{}, profile)
+
+	err := svc.Connect(context.Background(), profile.ID, ConnectOptions{PreferredTransport: "anytls"})
+	if err == nil {
+		t.Fatal("expected Connect to fail: profile has no anytls configuration")
+	}
+	if !strings.Contains(err.Error(), "no anytls configuration") {
+		t.Fatalf("Connect error = %v, want it to name the missing anytls configuration", err)
+	}
+	anytlsMgr.mu.Lock()
+	startCalled := anytlsMgr.startCalled
+	anytlsMgr.mu.Unlock()
+	if startCalled {
+		t.Fatal("anytls.Start must not run without a profile")
+	}
+}
+
+// The health check restarts a stopped anytls rather than falling through to
+// recoverActiveTransport's unknown-kind error arm.
+func TestRecoverActiveTransport_RestartsAnyTLS(t *testing.T) {
+	profile := anytlsProfile()
+	anytlsMgr := &fakeAnyTLSManager{}
+	svc := newTestServiceFull(t, &fakeCloakManager{}, &fakeNaiveManager{}, &fakeRealityManager{},
+		&fakeHysteria2Manager{}, &fakeShadowsocksManager{}, anytlsMgr, &fakeSnowflakeManager{}, &fakeWGManager{}, &fakeKillSwitch{}, profile)
+
+	if err := svc.Connect(context.Background(), "p1", ConnectOptions{PreferredTransport: "anytls"}); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+
+	anytlsMgr.mu.Lock()
+	anytlsMgr.running = false
+	anytlsMgr.startCalled = false
+	anytlsMgr.mu.Unlock()
+
+	live, _ := svc.getCurrentProfile()
+	if err := svc.recoverActiveTransport(context.Background(), live, "anytls"); err != nil {
+		t.Fatalf("recoverActiveTransport: %v", err)
+	}
+	anytlsMgr.mu.Lock()
+	restarted := anytlsMgr.startCalled
+	anytlsMgr.mu.Unlock()
+	if !restarted {
+		t.Fatal("expected anytls.Start on recovery")
+	}
+}
+
+func TestKillSwitchPermits_IncludesAnyTLSHostWhenPresent(t *testing.T) {
+	profile := anytlsProfile()
+	permits := killSwitchPermits(profile)
+	if !slices.Contains(permits, "at.example.com") {
+		t.Errorf("killSwitchPermits() = %v, want to contain anytls host at.example.com", permits)
+	}
+}
+
+func TestWithTransportBypassHosts_IncludesAnyTLSHostWhenPresent(t *testing.T) {
+	profile := anytlsProfile()
+	wgProfile := withTransportBypassHosts(profile)
+	if !slices.Contains(wgProfile.BypassHosts, "at.example.com") {
+		t.Errorf("withTransportBypassHosts().BypassHosts = %v, want to contain at.example.com", wgProfile.BypassHosts)
 	}
 }
 
