@@ -341,7 +341,42 @@ function verifyPackagedMacAppBundle(appBundlePath, arch) {
     }
   }
 
+  // electron-builder skips code signing on pull-request CI builds unless
+  // CSC_FOR_PULL_REQUEST is set, so the @electron/fuses flip leaves the app's
+  // seal broken and `codesign --strict` rejects a bundle that was never
+  // re-signed. That is the CI environment, not a real signing defect, so the
+  // signature check is skipped for exactly that case. The release build on a
+  // push or tag signs normally and still runs the strict verify below.
+  if (signingSkippedForPullRequest()) {
+    console.log(
+      `Skipping ${arch} app-bundle signature check: electron-builder skips code ` +
+      "signing on pull-request builds (set CSC_FOR_PULL_REQUEST=true to sign and " +
+      "verify). The release build on push/tag still signs and runs this check."
+    );
+    return;
+  }
+
   verifyAppBundleSignature(appBundlePath, arch);
+}
+
+// signingSkippedForPullRequest reports whether electron-builder skipped code
+// signing because this is a pull-request CI build. It mirrors electron-builder's
+// own pull-request detection and honors the CSC_FOR_PULL_REQUEST override, so it
+// stays true to when signing was actually skipped rather than guessing.
+function signingSkippedForPullRequest() {
+  const forced = /^(1|true|yes)$/i.test((process.env.CSC_FOR_PULL_REQUEST ?? "").trim());
+  if (forced) {
+    return false;
+  }
+  const isSet = (value) => Boolean(value) && value !== "false";
+  return (
+    process.env.GITHUB_EVENT_NAME === "pull_request" ||
+    process.env.GITHUB_EVENT_NAME === "pull_request_target" ||
+    isSet(process.env.TRAVIS_PULL_REQUEST) ||
+    isSet(process.env.CIRCLE_PULL_REQUEST) ||
+    isSet(process.env.BITRISE_PULL_REQUEST) ||
+    isSet(process.env.bamboo_repository_pr_key)
+  );
 }
 
 function verifyAppBundleSignature(appBundlePath, arch) {
