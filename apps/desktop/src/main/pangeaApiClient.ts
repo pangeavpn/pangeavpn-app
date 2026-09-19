@@ -1266,6 +1266,8 @@ export class PangeaApiClient {
       /** The caller's own cancel, undiluted by the request timeout composed
        *  into `signal` — a slow cascade is not a cancelled one. */
       cancelSignal?: AbortSignal;
+      /** Transport deadline for one request; a large body needs more than the default. */
+      timeoutMs?: number;
     }
   ): Promise<Response> {
     // Race, don't just await: the cascade is shared, so this call abandons it on
@@ -1298,15 +1300,20 @@ export class PangeaApiClient {
 
   /** Sends the sealed envelope over whichever transport is currently resolved,
    *  falling back from a TLS cert error on the normal path to DoH + direct IP. */
-  private async resolveRawResponse(route: string, envelopeJson: string, signal?: AbortSignal): Promise<Response> {
+  private async resolveRawResponse(
+    route: string,
+    body: string,
+    signal?: AbortSignal,
+    timeoutMs: number = this.timeoutMs
+  ): Promise<Response> {
     if (this.ssProxyPort) {
       // CONNECT names the hub by hostname: the node resolves it, so a client
       // with no cached IP still gets through.
       return fetchViaConnectProxy(this.ssProxyPort, HUB_HOSTNAME, HUB_HOSTNAME, route, {
         method: "POST",
         headers: SEALED_ENVELOPE_HEADERS,
-        body: envelopeJson,
-        timeoutMs: this.timeoutMs,
+        body,
+        timeoutMs,
         signal,
         proxyUsername: this.ssProxyUsername ?? undefined,
         proxyPassword: this.ssProxyPassword ?? undefined
@@ -1316,8 +1323,8 @@ export class PangeaApiClient {
       return fetchFronted(this.frontedHost, route, {
         method: "POST",
         headers: SEALED_ENVELOPE_HEADERS,
-        body: envelopeJson,
-        timeoutMs: this.timeoutMs,
+        body,
+        timeoutMs,
         signal
       });
     }
@@ -1325,8 +1332,8 @@ export class PangeaApiClient {
       return fetchDohResolved(this.dohResolvedIp, HUB_HOSTNAME, route, {
         method: "POST",
         headers: SEALED_ENVELOPE_HEADERS,
-        body: envelopeJson,
-        timeoutMs: this.timeoutMs,
+        body,
+        timeoutMs,
         signal
       });
     }
@@ -1337,7 +1344,7 @@ export class PangeaApiClient {
     }
 
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     const onExternalAbort = () => controller.abort();
     if (signal) {
       if (signal.aborted) controller.abort();
@@ -1347,7 +1354,7 @@ export class PangeaApiClient {
       return await net.fetch(`https://${this.normalHost}${route}`, {
         method: "POST",
         headers: SEALED_ENVELOPE_HEADERS,
-        body: envelopeJson,
+        body,
         signal: controller.signal,
       });
     } catch (err: unknown) {
@@ -1366,8 +1373,8 @@ export class PangeaApiClient {
       return fetchDohResolved(resolvedIp, HUB_HOSTNAME, route, {
         method: "POST",
         headers: SEALED_ENVELOPE_HEADERS,
-        body: envelopeJson,
-        timeoutMs: this.timeoutMs,
+        body,
+        timeoutMs,
       });
     } finally {
       clearTimeout(timer);
@@ -1383,6 +1390,8 @@ export class PangeaApiClient {
       body?: string;
       signal?: AbortSignal;
       cancelSignal?: AbortSignal;
+      /** Transport deadline for one request; a large body needs more than the default. */
+      timeoutMs?: number;
     }
   ): Promise<Response> {
     const method = options.method ?? "GET";
@@ -1392,7 +1401,7 @@ export class PangeaApiClient {
     const sealed = await this.sealRequest(method, path, headers, bodyObj);
     const envelopeJson = JSON.stringify(sealed.envelope);
 
-    const rawResponse = await this.resolveRawResponse(sealed.route, envelopeJson, options.signal);
+    const rawResponse = await this.resolveRawResponse(sealed.route, envelopeJson, options.signal, options.timeoutMs ?? this.timeoutMs);
 
     const responseText = await rawResponse.text();
 
@@ -1841,6 +1850,44 @@ export class PangeaApiClient {
     this.onSubscription?.(null);
     this.resetHubResolution();
     this.identityPubkey = null;
+  }
+
+  /** Whether a hub path has already been found by ordinary app traffic, so a
+   *  background caller can wait for one rather than start the cascade itself. */
+  hubPathReady(): boolean {
+    return this.hubReady;
+  }
+
+  /** A sealed request with no license key on it: same channel and path as
+   *  everything else, but the hub cannot tie it to an account. */
+  async anonymousRequest<T>(
+    method: string,
+    route: string,
+    body?: unknown,
+    options: { timeoutMs?: number; signal?: AbortSignal } = {}
+  ): Promise<{ status: number; body: T | undefined }> {
+    const timeoutMs = options.timeoutMs ?? this.timeoutMs;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const abortFromCaller = () => controller.abort();
+    if (options.signal) {
+      if (options.signal.aborted) controller.abort();
+      else options.signal.addEventListener("abort", abortFromCaller, { once: true });
+    }
+    try {
+      const response = await this.hubFetch(route, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: body === undefined ? undefined : JSON.stringify(body),
+        signal: controller.signal,
+        timeoutMs
+      });
+      const text = await response.text();
+      return { status: response.status, body: (text ? JSON.parse(text) : undefined) as T | undefined };
+    } finally {
+      clearTimeout(timer);
+      options.signal?.removeEventListener("abort", abortFromCaller);
+    }
   }
 
   /** @param externalSignal Aborts this request when the caller's work is cancelled

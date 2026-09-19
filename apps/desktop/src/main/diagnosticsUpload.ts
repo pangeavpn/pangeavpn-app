@@ -9,51 +9,37 @@ export type DiagnosticsUploadResult =
   | { ok: false; reason: "unreachable" | "rejected" };
 
 export interface DiagnosticsUploadOptions {
-  hosts: readonly string[];
-  fetchImpl: (input: string, init: RequestInit) => Promise<Response>;
+  /** A sealed, anonymous POST over the hub path the app has resolved: the
+   *  report never goes out as a bare request the way nothing else in the app does. */
+  send: (route: string, payload: DiagnosticsPayload, signal: AbortSignal) => Promise<{ status: number; body: unknown }>;
   timeoutMs?: number;
 }
 
-async function postOnce(
-  host: string,
-  body: string,
+export async function uploadDiagnostics(
+  payload: DiagnosticsPayload,
   options: DiagnosticsUploadOptions
 ): Promise<DiagnosticsUploadResult> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
   try {
-    const response = await options.fetchImpl(`https://${host}${DIAGNOSTICS_ROUTE}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body,
-      signal: controller.signal
-    });
-    if (!response.ok) return { ok: false, reason: "rejected" };
-    const parsed = (await response.json()) as { reportCode?: unknown };
-    const code = typeof parsed.reportCode === "string" ? parsed.reportCode.trim() : "";
-    if (!REPORT_CODE.test(code)) return { ok: false, reason: "rejected" };
+    const { status, body } = await options.send(DIAGNOSTICS_ROUTE, payload, controller.signal);
+    if (status < 200 || status >= 300) {
+      console.warn(`diagnostics: the hub refused the report (${status})`);
+      return { ok: false, reason: "rejected" };
+    }
+    const reportCode = typeof body === "object" && body !== null && "reportCode" in body ? body.reportCode : undefined;
+    const code = typeof reportCode === "string" ? reportCode.trim() : "";
+    if (!REPORT_CODE.test(code)) {
+      console.warn("diagnostics: the hub answered without a usable report code");
+      return { ok: false, reason: "rejected" };
+    }
     return { ok: true, reportCode: code };
+  } catch (error) {
+    // A transport failure is not the hub's answer; the path cascade already
+    // tried every way the app knows to reach it.
+    console.warn(`diagnostics: hub unreachable: ${error instanceof Error ? error.message : String(error)}`);
+    return { ok: false, reason: "unreachable" };
   } finally {
     clearTimeout(timer);
   }
-}
-
-/** Plain anonymous POST, deliberately outside pangeaApiClient's secure channel:
- *  that path needs a license key and caps inner bodies at 16kb. */
-export async function uploadDiagnostics(
-  payload: DiagnosticsPayload,
-  options: DiagnosticsUploadOptions
-): Promise<DiagnosticsUploadResult> {
-  const body = JSON.stringify(payload);
-  let refused = false;
-  for (const host of options.hosts) {
-    try {
-      const result = await postOnce(host, body, options);
-      if (result.ok) return result;
-      refused = true;
-    } catch {
-      // Try the next host; a transport failure is not the hub's answer.
-    }
-  }
-  return { ok: false, reason: refused ? "rejected" : "unreachable" };
 }

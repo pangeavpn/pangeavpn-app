@@ -1,4 +1,4 @@
-import { Menu, Notification, Tray, app, BrowserWindow, ipcMain, nativeImage, net, session, shell, type NativeImage } from "electron";
+import { Menu, Notification, Tray, app, BrowserWindow, ipcMain, nativeImage, session, shell, type NativeImage } from "electron";
 import os from "node:os";
 import path from "node:path";
 import type { ConfigResponse, OkResponse, Profile, StatusResponse } from "@pangeavpn/shared-types";
@@ -15,7 +15,6 @@ import {
   type PublicServerInfo,
   type ServerInfo
 } from "../shared/ipc";
-import { normalHubHosts } from "../shared/hubHosts";
 import * as auth from "./auth";
 import { readSecret, writeSecret } from "./secureStore";
 import {
@@ -27,7 +26,7 @@ import {
 import type { HubShadowsocksCreds } from "../shared/hubShadowsocksCreds";
 import type { CachedSubscription } from "../shared/cachedSubscription";
 import { beginAttempt, cancelAttempt, commitAttempt, endAttempt, isCancelled } from "./connectAttempt";
-import { setupAutoUpdater, notifyConnectionStateChange } from "./autoUpdater";
+import { LATEST_ROUTE, setupAutoUpdater } from "./autoUpdater";
 import { isSafeExternalUrl } from "./externalUrl";
 import { setLoginItemEnabled, isLoginItemEnabled, isHiddenLaunchArg } from "./loginItem";
 import { startNetworkWatcher, onNetworkChange } from "./networkWatcher";
@@ -688,7 +687,6 @@ async function refreshTrayStatus(): Promise<void> {
     } finally {
       maybeNotifyStatusChange();
       updateTrayMenu();
-      notifyConnectionStateChange(trayStatusState);
     }
   })();
   trayStatusRefreshPromise = run.finally(() => {
@@ -1876,8 +1874,7 @@ function registerConnectionHandlers(): void {
         note: typeof note === "string" ? note : undefined
       });
       return await uploadDiagnostics(payload, {
-        hosts: normalHubHosts(),
-        fetchImpl: (url, init) => net.fetch(url, init)
+        send: (route, report, signal) => pangeaApiClient.anonymousRequest("POST", route, report, { timeoutMs: 30000, signal })
       });
     } catch (err) {
       console.warn("sendDiagnostics failed", sanitizeLog(err));
@@ -2676,7 +2673,10 @@ async function boot(): Promise<void> {
   registerIpcHandlers();
   createWindow();
   // A resolver, not a snapshot, so this stays correct across window recreates.
-  setupAutoUpdater(() => mainWindow);
+  setupAutoUpdater(() => mainWindow, {
+    ready: () => pangeaApiClient.hubPathReady(),
+    fetchLatest: (timeoutMs) => pangeaApiClient.anonymousRequest("GET", LATEST_ROUTE, undefined, { timeoutMs })
+  });
   createTray();
   watchDisplayChanges();
   if (!hiddenLaunch) {
