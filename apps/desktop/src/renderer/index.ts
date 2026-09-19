@@ -3634,7 +3634,7 @@ async function refreshServersWithRetry(): Promise<void> {
 function buildLoadIndicator(load: number | null | undefined): HTMLElement | null {
   if (typeof load !== "number" || !Number.isFinite(load)) return null;
   const pct = Math.max(0, Math.min(100, Math.round(load)));
-  const level = pct < 40 ? "low" : pct < 75 ? "mid" : "high";
+  const level = pct > 90 ? "high" : pct > 75 ? "mid" : "low";
   const el = document.createElement("div");
   el.className = `server-picker-overlay-item-load load-${level}`;
   el.title = t("serverPicker.load", { pct });
