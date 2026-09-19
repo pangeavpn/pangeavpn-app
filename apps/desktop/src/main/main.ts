@@ -36,6 +36,7 @@ import { sanitizeLog } from "./logSanitize";
 import { isMissingFile, readSettings, writeSettings } from "./settingsFile";
 import { LOG_FILE_NAME, installConsoleFileSink } from "./logFileSink";
 import { collectDiagnostics } from "./diagnosticsReport";
+import { collectWindowsHostSnapshot } from "./hostSnapshot";
 import { uploadDiagnostics } from "./diagnosticsUpload";
 import { classifyLoginError } from "./loginError";
 import { shouldShowTrayHint, trayHintBodyKey } from "./trayHint";
@@ -1871,6 +1872,7 @@ function registerConnectionHandlers(): void {
         crashDumpsDir: app.getPath("crashDumps"),
         logFileName: LOG_FILE_NAME,
         daemonRing: () => daemonClient.getLogs(0),
+        hostSnapshot: process.platform === "win32" ? collectWindowsHostSnapshot : undefined,
         note: typeof note === "string" ? note : undefined
       });
       return await uploadDiagnostics(payload, {

@@ -97,6 +97,45 @@ func runProbedHealthChecks(svc *Service, n int) {
 	}
 }
 
+// TestHealthCheck_SwallowedProbeWithLiveTrafficIsNotDead: a host that keeps the
+// daemon's probe replies from its socket while the peer keeps answering must not
+// have its working session rebuilt every cooldown.
+func TestHealthCheck_SwallowedProbeWithLiveTrafficIsNotDead(t *testing.T) {
+	svc, probe, naive, wgMgr, _ := dataPathTestService(t)
+	probe.setErr(errors.New("i/o timeout"))
+
+	wgMgr.mu.Lock()
+	startsAfterConnect := wgMgr.startCount
+	wgMgr.mu.Unlock()
+	svc.probeResolver = func(ctx context.Context, iface, server string) error {
+		wgMgr.addBytesIn(500) // the reply landed on the device, not the socket
+		return probe.probe(ctx, iface, server)
+	}
+	runProbedHealthChecks(svc, dnsProbeFailuresBeforeRebuild+1)
+
+	wgMgr.mu.Lock()
+	restarts := wgMgr.startCount - startsAfterConnect
+	wgMgr.mu.Unlock()
+	if restarts != 0 {
+		t.Fatalf("wireguard restarts = %d, want 0 — the peer was answering the whole time", restarts)
+	}
+	naive.mu.Lock()
+	naiveStopped := naive.stopCalled
+	naive.mu.Unlock()
+	if naiveStopped {
+		t.Error("the transport was restarted under a tunnel that carried traffic")
+	}
+	rescues := 0
+	for _, entry := range svc.logs.Since(0) {
+		if strings.Contains(entry.Msg, "swallowing the daemon's probe replies") {
+			rescues++
+		}
+	}
+	if rescues != 1 {
+		t.Errorf("rescue log lines = %d, want exactly 1 per interval", rescues)
+	}
+}
+
 // TestHealthCheck_DeadDataPathRebuildsSession is the case the handshake check
 // cannot see: WireGuard keeps rekeying while the tunnel carries nothing.
 func TestHealthCheck_DeadDataPathRebuildsSession(t *testing.T) {

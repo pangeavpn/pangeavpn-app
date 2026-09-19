@@ -290,7 +290,7 @@ func TestProveDataPath_ProbesTheLiveTunnelInterface(t *testing.T) {
 		return nil
 	}
 
-	if err := svc.proveDataPath(context.Background(), cascadeProfile().WireGuard); err != nil {
+	if err := svc.proveDataPath(context.Background(), "reality", cascadeProfile().WireGuard); err != nil {
 		t.Fatalf("proveDataPath failed: %v", err)
 	}
 	mu.Lock()
@@ -459,7 +459,7 @@ func TestProveDataPath_OversizedReplyProvesTheTunnelCarriesTraffic(t *testing.T)
 
 	svc.probeResolver = func(context.Context, string, string) error { return errDNSProbeOversizedReply }
 
-	if err := svc.proveDataPath(context.Background(), cascadeProfile().WireGuard); err != nil {
+	if err := svc.proveDataPath(context.Background(), "reality", cascadeProfile().WireGuard); err != nil {
 		t.Fatalf("proveDataPath rejected a transport that carried an oversized reply: %v", err)
 	}
 }
@@ -499,7 +499,7 @@ func TestProveDataPath_BlockedTunnelStillFailsFast(t *testing.T) {
 	svc, _ := gateTestService(t)
 	calls := gateProbeCounter(svc)
 
-	if err := svc.proveDataPath(context.Background(), cascadeProfile().WireGuard); err == nil {
+	if err := svc.proveDataPath(context.Background(), "reality", cascadeProfile().WireGuard); err == nil {
 		t.Fatal("proveDataPath accepted a transport that never carried a round trip")
 	}
 	if got := calls.Load(); got != dataPathGateAttempts {
@@ -528,7 +528,7 @@ func TestProveDataPath_WaitsForALateAdapter(t *testing.T) {
 		return nil
 	}
 
-	if err := svc.proveDataPath(context.Background(), cascadeProfile().WireGuard); err != nil {
+	if err := svc.proveDataPath(context.Background(), "reality", cascadeProfile().WireGuard); err != nil {
 		t.Fatalf("proveDataPath rejected a tunnel whose adapter arrived late: %v", err)
 	}
 	mu.Lock()
@@ -541,20 +541,27 @@ func TestProveDataPath_WaitsForALateAdapter(t *testing.T) {
 	}
 }
 
-// A peer's passive keepalives move the received-byte counter on a tunnel that
-// carries nothing, so no extension may be bought with it.
+// A peer's keepalives and a rekey move the received-byte counter on a tunnel
+// that carries nothing; that much must neither rescue the gate nor extend it.
 func TestProveDataPath_KeepaliveInflatedCounterStillFailsFast(t *testing.T) {
 	svc, wgMgr := gateTestService(t)
+	markRunning(wgMgr)
 
 	var calls atomic.Int32
 	svc.probeResolver = func(context.Context, string, string) error {
-		calls.Add(1)
-		wgMgr.addBytesIn(1500)
+		if calls.Add(1) == 1 {
+			wgMgr.addBytesIn(148) // a handshake initiation from the peer
+		}
+		wgMgr.addBytesIn(32) // one keepalive per attempt
 		return errors.New("i/o timeout")
 	}
 
-	if err := svc.proveDataPath(context.Background(), cascadeProfile().WireGuard); err == nil {
+	err := svc.proveDataPath(context.Background(), "reality", cascadeProfile().WireGuard)
+	if err == nil {
 		t.Fatal("proveDataPath accepted a blocked tunnel whose peer only sent keepalives")
+	}
+	if !strings.Contains(err.Error(), "peer sent 212 bytes during the probe") {
+		t.Errorf("rejection does not carry the peer's byte count for the report: %v", err)
 	}
 	if got := calls.Load(); got != dataPathGateAttempts {
 		t.Errorf("probe attempts = %d, want %d — keepalives must not buy extra tries", got, dataPathGateAttempts)
@@ -562,6 +569,66 @@ func TestProveDataPath_KeepaliveInflatedCounterStillFailsFast(t *testing.T) {
 	if wgMgr.readyPolls == 0 {
 		t.Error("gate never checked adapter readiness")
 	}
+}
+
+// TestProveDataPath_PeerBytesRescueAProbeTheHostSwallows is the host that worked
+// before the gate existed: the peer's replies land on the device, so the transport
+// carries traffic, but nothing reaches the daemon's own socket.
+func TestProveDataPath_PeerBytesRescueAProbeTheHostSwallows(t *testing.T) {
+	svc, wgMgr := gateTestService(t)
+	markRunning(wgMgr)
+
+	var calls atomic.Int32
+	svc.probeResolver = func(context.Context, string, string) error {
+		calls.Add(1)
+		wgMgr.addBytesIn(500) // a padded resolver reply the socket never saw
+		return errors.New("i/o timeout")
+	}
+
+	if err := svc.proveDataPath(context.Background(), "reality", cascadeProfile().WireGuard); err != nil {
+		t.Fatalf("gate rejected a tunnel the peer was demonstrably answering over: %v", err)
+	}
+	if got := calls.Load(); got != dataPathGateAttempts {
+		t.Errorf("probe attempts = %d, want %d — the rescue must not buy extra tries", got, dataPathGateAttempts)
+	}
+	if !logMentions(svc, "reality tunnel carried 1000 bytes from the peer") {
+		t.Error("the rescue was not logged with the transport and the byte count")
+	}
+}
+
+// TestProveDataPath_CancelledGateIsATeardownNotAPass: a Disconnect landing
+// mid-gate must fail the bring-up, not log a verified tunnel it is tearing down.
+func TestProveDataPath_CancelledGateIsATeardownNotAPass(t *testing.T) {
+	svc, _ := gateTestService(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	svc.probeResolver = func(probeCtx context.Context, _, _ string) error {
+		cancel()
+		<-probeCtx.Done()
+		return fmt.Errorf("%w: %v", errDNSProbeInconclusive, probeCtx.Err())
+	}
+
+	err := svc.proveDataPath(ctx, "reality", cascadeProfile().WireGuard)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("proveDataPath = %v, want context.Canceled", err)
+	}
+}
+
+// markRunning models the device the gate runs against: a bring-up has started
+// WireGuard before it probes, which a direct call to the gate skips.
+func markRunning(wgMgr *fakeWGManager) {
+	wgMgr.mu.Lock()
+	defer wgMgr.mu.Unlock()
+	wgMgr.running = true
+}
+
+func logMentions(svc *Service, fragment string) bool {
+	for _, entry := range svc.logs.Since(0) {
+		if strings.Contains(entry.Msg, fragment) {
+			return true
+		}
+	}
+	return false
 }
 
 // TestProveDataPath_LateRouteIsRetriedNotTreatedAsAVerdict: a route of ours that
@@ -576,7 +643,7 @@ func TestProveDataPath_LateRouteIsRetriedNotTreatedAsAVerdict(t *testing.T) {
 		return fmt.Errorf("%w: the tunnel's route is not published yet", errDNSProbeNotReady)
 	}
 
-	err := svc.proveDataPath(context.Background(), cascadeProfile().WireGuard)
+	err := svc.proveDataPath(context.Background(), "reality", cascadeProfile().WireGuard)
 	if err == nil {
 		t.Fatal("proveDataPath passed a tunnel nothing ever left the host on")
 	}

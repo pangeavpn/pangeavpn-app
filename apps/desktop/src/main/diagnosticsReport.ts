@@ -38,6 +38,9 @@ export interface DiagnosticsSources {
   /** The daemon's in-memory log ring, fetched over its API: on Windows the
    *  service's file log is admin-only, so this is the only daemon log a report can carry. */
   daemonRing?: () => Promise<DaemonRingEntry[]>;
+  /** Security products, VPN services, adapters and firewall profiles: where a
+   *  probe reply can vanish outside anything the daemon itself can log. */
+  hostSnapshot?: () => Promise<string>;
   note?: string;
   now?: Date;
 }
@@ -73,6 +76,22 @@ async function daemonRingSection(fetchRing: DiagnosticsSources["daemonRing"]): P
     const text = ring.length === 0
       ? `<${name} empty>`
       : redactDiagnostics(tailText(formatDaemonRing(ring), SECTION_MAX_BYTES));
+    return { name, bytes: Buffer.byteLength(text), text };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    const text = `<${name} unavailable: ${redactDiagnostics(reason)}>`;
+    return { name, bytes: Buffer.byteLength(text), text };
+  }
+}
+
+async function hostSection(snapshot: DiagnosticsSources["hostSnapshot"]): Promise<DiagnosticsSection> {
+  const name = "host";
+  if (!snapshot) {
+    const text = `<${name} not collected on this platform>`;
+    return { name, bytes: Buffer.byteLength(text), text };
+  }
+  try {
+    const text = redactDiagnostics(tailText(await snapshot(), SECTION_MAX_BYTES));
     return { name, bytes: Buffer.byteLength(text), text };
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
@@ -174,6 +193,7 @@ export async function collectDiagnostics(sources: DiagnosticsSources): Promise<D
     await fileSection("daemon.log", path.join(sources.appSupportDir, "daemon.log")),
     await fileSection("daemon-elevated.log", path.join(sources.appSupportDir, "daemon-elevated.log")),
     await daemonRingSection(sources.daemonRing),
+    await hostSection(sources.hostSnapshot),
     await crashSection(sources.crashDumpsDir)
   ];
 

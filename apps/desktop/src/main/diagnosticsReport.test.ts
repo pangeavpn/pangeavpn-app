@@ -124,3 +124,28 @@ test("the user note is trimmed, length-capped and redacted", async () => {
   const payload = await collectDiagnostics(sources({ note: "stuck on connecting" }));
   assert.equal(payload.note, "stuck on connecting");
 });
+
+test("a host snapshot lands in its own section, redacted", async () => {
+  const payload = await collectDiagnostics(
+    sources({ hostSnapshot: async () => "fw | Example Firewall | state=266240\nRunning | nordvpn-service | 1.2.3.4" })
+  );
+  const text = section(payload, "host");
+  assert.match(text, /fw \| Example Firewall/);
+  assert.match(text, /nordvpn-service \| \[redacted:ipv4\]/);
+});
+
+test("no host collector leaves a host section that says so", async () => {
+  const payload = await collectDiagnostics(sources());
+  assert.match(section(payload, "host"), /^<host not collected on this platform>$/);
+});
+
+test("a host collector that fails becomes a section with the reason", async () => {
+  const payload = await collectDiagnostics(
+    sources({
+      hostSnapshot: async () => {
+        throw new Error("powershell.exe ENOENT");
+      }
+    })
+  );
+  assert.match(section(payload, "host"), /^<host unavailable: powershell\.exe ENOENT>$/);
+});

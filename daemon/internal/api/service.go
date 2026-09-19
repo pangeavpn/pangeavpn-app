@@ -182,6 +182,9 @@ type Service struct {
 	dnsProbeNextAt     time.Time
 	dnsProbeFailures   int
 	dnsProbeQuietUntil time.Time
+	// dataPathRescueLoggedAt is when the health loop last reported a host that
+	// swallows the daemon's probe replies while the peer keeps answering.
+	dataPathRescueLoggedAt time.Time
 
 	// dnsGuardNextAt is the earliest the DNS guard may run again. Zero (the normal
 	// state) means every health tick; it is pushed out only after a correction.
@@ -1381,7 +1384,7 @@ func (s *Service) bringUpTransport(ctx context.Context, profile *state.Profile, 
 
 	s.machine.Set(state.StateConnecting, fmt.Sprintf("checking traffic over %s", kind))
 	probeStart := time.Now()
-	if err = s.proveDataPath(ctx, *wireGuardProfile); err != nil {
+	if err = s.proveDataPath(ctx, kind, *wireGuardProfile); err != nil {
 		return fmt.Errorf("%s: %w", kind, err)
 	}
 	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("%s data path verified (%dms)", kind, time.Since(probeStart).Milliseconds()))
