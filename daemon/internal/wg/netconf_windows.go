@@ -46,6 +46,15 @@ func windowsInterfaceLUID(tunDev any, interfaceName string) (uint64, error) {
 	return uint64(luid), nil
 }
 
+// windowsInterfaceAlias reads the adapter's live friendly name by LUID.
+func windowsInterfaceAlias(luidValue uint64) string {
+	row, err := winipcfg.LUID(luidValue).Interface()
+	if err != nil || row == nil {
+		return ""
+	}
+	return strings.TrimSpace(row.Alias())
+}
+
 func configureWindowsInterface(luidValue uint64, addresses []string, allowedIPs []string, dnsServers []string, mtu int) error {
 	if luidValue == 0 {
 		return errors.New("invalid interface LUID")

@@ -759,7 +759,7 @@ export class PangeaApiClient {
   setCustomDns(value: unknown): string[] {
     const normalized = normalizeCustomDns(value);
     if (normalized === null) {
-      throw new TypeError("Custom DNS must contain only IPv4 addresses");
+      throw new TypeError("Custom DNS must contain only IPv4 addresses reachable through the tunnel");
     }
     this.customDnsServers = normalized.length > 0 ? normalized : null;
     return this.getCustomDns();

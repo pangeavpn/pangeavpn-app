@@ -20,11 +20,11 @@ func init() {
 }
 
 type windowsKillSwitch struct {
-	mu             sync.Mutex
-	active         bool
-	engine         *wfpEngine // static session — block filters are persistent and outlive this handle
-	probe          *wfpEngine // read-only handle Active() asks about the persistent block
-	tunnelFilterId uint64     // WFP filter ID for the tunnel interface permit
+	mu              sync.Mutex
+	active          bool
+	engine          *wfpEngine // static session — block filters are persistent and outlive this handle
+	probe           *wfpEngine // read-only handle Active() asks about the persistent block
+	tunnelFilterIds []uint64   // WFP filter IDs for the tunnel interface permits, both ALE layers
 
 	// Per-arm permit filter IDs so a re-arm can retire the previous set instead
 	// of stacking. Without this every node visited stays permitted until Clear.
@@ -184,7 +184,7 @@ func (ks *windowsKillSwitch) Enable(ctx context.Context, endpointHosts []string,
 	ks.lastEndpointIPs = ips
 	ks.lastAllowLAN = allowLAN
 	// The sweep inside installWindowsLock retired any tunnel permit too.
-	ks.tunnelFilterId = 0
+	ks.tunnelFilterIds = nil
 	ks.staleTunnelFilterIds = nil
 	ks.forwardTunnelFilterId = 0
 	ks.forwardLANFilterIds = nil
@@ -324,15 +324,15 @@ func (ks *windowsKillSwitch) Update(ctx context.Context, tunnel TunnelRef) error
 		return fmt.Errorf("kill switch update: %w", err)
 	}
 
-	// Retire the previous tunnel permit (e.g. reconnect). Keep the ID on a
+	// Retire the previous tunnel permits (e.g. reconnect). Keep the ID on a
 	// failed delete: a reassigned LUID could inherit an orphaned permit.
-	if ks.tunnelFilterId != 0 {
-		if err := ks.engine.deleteFilter(ks.tunnelFilterId); err != nil {
-			KillSwitchWarn("kill switch update could not retire previous tunnel permit %d: %v", ks.tunnelFilterId, err)
-			ks.staleTunnelFilterIds = append(ks.staleTunnelFilterIds, ks.tunnelFilterId)
+	for _, id := range ks.tunnelFilterIds {
+		if err := ks.engine.deleteFilter(id); err != nil {
+			KillSwitchWarn("kill switch update could not retire previous tunnel permit %d: %v", id, err)
+			ks.staleTunnelFilterIds = append(ks.staleTunnelFilterIds, id)
 		}
-		ks.tunnelFilterId = 0
 	}
+	ks.tunnelFilterIds = nil
 	if ks.forwardTunnelFilterId != 0 {
 		if err := ks.engine.deleteFilter(ks.forwardTunnelFilterId); err != nil {
 			ks.staleTunnelFilterIds = append(ks.staleTunnelFilterIds, ks.forwardTunnelFilterId)
@@ -343,11 +343,11 @@ func (ks *windowsKillSwitch) Update(ctx context.Context, tunnel TunnelRef) error
 
 	// Without a permit scoped to the tunnel interface LUID, block-all-outbound
 	// drops every app socket at the ALE_AUTH_CONNECT layer despite a live handshake.
-	filterId, err := ks.engine.addPermitTunnelInterface(luid)
+	filterIds, err := ks.engine.addPermitTunnelInterface(luid)
+	ks.tunnelFilterIds = filterIds
 	if err != nil {
 		return fmt.Errorf("kill switch update: permit tunnel interface: %w", err)
 	}
-	ks.tunnelFilterId = filterId
 	ks.permitForwardingToTunnel(luid)
 
 	// A failed reload must not clobber Active/Locked with the zero value, so
@@ -451,9 +451,9 @@ func (ks *windowsKillSwitch) Clear(ctx context.Context) error {
 			errs = append(errs, fmt.Sprintf("lan permit %d: %v", id, err))
 		}
 	}
-	if ks.tunnelFilterId != 0 {
-		if err := engine.deleteFilter(ks.tunnelFilterId); err != nil {
-			errs = append(errs, fmt.Sprintf("tunnel permit %d: %v", ks.tunnelFilterId, err))
+	for _, id := range ks.tunnelFilterIds {
+		if err := engine.deleteFilter(id); err != nil {
+			errs = append(errs, fmt.Sprintf("tunnel permit %d: %v", id, err))
 		}
 	}
 	for _, id := range ks.staleTunnelFilterIds {
@@ -505,7 +505,7 @@ func (ks *windowsKillSwitch) Clear(ctx context.Context) error {
 	ks.lanFilterIds = nil
 	ks.lastEndpointIPs = nil
 	ks.lastAllowLAN = false
-	ks.tunnelFilterId = 0
+	ks.tunnelFilterIds = nil
 	ks.staleTunnelFilterIds = nil
 	ks.forwardTunnelFilterId = 0
 	ks.forwardLANFilterIds = nil
@@ -669,7 +669,7 @@ func (ks *windowsKillSwitch) DropTunnelPermit(_ context.Context) error {
 	if !ks.active || ks.engine == nil {
 		return nil
 	}
-	for _, id := range []uint64{ks.tunnelFilterId, ks.forwardTunnelFilterId} {
+	for _, id := range append(append([]uint64(nil), ks.tunnelFilterIds...), ks.forwardTunnelFilterId) {
 		if id == 0 {
 			continue
 		}
@@ -677,7 +677,7 @@ func (ks *windowsKillSwitch) DropTunnelPermit(_ context.Context) error {
 			ks.staleTunnelFilterIds = append(ks.staleTunnelFilterIds, id)
 		}
 	}
-	ks.tunnelFilterId, ks.forwardTunnelFilterId = 0, 0
+	ks.tunnelFilterIds, ks.forwardTunnelFilterId = nil, 0
 	ks.retireStaleTunnelFilters()
 	if len(ks.staleTunnelFilterIds) > 0 {
 		return fmt.Errorf("kill switch drop tunnel: %d permits could not be retired", len(ks.staleTunnelFilterIds))

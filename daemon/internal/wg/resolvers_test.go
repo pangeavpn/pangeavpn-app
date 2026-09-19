@@ -64,3 +64,27 @@ AllowedIPs = 0.0.0.0/0
 		})
 	}
 }
+
+func TestProbeResolvers_SkipsALoopbackProxy(t *testing.T) {
+	profile := state.WireGuardProfile{ConfigText: "[Interface]\nPrivateKey=x\nDNS=127.0.0.1, 1.1.1.1\n[Peer]\nPublicKey=y\nAllowedIPs=0.0.0.0/0\n"}
+	got := ProbeResolvers(profile)
+	if len(got) != 1 || got[0] != "1.1.1.1" {
+		t.Fatalf("ProbeResolvers = %v, want [1.1.1.1]", got)
+	}
+	if only := ProbeResolvers(state.WireGuardProfile{DNS: []string{"127.0.0.53"}}); len(only) != 0 {
+		t.Fatalf("a loopback-only profile must leave nothing to probe, got %v", only)
+	}
+}
+
+func TestValidateResolvers_RejectsWhatNoTunnelCanReach(t *testing.T) {
+	for _, bad := range []string{"0.0.0.0", "169.254.1.1", "224.0.0.251", "255.255.255.255"} {
+		if err := ValidateResolvers([]string{bad}); err == nil {
+			t.Errorf("%s: want an error", bad)
+		}
+	}
+	for _, ok := range []string{"1.1.1.1", "10.10.1.1", "127.0.0.1"} {
+		if err := ValidateResolvers([]string{ok}); err != nil {
+			t.Errorf("%s: unexpected error %v", ok, err)
+		}
+	}
+}

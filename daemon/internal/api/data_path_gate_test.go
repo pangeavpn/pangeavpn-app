@@ -344,6 +344,7 @@ func TestHealthCheck_DeadDataPathWaitsForUsableNetwork(t *testing.T) {
 
 // TestStatus_HostNetworkOutageIsNotExhaustion: a cascade that failed because the
 // host had no route is not this server being blocked, so the app must not rotate.
+// The outage shows on the transport dials; the gate's own socket never sees it.
 func TestStatus_HostNetworkOutageIsNotExhaustion(t *testing.T) {
 	svc, probe := cascadeTestService(t, map[string]bool{"shadowsocks": true})
 	if err := svc.Connect(context.Background(), "p1", ConnectOptions{}); err != nil {
@@ -351,8 +352,9 @@ func TestStatus_HostNetworkOutageIsNotExhaustion(t *testing.T) {
 	}
 
 	probe.reset(map[string]bool{})
-	svc.probeResolver = func(context.Context, string, string) error {
-		return errors.New("dial udp 10.0.0.53:53: connect: A socket operation was attempted to an unreachable network.")
+	noRoute := errors.New("dial tcp: connectex: A socket operation was attempted to an unreachable network.")
+	for _, mgr := range []interface{ failStarts(error) }{probe.reality, probe.cloak, probe.shadowsocks} {
+		mgr.failStarts(noRoute)
 	}
 	runProbedHealthChecks(svc, dnsProbeFailuresBeforeRebuild)
 
@@ -390,8 +392,8 @@ func TestHandshakeTimeoutFor_RebuildsGetTheLongerBudget(t *testing.T) {
 func TestHostNetworkUnreachable(t *testing.T) {
 	cases := map[string]bool{
 		"all configured transports failed: reality: dial tcp: connectex: A socket operation was attempted to an unreachable network.": true,
-		"all configured transports failed: cloak: no wireguard handshake within 10s; reality: dial: no route to host":                  true,
-		"all configured transports failed: cloak: no wireguard handshake within 10s":                                                   false,
+		"all configured transports failed: cloak: no wireguard handshake within 10s; reality: dial: no route to host":                 true,
+		"all configured transports failed: cloak: no wireguard handshake within 10s":                                                  false,
 	}
 	for msg, want := range cases {
 		if got := hostNetworkUnreachable(errors.New(msg)); got != want {
@@ -400,6 +402,51 @@ func TestHostNetworkUnreachable(t *testing.T) {
 	}
 	if hostNetworkUnreachable(nil) {
 		t.Error("nil error must not be an outage")
+	}
+}
+
+// TestHostNetworkUnreachable_GateRejectionIsNotAnOutage: the gate's socket is
+// pinned to the tunnel, so its "no route" is about the tunnel, never the host.
+func TestHostNetworkUnreachable_GateRejectionIsNotAnOutage(t *testing.T) {
+	gate := &dataPathGateError{errors.New("tunnel came up but did not carry traffic: 1.1.1.1: write udp: sendto: no route to host")}
+	wrapped := fmt.Errorf("reality: %w", gate)
+	if hostNetworkUnreachable(wrapped) {
+		t.Fatal("a gate rejection must not read as the host being offline")
+	}
+	exhausted := fmt.Errorf("%w: %w", ErrTransportExhausted, cascadeFailures{wrapped, errors.New("cloak: no wireguard handshake within 10s")})
+	if hostNetworkUnreachable(exhausted) {
+		t.Fatal("a cascade of gate rejections must not read as an outage")
+	}
+	if !strings.Contains(exhausted.Error(), "reality: tunnel came up but did not carry traffic") || !strings.Contains(exhausted.Error(), "; cloak: ") {
+		t.Fatalf("cascade error lost its readable list: %v", exhausted)
+	}
+	mixed := fmt.Errorf("%w: %w", ErrTransportExhausted, cascadeFailures{wrapped, errors.New("cloak: dial tcp: connect: no route to host")})
+	if !hostNetworkUnreachable(mixed) {
+		t.Fatal("a transport dial with no route out is still an outage")
+	}
+}
+
+// TestConnect_GateRejectionWithRouteWordingWalksTheWholeCascade: before, the
+// socket's "no route to host" ended the cascade after one candidate as "no internet".
+func TestConnect_GateRejectionWithRouteWordingWalksTheWholeCascade(t *testing.T) {
+	svc, probe := cascadeTestService(t, map[string]bool{})
+	svc.probeResolver = func(_ context.Context, _ string, server string) error {
+		probe.probe(context.Background(), "", server)
+		return errors.New("write udp 10.0.0.2:1->10.0.0.53:53: sendto: no route to host")
+	}
+
+	err := svc.Connect(context.Background(), "p1", ConnectOptions{})
+	if errors.Is(err, ErrHostOffline) {
+		t.Fatalf("Connect error = %v, must not be reported as an outage", err)
+	}
+	if !errors.Is(err, ErrTransportExhausted) {
+		t.Fatalf("Connect error = %v, want ErrTransportExhausted", err)
+	}
+	if order := probe.order(); len(order) < 2*dataPathGateAttempts+1 {
+		t.Fatalf("cascade stopped after the first candidate: %v", order)
+	}
+	if svc.Status(context.Background()).Offline {
+		t.Fatal("a gate rejection must not show as no internet")
 	}
 }
 
@@ -582,4 +629,22 @@ func TestProbeResolverWithDialer_RetransmitsInsideOneAttempt(t *testing.T) {
 	if got := seen.Load(); got != 2 {
 		t.Errorf("queries sent = %d, want 2 (the original and one retransmit)", got)
 	}
+}
+
+func (f *fakeRealityManager) failStarts(err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.startErr = err
+}
+
+func (f *fakeCloakManager) failStarts(err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.startErr = err
+}
+
+func (f *fakeShadowsocksManager) failStarts(err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.startErr = err
 }

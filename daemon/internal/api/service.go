@@ -1169,7 +1169,7 @@ func (s *Service) startTransportWithHandshake(ctx context.Context, profile *stat
 	candidates = s.demoteFailedTransport(candidates)
 	defer s.setConnectingTransportKind("")
 
-	var failures []string
+	var failures cascadeFailures
 	for i, candidate := range candidates {
 		s.setConnectingTransportKind(candidate.kind)
 		// A fresh copy per candidate: start funcs mutate ConfigText (MTU clamp, loopback
@@ -1180,7 +1180,7 @@ func (s *Service) startTransportWithHandshake(ctx context.Context, profile *stat
 			if ctx.Err() != nil {
 				return "", ctx.Err()
 			}
-			failures = append(failures, err.Error())
+			failures = append(failures, err)
 			s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("%s transport did not establish a tunnel: %v", candidate.kind, err))
 			if hostNetworkUnreachable(err) || s.hostOffline() {
 				return "", fmt.Errorf("%w: %v", ErrHostOffline, err)
@@ -1195,10 +1195,24 @@ func (s *Service) startTransportWithHandshake(ctx context.Context, profile *stat
 	}
 
 	if !autoMode && len(failures) == 1 {
-		return "", errors.New(failures[0])
+		return "", failures[0]
 	}
-	return "", fmt.Errorf("%w: %s", ErrTransportExhausted, strings.Join(failures, "; "))
+	return "", fmt.Errorf("%w: %w", ErrTransportExhausted, failures)
 }
+
+// cascadeFailures reads like the "; " list the logs and app already know while
+// keeping each candidate's error reachable through errors.Is.
+type cascadeFailures []error
+
+func (c cascadeFailures) Error() string {
+	msgs := make([]string, 0, len(c))
+	for _, err := range c {
+		msgs = append(msgs, err.Error())
+	}
+	return strings.Join(msgs, "; ")
+}
+
+func (c cascadeFailures) Unwrap() []error { return c }
 
 // currentNetworkKey returns the fingerprint of the network the host is on, or
 // "" when it can't be determined. Nil-safe wrapper around the injectable networkKey func.
@@ -2469,6 +2483,17 @@ func hostNetworkUnreachable(err error) bool {
 	if err == nil {
 		return false
 	}
+	if multi, ok := err.(interface{ Unwrap() []error }); ok {
+		for _, inner := range multi.Unwrap() {
+			if hostNetworkUnreachable(inner) {
+				return true
+			}
+		}
+		return false
+	}
+	if errors.Is(err, errDataPathGate) {
+		return false
+	}
 	msg := strings.ToLower(err.Error())
 	for _, marker := range []string{"unreachable network", "unreachable host", "network is unreachable", "no route to host", "network is down", "dead network"} {
 		if strings.Contains(msg, marker) {
@@ -3529,7 +3554,7 @@ func validateProfile(profile state.Profile) error {
 	if profile.WireGuard.TunnelName == "" {
 		return errors.New("wireguard.tunnelName is required")
 	}
-	return nil
+	return wg.ValidateResolvers(wg.Resolvers(profile.WireGuard))
 }
 
 func parseWireGuardListenPort(configText string) (int, bool) {

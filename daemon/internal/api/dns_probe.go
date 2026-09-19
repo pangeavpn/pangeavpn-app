@@ -10,7 +10,6 @@ import (
 	"net"
 	"strings"
 	"sync/atomic"
-	"syscall"
 	"time"
 
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/state"
@@ -98,6 +97,16 @@ var errDNSProbeConnRefused = errors.New("dns probe: resolver refused the connect
 // proof of a round trip, since only the userspace copy failed.
 var errDNSProbeOversizedReply = errors.New("dns probe: reply larger than the read buffer")
 
+// errDataPathGate marks a candidate the bring-up gate rejected. Its text quotes
+// a socket pinned to the tunnel, whose "no route" says nothing about the host.
+var errDataPathGate = errors.New("rejected by the data-path gate")
+
+type dataPathGateError struct{ err error }
+
+func (e *dataPathGateError) Error() string        { return e.err.Error() }
+func (e *dataPathGateError) Unwrap() error        { return e.err }
+func (e *dataPathGateError) Is(target error) bool { return target == errDataPathGate }
+
 // ensureTunnelDNS re-asserts the session's resolvers on the host: the tunnel
 // can carry traffic while the host has silently stopped querying it.
 func (s *Service) ensureTunnelDNS(ctx context.Context, profile state.Profile) {
@@ -173,12 +182,10 @@ func probeResolverOverUDP(ctx context.Context, tunnelInterface, server string) e
 func probeResolverWithDialer(ctx context.Context, dialer *net.Dialer, server string) error {
 	conn, err := dialer.DialContext(ctx, "udp", net.JoinHostPort(server, currentDNSProbePort()))
 	if err != nil {
-		if isNetworkUnreachable(err) {
-			return fmt.Errorf("%w: the tunnel's route is not published yet", errDNSProbeNotReady)
-		}
-		return err
+		return classifyProbeSendError(err)
 	}
 	defer conn.Close()
+	enableUnreachableReports(conn)
 
 	deadline := time.Now().Add(dnsProbeTimeout)
 	if ctxDeadline, ok := ctx.Deadline(); ok && ctxDeadline.Before(deadline) {
@@ -193,7 +200,7 @@ func probeResolverWithDialer(ctx context.Context, dialer *net.Dialer, server str
 		return fmt.Errorf("build probe query: %w", err)
 	}
 	if _, err := conn.Write(query); err != nil {
-		return err
+		return classifyProbeSendError(err)
 	}
 
 	retransmitAt := time.Now().Add(dnsProbeRetransmitAfter)
@@ -217,7 +224,7 @@ func probeResolverWithDialer(ctx context.Context, dialer *net.Dialer, server str
 			if !retransmitted && isTimeout(err) && ctx.Err() == nil && time.Now().Before(deadline) {
 				retransmitted = true
 				if _, err := conn.Write(query); err != nil {
-					return err
+					return classifyProbeSendError(err)
 				}
 				continue
 			}
@@ -235,6 +242,15 @@ func isTimeout(err error) bool {
 	return errors.As(err, &netErr) && netErr.Timeout()
 }
 
+// classifyProbeSendError: a dial or send the host could not route out of the
+// tunnel is the adapter not being ready, never a verdict on the tunnel.
+func classifyProbeSendError(err error) error {
+	if isNetworkUnreachable(err) {
+		return fmt.Errorf("%w: the tunnel's route is not published yet", errDNSProbeNotReady)
+	}
+	return err
+}
+
 // classifyProbeReadError sorts a failed read into the round's outcome: an
 // ECONNRESET/ECONNREFUSED actually proves the tunnel carried the round trip.
 func classifyProbeReadError(ctx context.Context, err error) error {
@@ -243,7 +259,7 @@ func classifyProbeReadError(ctx context.Context, err error) error {
 	if errors.Is(ctx.Err(), context.Canceled) {
 		return fmt.Errorf("%w: %v", errDNSProbeInconclusive, ctx.Err())
 	}
-	if errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.ECONNREFUSED) {
+	if isConnRefused(err) {
 		return errDNSProbeConnRefused
 	}
 	if isOversizedDatagram(err) {
@@ -329,7 +345,7 @@ func (s *Service) dataPathIsDead(ctx context.Context, profile state.Profile) boo
 	if s.probeResolver == nil {
 		return false
 	}
-	servers := wg.Resolvers(profile.WireGuard)
+	servers := wg.ProbeResolvers(profile.WireGuard)
 	if len(servers) == 0 {
 		return false
 	}
@@ -383,7 +399,7 @@ func probeServerOrder(servers []string) []string {
 // canProveDataPath reports whether traffic can be judged directly. Where it
 // cannot, the handshake is the only liveness signal there is.
 func (s *Service) canProveDataPath(profile state.Profile) bool {
-	return s.probeResolver != nil && len(wg.Resolvers(profile.WireGuard)) > 0
+	return s.probeResolver != nil && len(wg.ProbeResolvers(profile.WireGuard)) > 0
 }
 
 // proveDataPath is the bring-up gate: a candidate must carry a round trip, not
@@ -392,7 +408,7 @@ func (s *Service) proveDataPath(ctx context.Context, wireGuardProfile state.Wire
 	if s.probeResolver == nil {
 		return nil
 	}
-	servers := wg.Resolvers(wireGuardProfile)
+	servers := wg.ProbeResolvers(wireGuardProfile)
 	if len(servers) == 0 {
 		return nil
 	}
@@ -429,14 +445,14 @@ func (s *Service) proveDataPath(ctx context.Context, wireGuardProfile state.Wire
 		case errors.Is(err, errDNSProbeNotReady):
 			// Nothing left the host, so this is neither a verdict nor an attempt.
 			if !time.Now().Before(deadline) {
-				return fmt.Errorf("tunnel came up but the host had not made its adapter usable in time: %w", err)
+				return &dataPathGateError{fmt.Errorf("tunnel came up but the host had not made its adapter usable in time: %w", err)}
 			}
 			continue
 		}
 		lastErr = fmt.Errorf("%s: %w", server, err)
 		attempt++
 	}
-	return fmt.Errorf("tunnel came up but did not carry traffic: %w", lastErr)
+	return &dataPathGateError{fmt.Errorf("tunnel came up but did not carry traffic: %w", lastErr)}
 }
 
 // awaitTunnelReady returns the moment the host has the tunnel's adapter usable,

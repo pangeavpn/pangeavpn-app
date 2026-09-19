@@ -35,8 +35,50 @@ export interface DiagnosticsSources {
   appSupportDir: string;
   crashDumpsDir: string;
   logFileName: string;
+  /** The daemon's in-memory log ring, fetched over its API: on Windows the
+   *  service's file log is admin-only, so this is the only daemon log a report can carry. */
+  daemonRing?: () => Promise<DaemonRingEntry[]>;
   note?: string;
   now?: Date;
+}
+
+export interface DaemonRingEntry {
+  ts: number;
+  level: string;
+  source: string;
+  msg: string;
+}
+
+export function formatDaemonRing(entries: readonly DaemonRingEntry[]): string {
+  return entries
+    .map((entry) => `${new Date(entry.ts).toISOString()} [${entry.level}] [${entry.source}] ${entry.msg}`)
+    .join("\n");
+}
+
+function tailText(text: string, maxBytes: number): string {
+  const size = Buffer.byteLength(text);
+  if (size <= maxBytes) return text;
+  const kept = Buffer.from(text, "utf8").subarray(size - maxBytes).toString("utf8");
+  return `[...truncated, showing last ${Buffer.byteLength(kept)} bytes of ${size}]\n${kept}`;
+}
+
+async function daemonRingSection(fetchRing: DiagnosticsSources["daemonRing"]): Promise<DiagnosticsSection> {
+  const name = "daemon-ring";
+  if (!fetchRing) {
+    const text = `<${name} not collected on this platform>`;
+    return { name, bytes: Buffer.byteLength(text), text };
+  }
+  try {
+    const ring = await fetchRing();
+    const text = ring.length === 0
+      ? `<${name} empty>`
+      : redactDiagnostics(tailText(formatDaemonRing(ring), SECTION_MAX_BYTES));
+    return { name, bytes: Buffer.byteLength(text), text };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    const text = `<${name} unavailable: ${redactDiagnostics(reason)}>`;
+    return { name, bytes: Buffer.byteLength(text), text };
+  }
 }
 
 function describeError(error: unknown): string {
@@ -131,6 +173,7 @@ export async function collectDiagnostics(sources: DiagnosticsSources): Promise<D
     await fileSection("app.log.1", path.join(sources.logDir, `${sources.logFileName}.1`)),
     await fileSection("daemon.log", path.join(sources.appSupportDir, "daemon.log")),
     await fileSection("daemon-elevated.log", path.join(sources.appSupportDir, "daemon-elevated.log")),
+    await daemonRingSection(sources.daemonRing),
     await crashSection(sources.crashDumpsDir)
   ];
 

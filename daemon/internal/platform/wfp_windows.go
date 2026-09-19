@@ -703,7 +703,9 @@ func (e *wfpEngine) addBlockDoTTCP() (uint64, error) {
 	return e.addFilterKeyed(cFWPM_LAYER_ALE_AUTH_CONNECT_V4, pangeaBlockDoTTCPV4FilterKey, "PangeaVPN Block DoT TCP", weightDNSBlock, cFWP_ACTION_BLOCK, cFWPM_FILTER_FLAG_PERSISTENT, dnsBlockConditions(cIPPROTO_TCP, dotPort))
 }
 
-func (e *wfpEngine) addPermitTunnelInterface(luid uint64) (uint64, error) {
+// addPermitTunnelInterface permits the tunnel at both ALE layers, like the
+// endpoint permit: a filter change anywhere re-authorises inbound UDP at RECV_ACCEPT.
+func (e *wfpEngine) addPermitTunnelInterface(luid uint64) ([]uint64, error) {
 	conditions := []wtFwpmFilterCondition0{
 		{
 			fieldKey:  cFWPM_CONDITION_IP_LOCAL_INTERFACE,
@@ -714,9 +716,24 @@ func (e *wfpEngine) addPermitTunnelInterface(luid uint64) (uint64, error) {
 			},
 		},
 	}
-	id, err := e.addFilter(cFWPM_LAYER_ALE_AUTH_CONNECT_V4, "PangeaVPN Allow Tunnel Interface", weightTrustedPermit, cFWP_ACTION_PERMIT, conditions)
+	layers := []struct {
+		layer windows.GUID
+		name  string
+	}{
+		{cFWPM_LAYER_ALE_AUTH_CONNECT_V4, "PangeaVPN Allow Tunnel Interface"},
+		{cFWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4, "PangeaVPN Allow Tunnel Interface Inbound"},
+	}
+	ids := make([]uint64, 0, len(layers))
+	for _, l := range layers {
+		id, err := e.addFilter(l.layer, l.name, weightTrustedPermit, cFWP_ACTION_PERMIT, conditions)
+		if err != nil {
+			runtime.KeepAlive(&luid)
+			return ids, err
+		}
+		ids = append(ids, id)
+	}
 	runtime.KeepAlive(&luid)
-	return id, err
+	return ids, nil
 }
 
 func (e *wfpEngine) addBlockAllOutboundV6() (uint64, error) {

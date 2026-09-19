@@ -104,6 +104,12 @@ func (m *wireGuardGoManager) startWindows(ctx context.Context, profile state.Wir
 		m.removeSession(tunnelKey)
 		return err
 	}
+	// Wintun renames the adapter "name 2" when a leftover holds the name and
+	// never says so; wireguard-go echoes the request, so read the live alias.
+	if alias := windowsInterfaceAlias(tunnelLUID); alias != "" && alias != interfaceName {
+		m.logs.Add(state.LogWarn, state.SourceWireGuard, fmt.Sprintf("wintun named the adapter %q, not the requested %q; using the live name", alias, interfaceName))
+		interfaceName = alias
+	}
 
 	// Every tunnel on the box is off limits as a next hop for the bypass, not
 	// just this one: routing WireGuard through any of them is a loop.

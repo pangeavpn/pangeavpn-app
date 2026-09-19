@@ -632,6 +632,24 @@ func Resolvers(profile state.WireGuardProfile) []string {
 	return mergeDNSServers(parsed.dnsServers, profile.DNS)
 }
 
+// ProbeResolvers is Resolvers without loopback: a local DNS proxy answers the
+// host fine but can never be reached from a socket pinned to the tunnel.
+func ProbeResolvers(profile state.WireGuardProfile) []string {
+	var out []string
+	for _, server := range Resolvers(profile) {
+		if addr, err := netip.ParseAddr(strings.TrimSpace(server)); err == nil && addr.IsLoopback() {
+			continue
+		}
+		out = append(out, server)
+	}
+	return out
+}
+
+// ValidateResolvers rejects DNS servers no tunnel session could ever use.
+func ValidateResolvers(servers []string) error {
+	return validateIPv4DNSServers(servers)
+}
+
 func validateParsedIPv4Only(parsed parsedUserlandConfig) ([]string, error) {
 	if err := validateIPv4InterfaceAddresses(parsed.addresses); err != nil {
 		return nil, err
@@ -678,6 +696,9 @@ func validateIPv4DNSServers(dnsServers []string) error {
 		}
 		if !addr.Is4() {
 			return fmt.Errorf("IPv6 DNS server is not supported: %s", trimmed)
+		}
+		if addr.IsUnspecified() || addr.IsLinkLocalUnicast() || addr.IsMulticast() || addr == netip.AddrFrom4([4]byte{255, 255, 255, 255}) {
+			return fmt.Errorf("DNS server %s cannot be reached through the tunnel", trimmed)
 		}
 	}
 	return nil

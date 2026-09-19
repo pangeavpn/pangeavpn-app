@@ -1872,6 +1872,7 @@ function registerConnectionHandlers(): void {
         appSupportDir: getAppSupportDir(),
         crashDumpsDir: app.getPath("crashDumps"),
         logFileName: LOG_FILE_NAME,
+        daemonRing: () => daemonClient.getLogs(0),
         note: typeof note === "string" ? note : undefined
       });
       return await uploadDiagnostics(payload, {

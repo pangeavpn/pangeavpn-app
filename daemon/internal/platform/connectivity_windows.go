@@ -59,8 +59,19 @@ func HostInternet() (online bool, known bool) {
 type windowsRoute struct {
 	name    string
 	up      bool
+	ifType  uint32
 	gateway netip.Addr
 	metric  uint64
+}
+
+// pointToPointType: PPP, PPPoE and mobile broadband links publish their default
+// route on-link, with no gateway, and are physical all the same.
+func pointToPointType(ifType uint32) bool {
+	switch ifType {
+	case winipcfg.IfTypePPP, winipcfg.IfTypeWwanpp, winipcfg.IfTypeWwanpp2:
+		return true
+	}
+	return false
 }
 
 // PhysicalDefaultRoute names the physical interface holding the lowest-metric
@@ -81,6 +92,7 @@ func PhysicalDefaultRoute() (iface, gateway string, err error) {
 		if ifc, ifErr := row.InterfaceLUID.Interface(); ifErr == nil {
 			r.name = ifc.Alias()
 			r.up = ifc.OperStatus == winipcfg.IfOperStatusUp
+			r.ifType = uint32(ifc.Type)
 		}
 		if ipif, ipErr := row.InterfaceLUID.IPInterface(windows.AF_INET); ipErr == nil {
 			r.metric += uint64(ipif.Metric)
@@ -94,9 +106,11 @@ func physicalDefaultRoute(rows []windowsRoute) (iface, gateway string, err error
 	var best *windowsRoute
 	for i := range rows {
 		r := &rows[i]
-		// An on-link default belongs to a tunnel, not a gateway.
-		if !r.up || r.name == "" || isVirtualInterface(r.name) || !r.gateway.IsValid() ||
-			r.gateway.IsUnspecified() || r.gateway.IsLoopback() || r.gateway.IsMulticast() {
+		// An on-link default belongs to a tunnel, not a gateway, unless the link
+		// itself is point-to-point and has no gateway to name.
+		onLink := !r.gateway.IsValid() || r.gateway.IsUnspecified()
+		if !r.up || r.name == "" || isVirtualInterface(r.name) || (onLink && !pointToPointType(r.ifType)) ||
+			r.gateway.IsLoopback() || r.gateway.IsMulticast() {
 			continue
 		}
 		if best == nil || r.metric < best.metric {
@@ -105,6 +119,9 @@ func physicalDefaultRoute(rows []windowsRoute) (iface, gateway string, err error
 	}
 	if best == nil {
 		return "", "", ErrNoDefaultRoute
+	}
+	if !best.gateway.IsValid() || best.gateway.IsUnspecified() {
+		return best.name, "", nil
 	}
 	return best.name, best.gateway.String(), nil
 }

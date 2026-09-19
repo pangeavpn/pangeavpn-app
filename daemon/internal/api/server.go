@@ -206,7 +206,7 @@ func serviceErrorResponse(err error) okResponse {
 	if errors.Is(err, ErrDisconnectIncomplete) {
 		return okResponse{OK: false, Error: "disconnect_incomplete", Detail: err.Error()}
 	}
-	return okResponse{OK: false}
+	return okResponse{OK: false, Detail: err.Error()}
 }
 
 // withAuthAndLimit authenticates first, then rate-limits: an unauthenticated

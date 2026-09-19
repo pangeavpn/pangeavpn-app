@@ -63,6 +63,27 @@ test("a missing or unreadable file becomes a section that says so, never a throw
   assert.match(section(payload, "crash-dumps"), /not present/);
 });
 
+test("the daemon's log ring is fetched over its API and redacted", async () => {
+  const payload = await collectDiagnostics(
+    sources({
+      daemonRing: async () => [
+        { ts: Date.UTC(2026, 8, 13, 9, 59, 0), level: "warn", source: "daemon", msg: "reality: tunnel came up but did not carry traffic: 1.1.1.1: i/o timeout" }
+      ]
+    })
+  );
+  const text = section(payload, "daemon-ring");
+  assert.match(text, /^2026-09-13T09:59:00\.000Z \[warn\] \[daemon\] reality: tunnel came up/);
+  assert.match(text, /\[redacted:ipv4\]: i\/o timeout/);
+});
+
+test("a daemon that does not answer leaves a ring section that says why", async () => {
+  const payload = await collectDiagnostics(
+    sources({ daemonRing: async () => { throw new Error("daemon request timeout (GET /logs)"); } })
+  );
+  assert.match(section(payload, "daemon-ring"), /^<daemon-ring unavailable: daemon request timeout/);
+  assert.match(section(await collectDiagnostics(sources()), "daemon-ring"), /not collected/);
+});
+
 test("crash dumps contribute names, sizes and times but never their bytes", async () => {
   const src = sources();
   mkdirSync(src.crashDumpsDir, { recursive: true });
