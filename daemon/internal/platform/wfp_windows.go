@@ -137,15 +137,30 @@ func wfpOpen() (*wfpEngine, error) {
 	session.displayData.name = name
 
 	var handle windows.Handle
-	r, _, _ := procFwpmEngineOpen0.Call(
-		0,
-		uintptr(cRPC_C_AUTHN_WINNT),
-		0,
-		uintptr(unsafe.Pointer(&session)),
-		uintptr(unsafe.Pointer(&handle)),
-	)
-	runtime.KeepAlive(name)
-	runtime.KeepAlive(&session)
+	open := func() uintptr {
+		r, _, _ := procFwpmEngineOpen0.Call(
+			0,
+			uintptr(cRPC_C_AUTHN_WINNT),
+			0,
+			uintptr(unsafe.Pointer(&session)),
+			uintptr(unsafe.Pointer(&handle)),
+		)
+		runtime.KeepAlive(name)
+		runtime.KeepAlive(&session)
+		return r
+	}
+	r := open()
+	if r != 0 {
+		// The usual cause is a stopped or disabled BFE; bring it back and retry once.
+		started, bfeErr := ensureBFERunning()
+		if bfeErr != nil {
+			return nil, fmt.Errorf("FwpmEngineOpen0: %w; the Windows Base Filtering Engine (BFE) service is not running and could not be started: %v", windows.Errno(r), bfeErr)
+		}
+		if started {
+			KillSwitchWarn("kill switch: Base Filtering Engine service was stopped or disabled; started it")
+			r = open()
+		}
+	}
 	if r != 0 {
 		return nil, fmt.Errorf("FwpmEngineOpen0: %w", windows.Errno(r))
 	}
