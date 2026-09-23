@@ -70,6 +70,8 @@ func configureWindowsInterface(luidValue uint64, addresses []string, allowedIPs 
 	if err != nil {
 		return fmt.Errorf("parse allowed-ips routes: %w", err)
 	}
+	allowed4 = withoutInterfaceHostRoutes(allowed4, addresses4)
+	allowed6 = withoutInterfaceHostRoutes(allowed6, addresses6)
 
 	routes4 := make([]*winipcfg.RouteData, 0, len(allowed4))
 	routes6 := make([]*winipcfg.RouteData, 0, len(allowed6))
@@ -97,10 +99,10 @@ func configureWindowsInterface(luidValue uint64, addresses []string, allowedIPs 
 	}
 	// Addresses first: an on-link default route can fail ERROR_NOT_FOUND on an
 	// interface with no address configured yet.
-	if err := setWindowsRoutesForFamily(luid, windowsFamilyV4, routes4); err != nil {
+	if err := setWindowsRoutesForFamily(luid, windowsFamilyV4, addresses4, routes4); err != nil {
 		errs = append(errs, fmt.Errorf("set IPv4 routes: %w", err))
 	}
-	if err := setWindowsRoutesForFamily(luid, windowsFamilyV6, routes6); err != nil {
+	if err := setWindowsRoutesForFamily(luid, windowsFamilyV6, addresses6, routes6); err != nil {
 		errs = append(errs, fmt.Errorf("set IPv6 routes: %w", err))
 	}
 	if err := configureWindowsIPInterface(luid, mtu); err != nil {
@@ -113,14 +115,97 @@ func configureWindowsInterface(luidValue uint64, addresses []string, allowedIPs 
 	return errors.Join(errs...)
 }
 
-// setWindowsRoutesForFamily replaces the family's routes, retrying once on
-// ERROR_NOT_FOUND since FlushRoutes can report a row the OS already removed.
-func setWindowsRoutesForFamily(luid winipcfg.LUID, family winipcfg.AddressFamily, routes []*winipcfg.RouteData) error {
-	err := luid.SetRoutesForFamily(family, routes)
-	if err != nil && errors.Is(err, windows.ERROR_NOT_FOUND) {
-		err = luid.SetRoutesForFamily(family, routes)
+// setWindowsRoutesForFamily syncs the tunnel's routes instead of FlushRoutes, which
+// deletes the Local host route of the address just set and so all inbound (24H2+, no VMP).
+func setWindowsRoutesForFamily(luid winipcfg.LUID, family winipcfg.AddressFamily, addresses []netip.Prefix, routes []*winipcfg.RouteData) error {
+	table, err := winipcfg.GetIPForwardTable2(family)
+	if err != nil {
+		return err
 	}
-	return err
+	stale, missing := planWindowsRouteSync(table, luid, addresses, routes)
+	var errs []error
+	for _, row := range stale {
+		if err := row.Delete(); err != nil && !errors.Is(err, windows.ERROR_NOT_FOUND) {
+			errs = append(errs, fmt.Errorf("delete route %s: %w", row.DestinationPrefix.Prefix(), err))
+		}
+	}
+	for _, route := range missing {
+		if err := luid.AddRoute(route.Destination, route.NextHop, route.Metric); err != nil && !errors.Is(err, windows.ERROR_OBJECT_ALREADY_EXISTS) {
+			errs = append(errs, fmt.Errorf("add route %s: %w", route.Destination, err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+type windowsRouteKey struct {
+	destination netip.Prefix
+	nextHop     netip.Addr
+}
+
+// planWindowsRouteSync picks the interface's rows to delete and the routes to add. Only Windows'
+// host route for an address stays; its 224/4 and broadcast rows would pull LAN discovery in.
+func planWindowsRouteSync(table []winipcfg.MibIPforwardRow2, luid winipcfg.LUID, addresses []netip.Prefix, routes []*winipcfg.RouteData) (stale []*winipcfg.MibIPforwardRow2, missing []*winipcfg.RouteData) {
+	want := make(map[windowsRouteKey]uint32, len(routes))
+	for _, route := range routes {
+		want[windowsRouteKey{route.Destination.Masked(), route.NextHop}] = route.Metric
+	}
+	kept := make(map[windowsRouteKey]bool, len(routes))
+	for i := range table {
+		row := &table[i]
+		if row.InterfaceLUID != luid {
+			continue
+		}
+		if row.Protocol == winipcfg.RouteProtocolLocal && isInterfaceHostRoute(row.DestinationPrefix.Prefix(), addresses) {
+			continue
+		}
+		key := windowsRouteKey{row.DestinationPrefix.Prefix().Masked(), row.NextHop.Addr()}
+		if metric, ok := want[key]; ok && metric == row.Metric && !kept[key] {
+			kept[key] = true
+			continue
+		}
+		stale = append(stale, row)
+	}
+	for _, route := range routes {
+		key := windowsRouteKey{route.Destination.Masked(), route.NextHop}
+		if !kept[key] {
+			kept[key] = true
+			missing = append(missing, route)
+		}
+	}
+	return stale, missing
+}
+
+// withoutInterfaceHostRoutes drops routes that are exactly an interface address:
+// Windows installs that host route itself, and a second one breaks local delivery.
+func withoutInterfaceHostRoutes(routes, addresses []netip.Prefix) []netip.Prefix {
+	out := make([]netip.Prefix, 0, len(routes))
+	for _, route := range routes {
+		if !isInterfaceHostRoute(route, addresses) {
+			out = append(out, route)
+		}
+	}
+	return out
+}
+
+func isInterfaceHostRoute(route netip.Prefix, addresses []netip.Prefix) bool {
+	for _, address := range addresses {
+		if route.Bits() == address.Addr().BitLen() && route.Addr() == address.Addr() {
+			return true
+		}
+	}
+	return false
+}
+
+// hasLocalHostRoute reports whether Windows' own host route for addr is on the interface.
+func hasLocalHostRoute(table []winipcfg.MibIPforwardRow2, luid winipcfg.LUID, addr netip.Addr) bool {
+	host := netip.PrefixFrom(addr, addr.BitLen())
+	for i := range table {
+		row := &table[i]
+		if row.InterfaceLUID == luid && row.Protocol == winipcfg.RouteProtocolLocal && row.DestinationPrefix.Prefix() == host {
+			return true
+		}
+	}
+	return false
 }
 
 func clearWindowsInterfaceConfig(luidValue uint64) error {

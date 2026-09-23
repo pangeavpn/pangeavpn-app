@@ -534,7 +534,11 @@ func (s *Service) awaitTunnelReady(ctx context.Context, wireGuardProfile state.W
 			s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("could not tell whether the tunnel adapter was ready: %v", err))
 			return
 		}
-		if ready || !time.Now().Before(deadline) {
+		if ready {
+			return
+		}
+		if !time.Now().Before(deadline) {
+			s.logs.Add(state.LogWarn, state.SourceDaemon, "tunnel adapter still not ready at the deadline (address, its local host route, or AllowedIPs routes missing); checking traffic anyway")
 			return
 		}
 		select {
