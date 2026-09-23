@@ -6,7 +6,7 @@ const HOST_SNAPSHOT_MAX_BYTES = 256 * 1024;
 const SOFTWARE_PATTERN =
   "vpn|nord|mullvad|proton|express|surfshark|cyberghost|windscribe|tunnelbear|privateinternet|zscaler|umbrella|" +
   "cloudflare|warp|adguard|nextdns|eset|kaspersky|norton|mcafee|bitdefender|avast|avg|malwarebytes|sophos|" +
-  "crowdstrike|sentinel|webroot|trend|wireguard|openvpn|wintun|pangea";
+  "crowdstrike|sentinel|webroot|trend|wireguard|openvpn|wintun|pangea|killer|rivet";
 
 // What the daemon cannot see from inside the tunnel: the security and VPN
 // software beside it, the adapters it competes with, and the firewall's stance.
