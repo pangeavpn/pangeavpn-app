@@ -44,14 +44,32 @@ jobs:
           fetch-depth: 0
 
       - name: Gather release context
+        id: ctx
         env:
           TAG: ${{ steps.tag.outputs.tag }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          PREV="$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || true)"
+          IS_PRE="$(gh release view "$TAG" --json isPrerelease -q .isPrerelease 2>/dev/null || true)"
+          if [ -z "$IS_PRE" ]; then
+            case "$TAG" in *-*) IS_PRE=true ;; *) IS_PRE=false ;; esac
+          fi
+          PREV=""
+          if [ "$IS_PRE" = "false" ]; then
+            # Stable releases cover everything since the last stable release, skipping the RCs in between.
+            for t in $(gh release list --exclude-pre-releases --exclude-drafts -L 50 --json tagName -q '.[].tagName'); do
+              if [ "$t" != "$TAG" ] && git merge-base --is-ancestor "$t" "$TAG" 2>/dev/null; then PREV="$t"; break; fi
+            done
+            if [ -z "$PREV" ]; then
+              PREV="$(git describe --tags --abbrev=0 --exclude='*-*' "${TAG}^" 2>/dev/null || true)"
+            fi
+          else
+            PREV="$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || true)"
+          fi
+          echo "is_prerelease=$IS_PRE" >> "$GITHUB_OUTPUT"
+          echo "prev=$PREV" >> "$GITHUB_OUTPUT"
           if [ -n "$PREV" ]; then RANGE="${PREV}..${TAG}"; else RANGE="$TAG"; fi
-          git log --no-merges -n 200 --pretty=format:'- %s' "$RANGE" > commits.txt || true
+          git log --no-merges -n 500--pretty=format:'- %s' "$RANGE" > commits.txt || true
           git diff --stat "$RANGE" > stat.txt || true
           # Regenerate GitHub's changelog fresh (idempotent on re-runs, unlike reading the live body)
           PREVFLAG=()
@@ -73,10 +91,18 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           TAG: ${{ steps.tag.outputs.tag }}
+          PREV: ${{ steps.ctx.outputs.prev }}
+          IS_PRE: ${{ steps.ctx.outputs.is_prerelease }}
         run: |
           set -euo pipefail
+          if [ "$IS_PRE" = "false" ] && [ -n "$PREV" ]; then
+            SCOPE="This is a stable release: summarise every change since the previous stable release ${PREV}, including work shipped in the release candidates between them."
+          else
+            SCOPE="This is a pre-release: cover only the changes since ${PREV:-the start}."
+          fi
           cat > instructions.txt <<EOF
           You are writing the GitHub release for PangeaVPN ${TAG}, a desktop VPN app.
+          ${SCOPE}
           Using the commits, file change summary, and GitHub changelog below, produce a
           JSON object with two fields:
 
