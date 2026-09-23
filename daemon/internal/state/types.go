@@ -26,6 +26,7 @@ const (
 	SourceCloak       LogSource = "cloak"
 	SourceNaive       LogSource = "naive"
 	SourceShadowsocks LogSource = "shadowsocks"
+	SourceAnyTLS      LogSource = "anytls"
 	SourceSnowflake   LogSource = "snowflake"
 	SourceWireGuard   LogSource = "wireguard"
 )
@@ -67,7 +68,7 @@ type StatusResponse struct {
 	// ProfileID is the profile the session runs on (or is held for), "" when idle.
 	ProfileID string `json:"profileId,omitempty"`
 	// ActiveTransport is "cloak", "naive", "reality", "hysteria2", "shadowsocks",
-	// "snowflake", "wireguard" (no transport at all), or "" when disconnected.
+	// "anytls", "snowflake", "wireguard" (no transport at all), or "" when disconnected.
 	ActiveTransport string `json:"activeTransport"`
 	// ConnectingTransport is the candidate the cascade is trying right now,
 	// "" outside a bring-up. Lets clients show "via X" while connecting.
@@ -77,6 +78,7 @@ type StatusResponse struct {
 	Reality             TransportStatus `json:"reality"`
 	Hysteria2           TransportStatus `json:"hysteria2"`
 	Shadowsocks         TransportStatus `json:"shadowsocks"`
+	AnyTLS              TransportStatus `json:"anytls"`
 	Snowflake           TransportStatus `json:"snowflake"`
 	WireGuard           WireGuardStatus `json:"wireguard"`
 	KillSwitchActive    bool            `json:"killSwitchActive"`
@@ -188,6 +190,29 @@ type ShadowsocksProfile struct {
 	UDPOverTCP bool `json:"udpOverTcp,omitempty"`
 }
 
+// AnyTLSProfile carries per-node AnyTLS settings: a TLS session whose record
+// sizes are padded against TLS-in-TLS fingerprinting, with WireGuard's UDP
+// carried inside as UDP-over-TCP. Nil on a Profile means unconfigured.
+type AnyTLSProfile struct {
+	LocalPort  int    `json:"localPort"`
+	RemoteHost string `json:"remoteHost"`
+	RemotePort int    `json:"remotePort"`
+	// Password is the AnyTLS auth password; sha256 of it opens the session.
+	Password string `json:"password"`
+	// ServerName is the SNI presented during the TLS handshake, and the name
+	// the certificate is verified against. Empty => RemoteHost.
+	ServerName string `json:"serverName,omitempty"`
+	// Insecure skips server certificate verification; PinSHA256 must then be set.
+	Insecure bool `json:"insecure,omitempty"`
+	// PinSHA256 is a base64-encoded SHA-256 hash of the server certificate's
+	// public key; when set, the cert is pinned regardless of Insecure.
+	PinSHA256 string `json:"pinSha256,omitempty"`
+	// Where the AnyTLS server relays decoded packets: the node's WireGuard
+	// listener. Client config because the node's ACL scopes it. Default 127.0.0.1:51820.
+	TargetHost string `json:"targetHost,omitempty"`
+	TargetPort int    `json:"targetPort,omitempty"`
+}
+
 // SnowflakeProfile carries per-device Tor Snowflake (WebRTC rendezvous)
 // settings; unlike other transports it has no fixed remote host, only a broker.
 type SnowflakeProfile struct {
@@ -228,8 +253,8 @@ const DefaultWireGuardPort = 51820
 // HopProfile makes a profile multihop: the transport terminates on an entry
 // node relaying WireGuard to the exit node holding the peer. Nil means single-hop.
 type HopProfile struct {
-	// SingBoxPort is the entry's loopback hop port for REALITY, Hysteria2
-	// and Shadowsocks.
+	// SingBoxPort is the entry's loopback hop port for REALITY, Hysteria2,
+	// Shadowsocks and AnyTLS.
 	SingBoxPort int `json:"singBoxPort"`
 	// CloakProxyMethod is the entry's ProxyBook key routing to this exit.
 	CloakProxyMethod string `json:"cloakProxyMethod,omitempty"`
@@ -259,6 +284,9 @@ type Profile struct {
 	// Shadowsocks is optional; nil means this profile has no Shadowsocks
 	// transport configured.
 	Shadowsocks *ShadowsocksProfile `json:"shadowsocks,omitempty"`
+	// AnyTLS is optional; nil means this profile has no AnyTLS transport
+	// configured.
+	AnyTLS *AnyTLSProfile `json:"anytls,omitempty"`
 	// Snowflake is optional; nil means this profile has no Snowflake
 	// transport configured.
 	Snowflake *SnowflakeProfile `json:"snowflake,omitempty"`

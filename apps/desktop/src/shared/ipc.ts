@@ -215,6 +215,23 @@ export interface ServerInfo {
     targetPort?: number;
     udpOverTcp?: boolean;
   };
+  /** AnyTLS (padded TLS session, WireGuard carried inside as UDP-over-TCP),
+   *  present only when the node has it configured. `targetHost`/`targetPort`
+   *  name the WireGuard listener it forwards to. */
+  anytls?: {
+    remoteHost: string;
+    /** Per-transport endpoint address; see naive.remoteIp above. */
+    remoteIp?: string;
+    remotePort: number;
+    password: string;
+    // Cover SNI / certificate name presented during the TLS handshake.
+    serverName?: string;
+    insecure?: boolean;
+    // Base64 SPKI SHA-256 pin for the node's self-signed cert.
+    pinSha256?: string;
+    targetHost?: string;
+    targetPort?: number;
+  };
   /** Shadowsocks listener that reaches the hub instead of WireGuard, used as a
    *  fallback path for account traffic. Per-region, but the same for all. */
   controlPlaneShadowsocks?: {
@@ -250,6 +267,7 @@ export interface PublicServerInfo {
   reality?: boolean;
   hysteria2?: boolean;
   shadowsocks?: boolean;
+  anytls?: boolean;
   snowflake?: boolean;
 }
 
@@ -266,6 +284,7 @@ export function toPublicServerInfo(server: ServerInfo): PublicServerInfo {
     reality: Boolean(server.reality),
     hysteria2: Boolean(server.hysteria2),
     shadowsocks: Boolean(server.shadowsocks),
+    anytls: Boolean(server.anytls),
     snowflake: Boolean(server.snowflake)
   };
 }

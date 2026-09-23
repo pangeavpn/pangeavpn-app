@@ -6,7 +6,7 @@
 
 **One internet. No borders.**
 
-An open-source VPN client that survives deep packet inspection. WireGuard inside five pluggable censorship-resistant transports, so the tunnel looks like ordinary HTTPS.
+An open-source VPN client that survives deep packet inspection. WireGuard inside six pluggable censorship-resistant transports, so the tunnel looks like ordinary HTTPS.
 
 [![Website](https://img.shields.io/badge/site-pangeavpn.org-DA7F4F?style=flat-square)](https://pangeavpn.org)
 [![License](https://img.shields.io/badge/license-GPL--3.0-blue?style=flat-square)](LICENSE)
@@ -48,6 +48,7 @@ In auto mode the daemon walks this list until one establishes. You can also pin 
 | 3 | **Shadowsocks** | An encrypted stream on its own port, with no TLS shape at all. The first attempt that shares nothing with a block on the two above |
 | 4 | **Hysteria2** | QUIC / HTTP-3, hard to distinguish from modern web traffic |
 | 5 | **NaiveProxy** | Traffic carrying a genuine Chrome TLS fingerprint |
+| 6 | **AnyTLS** | A TLS session whose record sizes are padded to blunt the TLS-in-TLS fingerprint |
 
 Cloak is always available and backs up whatever precedes it. The others activate when the hub provisions configuration for them, so the exact cascade depends on your account and the node you land on.
 
@@ -61,7 +62,7 @@ WireGuard rides inside whichever transport comes up. The tunnel itself is always
 
 | | |
 |---|---|
-| **Five transports, automatic fallback** | Blocking one doesn't take you offline, and the client remembers what works per network |
+| **Six transports, automatic fallback** | Blocking one doesn't take you offline, and the client remembers what works per network |
 | **WireGuard core** | Modern crypto, low latency, fully in-process |
 | **Kill switch** | OS-level firewall rules block traffic if the tunnel drops (Windows WFP, Linux nftables/iptables, macOS PF) |
 | **Lockdown mode** | Optionally keeps the kill switch armed even after disconnect |
@@ -167,7 +168,7 @@ All four steps complete in well under a second on a normal connection.
 │                          ┌─────────────────▼──┐   │                             │
 │                          │ Cloak / REALITY /  │   │                             │
 │                          │ Hysteria2 / Naive /│   │                             │
-│                          │    Shadowsocks     │   │                             │
+│                          │ Shadowsocks/AnyTLS │   │                             │
 │                          └─────────────────┬──┘   │                             │
 │                                            ▼      ▼                             │
 │                                       ┌──────────────┐                          │
