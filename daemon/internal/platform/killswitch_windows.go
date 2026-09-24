@@ -51,10 +51,17 @@ type windowsKillSwitch struct {
 	bootTimeFailed bool
 }
 
+// openWFPEngine is replaced by tests so they can never reach the real BFE.
+var openWFPEngine = wfpOpen
+
 func (ks *windowsKillSwitch) Enable(ctx context.Context, endpointHosts []string, allowLAN bool, locked bool) error {
 	ks.mu.Lock()
 	defer ks.mu.Unlock()
+	return afterLockArmed(ks.arm(ctx, endpointHosts, allowLAN, locked))
+}
 
+// arm is Enable's body, run with ks.mu held.
+func (ks *windowsKillSwitch) arm(ctx context.Context, endpointHosts []string, allowLAN bool, locked bool) error {
 	ips, err := resolveEndpointHosts(ctx, endpointHosts)
 	if err != nil {
 		return fmt.Errorf("kill switch enable: %w", err)
@@ -165,7 +172,7 @@ func (ks *windowsKillSwitch) Enable(ctx context.Context, endpointHosts []string,
 		return fmt.Errorf("kill switch enable: save state: %w", err)
 	}
 
-	engine, err := wfpOpen()
+	engine, err := openWFPEngine()
 	if err != nil {
 		_ = removeKillSwitchState()
 		return fmt.Errorf("kill switch enable: %w", err)
@@ -421,14 +428,18 @@ var pangeaPersistentFilterKeys = []windows.GUID{
 func (ks *windowsKillSwitch) Clear(ctx context.Context) error {
 	ks.mu.Lock()
 	defer ks.mu.Unlock()
+	return afterLockCleared(ks.disarm())
+}
 
+// disarm is Clear's body, run with ks.mu held.
+func (ks *windowsKillSwitch) disarm() error {
 	var errs []string
 
 	// A restarted daemon inherits no handle to the filters the previous
 	// process left live, so open a fresh engine rather than skip the teardown.
 	engine, ownsEngine := ks.engine, false
 	if engine == nil {
-		opened, err := wfpOpen()
+		opened, err := openWFPEngine()
 		if err != nil {
 			return fmt.Errorf("kill switch clear: %w", err)
 		}
@@ -530,7 +541,7 @@ func (ks *windowsKillSwitch) Active() bool {
 // previous process counts even though this one never armed it. Holds ks.mu.
 func (ks *windowsKillSwitch) persistentLockLive() bool {
 	if ks.probe == nil {
-		engine, err := wfpOpen()
+		engine, err := openWFPEngine()
 		if err != nil {
 			return false
 		}

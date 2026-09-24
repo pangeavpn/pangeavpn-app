@@ -74,6 +74,7 @@ func hasFlag(name string) bool {
 // clearKillSwitchCommand is the uninstaller's way to lower a lock the daemon
 // deliberately leaves behind on every exit that is not a user Disconnect.
 func clearKillSwitchCommand() int {
+	logKillSwitchWarnings()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	if err := platform.NewKillSwitch().Clear(ctx); err != nil {
@@ -86,6 +87,12 @@ func clearKillSwitchCommand() int {
 	}
 	log.Printf("kill switch cleared")
 	return 0
+}
+
+// logKillSwitchWarnings sends degraded-clear warnings, such as a Windows setting
+// left unrestored, to the output the uninstaller logs.
+func logKillSwitchWarnings() {
+	platform.KillSwitchWarnf = log.Printf
 }
 
 func runInteractive() error {

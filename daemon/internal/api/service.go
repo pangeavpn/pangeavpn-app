@@ -1641,6 +1641,7 @@ func (s *Service) ClearKillSwitch(ctx context.Context) error {
 	defer s.opMu.Unlock()
 
 	if !s.killSwitch.Active() {
+		s.releaseOrphanedLockSettings()
 		return nil
 	}
 	if why, held := s.sessionHeld(); held {
@@ -3199,6 +3200,7 @@ func (s *Service) reconcilePersistedKillSwitch(ctx context.Context) platform.Kil
 			s.logs.Add(state.LogWarn, state.SourceDaemon, "kill switch rules are live with no state file; leaving them in place")
 			return platform.KillSwitchState{Active: true}
 		}
+		s.releaseOrphanedLockSettings()
 		return persisted
 	}
 
@@ -3830,6 +3832,23 @@ func (s *Service) dropTunnelPermit(ctx context.Context) {
 	}
 	if err := dropper.DropTunnelPermit(ctx); err != nil {
 		s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("kill switch: could not retire the tunnel permit: %v", err))
+	}
+}
+
+// orphanedSettingsReleaser undoes host settings an armed lock changed, for a
+// lock that went away without the Clear that normally restores them.
+type orphanedSettingsReleaser interface {
+	ReleaseOrphanedSettings() error
+}
+
+// releaseOrphanedLockSettings must only run once no lock is live.
+func (s *Service) releaseOrphanedLockSettings() {
+	releaser, ok := s.killSwitch.(orphanedSettingsReleaser)
+	if !ok {
+		return
+	}
+	if err := releaser.ReleaseOrphanedSettings(); err != nil {
+		s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("kill switch: could not restore host settings a previous lock changed: %v", err))
 	}
 }
 

@@ -591,9 +591,18 @@ type fakeKillSwitch struct {
 	updateCount     int
 	clearCount      int
 	dropTunnelCount int
+	releaseCount    int
 	enableErr       error
 	updateErr       error
 	clearErr        error
+	releaseErr      error
+}
+
+func (f *fakeKillSwitch) ReleaseOrphanedSettings() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.releaseCount++
+	return f.releaseErr
 }
 
 func (f *fakeKillSwitch) DropTunnelPermit(_ context.Context) error {

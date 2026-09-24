@@ -191,6 +191,73 @@ func TestClearKillSwitch_AllowedWhenIdle(t *testing.T) {
 	}
 }
 
+// A lock that went away without a Clear leaves host settings behind that only
+// a Clear restores, so a start with no lock live must release them itself.
+func TestReconcileStartup_ReleasesOrphanedSettingsOnlyWithNoLock(t *testing.T) {
+	for name, tc := range map[string]struct {
+		persisted   platform.KillSwitchState
+		liveRules   bool
+		wantRelease int
+	}{
+		"no lock":                  {wantRelease: 1},
+		"live rules with no state": {liveRules: true},
+		"persisted lock":           {persisted: platform.KillSwitchState{Active: true, EndpointIPs: []string{"198.51.100.9"}}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ks := &fakeKillSwitch{active: tc.liveRules}
+			svc := newTestService(t, &fakeCloakManager{}, &fakeNaiveManager{}, &fakeWGManager{}, ks, testProfile())
+			stubSessionRecordStore(t)
+			stubKillSwitchState(t, tc.persisted)
+
+			svc.reconcileStartup(context.Background())
+
+			if ks.releaseCount != tc.wantRelease {
+				t.Errorf("ReleaseOrphanedSettings() called %d times, want %d", ks.releaseCount, tc.wantRelease)
+			}
+		})
+	}
+}
+
+func TestReconcileStartup_ReleaseFailureIsOnlyLogged(t *testing.T) {
+	ks := &fakeKillSwitch{releaseErr: errors.New("access denied")}
+	svc := newTestService(t, &fakeCloakManager{}, &fakeNaiveManager{}, &fakeWGManager{}, ks, testProfile())
+	stubSessionRecordStore(t)
+	stubKillSwitchState(t, platform.KillSwitchState{})
+
+	svc.reconcileStartup(context.Background())
+
+	if ks.enableCount != 0 || ks.clearCount != 0 {
+		t.Errorf("enables=%d clears=%d, want a failed release to leave the lock alone", ks.enableCount, ks.clearCount)
+	}
+	if !logMentions(svc, "access denied") {
+		t.Error("failed release not logged")
+	}
+}
+
+func TestClearKillSwitch_NoLockReleasesOrphanedSettings(t *testing.T) {
+	for name, tc := range map[string]struct {
+		active      bool
+		wantClear   int
+		wantRelease int
+	}{
+		"no lock":   {wantRelease: 1},
+		"idle lock": {active: true, wantClear: 1},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ks := &fakeKillSwitch{active: tc.active}
+			svc := newTestService(t, &fakeCloakManager{}, &fakeNaiveManager{}, &fakeWGManager{}, ks, testProfile())
+			stubSessionRecordStore(t)
+
+			if err := svc.ClearKillSwitch(context.Background()); err != nil {
+				t.Fatalf("ClearKillSwitch() error = %v", err)
+			}
+			if ks.clearCount != tc.wantClear || ks.releaseCount != tc.wantRelease {
+				t.Errorf("clears=%d releases=%d, want %d and %d", ks.clearCount, ks.releaseCount, tc.wantClear, tc.wantRelease)
+			}
+		})
+	}
+}
+
 // A resolver the profile names is routed into the tunnel (Allow LAN re-includes
 // it), so an interface-wide permit only ever lets queries out once the tunnel is down.
 func TestKillSwitchPermits_NeverPermitsAResolverOutsideTheTunnel(t *testing.T) {
