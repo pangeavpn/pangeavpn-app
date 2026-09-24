@@ -2840,8 +2840,11 @@ func (s *Service) rebuildSilentSession(ctx context.Context, profile state.Profil
 	s.setActiveTransportKind("")
 
 	if err := s.bringUpAfterKillSwitch(ctx, profile, wireGuardProfile, opts); err != nil {
+		// Preempted means the interrupting operation owns the device: a Switch
+		// re-points it in place, a Disconnect tears it down anyway.
+		preempted := rebuildCtx.Err() != nil
 		if keepDevice {
-			if errors.Is(err, ErrHostOffline) {
+			if errors.Is(err, ErrHostOffline) || preempted {
 				s.setKeptDeviceDead(true)
 			} else {
 				s.releaseKeptDevice(live)

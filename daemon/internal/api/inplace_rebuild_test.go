@@ -339,6 +339,38 @@ func TestConnect_ReleasesAKeptDeviceADisconnectCouldNotStop(t *testing.T) {
 	assertCleanBringUp(t, svc, wgMgr, stops, starts)
 }
 
+// TestConnect_NeverAdoptsTheDeviceOfAPreemptedRebuild: the rebuild keeps its
+// device for the operation that preempted it, which is not always a Switch.
+func TestConnect_NeverAdoptsTheDeviceOfAPreemptedRebuild(t *testing.T) {
+	a, _ := switchProfilePair()
+	wgMgr := &fakeInPlaceWGManager{}
+	svc := newInPlaceTestService(t, wgMgr, &fakeKillSwitch{}, a)
+	opts := ConnectOptions{PreferredTransport: "cloak"}
+	ctx := context.Background()
+	if err := svc.Connect(ctx, a.ID, opts); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+
+	entered := blockFirstStart(svc.cloak.(*fakeCloakManager))
+	rebuildDone := make(chan struct{})
+	go func() {
+		defer close(rebuildDone)
+		svc.attemptSessionRebuild(ctx, a, "tunnel stopped carrying traffic")
+	}()
+	awaitOrFail(t, entered, "the rebuild to reach its transport start")
+	svc.preemptRecovery()
+	awaitOrFail(t, rebuildDone, "the preempted rebuild to unwind")
+	if _, _, running := deviceCounts(wgMgr); !running {
+		t.Fatal("expected the preempted rebuild to keep its device")
+	}
+
+	stops, starts, _ := deviceCounts(wgMgr)
+	if err := svc.Connect(ctx, a.ID, opts); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	assertCleanBringUp(t, svc, wgMgr, stops, starts)
+}
+
 // TestAttach_StillAdoptsAGenuinelyRunningTunnel: with nothing kept by recovery,
 // a tunnel found running at startup is the live session and is adopted.
 func TestAttach_StillAdoptsAGenuinelyRunningTunnel(t *testing.T) {
