@@ -2305,7 +2305,7 @@ func (s *Service) onSystemResume(ctx context.Context, cause string) {
 // onNetworkChanged reacts to the host's connectivity moving: once the network
 // fingerprint says there is something to dial from, waiting out timers only delays recovery.
 func (s *Service) onNetworkChanged() {
-	if !s.networkLooksUsable() {
+	if !s.networkLooksUsable() || s.noPhysicalRoute() {
 		// The network the retry was booked on is gone, so its return is a real change.
 		s.recoveryMu.Lock()
 		s.recoveryNetwork = ""
@@ -2330,6 +2330,16 @@ func (s *Service) onNetworkChanged() {
 	s.netChangeGen++
 	s.recoveryMu.Unlock()
 	s.kickHealthCheck()
+}
+
+// noPhysicalRoute is a definite "nothing to dial from". Windows' hint can still say
+// online off our own kept adapter after the uplink went, so it can't decide this alone.
+func (s *Service) noPhysicalRoute() bool {
+	if s.physicalRoute == nil {
+		return false
+	}
+	_, _, err := s.physicalRoute()
+	return errors.Is(err, platform.ErrNoDefaultRoute)
 }
 
 // kickHealthCheck asks the health loop to run now; a kick already pending is

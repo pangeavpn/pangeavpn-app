@@ -455,3 +455,41 @@ func TestRetryDroppedSession_ResumesBehindTheKillSwitchOnARoute(t *testing.T) {
 		t.Error("Offline = true after the route returned")
 	}
 }
+
+// Our own adapter can keep the OS hint at "internet" after the uplink drops, and our
+// own route writes fire events; with no physical route those must not cut the hold short.
+func TestNetworkChange_NoPhysicalRouteKeepsTheOfflineHold(t *testing.T) {
+	svc, naive, _, _ := recoveryTestService(t)
+	ctx := context.Background()
+	svc.hostInternet = func() (bool, bool) { return true, true }
+	svc.physicalRoute = func() (string, string, error) { return "", "", platform.ErrNoDefaultRoute }
+	svc.networkKey = func() string { return "" }
+	naive.mu.Lock()
+	naive.running = false
+	naive.startErr = errUnreachableNetwork
+	naive.mu.Unlock()
+
+	svc.runHealthCheck(ctx)
+	if !svc.offlineHoldActive() {
+		t.Fatal("expected the unreachable restart to arm the offline hold")
+	}
+	select {
+	case <-svc.healthKick:
+	default:
+	}
+	gen := svc.networkChangeGen()
+	svc.onNetworkChanged()
+	if !svc.offlineHoldActive() {
+		t.Error("a network event cleared the offline hold with no physical route to dial from")
+	}
+	if svc.networkChangeGen() != gen || len(svc.healthKick) != 0 {
+		t.Error("a network event with no physical route counted as the network returning")
+	}
+
+	svc.physicalRoute = func() (string, string, error) { return "Wi-Fi", "192.0.2.1", nil }
+	svc.networkKey = func() string { return "wlan0:192.0.2.55" }
+	svc.onNetworkChanged()
+	if svc.offlineHoldActive() {
+		t.Error("the physical route returned but the offline hold was kept")
+	}
+}
