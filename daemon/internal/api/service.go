@@ -3202,6 +3202,7 @@ func (s *Service) reconcilePersistedKillSwitch(ctx context.Context) platform.Kil
 			return platform.KillSwitchState{Active: true}
 		}
 		s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("kill switch state file is unreadable and no live rules found: %v", err))
+		s.releaseOrphanedLockSettings()
 		return platform.KillSwitchState{}
 	}
 	if !persisted.Active {

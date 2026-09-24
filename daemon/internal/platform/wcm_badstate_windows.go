@@ -8,9 +8,13 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"syscall"
 
+	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
 )
+
+var procRegFlushKey = windows.NewLazySystemDLL("advapi32.dll").NewProc("RegFlushKey")
 
 const (
 	wcmSvcKeyPath               = `SOFTWARE\Microsoft\WcmSvc`
@@ -38,6 +42,10 @@ var wcmBadStateStore wcmBadStatePolicy = registryBadStatePolicy{}
 
 // Serialises the marker/value read-modify-write across kill switch instances.
 var wcmBadStateMu sync.Mutex
+
+// wcmAdminValueNoted keeps an administrator's own value to one log line per process,
+// since every arm finds it again. Guarded by wcmBadStateMu.
+var wcmAdminValueNoted bool
 
 func wcmBadStateMarkerPath() (string, error) {
 	statePath, err := killSwitchStatePath()
@@ -95,6 +103,7 @@ func pauseWCMBadStateTracking() error {
 		return fmt.Errorf("read %s: %w", enableBadStateTrackingValue, err)
 	}
 	if current != badStateAbsent {
+		noteAdministratorsValue(marker, current)
 		return nil
 	}
 	if err := writeWCMBadStateMarker(marker); err != nil {
@@ -103,7 +112,25 @@ func pauseWCMBadStateTracking() error {
 	if err := wcmBadStateStore.disable(); err != nil {
 		return errors.Join(fmt.Errorf("set %s=0: %w", enableBadStateTrackingValue, err), removeWCMBadStateMarker(marker))
 	}
+	KillSwitchInfo("kill switch: paused Windows WCM bad-state tracking (%s=0) while the lock blocks its connectivity probe", enableBadStateTrackingValue)
 	return nil
+}
+
+// noteAdministratorsValue logs, once, a value the pause found and left alone
+// because no marker says it is ours. Holds wcmBadStateMu.
+func noteAdministratorsValue(marker string, current wcmBadStateValue) {
+	if wcmAdminValueNoted {
+		return
+	}
+	if _, err := os.Stat(marker); err == nil {
+		return
+	}
+	wcmAdminValueNoted = true
+	effect := "tracking stays on, so Windows may still reset the Wi-Fi while locked"
+	if current == badStateOff {
+		effect = "tracking is already off"
+	}
+	KillSwitchInfo("kill switch: left the administrator's own %s value in place; %s", enableBadStateTrackingValue, effect)
 }
 
 // restoreWCMBadStateTracking undoes only our own pause, and keeps the marker
@@ -130,6 +157,9 @@ func restoreWCMBadStateTracking() error {
 		if err := wcmBadStateStore.remove(); err != nil {
 			return fmt.Errorf("delete %s: %w", enableBadStateTrackingValue, err)
 		}
+		KillSwitchInfo("kill switch: restored Windows WCM bad-state tracking")
+	} else {
+		KillSwitchInfo("kill switch: %s was changed while paused; keeping that value", enableBadStateTrackingValue)
 	}
 	return removeWCMBadStateMarker(marker)
 }
@@ -207,6 +237,11 @@ func (registryBadStatePolicy) remove() error {
 	defer key.Close()
 	if err := key.DeleteValue(enableBadStateTrackingValue); err != nil && !errors.Is(err, registry.ErrNotExist) {
 		return err
+	}
+	// The hive is written lazily: flush before the caller drops the marker, or a power
+	// cut could bring the value back with nothing left to say it is ours.
+	if status, _, _ := procRegFlushKey.Call(uintptr(key)); status != 0 {
+		return fmt.Errorf("flush %s: %w", wcmSvcKeyPath, syscall.Errno(status))
 	}
 	return nil
 }

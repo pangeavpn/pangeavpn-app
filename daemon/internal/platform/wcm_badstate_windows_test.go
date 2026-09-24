@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -61,7 +62,11 @@ func useFakeBadStatePolicy(t *testing.T, f *fakeBadStatePolicy) string {
 	isolateStateDir(t)
 	previous := wcmBadStateStore
 	wcmBadStateStore = f
-	t.Cleanup(func() { wcmBadStateStore = previous })
+	wcmAdminValueNoted = false
+	t.Cleanup(func() {
+		wcmBadStateStore = previous
+		wcmAdminValueNoted = false
+	})
 	marker, err := wcmBadStateMarkerPath()
 	if err != nil {
 		t.Fatalf("marker path: %v", err)
@@ -105,6 +110,53 @@ func captureKillSwitchWarnings(t *testing.T) *[]string {
 	}
 	t.Cleanup(func() { KillSwitchWarnf = previous })
 	return &warnings
+}
+
+func captureKillSwitchInfo(t *testing.T) *[]string {
+	t.Helper()
+	var notes []string
+	previous := KillSwitchInfof
+	KillSwitchInfof = func(format string, args ...any) {
+		notes = append(notes, fmt.Sprintf(format, args...))
+	}
+	t.Cleanup(func() { KillSwitchInfof = previous })
+	return &notes
+}
+
+// The daemon log is how a support case tells whether the pause was active,
+// so taking ownership and giving it back must each leave exactly one line.
+func TestWCMBadStateTracking_LogsPauseAndRestoreOnce(t *testing.T) {
+	useFakeBadStatePolicy(t, &fakeBadStatePolicy{})
+	notes := captureKillSwitchInfo(t)
+
+	for range 3 {
+		if err := pauseWCMBadStateTracking(); err != nil {
+			t.Fatalf("pause: %v", err)
+		}
+	}
+	if len(*notes) != 1 || !strings.Contains((*notes)[0], "paused") {
+		t.Fatalf("after three pauses logged %q, want one pause line", *notes)
+	}
+	if err := restoreWCMBadStateTracking(); err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+	if len(*notes) != 2 || !strings.Contains((*notes)[1], "restored") {
+		t.Fatalf("after restore logged %q, want a restore line", *notes)
+	}
+}
+
+func TestWCMBadStateTracking_NotesAnAdministratorsValueOnce(t *testing.T) {
+	useFakeBadStatePolicy(t, &fakeBadStatePolicy{present: true, value: 1})
+	notes := captureKillSwitchInfo(t)
+
+	for range 3 {
+		if err := pauseWCMBadStateTracking(); err != nil {
+			t.Fatalf("pause: %v", err)
+		}
+	}
+	if len(*notes) != 1 || !strings.Contains((*notes)[0], "administrator") {
+		t.Fatalf("logged %q, want one line naming the administrator's value", *notes)
+	}
 }
 
 func TestWCMBadStateMarkerSharesKillSwitchStateDir(t *testing.T) {

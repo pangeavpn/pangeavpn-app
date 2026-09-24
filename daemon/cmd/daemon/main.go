@@ -90,9 +90,10 @@ func clearKillSwitchCommand() int {
 }
 
 // logKillSwitchWarnings sends degraded-clear warnings, such as a Windows setting
-// left unrestored, to the output the uninstaller logs.
+// left unrestored, and what the clear gave back to the output the uninstaller logs.
 func logKillSwitchWarnings() {
 	platform.KillSwitchWarnf = log.Printf
+	platform.KillSwitchInfof = log.Printf
 }
 
 func runInteractive() error {
@@ -195,6 +196,9 @@ func startDaemonRuntime() (*daemonRuntime, error) {
 	// leaks later, so they must not stay silent.
 	platform.KillSwitchWarnf = func(format string, args ...any) {
 		logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf(format, args...))
+	}
+	platform.KillSwitchInfof = func(format string, args ...any) {
+		logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf(format, args...))
 	}
 	service := api.NewService(machine, logs, configStore, cloakManager, naiveManager, realityManager, hysteria2Manager, shadowsocksManager, snowflakeManager, wgManager, killSwitch)
 

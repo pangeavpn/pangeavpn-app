@@ -234,6 +234,35 @@ func TestReconcileStartup_ReleaseFailureIsOnlyLogged(t *testing.T) {
 	}
 }
 
+// An unreadable state file with no live rules is still "no lock", so a pause the
+// lost state file can no longer account for must be released too.
+func TestReconcileStartup_UnreadableStateWithNoLockReleasesOrphanedSettings(t *testing.T) {
+	for name, tc := range map[string]struct {
+		liveRules   bool
+		wantRelease int
+	}{
+		"no live rules": {wantRelease: 1},
+		"live rules":    {liveRules: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ks := &fakeKillSwitch{active: tc.liveRules}
+			svc := newTestService(t, &fakeCloakManager{}, &fakeNaiveManager{}, &fakeWGManager{}, ks, testProfile())
+			stubSessionRecordStore(t)
+			original := loadKillSwitchState
+			loadKillSwitchState = func() (platform.KillSwitchState, error) {
+				return platform.KillSwitchState{}, platform.ErrKillSwitchStateUnreadable
+			}
+			t.Cleanup(func() { loadKillSwitchState = original })
+
+			svc.reconcileStartup(context.Background())
+
+			if ks.releaseCount != tc.wantRelease {
+				t.Errorf("ReleaseOrphanedSettings() called %d times, want %d", ks.releaseCount, tc.wantRelease)
+			}
+		})
+	}
+}
+
 func TestClearKillSwitch_NoLockReleasesOrphanedSettings(t *testing.T) {
 	for name, tc := range map[string]struct {
 		active      bool

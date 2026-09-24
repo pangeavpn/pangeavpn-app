@@ -13,19 +13,24 @@ import (
 // so a half-finished clear must reach the process log rather than vanish.
 func TestLogKillSwitchWarningsReachesProcessLog(t *testing.T) {
 	var buf bytes.Buffer
-	previousOut, previousFlags, previousWarn := log.Writer(), log.Flags(), platform.KillSwitchWarnf
+	previousOut, previousFlags := log.Writer(), log.Flags()
+	previousWarn, previousInfo := platform.KillSwitchWarnf, platform.KillSwitchInfof
 	log.SetOutput(&buf)
 	log.SetFlags(0)
 	t.Cleanup(func() {
 		log.SetOutput(previousOut)
 		log.SetFlags(previousFlags)
 		platform.KillSwitchWarnf = previousWarn
+		platform.KillSwitchInfof = previousInfo
 	})
 
 	logKillSwitchWarnings()
 	platform.KillSwitchWarn("could not restore WCM bad-state tracking: %v", "access denied")
+	platform.KillSwitchInfo("restored Windows WCM bad-state tracking")
 
-	if !strings.Contains(buf.String(), "could not restore WCM bad-state tracking: access denied") {
-		t.Fatalf("log = %q, want the kill switch warning", buf.String())
+	for _, want := range []string{"could not restore WCM bad-state tracking: access denied", "restored Windows WCM bad-state tracking"} {
+		if !strings.Contains(buf.String(), want) {
+			t.Errorf("log = %q, want %q", buf.String(), want)
+		}
 	}
 }

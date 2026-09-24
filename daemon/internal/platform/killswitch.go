@@ -113,6 +113,16 @@ func KillSwitchWarn(format string, args ...any) {
 	}
 }
 
+// KillSwitchInfof records a host setting the lock changed or gave back, so an
+// incident log shows what was in force. Wired to the daemon log store.
+var KillSwitchInfof func(format string, args ...any)
+
+func KillSwitchInfo(format string, args ...any) {
+	if info := KillSwitchInfof; info != nil {
+		info(format, args...)
+	}
+}
+
 // NewKillSwitch returns a platform-appropriate kill-switch implementation.
 func NewKillSwitch() KillSwitch {
 	if newPlatformKillSwitch != nil {
