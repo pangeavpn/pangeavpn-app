@@ -174,6 +174,9 @@ type Service struct {
 	// keptDeviceDead marks a running device recovery or a switch kept for a session that
 	// is not up, which Connect must release rather than adopt. Guarded by recoveryMu.
 	keptDeviceDead bool
+	// netChangeGen counts network changes that cleared the holds, so an attempt that
+	// outlived one does not re-arm the hold it cleared. Guarded by recoveryMu.
+	netChangeGen uint64
 
 	// resumeFreshUntil marks the window after a host resume in which a single failed
 	// probe round is enough to rebuild; resumeNotedAt dedupes one wake's notifications.
@@ -680,11 +683,12 @@ func (s *Service) bringUpAfterKillSwitch(ctx context.Context, profile state.Prof
 	s.machine.Set(state.StateConnecting, "starting transport")
 	stepStart := time.Now()
 
+	netGen := s.networkChangeGen()
 	networkKey := s.currentNetworkKey()
 	kind, err := s.startTransportWithHandshake(ctx, &profile, &wireGuardProfile, opts.PreferredTransport, networkKey)
 	if err != nil {
 		if errors.Is(err, ErrHostOffline) {
-			s.holdBringUpOffline(err)
+			s.holdBringUpOffline(err, netGen, networkKey)
 			return err
 		}
 		s.clearOfflineHold()
@@ -708,10 +712,10 @@ func (s *Service) bringUpAfterKillSwitch(ctx context.Context, profile state.Prof
 
 // holdBringUpOffline parks a bring-up that found no route out: ERROR carries the
 // offline flag, the kill switch stays armed, and recovery re-dials on a link.
-func (s *Service) holdBringUpOffline(err error) {
-	s.enterOfflineHold()
+func (s *Service) holdBringUpOffline(err error, netGen uint64, startKey string) {
+	armed := s.enterOfflineHold(netGen, startKey)
 	s.machine.Set(state.StateError, offlineHoldDetail)
-	s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("no route to the network; holding the connection until it returns (%v)", err))
+	s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("%s (%v)", offlineHoldNote(armed, "the connection"), err))
 }
 
 // armKillSwitchForAdoptedTunnel enables and updates the kill switch for a
@@ -2313,6 +2317,7 @@ func (s *Service) onNetworkChanged() {
 	// The link is back: drop the offline hold so the health kick below retries
 	// transport recovery now instead of waiting out the backoff window.
 	s.offlineHoldUntil = time.Time{}
+	s.netChangeGen++
 	s.recoveryMu.Unlock()
 	s.kickHealthCheck()
 }
@@ -2379,14 +2384,15 @@ func (s *Service) runHealthCheck(ctx context.Context) {
 		if s.offlineHoldActive() {
 			return
 		}
+		netGen, startKey := s.networkChangeGen(), s.currentNetworkKey()
 		if err := s.recoverActiveTransport(ctx, profile, activeKind); err != nil {
 			// Whoever holds opMu owns the session right now; the next tick re-checks.
 			if errors.Is(err, errRebuildBusy) {
 				return
 			}
 			if hostNetworkUnreachable(err) || s.hostOffline() {
-				s.enterOfflineHold()
-				s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("no route to the network; holding %s until it returns", activeKind))
+				armed := s.enterOfflineHold(netGen, startKey)
+				s.logs.Add(state.LogWarn, state.SourceDaemon, offlineHoldNote(armed, activeKind))
 				return
 			}
 			s.clearOfflineHold()
@@ -2663,11 +2669,37 @@ func (s *Service) hostVerdict() (online bool, known bool) {
 // that had no route out, so an outage parks instead of hammering restart.
 const offlineHoldInterval = 12 * time.Second
 
-func (s *Service) enterOfflineHold() {
+// enterOfflineHold marks the host offline after an attempt that began at netGen on startKey.
+// Our own route writes fire network events too, so only a moved physical network skips the hold.
+func (s *Service) enterOfflineHold(netGen uint64, startKey string) (armed bool) {
+	key := s.currentNetworkKey()
+	s.recoveryMu.Lock()
+	s.offlineHeld = true
+	moved := s.netChangeGen != netGen && key != "" && key != startKey
+	armed = !moved
+	if armed {
+		s.offlineHoldUntil = time.Now().Add(offlineHoldInterval)
+	}
+	s.recoveryMu.Unlock()
+	if !armed {
+		s.kickHealthCheck()
+	}
+	return armed
+}
+
+// offlineHoldNote is the one log line for a dial that found no route, saying
+// what enterOfflineHold did about it.
+func offlineHoldNote(armed bool, what string) string {
+	if armed {
+		return fmt.Sprintf("no route to the network; holding %s until it returns", what)
+	}
+	return fmt.Sprintf("no route to the network, but it changed during the attempt; retrying %s now", what)
+}
+
+func (s *Service) networkChangeGen() uint64 {
 	s.recoveryMu.Lock()
 	defer s.recoveryMu.Unlock()
-	s.offlineHoldUntil = time.Now().Add(offlineHoldInterval)
-	s.offlineHeld = true
+	return s.netChangeGen
 }
 
 func (s *Service) offlineHoldActive() bool {

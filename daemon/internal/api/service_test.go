@@ -103,13 +103,25 @@ type fakeNaiveManager struct {
 	// boundLocalPort, when non-zero, overrides the default BoundLocalPort
 	// return value below.
 	boundLocalPort int
+
+	// startHook runs inside Start outside the lock, like fakeCloakManager's, so a
+	// test can act while a dial is in flight.
+	startHook func(ctx context.Context) error
 }
 
 func (f *fakeNaiveManager) Start(ctx context.Context, profile state.NaiveProfile) error {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.startCalled = true
 	f.startLocalPort = profile.LocalPort
+	hook := f.startHook
+	f.mu.Unlock()
+	if hook != nil {
+		if err := hook(ctx); err != nil {
+			return err
+		}
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if f.startErr != nil {
 		return f.startErr
 	}

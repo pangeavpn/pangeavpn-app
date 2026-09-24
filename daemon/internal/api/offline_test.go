@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -118,6 +119,131 @@ func TestHealthCheck_TransportRestartHoldsOnUnreachableNetwork(t *testing.T) {
 	svc.runHealthCheck(context.Background())
 	if svc.Status(context.Background()).Offline {
 		t.Error("Offline = true after the link returned")
+	}
+}
+
+// failFirstDialOffline makes the next naive dial fail "unreachable", optionally
+// after the network changes mid-dial; later dials succeed.
+func failFirstDialOffline(naive *fakeNaiveManager, midDial func()) {
+	var taken atomic.Bool
+	naive.mu.Lock()
+	defer naive.mu.Unlock()
+	naive.startHook = func(context.Context) error {
+		if !taken.CompareAndSwap(false, true) {
+			return nil
+		}
+		midDial()
+		return errUnreachableNetwork
+	}
+}
+
+// Only a moved physical network counts: our own route writes fire the same
+// events but leave the fingerprint alone, and must not skip the hold.
+var networkChangeMidDialCases = []struct {
+	name    string
+	event   bool
+	changed bool
+}{
+	{"network moved mid-dial", true, true},
+	{"own route churn mid-dial", true, false},
+	{"no network change", false, false},
+}
+
+// midDialNetwork points svc's fingerprint at a switchable key and returns the
+// mid-dial action for tc: fire the event, after moving the network if tc says so.
+func midDialNetwork(svc *Service, event, moved bool) func() {
+	var key atomic.Value
+	key.Store("eth0:192.0.2.10")
+	svc.networkKey = func() string { return key.Load().(string) }
+	return func() {
+		if !event {
+			return
+		}
+		if moved {
+			key.Store("wlan0:192.0.2.55")
+		}
+		svc.onNetworkChanged()
+	}
+}
+
+// assertOfflineOutcomeLogged checks the failed dial logged what actually
+// follows it, and only that: a hold, or a retry because the network moved.
+func assertOfflineOutcomeLogged(t *testing.T, svc *Service, changed bool) {
+	t.Helper()
+	held, retried := logMentions(svc, "until it returns"), logMentions(svc, "changed during the attempt")
+	if held == changed || retried != changed {
+		t.Errorf("logged hold=%v retry=%v, want hold=%v retry=%v", held, retried, !changed, changed)
+	}
+}
+
+// A restart dialled before the link returned and failing after it used to
+// re-arm the hold the change had just cleared, so its kick found it armed.
+func TestHealthCheck_NetworkChangeDuringFailedRestartRetriesNow(t *testing.T) {
+	for _, tc := range networkChangeMidDialCases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, naive, _, _ := recoveryTestService(t)
+			ctx := context.Background()
+			naive.mu.Lock()
+			naive.running = false
+			naive.mu.Unlock()
+			failFirstDialOffline(naive, midDialNetwork(svc, tc.event, tc.changed))
+
+			svc.runHealthCheck(ctx)
+			if !svc.Status(ctx).Offline {
+				t.Error("Offline = false after an unreachable restart, want the UI to keep saying offline")
+			}
+			if armed := svc.offlineHoldActive(); armed == tc.changed {
+				t.Fatalf("offline hold armed = %v, want %v", armed, !tc.changed)
+			}
+			assertOfflineOutcomeLogged(t, svc, tc.changed)
+
+			restoreNetwork(naive)
+			svc.runHealthCheck(ctx)
+			if retried := transportStarted(naive); retried != tc.changed {
+				t.Errorf("restart retried on the next check = %v, want %v", retried, tc.changed)
+			}
+		})
+	}
+}
+
+// The same race through a bring-up, where the health loop has already spent the
+// change's kick on a check that found CONNECTING.
+func TestConnect_NetworkChangeDuringOfflineDialRetriesNow(t *testing.T) {
+	for _, tc := range networkChangeMidDialCases {
+		t.Run(tc.name, func(t *testing.T) {
+			naive := &fakeNaiveManager{}
+			svc := newTestService(t, &fakeCloakManager{}, naive, &fakeWGManager{}, &fakeKillSwitch{}, silentTunnelProfile())
+			svc.recoveryDelays = []time.Duration{0}
+			ctx := context.Background()
+			change := midDialNetwork(svc, tc.event, tc.changed)
+			failFirstDialOffline(naive, func() {
+				change()
+				select {
+				case <-svc.healthKick:
+				default:
+				}
+			})
+
+			if err := svc.Connect(ctx, "p1", ConnectOptions{PreferredTransport: "naive"}); !errors.Is(err, ErrHostOffline) {
+				t.Fatalf("Connect error = %v, want ErrHostOffline", err)
+			}
+			if status := svc.Status(ctx); status.State != state.StateError || !status.Offline {
+				t.Fatalf("state = %q offline=%v, want ERROR held offline", status.State, status.Offline)
+			}
+			if armed := svc.offlineHoldActive(); armed == tc.changed {
+				t.Fatalf("offline hold armed = %v, want %v", armed, !tc.changed)
+			}
+			if kicked := len(svc.healthKick) == 1; kicked != tc.changed {
+				t.Errorf("health loop kicked = %v, want %v", kicked, tc.changed)
+			}
+			assertOfflineOutcomeLogged(t, svc, tc.changed)
+
+			restoreNetwork(naive)
+			svc.runHealthCheck(ctx)
+			if connected := svc.Status(ctx).State == state.StateConnected; connected != tc.changed {
+				t.Errorf("connected on the next check = %v, want %v", connected, tc.changed)
+			}
+		})
 	}
 }
 
