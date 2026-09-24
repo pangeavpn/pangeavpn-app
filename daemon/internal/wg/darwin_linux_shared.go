@@ -45,8 +45,8 @@ type tunnelSession struct {
 	interfaceName string
 	device        *device.Device
 	tunDevice     tun.Device
-	// deviceMTU is the clamped MTU the TUN was created with; an in-place
-	// reconfigure must decline when the new profile needs a different one.
+	// deviceMTU is the clamped MTU the TUN runs at; an in-place reconfigure must
+	// resize the device (Windows) or decline when the new profile needs another.
 	deviceMTU int
 
 	// Networking state for cleanup.

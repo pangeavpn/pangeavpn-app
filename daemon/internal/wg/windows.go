@@ -9,10 +9,14 @@ import (
 	"strings"
 
 	"golang.org/x/sys/windows"
+	"golang.zx2c4.com/wireguard/device"
 	"golang.zx2c4.com/wireguard/tun"
 
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/state"
 )
+
+// Seam for the in-place switch tests; production always configures the real interface.
+var configureWindowsInterfaceFn = configureWindowsInterface
 
 // RestoreOrphanedState is a no-op on Windows: WFP filters and routes don't
 // survive process exit the way darwin/linux network config files do.
@@ -123,7 +127,7 @@ func (m *wireGuardGoManager) startWindows(ctx context.Context, profile state.Wir
 		m.logs.Add(state.LogWarn, state.SourceWireGuard, fmt.Sprintf("endpoint bypass route setup warning: %v", endpointErr))
 	}
 
-	if err := configureWindowsInterface(tunnelLUID, parsed.addresses, allowedIPs, parsed.dnsServers, parsed.mtu); err != nil {
+	if err := configureWindowsInterface(tunnelLUID, parsed.addresses, allowedIPs, parsed.dnsServers, clampWireGuardDeviceMTU(parsed.mtu)); err != nil {
 		_ = removeWindowsEndpointRoutes(endpointRoutes)
 		closeDevice(dev)
 		m.removeSession(tunnelKey)
@@ -179,8 +183,8 @@ func (m *wireGuardGoManager) trySwitchInPlace(ctx context.Context, tunnelKey str
 	if !ok || session == nil || session.device == nil || session.windowsLUID == 0 {
 		return false
 	}
-	if clampWireGuardDeviceMTU(parsed.mtu) != session.deviceMTU {
-		m.logs.Add(state.LogInfo, state.SourceWireGuard, "mtu changed; rebuilding the device instead of reconfiguring in place")
+	mtu := clampWireGuardDeviceMTU(parsed.mtu)
+	if !m.matchDeviceMTU(session, mtu) {
 		return false
 	}
 
@@ -215,13 +219,64 @@ func (m *wireGuardGoManager) trySwitchInPlace(ctx context.Context, tunnelKey str
 		session.windowsRoutes = newRoutes
 	}
 
-	if err := configureWindowsInterface(session.windowsLUID, parsed.addresses, allowedIPs, parsed.dnsServers, parsed.mtu); err != nil {
+	if err := configureWindowsInterfaceFn(session.windowsLUID, parsed.addresses, allowedIPs, parsed.dnsServers, mtu); err != nil {
 		m.logs.Add(state.LogWarn, state.SourceWireGuard, fmt.Sprintf("in-place reconfigure: interface config failed: %v", err))
 		return false
 	}
 
 	m.logs.Add(state.LogInfo, state.SourceWireGuard, fmt.Sprintf("wireguard re-pointed in place on %s", session.interfaceName))
 	return true
+}
+
+type mtuForcer interface {
+	ForceMTU(mtu int)
+}
+
+// Fails the build if wireguard-go drops ForceMTU, which would silently turn every resize back into a rebuild.
+var _ mtuForcer = (*tun.NativeTun)(nil)
+
+// matchDeviceMTU resizes the live device rather than recreating the adapter, which Windows would
+// re-identify as a new network. The interface NLMTU follows in configureWindowsInterface.
+func (m *wireGuardGoManager) matchDeviceMTU(session *tunnelSession, mtu int) bool {
+	if mtu == session.deviceMTU {
+		return true
+	}
+	forcer, ok := session.tunDevice.(mtuForcer)
+	if !ok || deviceClosed(session.device) {
+		m.logs.Add(state.LogInfo, state.SourceWireGuard, "mtu changed; rebuilding the device instead of reconfiguring in place")
+		return false
+	}
+	if err := forceMTU(forcer, mtu); err != nil {
+		m.logs.Add(state.LogWarn, state.SourceWireGuard, fmt.Sprintf("mtu resize failed, rebuilding the device instead: %v", err))
+		return false
+	}
+	session.deviceMTU = mtu
+	m.logs.Add(state.LogInfo, state.SourceWireGuard, fmt.Sprintf("mtu changed to %d; resized the device in place", mtu))
+	return true
+}
+
+// ForceMTU checks for Close and then sends on the channel Close shuts; wireguard-go closing
+// the tun itself in between panics, and on the health loop that would kill the daemon.
+func forceMTU(forcer mtuForcer, mtu int) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("tun closed mid-resize: %v", r)
+		}
+	}()
+	forcer.ForceMTU(mtu)
+	return nil
+}
+
+func deviceClosed(dev *device.Device) bool {
+	if dev == nil {
+		return true
+	}
+	select {
+	case <-dev.Wait():
+		return true
+	default:
+		return false
+	}
 }
 
 func (m *wireGuardGoManager) stopWindows(_ context.Context, profile state.WireGuardProfile) error {
