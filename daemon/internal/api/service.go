@@ -34,8 +34,8 @@ var ErrDisconnectIncomplete = errors.New("disconnect incomplete")
 
 const offlineHoldDetail = "no internet connection; connecting when the network returns"
 
-// errRebuildBusy signals rebuildSilentSession found opMu already held by a
-// real operation (Connect/Switch, or an overlapping rebuild). It is not a failed rebuild.
+// errRebuildBusy signals a recovery path found opMu already held by a real
+// operation (Connect/Switch, or an overlapping rebuild). It is not a failed rebuild.
 var errRebuildBusy = errors.New("operation in progress")
 
 // cloakManager is transport.Manager (Stop) plus Start/Status with Cloak's
@@ -2380,6 +2380,10 @@ func (s *Service) runHealthCheck(ctx context.Context) {
 			return
 		}
 		if err := s.recoverActiveTransport(ctx, profile, activeKind); err != nil {
+			// Whoever holds opMu owns the session right now; the next tick re-checks.
+			if errors.Is(err, errRebuildBusy) {
+				return
+			}
 			if hostNetworkUnreachable(err) || s.hostOffline() {
 				s.enterOfflineHold()
 				s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("no route to the network; holding %s until it returns", activeKind))
@@ -2900,7 +2904,7 @@ func (s *Service) keptDeviceIsDead() bool {
 // v1 has no mid-session hot failover (design spec non-goal).
 func (s *Service) recoverActiveTransport(ctx context.Context, profile state.Profile, activeKind string) error {
 	if !s.opMu.TryLock() {
-		return errors.New("operation in progress")
+		return errRebuildBusy
 	}
 	defer s.opMu.Unlock()
 
