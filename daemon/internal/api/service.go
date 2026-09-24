@@ -165,6 +165,9 @@ type Service struct {
 	recoveryAttempts int
 	recoveryNextAt   time.Time
 	healthHoldUntil  time.Time
+	// recoveryNetwork is the fingerprint recoveryNextAt was booked on: our own adapter
+	// churn fires network events too, so only a move off it may cut the wait short.
+	recoveryNetwork string
 	// offlineHoldUntil backs off recovery while the host has no route out (a dial
 	// returning "unreachable network"), so a link drop holds instead of hammering restart.
 	offlineHoldUntil time.Time
@@ -647,10 +650,12 @@ const connectRetryGrace = 15 * time.Second
 
 // deferRecovery pushes the next automatic rebuild out to at least d from now.
 func (s *Service) deferRecovery(d time.Duration) {
+	network := s.currentNetworkKey()
 	s.recoveryMu.Lock()
 	defer s.recoveryMu.Unlock()
 	if next := time.Now().Add(d); next.After(s.recoveryNextAt) {
 		s.recoveryNextAt = next
+		s.recoveryNetwork = network
 	}
 }
 
@@ -2301,14 +2306,19 @@ func (s *Service) onSystemResume(ctx context.Context, cause string) {
 // fingerprint says there is something to dial from, waiting out timers only delays recovery.
 func (s *Service) onNetworkChanged() {
 	if !s.networkLooksUsable() {
+		// The network the retry was booked on is gone, so its return is a real change.
+		s.recoveryMu.Lock()
+		s.recoveryNetwork = ""
+		s.recoveryMu.Unlock()
 		return
 	}
+	network := s.currentNetworkKey()
 	s.recoveryMu.Lock()
 	now := time.Now()
 	if now.Before(s.healthHoldUntil) {
 		s.healthHoldUntil = now
 	}
-	if now.Before(s.recoveryNextAt) {
+	if now.Before(s.recoveryNextAt) && (network == "" || network != s.recoveryNetwork) {
 		s.recoveryNextAt = time.Time{}
 	}
 	if now.Before(s.dnsProbeNextAt) {
@@ -2734,6 +2744,7 @@ func (s *Service) beginRecoveryAttempt() int {
 // scheduleNextRecovery books the next attempt after a failure and reports the
 // wait, so the error detail can say when the daemon will try again.
 func (s *Service) scheduleNextRecovery(attempt int) time.Duration {
+	network := s.currentNetworkKey()
 	s.recoveryMu.Lock()
 	defer s.recoveryMu.Unlock()
 
@@ -2744,6 +2755,7 @@ func (s *Service) scheduleNextRecovery(attempt int) time.Duration {
 	index := min(max(attempt-1, 0), len(delays)-1)
 	delay := delays[index]
 	s.recoveryNextAt = time.Now().Add(delay)
+	s.recoveryNetwork = network
 	return delay
 }
 

@@ -67,24 +67,14 @@ func powerNotifyCallback(_, notifyType, _ uintptr) uintptr {
 // consumer only needs one kick, not one per table mutation.
 const netChangeMinGap = time.Second
 
-var (
-	netChangeMu   sync.Mutex
-	lastNetChange time.Time
-)
+var netChanges = newEventCoalescer(netChangeMinGap, func() {
+	dispatchSystemEvent(SystemEventNetworkChanged)
+})
 
 // netChangeCallback serves NotifyRouteChange2 and NotifyIpInterfaceChange;
 // both pass (context, row pointer, notification type), all uintptr-sized.
 func netChangeCallback(_, _, _ uintptr) uintptr {
-	netChangeMu.Lock()
-	now := time.Now()
-	fire := now.Sub(lastNetChange) >= netChangeMinGap
-	if fire {
-		lastNetChange = now
-	}
-	netChangeMu.Unlock()
-	if fire {
-		dispatchSystemEvent(SystemEventNetworkChanged)
-	}
+	netChanges.trigger()
 	return 0
 }
 
