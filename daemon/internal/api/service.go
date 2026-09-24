@@ -171,6 +171,9 @@ type Service struct {
 	// offlineHeld outlives the hold timer, until a bring-up succeeds or fails for
 	// another reason, so paced re-dials keep reporting "no internet". Guarded by recoveryMu.
 	offlineHeld bool
+	// keptDeviceDead marks a running device recovery or a switch kept for a session that
+	// is not up, which Connect must release rather than adopt. Guarded by recoveryMu.
+	keptDeviceDead bool
 
 	// resumeFreshUntil marks the window after a host resume in which a single failed
 	// probe round is enough to rebuild; resumeNotedAt dedupes one wake's notifications.
@@ -689,6 +692,7 @@ func (s *Service) bringUpAfterKillSwitch(ctx context.Context, profile state.Prof
 		return err
 	}
 	s.clearOfflineHold()
+	s.setKeptDeviceDead(false)
 	s.setActiveTransportKind(kind)
 	s.rememberTransport(networkKey, kind)
 	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("%s tunnel established with wireguard handshake (%dms)", kind, time.Since(stepStart).Milliseconds()))
@@ -1604,6 +1608,9 @@ func (s *Service) Switch(ctx context.Context, newProfileID string, opts ConnectO
 	s.setSessionOpts(opts)
 
 	if err := s.bringUpAfterKillSwitch(ctx, newProfile, wireGuardProfile, opts); err != nil {
+		if keepDevice && errors.Is(err, ErrHostOffline) {
+			s.setKeptDeviceDead(true)
+		}
 		if !errors.Is(err, ErrHostOffline) {
 			if keepDevice {
 				s.releaseKeptDevice(newProfile)
@@ -2833,8 +2840,12 @@ func (s *Service) rebuildSilentSession(ctx context.Context, profile state.Profil
 	s.setActiveTransportKind("")
 
 	if err := s.bringUpAfterKillSwitch(ctx, profile, wireGuardProfile, opts); err != nil {
-		if keepDevice && !errors.Is(err, ErrHostOffline) {
-			s.releaseKeptDevice(live)
+		if keepDevice {
+			if errors.Is(err, ErrHostOffline) {
+				s.setKeptDeviceDead(true)
+			} else {
+				s.releaseKeptDevice(live)
+			}
 		}
 		return err
 	}
@@ -2865,7 +2876,21 @@ func (s *Service) releaseKeptDevice(live state.Profile) {
 	defer cancel()
 	if err := s.wg.Stop(stopCtx, withTransportBypassHosts(live)); err != nil {
 		s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("releasing the device kept for recovery: %v", err))
+		return
 	}
+	s.setKeptDeviceDead(false)
+}
+
+func (s *Service) setKeptDeviceDead(dead bool) {
+	s.recoveryMu.Lock()
+	defer s.recoveryMu.Unlock()
+	s.keptDeviceDead = dead
+}
+
+func (s *Service) keptDeviceIsDead() bool {
+	s.recoveryMu.Lock()
+	defer s.recoveryMu.Unlock()
+	return s.keptDeviceDead
 }
 
 // recoverActiveTransport restarts whichever transport is active in-place —
@@ -3225,9 +3250,9 @@ func (s *Service) attachToRunningSession(ctx context.Context, profile state.Prof
 	if !status.Running {
 		return false, nil
 	}
-	// Recovery holds this device through the offline hold; its session is
-	// dead, so a connect starts clean instead of adopting it.
-	if s.offlineHoldActive() {
+	// Recovery or a switch kept this device for a session that is not up; the
+	// hold timer alone lapses on any network change, so the sticky flag decides too.
+	if s.offlineHoldActive() || s.keptDeviceIsDead() {
 		held, ok := s.getCurrentProfile()
 		if !ok {
 			held = profile
