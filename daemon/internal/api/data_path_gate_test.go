@@ -389,6 +389,21 @@ func TestHandshakeTimeoutFor_RebuildsGetTheLongerBudget(t *testing.T) {
 	}
 }
 
+// The service the daemon really builds must let a rebuild's longer budget reach
+// the wait; a constructor default used to win over it, so every rebuild got 10s.
+func TestNewService_RebuildHandshakeBudgetReachesTheWait(t *testing.T) {
+	svc := NewService(state.NewMachine(), state.NewLogStore(10), testConfigStore(t),
+		&fakeCloakManager{}, &fakeNaiveManager{}, &fakeRealityManager{}, &fakeHysteria2Manager{},
+		&fakeShadowsocksManager{}, &fakeSnowflakeManager{}, &fakeWGManager{}, &fakeKillSwitch{})
+	ctx := context.Background()
+	if got := handshakeTimeoutFor(withHandshakeBudget(ctx, rebuildHandshakeTimeout), svc.handshakeTimeout); got != rebuildHandshakeTimeout {
+		t.Fatalf("rebuild budget = %s, want %s", got, rebuildHandshakeTimeout)
+	}
+	if got := handshakeTimeoutFor(ctx, svc.handshakeTimeout); got != defaultWireGuardHandshakeTimeout {
+		t.Fatalf("connect budget = %s, want %s", got, defaultWireGuardHandshakeTimeout)
+	}
+}
+
 func TestHostNetworkUnreachable(t *testing.T) {
 	cases := map[string]bool{
 		"all configured transports failed: reality: dial tcp: connectex: A socket operation was attempted to an unreachable network.": true,

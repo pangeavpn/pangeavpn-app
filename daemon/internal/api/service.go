@@ -238,8 +238,8 @@ type Service struct {
 	repairNames []string
 	repairSeq   int
 
-	// handshakeTimeout bounds how long a single transport is given to carry a
-	// first WireGuard handshake during bring-up. Defaults to defaultWireGuardHandshakeTimeout; tests set it small.
+	// handshakeTimeout overrides the per-transport handshake budget; tests set it small.
+	// Zero in production, so a rebuild's longer context budget and the default both apply.
 	handshakeTimeout time.Duration
 
 	// dataPathBudget bounds how long the bring-up gate waits on a host that has
@@ -343,27 +343,26 @@ func NewService(
 	killSwitch platform.KillSwitch,
 ) *Service {
 	return &Service{
-		machine:          machine,
-		logs:             logs,
-		config:           config,
-		cloak:            cloakManager,
-		naive:            naiveManager,
-		reality:          realityManager,
-		hysteria2:        hysteria2Manager,
-		shadowsocks:      shadowsocksManager,
-		snowflake:        snowflakeManager,
-		wg:               wgManager,
-		killSwitch:       killSwitch,
-		handshakeTimeout: defaultWireGuardHandshakeTimeout,
-		dataPathBudget:   dataPathGateBudget,
-		networkKey:       currentNetworkKey,
-		hostInternet:     platform.HostInternet,
-		physicalRoute:    platform.PhysicalDefaultRoute,
-		recoveryDelays:   defaultRecoveryDelays,
-		probeResolver:    probeResolverOverUDP,
-		networkRepair:    platform.RepairNetworkAfterTunnelDisconnect,
-		systemEvents:     platform.WatchSystemEvents,
-		healthKick:       make(chan struct{}, 1),
+		machine:        machine,
+		logs:           logs,
+		config:         config,
+		cloak:          cloakManager,
+		naive:          naiveManager,
+		reality:        realityManager,
+		hysteria2:      hysteria2Manager,
+		shadowsocks:    shadowsocksManager,
+		snowflake:      snowflakeManager,
+		wg:             wgManager,
+		killSwitch:     killSwitch,
+		dataPathBudget: dataPathGateBudget,
+		networkKey:     currentNetworkKey,
+		hostInternet:   platform.HostInternet,
+		physicalRoute:  platform.PhysicalDefaultRoute,
+		recoveryDelays: defaultRecoveryDelays,
+		probeResolver:  probeResolverOverUDP,
+		networkRepair:  platform.RepairNetworkAfterTunnelDisconnect,
+		systemEvents:   platform.WatchSystemEvents,
+		healthKick:     make(chan struct{}, 1),
 	}
 }
 
