@@ -89,6 +89,15 @@ type shadowsocksProxyManager interface {
 	Credentials() (string, string)
 }
 
+// realityProxyManager is shadowsocksProxyManager over VLESS+REALITY, whose node
+// pins this user to the hub. reality.ProxyManager fits.
+type realityProxyManager interface {
+	Start(ctx context.Context, profile state.RealityProfile) (int, error)
+	Stop(ctx context.Context) error
+	Port() int
+	Credentials() (string, string)
+}
+
 // snowflakeManager is transport.Manager (Stop) plus Start/Status with
 // Snowflake's concrete types. snowflake.Manager satisfies this directly.
 type snowflakeManager interface {
@@ -132,6 +141,9 @@ type Service struct {
 	// shadowsocksProxy serves the hub control plane; nil leaves /ssproxy/*
 	// reporting unavailable. Set once at startup.
 	shadowsocksProxy shadowsocksProxyManager
+	// realityProxy is the same over REALITY; nil leaves /realityproxy/*
+	// reporting unavailable. Set once at startup.
+	realityProxy realityProxyManager
 
 	opMu sync.Mutex
 
@@ -416,6 +428,43 @@ func (s *Service) ShadowsocksProxyCredentials() (string, string) {
 		return "", ""
 	}
 	return s.shadowsocksProxy.Credentials()
+}
+
+// SetRealityProxy wires the REALITY hub proxy; nil makes /realityproxy/*
+// report it unavailable.
+func (s *Service) SetRealityProxy(proxy realityProxyManager) {
+	s.realityProxy = proxy
+}
+
+// StartRealityProxy returns the proxy's loopback port. Permits the remote
+// first, or a Lockdown lock would block our own dial.
+func (s *Service) StartRealityProxy(ctx context.Context, profile state.RealityProfile) (int, error) {
+	if s.realityProxy == nil {
+		return 0, errors.New("reality proxy is not available")
+	}
+	if host := strings.TrimSpace(profile.RemoteHost); host != "" {
+		if err := s.PermitHosts(ctx, []string{host}); err != nil {
+			s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf(
+				"could not permit reality hub proxy remote %s through the kill switch: %v", host, err))
+		}
+	}
+	return s.realityProxy.Start(ctx, profile)
+}
+
+func (s *Service) StopRealityProxy(ctx context.Context) error {
+	if s.realityProxy == nil {
+		return nil
+	}
+	return s.realityProxy.Stop(ctx)
+}
+
+// RealityProxyCredentials returns the live proxy's Basic Auth
+// username/password, both empty if no proxy is running.
+func (s *Service) RealityProxyCredentials() (string, string) {
+	if s.realityProxy == nil {
+		return "", ""
+	}
+	return s.realityProxy.Credentials()
 }
 
 // activeTransport returns whichever manager is live for the current session, or nil

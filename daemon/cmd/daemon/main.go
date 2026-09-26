@@ -203,6 +203,7 @@ func startDaemonRuntime() (*daemonRuntime, error) {
 	service := api.NewService(machine, logs, configStore, cloakManager, naiveManager, realityManager, hysteria2Manager, shadowsocksManager, snowflakeManager, wgManager, killSwitch)
 
 	service.SetShadowsocksProxy(shadowsocks.NewProxyManager(logs))
+	service.SetRealityProxy(reality.NewProxyManager(logs))
 
 	// Per-network last-good-transport cache is a best-effort optimization; a
 	// failure to open it just leaves auto-connect walking the full cascade.

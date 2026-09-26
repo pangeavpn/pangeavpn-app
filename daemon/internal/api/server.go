@@ -2,13 +2,16 @@ package api
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
 	"log"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -160,7 +163,8 @@ type ssProxyStartRequest struct {
 	UDPOverTCP bool   `json:"udpOverTcp,omitempty"`
 }
 
-type ssProxyStartResponse struct {
+// hubProxyStartResponse answers both /ssproxy/start and /realityproxy/start.
+type hubProxyStartResponse struct {
 	OK            bool   `json:"ok"`
 	Port          int    `json:"port,omitempty"`
 	ProxyUsername string `json:"proxyUsername,omitempty"`
@@ -194,6 +198,70 @@ func validateSSProxyStartRequest(req ssProxyStartRequest) error {
 		return errors.New("method is not a supported cipher")
 	}
 	return nil
+}
+
+// realityProxyStartRequest carries the node's control-plane REALITY user,
+// whose node-side routes pin all of its TCP to the hub.
+type realityProxyStartRequest struct {
+	RemoteHost string `json:"remoteHost"`
+	RemotePort int    `json:"remotePort"`
+	UUID       string `json:"uuid"`
+	PublicKey  string `json:"publicKey"`
+	ShortID    string `json:"shortId"`
+	ServerName string `json:"serverName"`
+}
+
+var (
+	canonicalUUIDPattern  = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+	realityShortIDPattern = regexp.MustCompile(`^([0-9a-fA-F]{2}){1,8}$`)
+	hostnameLabelPattern  = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$`)
+)
+
+// realityPublicKeyLength is RawURL base64 of a 32-byte X25519 key. The length
+// check matters: the decoder silently skips CR/LF.
+const realityPublicKeyLength = 43
+
+func validateRealityProxyStartRequest(req realityProxyStartRequest) error {
+	if !isIPv4Literal(req.RemoteHost) && !isHostname(req.RemoteHost) {
+		return errors.New("remoteHost must be an IPv4 literal or a hostname")
+	}
+	if req.RemotePort < 1 || req.RemotePort > 65535 {
+		return errors.New("remotePort must be between 1 and 65535")
+	}
+	if !canonicalUUIDPattern.MatchString(req.UUID) {
+		return errors.New("uuid must be a canonical 8-4-4-4-12 hex UUID")
+	}
+	key, err := base64.RawURLEncoding.DecodeString(req.PublicKey)
+	if err != nil || len(req.PublicKey) != realityPublicKeyLength || len(key) != 32 {
+		return errors.New("publicKey must be an unpadded base64url 32-byte key")
+	}
+	if !realityShortIDPattern.MatchString(req.ShortID) {
+		return errors.New("shortId must be 2-16 hex characters, even length")
+	}
+	if !isHostname(req.ServerName) {
+		return errors.New("serverName must be a hostname")
+	}
+	return nil
+}
+
+func isIPv4Literal(s string) bool {
+	addr, err := netip.ParseAddr(s)
+	return err == nil && addr.Is4()
+}
+
+// isHostname accepts an LDH DNS name. An all-digit last label is refused, so
+// a malformed or bare IP like 999.1.1.1 never passes as a name.
+func isHostname(s string) bool {
+	if s == "" || len(s) > 253 {
+		return false
+	}
+	labels := strings.Split(s, ".")
+	for _, label := range labels {
+		if !hostnameLabelPattern.MatchString(label) {
+			return false
+		}
+	}
+	return strings.Trim(labels[len(labels)-1], "0123456789") != ""
 }
 
 func serviceErrorResponse(err error) okResponse {
@@ -389,12 +457,12 @@ func NewHandler(token string, service *Service) http.Handler {
 		if err != nil {
 			// The reason travels: without it the settings pane can only say the
 			// hub was unreachable, which sends the next hour after the network.
-			writeJSON(w, http.StatusInternalServerError, ssProxyStartResponse{OK: false, Error: err.Error()})
+			writeJSON(w, http.StatusInternalServerError, hubProxyStartResponse{OK: false, Error: err.Error()})
 			return
 		}
 
 		user, pass := service.ShadowsocksProxyCredentials()
-		writeJSON(w, http.StatusOK, ssProxyStartResponse{OK: true, Port: port, ProxyUsername: user, ProxyPassword: pass})
+		writeJSON(w, http.StatusOK, hubProxyStartResponse{OK: true, Port: port, ProxyUsername: user, ProxyPassword: pass})
 	}))
 
 	mux.Handle("/ssproxy/stop", withAuthAndLimit(token, limiter, func(w http.ResponseWriter, r *http.Request) {
@@ -404,6 +472,54 @@ func NewHandler(token string, service *Service) http.Handler {
 		}
 
 		if err := service.StopShadowsocksProxy(r.Context()); err != nil {
+			writeJSON(w, http.StatusInternalServerError, okResponse{OK: false})
+			return
+		}
+
+		writeJSON(w, http.StatusOK, okResponse{OK: true})
+	}))
+
+	mux.Handle("/realityproxy/start", withAuthAndLimit(token, limiter, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+
+		r.Body = http.MaxBytesReader(w, r.Body, maxBodySize)
+		var req realityProxyStartRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid json")
+			return
+		}
+		if err := validateRealityProxyStartRequest(req); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		port, err := service.StartRealityProxy(r.Context(), state.RealityProfile{
+			RemoteHost: req.RemoteHost,
+			RemotePort: req.RemotePort,
+			UUID:       req.UUID,
+			PublicKey:  req.PublicKey,
+			ShortID:    req.ShortID,
+			ServerName: req.ServerName,
+		})
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, hubProxyStartResponse{OK: false, Error: err.Error()})
+			return
+		}
+
+		user, pass := service.RealityProxyCredentials()
+		writeJSON(w, http.StatusOK, hubProxyStartResponse{OK: true, Port: port, ProxyUsername: user, ProxyPassword: pass})
+	}))
+
+	mux.Handle("/realityproxy/stop", withAuthAndLimit(token, limiter, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+
+		if err := service.StopRealityProxy(r.Context()); err != nil {
 			writeJSON(w, http.StatusInternalServerError, okResponse{OK: false})
 			return
 		}
