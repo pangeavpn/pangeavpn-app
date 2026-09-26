@@ -1,7 +1,10 @@
 # Edge relay
 
-A Cloudflare Worker that forwards the hub's `/v1/secure` envelope to
-`api.pangeavpn.org`. It backs the client's `fronted` hub method.
+A Cloudflare Worker that forwards the hub's sealed envelope, on `/v1/secure`
+or `/v2/secure`, to the same route on `api.pangeavpn.org`. It backs the
+client's `fronted` hub method. Clients with a pinned post-quantum key only
+ever send `/v2/secure`, so a relay that forwards `/v1/secure` alone is dead
+to them.
 
 ## Why it exists
 
@@ -80,19 +83,16 @@ method. Nothing breaks; the improvement simply is not there yet.
 forwards no `CF-Connecting-IP` or `X-Forwarded-For`, so the relay tells the hub
 nothing about who is calling.
 
-This costs nothing today: the hub mounts `/v1/secure` ahead of `clientRateLimit`
-in `app.js`, and the inner request it re-dispatches carries a `_secureChannel`
-marker the limiter skips — so nothing on this path is bucketed by source address
-and there is no shared-bucket throttling to design around. Worth re-checking if
-that middleware order ever changes; if per-IP limiting does start applying here,
-exempt the relay hub-side rather than forwarding the client address, which is
-the thing this path exists to keep off the wire.
+That now has a cost: `app.js` mounts `clientRateLimit` (30 requests a minute
+per source address) ahead of both secure routes, so every client on one relay
+shares the budget of Cloudflare's egress address, and heavy use throttles all of
+them together. The inner request the hub re-dispatches is skipped, so each
+envelope counts once. If that becomes a problem, exempt the relay hub-side
+rather than forwarding the client address, which is the thing this path exists
+to keep off the wire.
 
-The flip side is that `/v1/secure` has no rate limit at all, and a relay is one
-more public door to it. The Worker's POST-only, single-path, 64 KB ceiling is
-the only brake it adds. That door was already open at `api.pangeavpn.org`, so
-this is not new exposure — but a limiter keyed on something other than source IP
-would be worth having before this sees real traffic.
+The Worker's POST-only, two-route, 64 KB ceiling is the only brake it adds on
+its own side.
 
 **Cost.** This carries control-plane traffic only — login, regions, key
 registration. No tunnel data ever crosses it. The free tier is far more than

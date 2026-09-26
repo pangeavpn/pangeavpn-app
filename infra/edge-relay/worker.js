@@ -3,9 +3,9 @@
 
 const HUB_ORIGIN = "https://api.pangeavpn.org";
 
-// The only route relayed — hardcoded rather than proxied, so this can't
+// The only routes relayed — hardcoded rather than proxied, so this can't
 // become an open proxy for arbitrary paths/hosts.
-const RELAY_PATH = "/v1/secure";
+const RELAY_PATHS = new Set(["/v1/secure", "/v2/secure"]);
 
 // Envelopes are small — a few KB at most. Anything larger is not our client.
 const MAX_BODY_BYTES = 64 * 1024;
@@ -16,7 +16,7 @@ export default {
   async fetch(request) {
     const url = new URL(request.url);
 
-    if (url.pathname !== RELAY_PATH) {
+    if (!RELAY_PATHS.has(url.pathname)) {
       return new Response("Not found", { status: 404 });
     }
     if (request.method !== "POST") {
@@ -32,7 +32,7 @@ export default {
     // copied through. See README.md if the hub ever needs the client address.
     let upstream;
     try {
-      upstream = await fetch(`${HUB_ORIGIN}${RELAY_PATH}`, {
+      upstream = await fetch(`${HUB_ORIGIN}${url.pathname}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body,
