@@ -145,6 +145,32 @@ export class DaemonClient implements PostQuantumProvider {
     return this.request<OkResponse>("POST", "/ssproxy/stop");
   }
 
+  /** Starts the hub REALITY proxy; resolves to its loopback port and CONNECT auth. */
+  async startRealityProxy(profile: {
+    remoteHost: string;
+    remotePort: number;
+    uuid: string;
+    publicKey: string;
+    shortId: string;
+    serverName: string;
+  }): Promise<{ port: number; proxyUsername: string; proxyPassword: string }> {
+    const res = await this.request<{
+      ok: boolean;
+      port?: number;
+      proxyUsername?: string;
+      proxyPassword?: string;
+      error?: string;
+    }>("POST", "/realityproxy/start", profile);
+    if (!res.ok || !res.port || !res.proxyUsername || !res.proxyPassword) {
+      throw new Error(res.error || "reality proxy failed to start");
+    }
+    return { port: res.port, proxyUsername: res.proxyUsername, proxyPassword: res.proxyPassword };
+  }
+
+  async stopRealityProxy(): Promise<OkResponse> {
+    return this.request<OkResponse>("POST", "/realityproxy/stop");
+  }
+
   async disconnect(opts?: { keepKillSwitch?: boolean }, signal?: AbortSignal): Promise<OkResponse> {
     const body = opts?.keepKillSwitch ? { keepKillSwitch: true } : undefined;
     return this.request<OkResponse>("POST", "/disconnect", body, this.disconnectTimeoutMs, signal);

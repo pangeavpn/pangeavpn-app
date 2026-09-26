@@ -12,7 +12,7 @@ test("no active method says so rather than naming one", () => {
   );
 });
 
-const FLAGS = { directIp: true, shadowsocks: true, fronted: true, normal: false };
+const FLAGS = { directIp: true, reality: true, shadowsocks: true, fronted: true, normal: false };
 
 test("an active method is named, with its address when there is one", () => {
   assert.equal(
@@ -56,11 +56,23 @@ test("a method with nothing to try says why instead of blaming the network", () 
     "settings.provisioning.result.noCredentials"
   );
   assert.equal(
+    hubTestText({ method: "reality", ok: false, unavailable: "noCredentials", ms: 0 }, t),
+    "settings.provisioning.result.noRealityCredentials",
+    "the shared message names Shadowsocks"
+  );
+  assert.equal(
     hubTestText({ method: "directIp", ok: false, unavailable: "noAddress", ms: 0 }, t),
     "settings.provisioning.result.noAddress"
   );
   assert.equal(
     hubTestText({ method: "normal", ok: false, unavailable: "busy", ms: 0 }, t),
     "settings.provisioning.result.busy"
+  );
+});
+
+test("the REALITY method is named like the others", () => {
+  assert.equal(
+    hubActiveText({ methods: FLAGS, active: "reality", detail: "192.0.2.10" }, t),
+    'settings.provisioning.active.detail {"method":"settings.provisioning.hubReality.title","detail":"192.0.2.10"}'
   );
 });

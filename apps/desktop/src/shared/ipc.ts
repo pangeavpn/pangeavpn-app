@@ -223,6 +223,16 @@ export interface ServerInfo {
     method: string;
     password: string;
   };
+  /** The node's REALITY user that reaches only the hub; same role as
+   *  controlPlaneShadowsocks. See shared/hubRealityCreds.ts. */
+  controlPlaneReality?: {
+    remoteHost: string;
+    remotePort: number;
+    uuid: string;
+    publicKey: string;
+    shortId: string;
+    serverName: string;
+  };
   /** Edge relays, repeated per region: this route answers with a bare array,
    *  so a top-level field would break clients that expect one. */
   frontedEndpoints?: string[];

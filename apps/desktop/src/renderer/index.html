@@ -604,11 +604,23 @@
                 <label class="option-title" for="hubDirectIpToggle" data-i18n="settings.provisioning.directIp.title">Direct IP</label>
                 <span class="hub-badge" id="hubDirectIpBadge" data-i18n="settings.provisioning.inUse" hidden>In use</span>
               </span>
-              <span class="option-desc" data-i18n="settings.provisioning.directIp.hint">Connects by IP, no DNS lookup. The only one that works under lockdown.</span>
+              <span class="option-desc" data-i18n="settings.provisioning.directIp.hint">Connects by IP, no DNS lookup. Works under lockdown.</span>
               <span class="hub-test-result" id="hubDirectIpResult" role="status" aria-live="polite" hidden></span>
             </span>
             <button id="hubDirectIpTestBtn" class="hub-test-btn" type="button" data-i18n="settings.provisioning.test">Test</button>
             <input id="hubDirectIpToggle" class="toggle-switch" type="checkbox" />
+          </div>
+          <div class="option-row option-row-toggle hub-method-row" data-hub-method="reality">
+            <span class="option-copy">
+              <span class="option-title-line">
+                <label class="option-title" for="hubRealityToggle" data-i18n="settings.provisioning.hubReality.title">REALITY</label>
+                <span class="hub-badge" id="hubRealityBadge" data-i18n="settings.provisioning.inUse" hidden>In use</span>
+              </span>
+              <span class="option-desc" data-i18n="settings.provisioning.hubReality.hint">Tunnels account traffic through REALITY, which looks like a visit to an ordinary website. Works with the VPN off, even under lockdown.</span>
+              <span class="hub-test-result" id="hubRealityResult" role="status" aria-live="polite" hidden></span>
+            </span>
+            <button id="hubRealityTestBtn" class="hub-test-btn" type="button" data-i18n="settings.provisioning.test">Test</button>
+            <input id="hubRealityToggle" class="toggle-switch" type="checkbox" />
           </div>
           <div class="option-row option-row-toggle hub-method-row" data-hub-method="shadowsocks">
             <span class="option-copy">
@@ -616,7 +628,7 @@
                 <label class="option-title" for="hubShadowsocksToggle" data-i18n="settings.provisioning.hubShadowsocks.title">Shadowsocks</label>
                 <span class="hub-badge" id="hubShadowsocksBadge" data-i18n="settings.provisioning.inUse" hidden>In use</span>
               </span>
-              <span class="option-desc" data-i18n="settings.provisioning.hubShadowsocks.hint">Tunnels account traffic through Shadowsocks, so nobody sees which server you reach. The VPN stays off.</span>
+              <span class="option-desc" data-i18n="settings.provisioning.hubShadowsocks.hint">Tunnels account traffic through Shadowsocks, so nobody sees which server you reach. Works with the VPN off, even under lockdown.</span>
               <span class="hub-test-result" id="hubShadowsocksResult" role="status" aria-live="polite" hidden></span>
             </span>
             <button id="hubShadowsocksTestBtn" class="hub-test-btn" type="button" data-i18n="settings.provisioning.test">Test</button>
@@ -628,7 +640,7 @@
                 <label class="option-title" for="hubFrontedToggle" data-i18n="settings.provisioning.hubFronted.title">Relay</label>
                 <span class="hub-badge" id="hubFrontedBadge" data-i18n="settings.provisioning.inUse" hidden>In use</span>
               </span>
-              <span class="option-desc" data-i18n="settings.provisioning.hubFronted.hint">Goes through a relay on a large content network, at an address too widely shared to block cheaply. The relay can't read what it passes on.</span>
+              <span class="option-desc" data-i18n="settings.provisioning.hubFronted.hint">Goes through a relay on a large content network, at an address too widely shared to block cheaply. The relay can't read what it passes on. Doesn't work under lockdown.</span>
               <span class="hub-test-result" id="hubFrontedResult" role="status" aria-live="polite" hidden></span>
             </span>
             <button id="hubFrontedTestBtn" class="hub-test-btn" type="button" data-i18n="settings.provisioning.test">Test</button>
@@ -640,7 +652,7 @@
                 <label class="option-title" for="hubNormalToggle" data-i18n="settings.provisioning.hubNormal.title">Normal connection</label>
                 <span class="hub-badge" id="hubNormalBadge" data-i18n="settings.provisioning.inUse" hidden>In use</span>
               </span>
-              <span class="option-desc" data-i18n="settings.provisioning.hubNormal.hint">Plain HTTPS and a normal DNS lookup. Tried last: it's the only one that exposes our domain.</span>
+              <span class="option-desc" data-i18n="settings.provisioning.hubNormal.hint">Plain HTTPS and a normal DNS lookup. Tried last: it's the only one that exposes our domain. Doesn't work under lockdown.</span>
               <span class="hub-test-result" id="hubNormalResult" role="status" aria-live="polite" hidden></span>
             </span>
             <button id="hubNormalTestBtn" class="hub-test-btn" type="button" data-i18n="settings.provisioning.test">Test</button>

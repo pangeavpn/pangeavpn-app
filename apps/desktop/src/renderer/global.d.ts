@@ -101,10 +101,11 @@ declare global {
     expiresAt: string | null;
   }
 
-  type HubMethodName = "directIp" | "shadowsocks" | "fronted" | "normal";
+  type HubMethodName = "directIp" | "reality" | "shadowsocks" | "fronted" | "normal";
 
   interface HubMethodFlags {
     directIp: boolean;
+    reality: boolean;
     shadowsocks: boolean;
     fronted: boolean;
     normal: boolean;

@@ -15,11 +15,11 @@ import {
   type HubMethodTestResult,
   type HubStatus
 } from "../shared/hubMethods";
+import { firstWorking, mergeAdvertised, promoteEntry } from "../shared/hubCredList";
+import { REALITY_CREDS, seedRealityCreds, type HubRealityCreds } from "../shared/hubRealityCreds";
 import {
-  firstWorkingCreds,
   mergeAdvertisedCreds,
-  promoteCreds,
-  restoreCachedCreds,
+  seedCachedCreds,
   type HubShadowsocksCreds
 } from "../shared/hubShadowsocksCreds";
 import {
@@ -479,13 +479,25 @@ type HubProbePath =
 /** A test result before the method name and elapsed time are stamped on. */
 type HubMethodOutcome = Omit<HubMethodTestResult, "method" | "ms">;
 
-/** The daemon-side Shadowsocks proxy ensureHub routes the secure envelope
- *  through. Injected so the client keeps no daemon dependency of its own. */
-export interface ShadowsocksHubProxy {
+/** A daemon-side CONNECT proxy ensureHub routes the secure envelope through.
+ *  Injected so the client keeps no daemon dependency of its own. */
+export interface HubProxy<C> {
   /** Resolves to the proxy's loopback port and CONNECT auth, or null when unavailable. */
-  start(creds: HubShadowsocksCreds): Promise<{ port: number; proxyUsername: string; proxyPassword: string } | null>;
+  start(creds: C): Promise<HubProxyEndpoint | null>;
   stop(): Promise<void>;
 }
+
+export interface HubProxyEndpoint {
+  port: number;
+  proxyUsername: string;
+  proxyPassword: string;
+}
+
+export type ShadowsocksHubProxy = HubProxy<HubShadowsocksCreds>;
+export type RealityHubProxy = HubProxy<HubRealityCreds>;
+
+/** The hub methods that ride a daemon proxy. */
+type ProxyHubMethod = Extract<HubMethod, "reality" | "shadowsocks">;
 
 export class PangeaApiClient {
   private readonly timeoutMs: number;
@@ -513,22 +525,25 @@ export class PangeaApiClient {
   private cachedHubIp: string | null = null;
   private onHubIpResolved: ((ip: string) => void) | null = null;
 
-  // Loopback port of the daemon's Shadowsocks hub proxy while it is carrying
-  // our traffic; null when that method is off or not currently in use.
-  private ssProxyPort: number | null = null;
-  private ssProxyUsername: string | null = null;
-  private ssProxyPassword: string | null = null;
+  // The daemon proxy carrying our traffic and how to stop it; null when no
+  // proxy method is the path in use.
+  private activeProxy: { method: ProxyHubMethod; endpoint: HubProxyEndpoint; stop: () => Promise<void> } | null =
+    null;
   private shadowsocksHubProxy: ShadowsocksHubProxy | null = null;
+  private realityHubProxy: RealityHubProxy | null = null;
   // The daemon's post-quantum key material. Null leaves peers unkeyed and the
   // hub channel on v1, exactly as before the exchange existed.
   private postQuantum: PostQuantumProvider | null = null;
   // Off unless the user asks for it. Gates the tunnel pre-shared key only; the
   // hub channel stays on v2, which is not the user's to weaken.
   private postQuantumEnabled = false;
-  // Control-plane credentials from the last good /api/client/regions. Every node
-  // the hub named, not just one — a rotated node's key leaves the others as the way back.
-  private hubShadowsocks: HubShadowsocksCreds[] = [];
+  // Control-plane credentials from the last good /api/client/regions, else the shipped
+  // seed. Every node, not just one — a rotated node's key leaves the others as the way back.
+  private hubShadowsocks: HubShadowsocksCreds[] = seedCachedCreds(null);
   private onHubShadowsocks: ((creds: HubShadowsocksCreds[]) => void) | null = null;
+  // The same for each node's REALITY user that only reaches the hub.
+  private hubReality: HubRealityCreds[] = seedRealityCreds(null);
+  private onHubReality: ((creds: HubRealityCreds[]) => void) | null = null;
 
   // Edge relays that will forward the envelope, refreshed from what the hub advertises.
   // Empty until configured, which makes the fronted method a no-op ensureHub skips over.
@@ -555,8 +570,8 @@ export class PangeaApiClient {
   private activeHubMethod: HubMethod | null = null;
   private activeHubDetail: string | null = null;
   private onHubStatus: ((status: HubStatus) => void) | null = null;
-  // One test at a time: the shadowsocks probe borrows the daemon's single
-  // proxy, so two overlapping tests would fight over it.
+  // One test at a time: a proxy probe borrows one of the daemon's proxies, so
+  // two overlapping tests would fight over it.
   private hubTestInFlight = false;
 
   // One shared cascade, so concurrent callers don't each pay ensureHub's full
@@ -619,6 +634,12 @@ export class PangeaApiClient {
     this.resetHubResolution();
   }
 
+  /** Supplies the REALITY hub proxy, on the same terms as the Shadowsocks one. */
+  setRealityHubProxy(proxy: RealityHubProxy | null): void {
+    this.realityHubProxy = proxy;
+    this.resetHubResolution();
+  }
+
   /** Supplies the daemon's post-quantum routes. */
   setPostQuantum(provider: PostQuantumProvider | null): void {
     this.postQuantum = provider;
@@ -662,13 +683,13 @@ export class PangeaApiClient {
   }
 
   /** The proxy port currently carrying hub traffic, for diagnostics. */
-  getShadowsocksProxyPort(): number | null {
-    return this.ssProxyPort;
+  getHubProxyPort(): number | null {
+    return this.activeProxy?.endpoint.port ?? null;
   }
 
-  /** Restores cached control-plane credentials at startup. */
+  /** Restores cached control-plane credentials at startup, or the shipped seed. */
   setCachedHubShadowsocks(stored: unknown): void {
-    this.hubShadowsocks = restoreCachedCreds(stored);
+    this.hubShadowsocks = seedCachedCreds(stored);
   }
 
   getCachedHubShadowsocks(): HubShadowsocksCreds[] {
@@ -678,6 +699,20 @@ export class PangeaApiClient {
   /** Called when fresh credentials arrive, so the caller can persist them. */
   onHubShadowsocksResolved(fn: (creds: HubShadowsocksCreds[]) => void): void {
     this.onHubShadowsocks = fn;
+  }
+
+  /** Restores cached REALITY control-plane credentials at startup, or the shipped seed. */
+  setCachedHubReality(stored: unknown): void {
+    this.hubReality = seedRealityCreds(stored);
+  }
+
+  getCachedHubReality(): HubRealityCreds[] {
+    return this.hubReality;
+  }
+
+  /** Called when fresh REALITY credentials arrive, so the caller can persist them. */
+  onHubRealityResolved(fn: (creds: HubRealityCreds[]) => void): void {
+    this.onHubReality = fn;
   }
 
   /** Restores the cached node list at startup. */
@@ -819,20 +854,15 @@ export class PangeaApiClient {
     this.hubResolutionFailedAtMs = 0;
     // Drop the proxy too: the next ensureHub re-decides whether to use it, and
     // leaving it running would keep a listener open for a path we abandoned.
-    this.stopShadowsocksProxy();
-  }
-
-  private clearSsProxyState(): void {
-    this.ssProxyPort = null;
-    this.ssProxyUsername = null;
-    this.ssProxyPassword = null;
+    this.stopHubProxy();
   }
 
   /** Best-effort: stops the proxy if one is running, ignoring failure. */
-  private stopShadowsocksProxy(): void {
-    if (this.ssProxyPort === null) return;
-    this.clearSsProxyState();
-    this.shadowsocksHubProxy?.stop().catch(() => {});
+  private stopHubProxy(): void {
+    const active = this.activeProxy;
+    if (!active) return;
+    this.activeProxy = null;
+    active.stop().catch(() => {});
   }
 
   /** Verify the secure route is reachable and decryptable on the current transport
@@ -843,13 +873,9 @@ export class PangeaApiClient {
 
   /** The path the next hub request would take, as an explicit value. */
   private currentProbePath(): HubProbePath {
-    if (this.ssProxyPort) {
-      return {
-        kind: "proxy",
-        port: this.ssProxyPort,
-        username: this.ssProxyUsername ?? undefined,
-        password: this.ssProxyPassword ?? undefined
-      };
+    if (this.activeProxy) {
+      const { port, proxyUsername, proxyPassword } = this.activeProxy.endpoint;
+      return { kind: "proxy", port, username: proxyUsername || undefined, password: proxyPassword || undefined };
     }
     if (this.frontedHost) return { kind: "fronted", host: this.frontedHost };
     if (this.dohResolvedIp) return { kind: "ip", ip: this.dohResolvedIp };
@@ -984,7 +1010,18 @@ export class PangeaApiClient {
       }
     }
 
-    // 3. Shadowsocks — the daemon proxies the secure envelope for us.
+    // 3. REALITY — the daemon proxies the envelope to a node user pinned to the hub.
+    if (this.hubMethods.reality) {
+      this.dohResolvedIp = null;
+      if (await this.tryRealityHubPath()) {
+        console.log(`[HubURL] REALITY hub path works`);
+        this.setActiveHubMethod("reality", this.hubReality[0]?.remoteHost ?? null);
+        this.hubReady = true;
+        return true;
+      }
+    }
+
+    // 4. Shadowsocks — the same, over SS-2022.
     if (this.hubMethods.shadowsocks) {
       this.dohResolvedIp = null;
       if (await this.tryShadowsocksHubPath()) {
@@ -995,7 +1032,7 @@ export class PangeaApiClient {
       }
     }
 
-    // 4. Edge relay — the CDN forwards the envelope to the hub for us.
+    // 5. Edge relay — the CDN forwards the envelope to the hub for us.
     if (this.hubMethods.fronted) {
       this.dohResolvedIp = null;
       if (await this.tryFrontedPath()) {
@@ -1006,7 +1043,7 @@ export class PangeaApiClient {
       }
     }
 
-    // 5. Plain HTTPS to the domain. Last because it is the only step whose
+    // 6. Plain HTTPS to the domain. Last because it is the only step whose
     //    SNI names the hub in cleartext.
     if (this.hubMethods.normal) {
       this.dohResolvedIp = null;
@@ -1097,32 +1134,48 @@ export class PangeaApiClient {
   /** Attempt the hub through the daemon's Shadowsocks proxy. Returns false —
    *  never throws — so ensureHub can fall through to the remaining methods. */
   private async tryShadowsocksHubPath(): Promise<boolean> {
-    if (!this.shadowsocksHubProxy || this.hubShadowsocks.length === 0) {
-      console.log(`[HubURL] Shadowsocks hub path unavailable (no proxy or no cached credentials)`);
-      return false;
+    const won = await this.tryProxyHubPath("shadowsocks", this.shadowsocksHubProxy, this.hubShadowsocks);
+    if (won === null) return false;
+    this.promoteHubShadowsocks(won);
+    return true;
+  }
+
+  /** The same through the daemon's REALITY proxy. */
+  private async tryRealityHubPath(): Promise<boolean> {
+    const won = await this.tryProxyHubPath("reality", this.realityHubProxy, this.hubReality);
+    if (won === null) return false;
+    this.promoteHubReality(won);
+    return true;
+  }
+
+  /** Tries each cached node on one daemon proxy, leaving the winner running as
+   *  the active path. Resolves to the winning index, or null — never throws. */
+  private async tryProxyHubPath<C>(
+    method: ProxyHubMethod,
+    proxy: HubProxy<C> | null,
+    list: readonly C[]
+  ): Promise<number | null> {
+    if (!proxy || list.length === 0) {
+      console.log(`[HubURL] ${method} hub path unavailable (no proxy or no cached credentials)`);
+      return null;
     }
-    const proxy = this.shadowsocksHubProxy;
-    const won = await firstWorkingCreds(
-      this.hubShadowsocks,
+    const won = await firstWorking(
+      list,
       async (creds) => {
-        const started = await proxy.start(creds);
-        if (!started) return null;
-        this.ssProxyPort = started.port;
-        this.ssProxyUsername = started.proxyUsername;
-        this.ssProxyPassword = started.proxyPassword;
-        if (await this.trySecureProbeCurrentPath()) return started.port;
-        this.clearSsProxyState();
+        const endpoint = await proxy.start(creds);
+        if (!endpoint) return null;
+        this.activeProxy = { method, endpoint, stop: () => proxy.stop() };
+        if (await this.trySecureProbeCurrentPath()) return endpoint.port;
+        this.activeProxy = null;
         await proxy.stop();
         return null;
       },
       (err, index) => {
-        console.warn(`[HubURL] Shadowsocks hub node ${index + 1} failed:`, sanitizeLog(err));
-        this.clearSsProxyState();
+        console.warn(`[HubURL] ${method} hub node ${index + 1} failed:`, sanitizeLog(err));
+        this.activeProxy = null;
       }
     );
-    if (!won) return false;
-    this.promoteHubShadowsocks(won.index);
-    return true;
+    return won ? won.index : null;
   }
 
   /** Attempt the hub through each cached edge relay in turn. Returns false —
@@ -1155,10 +1208,17 @@ export class PangeaApiClient {
   }
 
   private promoteHubShadowsocks(index: number): void {
-    const promoted = promoteCreds(this.hubShadowsocks, index);
+    const promoted = promoteEntry(this.hubShadowsocks, index);
     if (!promoted) return;
     this.hubShadowsocks = promoted;
     this.onHubShadowsocks?.(this.hubShadowsocks);
+  }
+
+  private promoteHubReality(index: number): void {
+    const promoted = promoteEntry(this.hubReality, index);
+    if (!promoted) return;
+    this.hubReality = promoted;
+    this.onHubReality?.(this.hubReality);
   }
 
   /** Probes one method on its own, leaving the path in use untouched. Never
@@ -1184,8 +1244,10 @@ export class PangeaApiClient {
     switch (method) {
       case "directIp":
         return this.testDirectIpPath();
+      case "reality":
+        return this.testProxyPath("reality", this.realityHubProxy, this.hubReality);
       case "shadowsocks":
-        return this.testShadowsocksPath();
+        return this.testProxyPath("shadowsocks", this.shadowsocksHubProxy, this.hubShadowsocks);
       case "fronted":
         return this.testFrontedPath();
       case "normal": {
@@ -1224,22 +1286,25 @@ export class PangeaApiClient {
     return { ok: false };
   }
 
-  private async testShadowsocksPath(): Promise<HubMethodOutcome> {
-    if (!this.shadowsocksHubProxy || this.hubShadowsocks.length === 0) {
+  private async testProxyPath<C extends { remoteHost: string }>(
+    method: ProxyHubMethod,
+    proxy: HubProxy<C> | null,
+    list: readonly C[]
+  ): Promise<HubMethodOutcome> {
+    if (!proxy || list.length === 0) {
       return { ok: false, unavailable: "noCredentials" };
     }
     // Borrow the running proxy rather than restarting the one carrying traffic.
-    if (this.ssProxyPort !== null) {
+    if (this.activeProxy?.method === method) {
       const ok = await this.probeSecurePath(this.currentProbePath());
-      return ok ? { ok, detail: this.hubShadowsocks[0]?.remoteHost } : { ok };
+      return ok ? { ok, detail: list[0]?.remoteHost } : { ok };
     }
-    const proxy = this.shadowsocksHubProxy;
-    for (const creds of this.hubShadowsocks) {
-      let started: { port: number; proxyUsername: string; proxyPassword: string } | null = null;
+    for (const creds of list) {
+      let started: HubProxyEndpoint | null = null;
       try {
         started = await proxy.start(creds);
       } catch (err) {
-        console.warn(`[HubTest] Shadowsocks proxy start failed:`, sanitizeLog(err));
+        console.warn(`[HubTest] ${method} proxy start failed:`, sanitizeLog(err));
       }
       if (!started) continue;
       const ok = await this.probeSecurePath({
@@ -1292,7 +1357,7 @@ export class PangeaApiClient {
         this.hubReady = false;
         this.dohResolvedIp = null;
         this.frontedHost = null;
-        this.stopShadowsocksProxy();
+        this.stopHubProxy();
       }
       throw err;
     }
@@ -1306,17 +1371,18 @@ export class PangeaApiClient {
     signal?: AbortSignal,
     timeoutMs: number = this.timeoutMs
   ): Promise<Response> {
-    if (this.ssProxyPort) {
-      // CONNECT names the hub by hostname: the node resolves it, so a client
-      // with no cached IP still gets through.
-      return fetchViaConnectProxy(this.ssProxyPort, HUB_HOSTNAME, HUB_HOSTNAME, route, {
+    if (this.activeProxy) {
+      // CONNECT names the hub by hostname: the node resolves it (or pins it, for
+      // REALITY), so a client with no cached IP still gets through.
+      const { port, proxyUsername, proxyPassword } = this.activeProxy.endpoint;
+      return fetchViaConnectProxy(port, HUB_HOSTNAME, HUB_HOSTNAME, route, {
         method: "POST",
         headers: SEALED_ENVELOPE_HEADERS,
         body,
         timeoutMs,
         signal,
-        proxyUsername: this.ssProxyUsername ?? undefined,
-        proxyPassword: this.ssProxyPassword ?? undefined
+        proxyUsername: proxyUsername || undefined,
+        proxyPassword: proxyPassword || undefined
       });
     }
     if (this.frontedHost) {
@@ -1421,7 +1487,7 @@ export class PangeaApiClient {
           // A relay or proxy answering with an error page is intercepted too; drop both
           // so the branch order in this method reaches the DoH path just resolved.
           this.frontedHost = null;
-          this.stopShadowsocksProxy();
+          this.stopHubProxy();
           const retryResponse = await fetchDohResolved(resolvedIp, HUB_HOSTNAME, sealed.route, {
             method: "POST",
             headers: SEALED_ENVELOPE_HEADERS,
@@ -1486,6 +1552,7 @@ export class PangeaApiClient {
       this.acceptLicenseKey(data.vpnAccessToken, "Token login");
       this.rememberServers(data.servers);
       this.rememberHubShadowsocks(data.servers);
+      this.rememberHubReality(data.servers);
       this.rememberFrontedEndpoints(data.frontedEndpoints);
       return data;
     } catch (error) {
@@ -1518,6 +1585,7 @@ export class PangeaApiClient {
       this.acceptLicenseKey(data.vpnAccessToken, "Bootstrap");
       this.rememberServers(data.servers);
       this.rememberHubShadowsocks(data.servers);
+      this.rememberHubReality(data.servers);
       this.rememberFrontedEndpoints(data.frontedEndpoints);
       return data;
     } catch (error) {
@@ -1543,6 +1611,7 @@ export class PangeaApiClient {
       const data = await this.hubRequest<ServerInfo[]>("GET", route);
       this.rememberServers(data);
       this.rememberHubShadowsocks(data);
+      this.rememberHubReality(data);
       this.rememberFrontedEndpoints(data.find((s) => s.frontedEndpoints)?.frontedEndpoints);
       return data;
     } catch (err) {
@@ -1654,6 +1723,14 @@ export class PangeaApiClient {
     if (!merged) return;
     this.frontedEndpoints = merged;
     this.onFrontedEndpoints?.(this.frontedEndpoints);
+  }
+
+  private rememberHubReality(servers: ServerInfo[]): void {
+    if (!Array.isArray(servers)) return;
+    const merged = mergeAdvertised(REALITY_CREDS, this.hubReality, servers.map((s) => s.controlPlaneReality));
+    if (!merged) return;
+    this.hubReality = merged;
+    this.onHubReality?.(this.hubReality);
   }
 
   private rememberHubShadowsocks(servers: ServerInfo[]): void {

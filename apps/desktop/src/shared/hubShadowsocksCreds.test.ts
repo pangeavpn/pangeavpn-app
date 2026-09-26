@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { isIPv4Literal } from "./ipLiteral.ts";
 import {
+  DEFAULT_HUB_SHADOWSOCKS,
   firstWorkingCreds,
   isHubShadowsocksCreds,
   mergeAdvertisedCreds,
   promoteCreds,
   restoreCachedCreds,
   sameHubShadowsocks,
+  seedCachedCreds,
   type HubShadowsocksCreds
 } from "./hubShadowsocksCreds.ts";
 
@@ -216,4 +219,56 @@ test("firstWorkingCreds returns null when every node fails", async () => {
 test("firstWorkingCreds treats a zero port as a real answer, not a falsy miss", async () => {
   const won = await firstWorkingCreds([node("a")], async () => 0);
   assert.equal(won?.value, 0);
+});
+
+const SS2022_KEY_BYTES: Record<string, number> = {
+  "2022-blake3-aes-128-gcm": 16,
+  "2022-blake3-aes-256-gcm": 32,
+  "2022-blake3-chacha20-poly1305": 32
+};
+
+test("DEFAULT_HUB_SHADOWSOCKS ships usable, distinct control-plane nodes", () => {
+  assert.ok(DEFAULT_HUB_SHADOWSOCKS.length > 0);
+  for (const creds of DEFAULT_HUB_SHADOWSOCKS) {
+    assert.equal(isHubShadowsocksCreds(creds), true, creds.remoteHost);
+    assert.equal(creds.remotePort, 8489, creds.remoteHost);
+  }
+  const hosts = DEFAULT_HUB_SHADOWSOCKS.map((c) => c.remoteHost);
+  assert.equal(new Set(hosts).size, hosts.length);
+});
+
+// A name would need a DNS lookup first, which is exactly what gets poisoned.
+test("DEFAULT_HUB_SHADOWSOCKS dials IP literals only", () => {
+  for (const creds of DEFAULT_HUB_SHADOWSOCKS) {
+    assert.equal(isIPv4Literal(creds.remoteHost), true, creds.remoteHost);
+  }
+});
+
+// A wrong-length SS-2022 key fails like a dead node, with no error to see.
+test("DEFAULT_HUB_SHADOWSOCKS carries SS-2022 keys of the right length", () => {
+  for (const creds of DEFAULT_HUB_SHADOWSOCKS) {
+    const want = SS2022_KEY_BYTES[creds.method];
+    assert.ok(want, `${creds.remoteHost} must use an SS-2022 cipher, not ${creds.method}`);
+    assert.equal(Buffer.from(creds.password, "base64").length, want, creds.remoteHost);
+    assert.equal(Buffer.from(creds.password, "base64").toString("base64"), creds.password);
+  }
+});
+
+test("seedCachedCreds falls back to the shipped nodes when nothing usable is stored", () => {
+  for (const stored of [null, undefined, [], {}, [{ junk: true }]]) {
+    assert.deepEqual(seedCachedCreds(stored), [...DEFAULT_HUB_SHADOWSOCKS]);
+  }
+});
+
+test("seedCachedCreds prefers what the hub last advertised over the shipped nodes", () => {
+  const stored = [node("192.0.2.10"), node("192.0.2.11")];
+  assert.deepEqual(seedCachedCreds(stored), stored);
+});
+
+test("seedCachedCreds hands out copies, so a caller cannot alter the shipped nodes", () => {
+  const before = DEFAULT_HUB_SHADOWSOCKS.map((c) => ({ ...c }));
+  const seeded = seedCachedCreds(null);
+  seeded[0].password = "mutated";
+  seeded.reverse();
+  assert.deepEqual(DEFAULT_HUB_SHADOWSOCKS.map((c) => ({ ...c })), before);
 });

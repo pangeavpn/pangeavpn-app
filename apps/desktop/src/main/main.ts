@@ -23,6 +23,7 @@ import {
   ConnectCancelledError,
   SubscriptionExpiredError
 } from "./pangeaApiClient";
+import type { HubRealityCreds } from "../shared/hubRealityCreds";
 import type { HubShadowsocksCreds } from "../shared/hubShadowsocksCreds";
 import type { CachedSubscription } from "../shared/cachedSubscription";
 import { beginAttempt, cancelAttempt, commitAttempt, endAttempt, isCancelled } from "./connectAttempt";
@@ -1447,6 +1448,12 @@ async function persistHubShadowsocks(creds: HubShadowsocksCreds[]): Promise<void
   }, "hub Shadowsocks credentials");
 }
 
+async function persistHubReality(creds: HubRealityCreds[]): Promise<void> {
+  await updateSettings((settings) => {
+    settings.hubReality = creds;
+  }, "hub REALITY credentials");
+}
+
 async function persistFrontedEndpoints(endpoints: string[]): Promise<void> {
   await updateSettings((settings) => {
     settings.frontedEndpoints = endpoints;
@@ -2450,6 +2457,7 @@ function applyPersistedSettings(settings: Record<string, unknown>): void {
   // Was a single object before every node's credentials were cached, so an
   // existing install still has one to migrate.
   pangeaApiClient.setCachedHubShadowsocks(settings.hubShadowsocks);
+  pangeaApiClient.setCachedHubReality(settings.hubReality);
   // Edge relays, and the last node list the hub gave us. Both are what stands
   // between a blocked hub and a client with nowhere left to go.
   pangeaApiClient.setCachedFrontedEndpoints(settings.frontedEndpoints);
@@ -2513,6 +2521,7 @@ function wirePangeaApiClient(): void {
     mainWindow?.webContents.send(IPC_CHANNELS.hubStatusChanged, status);
   });
   pangeaApiClient.onHubShadowsocksResolved((creds) => void persistHubShadowsocks(creds));
+  pangeaApiClient.onHubRealityResolved((creds) => void persistHubReality(creds));
   pangeaApiClient.onFrontedEndpointsResolved((endpoints) => void persistFrontedEndpoints(endpoints));
   pangeaApiClient.onDeadDropStateChanged((state) => void persistDeadDropState(state));
   pangeaApiClient.onServersResolved((servers) => void persistServers(servers));
@@ -2535,6 +2544,23 @@ function wirePangeaApiClient(): void {
     stop: async () => {
       try {
         await daemonClient.stopSsProxy();
+      } catch {
+        // best-effort
+      }
+    }
+  });
+  pangeaApiClient.setRealityHubProxy({
+    start: async (creds) => {
+      try {
+        return await daemonClient.startRealityProxy(creds);
+      } catch (err) {
+        console.warn("Failed to start the REALITY hub proxy:", sanitizeLog(err));
+        return null;
+      }
+    },
+    stop: async () => {
+      try {
+        await daemonClient.stopRealityProxy();
       } catch {
         // best-effort
       }
