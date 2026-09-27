@@ -211,9 +211,11 @@ type Service struct {
 	// state) means every health tick; it is pushed out only after a correction.
 	dnsGuardNextAt time.Time
 
-	// demotedTransport is sent to the back of the next cascade; transportsExhausted
-	// says the cascade ran out here, the app's cue to try another server.
-	demotedTransport    string
+	// recoveryLead places the transport that just died in the next cascade; lastDead*
+	// is the previous death. transportsExhausted is the app's cue to try another server.
+	recoveryLead        cascadeLead
+	lastDeadKind        string
+	lastDeadAt          time.Time
 	transportsExhausted bool
 
 	// endpointRouteRepairs counts consecutive health checks that had to re-pin the
@@ -1230,7 +1232,7 @@ func (s *Service) startTransportWithHandshake(ctx context.Context, profile *stat
 		return "", err
 	}
 	candidates = s.reorderByMemory(candidates, preferredTransport, networkKey)
-	candidates = s.demoteFailedTransport(candidates)
+	candidates = s.applyRecoveryLead(candidates)
 	defer s.setConnectingTransportKind("")
 
 	var failures cascadeFailures
@@ -1319,33 +1321,40 @@ func (s *Service) reorderByMemory(candidates []transportCandidate, preferredTran
 	return reordered
 }
 
-// demoteFailedTransport moves the transport whose data path just died to the
-// back, so recovery tries every other way out before walking into the block.
-func (s *Service) demoteFailedTransport(candidates []transportCandidate) []transportCandidate {
-	kind := s.takeDemotedTransport()
-	if kind == "" || len(candidates) < 2 {
-		return candidates
-	}
-	demoted := make([]transportCandidate, 0, len(candidates))
-	var tail []transportCandidate
-	for _, candidate := range candidates {
-		if candidate.kind == kind {
-			tail = append(tail, candidate)
-			continue
-		}
-		demoted = append(demoted, candidate)
-	}
-	return append(demoted, tail...)
+// cascadeLead is the transport whose data path just died: redialled first, or
+// sent to the back once it keeps dying (see noteDeadTransport).
+type cascadeLead struct {
+	kind   string
+	demote bool
 }
 
-// takeDemotedTransport reads and clears the demotion, which applies to the next
-// cascade only — a later session must not inherit it.
-func (s *Service) takeDemotedTransport() string {
+func (s *Service) applyRecoveryLead(candidates []transportCandidate) []transportCandidate {
+	lead := s.takeRecoveryLead()
+	if lead.kind == "" || len(candidates) < 2 {
+		return candidates
+	}
+	var match, rest []transportCandidate
+	for _, candidate := range candidates {
+		if candidate.kind == lead.kind {
+			match = append(match, candidate)
+		} else {
+			rest = append(rest, candidate)
+		}
+	}
+	if lead.demote {
+		return append(rest, match...)
+	}
+	return append(match, rest...)
+}
+
+// takeRecoveryLead reads and clears the lead, which applies to the next cascade
+// only — a later session must not inherit it.
+func (s *Service) takeRecoveryLead() cascadeLead {
 	s.recoveryMu.Lock()
 	defer s.recoveryMu.Unlock()
-	kind := s.demotedTransport
-	s.demotedTransport = ""
-	return kind
+	lead := s.recoveryLead
+	s.recoveryLead = cascadeLead{}
+	return lead
 }
 
 // rememberTransport records kind as the last-good transport for networkKey so the
@@ -2528,8 +2537,8 @@ func (s *Service) runHealthCheck(ctx context.Context) {
 	s.resetRecovery()
 }
 
-// escalateDeadDataPath rebuilds a session whose tunnel stopped carrying traffic,
-// re-running the whole cascade rather than restarting the transport that died.
+// escalateDeadDataPath rebuilds a session whose tunnel stopped carrying traffic
+// through the whole cascade, led by the transport that died (see noteDeadTransport).
 func (s *Service) escalateDeadDataPath(ctx context.Context, profile state.Profile, activeKind string) {
 	// A tunnel with no host network under it is not a blocked transport; a
 	// cascade dialled now fails everywhere and reads as exhaustion to the app.
@@ -2539,10 +2548,37 @@ func (s *Service) escalateDeadDataPath(ctx context.Context, profile state.Profil
 			"%s tunnel stopped carrying traffic, but the host has no network to rebuild on; waiting for it", activeKind))
 		return
 	}
-	s.setDemotedTransport(activeKind)
-	s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf(
-		"%s tunnel stopped carrying traffic; trying every transport again", activeKind))
+	next := "reconnecting it"
+	if preferred := s.getSessionOpts().PreferredTransport; preferred == "" || preferred == "auto" {
+		next = "redialling it before the other transports"
+		if s.noteDeadTransport(activeKind) {
+			next = fmt.Sprintf("it died again within %s, so trying every other transport first", transportFlapWindow)
+		}
+	}
+	s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("%s tunnel stopped carrying traffic; %s", activeKind, next))
 	s.attemptSessionRebuild(ctx, profile, "tunnel stopped carrying traffic")
+}
+
+// transportFlapWindow: a transport that dies again this soon after a redial is being
+// killed under load (DPI), not stalling on a lossy path, so it goes to the back.
+const transportFlapWindow = 10 * time.Minute
+
+// noteDeadTransport sets the next cascade's lead for kind and reports whether it is demoted.
+func (s *Service) noteDeadTransport(kind string) (demote bool) {
+	s.recoveryMu.Lock()
+	defer s.recoveryMu.Unlock()
+	now := time.Now()
+	demote = kind == s.lastDeadKind && now.Sub(s.lastDeadAt) < transportFlapWindow
+	s.recoveryLead = cascadeLead{kind: kind, demote: demote}
+	if demote {
+		// Settled either way: if the cascade lands back here, nothing else gets through.
+		s.lastDeadKind, s.lastDeadAt = "", time.Time{}
+		return true
+	}
+	s.lastDeadKind, s.lastDeadAt = kind, now
+	// A redial that DPI kills again must be caught at probe cadence, not after the cooldown.
+	s.dnsProbeQuietUntil = time.Time{}
+	return false
 }
 
 // probeDataPathNow brings the next probe round forward to this tick.
@@ -2550,12 +2586,6 @@ func (s *Service) probeDataPathNow() {
 	s.recoveryMu.Lock()
 	defer s.recoveryMu.Unlock()
 	s.dnsProbeNextAt = time.Time{}
-}
-
-func (s *Service) setDemotedTransport(kind string) {
-	s.recoveryMu.Lock()
-	defer s.recoveryMu.Unlock()
-	s.demotedTransport = kind
 }
 
 // setTransportsExhausted records whether the cascade ran out on this server, so

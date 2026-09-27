@@ -83,8 +83,8 @@ func TestHealthCheck_InPlaceRebuildKeepsDeviceAcrossFailedCandidate(t *testing.T
 	if gotStops != stops {
 		t.Errorf("failed candidate tore the device down (%d -> %d stops); the adapter should stay up", stops, gotStops)
 	}
-	if gotStarts != starts+2 {
-		t.Errorf("wireguard starts during the rebuild = %d, want 2 (one re-point per candidate)", gotStarts-starts)
+	if gotStarts != starts+3 {
+		t.Errorf("wireguard starts during the rebuild = %d, want 3 (reality redial, cloak, shadowsocks)", gotStarts-starts)
 	}
 }
 

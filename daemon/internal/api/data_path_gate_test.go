@@ -42,6 +42,8 @@ type gatedProbe struct {
 	shadowsocks *fakeShadowsocksManager
 	passing     map[string]bool
 	attempts    []string
+	// failNext fails that many probes whatever the transport: a stall, not a block.
+	failNext int
 }
 
 func (g *gatedProbe) runningKind() string {
@@ -62,10 +64,20 @@ func (g *gatedProbe) probe(context.Context, string, string) error {
 	defer g.mu.Unlock()
 	kind := g.runningKind()
 	g.attempts = append(g.attempts, kind)
-	if g.passing[kind] {
+	if g.failNext > 0 {
+		g.failNext--
+	} else if g.passing[kind] {
 		return nil
 	}
 	return errors.New("no reply over the tunnel")
+}
+
+// stall resets the record and fails the next n probes before passing resumes.
+func (g *gatedProbe) stall(passing map[string]bool, n int) {
+	g.reset(passing)
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.failNext = n
 }
 
 func (g *gatedProbe) order() []string {
@@ -89,6 +101,7 @@ func (g *gatedProbe) reset(passing map[string]bool) {
 	defer g.mu.Unlock()
 	g.passing = passing
 	g.attempts = nil
+	g.failNext = 0
 }
 
 func cascadeTestService(t *testing.T, passing map[string]bool) (*Service, *gatedProbe) {
@@ -135,7 +148,7 @@ func TestConnect_NoTransportCarriesTrafficExhaustsTheCascade(t *testing.T) {
 }
 
 // TestHealthCheck_DeadDataPathRestartsTheCascadeAtTheTop: when the connected
-// transport stops carrying traffic, recovery walks the whole cascade again.
+// transport will not come back, recovery walks the rest of the cascade from the top.
 func TestHealthCheck_DeadDataPathRestartsTheCascadeAtTheTop(t *testing.T) {
 	svc, probe := cascadeTestService(t, map[string]bool{"shadowsocks": true})
 	if err := svc.Connect(context.Background(), "p1", ConnectOptions{}); err != nil {
@@ -153,24 +166,110 @@ func TestHealthCheck_DeadDataPathRestartsTheCascadeAtTheTop(t *testing.T) {
 	}
 }
 
-func TestHealthCheck_DeadDataPathDemotesTheFailedTransport(t *testing.T) {
+// connectedOnShadowsocks is a session that only shadowsocks gets through, the
+// way a network that blocks every other transport looks.
+func connectedOnShadowsocks(t *testing.T) (*Service, *gatedProbe) {
+	t.Helper()
 	svc, probe := cascadeTestService(t, map[string]bool{"shadowsocks": true})
 	if err := svc.Connect(context.Background(), "p1", ConnectOptions{}); err != nil {
 		t.Fatalf("connect failed: %v", err)
 	}
+	return svc, probe
+}
 
-	probe.reset(map[string]bool{})
+// stallAndRecover fails the health rounds that call the path dead, then lets
+// passing decide the rebuild, and returns every kind probed after the stall.
+func stallAndRecover(svc *Service, probe *gatedProbe, passing map[string]bool) []string {
+	probe.stall(passing, dnsProbeFailuresBeforeRebuild)
 	runProbedHealthChecks(svc, dnsProbeFailuresBeforeRebuild)
+	return probe.order()[dnsProbeFailuresBeforeRebuild:]
+}
 
-	order := probe.recoveryOrder("shadowsocks")
-	if len(order) == 0 {
-		t.Fatal("recovery attempted no transports")
+// The shipped bug: a one-off stall on the only transport that worked sent it to
+// the back, so recovery sat through every blocked transport before redialling it.
+func TestHealthCheck_DeadDataPathRedialsTheTransportFirst(t *testing.T) {
+	svc, probe := connectedOnShadowsocks(t)
+
+	rebuild := stallAndRecover(svc, probe, map[string]bool{"shadowsocks": true})
+
+	if !slices.Equal(rebuild, []string{"shadowsocks"}) {
+		t.Fatalf("recovery probed %v, want only a shadowsocks redial", rebuild)
 	}
-	if order[0] != "reality" {
-		t.Fatalf("recovery started at %q, want reality: %v", order[0], order)
+	if got := svc.activeTransportKindSnapshot(); got != "shadowsocks" {
+		t.Fatalf("active transport after recovery = %q, want shadowsocks", got)
 	}
-	if last := order[len(order)-1]; last != "shadowsocks" {
-		t.Fatalf("the transport that died was retried at %q, want it last: %v", last, order)
+}
+
+// A redial that dies again soon is DPI killing it under load: the next rebuild
+// must not wait out the probe cooldown, and must try everything else first.
+func TestHealthCheck_TransportThatDiesAgainSoonIsDemoted(t *testing.T) {
+	svc, probe := connectedOnShadowsocks(t)
+	stallAndRecover(svc, probe, map[string]bool{"shadowsocks": true})
+
+	rebuild := stallAndRecover(svc, probe, map[string]bool{})
+
+	if len(rebuild) == 0 {
+		t.Fatal("the second death did not rebuild; the redial left the probe cooldown armed")
+	}
+	if rebuild[0] != "reality" {
+		t.Fatalf("recovery started at %q, want reality: %v", rebuild[0], rebuild)
+	}
+	if last := rebuild[len(rebuild)-1]; last != "shadowsocks" {
+		t.Fatalf("the transport that died again was retried at %q, want it last: %v", last, rebuild)
+	}
+}
+
+// Once a demoted cascade lands back on the same transport nothing else gets
+// through here, so its next stall is a redial again rather than another tour.
+func TestHealthCheck_DemotionDoesNotOutliveTheCascadeItRan(t *testing.T) {
+	svc, probe := connectedOnShadowsocks(t)
+	stallAndRecover(svc, probe, map[string]bool{"shadowsocks": true})
+	stallAndRecover(svc, probe, map[string]bool{"shadowsocks": true})
+	if got := svc.activeTransportKindSnapshot(); got != "shadowsocks" {
+		t.Fatalf("precondition: active transport = %q, want shadowsocks", got)
+	}
+
+	svc.recoveryMu.Lock()
+	svc.dnsProbeQuietUntil = time.Time{}
+	svc.recoveryMu.Unlock()
+	rebuild := stallAndRecover(svc, probe, map[string]bool{"shadowsocks": true})
+
+	if !slices.Equal(rebuild, []string{"shadowsocks"}) {
+		t.Fatalf("recovery probed %v, want only a shadowsocks redial", rebuild)
+	}
+}
+
+func TestHealthCheck_TransportThatDiesAgainAfterTheWindowIsRedialled(t *testing.T) {
+	svc, probe := connectedOnShadowsocks(t)
+	stallAndRecover(svc, probe, map[string]bool{"shadowsocks": true})
+
+	svc.recoveryMu.Lock()
+	svc.lastDeadAt = time.Now().Add(-transportFlapWindow - time.Minute)
+	svc.recoveryMu.Unlock()
+	rebuild := stallAndRecover(svc, probe, map[string]bool{"shadowsocks": true})
+
+	if !slices.Equal(rebuild, []string{"shadowsocks"}) {
+		t.Fatalf("recovery probed %v, want only a shadowsocks redial", rebuild)
+	}
+}
+
+// An explicit transport has nothing to fall back to, so a death must not arm a
+// lead or lift the cooldown for it.
+func TestHealthCheck_ExplicitTransportDeathKeepsTheCooldown(t *testing.T) {
+	svc, probe := cascadeTestService(t, map[string]bool{"shadowsocks": true})
+	if err := svc.Connect(context.Background(), "p1", ConnectOptions{PreferredTransport: "shadowsocks"}); err != nil {
+		t.Fatalf("connect failed: %v", err)
+	}
+	stallAndRecover(svc, probe, map[string]bool{"shadowsocks": true})
+
+	svc.recoveryMu.Lock()
+	quiet, lastDead := svc.dnsProbeQuietUntil, svc.lastDeadKind
+	svc.recoveryMu.Unlock()
+	if !time.Now().Before(quiet) {
+		t.Fatal("an explicit transport's rebuild lifted the probe cooldown")
+	}
+	if lastDead != "" {
+		t.Fatalf("an explicit transport's death was booked for demotion: %q", lastDead)
 	}
 }
 
