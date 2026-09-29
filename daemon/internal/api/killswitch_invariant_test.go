@@ -303,6 +303,27 @@ func TestKillSwitchPermits_NeverPermitsAResolverOutsideTheTunnel(t *testing.T) {
 	}
 }
 
+// The session permits also carry running hub-proxy nodes; a node that is also a
+// named resolver must stay shut for the same reason.
+func TestSessionKillSwitchPermits_NeverPermitsAResolverOutsideTheTunnel(t *testing.T) {
+	profile := testProfile()
+	profile.WireGuard.DNS = []string{"10.8.0.1", "1.1.1.1"}
+	vouching := testProfile()
+	vouching.ID = "test-profile-2"
+	vouching.TransportEndpointIPs = []string{"1.1.1.1"}
+	svc := newTestService(t, &fakeCloakManager{}, &fakeNaiveManager{}, &fakeWGManager{}, &fakeKillSwitch{}, profile, vouching)
+	svc.SetRealityProxy(&fakeRealityProxy{port: 41000, remote: "1.1.1.1"})
+
+	for _, allowLAN := range []bool{true, false} {
+		permits := svc.sessionKillSwitchPermits(profile, allowLAN)
+		for _, resolver := range profile.WireGuard.DNS {
+			if slices.Contains(permits, resolver) {
+				t.Errorf("allowLAN=%v: permits %v include resolver %s via a hub proxy node", allowLAN, permits, resolver)
+			}
+		}
+	}
+}
+
 // Under Lockdown the lock outlives the session, but the tunnel permit must not:
 // macOS hands the same utunN to the next creator, Windows can reuse a LUID index.
 func TestDisconnect_LockdownDropsTheTunnelPermit(t *testing.T) {

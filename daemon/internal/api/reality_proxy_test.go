@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -23,7 +24,21 @@ type fakeRealityProxy struct {
 	stopped  int
 	startErr error
 	port     int
+	remote   string
 	onStart  func(state.RealityProfile)
+}
+
+func (f *fakeRealityProxy) HubRemote() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.port == 0 {
+		return ""
+	}
+	return f.remote
+}
+
+func (f *fakeRealityProxy) DialHub(context.Context, string, string, int) (net.Conn, error) {
+	return nil, errors.New("fake reality proxy does not dial")
 }
 
 func (f *fakeRealityProxy) Start(_ context.Context, profile state.RealityProfile) (int, error) {

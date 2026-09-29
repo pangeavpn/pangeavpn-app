@@ -392,3 +392,26 @@ func TestHubProxyLifecycle(t *testing.T) {
 		t.Fatal("the proxy port still accepts connections after Stop")
 	}
 }
+
+// TestHubProxyDialHubReachesThePinnedHub: the reachability probe's dial rides the
+// hub user just like the proxy, so the node delivers it to the pinned hub.
+func TestHubProxyDialHubReachesThePinnedHub(t *testing.T) {
+	node := startHubFenceNode(t)
+	proxy := startHubProxy(t, node.hubUser)
+	if got := proxy.mgr.HubRemote(); got != node.hubUser.RemoteHost {
+		t.Fatalf("HubRemote = %q, want %q", got, node.hubUser.RemoteHost)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	conn, err := proxy.mgr.DialHub(ctx, "", "api.pangeavpn.org", 443)
+	if err != nil {
+		t.Fatalf("DialHub: %v", err)
+	}
+	body, err := fetchThrough(conn, "api.pangeavpn.org")
+	if err != nil {
+		t.Fatalf("fetch through DialHub: %v", err)
+	}
+	if body != "hub" {
+		t.Fatalf("DialHub reached %q, want the pinned hub", body)
+	}
+}

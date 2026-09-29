@@ -747,6 +747,8 @@ func newTestServiceFull(
 	// Default the OS connectivity oracle to "unknown" so networkLooksUsable
 	// falls back to networkKey; offline tests override this explicitly.
 	svc.hostInternet = func() (bool, bool) { return false, false }
+	// Hub probes dial real sockets; tests that exercise them opt back in.
+	svc.reachProbe = nil
 	return svc
 }
 
