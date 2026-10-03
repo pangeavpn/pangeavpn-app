@@ -1,6 +1,6 @@
 import { app, nativeImage, shell, type NativeImage, type OpenDialogOptions } from "electron";
 import { execFile } from "node:child_process";
-import type { Dirent } from "node:fs";
+import { constants as fsConstants, type Dirent } from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -184,14 +184,31 @@ async function largestExeIn(dir: string): Promise<string | null> {
   return best?.file ?? null;
 }
 
+// One handle for the type check and a capped read, so a file swapped or grown after a stat can't slip past.
+async function readSmallFile(file: string, max: number): Promise<Buffer | null> {
+  const handle = await fs.open(file, fsConstants.O_RDONLY | fsConstants.O_NONBLOCK).catch(() => null);
+  if (!handle) return null;
+  try {
+    if (!(await handle.stat()).isFile()) return null;
+    const buf = Buffer.alloc(max + 1);
+    const { bytesRead } = await handle.read(buf, 0, max + 1, 0);
+    return bytesRead > max ? null : buf.subarray(0, bytesRead);
+  } catch {
+    return null;
+  } finally {
+    await handle.close().catch(() => {});
+  }
+}
+
 async function linuxIcon(name: string): Promise<string> {
   for (const file of linuxIconCandidates(name, process.env, os.homedir())) {
+    if (file.toLowerCase().endsWith(".svg")) {
+      const svg = await readSmallFile(file, MAX_SVG_BYTES);
+      if (svg) return `data:image/svg+xml;base64,${svg.toString("base64")}`;
+      continue;
+    }
     const stat = await fs.stat(file).catch(() => null);
     if (!stat?.isFile()) continue;
-    if (file.toLowerCase().endsWith(".svg")) {
-      if (stat.size > MAX_SVG_BYTES) continue;
-      return `data:image/svg+xml;base64,${(await fs.readFile(file)).toString("base64")}`;
-    }
     const image = nativeImage.createFromPath(file);
     if (!image.isEmpty()) return image.resize({ width: 64 }).toDataURL();
   }

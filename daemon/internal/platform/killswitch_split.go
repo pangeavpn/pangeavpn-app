@@ -164,14 +164,14 @@ func subtractPrefixes(p netip.Prefix, minus []netip.Prefix) []netip.Prefix {
 const minSplitEgressGID = 100
 
 func splitEgressGIDFromString(s string) (int, error) {
-	gid, err := strconv.Atoi(strings.TrimSpace(s))
+	gid, err := strconv.ParseUint(strings.TrimSpace(s), 10, 32)
 	if err != nil {
-		return 0, fmt.Errorf("group %s has a non-numeric gid %q", SplitEgressGroupName, s)
+		return 0, fmt.Errorf("group %s has an invalid gid %q", SplitEgressGroupName, s)
 	}
 	if gid < minSplitEgressGID {
 		return 0, fmt.Errorf("group %s has gid %d, below %d; refusing a shared system group", SplitEgressGroupName, gid, minSplitEgressGID)
 	}
-	return gid, nil
+	return int(gid), nil
 }
 
 // dsclGroupHasMembers reads `dscl . -read /Groups/<name>` output; any member
