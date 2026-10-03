@@ -3419,3 +3419,252 @@ body[data-theme="light"] .hero-path-flag { box-shadow: 0 0 0 1px rgba(0, 0, 0, 0
   text-align: center;
   user-select: text;
 }
+
+/* Split tunnelling: section states, the app picker pane and the hero chip. */
+
+.split-state {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin: 0 0 8px;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  color: var(--text-secondary);
+}
+
+.split-state[hidden],
+.split-controls[hidden],
+.split-hints li[hidden] { display: none; }
+
+.split-state[data-state="unreachable"] .split-state-text { color: var(--warning); }
+.split-controls[aria-busy="true"] { opacity: 0.6; }
+
+.split-note[data-tone="warn"] { color: var(--warning); }
+.split-note[data-tone="error"] { color: var(--danger); }
+.split-pending { color: var(--accent); }
+
+.settings-field-input[aria-invalid="true"] { border-color: var(--danger); }
+.settings-field-input[aria-invalid="true"]:focus-visible { outline-color: var(--danger); }
+
+.split-hints {
+  display: grid;
+  gap: 4px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+
+.split-hints li {
+  position: relative;
+  padding-inline-start: 12px;
+}
+
+.split-hints li::before {
+  content: "";
+  position: absolute;
+  top: 0.62em;
+  inset-inline-start: 2px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+/* The pane scrolls under its own head, so the back button and search stay put. */
+.split-pane {
+  display: flex;
+  flex-direction: column;
+  padding-top: 0;
+}
+
+.split-pane[hidden] { display: none; }
+
+.split-pane-top {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  flex: none;
+  margin: 0 -18px 6px;
+  padding: 14px 18px 8px;
+  background: var(--bg-base);
+}
+
+.split-search {
+  margin-top: 6px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+  font-size: 0.85rem;
+}
+
+.split-pane-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  margin: 0 0 8px;
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.split-pane-note[hidden] { display: none; }
+
+.split-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.split-list[aria-busy="true"] { cursor: progress; }
+
+.split-group-title {
+  margin: 6px 2px 0;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.split-empty {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 2px 2px;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+
+.split-empty .spinner { flex: none; }
+
+.split-app-row {
+  padding: 8px 12px;
+  cursor: default;
+}
+
+.split-app-row[aria-busy="true"] { cursor: progress; }
+.split-app-row:has(.toggle-switch[aria-invalid="true"]) { border-color: var(--danger); }
+
+.split-app-icon {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  flex: none;
+  color: var(--text-muted);
+}
+
+.split-app-icon svg {
+  width: 20px;
+  height: 20px;
+  display: block;
+}
+
+.split-app-icon img {
+  width: 24px;
+  height: 24px;
+  display: block;
+  object-fit: contain;
+}
+
+.split-app-name {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.split-badge {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font-size: 0.62rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* Trimmed from the middle in index.ts; the ellipsis here only covers the frame before that. */
+.split-app-path {
+  margin-top: 2px;
+  font-family: "SF Mono", "Cascadia Mono", ui-monospace, monospace;
+  font-size: 0.66rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: left;
+}
+
+.split-app-note {
+  display: block;
+  margin-top: 3px;
+  font-size: 0.74rem;
+  line-height: 1.35;
+  color: var(--text-muted);
+}
+
+.split-app-note[hidden] { display: none; }
+.split-app-note[data-tone="warn"] { color: var(--warning); }
+.split-app-note[data-tone="error"] { color: var(--danger); }
+
+.split-browse {
+  align-self: flex-start;
+  margin-top: 10px;
+  padding: 7px 14px;
+  font-size: 0.8rem;
+}
+
+.split-live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+[dir="rtl"] .split-app-path { text-align: right; }
+
+/* dir=auto resolves an empty field to LTR, which would pin the placeholder to the wrong edge. */
+[dir="rtl"] .split-search:placeholder-shown { direction: rtl; }
+
+.hero-split {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  height: 18px;
+  padding-inline: 5px 7px;
+  border-radius: 999px;
+  color: var(--accent);
+  background: var(--accent-glow);
+  border: 1px solid color-mix(in srgb, var(--accent) 38%, transparent);
+  animation: hero-pq-in 0.35s ease-out;
+}
+
+.hero-split[hidden] { display: none; }
+
+.hero-split svg {
+  width: 12px;
+  height: 12px;
+  flex: none;
+}
+
+.hero-split-label {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hero-split { animation: none; }
+}

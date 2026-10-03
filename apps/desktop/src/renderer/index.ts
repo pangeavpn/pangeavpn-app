@@ -42,6 +42,31 @@ import {
   initialDaemonHealth
 } from "./daemonHealth.js";
 import {
+  fallbackSplitEntry,
+  groupSplitRows,
+  isolateAuto,
+  isolateLtr,
+  middleEllipsis,
+  placeChildren,
+  splitAppErrorText,
+  splitAppsUnavailable,
+  splitChipVisible,
+  splitCidrErrorText,
+  splitCidrsAdjusted,
+  splitEntryKey,
+  splitEntryPath,
+  splitInvalidByRule,
+  splitPaneNote,
+  splitPickerSummary,
+  splitRailSummary,
+  splitRangesSaveError,
+  splitRowNote,
+  splitRuleKey,
+  splitStatusOf,
+  type SplitLoad,
+  type SplitStatusSummary
+} from "./splitTunnelView.js";
+import {
   t,
   initLocale,
   resolveLocale,
@@ -118,6 +143,7 @@ const heroPath = document.getElementById("heroPath") as HTMLElement;
 const heroPathEntry = document.getElementById("heroPathEntry") as HTMLElement;
 const heroPathExit = document.getElementById("heroPathExit") as HTMLElement;
 const heroPq = document.getElementById("heroPq") as HTMLElement;
+const heroSplit = document.getElementById("heroSplit") as HTMLElement;
 const heroServerLabel = document.getElementById("heroServerLabel") as HTMLElement;
 const multihopPanel = document.getElementById("multihopPanel") as HTMLElement;
 const multihopToggle = document.getElementById("multihopToggle") as HTMLInputElement;
@@ -165,6 +191,7 @@ const accountSubscription = document.getElementById("accountSubscription") as HT
 const setProvisioningValue = document.getElementById("setProvisioningValue") as HTMLSpanElement;
 const setTransportValue = document.getElementById("setTransportValue") as HTMLSpanElement;
 const setNetworkValue = document.getElementById("setNetworkValue") as HTMLSpanElement;
+const setSplitTunnelValue = document.getElementById("setSplitTunnelValue") as HTMLSpanElement;
 const setStartupValue = document.getElementById("setStartupValue") as HTMLSpanElement;
 const setNotificationsValue = document.getElementById("setNotificationsValue") as HTMLSpanElement;
 const setDeveloperValue = document.getElementById("setDeveloperValue") as HTMLSpanElement;
@@ -202,6 +229,46 @@ let connectInFlight = false;
 // Hub's verdict on whether this account may connect; null until asked. Never
 // derived from subscription.status — prepaid plans stay "active" once lapsed.
 let entitled: boolean | null = null;
+
+// The service is the only store for split tunnelling; these mirror its last reply.
+let splitLoad: SplitLoad = "loading";
+let splitConfig: SplitTunnelConfig | null = null;
+let splitConfigKeys = new Set<string>();
+let splitLive: SplitStatusSummary | null = null;
+let splitLoadSeq = 0;
+let splitLoadAt = 0;
+let splitToggleBusy = false;
+let splitCidrsBusy = false;
+let splitCatalog: SplitTunnelAppEntry[] | null = null;
+let splitCatalogState: "idle" | "loading" | "failed" | "ready" = "idle";
+let splitCatalogPending: Promise<void> | null = null;
+let splitCatalogAt = 0;
+const splitIcons = new Map<string, string>();
+const splitIconQueue = new Set<string>();
+let splitIconsInFlight = false;
+
+interface SplitRow {
+  key: string;
+  row: HTMLElement;
+  toggle: HTMLInputElement;
+  icon: HTMLElement;
+  path: HTMLElement;
+  note: HTMLElement;
+}
+
+// One visit to the picker: rows keep their place until it is opened again.
+let splitPaneGen = 0;
+let splitRowSeq = 0;
+let splitDescribed = false;
+let splitPinned: string[] = [];
+const splitSession = new Set<string>();
+const splitEntries = new Map<string, SplitTunnelAppEntry>();
+const splitRows = new Map<string, SplitRow>();
+const splitInvalid = new Map<string, SplitTunnelErrorCode>();
+const splitBusy = new Set<string>();
+let splitIconObserver: IntersectionObserver | null = null;
+let splitTouched = false;
+const splitPlatform: string = window.appPlatform ?? "";
 
 // Mirrors shared/mtu.ts — the renderer can't import it without clobbering
 // main's CommonJS copy in dist. Display only; keep in step with the input.
@@ -262,6 +329,7 @@ function updateSettingsSummaries(): void {
   // The badge, not the title: the full name overflows the nav summary line.
   if (postQuantumToggle.checked) network.push(t("hero.postQuantumBadge"));
   setNetworkValue.textContent = network.join(" · ");
+  renderSplitSummaries();
 
   const startup: string[] = [];
   if (launchAtStartupToggle.checked) startup.push(t("settings.startup.launch.title"));
@@ -452,6 +520,7 @@ function openSettings(): void {
   settingsAccountActions.hidden = !authState.authenticated;
   settingsAccountBar.hidden = !authState.authenticated;
   if (authState.authenticated) void refreshSubscription();
+  void loadSplitTunnel();
   activateOverlay(settingsOverlay);
 }
 
@@ -488,10 +557,20 @@ let settingsSpyLockUntil = 0;
 function markSettingsNav(sectionId: string): void {
   for (const item of settingsNavItems) {
     const active = item.dataset.settingsTarget === sectionId;
+    const wasActive = item.classList.contains("is-active");
     item.classList.toggle("is-active", active);
     if (active) item.setAttribute("aria-current", "true");
     else item.removeAttribute("aria-current");
+    if (active && !wasActive) revealNavItem(item);
   }
+}
+
+// The rail overflows at 640x440. Scrolled by hand: scrollIntoView could also move the off-screen overlay's ancestors.
+function revealNavItem(item: HTMLElement): void {
+  const rail = settingsNav.getBoundingClientRect();
+  const box = item.getBoundingClientRect();
+  if (box.top < rail.top) settingsNav.scrollTop -= rail.top - box.top;
+  else if (box.bottom > rail.bottom) settingsNav.scrollTop += box.bottom - rail.bottom;
 }
 
 /** Light up whichever section currently sits at the top of the pane. */
@@ -633,6 +712,30 @@ const provisioningPickerBtn = document.getElementById("provisioningPickerBtn") a
 const provisioningPickerValue = document.getElementById("provisioningPickerValue") as HTMLElement;
 const provisioningBackBtn = document.getElementById("provisioningBackBtn") as HTMLButtonElement;
 
+const splitTunnelSection = document.getElementById("secSplitTunnel") as HTMLElement;
+const splitTunnelState = document.getElementById("splitTunnelState") as HTMLElement;
+const splitTunnelStateText = document.getElementById("splitTunnelStateText") as HTMLElement;
+const splitTunnelRetryBtn = document.getElementById("splitTunnelRetryBtn") as HTMLButtonElement;
+const splitTunnelControls = document.getElementById("splitTunnelControls") as HTMLElement;
+const splitTunnelToggle = document.getElementById("splitTunnelToggle") as HTMLInputElement;
+const splitTunnelPickerBtn = document.getElementById("splitTunnelPickerBtn") as HTMLButtonElement;
+const splitTunnelPickerValue = document.getElementById("splitTunnelPickerValue") as HTMLElement;
+const splitTunnelAppsNote = document.getElementById("splitTunnelAppsNote") as HTMLElement;
+const splitTunnelCidrsInput = document.getElementById("splitTunnelCidrsInput") as HTMLInputElement;
+const splitTunnelCidrsError = document.getElementById("splitTunnelCidrsError") as HTMLElement;
+const splitTunnelCidrsDropped = document.getElementById("splitTunnelCidrsDropped") as HTMLElement;
+const splitTunnelPending = document.getElementById("splitTunnelPending") as HTMLElement;
+const splitTunnelLockdownHint = document.getElementById("splitTunnelLockdownHint") as HTMLElement;
+const splitTunnelPane = document.getElementById("splitTunnelPane") as HTMLElement;
+const splitTunnelBackBtn = document.getElementById("splitTunnelBackBtn") as HTMLButtonElement;
+const splitTunnelSearch = document.getElementById("splitTunnelSearch") as HTMLInputElement;
+const splitTunnelPaneNote = document.getElementById("splitTunnelPaneNote") as HTMLElement;
+const splitTunnelPaneNoteText = document.getElementById("splitTunnelPaneNoteText") as HTMLElement;
+const splitTunnelTurnOnBtn = document.getElementById("splitTunnelTurnOnBtn") as HTMLButtonElement;
+const splitTunnelList = document.getElementById("splitTunnelList") as HTMLElement;
+const splitTunnelLive = document.getElementById("splitTunnelLive") as HTMLElement;
+const splitTunnelBrowseBtn = document.getElementById("splitTunnelBrowseBtn") as HTMLButtonElement;
+
 const subpanes: Subpane[] = [
   {
     pane: transportPane,
@@ -648,6 +751,14 @@ const subpanes: Subpane[] = [
     back: provisioningBackBtn,
     section: "secProvisioning",
     initialFocus: () => provisioningPane.querySelector<HTMLElement>(".toggle-switch")
+  },
+  {
+    pane: splitTunnelPane,
+    trigger: splitTunnelPickerBtn,
+    back: splitTunnelBackBtn,
+    section: "secSplitTunnel",
+    render: renderSplitPane,
+    initialFocus: () => splitTunnelSearch
   }
 ];
 
@@ -882,8 +993,8 @@ function renderHeroPath(): void {
   const live = connected && activeEntryId !== null;
   const entry = live ? servers.find((s) => s.id === activeEntryId) ?? null : entryFor(exitId);
   const exit = servers.find((s) => s.id === exitId) ?? null;
-  // The state text and PQ chip share the row, so either leaves this chip less room.
-  const key = [live, entry?.id ?? "", exit?.id ?? "", localeTag(), stateEl.textContent, heroPq.hidden].join("|");
+  // The state text and the PQ and Split chips share the row, so any of them leaves this chip less room.
+  const key = [live, entry?.id ?? "", exit?.id ?? "", localeTag(), stateEl.textContent, heroPq.hidden, heroSplit.hidden].join("|");
   if (key === heroPathKey) return;
   heroPathKey = key;
   heroPath.dataset.live = String(live);
@@ -2219,6 +2330,665 @@ lockdownToggle.addEventListener("change", async () => {
   showToast(lockdownLocal ? t("toggle.lockdown.on") : t("toggle.lockdown.off"), 5000, true);
 });
 
+const SPLIT_ICON_BATCH = 16;
+const SPLIT_CATALOG_MAX_AGE_MS = 120_000;
+const SPLIT_RELOAD_MS = 5000;
+const SPLIT_APP_GLYPH =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="3"/><path d="M3.5 9h17"/><path d="M7 6.8h.01M9.5 6.8h.01"/></svg>';
+const SPLIT_FOLDER_GLYPH =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2.5h7a2 2 0 0 1 2 2v7.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2Z"/></svg>';
+
+
+function setSplitNote(el: HTMLElement, text: string, tone?: string): void {
+  el.textContent = text;
+  el.hidden = text === "";
+  if (tone && text) el.dataset.tone = tone;
+  else delete el.dataset.tone;
+}
+
+function loadedSplitConfig(): SplitTunnelConfig | null {
+  return splitLoad === "loaded" ? splitConfig : null;
+}
+
+function splitAppsInfo(): { text: string; blocking: boolean } | null {
+  const config = loadedSplitConfig();
+  if (!config) return null;
+  return splitAppsUnavailable(
+    { appsSupported: config.appsSupported, unavailableReason: splitLive?.unavailableReason ?? config.unavailableReason },
+    t
+  );
+}
+
+function renderSplitSummaries(): void {
+  setSplitTunnelValue.textContent = splitRailSummary(splitLoad, splitConfig, t);
+  splitTunnelPickerValue.textContent =
+    splitLoad === "loaded"
+      ? splitPickerSummary(splitConfig, t)
+      : splitLoad === "loading"
+        ? t("common.loading")
+        : t("common.dash");
+  splitTunnelLockdownHint.hidden = !lockdownToggle.checked;
+}
+
+function renderSplitSection(): void {
+  const config = loadedSplitConfig();
+  splitTunnelState.hidden = config !== null;
+  splitTunnelState.dataset.state = splitLoad;
+  splitTunnelStateText.textContent =
+    splitLoad === "unreachable"
+      ? t("settings.splitTunnel.unreachable")
+      : splitLoad === "unsupported"
+        ? t("settings.splitTunnel.unsupported")
+        : config
+          ? ""
+          : t("common.loading");
+  splitTunnelRetryBtn.hidden = splitLoad !== "unreachable";
+  splitTunnelControls.hidden = splitLoad === "unsupported";
+  if (splitLoad === "loading") splitTunnelControls.setAttribute("aria-busy", "true");
+  else splitTunnelControls.removeAttribute("aria-busy");
+  splitTunnelToggle.disabled = !config;
+  splitTunnelPickerBtn.disabled = !config;
+  splitTunnelCidrsInput.disabled = !config;
+  if (config) {
+    if (!splitToggleBusy) splitTunnelToggle.checked = config.enabled;
+    const keepTyped =
+      splitCidrsBusy ||
+      document.activeElement === splitTunnelCidrsInput ||
+      splitTunnelCidrsInput.getAttribute("aria-invalid") === "true";
+    if (!keepTyped) splitTunnelCidrsInput.value = config.cidrs.join(", ");
+  }
+  const apps = splitAppsInfo();
+  setSplitNote(splitTunnelAppsNote, apps?.text ?? "", apps?.blocking ? "error" : "warn");
+  const dropped = config !== null && (splitLive?.cidrsDropped ?? config.cidrsDropped);
+  setSplitNote(splitTunnelCidrsDropped, dropped ? t("settings.splitTunnel.ranges.dropped") : "", "warn");
+  splitTunnelPending.hidden = !(config && (splitLive?.pending ?? config.pending));
+  renderSplitSummaries();
+  renderSplitPaneState();
+}
+
+function setSplitConfig(load: SplitLoad, config: SplitTunnelConfig | null): void {
+  splitLoad = load;
+  splitConfig = config;
+  splitConfigKeys = new Set((config?.apps ?? []).map((rule) => `rule:${splitRuleKey(rule, splitPlatform)}`));
+  renderSplitSection();
+  syncSplitRows();
+  if (load !== "loaded" && activeSubpane?.pane === splitTunnelPane) closeSubpane(true);
+}
+
+// A write's reply is newer than any read still in flight, and than the last /status sample.
+function applySplitConfig(config: SplitTunnelConfig): void {
+  splitLoadSeq++;
+  splitLive = null;
+  setSplitConfig("loaded", config);
+}
+
+async function loadSplitTunnel(): Promise<void> {
+  const api = pangeaApi;
+  if (!api) return;
+  const seq = ++splitLoadSeq;
+  splitLoadAt = Date.now();
+  if (splitLoad !== "loaded") {
+    splitLoad = "loading";
+    renderSplitSection();
+  }
+  let config: SplitTunnelConfig | null;
+  try {
+    config = (await api.getSplitTunnel()) ?? null;
+  } catch (err) {
+    if (seq !== splitLoadSeq) return;
+    console.error("[splitTunnel]", err);
+    setSplitConfig("unreachable", null);
+    return;
+  }
+  if (seq !== splitLoadSeq) return;
+  setSplitConfig(config ? "loaded" : "unsupported", config);
+}
+
+/** Any failure but a validation one means the UI may be out of step, so it re-reads the service. */
+async function runSplitWrite(
+  context: string,
+  write: () => Promise<SplitTunnelResult>
+): Promise<SplitTunnelResult | null> {
+  try {
+    const result = await write();
+    if (result.ok) applySplitConfig(result.config);
+    return result;
+  } catch (err) {
+    showToast(reportError(context, err, t("toggle.updateFailed")));
+    await loadSplitTunnel();
+    return null;
+  }
+}
+
+function setSplitCidrError(text: string): void {
+  setSplitNote(splitTunnelCidrsError, text, "error");
+  if (text) splitTunnelCidrsInput.setAttribute("aria-invalid", "true");
+  else splitTunnelCidrsInput.removeAttribute("aria-invalid");
+}
+
+function showSplitInvalid(invalid: readonly SplitTunnelInvalid[], fromRanges = false): void {
+  for (const [key, code] of splitInvalidByRule(invalid, splitPlatform)) splitInvalid.set(key, code);
+  const ranges = fromRanges ? splitRangesSaveError(invalid, splitPlatform, t) : splitCidrErrorText(invalid, t);
+  if (ranges) setSplitCidrError(ranges);
+  const messages = [
+    ...new Set(invalid.filter((item) => item.field === "apps").map((item) => splitAppErrorText(item.code, t)))
+  ];
+  if (ranges && !fromRanges) messages.push(ranges);
+  if (messages.length > 0) showToast(messages.join(" "));
+  syncSplitRows();
+}
+
+splitTunnelRetryBtn.addEventListener("click", async () => {
+  await loadSplitTunnel();
+  if (document.activeElement === document.body) {
+    (splitLoad === "unreachable" ? splitTunnelRetryBtn : splitTunnelToggle).focus();
+  }
+});
+
+// Disabling a switch mid-write would drop keyboard focus, so a busy one just ignores clicks.
+splitTunnelToggle.addEventListener("click", (event) => {
+  if (splitToggleBusy) event.preventDefault();
+});
+
+async function setSplitEnabled(requested: boolean): Promise<void> {
+  const api = pangeaApi;
+  if (!api || splitLoad !== "loaded" || splitToggleBusy) return;
+  splitToggleBusy = true;
+  splitTunnelToggle.checked = requested;
+  splitTunnelToggle.setAttribute("aria-busy", "true");
+  const result = await runSplitWrite("splitTunnelEnabled", () => api.setSplitTunnelEnabled(requested));
+  splitToggleBusy = false;
+  splitTunnelToggle.removeAttribute("aria-busy");
+  if (result?.ok) showToast(t(requested ? "toggle.splitTunnel.on" : "toggle.splitTunnel.off"), 4000, true);
+  else if (result) showSplitInvalid(result.invalid);
+  renderSplitSection();
+}
+
+splitTunnelToggle.addEventListener("change", () => void setSplitEnabled(splitTunnelToggle.checked));
+
+// The picker hides the section's switch, so its "off" note carries one of its own.
+splitTunnelTurnOnBtn.addEventListener("click", async () => {
+  const hadFocus = document.activeElement === splitTunnelTurnOnBtn;
+  await setSplitEnabled(true);
+  if (hadFocus && splitTunnelTurnOnBtn.hidden) splitTunnelSearch.focus();
+});
+
+// Commits on blur/Enter only: a bad entry keeps the text as typed and says what is wrong with it.
+splitTunnelCidrsInput.addEventListener("change", () => void saveSplitCidrs());
+
+async function saveSplitCidrs(): Promise<void> {
+  const api = pangeaApi;
+  if (!api || splitLoad !== "loaded") return;
+  const typed = splitTunnelCidrsInput.value;
+  splitCidrsBusy = true;
+  splitTunnelCidrsInput.readOnly = true;
+  splitTunnelCidrsInput.setAttribute("aria-busy", "true");
+  const result = await runSplitWrite("splitTunnelCidrs", () => api.setSplitTunnelCidrs(typed));
+  splitCidrsBusy = false;
+  splitTunnelCidrsInput.readOnly = false;
+  splitTunnelCidrsInput.removeAttribute("aria-busy");
+  if (!result) return;
+  if (!result.ok) {
+    showSplitInvalid(result.invalid, true);
+    return;
+  }
+  setSplitCidrError("");
+  const stored = result.config.cidrs;
+  splitTunnelCidrsInput.value = stored.join(", ");
+  const cidrs = stored.map(isolateLtr).join(", ");
+  const key: MessageKey =
+    stored.length === 0
+      ? "settings.splitTunnel.ranges.cleared"
+      : splitCidrsAdjusted(typed, stored)
+        ? "settings.splitTunnel.ranges.adjusted"
+        : "settings.splitTunnel.ranges.saved";
+  showToast(t(key, { cidrs }), 5000, true);
+}
+
+function ensureSplitCatalog(refresh: boolean): Promise<void> {
+  const api = pangeaApi;
+  if (!api) return Promise.resolve();
+  if (splitCatalogPending) return splitCatalogPending;
+  if (splitCatalog && !refresh) return Promise.resolve();
+  if (!splitCatalog) splitCatalogState = "loading";
+  splitCatalogPending = (async () => {
+    try {
+      const entries = await api.listSplitTunnelApps(refresh ? { refresh: true } : undefined);
+      splitCatalog = Array.isArray(entries) ? entries : [];
+      splitCatalogState = "ready";
+      splitCatalogAt = Date.now();
+    } catch (err) {
+      console.error("[splitTunnelCatalog]", err);
+      if (!splitCatalog) splitCatalogState = "failed";
+    } finally {
+      splitCatalogPending = null;
+    }
+  })();
+  return splitCatalogPending;
+}
+
+// The scan walks the disk, so it starts once the section is in view rather than at launch.
+function prefetchSplitCatalog(): void {
+  if (splitLoad === "loaded" && !splitCatalog && splitCatalogState !== "failed") void ensureSplitCatalog(false);
+}
+
+splitTunnelPickerBtn.addEventListener("pointerenter", prefetchSplitCatalog);
+splitTunnelPickerBtn.addEventListener("focus", prefetchSplitCatalog);
+new IntersectionObserver(
+  (records) => {
+    if (settingsOverlay.classList.contains("visible") && records.some((record) => record.isIntersecting)) {
+      prefetchSplitCatalog();
+    }
+  },
+  { root: settingsPane }
+).observe(splitTunnelSection);
+
+function renderSplitPaneState(): void {
+  const apps = splitAppsInfo();
+  const note = splitPaneNote(apps, loadedSplitConfig()?.enabled ?? null, t);
+  setSplitNote(splitTunnelPaneNoteText, note?.text ?? "", note?.tone);
+  splitTunnelPaneNote.hidden = !note;
+  splitTunnelTurnOnBtn.hidden = !note?.turnOn;
+  splitTunnelBrowseBtn.disabled = splitLoad !== "loaded" || apps?.blocking === true;
+}
+
+function renderSplitPane(): void {
+  const gen = ++splitPaneGen;
+  splitTunnelSearch.value = "";
+  splitTouched = false;
+  splitDescribed = false;
+  splitPinned = [];
+  splitSession.clear();
+  splitEntries.clear();
+  splitRows.clear();
+  splitInvalid.clear();
+  splitIconQueue.clear();
+  splitIconObserver?.disconnect();
+  splitIconObserver = new IntersectionObserver(onSplitRowsVisible, { root: splitTunnelPane, rootMargin: "48px 0px" });
+  splitTunnelPane.scrollTop = 0;
+  renderSplitPaneState();
+  drawSplitList();
+  const hadCatalog = splitCatalog !== null;
+  const stale = hadCatalog && Date.now() - splitCatalogAt > SPLIT_CATALOG_MAX_AGE_MS;
+  // The scan's request goes first, so the main process describes the stored rules against its result.
+  const catalogLoad = ensureSplitCatalog(stale);
+  void describeSplitRules(splitConfig?.apps ?? [], gen);
+  void catalogLoad.then(() => {
+    if (gen === splitPaneGen && !(hadCatalog && splitTouched)) drawSplitList();
+  });
+}
+
+async function describeSplitRules(rules: readonly string[], gen: number): Promise<void> {
+  let described: SplitTunnelAppEntry[] = [];
+  if (rules.length > 0 && pangeaApi) {
+    try {
+      const reply = await pangeaApi.describeSplitTunnelApps([...rules]);
+      described = Array.isArray(reply) ? reply : [];
+    } catch (err) {
+      console.error("[splitTunnelDescribe]", err);
+      described = rules.map((rule) => fallbackSplitEntry(rule, splitPlatform));
+    }
+  }
+  if (gen !== splitPaneGen) return;
+  for (const entry of described) {
+    const key = splitEntryKey(entry, splitPlatform);
+    splitEntries.set(key, entry);
+    splitSession.add(key);
+  }
+  splitDescribed = true;
+  drawSplitList();
+}
+
+function splitGroupTitle(text: string): HTMLElement {
+  const title = document.createElement("h4");
+  title.className = "split-group-title";
+  title.textContent = text;
+  return title;
+}
+
+function splitEmptyLine(text: string, working = false): HTMLElement {
+  const line = document.createElement("p");
+  line.className = "split-empty";
+  if (working) {
+    const spinner = document.createElement("span");
+    spinner.className = "spinner";
+    spinner.setAttribute("aria-hidden", "true");
+    line.append(spinner);
+  }
+  line.append(text);
+  return line;
+}
+
+function announceSplit(text: string): void {
+  if (splitTunnelLive.textContent !== text) splitTunnelLive.textContent = text;
+}
+
+/** Groups and orders the rows. Runs on open, on search and as data arrives, never on a toggle. */
+function drawSplitList(): void {
+  const searching = splitTunnelSearch.value.trim() !== "";
+  const catalogWorking = splitCatalogState === "loading" || splitCatalogState === "idle";
+  splitTunnelList.setAttribute("aria-busy", String(!splitDescribed || catalogWorking));
+  if (!splitDescribed) {
+    splitTunnelList.replaceChildren(splitEmptyLine(t("common.loading"), true));
+    announceSplit(t("settings.splitTunnel.apps.finding"));
+    return;
+  }
+
+  const catalogKeys: string[] = [];
+  for (const entry of splitCatalog ?? []) {
+    const key = splitEntryKey(entry, splitPlatform);
+    if (!splitEntries.has(key)) splitEntries.set(key, entry);
+    catalogKeys.push(key);
+  }
+  for (const rule of splitConfig?.apps ?? []) {
+    const key = `rule:${splitRuleKey(rule, splitPlatform)}`;
+    if (!splitEntries.has(key)) splitEntries.set(key, fallbackSplitEntry(rule, splitPlatform));
+  }
+  const groups = groupSplitRows({
+    entries: splitEntries,
+    pinned: splitPinned,
+    excluded: new Set([...splitConfigKeys, ...splitSession]),
+    catalog: catalogKeys,
+    query: splitTunnelSearch.value,
+    locale: localeTag()
+  });
+
+  const nodes: HTMLElement[] = [];
+  const shown: SplitRow[] = [];
+  const total = groups.excluded.length + groups.catalog.length;
+  const addRows = (keys: string[]): void => {
+    for (const key of keys) {
+      const row = splitRowFor(key);
+      shown.push(row);
+      nodes.push(row.row);
+    }
+  };
+  if (searching && total === 0 && !catalogWorking) {
+    nodes.push(splitEmptyLine(t("settings.splitTunnel.apps.noMatch", { query: isolateAuto(splitTunnelSearch.value.trim()) })));
+  } else {
+    if (groups.excluded.length > 0 || !searching) {
+      nodes.push(splitGroupTitle(t("settings.splitTunnel.apps.groupExcluded")));
+      if (groups.excluded.length === 0) nodes.push(splitEmptyLine(t("settings.splitTunnel.apps.noneExcluded")));
+      addRows(groups.excluded);
+    }
+    const installed = t("settings.splitTunnel.apps.groupInstalled");
+    if (catalogWorking) {
+      nodes.push(splitGroupTitle(installed), splitEmptyLine(t("settings.splitTunnel.apps.finding"), true));
+    } else if (splitCatalogState === "failed") {
+      nodes.push(splitGroupTitle(installed), splitEmptyLine(t("settings.splitTunnel.apps.listFailed")));
+    } else if (groups.catalog.length > 0) {
+      nodes.push(splitGroupTitle(installed));
+      addRows(groups.catalog);
+    } else if (!searching && (splitCatalog?.length ?? 0) === 0) {
+      nodes.push(splitGroupTitle(installed), splitEmptyLine(t("settings.splitTunnel.apps.noneInstalled")));
+    }
+  }
+  placeChildren(splitTunnelList, nodes);
+  for (const row of shown) {
+    syncSplitRow(row);
+    splitIconObserver?.observe(row.row);
+  }
+  announceSplit(
+    catalogWorking
+      ? t("settings.splitTunnel.apps.finding")
+      : searching && total === 0
+        ? t("settings.splitTunnel.apps.noMatch", { query: splitTunnelSearch.value.trim() })
+        : t("settings.splitTunnel.apps.found", { count: total })
+  );
+}
+
+function splitRowFor(key: string): SplitRow {
+  const existing = splitRows.get(key);
+  if (existing) return existing;
+  const entry = splitEntries.get(key)!;
+  const id = `splitApp${++splitRowSeq}`;
+
+  const row = document.createElement("div");
+  row.className = "option-row option-row-toggle split-app-row";
+  row.id = id;
+  row.dataset.key = key;
+
+  const icon = document.createElement("span");
+  icon.className = "split-app-icon";
+  icon.dataset.iconId = entry.id;
+  icon.innerHTML = entry.kind === "dir" ? SPLIT_FOLDER_GLYPH : SPLIT_APP_GLYPH;
+
+  const copy = document.createElement("span");
+  copy.className = "option-copy";
+  const titleLine = document.createElement("span");
+  titleLine.className = "option-title-line";
+  const name = document.createElement("label");
+  name.className = "option-title split-app-name";
+  name.htmlFor = `${id}-switch`;
+  name.dir = "auto";
+  name.textContent = entry.name;
+  titleLine.append(name);
+  if (entry.kind === "dir") {
+    const badge = document.createElement("span");
+    badge.className = "split-badge";
+    badge.textContent = t("settings.splitTunnel.apps.folder");
+    badge.title = t("settings.splitTunnel.apps.folderHint");
+    titleLine.append(badge);
+  }
+  const full = splitEntryPath(entry);
+  const path = document.createElement("span");
+  path.className = "option-desc split-app-path";
+  path.id = `${id}-path`;
+  path.dir = "ltr";
+  path.title = full;
+  path.dataset.full = full;
+  path.textContent = full;
+  const note = document.createElement("span");
+  note.className = "split-app-note";
+  note.id = `${id}-note`;
+  note.hidden = true;
+  copy.append(titleLine, path, note);
+
+  const toggle = document.createElement("input");
+  toggle.type = "checkbox";
+  toggle.className = "toggle-switch";
+  toggle.id = `${id}-switch`;
+  toggle.setAttribute("aria-describedby", `${id}-path ${id}-note`);
+  row.append(icon, copy, toggle);
+
+  const splitRow: SplitRow = { key, row, toggle, icon, path, note };
+  toggle.addEventListener("click", (event) => {
+    if (splitBusy.has(key)) event.preventDefault();
+  });
+  toggle.addEventListener("change", () => void toggleSplitApp(splitRow, toggle.checked));
+  splitRows.set(key, splitRow);
+  return splitRow;
+}
+
+function syncSplitRow(splitRow: SplitRow): void {
+  const entry = splitEntries.get(splitRow.key);
+  if (!entry) return;
+  const busy = splitBusy.has(splitRow.key);
+  const configured = splitConfigKeys.has(splitRow.key);
+  if (!busy) splitRow.toggle.checked = configured;
+  // Where the service can't exclude apps, a row can still be switched off, just not on.
+  const blocked = splitAppsInfo()?.blocking === true && !configured && !busy;
+  splitRow.toggle.disabled = splitLoad !== "loaded" || !entry.rule || blocked;
+  if (busy) splitRow.row.setAttribute("aria-busy", "true");
+  else splitRow.row.removeAttribute("aria-busy");
+  const invalid = splitInvalid.get(splitRow.key);
+  if (invalid) splitRow.toggle.setAttribute("aria-invalid", "true");
+  else splitRow.toggle.removeAttribute("aria-invalid");
+  const note = splitRowNote(entry, invalid, t);
+  setSplitNote(splitRow.note, note?.text ?? "", note?.tone);
+}
+
+function syncSplitRows(): void {
+  for (const splitRow of splitRows.values()) syncSplitRow(splitRow);
+  renderSplitPaneState();
+}
+
+async function toggleSplitApp(splitRow: SplitRow, excluded: boolean): Promise<void> {
+  const api = pangeaApi;
+  const rule = splitEntries.get(splitRow.key)?.rule;
+  if (!api || !rule || splitLoad !== "loaded") return;
+  splitTouched = true;
+  splitBusy.add(splitRow.key);
+  splitInvalid.delete(splitRow.key);
+  syncSplitRow(splitRow);
+  const result = await runSplitWrite("splitTunnelApp", () => api.setSplitTunnelApp(rule, excluded));
+  splitBusy.delete(splitRow.key);
+  if (result && !result.ok) showSplitInvalid(result.invalid);
+  syncSplitRows();
+}
+
+function onSplitRowsVisible(records: IntersectionObserverEntry[]): void {
+  for (const record of records) {
+    if (!record.isIntersecting) continue;
+    const splitRow = splitRows.get((record.target as HTMLElement).dataset.key ?? "");
+    if (!splitRow || splitRow.row !== record.target) continue;
+    splitIconObserver?.unobserve(record.target);
+    fitSplitPath(splitRow.path);
+    const iconId = splitRow.icon.dataset.iconId ?? "";
+    const icon = splitIcons.get(iconId);
+    if (icon !== undefined) showSplitIcon(splitRow, icon);
+    else if (iconId) splitIconQueue.add(iconId);
+  }
+  void pumpSplitIcons();
+}
+
+/** Trims the path from the middle until it fits, so the app's own folder and file stay readable. */
+function fitSplitPath(el: HTMLElement): void {
+  const full = el.dataset.full ?? "";
+  el.textContent = full;
+  if (el.clientWidth === 0 || el.scrollWidth <= el.clientWidth) return;
+  let low = 8;
+  let high = full.length - 1;
+  let best = middleEllipsis(full, low);
+  while (low <= high) {
+    const mid = (low + high) >> 1;
+    const candidate = middleEllipsis(full, mid);
+    el.textContent = candidate;
+    if (el.scrollWidth <= el.clientWidth) {
+      best = candidate;
+      low = mid + 1;
+    } else {
+      high = mid - 1;
+    }
+  }
+  el.textContent = best;
+}
+
+function showSplitIcon(splitRow: SplitRow, icon: string): void {
+  if (!icon || splitRow.icon.dataset.loaded === "true") return;
+  const img = document.createElement("img");
+  img.alt = "";
+  img.width = 24;
+  img.height = 24;
+  img.decoding = "async";
+  img.addEventListener("error", () => {
+    splitRow.icon.dataset.loaded = "false";
+    splitRow.icon.innerHTML = SPLIT_APP_GLYPH;
+  });
+  img.src = icon;
+  splitRow.icon.replaceChildren(img);
+  splitRow.icon.dataset.loaded = "true";
+}
+
+// One request at a time: the main process resolves icons serially anyway, so more would only queue there.
+async function pumpSplitIcons(): Promise<void> {
+  const api = pangeaApi;
+  if (!api || splitIconsInFlight || splitIconQueue.size === 0) return;
+  const batch = [...splitIconQueue].slice(0, SPLIT_ICON_BATCH);
+  for (const id of batch) splitIconQueue.delete(id);
+  splitIconsInFlight = true;
+  try {
+    const icons = await api.getSplitTunnelIcons(batch);
+    for (const item of Array.isArray(icons) ? icons : []) {
+      if (!batch.includes(item.key)) continue;
+      splitIcons.set(item.key, typeof item.icon === "string" && item.icon.startsWith("data:image/") ? item.icon : "");
+    }
+  } catch (err) {
+    console.error("[splitTunnelIcons]", err);
+  } finally {
+    splitIconsInFlight = false;
+  }
+  for (const id of batch) {
+    if (!splitIcons.has(id)) splitIcons.set(id, "");
+  }
+  for (const splitRow of splitRows.values()) {
+    const id = splitRow.icon.dataset.iconId ?? "";
+    if (batch.includes(id)) showSplitIcon(splitRow, splitIcons.get(id) ?? "");
+  }
+  void pumpSplitIcons();
+}
+
+splitTunnelSearch.addEventListener("input", () => {
+  splitTouched = true;
+  drawSplitList();
+});
+
+// A non-empty search swallows Escape; an empty one lets it close the pane.
+splitTunnelSearch.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape" || splitTunnelSearch.value === "") return;
+  event.preventDefault();
+  event.stopPropagation();
+  splitTunnelSearch.value = "";
+  drawSplitList();
+});
+
+splitTunnelBrowseBtn.addEventListener("click", () => void browseSplitApp());
+
+async function browseSplitApp(): Promise<void> {
+  const api = pangeaApi;
+  if (!api || splitLoad !== "loaded") return;
+  let picked: SplitTunnelBrowseResult | null = null;
+  try {
+    picked = (await api.browseSplitTunnelApp()) ?? null;
+  } catch (err) {
+    showToast(reportError("splitTunnelBrowse", err, t("toggle.updateFailed")));
+  }
+  if (!picked || !picked.ok || !picked.entry.rule) {
+    if (picked && !picked.ok) {
+      showToast(t(picked.reason === "ownImage" ? "settings.splitTunnel.browse.ownImage" : "settings.splitTunnel.browse.notAnApp"));
+    } else if (picked) {
+      showToast(splitRowNote(picked.entry, undefined, t)?.text ?? t("settings.splitTunnel.browse.notAnApp"));
+    }
+    splitTunnelBrowseBtn.focus();
+    return;
+  }
+  const entry = picked.entry;
+  const key = splitEntryKey(entry, splitPlatform);
+  const name = isolateAuto(entry.name);
+  splitTouched = true;
+  if (!splitRows.has(key)) splitEntries.set(key, entry);
+  splitPinned = [key, ...splitPinned.filter((pinned) => pinned !== key)];
+  splitSession.add(key);
+  splitTunnelSearch.value = "";
+  drawSplitList();
+  const splitRow = splitRowFor(key);
+  splitTunnelPane.scrollTo({ top: 0 });
+  splitRow.toggle.focus();
+  if (splitConfigKeys.has(key)) {
+    showToast(t("settings.splitTunnel.apps.already", { name }), 4000, true);
+    return;
+  }
+  splitRow.toggle.checked = true;
+  await toggleSplitApp(splitRow, true);
+  if (!splitConfigKeys.has(key)) return;
+  const added = splitConfig?.enabled ? "settings.splitTunnel.apps.added" : "settings.splitTunnel.apps.addedOff";
+  showToast(t(added, { name }), 4000, true);
+}
+
+function syncSplitStatus(status: StatusResponse): void {
+  const live = splitStatusOf(status);
+  if (
+    live &&
+    (live.pending !== splitLive?.pending ||
+      live.unavailableReason !== splitLive?.unavailableReason ||
+      live.cidrsDropped !== splitLive?.cidrsDropped)
+  ) {
+    splitLive = live;
+    if (splitLoad === "loaded") renderSplitSection();
+  }
+  if (splitLoad === "unreachable" && Date.now() - splitLoadAt > SPLIT_RELOAD_MS) void loadSplitTunnel();
+}
+
 async function refreshLastServer(): Promise<void> {
   if (!pangeaApi) return;
   try {
@@ -2542,6 +3312,9 @@ async function init(): Promise<void> {
     } catch {
       // defaults already in place
     }
+
+    // Its own load: a service without the route, or one still starting, must not cost the settings above.
+    void loadSplitTunnel();
 
     initAutoConnect({
       getEnabled: () => autoConnectLocal,
@@ -3320,6 +4093,8 @@ function renderStatus(status: StatusResponse): void {
   factViaEl.textContent = viaLabel;
   // A post-quantum keyed tunnel looks like any other; the chip is its only tell.
   heroPq.hidden = !(connected && wg.postQuantum === true);
+  heroSplit.hidden = !splitChipVisible(connected, status);
+  syncSplitStatus(status);
   renderSessionClock();
 
   // Recovery toast — cloak was down last poll, now it's back

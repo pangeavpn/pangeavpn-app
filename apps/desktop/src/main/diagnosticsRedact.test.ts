@@ -162,3 +162,112 @@ test("ordinary prose survives untouched", () => {
   const line = "Hub unreachable; retrying in 20s (method=normal, attempt 2)";
   assert.equal(redactDiagnostics(line), line);
 });
+
+const HOME_CASES: readonly Case[] = [
+  {
+    what: "Windows profile path with a space in the username",
+    line: "describeApps: stat failed for C:\\Users\\Dana Reyes\\AppData\\Local\\Discord\\app-1.0.9\\Discord.exe",
+    gone: ["Dana Reyes", "Dana"],
+    kept: ["describeApps: stat failed for C:\\Users\\", "\\AppData\\Local\\Discord\\app-1.0.9\\Discord.exe"]
+  },
+  {
+    what: "JSON-escaped profile path inside a daemon error",
+    line: 'daemon request failed (400): {"ok":false,"apps":["C:\\\\Users\\\\dana\\\\Games\\\\x.exe"]}',
+    gone: ["dana"],
+    kept: ["daemon request failed (400)", "\\\\Games\\\\x.exe"]
+  },
+  {
+    what: "forward-slash Windows profile path",
+    line: "icon lookup C:/Users/dana/AppData/Roaming/app.exe",
+    gone: ["dana"],
+    kept: ["icon lookup C:/Users/", "/AppData/Roaming/app.exe"]
+  },
+  {
+    what: "kernel device path to a profile",
+    line: "owner \\Device\\HarddiskVolume3\\Users\\dana\\scoop\\apps\\x.exe",
+    gone: ["dana"],
+    kept: ["\\scoop\\apps\\x.exe"]
+  },
+  {
+    what: "legacy Documents and Settings profile",
+    line: "C:\\Documents and Settings\\dana\\Desktop\\tool.exe",
+    gone: ["dana"],
+    kept: ["\\Desktop\\tool.exe"]
+  },
+  {
+    what: "macOS home",
+    line: "bundle /Users/dana/Applications/Foo.app not found",
+    gone: ["dana"],
+    kept: ["bundle /Users/", "/Applications/Foo.app not found"]
+  },
+  {
+    what: "Linux home",
+    line: "desktop entry /home/dana/.local/share/applications/foo.desktop skipped",
+    gone: ["dana"],
+    kept: ["desktop entry /home/", "/.local/share/applications/foo.desktop skipped"]
+  },
+  {
+    what: "root's home",
+    line: "reading /root/.config/pangeavpn/settings.json",
+    gone: ["/root/"],
+    kept: ["/.config/pangeavpn/settings.json"]
+  }
+];
+
+for (const item of HOME_CASES) {
+  test(`redacts ${item.what}`, () => {
+    const out = redactDiagnostics(item.line, "");
+    for (const secret of item.gone) {
+      assert.ok(!out.includes(secret), `leaked ${secret} in: ${out}`);
+    }
+    for (const context of item.kept) {
+      assert.ok(out.includes(context), `lost context ${context} in: ${out}`);
+    }
+    assert.ok(out.includes("[redacted:user]"), out);
+  });
+}
+
+test("a redirected home directory is redacted in every spelling", () => {
+  const home = "D:\\Profiles\\dana";
+  const raw = redactDiagnostics("open D:\\Profiles\\dana\\AppData\\x.exe failed", home);
+  assert.equal(raw, "open [redacted:user]\\AppData\\x.exe failed");
+  const json = redactDiagnostics('{"path":"d:\\\\profiles\\\\DANA\\\\x.exe"}', home);
+  assert.equal(json, '{"path":"[redacted:user]\\\\x.exe"}');
+  const slash = redactDiagnostics("D:/Profiles/dana/x.exe", home);
+  assert.equal(slash, "[redacted:user]/x.exe");
+});
+
+test("the literal home stops at a path boundary", () => {
+  const home = "/srv/people/dan";
+  assert.equal(
+    redactDiagnostics("/srv/people/dan/x and /srv/people/dana/y", home),
+    "[redacted:user]/x and /srv/people/dana/y"
+  );
+  assert.equal(redactDiagnostics("unchanged", "C:\\"), "unchanged");
+});
+
+test("a multi-line block with profile paths keeps every line", () => {
+  const block = [
+    "2026-10-02T10:00:00.000Z [log] catalog: 41 apps, 3 skipped",
+    "2026-10-02T10:00:01.000Z [warn] C:\\Users\\dana\\AppData\\Local\\x.exe",
+    "2026-10-02T10:00:02.000Z [log] /home/dana/.local/bin/y",
+    "2026-10-02T10:00:03.000Z [log] done"
+  ].join("\n");
+  const out = redactDiagnostics(block, "");
+  assert.equal(out.split("\n").length, 4);
+  assert.ok(!out.includes("dana"));
+  assert.ok(out.includes("catalog: 41 apps, 3 skipped"));
+  assert.ok(out.endsWith("[log] done"));
+});
+
+test("system paths outside home directories are left alone", () => {
+  for (const line of [
+    "C:\\ProgramData\\PangeaVPN\\daemon.log",
+    "C:\\Program Files\\PangeaVPN\\PangeaVPN.exe",
+    "/Library/Application Support/PangeaVPN/daemon-elevated.log",
+    "/usr/share/applications/firefox.desktop",
+    "/opt/google/chrome/"
+  ]) {
+    assert.equal(redactDiagnostics(line, ""), line);
+  }
+});

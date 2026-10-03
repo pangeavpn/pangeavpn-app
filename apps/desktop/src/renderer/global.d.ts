@@ -33,6 +33,71 @@ declare global {
     entryServerId: string | null;
   }
 
+  /** Mirrors SplitTunnelConfig in src/shared/splitTunnel.ts. */
+  interface SplitTunnelConfig {
+    enabled: boolean;
+    apps: string[];
+    cidrs: string[];
+    /** False when the service can't exclude apps here; ranges still work. */
+    appsSupported: boolean;
+    /** "" or a daemon code: classifierFailed, egressFailed, permitFailed, stackFailed, strictReversePath. */
+    unavailableReason: string;
+    active: boolean;
+    /** Saved, but not yet applied to the live tunnel. */
+    pending: boolean;
+    /** The ranges stay in the tunnel on this connection: the server's routes can't fit them. */
+    cidrsDropped: boolean;
+  }
+
+  /** Mirrors SplitTunnelErrorCode; "invalid" stands for a code this build doesn't know. */
+  type SplitTunnelErrorCode =
+    | "notAbsolute"
+    | "tooLong"
+    | "nul"
+    | "unsupportedForm"
+    | "systemProcess"
+    | "tooBroad"
+    | "ownImage"
+    | "tooMany"
+    | "duplicate"
+    | "notIPv4"
+    | "prefixTooShort"
+    | "tooManyRoutes"
+    | "invalid";
+
+  /** `value` is the rejected entry: the rule, or the ranges token as typed. */
+  interface SplitTunnelInvalid {
+    field: "apps" | "cidrs";
+    index: number;
+    code: SplitTunnelErrorCode;
+    value?: string;
+  }
+
+  type SplitTunnelResult =
+    | { ok: true; config: SplitTunnelConfig }
+    | { ok: false; invalid: SplitTunnelInvalid[] };
+
+  /** Mirrors SplitTunnelAppEntry. `rule` is "" for unsupported rows; `id` is the icon key. */
+  interface SplitTunnelAppEntry {
+    id: string;
+    name: string;
+    rule: string;
+    exe: string;
+    kind: "file" | "dir" | "bundle";
+    missing?: boolean;
+    warning?: "inherits" | "mayNotWork";
+    unsupported?: "flatpak" | "appimage" | "script";
+  }
+
+  interface SplitTunnelIcon {
+    key: string;
+    icon: string;
+  }
+
+  type SplitTunnelBrowseResult =
+    | { ok: true; entry: SplitTunnelAppEntry }
+    | { ok: false; reason: "ownImage" | "notAnApp" };
+
   /** Mirrors LoginErrorCode in shared/ipc.ts. */
   type LoginErrorCode =
     | "INVALID_ACCOUNT_NUMBER"
@@ -176,6 +241,17 @@ declare global {
     clearLastServer: () => Promise<void>;
     setMultihop: (prefs: MultihopPrefs) => Promise<void>;
     getMultihop: () => Promise<MultihopPrefs>;
+    /** Null when the service predates split tunnelling; rejects when unreachable. */
+    getSplitTunnel: () => Promise<SplitTunnelConfig | null>;
+    /** Reject on anything but a validation failure; re-read with getSplitTunnel then. */
+    setSplitTunnelEnabled: (enabled: boolean) => Promise<SplitTunnelResult>;
+    setSplitTunnelApp: (rule: string, excluded: boolean) => Promise<SplitTunnelResult>;
+    setSplitTunnelCidrs: (text: string) => Promise<SplitTunnelResult>;
+    listSplitTunnelApps: (options?: { refresh?: boolean }) => Promise<SplitTunnelAppEntry[]>;
+    describeSplitTunnelApps: (rules: string[]) => Promise<SplitTunnelAppEntry[]>;
+    getSplitTunnelIcons: (keys: string[]) => Promise<SplitTunnelIcon[]>;
+    /** Null when cancelled; adding the pick is up to the caller. */
+    browseSplitTunnelApp: () => Promise<SplitTunnelBrowseResult | null>;
     getLocale: () => Promise<string>;
     setLocale: (locale: string) => Promise<void>;
     getIsPackaged: () => Promise<boolean>;
