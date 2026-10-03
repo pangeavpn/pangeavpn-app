@@ -15,8 +15,11 @@ import (
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/state"
 )
 
-// Seam for the in-place switch tests; production always configures the real interface.
-var configureWindowsInterfaceFn = configureWindowsInterface
+// Seams for the in-place switch tests; production always configures the real interface.
+var (
+	configureWindowsInterfaceFn  = configureWindowsInterface
+	syncWindowsAllowedIPRoutesFn = syncWindowsAllowedIPRoutes
+)
 
 // RestoreOrphanedState is a no-op on Windows: WFP filters and routes don't
 // survive process exit the way darwin/linux network config files do.
@@ -90,6 +93,7 @@ func (m *wireGuardGoManager) startWindows(ctx context.Context, profile state.Wir
 		func(interfaceName string, mtu int) (tun.Device, error) {
 			return tun.CreateTUNWithRequestedGUID(interfaceName, requestedGUID, mtu)
 		},
+		tunnelInfoFor(requestedName, parsed),
 	)
 	if err != nil {
 		m.removeSession(tunnelKey)
@@ -183,6 +187,10 @@ func (m *wireGuardGoManager) trySwitchInPlace(ctx context.Context, tunnelKey str
 	if !ok || session == nil || session.device == nil || session.windowsLUID == 0 {
 		return false
 	}
+	if tunnelAddrChanged(session.tunDevice, parsed.addresses) {
+		m.logs.Add(state.LogInfo, state.SourceWireGuard, "tunnel address changed; rebuilding the device instead of reconfiguring in place")
+		return false
+	}
 	mtu := clampWireGuardDeviceMTU(parsed.mtu)
 	if !m.matchDeviceMTU(session, mtu) {
 		return false
@@ -223,9 +231,18 @@ func (m *wireGuardGoManager) trySwitchInPlace(ctx context.Context, tunnelKey str
 		m.logs.Add(state.LogWarn, state.SourceWireGuard, fmt.Sprintf("in-place reconfigure: interface config failed: %v", err))
 		return false
 	}
+	updateWrappedTunnelInfo(session, parsed)
 
 	m.logs.Add(state.LogInfo, state.SourceWireGuard, fmt.Sprintf("wireguard re-pointed in place on %s", session.interfaceName))
 	return true
+}
+
+// syncAllowedIPRoutes moves the tunnel's on-link routes to allowedIPs for ApplyAllowedIPs.
+func (m *wireGuardGoManager) syncAllowedIPRoutes(_ context.Context, _ string, session *tunnelSession, parsed parsedUserlandConfig, allowedIPs []string) error {
+	if session.windowsLUID == 0 {
+		return errors.New("tunnel has no interface LUID")
+	}
+	return syncWindowsAllowedIPRoutesFn(session.windowsLUID, parsed.addresses, allowedIPs)
 }
 
 type mtuForcer interface {

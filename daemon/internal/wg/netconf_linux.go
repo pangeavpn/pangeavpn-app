@@ -249,6 +249,72 @@ func removeLinuxSessionPolicyRoutes(allowedIPs []string) {
 	}
 }
 
+// syncLinuxPolicyRoutes moves a live session's table-51820 routes from old to want, adding before
+// removing. It returns what the session now holds references for, which is the union on failure.
+func syncLinuxPolicyRoutes(interfaceName string, old, want []string) ([]string, error) {
+	link, err := netlink.LinkByName(interfaceName)
+	if err != nil {
+		return old, fmt.Errorf("lookup interface %s for routes: %w", interfaceName, err)
+	}
+	index := link.Attrs().Index
+	add := func(rp string) error {
+		_, dst, err := net.ParseCIDR(rp)
+		if err != nil {
+			return fmt.Errorf("parse route prefix %s: %w", rp, err)
+		}
+		if err := netlink.RouteAdd(&netlink.Route{LinkIndex: index, Dst: dst, Table: policyRoutingTable}); err != nil && !errors.Is(err, os.ErrExist) {
+			return fmt.Errorf("add route %s to table %d: %w", rp, policyRoutingTable, err)
+		}
+		return nil
+	}
+	del := func(rp string) {
+		if _, dst, err := net.ParseCIDR(rp); err == nil {
+			_ = netlink.RouteDel(&netlink.Route{LinkIndex: index, Dst: dst, Table: policyRoutingTable})
+		}
+	}
+	return diffLinuxPolicyRoutes(old, want, add, del)
+}
+
+// diffLinuxPolicyRoutes takes a reference on every route of want (installing the ones old lacks)
+// before dropping old's, so a route both share never leaves the kernel.
+func diffLinuxPolicyRoutes(old, want []string, add func(rp string) error, del func(rp string)) ([]string, error) {
+	var wantRoutes []string
+	for _, prefix := range want {
+		routePrefixes, _, err := normalizedRoutesForPrefix(prefix)
+		if err != nil {
+			return old, err
+		}
+		wantRoutes = append(wantRoutes, routePrefixes...)
+	}
+	var oldRoutes []string
+	for _, prefix := range old {
+		if routePrefixes, _, err := normalizedRoutesForPrefix(prefix); err == nil {
+			oldRoutes = append(oldRoutes, routePrefixes...)
+		}
+	}
+	had := make(map[string]struct{}, len(oldRoutes))
+	for _, rp := range oldRoutes {
+		had[rp] = struct{}{}
+	}
+
+	taken := make([]string, 0, len(wantRoutes))
+	for _, rp := range wantRoutes {
+		if _, ok := had[rp]; !ok {
+			if err := add(rp); err != nil {
+				return append(append([]string{}, old...), taken...), err
+			}
+		}
+		incrementLinuxPolicyRouteRef(rp)
+		taken = append(taken, rp)
+	}
+	for _, rp := range oldRoutes {
+		if decrementLinuxPolicyRouteRef(rp) {
+			del(rp)
+		}
+	}
+	return want, nil
+}
+
 func incrementLinuxPolicyRouteRef(prefix string) {
 	linuxPolicyRouteMu.Lock()
 	defer linuxPolicyRouteMu.Unlock()

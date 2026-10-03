@@ -37,6 +37,32 @@ func LANExcludePrefixes() []netip.Prefix {
 	return out
 }
 
+// LANExcludePrefixesV6 is the IPv6 counterpart of LANExcludePrefixes.
+func LANExcludePrefixesV6() []netip.Prefix {
+	out := make([]netip.Prefix, len(lanExcludeRangesV6))
+	copy(out, lanExcludeRangesV6)
+	return out
+}
+
+// CountExcludeRoutes is how many IPv4 routes the tunnel needs once excludes are carved out of
+// 0.0.0.0/0, taking the worse of Allow LAN on (LAN carved too) and off (private ranges split).
+func CountExcludeRoutes(excludes []netip.Prefix) int {
+	all := []netip.Prefix{netip.PrefixFrom(netip.IPv4Unspecified(), 0)}
+	masked := maskedPrefixes(excludes)
+	withLAN := len(subtractRanges(all, append(LANExcludePrefixes(), masked...)))
+	return max(withLAN, len(subtractRanges(all, masked)))
+}
+
+func maskedPrefixes(prefixes []netip.Prefix) []netip.Prefix {
+	out := make([]netip.Prefix, 0, len(prefixes))
+	for _, p := range prefixes {
+		if p.IsValid() {
+			out = append(out, p.Masked())
+		}
+	}
+	return out
+}
+
 // subtractPrefix returns (p \ exclude) as disjoint prefixes of p's own
 // family. Never overlaps exclude; preserves the remainder of p.
 func subtractPrefix(p, exclude netip.Prefix) []netip.Prefix {
@@ -76,6 +102,10 @@ func subtractRanges(inputs, excludes []netip.Prefix) []netip.Prefix {
 	for _, ex := range excludes {
 		next := result[:0:0]
 		for _, p := range result {
+			if !p.Overlaps(ex) {
+				next = append(next, p)
+				continue
+			}
 			next = append(next, subtractPrefix(p, ex)...)
 		}
 		result = next
@@ -160,7 +190,25 @@ func sectionHeader(trimmed string) (string, bool) {
 // TransformWGConfigExcludeLAN subtracts the LAN exclusion set from each
 // [Peer] AllowedIPs line, keeping the tunnel's own address/DNS routed.
 func TransformWGConfigExcludeLAN(configText string) (string, error) {
-	keep := collectTunnelPrefixes(configText)
+	return TransformWGConfigExclude(configText, lanExcludeRanges, lanExcludeRangesV6, nil)
+}
+
+// TransformWGConfigExclude subtracts v4 from each [Peer] AllowedIPs line's IPv4 entries and v6 from
+// its IPv6 ones, then re-includes keep and the config's own Address/DNS so they stay in the tunnel.
+func TransformWGConfigExclude(configText string, v4, v6 []netip.Prefix, keep []netip.Prefix) (string, error) {
+	if len(v4) == 0 && len(v6) == 0 {
+		return configText, nil
+	}
+	excludes4 := maskedPrefixes(v4)
+	excludes6 := maskedPrefixes(v6)
+	var keep4, keep6 []netip.Prefix
+	for _, k := range maskedPrefixes(append(collectTunnelPrefixes(configText), keep...)) {
+		if k.Addr().Is4() {
+			keep4 = append(keep4, k)
+		} else {
+			keep6 = append(keep6, k)
+		}
+	}
 
 	scanner := bufio.NewScanner(strings.NewReader(configText))
 	scanner.Buffer(make([]byte, 0, 1024), 1024*1024)
@@ -204,7 +252,7 @@ func TransformWGConfigExcludeLAN(configText string) (string, error) {
 		}
 
 		var v4Inputs, v6Passthrough []netip.Prefix
-		var v6Raw []string
+		var v4Raw, v6Raw []string
 		for part := range strings.SplitSeq(value, ",") {
 			p := strings.TrimSpace(part)
 			if p == "" {
@@ -216,6 +264,7 @@ func TransformWGConfigExcludeLAN(configText string) (string, error) {
 			}
 			if prefix.Addr().Is4() {
 				v4Inputs = append(v4Inputs, prefix.Masked())
+				v4Raw = append(v4Raw, p)
 			} else {
 				v6Passthrough = append(v6Passthrough, prefix.Masked())
 				v6Raw = append(v6Raw, p)
@@ -223,25 +272,30 @@ func TransformWGConfigExcludeLAN(configText string) (string, error) {
 		}
 
 		var parts []string
-		if len(v4Inputs) > 0 {
-			filtered := reinclude(subtractRanges(v4Inputs, lanExcludeRanges), keep)
+		switch {
+		case len(v4Inputs) == 0:
+		case len(excludes4) == 0:
+			parts = append(parts, v4Raw...)
+		default:
+			filtered := reinclude(subtractRanges(v4Inputs, excludes4), keep4)
 			if len(filtered) == 0 {
 				// Entirely private peer (e.g. site-to-site): leave it unchanged.
-				for _, p := range v4Inputs {
-					parts = append(parts, p.String())
-				}
-			} else {
-				for _, p := range filtered {
-					parts = append(parts, p.String())
-				}
+				filtered = v4Inputs
+			}
+			for _, p := range filtered {
+				parts = append(parts, p.String())
 			}
 		}
-		if len(v6Passthrough) > 0 {
-			v6Filtered := subtractRanges(v6Passthrough, lanExcludeRangesV6)
+		switch {
+		case len(v6Passthrough) == 0:
+		case len(excludes6) == 0:
+			parts = append(parts, v6Raw...)
+		default:
+			v6Filtered := subtractRanges(v6Passthrough, excludes6)
 			if len(v6Filtered) == 0 {
 				parts = append(parts, v6Raw...)
 			} else {
-				for _, p := range v6Filtered {
+				for _, p := range reinclude(v6Filtered, keep6) {
 					parts = append(parts, p.String())
 				}
 			}
@@ -259,4 +313,39 @@ func TransformWGConfigExcludeLAN(configText string) (string, error) {
 	}
 
 	return strings.Join(out, "\n") + "\n", nil
+}
+
+// CountAllowedIPv4 reports how many IPv4 entries the config's [Peer] AllowedIPs lines carry.
+func CountAllowedIPv4(configText string) (int, error) {
+	scanner := bufio.NewScanner(strings.NewReader(configText))
+	scanner.Buffer(make([]byte, 0, 1024), 1024*1024)
+	count := 0
+	section := ""
+	for scanner.Scan() {
+		trimmed := strings.TrimSpace(scanner.Text())
+		if header, ok := sectionHeader(trimmed); ok {
+			section = header
+			continue
+		}
+		if section != "peer" {
+			continue
+		}
+		key, value, ok := parseKeyValue(trimmed)
+		if !ok || !strings.EqualFold(key, "AllowedIPs") {
+			continue
+		}
+		for _, part := range splitCSV(value) {
+			prefix, err := parseAllowedIPEntry(part)
+			if err != nil {
+				return 0, fmt.Errorf("invalid AllowedIPs entry %q: %w", part, err)
+			}
+			if prefix.Addr().Is4() {
+				count++
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return 0, fmt.Errorf("parse wg config for allowed-ips: %w", err)
+	}
+	return count, nil
 }

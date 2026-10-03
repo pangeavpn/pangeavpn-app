@@ -34,3 +34,17 @@ func normalizedRoutesForPrefix(prefix string) ([]string, string, error) {
 	}
 	return []string{network.String()}, "inet6", nil
 }
+
+// expandRoutePrefixes lists the routes AllowedIPs install; an unparseable entry is kept so adding it still fails.
+func expandRoutePrefixes(prefixes []string) []string {
+	var out []string
+	for _, prefix := range prefixes {
+		routes, _, err := normalizedRoutesForPrefix(prefix)
+		if err != nil {
+			out = append(out, prefix)
+			continue
+		}
+		out = append(out, routes...)
+	}
+	return out
+}

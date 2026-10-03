@@ -56,6 +56,48 @@ func wgConfigToUAPI(wgConfig string) (string, error) {
 	return strings.Join(out, "\n") + "\n", nil
 }
 
+// allowedIPsUAPI is the minimal UAPI that swaps each existing peer's AllowedIPs and nothing else:
+// no endpoint, so a transport's rewritten loopback endpoint is left alone.
+func allowedIPsUAPI(wgConfig string) (string, []string, error) {
+	_, peers, err := parseUAPISource(wgConfig)
+	if err != nil {
+		return "", nil, err
+	}
+	if len(peers) == 0 {
+		return "", nil, fmt.Errorf("uapi convert: config has no peers")
+	}
+	var out, keys []string
+	for i, peer := range peers {
+		publicKey := ""
+		var allowed []string
+		for _, e := range peer {
+			switch strings.ToLower(e.key) {
+			case "publickey":
+				if publicKey == "" {
+					h, err := base64ToHex(e.value)
+					if err != nil {
+						return "", nil, fmt.Errorf("uapi convert peer[%d]: %w", i, err)
+					}
+					publicKey = h
+				}
+			case "allowedips":
+				lines, err := expandAllowedIPs(e.value)
+				if err != nil {
+					return "", nil, fmt.Errorf("uapi convert peer[%d].AllowedIPs: %w", i, err)
+				}
+				allowed = append(allowed, lines...)
+			}
+		}
+		if publicKey == "" {
+			return "", nil, fmt.Errorf("uapi convert: peer has no PublicKey")
+		}
+		keys = append(keys, publicKey)
+		out = append(out, "public_key="+publicKey, "update_only=true", "replace_allowed_ips=true")
+		out = append(out, allowed...)
+	}
+	return strings.Join(out, "\n") + "\n", keys, nil
+}
+
 // parseUAPISource walks the stripped config and groups key/value pairs by
 // section, starting a new peer group on every [Peer] header.
 func parseUAPISource(wgConfig string) ([]kv, [][]kv, error) {

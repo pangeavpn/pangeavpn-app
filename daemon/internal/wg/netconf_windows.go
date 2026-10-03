@@ -73,22 +73,8 @@ func configureWindowsInterface(luidValue uint64, addresses []string, allowedIPs 
 	allowed4 = withoutInterfaceHostRoutes(allowed4, addresses4)
 	allowed6 = withoutInterfaceHostRoutes(allowed6, addresses6)
 
-	routes4 := make([]*winipcfg.RouteData, 0, len(allowed4))
-	routes6 := make([]*winipcfg.RouteData, 0, len(allowed6))
-	for _, prefix := range allowed4 {
-		routes4 = append(routes4, &winipcfg.RouteData{
-			Destination: prefix,
-			NextHop:     netip.IPv4Unspecified(),
-			Metric:      0,
-		})
-	}
-	for _, prefix := range allowed6 {
-		routes6 = append(routes6, &winipcfg.RouteData{
-			Destination: prefix,
-			NextHop:     netip.IPv6Unspecified(),
-			Metric:      0,
-		})
-	}
+	routes4 := onLinkRouteData(allowed4, netip.IPv4Unspecified())
+	routes6 := onLinkRouteData(allowed6, netip.IPv6Unspecified())
 
 	var errs []error
 	if err := luid.SetIPAddressesForFamily(windowsFamilyV4, addresses4); err != nil {
@@ -130,6 +116,83 @@ func setWindowsRoutesForFamily(luid winipcfg.LUID, family winipcfg.AddressFamily
 		}
 	}
 	for _, route := range missing {
+		if err := luid.AddRoute(route.Destination, route.NextHop, route.Metric); err != nil && !errors.Is(err, windows.ERROR_OBJECT_ALREADY_EXISTS) {
+			errs = append(errs, fmt.Errorf("add route %s: %w", route.Destination, err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func onLinkRouteData(prefixes []netip.Prefix, nextHop netip.Addr) []*winipcfg.RouteData {
+	routes := make([]*winipcfg.RouteData, 0, len(prefixes))
+	for _, prefix := range prefixes {
+		routes = append(routes, &winipcfg.RouteData{Destination: prefix, NextHop: nextHop, Metric: 0})
+	}
+	return routes
+}
+
+// syncWindowsAllowedIPRoutes moves a live tunnel's IPv4 routes to allowedIPs without a gap: a
+// failed add returns before any delete, so whatever the old routes covered stays in the tunnel.
+func syncWindowsAllowedIPRoutes(luidValue uint64, addresses []string, allowedIPs []string) error {
+	if luidValue == 0 {
+		return errors.New("invalid interface LUID")
+	}
+	luid := winipcfg.LUID(luidValue)
+	addresses4, _, err := parseWindowsPrefixes(addresses)
+	if err != nil {
+		return fmt.Errorf("parse interface addresses: %w", err)
+	}
+	allowed4, _, err := parseWindowsRoutePrefixes(allowedIPs)
+	if err != nil {
+		return fmt.Errorf("parse allowed-ips routes: %w", err)
+	}
+	routes := onLinkRouteData(withoutInterfaceHostRoutes(allowed4, addresses4), netip.IPv4Unspecified())
+
+	table, err := winipcfg.GetIPForwardTable2(windowsFamilyV4)
+	if err != nil {
+		return err
+	}
+	addFirst, stale, addAfter := planWindowsAllowedIPSync(table, luid, addresses4, routes)
+	if err := addWindowsTunnelRoutes(luid, addFirst); err != nil {
+		return err
+	}
+	var errs []error
+	for _, row := range stale {
+		if err := row.Delete(); err != nil && !errors.Is(err, windows.ERROR_NOT_FOUND) {
+			errs = append(errs, fmt.Errorf("delete route %s: %w", row.DestinationPrefix.Prefix(), err))
+		}
+	}
+	if err := addWindowsTunnelRoutes(luid, addAfter); err != nil {
+		errs = append(errs, err)
+	}
+	return errors.Join(errs...)
+}
+
+// planWindowsAllowedIPSync splits planWindowsRouteSync's adds into those safe before the deletes and
+// those re-adding a stale row's own destination and next hop. Windows' own Local rows are left alone.
+func planWindowsAllowedIPSync(table []winipcfg.MibIPforwardRow2, luid winipcfg.LUID, addresses []netip.Prefix, routes []*winipcfg.RouteData) (addFirst []*winipcfg.RouteData, stale []*winipcfg.MibIPforwardRow2, addAfter []*winipcfg.RouteData) {
+	planned, missing := planWindowsRouteSync(table, luid, addresses, routes)
+	staleKeys := make(map[windowsRouteKey]struct{}, len(planned))
+	for _, row := range planned {
+		if row.Protocol == winipcfg.RouteProtocolLocal {
+			continue
+		}
+		stale = append(stale, row)
+		staleKeys[windowsRouteKey{row.DestinationPrefix.Prefix().Masked(), row.NextHop.Addr()}] = struct{}{}
+	}
+	for _, route := range missing {
+		if _, clash := staleKeys[windowsRouteKey{route.Destination.Masked(), route.NextHop}]; clash {
+			addAfter = append(addAfter, route)
+		} else {
+			addFirst = append(addFirst, route)
+		}
+	}
+	return addFirst, stale, addAfter
+}
+
+func addWindowsTunnelRoutes(luid winipcfg.LUID, routes []*winipcfg.RouteData) error {
+	var errs []error
+	for _, route := range routes {
 		if err := luid.AddRoute(route.Destination, route.NextHop, route.Metric); err != nil && !errors.Is(err, windows.ERROR_OBJECT_ALREADY_EXISTS) {
 			errs = append(errs, fmt.Errorf("add route %s: %w", route.Destination, err))
 		}
