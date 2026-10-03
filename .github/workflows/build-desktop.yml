@@ -158,6 +158,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          # Ad-hoc signing (mac.identity "-") uses no secrets; PR builds skip it otherwise and fail verification.
+          CSC_FOR_PULL_REQUEST: 'true'
           # Fail the build rather than quietly shipping the naive stub.
           PANGEA_REQUIRE_NAIVE: '1'
 
