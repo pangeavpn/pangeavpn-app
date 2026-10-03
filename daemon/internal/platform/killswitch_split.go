@@ -164,7 +164,8 @@ func subtractPrefixes(p netip.Prefix, minus []netip.Prefix) []netip.Prefix {
 const minSplitEgressGID = 100
 
 func splitEgressGIDFromString(s string) (int, error) {
-	gid, err := strconv.ParseUint(strings.TrimSpace(s), 10, 32)
+	// 31 bits so the gid fits an int on any architecture.
+	gid, err := strconv.ParseUint(strings.TrimSpace(s), 10, 31)
 	if err != nil {
 		return 0, fmt.Errorf("group %s has an invalid gid %q", SplitEgressGroupName, s)
 	}

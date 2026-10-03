@@ -142,7 +142,7 @@ func TestSplitEgressGIDFromString(t *testing.T) {
 	if gid, err := splitEgressGIDFromString(" 437\n"); err != nil || gid != 437 {
 		t.Fatalf("gid = %d, %v; want 437", gid, err)
 	}
-	for _, bad := range []string{"0", "20", "80", "-1", "abc", "", "4294967296"} {
+	for _, bad := range []string{"0", "20", "80", "-1", "abc", "", "2147483648", "4294967296"} {
 		if _, err := splitEgressGIDFromString(bad); err == nil {
 			t.Errorf("gid %q accepted; pf would pass a shared group's sockets", bad)
 		}
