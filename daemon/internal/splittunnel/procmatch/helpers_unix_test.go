@@ -4,6 +4,7 @@ package procmatch
 
 import (
 	"syscall"
+	"testing"
 
 	"golang.org/x/sys/unix"
 )
@@ -19,4 +20,9 @@ func reuseAddrControl(network, address string, c syscall.RawConn) error {
 		return err
 	}
 	return serr
+}
+
+func longTempDir(t *testing.T) string {
+	t.Helper()
+	return t.TempDir()
 }

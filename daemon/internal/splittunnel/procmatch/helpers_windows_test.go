@@ -4,6 +4,7 @@ package procmatch
 
 import (
 	"syscall"
+	"testing"
 
 	"golang.org/x/sys/windows"
 )
@@ -16,4 +17,15 @@ func reuseAddrControl(network, address string, c syscall.RawConn) error {
 		return err
 	}
 	return serr
+}
+
+// longTempDir expands t.TempDir to the long-name form the kernel reports; CI's TEMP is C:\Users\RUNNER~1\...
+func longTempDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	long, ok := longPath(dir)
+	if !ok {
+		t.Fatalf("GetLongPathName(%q) failed", dir)
+	}
+	return long
 }

@@ -405,7 +405,7 @@ func TestStaleClassifyKeepsRefreshOff(t *testing.T) {
 }
 
 func TestLongPathNormalisation(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "A Rather Long Directory Name")
+	dir := filepath.Join(longTempDir(t), "A Rather Long Directory Name")
 	if err := os.Mkdir(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -433,7 +433,7 @@ func TestLongPathNormalisation(t *testing.T) {
 }
 
 func TestResolveJunction(t *testing.T) {
-	base := t.TempDir()
+	base := longTempDir(t)
 	target := filepath.Join(base, "Library", "Game")
 	if err := os.MkdirAll(target, 0o755); err != nil {
 		t.Fatal(err)

@@ -183,7 +183,7 @@ type helperTree struct {
 
 func startHelperTree(t *testing.T, ext string, env ...string) *helperTree {
 	t.Helper()
-	dir := t.TempDir()
+	dir := longTempDir(t)
 	ln, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
