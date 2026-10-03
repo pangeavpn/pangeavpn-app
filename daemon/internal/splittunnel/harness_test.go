@@ -1361,6 +1361,7 @@ func (h *harness) udpServer(remote netip.AddrPort) *udpServer {
 		h.t.Fatalf("listen udp: %v", err)
 	}
 	_ = c.SetReadBuffer(4 << 20)
+	_ = c.SetWriteBuffer(4 << 20)
 	s := &udpServer{remote: remote, conn: c}
 	h.eg.mapUDP(remote, c.LocalAddr().(*net.UDPAddr).AddrPort())
 	h.mu.Lock()

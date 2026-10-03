@@ -16,6 +16,8 @@ import (
 
 const udpReadBufSize = 64 << 10
 
+const udpSendBuffer = 256 << 10
+
 var udpReadPool = sync.Pool{New: func() any {
 	b := make([]byte, udpReadBufSize)
 	return &b
@@ -125,6 +127,10 @@ func (s *udpSession) listen() (net.PacketConn, error) {
 	if ctx.Err() != nil {
 		_ = conn.Close()
 		return nil, ctx.Err()
+	}
+	// macOS refuses a datagram larger than SO_SNDBUF, which defaults to 9216 (net.inet.udp.maxdgram).
+	if wb, ok := conn.(interface{ SetWriteBuffer(int) error }); ok {
+		_ = wb.SetWriteBuffer(udpSendBuffer)
 	}
 	return conn, nil
 }
