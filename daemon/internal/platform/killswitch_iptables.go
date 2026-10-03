@@ -100,14 +100,9 @@ func iptables6ForwardStagingChain(live string) string {
 
 // iptablesApplyPlan never leaves OUTPUT unfiltered: it builds the replacement
 // under an unreferenced name, hooking it up only after its terminal DROP.
-func iptablesApplyPlan(
-	staging string,
-	staging6 string,
-	endpointIPs []string,
-	tunnelInterface string,
-	allowLAN bool,
-) []iptablesCommand {
+func iptablesApplyPlan(staging, staging6 string, r ksRules) []iptablesCommand {
 	plan := make([]iptablesCommand, 0, 32)
+	cidrs := renderableSplitCIDRs(r.Split.CIDRs)
 
 	// IPv6 rebuilds first so a v6 failure aborts before v4 permits move.
 	plan = append(plan,
@@ -141,22 +136,30 @@ func iptablesApplyPlan(
 		ipt4("allow DHCP", "-A", staging, "-p", "udp", "--sport", "68", "--dport", "67", "-d", "255.255.255.255", "-j", "ACCEPT"),
 	)
 
-	for _, ip := range endpointIPs {
+	for _, ip := range r.EndpointIPs {
 		if strings.Contains(ip, ":") {
 			continue // v6 endpoints unsupported; the v6 chain blocks all.
 		}
 		plan = append(plan, ipt4("allow endpoint "+ip, "-A", staging, "-d", ip, "-j", "ACCEPT"))
 	}
 
-	if tunnelInterface != "" {
-		plan = append(plan, ipt4("allow tunnel interface", "-A", staging, "-o", tunnelInterface, "-j", "ACCEPT"))
+	if r.Tunnel != "" {
+		plan = append(plan, ipt4("allow tunnel interface", "-A", staging, "-o", r.Tunnel, "-j", "ACCEPT"))
 	}
 
-	if allowLAN {
+	if r.AllowLAN || len(cidrs) > 0 || r.Split.Egress {
 		plan = append(plan, iptablesResolverDrops(staging)...)
+	}
+	if r.Split.Egress {
+		plan = append(plan, ipt4("allow split egress", "-A", staging, "-m", "mark", "--mark", splitEgressMark, "-j", "ACCEPT"))
+	}
+	if r.AllowLAN {
 		for _, cidr := range LANAllowPrefixes {
 			plan = append(plan, ipt4("allow LAN "+cidr, "-A", staging, "-d", cidr, "-j", "ACCEPT"))
 		}
+	}
+	for _, cidr := range cidrs {
+		plan = append(plan, ipt4("allow split CIDR "+cidr, "-A", staging, "-d", cidr, "-j", "ACCEPT"))
 	}
 
 	// Complete from here; only now is it reachable.
@@ -232,7 +235,7 @@ var runIPTablesCommand = func(ctx context.Context, binary string, args ...string
 
 // Refuses rather than guesses when the live chain is unknown: guessing "nothing
 // installed" while a chain is live would stage into it and tear it down.
-func applyIPTablesRules(ctx context.Context, endpointIPs []string, tunnelInterface string, allowLAN bool) error {
+func applyIPTablesRules(ctx context.Context, r ksRules) error {
 	live, ok := liveIPTablesChain(ctx, "iptables", "OUTPUT", iptChainName, iptChainNameAlt)
 	if !ok {
 		return errors.New("cannot determine the live IPv4 kill-switch chain; refusing to rebuild")
@@ -250,16 +253,8 @@ func applyIPTablesRules(ctx context.Context, endpointIPs []string, tunnelInterfa
 		return errors.New("cannot determine the live IPv6 forward chain; refusing to rebuild")
 	}
 
-	plan := iptablesApplyPlan(
-		iptablesStagingChain(live),
-		iptables6StagingChain(live6),
-		endpointIPs, tunnelInterface, allowLAN,
-	)
-	plan = append(plan, iptablesForwardPlan(
-		iptablesForwardStagingChain(liveFwd),
-		iptables6ForwardStagingChain(liveFwd6),
-		tunnelInterface, allowLAN,
-	)...)
+	plan := iptablesApplyPlan(iptablesStagingChain(live), iptables6StagingChain(live6), r)
+	plan = append(plan, iptablesForwardPlan(iptablesForwardStagingChain(liveFwd), iptables6ForwardStagingChain(liveFwd6), r)...)
 	for _, cmd := range plan {
 		err := runIPTablesCommand(ctx, cmd.Binary, cmd.Args...)
 		if err == nil || cmd.BestEffort {
@@ -388,8 +383,9 @@ func iptablesTargetAbsent(ctx context.Context, cmd iptablesCommand) (absent bool
 
 // iptablesForwardPlan stages the FORWARD chains the way iptablesApplyPlan stages
 // OUTPUT. The physdev accept is best-effort: a kernel without it must still arm.
-func iptablesForwardPlan(staging, staging6, tunnelInterface string, allowLAN bool) []iptablesCommand {
+func iptablesForwardPlan(staging, staging6 string, r ksRules) []iptablesCommand {
 	plan := make([]iptablesCommand, 0, 24)
+	cidrs := renderableSplitCIDRs(r.Split.CIDRs)
 
 	plan = append(plan,
 		ipt6Optional("-D", "FORWARD", "-j", staging6),
@@ -419,17 +415,27 @@ func iptablesForwardPlan(staging, staging6, tunnelInterface string, allowLAN boo
 		ipt4Optional("-A", staging, "-m", "physdev", "--physdev-is-bridged", "-j", "ACCEPT"),
 	)
 	// The tunnel carries IPv4 only, so only the v4 chain ever names it.
-	if tunnelInterface != "" {
+	if r.Tunnel != "" {
 		plan = append(plan,
-			ipt4("allow forwarding to tunnel", "-A", staging, "-o", tunnelInterface, "-j", "ACCEPT"),
-			ipt4("allow forwarding from tunnel", "-A", staging, "-i", tunnelInterface, "-j", "ACCEPT"),
+			ipt4("allow forwarding to tunnel", "-A", staging, "-o", r.Tunnel, "-j", "ACCEPT"),
+			ipt4("allow forwarding from tunnel", "-A", staging, "-i", r.Tunnel, "-j", "ACCEPT"),
 		)
 	}
-	if allowLAN {
+	if r.AllowLAN || len(cidrs) > 0 {
 		plan = append(plan, iptablesResolverDrops(staging)...)
+	}
+	if r.AllowLAN {
 		for _, cidr := range LANAllowPrefixes {
 			plan = append(plan, ipt4("allow forwarding to LAN "+cidr, "-A", staging, "-d", cidr, "-j", "ACCEPT"))
 		}
+	}
+	// Routed guests' replies only match by source (physdev covers bridged ones), and
+	// only as replies; without xt_conntrack guests just get none, the lock still arms.
+	for _, cidr := range cidrs {
+		plan = append(plan,
+			ipt4("allow forwarding to split CIDR "+cidr, "-A", staging, "-d", cidr, "-j", "ACCEPT"),
+			ipt4Optional("-A", staging, "-s", cidr, "-m", "conntrack", "--ctdir", "REPLY", "-j", "ACCEPT"),
+		)
 	}
 	plan = append(plan,
 		ipt4("add forward drop rule", "-A", staging, "-j", "DROP"),
@@ -448,13 +454,13 @@ func iptablesForwardPlan(staging, staging6, tunnelInterface string, allowLAN boo
 	return plan
 }
 
-// iptablesResolverDrops closes the Allow-LAN resolver hole. Placed after the
-// tunnel accept, only a LAN resolver on 53/853 is left for them to catch.
+// iptablesResolverDrops keeps lookups behind the tunnel once anything else may
+// leave. Placed after the tunnel accept, only an off-tunnel resolver is caught.
 func iptablesResolverDrops(chain string) []iptablesCommand {
 	drops := make([]iptablesCommand, 0, 4)
 	for _, proto := range []string{"udp", "tcp"} {
 		for _, port := range []string{"53", "853"} {
-			drops = append(drops, ipt4("block LAN resolver "+proto+"/"+port, "-A", chain, "-p", proto, "--dport", port, "-j", "DROP"))
+			drops = append(drops, ipt4("block off-tunnel resolver "+proto+"/"+port, "-A", chain, "-p", proto, "--dport", port, "-j", "DROP"))
 		}
 	}
 	return drops

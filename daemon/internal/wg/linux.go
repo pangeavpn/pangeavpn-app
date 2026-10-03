@@ -33,6 +33,12 @@ func storeLinuxExtra(tunnelKey string, extra *linuxSessionExtra) {
 	linuxExtra[tunnelKey] = extra
 }
 
+func peekLinuxExtra(tunnelKey string) *linuxSessionExtra {
+	linuxExtraMu.Lock()
+	defer linuxExtraMu.Unlock()
+	return linuxExtra[tunnelKey]
+}
+
 func takeLinuxExtra(tunnelKey string) *linuxSessionExtra {
 	linuxExtraMu.Lock()
 	defer linuxExtraMu.Unlock()
@@ -93,7 +99,7 @@ func (m *wireGuardGoManager) startLinux(ctx context.Context, profile state.WireG
 	parsed.wgConfig = injectFwMark(parsed.wgConfig, policyRoutingFwmark)
 
 	// Create in-process TUN device and WireGuard device.
-	dev, tunDev, err := m.createInProcessDeviceWithFactory(interfaceName, parsed.mtu, parsed.wgConfig, tun.CreateTUN)
+	dev, tunDev, err := m.createInProcessDeviceWithFactory(interfaceName, parsed.mtu, parsed.wgConfig, tun.CreateTUN, tunnelInfoFor(interfaceName, parsed))
 	if err != nil {
 		m.removeSession(tunnelKey)
 		return err
@@ -255,6 +261,26 @@ func (m *wireGuardGoManager) statusLinux(_ context.Context, profile state.WireGu
 		Running: false,
 		Detail:  "not running",
 	}, nil
+}
+
+// syncAllowedIPRoutes moves the session's table-51820 routes to allowedIPs for ApplyAllowedIPs and
+// re-persists the session, whose tracked list always matches the route refs it holds.
+func (m *wireGuardGoManager) syncAllowedIPRoutes(_ context.Context, tunnelKey string, session *tunnelSession, _ parsedUserlandConfig, allowedIPs []string) error {
+	tracked, err := syncLinuxPolicyRoutes(session.interfaceName, session.linuxAllowedIPs, allowedIPs)
+	session.linuxAllowedIPs = tracked
+
+	extra := peekLinuxExtra(tunnelKey)
+	var ownership map[string]routeOwnership
+	var backup linuxResolvSymlinkBackup
+	if extra != nil {
+		ownership = extra.endpointRouteOwnership
+		backup = extra.dnsSymlinkBackup
+	}
+	persisted := newLinuxPersistedSession(session.interfaceName, tracked, session.endpointRoutes, ownership, session.linuxDNSOverride, backup)
+	if perr := persistLinuxSessionState(tunnelKey, persisted); perr != nil {
+		m.logs.Add(state.LogWarn, state.SourceWireGuard, fmt.Sprintf("persist network pre-state failed: %v", perr))
+	}
+	return err
 }
 
 // injectFwMark adds a FwMark line to the [Interface] section if not already

@@ -22,11 +22,24 @@ func init() {
 	}
 }
 
+var _ SplitTunnelPermitter = (*linuxKillSwitch)(nil)
+
+// Seams so lifecycle tests never run nft or iptables.
+var (
+	nftAvailable = hasNFT
+	nftApply     = applyNFTRules
+	nftRemove    = removeNFTRules
+	iptApply     = applyIPTablesRules
+	iptRemove    = removeIPTablesRules
+)
+
 type linuxKillSwitch struct {
 	mu       sync.Mutex
 	active   bool
 	useNFT   bool // true = nftables, false = iptables
 	allowLAN bool
+	// split is what every render carries for split tunnelling; never persisted.
+	split splitPermits
 
 	// Cached kernel probe under its own lock, so a 1Hz status poll neither
 	// forks nft each time nor holds up Enable/Clear behind a slow probe.
@@ -50,8 +63,9 @@ func (ks *linuxKillSwitch) Enable(ctx context.Context, endpointHosts []string, a
 	}
 
 	var tunnelInterface string
+	var prev KillSwitchState
 	if ks.active {
-		prev, _ := loadKillSwitchState()
+		prev, _ = loadKillSwitchState()
 		tunnelInterface = prev.TunnelInterface
 		if prev.Locked {
 			// Never let a re-arm silently drop a previously recorded Lockdown.
@@ -61,18 +75,19 @@ func (ks *linuxKillSwitch) Enable(ctx context.Context, endpointHosts []string, a
 
 	// Re-apply unconditionally rather than trusting in-memory state: an
 	// external actor can remove the live rules without this process knowing.
+	rules := ksRules{EndpointIPs: ips, Tunnel: tunnelInterface, AllowLAN: allowLAN, Split: ks.split}
 	useNFT := false
-	if hasNFT(ctx) {
-		if err := applyNFTRules(ctx, ips, tunnelInterface, allowLAN); err == nil {
+	if nftAvailable(ctx) {
+		if err := nftApply(ctx, rules); err == nil {
 			useNFT = true
 		} else if !ks.active {
-			_ = removeNFTRules(ctx)
+			_ = nftRemove(ctx)
 		}
 	}
 	if !useNFT {
-		if err := applyIPTablesRules(ctx, ips, tunnelInterface, allowLAN); err != nil {
+		if err := iptApply(ctx, rules); err != nil {
 			if !ks.active {
-				_ = removeIPTablesRules(ctx)
+				_ = iptRemove(ctx)
 			}
 			return fmt.Errorf("kill switch enable (iptables): %w", err)
 		}
@@ -86,13 +101,12 @@ func (ks *linuxKillSwitch) Enable(ctx context.Context, endpointHosts []string, a
 
 	// Saved only after the rules land: saving first let a failed re-apply leave
 	// phantom state that the next attempt's equality check would match.
-	st := KillSwitchState{
-		Active:          true,
-		AllowLAN:        allowLAN,
-		EndpointIPs:     ips,
-		TunnelInterface: tunnelInterface,
-		Locked:          locked,
-	}
+	st := prev
+	st.Active = true
+	st.AllowLAN = allowLAN
+	st.EndpointIPs = ips
+	st.TunnelInterface = tunnelInterface
+	st.Locked = locked
 	if err := saveKillSwitchState(st); err != nil {
 		return fmt.Errorf("kill switch enable: save state: %w", err)
 	}
@@ -117,14 +131,8 @@ func (ks *linuxKillSwitch) Update(ctx context.Context, tunnel TunnelRef) error {
 		return fmt.Errorf("kill switch update: load state: %w", err)
 	}
 
-	if ks.useNFT {
-		if err := applyNFTRules(ctx, st.EndpointIPs, tunnelInterface, ks.allowLAN); err != nil {
-			return fmt.Errorf("kill switch update (nft): %w", err)
-		}
-	} else {
-		if err := applyIPTablesRules(ctx, st.EndpointIPs, tunnelInterface, ks.allowLAN); err != nil {
-			return fmt.Errorf("kill switch update (iptables): %w", err)
-		}
+	if err := ks.render(ctx, ksRules{EndpointIPs: st.EndpointIPs, Tunnel: tunnelInterface, AllowLAN: ks.allowLAN, Split: ks.split}); err != nil {
+		return fmt.Errorf("kill switch update %w", err)
 	}
 
 	// Persisted only after the rules land, so state never claims a permit
@@ -136,17 +144,33 @@ func (ks *linuxKillSwitch) Update(ctx context.Context, tunnel TunnelRef) error {
 	return nil
 }
 
+// render re-applies the live backend's rules. ks.mu held.
+func (ks *linuxKillSwitch) render(ctx context.Context, r ksRules) error {
+	if ks.useNFT {
+		if err := nftApply(ctx, r); err != nil {
+			return fmt.Errorf("(nft): %w", err)
+		}
+		return nil
+	}
+	if err := iptApply(ctx, r); err != nil {
+		return fmt.Errorf("(iptables): %w", err)
+	}
+	return nil
+}
+
 func (ks *linuxKillSwitch) Clear(ctx context.Context) error {
 	ks.mu.Lock()
 	defer ks.mu.Unlock()
+	// Dropped first: a re-arm after a failed Clear must not bring the permits back.
+	ks.split = splitPermits{}
 
 	// Tear down both backends unconditionally: which one is live cannot be
 	// trusted after a restart (useNFT is in-memory only, never persisted).
 	var errs []string
-	if err := removeNFTRules(ctx); err != nil {
+	if err := nftRemove(ctx); err != nil {
 		errs = append(errs, fmt.Sprintf("remove nft rules: %v", err))
 	}
-	if err := removeIPTablesRules(ctx); err != nil {
+	if err := iptRemove(ctx); err != nil {
 		errs = append(errs, fmt.Sprintf("remove iptables rules: %v", err))
 	}
 	if len(errs) > 0 {
@@ -170,6 +194,48 @@ func (ks *linuxKillSwitch) Active() bool {
 		return true
 	}
 	return ks.lockLive()
+}
+
+// SetSplitEgress lets the daemon's marked bypass sockets out of the lock.
+func (ks *linuxKillSwitch) SetSplitEgress(ctx context.Context, on bool) error {
+	ks.mu.Lock()
+	defer ks.mu.Unlock()
+	next := ks.split.clone()
+	next.Egress = on
+	return ks.setSplit(ctx, next)
+}
+
+// SetSplitCIDRs permits the excluded destination ranges, resolvers excepted.
+func (ks *linuxKillSwitch) SetSplitCIDRs(ctx context.Context, cidrs []string) error {
+	normalized, err := normalizeSplitCIDRs(cidrs)
+	if err != nil {
+		return fmt.Errorf("kill switch split permits: %w", err)
+	}
+	ks.mu.Lock()
+	defer ks.mu.Unlock()
+	next := ks.split.clone()
+	next.CIDRs = normalized
+	return ks.setSplit(ctx, next)
+}
+
+// setSplit re-renders an armed lock with next; an idle switch only records it for
+// the next Enable. Always renders, so a retry repairs an earlier failed narrowing.
+func (ks *linuxKillSwitch) setSplit(ctx context.Context, next splitPermits) error {
+	if !ks.active {
+		ks.split = next
+		return nil
+	}
+	st, err := loadKillSwitchState()
+	if err != nil {
+		ks.split = narrowedSplit(ks.split, next)
+		return fmt.Errorf("kill switch split permits: load state: %w", err)
+	}
+	if err := ks.render(ctx, ksRules{EndpointIPs: st.EndpointIPs, Tunnel: st.TunnelInterface, AllowLAN: ks.allowLAN, Split: next}); err != nil {
+		ks.split = narrowedSplit(ks.split, next)
+		return fmt.Errorf("kill switch split permits %w", err)
+	}
+	ks.split = next
+	return nil
 }
 
 // lockLive asks the kernel whether either backend still holds the lock: one
@@ -201,9 +267,9 @@ func hasNFT(ctx context.Context) bool {
 	return cmd.Run() == nil
 }
 
-func applyNFTRules(ctx context.Context, endpointIPs []string, tunnelInterface string, allowLAN bool) error {
-	if tunnelInterface != "" && !validTunnelInterfaceName(tunnelInterface) {
-		return fmt.Errorf("invalid tunnel interface name %q", tunnelInterface)
+func applyNFTRules(ctx context.Context, r ksRules) error {
+	if r.Tunnel != "" && !validTunnelInterfaceName(r.Tunnel) {
+		return fmt.Errorf("invalid tunnel interface name %q", r.Tunnel)
 	}
 
 	// nft -f runs the whole script as one kernel transaction, so there is
@@ -211,7 +277,7 @@ func applyNFTRules(ctx context.Context, endpointIPs []string, tunnelInterface st
 	var b strings.Builder
 	fmt.Fprintf(&b, "add table %s %s\n", nftFamily, nftTableName)
 	fmt.Fprintf(&b, "delete table %s %s\n", nftFamily, nftTableName)
-	b.WriteString(buildNFTRuleset(endpointIPs, tunnelInterface, allowLAN))
+	b.WriteString(buildNFTRuleset(r))
 
 	cmd := exec.CommandContext(ctx, "nft", "-f", "-")
 	cmd.Stdin = strings.NewReader(b.String())
@@ -251,13 +317,8 @@ func (ks *linuxKillSwitch) DropTunnelPermit(ctx context.Context) error {
 	if st.TunnelInterface == "" {
 		return nil
 	}
-	if ks.useNFT {
-		err = applyNFTRules(ctx, st.EndpointIPs, "", ks.allowLAN)
-	} else {
-		err = applyIPTablesRules(ctx, st.EndpointIPs, "", ks.allowLAN)
-	}
-	if err != nil {
-		return fmt.Errorf("kill switch drop tunnel: %w", err)
+	if err := ks.render(ctx, ksRules{EndpointIPs: st.EndpointIPs, AllowLAN: ks.allowLAN, Split: ks.split}); err != nil {
+		return fmt.Errorf("kill switch drop tunnel %w", err)
 	}
 	st.TunnelInterface = ""
 	if err := saveKillSwitchState(st); err != nil {

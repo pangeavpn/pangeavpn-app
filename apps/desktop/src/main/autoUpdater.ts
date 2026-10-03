@@ -1,6 +1,7 @@
 import { app, ipcMain, shell, type BrowserWindow } from "electron";
 import { IPC_CHANNELS } from "../shared/ipc";
 import { isSafeExternalUrl } from "./externalUrl";
+import { shouldOfferUpdate } from "./updatePolicy";
 
 export const LATEST_ROUTE = "/api/desktop/latest";
 const FALLBACK_RELEASE_URL = "https://github.com/pangeavpn/pangeavpn-app/releases/latest";
@@ -23,34 +24,11 @@ interface LatestRelease {
   releaseUrl: string;
   releaseNotes: string;
   publishedAt: string;
+  prerelease: boolean;
 }
 
 function isSafeReleaseUrl(url: string): boolean {
   return isSafeExternalUrl(url);
-}
-
-function parseVersion(v: string): { core: number[]; prerelease: string | null } {
-  const [core, ...pre] = v.replace(/^v/, "").split("-");
-  return {
-    core: core.split(".").map((n) => parseInt(n, 10) || 0),
-    prerelease: pre.length > 0 ? pre.join("-") : null,
-  };
-}
-
-// A prerelease (e.g. "0.6.0-rc.1") always sorts below its final release.
-export function compareVersions(a: string, b: string): number {
-  const av = parseVersion(a);
-  const bv = parseVersion(b);
-  const len = Math.max(av.core.length, bv.core.length);
-  for (let i = 0; i < len; i++) {
-    const x = av.core[i] ?? 0;
-    const y = bv.core[i] ?? 0;
-    if (x !== y) return x - y;
-  }
-  if (av.prerelease === bv.prerelease) return 0;
-  if (av.prerelease === null) return 1;
-  if (bv.prerelease === null) return -1;
-  return av.prerelease < bv.prerelease ? -1 : 1;
 }
 
 function isNonEmptyString(v: unknown): v is string {
@@ -72,6 +50,7 @@ export function toLatestRelease(data: unknown): LatestRelease | null {
     releaseUrl,
     releaseNotes: typeof d.releaseNotes === "string" ? d.releaseNotes : "",
     publishedAt: typeof d.publishedAt === "string" ? d.publishedAt : "",
+    prerelease: d.prerelease === true,
   };
 }
 
@@ -104,7 +83,7 @@ async function performCheck(): Promise<void> {
   latestRelease = data;
   const win = getMainWindow();
   if (!win || win.isDestroyed()) return;
-  if (compareVersions(data.version, app.getVersion()) > 0) {
+  if (shouldOfferUpdate(data, app.getVersion())) {
     win.webContents.send(IPC_CHANNELS.updateAvailable, {
       version: data.version,
       releaseNotes: data.releaseNotes,
@@ -126,6 +105,17 @@ function scheduleAutoCheck(delayMs: number): void {
   if (typeof autoCheckTimer.unref === "function") autoCheckTimer.unref();
 }
 
+// The renderer shows "update" or "you're on the latest" from `available`, so the release
+// policy lives in one place.
+function checkResult(): { version: string; releaseNotes: string; available: boolean } | null {
+  if (!latestRelease) return null;
+  return {
+    version: latestRelease.version,
+    releaseNotes: latestRelease.releaseNotes,
+    available: shouldOfferUpdate(latestRelease, app.getVersion()),
+  };
+}
+
 // `windowResolver` is called at send time (not captured once) so a closed
 // and reopened main window still receives the update banner.
 export function setupAutoUpdater(windowResolver: () => BrowserWindow | null, updateHub: UpdateHub): void {
@@ -135,18 +125,17 @@ export function setupAutoUpdater(windowResolver: () => BrowserWindow | null, upd
   ipcMain.handle(IPC_CHANNELS.checkForUpdates, async () => {
     if (manualCheckInFlight) {
       await manualCheckInFlight;
-      return latestRelease ? { version: latestRelease.version, releaseNotes: latestRelease.releaseNotes } : null;
+      return checkResult();
     }
     const now = Date.now();
     if (now - lastManualCheckAt < MANUAL_CHECK_MIN_INTERVAL_MS) {
-      return latestRelease ? { version: latestRelease.version, releaseNotes: latestRelease.releaseNotes } : null;
+      return checkResult();
     }
     lastManualCheckAt = now;
     manualCheckInFlight = performCheck().catch(() => {});
     await manualCheckInFlight;
     manualCheckInFlight = null;
-    if (!latestRelease) return null;
-    return { version: latestRelease.version, releaseNotes: latestRelease.releaseNotes };
+    return checkResult();
   });
 
   ipcMain.handle(IPC_CHANNELS.downloadAppUpdate, async () => {

@@ -127,3 +127,108 @@ test("DaemonClient hands back the daemon's pre-shared key", async (t) => {
   const client = new DaemonClient(baseUrl, async () => "token");
   assert.equal(await client.pqFinish("abc", { algorithm: "ml-kem-768", kemCiphertext: "Y3Q=" }), "cHNr");
 });
+
+test("DaemonClient reads an old daemon's missing split-tunnel route as unsupported", async (t) => {
+  const { baseUrl } = await serve(t, (_req, res) => {
+    res.writeHead(404, { "Content-Type": "text/plain" });
+    res.end("404 page not found\n");
+  });
+
+  const client = new DaemonClient(baseUrl, async () => "token");
+  assert.equal(await client.getSplitTunnel(), null);
+  assert.equal(await client.setSplitTunnel({ enabled: true, apps: [], cidrs: [] }), null);
+});
+
+test("DaemonClient normalises the split-tunnel config and posts only the write fields", async (t) => {
+  const games = "C:\\Games\\";
+  const bodies: unknown[] = [];
+  const { baseUrl } = await serve(t, (req, res) => {
+    let raw = "";
+    req.on("data", (chunk) => (raw += chunk));
+    req.on("end", () => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      if (req.method === "GET") {
+        res.end(JSON.stringify({
+          enabled: true,
+          apps: [games],
+          cidrs: [],
+          appsSupported: true,
+          unavailableReason: "",
+          active: true,
+          pending: false
+        }));
+        return;
+      }
+      bodies.push(JSON.parse(raw));
+      res.end(JSON.stringify({ enabled: false, apps: [games], cidrs: ["10.0.0.0/8"], pending: true, cidrsDropped: true }));
+    });
+  });
+
+  const client = new DaemonClient(baseUrl, async () => "token");
+  const current = await client.getSplitTunnel();
+  assert.ok(current);
+  assert.equal(current.appsSupported, true);
+  assert.equal(current.cidrsDropped, false);
+  const body = { enabled: false, apps: [games], cidrs: ["10.0.0.0/8"], protect: ["C:\\P\\PangeaVPN.exe"] };
+  const result = await client.setSplitTunnel(body, current);
+  assert.deepEqual(bodies, [body]);
+  assert.deepEqual(result, {
+    ok: true,
+    config: {
+      enabled: false,
+      apps: [games],
+      cidrs: ["10.0.0.0/8"],
+      appsSupported: true,
+      unavailableReason: "",
+      active: true,
+      pending: true,
+      cidrsDropped: true
+    }
+  });
+});
+
+test("DaemonClient turns a split-tunnel 400 into per-entry codes", async (t) => {
+  const { baseUrl } = await serve(t, (_req, res) => {
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({
+      ok: false,
+      error: "invalid_split_tunnel",
+      invalid: [{ field: "apps", index: 0, code: "tooBroad" }, { field: "cidrs", index: 2, code: "tooManyRoutes" }]
+    }));
+  });
+
+  const client = new DaemonClient(baseUrl, async () => "token");
+  assert.deepEqual(await client.setSplitTunnel({ enabled: true, apps: ["/usr/"], cidrs: [] }), {
+    ok: false,
+    invalid: [
+      { field: "apps", index: 0, code: "tooBroad" },
+      { field: "cidrs", index: 2, code: "tooManyRoutes" }
+    ]
+  });
+});
+
+test("DaemonClient throws any other split-tunnel 400 with its body attached", async (t) => {
+  const { baseUrl } = await serve(t, (_req, res) => {
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: false, error: "invalid json" }));
+  });
+
+  const client = new DaemonClient(baseUrl, async () => "token");
+  await assert.rejects(
+    client.setSplitTunnel({ enabled: true, apps: [], cidrs: [] }),
+    (error) => error instanceof DaemonHttpError && error.status === 400 && error.body.includes("invalid json")
+  );
+});
+
+test("DaemonClient reports a stalled split-tunnel call as a timeout", async (t) => {
+  const { baseUrl } = await serve(t, () => {
+    // Never respond.
+  });
+
+  const client = new DaemonClient(baseUrl, async () => "token", { defaultRequestTimeoutMs: 200 });
+  await assert.rejects(client.getSplitTunnel(), /daemon request timeout \(GET \/split-tunnel\)/);
+  await assert.rejects(
+    client.setSplitTunnel({ enabled: false, apps: [], cidrs: [] }),
+    /daemon request timeout \(POST \/split-tunnel\)/
+  );
+});

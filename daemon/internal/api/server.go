@@ -145,6 +145,22 @@ type permitHostsRequest struct {
 	Hosts []string `json:"hosts,omitempty"`
 }
 
+// splitTunnelRequest is POST /split-tunnel. Pointers tell a missing key from an empty
+// value, so a truncated body cannot wipe the lists; an absent protect keeps the stored one.
+type splitTunnelRequest struct {
+	Enabled *bool     `json:"enabled"`
+	Apps    *[]string `json:"apps"`
+	CIDRs   *[]string `json:"cidrs"`
+	Protect *[]string `json:"protect"`
+}
+
+// splitTunnelInvalidResponse names rejected entries by list and index, never by value.
+type splitTunnelInvalidResponse struct {
+	OK      bool                 `json:"ok"`
+	Error   string               `json:"error"`
+	Invalid []splitTunnelInvalid `json:"invalid"`
+}
+
 type okResponse struct {
 	OK    bool   `json:"ok"`
 	Error string `json:"error,omitempty"`
@@ -575,6 +591,51 @@ func NewHandler(token string, service *Service) http.Handler {
 	}))
 
 	registerPostQuantumRoutes(mux, token, limiter)
+
+	// Never behind opMu: a POST saves, applies the app rules live and leaves the ranges
+	// to the reconciler, so it answers while a connect is still running.
+	mux.Handle("/split-tunnel", withAuthAndLimit(token, limiter, func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			view, ok := service.SplitTunnel()
+			if !ok {
+				writeError(w, http.StatusNotFound, "split tunnelling is not available")
+				return
+			}
+			writeJSON(w, http.StatusOK, view)
+		case http.MethodPost:
+			r.Body = http.MaxBytesReader(w, r.Body, maxBodySize)
+			var req splitTunnelRequest
+			decoder := json.NewDecoder(r.Body)
+			decoder.DisallowUnknownFields()
+			if err := decoder.Decode(&req); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid json")
+				return
+			}
+			if req.Enabled == nil || req.Apps == nil || req.CIDRs == nil {
+				writeError(w, http.StatusBadRequest, "enabled, apps and cidrs are required")
+				return
+			}
+			view, invalid, err := service.UpdateSplitTunnel(splitTunnelUpdate{
+				Enabled: *req.Enabled,
+				Apps:    *req.Apps,
+				CIDRs:   *req.CIDRs,
+				Protect: req.Protect,
+			})
+			switch {
+			case len(invalid) > 0:
+				writeJSON(w, http.StatusBadRequest, splitTunnelInvalidResponse{OK: false, Error: "invalid_split_tunnel", Invalid: invalid})
+			case errors.Is(err, errSplitTunnelUnavailable):
+				writeError(w, http.StatusNotFound, "split tunnelling is not available")
+			case err != nil:
+				writeJSON(w, http.StatusInternalServerError, okResponse{OK: false, Detail: "could not save the split tunnel settings"})
+			default:
+				writeJSON(w, http.StatusOK, view)
+			}
+		default:
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		}
+	}))
 
 	mux.Handle("/config", withAuthAndLimit(token, limiter, func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {

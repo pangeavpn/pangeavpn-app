@@ -4,7 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/netip"
 	"runtime"
+
+	"golang.zx2c4.com/wireguard/tun"
 
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/state"
 )
@@ -17,6 +20,19 @@ type Manager interface {
 	// ActiveLUIDs returns the set of Windows interface LUIDs for currently
 	// active tunnels. On non-Windows platforms this returns an empty map.
 	ActiveLUIDs() map[uint64]struct{}
+}
+
+// TunnelInfo describes a freshly created tunnel to the split-tunnel hook.
+type TunnelInfo struct {
+	Name      string
+	Addresses []netip.Addr
+	DNS       []netip.Addr
+	MTU       int
+}
+
+// SplitTunnelHook wraps each new TUN before wireguard-go reads from it.
+type SplitTunnelHook interface {
+	WrapTUN(dev tun.Device, info TunnelInfo) tun.Device
 }
 
 // Set by platform-specific files (windows.go, darwin_linux_shared.go).

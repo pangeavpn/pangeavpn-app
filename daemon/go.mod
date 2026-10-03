@@ -8,6 +8,7 @@ toolchain go1.26.7
 require (
 	github.com/clarkduvall/hyperloglog v0.0.0-20171127014514-a0107a5d8004
 	github.com/godbus/dbus/v5 v5.2.2
+	github.com/sagernet/gvisor v0.0.0-20260727.0-sing-box-mod.1
 	github.com/sagernet/sing v0.9.0-beta.4
 	github.com/sagernet/sing-box v1.14.0
 	github.com/sirupsen/logrus v1.10.1
@@ -102,7 +103,6 @@ require (
 	github.com/realclientip/realclientip-go v1.0.0 // indirect
 	github.com/sagernet/bbolt v0.0.0-20260823094646-e24805439c9c // indirect
 	github.com/sagernet/fswatch v0.1.2 // indirect
-	github.com/sagernet/gvisor v0.0.0-20260727.0-sing-box-mod.1 // indirect
 	github.com/sagernet/netlink v0.0.0-20260814022025-64455d367bbf // indirect
 	github.com/sagernet/nftables v0.3.0-mod.4 // indirect
 	github.com/sagernet/quic-go v0.61.0-sing-box-mod.7 // indirect

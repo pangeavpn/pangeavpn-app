@@ -202,7 +202,21 @@ export const StatusResponseSchema = z.object({
   // The profile the session runs on. Older daemons omit it; the desktop's main
   // process derives serverId from it for the renderer.
   profileId: z.string().optional(),
-  serverId: z.string().optional()
+  serverId: z.string().optional(),
+  // Split tunnelling, as counts only (GET /split-tunnel has the lists). Absent from
+  // daemons without it.
+  splitTunnel: z
+    .object({
+      enabled: z.boolean(),
+      appCount: z.number().default(0),
+      cidrCount: z.number().default(0),
+      appsActive: z.boolean().default(false),
+      bypassFlows: z.number().default(0),
+      pending: z.boolean().default(false),
+      unavailableReason: z.string().default(""),
+      cidrsDropped: z.boolean().optional()
+    })
+    .optional()
 });
 
 export const ConnectRequestSchema = z.object({

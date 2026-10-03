@@ -1,6 +1,6 @@
 {
   "name": "pangea-vpn",
-  "version": "0.7.5",
+  "version": "0.8.0-rc.2",
   "private": true,
   "workspaces": [
     "apps/*",

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/netip"
 	"net/url"
 	"os"
 	"regexp"
@@ -279,6 +280,10 @@ type Service struct {
 	// a live cloak.Status().Running is trusted as "already bridging this server" only then.
 	cloakMu         sync.Mutex
 	cloakStartedFor state.CloakProfile
+
+	// splitTunnel holds the split-tunnel settings and what the live session applied of
+	// them; see split_tunnel.go. Inert until SetSplitTunnel wires it in.
+	splitTunnel *splitTunnelState
 }
 
 type wgPreflightChecker interface {
@@ -394,6 +399,7 @@ func NewService(
 		networkRepair:  platform.RepairNetworkAfterTunnelDisconnect,
 		systemEvents:   platform.WatchSystemEvents,
 		healthKick:     make(chan struct{}, 1),
+		splitTunnel:    newSplitTunnelState(),
 	}
 }
 
@@ -543,6 +549,7 @@ func (s *Service) StartBackground(ctx context.Context) {
 	go s.reconcileStartup(ctx)
 	go s.healthLoop(ctx)
 	go s.watchSystemEvents(ctx)
+	go s.splitReconcileLoop(ctx)
 }
 
 // ConnectOptions carries per-connect toggles from the client. Defaults to
@@ -584,12 +591,12 @@ func (s *Service) registerCancelLocked(cancel context.CancelFunc, recovery bool)
 	}
 }
 
-// claimRecoveryCancel is registerCancel for a rebuild: it yields (nil) when a
-// user operation already holds the slot, so it can never displace one.
+// claimRecoveryCancel is registerCancel for a rebuild: it yields (nil) whenever the slot
+// is taken, since its holder has opMu, so it never displaces a user operation or the reconciler.
 func (s *Service) claimRecoveryCancel(cancel context.CancelFunc) func() {
 	s.cancelMu.Lock()
 	defer s.cancelMu.Unlock()
-	if s.cancelConnect != nil && !s.cancelRecovery {
+	if s.cancelConnect != nil {
 		return nil
 	}
 	return s.registerCancelLocked(cancel, true)
@@ -608,6 +615,7 @@ func (s *Service) preemptRecovery() {
 
 func (s *Service) Connect(ctx context.Context, profileID string, opts ConnectOptions) (err error) {
 	s.preemptRecovery()
+	defer s.kickSplitReconcileIfPending()
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
 	// The user owns the session now; a silent-network hold must not rebuild what
@@ -668,7 +676,7 @@ func (s *Service) Connect(ctx context.Context, profileID string, opts ConnectOpt
 		return nil
 	}
 
-	wireGuardProfile, err := wireGuardProfileFor(profile, opts.AllowLAN)
+	wireGuardProfile, err := wireGuardProfileFor(profile, opts.AllowLAN, s.splitCIDRsFor(profile, opts.AllowLAN))
 	if err != nil {
 		s.setError(fmt.Sprintf("allow-lan config transform failed: %v", err))
 		return err
@@ -704,7 +712,7 @@ func (s *Service) Connect(ctx context.Context, profileID string, opts ConnectOpt
 	// crash or a restart all rebuild toward it instead of stranding the lock.
 	s.setCurrentProfile(profile)
 	s.setSessionOpts(opts)
-	if err := s.bringUpAfterKillSwitch(ctx, profile, wireGuardProfile, opts); err != nil {
+	if err := s.bringUpAfterKillSwitch(ctx, profile, opts); err != nil {
 		if !errors.Is(err, ErrHostOffline) {
 			s.deferRecovery(connectRetryGrace)
 		}
@@ -729,14 +737,14 @@ func (s *Service) deferRecovery(d time.Duration) {
 	}
 }
 
-// wireGuardProfileFor builds the WireGuard profile a session runs with: the
-// transport's own endpoints bypass the tunnel, and AllowLAN carves local ranges out of AllowedIPs.
-func wireGuardProfileFor(profile state.Profile, allowLAN bool) (state.WireGuardProfile, error) {
+// wireGuardProfileFor builds the WireGuard profile a session runs with: the transport's own
+// endpoints bypass the tunnel, and AllowLAN and the split ranges carve AllowedIPs.
+func wireGuardProfileFor(profile state.Profile, allowLAN bool, splitCIDRs []netip.Prefix) (state.WireGuardProfile, error) {
 	wireGuardProfile := withTransportBypassHosts(profile)
-	if !allowLAN {
-		return wireGuardProfile, nil
+	if len(splitCIDRs) > 0 && !splitRoutesFit(profile, allowLAN, splitCIDRs) {
+		splitCIDRs = nil
 	}
-	rewritten, err := wg.TransformWGConfigExcludeLAN(wireGuardProfile.ConfigText)
+	rewritten, err := carveAllowedIPs(wireGuardProfile, allowLAN, splitCIDRs)
 	if err != nil {
 		return state.WireGuardProfile{}, err
 	}
@@ -746,7 +754,7 @@ func wireGuardProfileFor(profile state.Profile, allowLAN bool) (state.WireGuardP
 
 // bringUpAfterKillSwitch starts the transport + WireGuard and updates the
 // kill switch. Assumes opMu held, kill switch already Enable()d. Shared by Connect and Switch.
-func (s *Service) bringUpAfterKillSwitch(ctx context.Context, profile state.Profile, wireGuardProfile state.WireGuardProfile, opts ConnectOptions) (err error) {
+func (s *Service) bringUpAfterKillSwitch(ctx context.Context, profile state.Profile, opts ConnectOptions) (err error) {
 	// Cancelled here too because Switch and the recovery rebuild reach this
 	// without going through Connect; restarted on failure for the same reason.
 	interruptedRepair := s.cancelNetworkRepair()
@@ -755,6 +763,19 @@ func (s *Service) bringUpAfterKillSwitch(ctx context.Context, profile state.Prof
 			s.startNetworkRepair(interruptedRepair)
 		}
 	}()
+	// The routes follow what the lock actually permits, from one read of the settings.
+	splitCIDRs := s.syncSplitForBringUp(ctx, profile, opts.AllowLAN)
+	defer func() {
+		if err != nil {
+			// A kept device may never have received these routes.
+			s.updateAppliedSplit(func(a *appliedSplit) { a.known = false })
+		}
+	}()
+	wireGuardProfile, err := wireGuardProfileFor(profile, opts.AllowLAN, splitCIDRs)
+	if err != nil {
+		s.setError(fmt.Sprintf("allow-lan config transform failed: %v", err))
+		return err
+	}
 	s.machine.Set(state.StateConnecting, "starting transport")
 	stepStart := time.Now()
 
@@ -798,7 +819,7 @@ func (s *Service) holdBringUpOffline(err error, netGen uint64, startKey string) 
 // armKillSwitchForAdoptedTunnel enables and updates the kill switch for a
 // tunnel Connect just adopted rather than built.
 func (s *Service) armKillSwitchForAdoptedTunnel(ctx context.Context, profile state.Profile, opts ConnectOptions) error {
-	wireGuardProfile, err := wireGuardProfileFor(profile, opts.AllowLAN)
+	wireGuardProfile, err := wireGuardProfileFor(profile, opts.AllowLAN, s.splitCIDRsFor(profile, opts.AllowLAN))
 	if err != nil {
 		return fmt.Errorf("allow-lan config transform failed: %w", err)
 	}
@@ -810,6 +831,8 @@ func (s *Service) armKillSwitchForAdoptedTunnel(ctx context.Context, profile sta
 	if err := s.killSwitch.Update(ctx, tunnel); err != nil {
 		return fmt.Errorf("kill switch tunnel update failed for adopted tunnel: %w", err)
 	}
+	// Adoption never rebuilds, so the device's AllowedIPs are moved onto the stored ranges in place.
+	s.applySplitLive(ctx, profile, opts.AllowLAN, true)
 	s.machine.Set(state.StateConnected, "adopted tunnel active")
 	return nil
 }
@@ -1603,6 +1626,7 @@ func (s *Service) waitForWireGuardHandshake(ctx context.Context, wireGuardProfil
 // by Disconnect.
 func (s *Service) Switch(ctx context.Context, newProfileID string, opts ConnectOptions) error {
 	s.preemptRecovery()
+	defer s.kickSplitReconcileIfPending()
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
 	s.clearUpstreamHold()
@@ -1646,7 +1670,7 @@ func (s *Service) Switch(ctx context.Context, newProfileID string, opts ConnectO
 		return err
 	}
 
-	wireGuardProfile, err := wireGuardProfileFor(newProfile, opts.AllowLAN)
+	wireGuardProfile, err := wireGuardProfileFor(newProfile, opts.AllowLAN, s.splitCIDRsFor(newProfile, opts.AllowLAN))
 	if err != nil {
 		return refuse(err, fmt.Sprintf("allow-lan config transform failed: %v", err))
 	}
@@ -1696,7 +1720,7 @@ func (s *Service) Switch(ctx context.Context, newProfileID string, opts ConnectO
 	s.setCurrentProfile(newProfile)
 	s.setSessionOpts(opts)
 
-	if err := s.bringUpAfterKillSwitch(ctx, newProfile, wireGuardProfile, opts); err != nil {
+	if err := s.bringUpAfterKillSwitch(ctx, newProfile, opts); err != nil {
 		if keepDevice && errors.Is(err, ErrHostOffline) {
 			s.setKeptDeviceDead(true)
 		}
@@ -2059,6 +2083,10 @@ func (s *Service) disconnect(ctx context.Context, mode teardownMode) error {
 		case teardownLockdown:
 			// Lockdown keeps the lock, not the session's permits: the dead tunnel's
 			// interface and the departing server come out, only the hub stays.
+			if err := s.clearSplitPermits(teardownCtx); err != nil {
+				cleanupFailures = append(cleanupFailures, fmt.Sprintf("dropping the split-tunnel range permits failed: %v", err))
+				s.logs.Add(state.LogError, state.SourceDaemon, cleanupFailures[len(cleanupFailures)-1])
+			}
 			s.dropTunnelPermit(teardownCtx)
 			hubPermits := ipLiterals(s.storedControlPlaneHosts())
 			if err := s.killSwitch.Enable(teardownCtx, hubPermits, false, true); err != nil {
@@ -2076,12 +2104,18 @@ func (s *Service) disconnect(ctx context.Context, mode teardownMode) error {
 				// Leaves the host with no internet at all.
 				cleanupFailures = append(cleanupFailures, fmt.Sprintf("kill switch clear failed: %v", err))
 				s.logs.Add(state.LogError, state.SourceDaemon, cleanupFailures[len(cleanupFailures)-1])
+				// The lock stays up, so at least it must not keep the session's ranges open.
+				_ = s.clearSplitPermits(teardownCtx)
 			} else {
 				s.logs.Add(state.LogInfo, state.SourceDaemon, "kill switch cleared")
 			}
 			ksCancel()
 		}
+	} else if mode != teardownShutdown {
+		// An idle switch only records them, but the next arm would install what it holds.
+		_ = s.clearSplitPermits(teardownCtx)
 	}
+	s.resetAppliedSplit()
 
 	// Always transition to disconnected, even with partial cleanup failures.
 	s.machine.Set(state.StateDisconnected, "idle")
@@ -2204,6 +2238,7 @@ func (s *Service) Status(ctx context.Context) state.StatusResponse {
 		Reconnecting:        s.recoveryPending(),
 		TransportsExhausted: s.transportsAreExhausted(),
 		Offline:             offlineForState(stateValue, s.offlineNow()),
+		SplitTunnel:         s.splitTunnelStatus(),
 	}
 }
 
@@ -2286,6 +2321,8 @@ func (s *Service) healthLoop(ctx context.Context) {
 			}
 		}
 		s.runHealthCheck(ctx)
+		// After the check, so a retried range apply never races recovery for opMu.
+		s.splitTick()
 		gaps = gaps.checkDone(time.Now())
 	}
 }
@@ -2356,6 +2393,7 @@ func (s *Service) watchSystemEvents(ctx context.Context) {
 // onSystemResume prepares recovery for the network the host is waking into:
 // rebind sockets, hold health checks until interfaces return, then re-probe.
 func (s *Service) onSystemResume(ctx context.Context, cause string) {
+	s.splitNetworkChanged()
 	s.recoveryMu.Lock()
 	now := time.Now()
 	if now.Sub(s.resumeNotedAt) < resumeDedupeWindow {
@@ -2386,6 +2424,8 @@ func (s *Service) onSystemResume(ctx context.Context, cause string) {
 // onNetworkChanged reacts to the host's connectivity moving: once the network
 // fingerprint says there is something to dial from, waiting out timers only delays recovery.
 func (s *Service) onNetworkChanged() {
+	// First, ahead of the early return: a network that just went is a change too.
+	s.splitNetworkChanged()
 	if !s.networkLooksUsable() || s.noPhysicalRoute() {
 		// The network the retry was booked on is gone, so its return is a real change.
 		s.recoveryMu.Lock()
@@ -2960,6 +3000,7 @@ func (s *Service) rebuildSilentSession(ctx context.Context, profile state.Profil
 		clearCancel()
 		return errRebuildBusy
 	}
+	defer s.kickSplitReconcileIfPending()
 	defer s.opMu.Unlock()
 	defer clearCancel()
 	defer cancel()
@@ -2977,7 +3018,7 @@ func (s *Service) rebuildSilentSession(ctx context.Context, profile state.Profil
 	}
 
 	opts := s.getSessionOpts()
-	wireGuardProfile, err := wireGuardProfileFor(profile, opts.AllowLAN)
+	wireGuardProfile, err := wireGuardProfileFor(profile, opts.AllowLAN, s.splitCIDRsFor(profile, opts.AllowLAN))
 	if err != nil {
 		return fmt.Errorf("allow-lan config transform failed: %w", err)
 	}
@@ -3015,7 +3056,7 @@ func (s *Service) rebuildSilentSession(ctx context.Context, profile state.Profil
 	}
 	s.setActiveTransportKind("")
 
-	if err := s.bringUpAfterKillSwitch(ctx, profile, wireGuardProfile, opts); err != nil {
+	if err := s.bringUpAfterKillSwitch(ctx, profile, opts); err != nil {
 		// Preempted means the interrupting operation owns the device: a Switch
 		// re-points it in place, a Disconnect tears it down anyway.
 		preempted := rebuildCtx.Err() != nil
@@ -3308,6 +3349,7 @@ func (s *Service) reconcileKillSwitchForAdoptedTunnel(ctx context.Context, profi
 	if err := s.killSwitch.Update(ctx, tunnel); err != nil {
 		s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("could not update kill switch tunnel ref for adopted tunnel: %v", err))
 	}
+	s.applySplitLive(ctx, profile, allowLAN, true)
 }
 
 // reconcilePersistedKillSwitch re-arms the lock the previous process left, if
@@ -3384,6 +3426,10 @@ func (s *Service) recoverRecordedSession(persisted platform.KillSwitchState) {
 	}
 
 	s.setCurrentProfile(profile)
+	// Nothing saved before the restart is waiting on this session; its bring-up applies it.
+	if store := s.splitTunnel.store; store != nil {
+		s.updateAppliedSplit(func(a *appliedSplit) { a.gen = store.generation() })
+	}
 	s.setSessionOpts(ConnectOptions{
 		AllowLAN:           record.AllowLAN || persisted.AllowLAN,
 		Lockdown:           record.Lockdown || persisted.Locked,

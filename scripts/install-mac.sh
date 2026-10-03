@@ -113,6 +113,7 @@ PF_LABEL="com.pangea.pangeavpn.pf"
 PF_ANCHOR_FILE="/etc/pf.anchors/com.pangeavpn.killswitch"
 DAEMON_LOG="/var/log/pangeavpn-daemon.log"
 DAEMON_PING_URL="http://127.0.0.1:8787/ping"
+SPLIT_GROUP="_pangeasplit"
 
 banner
 
@@ -270,6 +271,37 @@ sudo xattr -dr com.apple.quarantine "$SUPPORT_DIR" 2>/dev/null || true
 # Copying invalidates the ad-hoc signature macOS requires to run the binary.
 if ! sudo codesign --force --sign - "$SUPPORT_DIR/PangeaDaemon"; then
     fail "Could not prepare the background service. Please try installing again, or contact ${SUPPORT_URL}"
+fi
+
+# The package's postinstall normally creates it; this repairs one gone missing. Same
+# rules: no members, a gid in 400-499 that no local or directory record holds.
+ensure_split_group() {
+    if dscl . -read "/Groups/$SPLIT_GROUP" PrimaryGroupID >/dev/null 2>&1; then
+        sudo dscl . -delete "/Groups/$SPLIT_GROUP" GroupMembership >/dev/null 2>&1 || true
+        sudo dscl . -delete "/Groups/$SPLIT_GROUP" GroupMembers >/dev/null 2>&1 || true
+        return 0
+    fi
+    local used gid=400
+    used="$( { dscl . -list /Groups PrimaryGroupID; dscl . -list /Users PrimaryGroupID; } 2>/dev/null | awk '{ print $2 }' || true)"
+    while (( gid < 500 )); do
+        if ! grep -qx "$gid" <<<"$used" && [[ -z "$(dscacheutil -q group -a gid "$gid" 2>/dev/null || true)" ]] \
+            && [[ -z "$(dscl /Search -search /Users PrimaryGroupID "$gid" 2>/dev/null || true)" ]]; then
+            break
+        fi
+        gid=$(( gid + 1 ))
+    done
+    (( gid < 500 )) || return 1
+    if ! sudo dscl . -create "/Groups/$SPLIT_GROUP" || ! sudo dscl . -create "/Groups/$SPLIT_GROUP" PrimaryGroupID "$gid"; then
+        sudo dscl . -delete "/Groups/$SPLIT_GROUP" >/dev/null 2>&1 || true
+        return 1
+    fi
+    sudo dscl . -create "/Groups/$SPLIT_GROUP" RealName "PangeaVPN split tunnelling" >/dev/null 2>&1 || true
+    sudo dscl . -create "/Groups/$SPLIT_GROUP" Password "*" >/dev/null 2>&1 || true
+}
+
+log "Setting up split tunnelling..."
+if ! ensure_split_group; then
+    warn "Could not set up split tunnelling's network group, so excluding apps from the VPN will be unavailable. Everything else works."
 fi
 
 # ── Auth token ───────────────────────────────────────────────────────────
