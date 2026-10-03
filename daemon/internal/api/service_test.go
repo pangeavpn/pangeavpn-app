@@ -429,6 +429,34 @@ type fakeWGManager struct {
 
 	// rebindCount records post-resume socket rebinds (wgSocketRebinder).
 	rebindCount int
+
+	// In-place AllowedIPs moves (wgAllowedIPsApplier) for split-tunnel ranges.
+	applyCount      int
+	applyErr        error
+	lastApplyConfig string
+	// applyHook runs inside ApplyAllowedIPs outside the lock, so a test can hold an apply open.
+	applyHook func(ctx context.Context) error
+	events    *callLog
+}
+
+func (f *fakeWGManager) ApplyAllowedIPs(ctx context.Context, profile state.WireGuardProfile) error {
+	f.mu.Lock()
+	f.applyCount++
+	f.events.add("wg:apply")
+	hook := f.applyHook
+	f.mu.Unlock()
+	if hook != nil {
+		if err := hook(ctx); err != nil {
+			return err
+		}
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.applyErr != nil {
+		return f.applyErr
+	}
+	f.lastApplyConfig = profile.ConfigText
+	return nil
 }
 
 func (f *fakeWGManager) RebindDeviceSockets(_ context.Context) int {
@@ -468,6 +496,7 @@ func (f *fakeWGManager) ActiveTunnelLUID(_ context.Context, _ state.WireGuardPro
 func (f *fakeWGManager) Start(_ context.Context, profile state.WireGuardProfile) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.events.add("wg:start")
 	f.startCount++
 	f.lastStartConfig = profile.ConfigText
 	if f.startErr != nil {
@@ -596,6 +625,43 @@ type fakeKillSwitch struct {
 	updateErr       error
 	clearErr        error
 	releaseErr      error
+
+	// Split-tunnel permits (platform.SplitTunnelPermitter); events, when set, records
+	// every call in order alongside the other fakes sharing it.
+	splitCIDRs       []string
+	splitCIDRCalls   int
+	splitCIDRErr     error
+	splitEgress      bool
+	splitEgressCalls int
+	events           *callLog
+}
+
+var _ platform.SplitTunnelPermitter = (*fakeKillSwitch)(nil)
+
+func (f *fakeKillSwitch) SetSplitCIDRs(_ context.Context, cidrs []string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.splitCIDRCalls++
+	f.events.add("ks:cidrs " + strings.Join(cidrs, ","))
+	if f.splitCIDRErr != nil {
+		return f.splitCIDRErr
+	}
+	f.splitCIDRs = append([]string(nil), cidrs...)
+	return nil
+}
+
+func (f *fakeKillSwitch) SetSplitEgress(_ context.Context, on bool) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.splitEgressCalls++
+	f.splitEgress = on
+	return nil
+}
+
+func (f *fakeKillSwitch) splitState() ([]string, int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.splitCIDRs...), f.splitCIDRCalls
 }
 
 func (f *fakeKillSwitch) ReleaseOrphanedSettings() error {
@@ -616,6 +682,7 @@ func (f *fakeKillSwitch) DropTunnelPermit(_ context.Context) error {
 func (f *fakeKillSwitch) Enable(_ context.Context, endpoints []string, allowLAN bool, locked bool) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.events.add("ks:enable")
 	f.enableCount++
 	f.enableEndpoints = append(f.enableEndpoints[:0], endpoints...)
 	f.enableAllowLAN = allowLAN
@@ -646,6 +713,7 @@ func (f *fakeKillSwitch) Clear(_ context.Context) error {
 		return f.clearErr
 	}
 	f.active = false
+	f.splitCIDRs, f.splitEgress = nil, false
 	return nil
 }
 
