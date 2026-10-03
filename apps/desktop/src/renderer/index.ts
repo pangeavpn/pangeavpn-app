@@ -3475,20 +3475,6 @@ menuUpdateBtn.addEventListener("click", () => {
   showUpdateModal();
 });
 
-// checkForUpdates() resolves with the latest release whether or not it's newer,
-// so compare against the running version; onUpdateAvailable shows the modal.
-function isNewerVersion(candidate: string, current: string): boolean {
-  const parse = (v: string): number[] => v.replace(/^v/, "").split(".").map((n) => parseInt(n, 10) || 0);
-  const a = parse(candidate);
-  const b = parse(current);
-  for (let i = 0; i < Math.max(a.length, b.length); i++) {
-    const x = a[i] ?? 0;
-    const y = b[i] ?? 0;
-    if (x !== y) return x > y;
-  }
-  return false;
-}
-
 checkUpdatesBtn.addEventListener("click", async () => {
   if (!updater) {
     showToast(t("update.unavailable"));
@@ -3499,7 +3485,7 @@ checkUpdatesBtn.addEventListener("click", async () => {
   checkUpdatesBtn.textContent = t("update.checking");
   try {
     const info = await updater.checkForUpdates();
-    if (info && isNewerVersion(info.version, currentAppVersion)) {
+    if (info?.available) {
       // Open the modal even if this version was dismissed earlier, and always
       // take the version just reported — a stale pending one would be wrong.
       pendingUpdate = { version: info.version };

@@ -269,7 +269,7 @@ declare global {
   }
 
   interface AutoUpdaterApi {
-    checkForUpdates: () => Promise<{ version: string; releaseNotes?: string } | null>;
+    checkForUpdates: () => Promise<{ version: string; releaseNotes?: string; available?: boolean } | null>;
     downloadUpdate: () => Promise<void>;
     installUpdate: () => void;
     onUpdateAvailable: (callback: (info: { version: string; releaseNotes?: string; macOnly?: boolean }) => void) => () => void;
