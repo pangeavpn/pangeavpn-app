@@ -33,6 +33,13 @@ type KillSwitch interface {
 	Active() bool
 }
 
+// SplitTunnelPermitter lets split-tunnel traffic through the lock. Desired sets live
+// in memory only, so a fresh process never re-arms them from disk.
+type SplitTunnelPermitter interface {
+	SetSplitEgress(ctx context.Context, on bool) error
+	SetSplitCIDRs(ctx context.Context, cidrs []string) error
+}
+
 // TunnelRef scopes a permit to an adapter: Name is what pf/nftables match on;
 // WindowsLUID avoids a by-name lookup racing a rebuild that reuses the name.
 type TunnelRef struct {
@@ -138,6 +145,8 @@ func (n *noopKillSwitch) Enable(_ context.Context, _ []string, _ bool, _ bool) e
 func (n *noopKillSwitch) Update(_ context.Context, _ TunnelRef) error                { return nil }
 func (n *noopKillSwitch) Clear(_ context.Context) error                              { return nil }
 func (n *noopKillSwitch) Active() bool                                               { return false }
+func (n *noopKillSwitch) SetSplitEgress(_ context.Context, _ bool) error             { return nil }
+func (n *noopKillSwitch) SetSplitCIDRs(_ context.Context, _ []string) error          { return nil }
 
 var stateMu sync.Mutex
 

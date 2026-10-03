@@ -95,6 +95,8 @@ func TestWFPConstantsMatchSDK(t *testing.T) {
 		{"FWP_V6_ADDR_MASK", uint64(cFWP_V6_ADDR_MASK), 0x101},
 		{"FWP_MATCH_EQUAL", uint64(cFWP_MATCH_EQUAL), 0},
 		{"FWP_MATCH_FLAGS_ALL_SET", uint64(cFWP_MATCH_FLAGS_ALL_SET), 6},
+		{"FWP_MATCH_NOT_EQUAL", uint64(cFWP_MATCH_NOT_EQUAL), 10},
+		{"FWP_BYTE_BLOB_TYPE", uint64(cFWP_BYTE_BLOB_TYPE), 12},
 		{"FWP_ACTION_BLOCK", uint64(cFWP_ACTION_BLOCK), 0x00001001},
 		{"FWP_ACTION_PERMIT", uint64(cFWP_ACTION_PERMIT), 0x00001002},
 		{"FWP_CONDITION_FLAG_IS_LOOPBACK", uint64(cFWP_CONDITION_FLAG_IS_LOOPBACK), 1},
@@ -131,6 +133,8 @@ func TestWFPGUIDsMatchFwpmu(t *testing.T) {
 		"CONDITION_IP_REMOTE_ADDRESS":   {cFWPM_CONDITION_IP_REMOTE_ADDRESS, "{B235AE9A-1D64-49B8-A44C-5FF3D9095045}"},
 		"CONDITION_IP_LOCAL_INTERFACE":  {cFWPM_CONDITION_IP_LOCAL_INTERFACE, "{4CD62A49-59C3-4969-B7F3-BDA5D32890A4}"},
 		"CONDITION_FLAGS":               {cFWPM_CONDITION_FLAGS, "{632CE23B-5167-435C-86D7-E903684AA80C}"},
+		// Split-tunnel egress is permitted by the daemon image, not by address.
+		"CONDITION_ALE_APP_ID": {cFWPM_CONDITION_ALE_APP_ID, "{D78E1E87-8644-4EA5-9437-D809ECEFC971}"},
 		// The forward layers see traffic the host routes for others (WSL2,
 		// Hyper-V NAT, ICS), which never reaches the ALE layers above.
 		"LAYER_IPFORWARD_V4":                    {cFWPM_LAYER_IPFORWARD_V4, "{A82ACC24-4EE1-4EE1-B465-FD1D25CB10A4}"},
@@ -203,6 +207,10 @@ func TestPersistentLockKeysAreDistinct(t *testing.T) {
 func TestFilterWeightLadder(t *testing.T) {
 	if !(weightBlockAll < weightLANPermit && weightLANPermit < weightDNSBlock && weightDNSBlock < weightTrustedPermit) {
 		t.Fatalf("weights block=%d lan=%d dns=%d trusted=%d are not strictly ascending", weightBlockAll, weightLANPermit, weightDNSBlock, weightTrustedPermit)
+	}
+	// Split permits share the LAN tier: under the DNS block, so excluded resolvers stay blocked.
+	if !(weightBlockAll < weightSplitPermit && weightSplitPermit < weightDNSBlock) {
+		t.Fatalf("split permit weight %d is not between block=%d and dns=%d", weightSplitPermit, weightBlockAll, weightDNSBlock)
 	}
 }
 

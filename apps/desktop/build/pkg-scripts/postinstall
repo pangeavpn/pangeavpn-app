@@ -90,6 +90,39 @@ if [ -n "${target_user}" ] && [ "${target_user}" != "root" ]; then
   fi
 fi
 
+# pf lets this group's sockets leave beside the tunnel, so it stays memberless on a
+# gid nobody holds: 400-499 sits above Apple's system groups and below local users.
+SPLIT_GROUP="_pangeasplit"
+
+ensure_split_group() {
+  if /usr/bin/dscl . -read "/Groups/${SPLIT_GROUP}" PrimaryGroupID >/dev/null 2>&1; then
+    /usr/bin/dscl . -delete "/Groups/${SPLIT_GROUP}" GroupMembership >/dev/null 2>&1 || true
+    /usr/bin/dscl . -delete "/Groups/${SPLIT_GROUP}" GroupMembers >/dev/null 2>&1 || true
+    return 0
+  fi
+  used="$( { /usr/bin/dscl . -list /Groups PrimaryGroupID; /usr/bin/dscl . -list /Users PrimaryGroupID; } 2>/dev/null \
+    | /usr/bin/awk '{ print $2 }')"
+  gid=400
+  while [ "${gid}" -lt 500 ]; do
+    if ! printf '%s\n' "${used}" | /usr/bin/grep -qx "${gid}" \
+      && [ -z "$(/usr/bin/dscacheutil -q group -a gid "${gid}" 2>/dev/null)" ] \
+      && [ -z "$(/usr/bin/dscl /Search -search /Users PrimaryGroupID "${gid}" 2>/dev/null)" ]; then
+      break
+    fi
+    gid=$((gid + 1))
+  done
+  [ "${gid}" -lt 500 ] || return 1
+  if ! /usr/bin/dscl . -create "/Groups/${SPLIT_GROUP}" \
+    || ! /usr/bin/dscl . -create "/Groups/${SPLIT_GROUP}" PrimaryGroupID "${gid}"; then
+    /usr/bin/dscl . -delete "/Groups/${SPLIT_GROUP}" >/dev/null 2>&1 || true
+    return 1
+  fi
+  /usr/bin/dscl . -create "/Groups/${SPLIT_GROUP}" RealName "PangeaVPN split tunnelling" >/dev/null 2>&1 || true
+  /usr/bin/dscl . -create "/Groups/${SPLIT_GROUP}" Password "*" >/dev/null 2>&1 || true
+}
+
+ensure_split_group || echo "Could not create the ${SPLIT_GROUP} group; excluding apps from the VPN stays unavailable"
+
 install_base="${2:-/Applications}"
 volume_root="${3:-/}"
 app_path=""

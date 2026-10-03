@@ -14,8 +14,9 @@ const (
 // killswitch_linux.go.
 
 // buildNFTRuleset generates a complete nftables ruleset for the kill switch.
-func buildNFTRuleset(endpointIPs []string, tunnelInterface string, allowLAN bool) string {
+func buildNFTRuleset(r ksRules) string {
 	var b strings.Builder
+	cidrs := renderableSplitCIDRs(r.Split.CIDRs)
 
 	fmt.Fprintf(&b, "table %s %s {\n", nftFamily, nftTableName)
 	fmt.Fprintf(&b, "  chain output {\n")
@@ -30,7 +31,7 @@ func buildNFTRuleset(endpointIPs []string, tunnelInterface string, allowLAN bool
 	fmt.Fprintf(&b, "    meta nfproto ipv4 udp sport 68 udp dport 67 ip daddr 255.255.255.255 accept\n")
 
 	// Allow traffic to endpoint IPs.
-	for _, ip := range endpointIPs {
+	for _, ip := range r.EndpointIPs {
 		if strings.Contains(ip, ":") {
 			continue
 		}
@@ -38,28 +39,37 @@ func buildNFTRuleset(endpointIPs []string, tunnelInterface string, allowLAN bool
 	}
 
 	// Allow IPv4 traffic on tunnel interface.
-	if tunnelInterface != "" {
-		fmt.Fprintf(&b, "    meta nfproto ipv4 oifname \"%s\" accept\n", tunnelInterface)
+	if r.Tunnel != "" {
+		fmt.Fprintf(&b, "    meta nfproto ipv4 oifname \"%s\" accept\n", r.Tunnel)
+	}
+
+	if r.AllowLAN || len(cidrs) > 0 || r.Split.Egress {
+		writeNFTResolverDrops(&b)
+	}
+	if r.Split.Egress {
+		fmt.Fprintf(&b, "    meta nfproto ipv4 meta mark %s accept\n", splitEgressMark)
 	}
 
 	// Allow LAN ranges so captive portals and gateway probes work on
 	// restrictive WiFi. Only applied when the user opts in.
-	if allowLAN {
-		writeNFTResolverDrops(&b)
+	if r.AllowLAN {
 		for _, cidr := range LANAllowPrefixes {
 			fmt.Fprintf(&b, "    ip daddr %s accept\n", cidr)
 		}
 	}
+	for _, cidr := range cidrs {
+		fmt.Fprintf(&b, "    ip daddr %s accept\n", cidr)
+	}
 
 	fmt.Fprintf(&b, "  }\n")
-	writeNFTForwardChain(&b, tunnelInterface, allowLAN)
+	writeNFTForwardChain(&b, r.Tunnel, r.AllowLAN, cidrs)
 	fmt.Fprintf(&b, "}\n")
 
 	return b.String()
 }
 
-// writeNFTResolverDrops closes the Allow-LAN resolver hole. Placed after the
-// tunnel accept, so only a LAN resolver is left for it to catch.
+// writeNFTResolverDrops keeps lookups behind the tunnel once anything else may
+// leave. Placed after the tunnel accept, so only an off-tunnel resolver is caught.
 func writeNFTResolverDrops(b *strings.Builder) {
 	fmt.Fprintf(b, "    udp dport { 53, 853 } drop\n")
 	fmt.Fprintf(b, "    tcp dport { 53, 853 } drop\n")
@@ -67,7 +77,7 @@ func writeNFTResolverDrops(b *strings.Builder) {
 
 // writeNFTForwardChain covers what the output hook never sees: packets the
 // host routes for containers and VMs. Same policy as the host's own traffic.
-func writeNFTForwardChain(b *strings.Builder, tunnelInterface string, allowLAN bool) {
+func writeNFTForwardChain(b *strings.Builder, tunnelInterface string, allowLAN bool, cidrs []string) {
 	fmt.Fprintf(b, "  chain forward {\n")
 	fmt.Fprintf(b, "    type filter hook forward priority 0; policy drop;\n")
 	fmt.Fprintf(b, "\n")
@@ -81,11 +91,19 @@ func writeNFTForwardChain(b *strings.Builder, tunnelInterface string, allowLAN b
 		fmt.Fprintf(b, "    meta nfproto ipv4 iifname \"%s\" accept\n", tunnelInterface)
 	}
 
-	if allowLAN {
+	if allowLAN || len(cidrs) > 0 {
 		writeNFTResolverDrops(b)
+	}
+	if allowLAN {
 		for _, cidr := range LANAllowPrefixes {
 			fmt.Fprintf(b, "    ip daddr %s accept\n", cidr)
 		}
+	}
+	// Routed guests' replies come back by source: oifkind only covers bridged ones.
+	// Reply direction only, or a guest inside the range could reach anywhere.
+	for _, cidr := range cidrs {
+		fmt.Fprintf(b, "    ip daddr %s accept\n", cidr)
+		fmt.Fprintf(b, "    ip saddr %s ct direction reply accept\n", cidr)
 	}
 
 	fmt.Fprintf(b, "  }\n")

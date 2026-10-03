@@ -4,24 +4,28 @@ package platform
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 )
 
 const (
-	pfAnchorName     = "com.pangeavpn.killswitch"
-	pfAnchorFilePath = "/etc/pf.anchors/" + pfAnchorName
-	pfConfPath       = "/etc/pf.conf"
-	pfAnchorLine     = `anchor "` + pfAnchorName + `"`
-	pfLoadAnchorLine = `load anchor "` + pfAnchorName + `" from "` + pfAnchorFilePath + `"`
-	pfConfBackupFile = "pf.conf.pangea-backup"
-	pfTokenFile      = "killswitch-pf-token.txt"
+	pfAnchorName      = "com.pangeavpn.killswitch"
+	pfSplitAnchorPath = pfAnchorName + "/" + pfSplitAnchor
+	pfAnchorFilePath  = "/etc/pf.anchors/" + pfAnchorName
+	pfConfPath        = "/etc/pf.conf"
+	pfAnchorLine      = `anchor "` + pfAnchorName + `"`
+	pfLoadAnchorLine  = `load anchor "` + pfAnchorName + `" from "` + pfAnchorFilePath + `"`
+	pfConfBackupFile  = "pf.conf.pangea-backup"
+	pfTokenFile       = "killswitch-pf-token.txt"
 )
 
 var pfTokenPattern = regexp.MustCompile(`Token\s*:\s*(\d+)`)
@@ -32,6 +36,21 @@ func init() {
 	}
 }
 
+var _ SplitTunnelPermitter = (*darwinKillSwitch)(nil)
+
+// Seams so lifecycle tests never reach pfctl or the directory service.
+var (
+	pfApply        = applyPFAnchor
+	pfEnable       = enablePF
+	pfIsEnabled    = pfEnabled
+	pfVerifyLive   = verifyPFAnchorLive
+	pfFlushStates  = flushPFStates
+	pfKillStates   = killPFStates
+	pfDisable      = disablePF
+	pfRemoveAnchor = removePFAnchor
+	splitEgressGID = SplitEgressGroupID
+)
+
 type darwinKillSwitch struct {
 	// opMu serialises Enable/Update/Clear; stateMu guards the flags so
 	// Active() (called by every /status) never queues behind a slow op.
@@ -39,6 +58,12 @@ type darwinKillSwitch struct {
 	stateMu  sync.Mutex
 	active   bool
 	allowLAN bool
+
+	// Under opMu, never persisted: split is what renders carry, pfSplit what the
+	// live anchor holds, egressGID the group SetSplitEgress resolved.
+	split     splitPermits
+	pfSplit   splitPermits
+	egressGID int
 
 	// Cached pf probe, so a 1Hz status poll does not fork pfctl each time.
 	liveAt time.Time
@@ -82,10 +107,10 @@ func (ks *darwinKillSwitch) Enable(ctx context.Context, endpointHosts []string, 
 			return fmt.Errorf("kill switch enable: load state: %w", err)
 		}
 		tunnelInterface = prev.TunnelInterface
-		// Only skip re-arming if the live anchor still enforces the lock;
-		// an externally flushed anchor must always be re-applied.
-		if stringSlicesEqual(prev.EndpointIPs, ips) && prev.AllowLAN == allowLAN {
-			if verifyPFAnchorLive(ctx) == nil {
+		// Only skip re-arming if the live anchor still enforces the lock and
+		// carries the split permits; an externally flushed anchor is re-applied.
+		if stringSlicesEqual(prev.EndpointIPs, ips) && prev.AllowLAN == allowLAN && ks.pfSplit.equal(ks.split) {
+			if pfVerifyLive(ctx) == nil {
 				return persistLockedUpgrade(prev, locked)
 			}
 		}
@@ -93,23 +118,24 @@ func (ks *darwinKillSwitch) Enable(ctx context.Context, endpointHosts []string, 
 
 	// pf itself can be switched off under a live anchor (another tool's
 	// pfctl -d); a re-arm takes a fresh reference whenever that happened.
-	firstActivation := !wasActive || !pfEnabled(ctx)
+	firstActivation := !wasActive || !pfIsEnabled(ctx)
 	var token string
 	if firstActivation {
-		token, err = enablePF(ctx)
+		token, err = pfEnable(ctx)
 		if err != nil {
 			return fmt.Errorf("kill switch enable: %w", err)
 		}
 	}
 
-	if err := applyPFAnchor(ctx, ips, tunnelInterface, allowLAN); err != nil {
+	if err := ks.render(ctx, ksRules{EndpointIPs: ips, Tunnel: tunnelInterface, AllowLAN: allowLAN, Split: ks.split}); err != nil {
 		// The caller's ctx is often the one that just died; cleanup gets its own.
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), pfCleanupGrace)
 		defer cancel()
 		if !wasActive {
-			_ = disablePF(cleanupCtx, token)
-			_ = removePFAnchor(cleanupCtx)
-		} else if rbErr := applyPFAnchor(cleanupCtx, prev.EndpointIPs, prev.TunnelInterface, prev.AllowLAN); rbErr != nil {
+			_ = pfDisable(cleanupCtx, token)
+			_ = pfRemoveAnchor(cleanupCtx)
+			ks.pfSplit = splitPermits{}
+		} else if rbErr := ks.render(cleanupCtx, ksRules{EndpointIPs: prev.EndpointIPs, Tunnel: prev.TunnelInterface, AllowLAN: prev.AllowLAN, Split: ks.split}); rbErr != nil {
 			KillSwitchWarn("kill switch enable: rollback to previous ruleset failed: %v", rbErr)
 		}
 		return fmt.Errorf("kill switch enable: %w", err)
@@ -119,24 +145,24 @@ func (ks *darwinKillSwitch) Enable(ctx context.Context, endpointHosts []string, 
 		if err := savePFToken(token); err != nil {
 			cleanupCtx, cancel := context.WithTimeout(context.Background(), pfCleanupGrace)
 			defer cancel()
-			_ = disablePF(cleanupCtx, token)
+			_ = pfDisable(cleanupCtx, token)
 			if !wasActive {
-				_ = removePFAnchor(cleanupCtx)
+				_ = pfRemoveAnchor(cleanupCtx)
+				ks.pfSplit = splitPermits{}
 			}
 			return fmt.Errorf("kill switch enable: save pf token: %w", err)
 		}
-		flushPFStates(ctx)
+		pfFlushStates(ctx)
 	}
 
 	ks.setState(true, allowLAN)
 
-	st := KillSwitchState{
-		Active:          true,
-		AllowLAN:        allowLAN,
-		EndpointIPs:     ips,
-		TunnelInterface: tunnelInterface,
-		Locked:          locked,
-	}
+	st := prev
+	st.Active = true
+	st.AllowLAN = allowLAN
+	st.EndpointIPs = ips
+	st.TunnelInterface = tunnelInterface
+	st.Locked = locked
 	if err := saveKillSwitchState(st); err != nil {
 		return fmt.Errorf("kill switch enable: save state: %w", err)
 	}
@@ -162,7 +188,7 @@ func (ks *darwinKillSwitch) Update(ctx context.Context, tunnel TunnelRef) error 
 		return fmt.Errorf("kill switch update: load state: %w", err)
 	}
 
-	if err := applyPFAnchor(ctx, st.EndpointIPs, tunnelInterface, allowLAN); err != nil {
+	if err := ks.render(ctx, ksRules{EndpointIPs: st.EndpointIPs, Tunnel: tunnelInterface, AllowLAN: allowLAN, Split: ks.split}); err != nil {
 		return fmt.Errorf("kill switch update: %w", err)
 	}
 
@@ -176,15 +202,18 @@ func (ks *darwinKillSwitch) Update(ctx context.Context, tunnel TunnelRef) error 
 func (ks *darwinKillSwitch) Clear(ctx context.Context) error {
 	ks.opMu.Lock()
 	defer ks.opMu.Unlock()
+	// Dropped first: a re-arm after a failed Clear must not bring the permits back.
+	ks.split, ks.egressGID = splitPermits{}, 0
 
-	if err := removePFAnchor(ctx); err != nil {
+	if err := pfRemoveAnchor(ctx); err != nil {
 		return fmt.Errorf("kill switch clear: remove anchor: %w", err)
 	}
+	ks.pfSplit = splitPermits{}
 
 	if token, err := loadPFToken(); err != nil {
 		return fmt.Errorf("kill switch clear: load pf token: %w", err)
 	} else if token != "" {
-		if err := disablePF(ctx, token); err != nil {
+		if err := pfDisable(ctx, token); err != nil {
 			return fmt.Errorf("kill switch clear: disable pf: %w", err)
 		}
 	}
@@ -194,6 +223,79 @@ func (ks *darwinKillSwitch) Clear(ctx context.Context) error {
 		return fmt.Errorf("kill switch clear: remove state: %w", err)
 	}
 	ks.setState(false, false)
+	return nil
+}
+
+// SetSplitEgress lets sockets of the split-egress group out of the lock. It fails
+// when the group is missing or shared, since pf could then match other sockets.
+func (ks *darwinKillSwitch) SetSplitEgress(ctx context.Context, on bool) error {
+	ks.opMu.Lock()
+	defer ks.opMu.Unlock()
+	next := ks.split.clone()
+	next.Egress = on
+	if on {
+		gid, err := splitEgressGID()
+		if err != nil {
+			err = fmt.Errorf("kill switch split egress: %w", err)
+			if ks.split.Egress {
+				next.Egress = false
+				err = errors.Join(err, ks.setSplit(ctx, next))
+			}
+			return err
+		}
+		ks.egressGID = gid
+	}
+	return ks.setSplit(ctx, next)
+}
+
+// SetSplitCIDRs permits the excluded destination ranges, resolvers excepted.
+func (ks *darwinKillSwitch) SetSplitCIDRs(ctx context.Context, cidrs []string) error {
+	normalized, err := normalizeSplitCIDRs(cidrs)
+	if err != nil {
+		return fmt.Errorf("kill switch split permits: %w", err)
+	}
+	ks.opMu.Lock()
+	defer ks.opMu.Unlock()
+	next := ks.split.clone()
+	next.CIDRs = normalized
+	return ks.setSplit(ctx, next)
+}
+
+// setSplit re-renders an armed lock with next; an idle switch only records it for
+// the next Enable. Always renders, so a retry repairs an earlier failed narrowing.
+func (ks *darwinKillSwitch) setSplit(ctx context.Context, next splitPermits) error {
+	active, allowLAN := ks.snapshotState()
+	if !active {
+		ks.split = next
+		return nil
+	}
+	st, err := loadKillSwitchState()
+	if err != nil {
+		ks.split = narrowedSplit(ks.pfSplit, next)
+		return fmt.Errorf("kill switch split permits: load state: %w", err)
+	}
+	if err := ks.render(ctx, ksRules{EndpointIPs: st.EndpointIPs, Tunnel: st.TunnelInterface, AllowLAN: allowLAN, Split: next}); err != nil {
+		ks.split = narrowedSplit(ks.pfSplit, next)
+		return fmt.Errorf("kill switch split permits: %w", err)
+	}
+	ks.split = next
+	return nil
+}
+
+// render loads r into the anchor, then ends the states of ranges it stopped
+// permitting: pf keeps established flows across a reload. opMu held.
+func (ks *darwinKillSwitch) render(ctx context.Context, r ksRules) error {
+	gid := 0
+	if r.Split.Egress {
+		gid = ks.egressGID
+	}
+	if err := pfApply(ctx, r, gid); err != nil {
+		return err
+	}
+	if gone := splitRangesToKill(ks.pfSplit.CIDRs, r); len(gone) > 0 {
+		pfKillStates(ctx, gone, r.Tunnel)
+	}
+	ks.pfSplit = r.Split.clone()
 	return nil
 }
 
@@ -217,7 +319,7 @@ func (ks *darwinKillSwitch) lockLive() bool {
 
 	ctx, cancel := context.WithTimeout(context.Background(), pfProbeTimeout)
 	defer cancel()
-	live := pfEnabled(ctx) && verifyPFAnchorLive(ctx) == nil
+	live := pfIsEnabled(ctx) && pfVerifyLive(ctx) == nil
 
 	ks.stateMu.Lock()
 	ks.live, ks.liveAt = live, time.Now()
@@ -231,10 +333,10 @@ func pfEnabled(ctx context.Context) bool {
 	return err == nil && strings.Contains(string(out), "Status: Enabled")
 }
 
-// applyPFAnchor writes the kill-switch ruleset to disk, wires it into
-// /etc/pf.conf, reloads pf, and verifies the block rule is actually live.
-func applyPFAnchor(ctx context.Context, endpointIPs []string, tunnelInterface string, allowLAN bool) error {
-	rules, err := buildPFRules(endpointIPs, tunnelInterface, allowLAN)
+// applyPFAnchor writes the lock to disk, wires it into /etc/pf.conf, reloads and
+// verifies it, then loads the split rules into the in-memory child anchor.
+func applyPFAnchor(ctx context.Context, r ksRules, egressGID int) error {
+	rules, err := buildPFRules(r)
 	if err != nil {
 		return err
 	}
@@ -254,6 +356,28 @@ func applyPFAnchor(ctx context.Context, endpointIPs []string, tunnelInterface st
 
 	if err := verifyPFAnchorLive(ctx); err != nil {
 		return fmt.Errorf("verify pf anchor: %w", err)
+	}
+	return loadPFSplitAnchor(ctx, pfSplitRules(r.Split, egressGID))
+}
+
+// loadPFSplitAnchor swaps the split rules into the child anchor the file hooks,
+// straight from memory; an empty set flushes it.
+func loadPFSplitAnchor(ctx context.Context, rules []string) error {
+	if len(rules) == 0 {
+		return flushPFAnchor(ctx, pfSplitAnchorPath)
+	}
+	cmd := exec.CommandContext(ctx, "pfctl", "-a", pfSplitAnchorPath, "-f", "-")
+	cmd.Stdin = strings.NewReader(strings.Join(rules, "\n") + "\n")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("load pf split anchor: %w (%s)", err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+func flushPFAnchor(ctx context.Context, anchor string) error {
+	out, err := exec.CommandContext(ctx, "pfctl", "-a", anchor, "-F", "all").CombinedOutput()
+	if err != nil && !strings.Contains(strings.ToLower(string(out)), "no such") {
+		return fmt.Errorf("flush pf anchor %s: %w (%s)", anchor, err, strings.TrimSpace(string(out)))
 	}
 	return nil
 }
@@ -329,13 +453,9 @@ func pfConfBackupPath() (string, error) {
 // removePFAnchor flushes the live anchor rules and empties the on-disk anchor
 // file so a later reload does not resurrect a stale block-all.
 func removePFAnchor(ctx context.Context) error {
-	cmd := exec.CommandContext(ctx, "pfctl", "-a", pfAnchorName, "-F", "all")
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		trimmed := strings.ToLower(string(out))
-		if !strings.Contains(trimmed, "no such") {
-			return fmt.Errorf("flush pf anchor: %w (%s)", err, strings.TrimSpace(string(out)))
-		}
+	// The split anchor too: the next arm's hook would otherwise pick its rules up again.
+	if err := errors.Join(flushPFAnchor(ctx, pfSplitAnchorPath), flushPFAnchor(ctx, pfAnchorName)); err != nil {
+		return err
 	}
 
 	if err := os.WriteFile(pfAnchorFilePath, nil, 0o644); err != nil && !os.IsNotExist(err) {
@@ -437,7 +557,7 @@ func (ks *darwinKillSwitch) DropTunnelPermit(ctx context.Context) error {
 	if st.TunnelInterface == "" {
 		return nil
 	}
-	if err := applyPFAnchor(ctx, st.EndpointIPs, "", allowLAN); err != nil {
+	if err := ks.render(ctx, ksRules{EndpointIPs: st.EndpointIPs, AllowLAN: allowLAN, Split: ks.split}); err != nil {
 		return fmt.Errorf("kill switch drop tunnel: %w", err)
 	}
 	st.TunnelInterface = ""
@@ -453,4 +573,66 @@ func flushPFStates(ctx context.Context) {
 	if out, err := exec.CommandContext(ctx, "pfctl", "-F", "states").CombinedOutput(); err != nil {
 		KillSwitchWarn("kill switch enable: could not flush pf states: %v (%s)", err, strings.TrimSpace(string(out)))
 	}
+}
+
+// killPFStates ends the host's off-tunnel flows to and from ranges the anchor no
+// longer permits.
+func killPFStates(ctx context.Context, cidrs []string, tunnel string) {
+	locals, err := pfKillLocalAddrs(tunnel)
+	if err != nil {
+		KillSwitchWarn("kill switch: could not list local addresses to end pf states: %v", err)
+		return
+	}
+	for _, args := range pfKillArgs(locals, cidrs) {
+		if out, err := exec.CommandContext(ctx, "pfctl", args...).CombinedOutput(); err != nil {
+			KillSwitchWarn("kill switch: could not end pf states %v: %v (%s)", args, err, strings.TrimSpace(string(out)))
+		}
+	}
+}
+
+const dsclTimeout = 5 * time.Second
+
+// SplitEgressGroupID resolves the gid pf matches for split-tunnel egress sockets.
+// It refuses a group anyone else could carry: members, or a user's primary gid.
+func SplitEgressGroupID() (int, error) {
+	grp, err := user.LookupGroup(SplitEgressGroupName)
+	if err != nil {
+		return 0, fmt.Errorf("look up group %s: %w", SplitEgressGroupName, err)
+	}
+	gid, err := splitEgressGIDFromString(grp.Gid)
+	if err != nil {
+		return 0, err
+	}
+	if back, err := user.LookupGroupId(grp.Gid); err != nil || back.Name != SplitEgressGroupName {
+		return 0, fmt.Errorf("gid %d does not resolve back to %s; another group shares it", gid, SplitEgressGroupName)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), dsclTimeout)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "/usr/bin/dscl", ".", "-read", "/Groups/"+SplitEgressGroupName).Output()
+	if err != nil {
+		return 0, fmt.Errorf("read group %s: %w", SplitEgressGroupName, err)
+	}
+	if dsclGroupHasMembers(string(out)) {
+		return 0, fmt.Errorf("group %s has members, who could send through the egress pass", SplitEgressGroupName)
+	}
+	out, err = exec.CommandContext(ctx, "/usr/bin/dscl", ".", "-list", "/Users", "PrimaryGroupID").Output()
+	if err != nil {
+		return 0, fmt.Errorf("list user primary groups: %w", err)
+	}
+	if users := dsclPrimaryGIDUsers(string(out), gid); len(users) > 0 {
+		return 0, fmt.Errorf("gid %d of group %s is the primary group of %d local users", gid, SplitEgressGroupName, len(users))
+	}
+	// LDAP/AD records too. Unreachable means no one can log in from it, so only warn.
+	search := func(path string) string {
+		out, err := exec.CommandContext(ctx, "/usr/bin/dscl", "/Search", "-search", path, "PrimaryGroupID", strconv.Itoa(gid)).Output()
+		if err != nil {
+			KillSwitchWarn("kill switch: directory search of %s for gid %d failed: %v", path, gid, err)
+		}
+		return string(out)
+	}
+	if err := splitEgressDirectoryCheck(gid, search("/Users"), search("/Groups")); err != nil {
+		return 0, err
+	}
+	return gid, nil
 }

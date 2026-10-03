@@ -32,6 +32,8 @@ var (
 	procFwpmFilterEnum0              = modFwpuclnt.NewProc("FwpmFilterEnum0")
 	procFwpmFilterDestroyEnumHandle0 = modFwpuclnt.NewProc("FwpmFilterDestroyEnumHandle0")
 	procFwpmFreeMemory0              = modFwpuclnt.NewProc("FwpmFreeMemory0")
+
+	procFwpmGetAppIdFromFileName0 = modFwpuclnt.NewProc("FwpmGetAppIdFromFileName0")
 )
 
 // fwperror.h codes; the vendored types stop at fwpmtypes.h and fwptypes.h.
@@ -104,6 +106,7 @@ func bootTimeVariant(key windows.GUID, flags wtFwpmFilterFlags) (windows.GUID, w
 const (
 	weightBlockAll      uint8 = 1
 	weightLANPermit     uint8 = 10
+	weightSplitPermit   uint8 = 10
 	weightDNSBlock      uint8 = 11
 	weightTrustedPermit uint8 = 12
 )
@@ -118,11 +121,157 @@ type wfpEngine struct {
 	handle windows.Handle
 	// bootTime makes every keyed add write the filter's boot-time twin instead.
 	bootTime bool
+	// calls is nil for the real BFE; tests put an in-memory engine here.
+	calls wfpCalls
 }
 
 // bootTimeView shares the handle; never close it, close the owner instead.
 func (e *wfpEngine) bootTimeView() *wfpEngine {
-	return &wfpEngine{handle: e.handle, bootTime: true}
+	return &wfpEngine{handle: e.handle, bootTime: true, calls: e.calls}
+}
+
+func (e *wfpEngine) sys() wfpCalls {
+	if e.calls != nil {
+		return e.calls
+	}
+	return bfeCalls{}
+}
+
+// wfpCalls is the raw BFE surface the engine drives, returning the API's status
+// codes, so the kill switch can be tested without ever reaching the real BFE.
+type wfpCalls interface {
+	engineClose(h windows.Handle) uintptr
+	transactionBegin(h windows.Handle) uintptr
+	transactionCommit(h windows.Handle) uintptr
+	transactionAbort(h windows.Handle) uintptr
+	subLayerAdd(h windows.Handle, sublayer *wtFwpmSublayer0) uintptr
+	subLayerDeleteByKey(h windows.Handle, key *windows.GUID) uintptr
+	filterAdd(h windows.Handle, filter *wtFwpmFilter0, id *uint64) uintptr
+	filterDeleteByID(h windows.Handle, id uint64) uintptr
+	filterDeleteByKey(h windows.Handle, key *windows.GUID) uintptr
+	filterExistsByKey(h windows.Handle, key *windows.GUID) (bool, uintptr)
+	// filters lists every installed filter with only its ID, sublayer and flags set.
+	filters(h windows.Handle) ([]wtFwpmFilter0, error)
+}
+
+type bfeCalls struct{}
+
+func (bfeCalls) engineClose(h windows.Handle) uintptr {
+	r, _, _ := procFwpmEngineClose0.Call(uintptr(h))
+	return r
+}
+
+func (bfeCalls) transactionBegin(h windows.Handle) uintptr {
+	r, _, _ := procFwpmTransactionBegin0.Call(uintptr(h), 0)
+	return r
+}
+
+func (bfeCalls) transactionCommit(h windows.Handle) uintptr {
+	r, _, _ := procFwpmTransactionCommit0.Call(uintptr(h))
+	return r
+}
+
+func (bfeCalls) transactionAbort(h windows.Handle) uintptr {
+	r, _, _ := procFwpmTransactionAbort0.Call(uintptr(h))
+	return r
+}
+
+func (bfeCalls) subLayerAdd(h windows.Handle, sublayer *wtFwpmSublayer0) uintptr {
+	r, _, _ := procFwpmSubLayerAdd0.Call(uintptr(h), uintptr(unsafe.Pointer(sublayer)), 0)
+	return r
+}
+
+func (bfeCalls) subLayerDeleteByKey(h windows.Handle, key *windows.GUID) uintptr {
+	r, _, _ := procFwpmSubLayerDeleteByKey0.Call(uintptr(h), uintptr(unsafe.Pointer(key)))
+	return r
+}
+
+func (bfeCalls) filterAdd(h windows.Handle, filter *wtFwpmFilter0, id *uint64) uintptr {
+	r, _, _ := procFwpmFilterAdd0.Call(uintptr(h), uintptr(unsafe.Pointer(filter)), 0, uintptr(unsafe.Pointer(id)))
+	return r
+}
+
+func (bfeCalls) filterDeleteByID(h windows.Handle, id uint64) uintptr {
+	r, _, _ := procFwpmFilterDeleteById0.Call(uintptr(h), uintptr(id))
+	return r
+}
+
+func (bfeCalls) filterDeleteByKey(h windows.Handle, key *windows.GUID) uintptr {
+	r, _, _ := procFwpmFilterDeleteByKey0.Call(uintptr(h), uintptr(unsafe.Pointer(key)))
+	return r
+}
+
+func (bfeCalls) filterExistsByKey(h windows.Handle, key *windows.GUID) (bool, uintptr) {
+	var filter *wtFwpmFilter0
+	r, _, _ := procFwpmFilterGetByKey0.Call(uintptr(h), uintptr(unsafe.Pointer(key)), uintptr(unsafe.Pointer(&filter)))
+	if r != 0 {
+		return false, r
+	}
+	if filter != nil {
+		procFwpmFreeMemory0.Call(uintptr(unsafe.Pointer(&filter)))
+	}
+	return true, 0
+}
+
+func (bfeCalls) filters(h windows.Handle) ([]wtFwpmFilter0, error) {
+	var enumHandle windows.Handle
+	r, _, _ := procFwpmFilterCreateEnumHandle0.Call(
+		uintptr(h),
+		0, // no template: every layer, filtered by sublayer by the caller
+		uintptr(unsafe.Pointer(&enumHandle)),
+	)
+	if r != 0 {
+		return nil, fmt.Errorf("FwpmFilterCreateEnumHandle0: %w", windows.Errno(r))
+	}
+	defer procFwpmFilterDestroyEnumHandle0.Call(uintptr(h), uintptr(enumHandle))
+
+	const batch = 256
+	var out []wtFwpmFilter0
+	for {
+		var entries **wtFwpmFilter0
+		var returned uint32
+		r, _, _ = procFwpmFilterEnum0.Call(
+			uintptr(h),
+			uintptr(enumHandle),
+			batch,
+			uintptr(unsafe.Pointer(&entries)),
+			uintptr(unsafe.Pointer(&returned)),
+		)
+		if r != 0 {
+			return nil, fmt.Errorf("FwpmFilterEnum0: %w", windows.Errno(r))
+		}
+		if returned == 0 {
+			return out, nil
+		}
+		// Copied out field by field: the entries die with FwpmFreeMemory0 below.
+		for _, filter := range unsafe.Slice(entries, returned) {
+			if filter != nil {
+				out = append(out, wtFwpmFilter0{filterID: filter.filterID, subLayerKey: filter.subLayerKey, flags: filter.flags})
+			}
+		}
+		procFwpmFreeMemory0.Call(uintptr(unsafe.Pointer(&entries)))
+		if returned < batch {
+			return out, nil
+		}
+	}
+}
+
+// wfpAppID is replaced by tests; the real one needs the image to exist on disk.
+var wfpAppID = appIDFromFileName
+
+// appIDFromFileName returns BFE's app id for an image, its lower-cased NT device
+// path. free releases the BFE-allocated blob once every filter using it is added.
+func appIDFromFileName(path string) (blob *wtFwpByteBlob, free func(), err error) {
+	name, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return nil, nil, fmt.Errorf("app id path: %w", err)
+	}
+	r, _, _ := procFwpmGetAppIdFromFileName0.Call(uintptr(unsafe.Pointer(name)), uintptr(unsafe.Pointer(&blob)))
+	runtime.KeepAlive(name)
+	if r != 0 {
+		return nil, nil, fmt.Errorf("FwpmGetAppIdFromFileName0: %w", windows.Errno(r))
+	}
+	return blob, func() { procFwpmFreeMemory0.Call(uintptr(unsafe.Pointer(&blob))) }, nil
 }
 
 func wfpOpen() (*wfpEngine, error) {
@@ -172,7 +321,7 @@ func (e *wfpEngine) close() error {
 	if e.handle == 0 {
 		return nil
 	}
-	r, _, _ := procFwpmEngineClose0.Call(uintptr(e.handle))
+	r := e.sys().engineClose(e.handle)
 	e.handle = 0
 	if r != 0 {
 		return fmt.Errorf("FwpmEngineClose0: %w", windows.Errno(r))
@@ -181,23 +330,21 @@ func (e *wfpEngine) close() error {
 }
 
 func (e *wfpEngine) beginTransaction() error {
-	r, _, _ := procFwpmTransactionBegin0.Call(uintptr(e.handle), 0)
-	if r != 0 {
+	if r := e.sys().transactionBegin(e.handle); r != 0 {
 		return fmt.Errorf("FwpmTransactionBegin0: %w", windows.Errno(r))
 	}
 	return nil
 }
 
 func (e *wfpEngine) commitTransaction() error {
-	r, _, _ := procFwpmTransactionCommit0.Call(uintptr(e.handle))
-	if r != 0 {
+	if r := e.sys().transactionCommit(e.handle); r != 0 {
 		return fmt.Errorf("FwpmTransactionCommit0: %w", windows.Errno(r))
 	}
 	return nil
 }
 
 func (e *wfpEngine) abortTransaction() {
-	procFwpmTransactionAbort0.Call(uintptr(e.handle))
+	e.sys().transactionAbort(e.handle)
 }
 
 func (e *wfpEngine) addSublayer() error {
@@ -220,11 +367,7 @@ func (e *wfpEngine) addSublayer() error {
 		weight: 0xFFFF, // highest priority sublayer
 	}
 
-	r, _, _ := procFwpmSubLayerAdd0.Call(
-		uintptr(e.handle),
-		uintptr(unsafe.Pointer(&sublayer)),
-		0,
-	)
+	r := e.sys().subLayerAdd(e.handle, &sublayer)
 	runtime.KeepAlive(name)
 	runtime.KeepAlive(desc)
 	runtime.KeepAlive(&sublayer)
@@ -238,11 +381,7 @@ func (e *wfpEngine) addSublayer() error {
 }
 
 func (e *wfpEngine) deleteSublayerByKey(key windows.GUID) error {
-	r, _, _ := procFwpmSubLayerDeleteByKey0.Call(
-		uintptr(e.handle),
-		uintptr(unsafe.Pointer(&key)),
-	)
-	if r != 0 {
+	if r := e.sys().subLayerDeleteByKey(e.handle, &key); r != 0 {
 		if uint32(r) == fwpESublayerNotFound {
 			return nil
 		}
@@ -291,12 +430,7 @@ func (e *wfpEngine) addFilterKeyed(layer, filterKey windows.GUID, filterName str
 	}
 
 	var filterId uint64
-	r, _, _ := procFwpmFilterAdd0.Call(
-		uintptr(e.handle),
-		uintptr(unsafe.Pointer(&filter)),
-		0,
-		uintptr(unsafe.Pointer(&filterId)),
-	)
+	r := e.sys().filterAdd(e.handle, &filter, &filterId)
 	runtime.KeepAlive(namePtr)
 	runtime.KeepAlive(&filter)
 	runtime.KeepAlive(conditions)
@@ -310,11 +444,7 @@ func (e *wfpEngine) addFilterKeyed(layer, filterKey windows.GUID, filterName str
 }
 
 func (e *wfpEngine) deleteFilterByKey(key windows.GUID) error {
-	r, _, _ := procFwpmFilterDeleteByKey0.Call(
-		uintptr(e.handle),
-		uintptr(unsafe.Pointer(&key)),
-	)
-	if r != 0 {
+	if r := e.sys().filterDeleteByKey(e.handle, &key); r != 0 {
 		if uint32(r) == fwpEFilterNotFound {
 			return nil
 		}
@@ -326,31 +456,18 @@ func (e *wfpEngine) deleteFilterByKey(key windows.GUID) error {
 // filterExistsByKey asks BFE whether a keyed filter is installed, which is
 // how a fresh process learns the lock a previous one left is still live.
 func (e *wfpEngine) filterExistsByKey(key windows.GUID) (bool, error) {
-	var filter *wtFwpmFilter0
-	r, _, _ := procFwpmFilterGetByKey0.Call(
-		uintptr(e.handle),
-		uintptr(unsafe.Pointer(&key)),
-		uintptr(unsafe.Pointer(&filter)),
-	)
-	runtime.KeepAlive(&key)
+	found, r := e.sys().filterExistsByKey(e.handle, &key)
 	if r != 0 {
 		if uint32(r) == fwpEFilterNotFound {
 			return false, nil
 		}
 		return false, fmt.Errorf("FwpmFilterGetByKey0: %w", windows.Errno(r))
 	}
-	if filter != nil {
-		procFwpmFreeMemory0.Call(uintptr(unsafe.Pointer(&filter)))
-	}
-	return true, nil
+	return found, nil
 }
 
 func (e *wfpEngine) deleteFilter(filterId uint64) error {
-	r, _, _ := procFwpmFilterDeleteById0.Call(
-		uintptr(e.handle),
-		uintptr(filterId),
-	)
-	if r != 0 {
+	if r := e.sys().filterDeleteByID(e.handle, filterId); r != 0 {
 		// Already gone is the outcome the caller wanted. Without this a
 		// sublayer sweep would make every later delete look like a failure.
 		if uint32(r) == fwpEFilterNotFound {
@@ -364,45 +481,17 @@ func (e *wfpEngine) deleteFilter(filterId uint64) error {
 // sublayerFilterIds lists every filter in one of our sublayers, including
 // engine-keyed ones a dead process left behind that only enumeration can name.
 func (e *wfpEngine) sublayerFilterIds(subLayer windows.GUID, keep func(*wtFwpmFilter0) bool) ([]uint64, error) {
-	var enumHandle windows.Handle
-	r, _, _ := procFwpmFilterCreateEnumHandle0.Call(
-		uintptr(e.handle),
-		0, // no template: every layer, filtered by sublayer below
-		uintptr(unsafe.Pointer(&enumHandle)),
-	)
-	if r != 0 {
-		return nil, fmt.Errorf("FwpmFilterCreateEnumHandle0: %w", windows.Errno(r))
+	all, err := e.sys().filters(e.handle)
+	if err != nil {
+		return nil, err
 	}
-	defer procFwpmFilterDestroyEnumHandle0.Call(uintptr(e.handle), uintptr(enumHandle))
-
-	const batch = 256
 	var ids []uint64
-	for {
-		var entries **wtFwpmFilter0
-		var returned uint32
-		r, _, _ = procFwpmFilterEnum0.Call(
-			uintptr(e.handle),
-			uintptr(enumHandle),
-			batch,
-			uintptr(unsafe.Pointer(&entries)),
-			uintptr(unsafe.Pointer(&returned)),
-		)
-		if r != 0 {
-			return nil, fmt.Errorf("FwpmFilterEnum0: %w", windows.Errno(r))
-		}
-		if returned == 0 {
-			return ids, nil
-		}
-		for _, filter := range unsafe.Slice(entries, returned) {
-			if filter != nil && filter.subLayerKey == subLayer && keep(filter) {
-				ids = append(ids, filter.filterID)
-			}
-		}
-		procFwpmFreeMemory0.Call(uintptr(unsafe.Pointer(&entries)))
-		if returned < batch {
-			return ids, nil
+	for i := range all {
+		if all[i].subLayerKey == subLayer && keep(&all[i]) {
+			ids = append(ids, all[i].filterID)
 		}
 	}
+	return ids, nil
 }
 
 // anyFilter keeps every filter in the sublayer; Clear tears the lot down.
@@ -821,6 +910,16 @@ func (e *wfpEngine) addPermitForwardToInterface(ifIndex uint32) (uint64, error) 
 // addPermitForwardIPv4Subnet is the forward-layer half of Allow LAN: a guest
 // keeps reaching the local network while the lock holds, as the host does.
 func (e *wfpEngine) addPermitForwardIPv4Subnet(cidr string) (uint64, error) {
+	return e.addPermitForwardTo(cidr, "PangeaVPN Allow Forwarding To LAN "+cidr, weightLANPermit)
+}
+
+// addPermitForwardSplitCIDR lets guests reach an excluded range the way the host
+// can. The forward layer has no ports, so guest DNS to it is not blocked.
+func (e *wfpEngine) addPermitForwardSplitCIDR(cidr string) (uint64, error) {
+	return e.addPermitForwardTo(cidr, "PangeaVPN Allow Forwarding To Split Range "+cidr, weightSplitPermit)
+}
+
+func (e *wfpEngine) addPermitForwardTo(cidr, name string, weight uint8) (uint64, error) {
 	addrMask, err := parseV4CIDRAddrMask(cidr)
 	if err != nil {
 		return 0, err
@@ -835,7 +934,85 @@ func (e *wfpEngine) addPermitForwardIPv4Subnet(cidr string) (uint64, error) {
 			},
 		},
 	}
-	id, err := e.addFilter(cFWPM_LAYER_IPFORWARD_V4, "PangeaVPN Allow Forwarding To LAN "+cidr, weightLANPermit, cFWP_ACTION_PERMIT, conditions)
+	id, err := e.addFilter(cFWPM_LAYER_IPFORWARD_V4, name, weight, cFWP_ACTION_PERMIT, conditions)
 	runtime.KeepAlive(&addrMask)
 	return id, err
+}
+
+// addALEPermitPair adds name at CONNECT_V4 and its twin at RECV_ACCEPT_V4, where
+// UDP replies and every flow re-authorised after a filter change are judged.
+func (e *wfpEngine) addALEPermitPair(name string, weight uint8, conditions []wtFwpmFilterCondition0) ([]uint64, error) {
+	ids := make([]uint64, 0, 2)
+	for _, l := range []struct {
+		layer windows.GUID
+		name  string
+	}{
+		{cFWPM_LAYER_ALE_AUTH_CONNECT_V4, name},
+		{cFWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4, name + " Inbound"},
+	} {
+		id, err := e.addFilter(l.layer, l.name, weight, cFWP_ACTION_PERMIT, conditions)
+		if err != nil {
+			return ids, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, nil
+}
+
+// splitEgressConditions match the daemon image's sockets anywhere but the tunnel,
+// which has its own permit. tunnelLUID 0 leaves the interface unconstrained.
+func splitEgressConditions(appID *wtFwpByteBlob, tunnelLUID *uint64) []wtFwpmFilterCondition0 {
+	conditions := []wtFwpmFilterCondition0{
+		{
+			fieldKey:  cFWPM_CONDITION_ALE_APP_ID,
+			matchType: cFWP_MATCH_EQUAL,
+			conditionValue: wtFwpConditionValue0{
+				_type: cFWP_BYTE_BLOB_TYPE,
+				value: uintptr(unsafe.Pointer(appID)),
+			},
+		},
+	}
+	if *tunnelLUID != 0 {
+		conditions = append(conditions, wtFwpmFilterCondition0{
+			fieldKey:  cFWPM_CONDITION_IP_LOCAL_INTERFACE,
+			matchType: cFWP_MATCH_NOT_EQUAL,
+			conditionValue: wtFwpConditionValue0{
+				_type: cFWP_UINT64,
+				value: uintptr(unsafe.Pointer(tunnelLUID)),
+			},
+		})
+	}
+	return conditions
+}
+
+// addPermitSplitEgress lets the sockets that carry bypassed flows out the NIC.
+// Weight 10 keeps the DNS block over them, as for the LAN permits.
+func (e *wfpEngine) addPermitSplitEgress(appID *wtFwpByteBlob, tunnelLUID uint64) ([]uint64, error) {
+	luid := &tunnelLUID
+	ids, err := e.addALEPermitPair("PangeaVPN Allow Split Tunnel Egress", weightSplitPermit, splitEgressConditions(appID, luid))
+	runtime.KeepAlive(appID)
+	runtime.KeepAlive(luid)
+	return ids, err
+}
+
+// addPermitSplitCIDR permits an excluded destination range both ways, under the
+// DNS block so a resolver inside it still cannot be reached off-tunnel.
+func (e *wfpEngine) addPermitSplitCIDR(cidr string) ([]uint64, error) {
+	addrMask, err := parseV4CIDRAddrMask(cidr)
+	if err != nil {
+		return nil, err
+	}
+	conditions := []wtFwpmFilterCondition0{
+		{
+			fieldKey:  cFWPM_CONDITION_IP_REMOTE_ADDRESS,
+			matchType: cFWP_MATCH_EQUAL,
+			conditionValue: wtFwpConditionValue0{
+				_type: cFWP_V4_ADDR_MASK,
+				value: uintptr(unsafe.Pointer(&addrMask)),
+			},
+		},
+	}
+	ids, err := e.addALEPermitPair("PangeaVPN Allow Split Range "+cidr, weightSplitPermit, conditions)
+	runtime.KeepAlive(&addrMask)
+	return ids, err
 }
