@@ -154,14 +154,18 @@ jobs:
       - name: Update release
         env:
           TAG: ${{ steps.tag.outputs.tag }}
+          IS_PRE: ${{ steps.ctx.outputs.is_prerelease }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          # The installer defaults to stable, so a candidate's page must ask for the prerelease channel.
+          RUNNER='bash'
+          if [ "$IS_PRE" = "true" ]; then RUNNER='PANGEA_CHANNEL=prerelease bash'; fi
           {
             printf '## Install (macOS)\n\n'
-            printf '```bash\ncurl -fsSL https://pangeavpn.org/install-mac.sh | bash\n```\n\n'
+            printf '```bash\ncurl -fsSL https://pangeavpn.org/install-mac.sh | %s\n```\n\n' "$RUNNER"
             printf 'If pangeavpn.org is blocked on your network:\n\n'
-            printf '```bash\ncurl -fsSL https://raw.githubusercontent.com/pangeavpn/pangeavpn-app/master/scripts/install-mac-online.sh | bash\n```\n\n'
+            printf '```bash\ncurl -fsSL https://raw.githubusercontent.com/pangeavpn/pangeavpn-app/master/scripts/install-mac-online.sh | %s\n```\n\n' "$RUNNER"
             printf -- '---\n\n'
             cat notes.md
             if [ -s changelog.md ]; then

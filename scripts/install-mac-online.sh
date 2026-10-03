@@ -1,6 +1,7 @@
 #!/bin/bash
-# PangeaVPN macOS one-shot online installer, run as:
-#   curl -fsSL https://pangeavpn.org/install-mac.sh | bash
+
+# PangeaVPN macOS online installer: curl -fsSL https://pangeavpn.org/install-mac.sh | bash
+# Asks stable or pre-release; PANGEA_CHANNEL=stable|prerelease skips the question.
 
 set -euo pipefail
 
@@ -62,7 +63,32 @@ ART
 }
 
 HUB_LATEST_URL="${PANGEA_HUB_URL:-https://api.pangeavpn.org/api/desktop/latest}"
-GITHUB_LATEST_URL="https://api.github.com/repos/pangeavpn/pangeavpn-app/releases/latest"
+GITHUB_RELEASES_URL="https://api.github.com/repos/pangeavpn/pangeavpn-app/releases"
+
+CHANNEL="stable"
+
+choose_channel() {
+    case "${PANGEA_CHANNEL:-}" in
+        stable|prerelease) CHANNEL="$PANGEA_CHANNEL"; return 0 ;;
+        "") ;;
+        *) warn "Ignoring PANGEA_CHANNEL=${PANGEA_CHANNEL} (use stable or prerelease)." ;;
+    esac
+    # Under `curl | bash` stdin is this script, so ask on the terminal; none means stable.
+    { true < /dev/tty; } 2>/dev/null || return 0
+    local answer="" left
+    printf "\nWhich version would you like to install?\n" > /dev/tty
+    printf "  1) Stable (recommended)\n" > /dev/tty
+    printf "  2) Pre-release - early access to new features, may have bugs\n" > /dev/tty
+    for (( left = 5; left > 0; left-- )); do
+        printf "\rPress 1 or 2. Stable starts in %ds... " "$left" > /dev/tty
+        if read -r -s -n 1 -t 1 answer < /dev/tty; then
+            break
+        fi
+    done
+    printf "\n\n" > /dev/tty
+    [[ "$answer" == "2" ]] && CHANNEL="prerelease"
+    return 0
+}
 
 SUDO_KEEPALIVE_PID=""
 TMPDIR_PANGEA=""
@@ -180,13 +206,23 @@ main() {
     # closing message when the cleanup trap kills it.
     disown "$SUDO_KEEPALIVE_PID" 2>/dev/null || true
 
+    choose_channel
+
     # ── Resolve the DMG URL for this arch ───────────────────────────────────
     # Prefer the hub (censorship-resistant); fall back to GitHub if unreachable.
-    log "Looking up the latest release..."
+    if [[ "$CHANNEL" == "prerelease" ]]; then
+        log "Looking up the latest pre-release..."
+        HUB_URL="${HUB_LATEST_URL}?channel=prerelease"
+        # Newest-created first, so the first DMG is the most recent release of either kind.
+        GITHUB_URL="${GITHUB_RELEASES_URL}?per_page=10"
+    else
+        log "Looking up the latest stable release..."
+        HUB_URL="$HUB_LATEST_URL"
+        GITHUB_URL="${GITHUB_RELEASES_URL}/latest"
+    fi
 
     TMPDIR_PANGEA="$(mktemp -d -t pangeavpn-install)"
     RELEASE_FILE="$TMPDIR_PANGEA/release.json"
-    RELEASE_JSON=""
     DMG_URL=""
     SAW_RELEASE=""
 
@@ -211,8 +247,8 @@ main() {
 
     # One quick try each: hub traffic is routed around the tunnel, so a hostile
     # network blackholing it must not cost minutes before falling back to GitHub.
-    if try_release_source "$HUB_LATEST_URL" 1 || try_release_source "$GITHUB_LATEST_URL" 2; then
-        RELEASE_JSON="$(cat "$RELEASE_FILE")"
+    if try_release_source "$HUB_URL" 1 || try_release_source "$GITHUB_URL" 2; then
+        :
     elif [[ -n "$SAW_RELEASE" ]]; then
         fail "The latest release has no download for this Mac yet. It may still be uploading - try again in a few minutes, or see ${DOWNLOAD_URL}"
     elif [[ "$HTTP_STATUS" == "429" || "$HTTP_STATUS" == "403" ]]; then
@@ -221,9 +257,13 @@ main() {
         fail "Could not reach the download server (HTTP ${HTTP_STATUS}). If the rest of your internet works, your network may be blocking it - try a different network, or get the installer from ${DOWNLOAD_URL}"
     fi
 
-    VERSION="$(printf "%s" "$RELEASE_JSON" | grep -Eo '"(version|tag_name)":[[:space:]]*"[^"]+"' | head -1 | sed -E 's/.*"([^"]+)"$/\1/' | sed 's/^v//' || true)"
+    # Read from the DMG's release tag so the version shown is the one downloaded.
+    VERSION="$(printf "%s" "$DMG_URL" | sed -nE 's@.*/releases/download/v?([^/]+)/.*@\1@p' || true)"
     if [[ -n "$VERSION" ]]; then
         log "Latest version: $VERSION"
+        if [[ "$CHANNEL" == "prerelease" && "$VERSION" != *-* ]]; then
+            log "No pre-release is newer than this stable release, so installing it instead."
+        fi
     fi
     log "Downloading: $(basename "$DMG_URL")"
 

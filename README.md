@@ -103,6 +103,8 @@ Release builds cover Windows and macOS. On Linux, `npm run build-bin:linux` also
 curl -fsSL https://pangeavpn.org/install-mac.sh | bash
 ```
 
+It asks whether to install the latest stable release or the latest pre-release, and goes with stable after 5 seconds. To skip the question, run it as `... | PANGEA_CHANNEL=prerelease bash` (or `stable`).
+
 > [!CAUTION]
 > This pipes a remote script into a root shell. That's fine for developers, but we'd rather you read [`scripts/install-mac.sh`](scripts/install-mac.sh) first. The installer `.dmg` on the Releases page bundles the same script next to the `.pkg`. Installing the `.pkg` on its own leaves out the background service.
 
