@@ -78,6 +78,8 @@ func TestSelectDarwinDefault(t *testing.T) {
 		{"reject skipped", []ribRoute{{Index: 4, DefaultV4: true, Up: true, Gateway: true, RejectOrBlack: true}}, 0},
 		{"bridge skipped", []ribRoute{def(7, false)}, 0},
 		{"unknown interface skipped", []ribRoute{def(42, false)}, 0},
+		{"own mirror never selected", []ribRoute{{Index: 4, DefaultV4: true, Up: true, Gateway: true, IfScope: true, Mirror: true}}, 0},
+		{"mirror skipped for a real scoped default", []ribRoute{{Index: 4, DefaultV4: true, Up: true, Gateway: true, IfScope: true, Mirror: true}, def(5, true)}, 5},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -90,6 +92,70 @@ func TestSelectDarwinDefault(t *testing.T) {
 			}
 			if !ok || index != tc.want || name != ifaces[tc.want].name {
 				t.Fatalf("selected %d %q (ok=%v), want %d", index, name, ok, tc.want)
+			}
+		})
+	}
+}
+
+func TestPlanDarwinMirror(t *testing.T) {
+	ifaces := map[int]struct {
+		name string
+		up   bool
+	}{4: {"en0", true}, 5: {"en5", true}, 9: {"utun3", true}, 6: {"en2", false}}
+	lookup := func(i int) (string, bool) { v := ifaces[i]; return v.name, v.up }
+	gw := netip.MustParseAddr("192.168.1.1")
+	gw2 := netip.MustParseAddr("10.0.0.1")
+	primary := func(index int, next netip.Addr) ribRoute {
+		return ribRoute{Index: index, DefaultV4: true, Up: true, Gateway: true, NextHop: next}
+	}
+	scoped := func(index int, next netip.Addr) ribRoute {
+		r := primary(index, next)
+		r.IfScope = true
+		return r
+	}
+	mirror := func(index int, next netip.Addr) ribRoute {
+		r := scoped(index, next)
+		r.Mirror = true
+		return r
+	}
+	tunnelHalf := ribRoute{Index: 9, Up: true}
+	sd := func(index int, next netip.Addr) scopedDefault {
+		return scopedDefault{Index: index, Name: ifaces[index].name, NextHop: next}
+	}
+	cases := []struct {
+		name   string
+		routes []ribRoute
+		add    *scopedDefault
+		remove []scopedDefault
+	}{
+		{"primary with no scoped copy gets one", []ribRoute{tunnelHalf, primary(4, gw)}, &scopedDefault{Index: 4, Name: "en0", NextHop: gw}, nil},
+		{"own mirror already in place", []ribRoute{tunnelHalf, primary(4, gw), mirror(4, gw)}, nil, nil},
+		{"configd scoped default already in place", []ribRoute{primary(4, gw), scoped(4, gw)}, nil, nil},
+		{"foreign scoped default holds the key", []ribRoute{primary(4, gw), scoped(4, gw2)}, nil, nil},
+		{"foreign scoped default holds the key even when down", []ribRoute{primary(4, gw), {Index: 4, DefaultV4: true, IfScope: true}}, nil, nil},
+		{"gateway moved: stale mirror replaced", []ribRoute{primary(4, gw2), mirror(4, gw)}, &scopedDefault{Index: 4, Name: "en0", NextHop: gw2}, []scopedDefault{sd(4, gw)}},
+		{"primary moved: old mirror dropped", []ribRoute{primary(5, gw2), mirror(4, gw)}, &scopedDefault{Index: 5, Name: "en5", NextHop: gw2}, []scopedDefault{sd(4, gw)}},
+		{"no primary: mirror dropped, none added", []ribRoute{tunnelHalf, mirror(4, gw)}, nil, []scopedDefault{sd(4, gw)}},
+		{"another network's scoped default is not a copy", []ribRoute{primary(4, gw), scoped(5, gw)}, &scopedDefault{Index: 4, Name: "en0", NextHop: gw}, nil},
+		{"virtual primary is never mirrored", []ribRoute{primary(9, gw), scoped(4, gw)}, nil, nil},
+		{"down primary is never mirrored", []ribRoute{primary(6, gw)}, nil, nil},
+		{"primary without an IPv4 next hop is never mirrored", []ribRoute{primary(4, netip.Addr{})}, nil, nil},
+		{"mirror on a vanished interface is left to the kernel", []ribRoute{primary(4, gw), mirror(4, gw), mirror(42, gw)}, nil, nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			plan := planDarwinMirror(tc.routes, lookup)
+			add, remove := plan.Add, plan.Remove
+			if (add == nil) != (tc.add == nil) || (add != nil && *add != *tc.add) {
+				t.Fatalf("add = %+v, want %+v", add, tc.add)
+			}
+			if len(remove) != len(tc.remove) {
+				t.Fatalf("remove = %+v, want %+v", remove, tc.remove)
+			}
+			for i := range remove {
+				if remove[i] != tc.remove[i] {
+					t.Fatalf("remove = %+v, want %+v", remove, tc.remove)
+				}
 			}
 		})
 	}

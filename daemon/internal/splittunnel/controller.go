@@ -370,6 +370,8 @@ func (c *Controller) permitLoop() {
 				continue
 			}
 			applied = true
+			// Before the gate opens, so the egress route a dialer may need is already in place.
+			_ = c.refreshNetwork()
 		case !desired && dirty:
 			if err := c.callPermit(false); err != nil {
 				c.log.limited("permit-off", "split tunnel: withdrawing egress permit failed: %v", err)
@@ -377,6 +379,7 @@ func (c *Controller) permitLoop() {
 				continue
 			}
 			applied, dirty = false, false
+			_ = c.refreshNetwork()
 		}
 		c.permitFailed.Store(false)
 		if applied {

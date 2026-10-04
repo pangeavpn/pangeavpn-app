@@ -486,6 +486,19 @@ and the desktop app never bypass.
 | macOS | Opened by a root broker (`--split-egress-broker`) running under the `_pangeasplit` group, with `IP_BOUND_IF` | Traffic of that group, which has no members |
 | Linux | `SO_MARK 0x1ca6c`, which skips the tunnel's policy-routing rule | Packets carrying that mark |
 
+On macOS, a socket pinned with `IP_BOUND_IF` has no route once the tunnel's
+`0.0.0.0/1` is installed: XNU's last-resort lookup of the unscoped default
+matches that `/1`, and configd never scopes the primary interface's own default.
+So while apps are excluded and a tunnel is up (the egress permit's condition),
+the daemon keeps a scoped copy of the primary default (`route add -ifscope <if>
+-proto2 default <gw>`). It follows the gateway and the primary interface, and it
+is removed when it stops being wanted, on shutdown, and after a crash at the next
+start or by the uninstaller. On the primary interface the kernel prefers it to
+configd's default even for unscoped lookups, which is why it must track configd;
+it lags by at most one refresh. A copy left on an interface that lost primary
+status is only removed on a later refresh, because configd may have just taken
+that key over. `RTF_PROTO2` lets the daemon's routing-table readers tell it apart.
+
 The split permits live only in the kill switch's memory. A restarted daemon
 never re-arms them from disk; each bring-up applies them again from
 `split-tunnel.json`, and the routes only ever follow what the lock actually

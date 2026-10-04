@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/netip"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -259,6 +260,45 @@ func TestEgressPermitFollowsRulesAndDevices(t *testing.T) {
 	}
 	_ = dev.Close()
 	checkNoEngineGoroutines(t)
+}
+
+type routeHoldingEgress struct {
+	*fakeEgress
+	mu     sync.Mutex
+	wanted []bool
+}
+
+func (r *routeHoldingEgress) SetRouteWanted(wanted bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.wanted = append(r.wanted, wanted)
+}
+
+func TestRefreshTellsDialerWhetherItsRouteIsWanted(t *testing.T) {
+	c := NewController(ControllerOptions{})
+	defer c.Close()
+	eg := &routeHoldingEgress{fakeEgress: newFakeEgress()}
+	dev := &Device{}
+	c.mu.Lock()
+	c.dialer = eg
+	c.mu.Unlock()
+
+	_ = c.refreshNetwork()
+	c.mu.Lock()
+	c.rulesOn = true
+	c.devices[dev] = struct{}{}
+	c.mu.Unlock()
+	_ = c.refreshNetwork()
+	c.mu.Lock()
+	delete(c.devices, dev)
+	c.mu.Unlock()
+	_ = c.refreshNetwork()
+
+	eg.mu.Lock()
+	defer eg.mu.Unlock()
+	if want := []bool{false, true, false}; !slices.Equal(eg.wanted, want) {
+		t.Fatalf("SetRouteWanted calls = %v, want %v (rules and a live tunnel)", eg.wanted, want)
+	}
 }
 
 func TestControllerCloseResetsBypassAndReleasesEngines(t *testing.T) {

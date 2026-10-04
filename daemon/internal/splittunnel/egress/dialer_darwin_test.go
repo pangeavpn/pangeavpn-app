@@ -1,6 +1,7 @@
 package egress
 
 import (
+	"net/netip"
 	"testing"
 
 	"golang.org/x/net/route"
@@ -60,5 +61,22 @@ func TestRIBRoutesSelectPrimary(t *testing.T) {
 	index, name, ok := selectDarwinDefault(routes, func(i int) (string, bool) { return names[i], true })
 	if !ok || index != 4 || name != "en0" {
 		t.Fatalf("selected %d %q (ok=%v), want en0", index, name, ok)
+	}
+	if routes[3].NextHop != netip.MustParseAddr("192.168.1.1") || routes[0].NextHop.IsValid() {
+		t.Fatalf("next hop mapping wrong: %+v", routes)
+	}
+}
+
+func TestRIBRoutesMarkMirror(t *testing.T) {
+	zero := &route.Inet4Addr{}
+	gw := &route.Inet4Addr{IP: [4]byte{192, 168, 1, 1}}
+	base := unix.RTF_UP | unix.RTF_STATIC | unix.RTF_GATEWAY
+	routes := ribRoutes([]route.Message{
+		&route.RouteMessage{Index: 4, Flags: base | unix.RTF_IFSCOPE | unix.RTF_PROTO2, Addrs: ribAddrs(zero, gw, zero)},
+		&route.RouteMessage{Index: 4, Flags: base | unix.RTF_IFSCOPE, Addrs: ribAddrs(zero, gw, zero)},
+		&route.RouteMessage{Index: 4, Flags: base | unix.RTF_PROTO2, Addrs: ribAddrs(zero, gw, zero)},
+	})
+	if !routes[0].Mirror || routes[1].Mirror || routes[2].Mirror {
+		t.Fatalf("mirror needs both RTF_IFSCOPE and RTF_PROTO2: %+v", routes)
 	}
 }

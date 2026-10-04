@@ -16,6 +16,10 @@ func (c *Controller) NetworkChanged() {
 	_ = c.refreshNetwork()
 }
 
+// routeHolder is a dialer that installs routes of its own (the macOS scoped default), wanted only
+// while flows may bypass: the egress permit's condition.
+type routeHolder interface{ SetRouteWanted(wanted bool) }
+
 // refreshNetwork acts only on a confirmed change to a usable interface; a change to "no
 // interface" keeps every flow, whose sends then fail until one returns.
 func (c *Controller) refreshNetwork() error {
@@ -27,6 +31,12 @@ func (c *Controller) refreshNetwork() error {
 	}
 	c.netMu.Lock()
 	defer c.netMu.Unlock()
+	if h, ok := dl.(routeHolder); ok {
+		c.mu.Lock()
+		wanted := c.desiredLocked()
+		c.mu.Unlock()
+		h.SetRouteWanted(wanted)
+	}
 	_, cur, changed, err := dl.Refresh()
 	if err != nil || !changed || (cur.Index == 0 && cur.Name == "") {
 		return err

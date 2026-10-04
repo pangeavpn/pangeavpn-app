@@ -92,6 +92,8 @@ func clearKillSwitchCommand() int {
 	if splitErr != nil {
 		log.Printf("forget split tunnel settings: %v", splitErr)
 	}
+	// A daemon killed before closing its dialer leaves the macOS scoped default route behind.
+	egress.RemoveOrphanedRoutes(log.Printf)
 	if err := clearKillSwitch(ctx); err != nil {
 		log.Printf("clear kill switch: %v", err)
 		return 1
@@ -195,6 +197,9 @@ func startDaemonRuntime() (*daemonRuntime, error) {
 	// A previous daemon process may have died mid-session; restore whatever
 	// network state it left behind before serving any new requests.
 	wg.RestoreOrphanedState()
+	egress.RemoveOrphanedRoutes(func(format string, args ...any) {
+		logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf(format, args...))
+	})
 
 	machine := state.NewMachine()
 	configStore, err := state.NewConfigStore(configPath)

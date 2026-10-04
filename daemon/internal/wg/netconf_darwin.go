@@ -602,6 +602,10 @@ func darwinIPv4Routes() ([]darwinRouteEntry, error) {
 		if !ok || routeMessage.Flags&syscall.RTF_UP == 0 {
 			continue
 		}
+		// Split tunnelling's scoped copy of the default (egress.mirrorFlags) must never pick the gateway.
+		if routeMessage.Flags&(syscall.RTF_IFSCOPE|syscall.RTF_PROTO2) == syscall.RTF_IFSCOPE|syscall.RTF_PROTO2 {
+			continue
+		}
 		destination, ok := darwinInet4Addr(routeMessage.Addrs, syscall.RTAX_DST)
 		if !ok {
 			continue

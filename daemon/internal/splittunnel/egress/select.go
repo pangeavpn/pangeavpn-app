@@ -75,6 +75,8 @@ type ribRoute struct {
 	Gateway       bool
 	IfScope       bool
 	RejectOrBlack bool
+	NextHop       netip.Addr
+	Mirror        bool // RTF_IFSCOPE|RTF_PROTO2: a scoped default this package installed
 }
 
 func darwinVirtualName(name string) bool {
@@ -90,7 +92,7 @@ func darwinVirtualName(name string) bool {
 func selectDarwinDefault(routes []ribRoute, iface func(index int) (name string, up bool)) (int, string, bool) {
 	scopedIndex, scopedName := 0, ""
 	for _, r := range routes {
-		if !r.DefaultV4 || !r.Up || !r.Gateway || r.RejectOrBlack || r.Index <= 0 {
+		if !r.DefaultV4 || !r.Up || !r.Gateway || r.RejectOrBlack || r.Mirror || r.Index <= 0 {
 			continue
 		}
 		name, up := iface(r.Index)
@@ -105,6 +107,66 @@ func selectDarwinDefault(routes []ribRoute, iface func(index int) (name string, 
 		}
 	}
 	return scopedIndex, scopedName, scopedIndex != 0
+}
+
+// scopedDefault is an interface-scoped IPv4 default route.
+type scopedDefault struct {
+	Index   int
+	Name    string
+	NextHop netip.Addr
+}
+
+// darwinMirrors lists the scoped defaults this package installed whose interface still has a name.
+func darwinMirrors(routes []ribRoute, iface func(index int) (name string, up bool)) []scopedDefault {
+	var out []scopedDefault
+	for _, r := range routes {
+		if !r.Mirror || !r.DefaultV4 {
+			continue
+		}
+		if name, _ := iface(r.Index); name != "" {
+			out = append(out, scopedDefault{Index: r.Index, Name: name, NextHop: r.NextHop})
+		}
+	}
+	return out
+}
+
+// mirrorPlan is what keeping the primary default's scoped copy takes: Primary is its interface
+// index (0 without one), Add the copy to install, Remove the mirrors that no longer match it.
+type mirrorPlan struct {
+	Primary int
+	Add     *scopedDefault
+	Remove  []scopedDefault
+}
+
+func planDarwinMirror(routes []ribRoute, iface func(index int) (name string, up bool)) mirrorPlan {
+	var want scopedDefault
+	for _, r := range routes {
+		if !r.DefaultV4 || !r.Up || !r.Gateway || r.RejectOrBlack || r.IfScope || r.Mirror || r.Index <= 0 || !r.NextHop.Is4() {
+			continue
+		}
+		if name, up := iface(r.Index); name != "" && up && !darwinVirtualName(name) {
+			want = scopedDefault{Index: r.Index, Name: name, NextHop: r.NextHop}
+			break
+		}
+	}
+	plan := mirrorPlan{Primary: want.Index}
+	inPlace := false
+	for _, m := range darwinMirrors(routes, iface) {
+		if want.Index != 0 && m.Index == want.Index && m.NextHop == want.NextHop {
+			inPlace = true
+			continue
+		}
+		plan.Remove = append(plan.Remove, m)
+	}
+	// Any other scoped default on that interface holds the key, so an add could only fail with EEXIST.
+	taken := false
+	for _, r := range routes {
+		taken = taken || (r.DefaultV4 && r.IfScope && !r.Mirror && r.Index == want.Index)
+	}
+	if want.Index != 0 && !inPlace && !taken {
+		plan.Add = &want
+	}
+	return plan
 }
 
 const (
