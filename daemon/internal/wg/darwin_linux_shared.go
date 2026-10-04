@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.zx2c4.com/wireguard/conn"
@@ -31,13 +32,15 @@ type wireGuardGoManager struct {
 	sessions map[string]*tunnelSession
 	// guardMu serialises the exec-heavy repair guards against teardown, so
 	// m.mu stays a map lock and /status never waits behind networksetup.
-	guardMu sync.Mutex
+	guardMu   sync.Mutex
+	splitHook atomic.Pointer[splitHookRef]
 }
 
-// Seams for the lock-scope tests; production always points at the real repairs.
+// Seams for tests; production always points at the real repairs and the OS socket bind.
 var (
 	ensureSessionDNSFn            = ensureSessionDNS
 	ensureSessionEndpointRoutesFn = ensureSessionEndpointRoutes
+	newDeviceBind                 = conn.NewDefaultBind
 )
 
 // tunnelSession holds state for an active in-process WireGuard tunnel.
@@ -193,6 +196,7 @@ func (m *wireGuardGoManager) createInProcessDeviceWithFactory(
 	mtu int,
 	wgConfig string,
 	createTUN tunFactory,
+	info TunnelInfo,
 ) (*device.Device, tun.Device, error) {
 	mtu = clampWireGuardDeviceMTU(mtu)
 
@@ -200,9 +204,11 @@ func (m *wireGuardGoManager) createInProcessDeviceWithFactory(
 	if err != nil {
 		return nil, nil, fmt.Errorf("create tun device %s: %w", interfaceName, err)
 	}
+	// The wrapper is what wireguard-go reads and what the session keeps, so close paths reach it.
+	tunDev = m.wrapTUN(tunDev, info)
 
 	logger := newWGLogger(m.logs)
-	dev := device.NewDevice(tunDev, conn.NewDefaultBind(), logger)
+	dev := device.NewDevice(tunDev, newDeviceBind(), logger)
 
 	uapi, err := wgConfigToUAPI(wgConfig)
 	if err != nil {

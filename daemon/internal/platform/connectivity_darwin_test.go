@@ -50,6 +50,8 @@ func TestHasPhysicalDefaultRoute(t *testing.T) {
 		{"tunnel half-default is not a default", []route.Message{tunnelHalfV4(4)}, false},
 		{"unknown interface index", []route.Message{defaultV4(7, syscall.RTF_UP)}, false},
 		{"tunnel halves plus real default", []route.Message{tunnelHalfV4(9), defaultV4(4, syscall.RTF_UP)}, true},
+		{"split egress mirror alone is not a link", []route.Message{defaultV4(4, syscall.RTF_UP|syscall.RTF_GATEWAY|syscall.RTF_IFSCOPE|syscall.RTF_PROTO2)}, false},
+		{"configd scoped default still counts", []route.Message{defaultV4(4, syscall.RTF_UP|syscall.RTF_GATEWAY|syscall.RTF_IFSCOPE)}, true},
 		{
 			"v6 default via en0",
 			[]route.Message{&route.RouteMessage{

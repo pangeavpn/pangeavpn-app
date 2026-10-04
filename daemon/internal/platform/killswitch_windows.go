@@ -4,8 +4,11 @@ package platform
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
+	"os"
+	"slices"
 	"strings"
 	"sync"
 
@@ -18,6 +21,8 @@ func init() {
 		return &windowsKillSwitch{}
 	}
 }
+
+var _ SplitTunnelPermitter = (*windowsKillSwitch)(nil)
 
 type windowsKillSwitch struct {
 	mu              sync.Mutex
@@ -39,6 +44,8 @@ type windowsKillSwitch struct {
 	// Tunnel permit IDs a previous Update failed to delete; Clear retries them
 	// so a reassigned LUID can't inherit a stale permit.
 	staleTunnelFilterIds []uint64
+	// tunnelLUID is the device Update last permitted; the egress permit excludes it.
+	tunnelLUID uint64
 
 	// Forward-layer permits mirroring the ALE ones: the tunnel by interface
 	// index, the LAN ranges under Allow LAN.
@@ -49,10 +56,33 @@ type windowsKillSwitch struct {
 	forwardLock bool
 	// bootTimeFailed stops retrying the best-effort boot-time twins every arm.
 	bootTimeFailed bool
+
+	// split is what the service wants through the lock, appliedSplit what the
+	// split IDs enforce. In memory only: a fresh process starts with none.
+	split                 splitPermits
+	appliedSplit          splitPermits
+	splitEgressFilterIds  []uint64
+	splitCIDRFilterIds    []uint64
+	forwardSplitFilterIds []uint64
+	// forwardSplitCIDRs is what the forward split IDs permit; it trails appliedSplit
+	// after a failed forward swap until applySplit retries it.
+	forwardSplitCIDRs []string
 }
 
 // openWFPEngine is replaced by tests so they can never reach the real BFE.
 var openWFPEngine = wfpOpen
+
+// Seams for tests: the image the egress permit names, and the LUID to index lookup.
+var (
+	splitEgressImage      = os.Executable
+	interfaceIndexForLUID = func(luid uint64) (uint32, error) {
+		row, err := winipcfg.LUID(luid).Interface()
+		if err != nil {
+			return 0, err
+		}
+		return row.InterfaceIndex, nil
+	}
+)
 
 func (ks *windowsKillSwitch) Enable(ctx context.Context, endpointHosts []string, allowLAN bool, locked bool) error {
 	ks.mu.Lock()
@@ -90,6 +120,7 @@ func (ks *windowsKillSwitch) arm(ctx context.Context, endpointHosts []string, al
 		// Against live engine state, not disk: a corrupt/missing state file
 		// must never read as "filters already match" unverified.
 		if stringSlicesEqual(ks.lastEndpointIPs, ips) && ks.lastAllowLAN == allowLAN {
+			ks.reconcileSplit()
 			// Filters already match, but a caller re-arming an existing lock as a
 			// Lockdown lock still has to be recorded — see persistLockedUpgrade.
 			prev.Active = true
@@ -147,6 +178,7 @@ func (ks *windowsKillSwitch) arm(ctx context.Context, endpointHosts []string, al
 			KillSwitchWarn("kill switch re-arm could not retire stale permits (%s)", strings.Join(staleDeletes, "; "))
 		}
 		ks.swapForwardLANPermits(allowLAN)
+		ks.reconcileSplit()
 
 		prev.Active = true // the load above may have failed; rules are live
 		prev.EndpointIPs = ips
@@ -162,12 +194,12 @@ func (ks *windowsKillSwitch) arm(ctx context.Context, endpointHosts []string, al
 
 	// Persist state for crash recovery. No PreviousPolicy — WFP doesn't
 	// modify the Windows Firewall outbound policy.
-	st := KillSwitchState{
-		Active:      true,
-		AllowLAN:    allowLAN,
-		EndpointIPs: ips,
-		Locked:      locked,
-	}
+	st, _ := loadKillSwitchState()
+	st.Active = true
+	st.AllowLAN = allowLAN
+	st.EndpointIPs = ips
+	st.TunnelInterface = ""
+	st.Locked = locked
 	if err := saveKillSwitchState(st); err != nil {
 		return fmt.Errorf("kill switch enable: save state: %w", err)
 	}
@@ -177,7 +209,16 @@ func (ks *windowsKillSwitch) arm(ctx context.Context, endpointHosts []string, al
 		_ = removeKillSwitchState()
 		return fmt.Errorf("kill switch enable: %w", err)
 	}
-	endpointIds, lanIds, err := installWindowsLock(engine, ips, allowLAN)
+	split, releaseSplit := ks.splitSpec(ks.split)
+	defer releaseSplit()
+	ids, err := installWindowsLock(engine, ips, allowLAN, split)
+	var splitErr *splitInstallError
+	if errors.As(err, &splitErr) {
+		// The lock matters more than the exclusions: arm without them.
+		KillSwitchWarn("kill switch enable: split-tunnel permits not installed, excluded traffic stays blocked: %v", splitErr.err)
+		split = windowsSplitSpec{}
+		ids, err = installWindowsLock(engine, ips, allowLAN, split)
+	}
 	if err != nil {
 		engine.close()
 		_ = removeKillSwitchState()
@@ -186,8 +227,8 @@ func (ks *windowsKillSwitch) arm(ctx context.Context, endpointHosts []string, al
 
 	ks.engine = engine
 	ks.active = true
-	ks.endpointFilterIds = endpointIds
-	ks.lanFilterIds = lanIds
+	ks.endpointFilterIds = ids.endpoint
+	ks.lanFilterIds = ids.lan
 	ks.lastEndpointIPs = ips
 	ks.lastAllowLAN = allowLAN
 	// The sweep inside installWindowsLock retired any tunnel permit too.
@@ -195,23 +236,54 @@ func (ks *windowsKillSwitch) arm(ctx context.Context, endpointHosts []string, al
 	ks.staleTunnelFilterIds = nil
 	ks.forwardTunnelFilterId = 0
 	ks.forwardLANFilterIds = nil
+	// ...and every split permit, so these IDs are the whole split set now.
+	ks.splitEgressFilterIds = ids.splitEgress
+	ks.splitCIDRFilterIds = ids.splitCIDR
+	ks.forwardSplitFilterIds, ks.forwardSplitCIDRs = nil, nil
+	ks.appliedSplit = split.applied()
 	// The forward blocks are in the persistent set just installed; the permits
 	// that keep guests usable are best-effort on top of them.
 	ks.forwardLock = true
 	ks.swapForwardLANPermits(allowLAN)
+	ks.swapForwardSplitPermits(ks.appliedSplit.CIDRs)
 	ks.installBootTimeLock()
 	return nil
 }
 
+// lockFilterIds are the per-arm permits installWindowsLock added.
+type lockFilterIds struct {
+	endpoint, lan, splitEgress, splitCIDR []uint64
+}
+
+// windowsSplitSpec is what a fresh arm re-adds inside its transaction; the app id
+// is resolved beforehand, outside it. A nil appID means no egress permit.
+type windowsSplitSpec struct {
+	appID      *wtFwpByteBlob
+	tunnelLUID uint64
+	cidrs      []string
+}
+
+func (s windowsSplitSpec) applied() splitPermits {
+	return splitPermits{Egress: s.appID != nil, CIDRs: slices.Clone(s.cidrs)}
+}
+
+// splitInstallError marks a fresh arm that failed only on a split permit, so the
+// lock can be retried without them instead of leaving the host unlocked.
+type splitInstallError struct{ err error }
+
+func (e *splitInstallError) Error() string { return "split-tunnel permits: " + e.err.Error() }
+func (e *splitInstallError) Unwrap() error { return e.err }
+
 // installWindowsLock builds the whole lock in one transaction: stale permits
 // out, the persistent set replaced by this build's, this arm's permits in.
-func installWindowsLock(engine *wfpEngine, ips []string, allowLAN bool) (endpointIds, lanIds []uint64, err error) {
+func installWindowsLock(engine *wfpEngine, ips []string, allowLAN bool, split windowsSplitSpec) (lockFilterIds, error) {
+	var ids lockFilterIds
 	if err := engine.beginTransaction(); err != nil {
-		return nil, nil, err
+		return ids, err
 	}
-	fail := func(err error) ([]uint64, []uint64, error) {
+	fail := func(err error) (lockFilterIds, error) {
 		engine.abortTransaction()
-		return nil, nil, err
+		return lockFilterIds{}, err
 	}
 
 	if err := engine.addSublayer(); err != nil {
@@ -235,10 +307,10 @@ func installWindowsLock(engine *wfpEngine, ips []string, allowLAN bool) (endpoin
 		}
 	}
 
-	endpointIds = make([]uint64, 0, 2*len(ips))
+	ids.endpoint = make([]uint64, 0, 2*len(ips))
 	for _, ip := range ips {
-		ids, err := engine.addPermitEndpointIP(ip)
-		endpointIds = append(endpointIds, ids...)
+		added, err := engine.addPermitEndpointIP(ip)
+		ids.endpoint = append(ids.endpoint, added...)
 		if err != nil {
 			return fail(fmt.Errorf("permit %s: %w", ip, err))
 		}
@@ -246,7 +318,7 @@ func installWindowsLock(engine *wfpEngine, ips []string, allowLAN bool) (endpoin
 
 	// Unicast renewals to the server itself and the LAN ranges themselves,
 	// only when the user opted into LAN access.
-	lanIds = make([]uint64, 0, len(LANAllowPrefixes))
+	ids.lan = make([]uint64, 0, len(LANAllowPrefixes))
 	if allowLAN {
 		for _, cidr := range LANAllowPrefixes {
 			if cidr == "224.0.0.0/4" {
@@ -261,15 +333,31 @@ func installWindowsLock(engine *wfpEngine, ips []string, allowLAN bool) (endpoin
 			if err != nil {
 				return fail(fmt.Errorf("permit LAN %s: %w", cidr, err))
 			}
-			lanIds = append(lanIds, id)
+			ids.lan = append(ids.lan, id)
+		}
+	}
+
+	// The sweep above took the split permits too; whatever is still wanted goes back in.
+	if split.appID != nil {
+		added, err := engine.addPermitSplitEgress(split.appID, split.tunnelLUID)
+		if err != nil {
+			return fail(&splitInstallError{fmt.Errorf("permit split egress: %w", err)})
+		}
+		ids.splitEgress = added
+	}
+	for _, cidr := range split.cidrs {
+		added, err := engine.addPermitSplitCIDR(cidr)
+		ids.splitCIDR = append(ids.splitCIDR, added...)
+		if err != nil {
+			return fail(&splitInstallError{fmt.Errorf("permit split range %s: %w", cidr, err)})
 		}
 	}
 
 	if err := engine.commitTransaction(); err != nil {
 		engine.abortTransaction()
-		return nil, nil, err
+		return lockFilterIds{}, err
 	}
-	return endpointIds, lanIds, nil
+	return ids, nil
 }
 
 // persistentLockFilters is the lock that outlives the process, in install
@@ -355,6 +443,7 @@ func (ks *windowsKillSwitch) Update(ctx context.Context, tunnel TunnelRef) error
 	if err != nil {
 		return fmt.Errorf("kill switch update: permit tunnel interface: %w", err)
 	}
+	ks.tunnelLUID = luid
 	ks.permitForwardingToTunnel(luid)
 
 	// A failed reload must not clobber Active/Locked with the zero value, so
@@ -433,6 +522,8 @@ func (ks *windowsKillSwitch) Clear(ctx context.Context) error {
 
 // disarm is Clear's body, run with ks.mu held.
 func (ks *windowsKillSwitch) disarm() error {
+	// Dropped first: a re-arm after a failed Clear must not bring the permits back.
+	ks.split = splitPermits{}
 	var errs []string
 
 	// A restarted daemon inherits no handle to the filters the previous
@@ -480,6 +571,11 @@ func (ks *windowsKillSwitch) disarm() error {
 			errs = append(errs, fmt.Sprintf("forward permit %d: %v", id, err))
 		}
 	}
+	for _, id := range slices.Concat(ks.splitEgressFilterIds, ks.splitCIDRFilterIds, ks.forwardSplitFilterIds) {
+		if err := engine.deleteFilter(id); err != nil {
+			errs = append(errs, fmt.Sprintf("split permit %d: %v", id, err))
+		}
+	}
 	for _, key := range pangeaPersistentFilterKeys {
 		if err := engine.deleteFilterByKey(key); err != nil {
 			errs = append(errs, fmt.Sprintf("filter %v: %v", key, err))
@@ -518,9 +614,14 @@ func (ks *windowsKillSwitch) disarm() error {
 	ks.lastAllowLAN = false
 	ks.tunnelFilterIds = nil
 	ks.staleTunnelFilterIds = nil
+	ks.tunnelLUID = 0
 	ks.forwardTunnelFilterId = 0
 	ks.forwardLANFilterIds = nil
 	ks.forwardLock = false
+	ks.appliedSplit = splitPermits{}
+	ks.splitEgressFilterIds = nil
+	ks.splitCIDRFilterIds = nil
+	ks.forwardSplitFilterIds, ks.forwardSplitCIDRs = nil, nil
 
 	if err := removeKillSwitchState(); err != nil {
 		return fmt.Errorf("kill switch clear: remove state: %w", err)
@@ -562,12 +663,12 @@ func (ks *windowsKillSwitch) permitForwardingToTunnel(luid uint64) {
 	if !ks.forwardLock {
 		return
 	}
-	row, err := winipcfg.LUID(luid).Interface()
+	index, err := interfaceIndexForLUID(luid)
 	if err != nil {
 		ks.dropForwardLock(fmt.Errorf("interface index for LUID %d: %w", luid, err))
 		return
 	}
-	id, err := ks.engine.addPermitForwardToInterface(row.InterfaceIndex)
+	id, err := ks.engine.addPermitForwardToInterface(index)
 	if err != nil {
 		ks.dropForwardLock(fmt.Errorf("permit forwarding to tunnel: %w", err))
 		return
@@ -620,12 +721,13 @@ func (ks *windowsKillSwitch) dropForwardLock(cause error) {
 			KillSwitchWarn("kill switch: could not remove forward block %v: %v", key, err)
 		}
 	}
-	for _, id := range append(ks.forwardLANFilterIds, ks.forwardTunnelFilterId) {
+	for _, id := range slices.Concat(ks.forwardLANFilterIds, ks.forwardSplitFilterIds, []uint64{ks.forwardTunnelFilterId}) {
 		if id != 0 {
 			_ = ks.engine.deleteFilter(id)
 		}
 	}
 	ks.forwardLANFilterIds = nil
+	ks.forwardSplitFilterIds, ks.forwardSplitCIDRs = nil, nil
 	ks.forwardTunnelFilterId = 0
 }
 
@@ -689,6 +791,7 @@ func (ks *windowsKillSwitch) DropTunnelPermit(_ context.Context) error {
 		}
 	}
 	ks.tunnelFilterIds, ks.forwardTunnelFilterId = nil, 0
+	ks.tunnelLUID = 0
 	ks.retireStaleTunnelFilters()
 	if len(ks.staleTunnelFilterIds) > 0 {
 		return fmt.Errorf("kill switch drop tunnel: %d permits could not be retired", len(ks.staleTunnelFilterIds))
@@ -697,4 +800,189 @@ func (ks *windowsKillSwitch) DropTunnelPermit(_ context.Context) error {
 		KillSwitchWarn("kill switch drop tunnel: state reload failed, leaving persisted state untouched: %v", err)
 	}
 	return nil
+}
+
+// SetSplitEgress permits the daemon image's off-tunnel sockets for bypassed flows.
+func (ks *windowsKillSwitch) SetSplitEgress(_ context.Context, on bool) error {
+	ks.mu.Lock()
+	defer ks.mu.Unlock()
+	next := ks.split.clone()
+	next.Egress = on
+	return ks.setSplit(next)
+}
+
+// SetSplitCIDRs permits the excluded destination ranges, resolvers excepted.
+func (ks *windowsKillSwitch) SetSplitCIDRs(_ context.Context, cidrs []string) error {
+	normalized, err := normalizeSplitCIDRs(cidrs)
+	if err != nil {
+		return fmt.Errorf("kill switch split permits: %w", err)
+	}
+	ks.mu.Lock()
+	defer ks.mu.Unlock()
+	next := ks.split.clone()
+	next.CIDRs = normalized
+	return ks.setSplit(next)
+}
+
+// setSplit swaps the split filters on an armed lock; an idle switch only records
+// next for the next fresh arm. Run with ks.mu held.
+func (ks *windowsKillSwitch) setSplit(next splitPermits) error {
+	if !ks.active || ks.engine == nil {
+		ks.split = next
+		return nil
+	}
+	if err := ks.applySplit(next); err != nil {
+		ks.split = narrowedSplit(ks.appliedSplit, next)
+		return err
+	}
+	ks.split = next
+	return nil
+}
+
+// reconcileSplit brings the split filters back to what is wanted after a re-arm,
+// so a failed narrowing (a Lockdown disconnect, say) is retried here.
+func (ks *windowsKillSwitch) reconcileSplit() {
+	if err := ks.applySplit(ks.split); err != nil {
+		KillSwitchWarn("kill switch re-arm: split-tunnel permits could not be brought in line: %v", err)
+	}
+}
+
+// applySplit swaps whichever half of the split filters differs from want.
+func (ks *windowsKillSwitch) applySplit(want splitPermits) error {
+	var errs []error
+	if want.Egress != ks.appliedSplit.Egress {
+		if err := ks.swapSplitEgress(want.Egress); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	cidrs := renderableSplitCIDRs(want.CIDRs)
+	if !slices.Equal(cidrs, ks.appliedSplit.CIDRs) {
+		if err := ks.swapSplitCIDRs(cidrs); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	// Mirrors what the host lock permits, never more; also retries a failed forward swap.
+	if ks.forwardLock && !slices.Equal(ks.forwardSplitCIDRs, ks.appliedSplit.CIDRs) {
+		ks.swapForwardSplitPermits(ks.appliedSplit.CIDRs)
+	}
+	return errors.Join(errs...)
+}
+
+func (ks *windowsKillSwitch) swapSplitEgress(on bool) error {
+	var appID *wtFwpByteBlob
+	if on {
+		blob, free, err := daemonAppID()
+		if err != nil {
+			return fmt.Errorf("kill switch split egress: %w", err)
+		}
+		defer free()
+		appID = blob
+	}
+	ids, err := ks.swapFilters(ks.splitEgressFilterIds, func() ([]uint64, error) {
+		if !on {
+			return nil, nil
+		}
+		return ks.engine.addPermitSplitEgress(appID, ks.tunnelLUID)
+	})
+	if err != nil {
+		return fmt.Errorf("kill switch split egress: %w", err)
+	}
+	ks.splitEgressFilterIds = ids
+	ks.appliedSplit.Egress = on
+	return nil
+}
+
+func (ks *windowsKillSwitch) swapSplitCIDRs(cidrs []string) error {
+	ids, err := ks.swapFilters(ks.splitCIDRFilterIds, func() ([]uint64, error) {
+		var ids []uint64
+		for _, cidr := range cidrs {
+			added, err := ks.engine.addPermitSplitCIDR(cidr)
+			ids = append(ids, added...)
+			if err != nil {
+				return ids, fmt.Errorf("permit split range %s: %w", cidr, err)
+			}
+		}
+		return ids, nil
+	})
+	if err != nil {
+		return fmt.Errorf("kill switch split ranges: %w", err)
+	}
+	ks.splitCIDRFilterIds = ids
+	ks.appliedSplit.CIDRs = slices.Clone(cidrs)
+	return nil
+}
+
+// swapForwardSplitPermits mirrors the split ranges at the forward layer in their
+// own transaction: on failure guests just can't reach them; the forward lock stays.
+func (ks *windowsKillSwitch) swapForwardSplitPermits(cidrs []string) {
+	if !ks.forwardLock {
+		return
+	}
+	if len(cidrs) == 0 && len(ks.forwardSplitFilterIds) == 0 {
+		ks.forwardSplitCIDRs = nil
+		return
+	}
+	ids, err := ks.swapFilters(ks.forwardSplitFilterIds, func() ([]uint64, error) {
+		ids := make([]uint64, 0, len(cidrs))
+		for _, cidr := range cidrs {
+			id, err := ks.engine.addPermitForwardSplitCIDR(cidr)
+			if err != nil {
+				return ids, fmt.Errorf("permit forwarding to split range %s: %w", cidr, err)
+			}
+			ids = append(ids, id)
+		}
+		return ids, nil
+	})
+	if err != nil {
+		KillSwitchWarn("kill switch: guests cannot follow the split-tunnel ranges (%v); the forwarded-traffic lock stays", err)
+		return
+	}
+	ks.forwardSplitFilterIds = ids
+	ks.forwardSplitCIDRs = slices.Clone(cidrs)
+}
+
+// swapFilters adds the new filters and retires old in one transaction, new in
+// before old out; any failure aborts it, leaving old exactly as it was.
+func (ks *windowsKillSwitch) swapFilters(old []uint64, add func() ([]uint64, error)) ([]uint64, error) {
+	if err := ks.engine.beginTransaction(); err != nil {
+		return nil, err
+	}
+	ids, err := add()
+	for i := 0; err == nil && i < len(old); i++ {
+		if delErr := ks.engine.deleteFilter(old[i]); delErr != nil {
+			err = fmt.Errorf("retire permit %d: %w", old[i], delErr)
+		}
+	}
+	if err == nil {
+		err = ks.engine.commitTransaction()
+	}
+	if err != nil {
+		ks.engine.abortTransaction()
+		return nil, err
+	}
+	return ids, nil
+}
+
+// splitSpec resolves what a fresh arm re-adds for want, the app id outside the
+// transaction; release frees that BFE-allocated id once the arm is done.
+func (ks *windowsKillSwitch) splitSpec(want splitPermits) (windowsSplitSpec, func()) {
+	spec := windowsSplitSpec{tunnelLUID: ks.tunnelLUID, cidrs: renderableSplitCIDRs(want.CIDRs)}
+	if !want.Egress {
+		return spec, func() {}
+	}
+	appID, free, err := daemonAppID()
+	if err != nil {
+		KillSwitchWarn("kill switch enable: split-tunnel egress permit unavailable: %v", err)
+		return spec, func() {}
+	}
+	spec.appID = appID
+	return spec, free
+}
+
+func daemonAppID() (*wtFwpByteBlob, func(), error) {
+	image, err := splitEgressImage()
+	if err != nil {
+		return nil, nil, fmt.Errorf("daemon image: %w", err)
+	}
+	return wfpAppID(image)
 }

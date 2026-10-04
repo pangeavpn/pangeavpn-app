@@ -27,3 +27,17 @@ func (u *unsupportedKillSwitch) Update(context.Context, TunnelRef) error {
 }
 func (u *unsupportedKillSwitch) Clear(context.Context) error { return nil }
 func (u *unsupportedKillSwitch) Active() bool                { return false }
+
+func (u *unsupportedKillSwitch) SetSplitEgress(_ context.Context, on bool) error {
+	if on {
+		return errKillSwitchUnsupportedArch
+	}
+	return nil
+}
+
+func (u *unsupportedKillSwitch) SetSplitCIDRs(_ context.Context, cidrs []string) error {
+	if len(cidrs) > 0 {
+		return errKillSwitchUnsupportedArch
+	}
+	return nil
+}

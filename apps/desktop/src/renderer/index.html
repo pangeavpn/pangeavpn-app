@@ -140,7 +140,7 @@
 
         <section id="heroCard" class="hero-card" data-state="DISCONNECTED">
           <div class="hero-state" aria-live="polite">
-            <span class="hero-kicker"><i class="hero-dot" aria-hidden="true"></i><strong id="state" data-i18n="state.DISCONNECTED">DISCONNECTED</strong><span id="heroPq" class="hero-pq" role="img" title="Post-quantum protected tunnel" data-i18n-title="hero.postQuantum" aria-label="Post-quantum protected tunnel" data-i18n-aria-label="hero.postQuantum" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="2.2" fill="currentColor" stroke="none"/><ellipse cx="12" cy="12" rx="9.6" ry="4.6" transform="rotate(-45 12 12)"/><ellipse cx="12" cy="12" rx="9.6" ry="4.6" transform="rotate(45 12 12)"/></svg><span class="hero-pq-label" data-i18n="hero.postQuantumBadge">PQ</span></span><div id="heroPath" class="hero-path" role="img" aria-live="off" data-live="false" hidden><span class="hero-path-node hero-path-you"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4.5" width="18" height="12" rx="2"/><path d="M8 20h8M12 16.5V20"/></svg></span><span class="hero-path-link" aria-hidden="true"><i class="hero-path-pulse"></i></span><span id="heroPathEntry" class="hero-path-node hero-path-entry"></span><span class="hero-path-link" aria-hidden="true"><i class="hero-path-pulse"></i></span><span id="heroPathExit" class="hero-path-node hero-path-exit"></span></div></span>
+            <span class="hero-kicker"><i class="hero-dot" aria-hidden="true"></i><strong id="state" data-i18n="state.DISCONNECTED">DISCONNECTED</strong><span id="heroPq" class="hero-pq" role="img" title="Post-quantum protected tunnel" data-i18n-title="hero.postQuantum" aria-label="Post-quantum protected tunnel" data-i18n-aria-label="hero.postQuantum" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="2.2" fill="currentColor" stroke="none"/><ellipse cx="12" cy="12" rx="9.6" ry="4.6" transform="rotate(-45 12 12)"/><ellipse cx="12" cy="12" rx="9.6" ry="4.6" transform="rotate(45 12 12)"/></svg><span class="hero-pq-label" data-i18n="hero.postQuantumBadge">PQ</span></span><span id="heroSplit" class="hero-split" role="img" title="Some apps or addresses skip the VPN" data-i18n-title="hero.split" aria-label="Some apps or addresses skip the VPN" data-i18n-aria-label="hero.split" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21v-7"/><path d="M12 14 6 8V4"/><path d="m12 14 6-6V4"/></svg><span class="hero-split-label" data-i18n="hero.splitBadge">Split</span></span><div id="heroPath" class="hero-path" role="img" aria-live="off" data-live="false" hidden><span class="hero-path-node hero-path-you"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4.5" width="18" height="12" rx="2"/><path d="M8 20h8M12 16.5V20"/></svg></span><span class="hero-path-link" aria-hidden="true"><i class="hero-path-pulse"></i></span><span id="heroPathEntry" class="hero-path-node hero-path-entry"></span><span class="hero-path-link" aria-hidden="true"><i class="hero-path-pulse"></i></span><span id="heroPathExit" class="hero-path-node hero-path-exit"></span></div></span>
             <h2 id="heroHeadline" class="hero-headline"></h2>
             <span id="detail" class="hero-detail" tabindex="0"></span>
           </div>
@@ -297,6 +297,13 @@
             <span class="settings-nav-copy">
               <span class="set-title" data-i18n="settings.network.heading">Network</span>
               <span id="setNetworkValue" class="set-value"></span>
+            </span>
+          </button>
+          <button class="settings-nav-item" type="button" data-settings-target="secSplitTunnel" aria-controls="secSplitTunnel">
+            <span class="set-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21v-7"/><path d="M12 14 6 8V4"/><path d="m12 14 6-6V4"/><path d="m3.5 6.5 2.5-2.5 2.5 2.5"/><path d="m15.5 6.5 2.5-2.5 2.5 2.5"/></svg></span>
+            <span class="settings-nav-copy">
+              <span class="set-title" data-i18n="settings.splitTunnel.heading">Split Tunnelling</span>
+              <span id="setSplitTunnelValue" class="set-value"></span>
             </span>
           </button>
           <button class="settings-nav-item" type="button" data-settings-target="secStartup" aria-controls="secStartup">
@@ -477,6 +484,56 @@
               data-i18n-aria-label="settings.network.mtu.title"
             />
             <span class="settings-field-hint" data-i18n="settings.network.mtu.hint">Packet size through the tunnel. Lower it if pages hang on a network that otherwise works. Default 1380. Applies on next connect.</span>
+          </div>
+        </section>
+
+        <!-- Split tunnelling: the service holds these lists, not settings.json. -->
+        <section id="secSplitTunnel" class="settings-section">
+          <h3 class="settings-section-title" data-i18n="settings.splitTunnel.heading">Split Tunnelling</h3>
+          <p class="settings-description" data-i18n="settings.splitTunnel.description">Apps switched on here bypass the VPN and use your normal connection.</p>
+          <div id="splitTunnelState" class="split-state" role="status" aria-live="polite" hidden>
+            <span id="splitTunnelStateText" class="split-state-text"></span>
+            <button id="splitTunnelRetryBtn" class="settings-inline-btn" type="button" data-i18n="settings.splitTunnel.retry" hidden>Try again</button>
+          </div>
+          <div id="splitTunnelControls" class="split-controls">
+            <div class="settings-toggles">
+              <label class="toggle-label">
+                <span class="toggle-copy">
+                  <span class="toggle-title" data-i18n="settings.splitTunnel.enabled.title">Use split tunnelling</span>
+                  <span class="toggle-hint" data-i18n="settings.splitTunnel.enabled.hint">Off sends everything through the VPN. Your apps and ranges are kept.</span>
+                </span>
+                <input id="splitTunnelToggle" class="toggle-switch" type="checkbox" />
+              </label>
+            </div>
+            <div class="settings-field">
+              <span id="splitTunnelAppsLabel" class="settings-field-label" data-i18n="settings.splitTunnel.apps.title">Excluded apps</span>
+              <button id="splitTunnelPickerBtn" class="settings-picker" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="splitTunnelPane" aria-labelledby="splitTunnelAppsLabel splitTunnelPickerValue">
+                <span id="splitTunnelPickerValue" class="settings-picker-value"></span>
+                <span class="settings-picker-chevron" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg></span>
+              </button>
+              <span id="splitTunnelAppsNote" class="settings-field-hint split-note" hidden></span>
+            </div>
+            <div class="settings-field">
+              <label class="settings-field-label" for="splitTunnelCidrsInput" data-i18n="settings.splitTunnel.ranges.title">Excluded IP ranges</label>
+              <input
+                id="splitTunnelCidrsInput"
+                class="settings-field-input"
+                type="text"
+                autocomplete="off"
+                spellcheck="false"
+                placeholder="192.0.2.0/24, 198.51.100.7"
+                data-i18n-placeholder="settings.splitTunnel.ranges.placeholder"
+                aria-describedby="splitTunnelCidrsError splitTunnelCidrsDropped splitTunnelCidrsHint"
+              />
+              <span id="splitTunnelCidrsError" class="settings-field-hint split-note" data-tone="error" aria-live="polite" hidden></span>
+              <span id="splitTunnelCidrsDropped" class="settings-field-hint split-note" role="status" hidden></span>
+              <span id="splitTunnelCidrsHint" class="settings-field-hint" data-i18n="settings.splitTunnel.ranges.hint">IPv4 addresses or ranges, separated by commas. For devices on your own network, turn on Allow LAN instead.</span>
+              <span id="splitTunnelPending" class="settings-field-hint split-pending" role="status" data-i18n="settings.splitTunnel.pending" hidden>Saved. Applying to your connection…</span>
+            </div>
+            <ul class="split-hints">
+              <li data-i18n="settings.splitTunnel.hint.dns">Name lookups (DNS) still go through the VPN.</li>
+              <li id="splitTunnelLockdownHint" data-i18n="settings.splitTunnel.hint.lockdown" hidden>Lockdown is on: while the VPN is disconnected, excluded apps and ranges are blocked like everything else.</li>
+            </ul>
           </div>
         </section>
 
@@ -671,6 +728,42 @@
             <input id="deadDropToggle" class="toggle-switch" type="checkbox" />
           </div>
         </div>
+      </div>
+
+      <!-- Split-tunnel app picker. Rows are built in index.ts; toggling one never moves it. -->
+      <div id="splitTunnelPane" class="settings-pane settings-subpane split-pane" hidden>
+        <div class="split-pane-top">
+          <div class="subpane-head">
+            <button id="splitTunnelBackBtn" class="subpane-back" type="button" aria-label="Back" data-i18n-aria-label="settings.back">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 6-6 6 6 6"/></svg>
+            </button>
+            <h3 id="splitTunnelPaneTitle" class="subpane-title" data-i18n="settings.splitTunnel.apps.title">Excluded apps</h3>
+          </div>
+          <input
+            id="splitTunnelSearch"
+            class="split-search"
+            type="search"
+            dir="auto"
+            autocomplete="off"
+            spellcheck="false"
+            placeholder="Search apps"
+            data-i18n-placeholder="settings.splitTunnel.apps.search"
+            aria-label="Search apps"
+            data-i18n-aria-label="settings.splitTunnel.apps.search"
+            aria-controls="splitTunnelList"
+          />
+        </div>
+        <p id="splitTunnelPaneNote" class="split-pane-note" hidden>
+          <span id="splitTunnelPaneNoteText" class="split-note"></span>
+          <button id="splitTunnelTurnOnBtn" class="settings-inline-btn" type="button" data-i18n="settings.splitTunnel.turnOn" hidden>Turn on</button>
+        </p>
+        <div id="splitTunnelList" class="split-list" role="group" aria-labelledby="splitTunnelPaneTitle"></div>
+        <p id="splitTunnelLive" class="split-live" role="status" aria-live="polite"></p>
+        <button id="splitTunnelBrowseBtn" class="btn-ghost split-browse" type="button" data-i18n="settings.splitTunnel.apps.browse">Find another app…</button>
+        <ul class="split-hints">
+          <li data-i18n="settings.splitTunnel.hint.restart">Changes apply to new connections. Restart an app that was already open.</li>
+          <li data-i18n="settings.splitTunnel.hint.children">Programs an excluded app starts bypass the VPN too.</li>
+        </ul>
       </div>
     </div>
 

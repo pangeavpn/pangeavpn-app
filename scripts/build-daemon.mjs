@@ -134,7 +134,8 @@ function assertWindowsVersionInfo() {
     throw new Error(`desktop package version ${desktopVersion} does not match root package version ${packageVersion}`);
   }
   const versionInfo = JSON.parse(fs.readFileSync(path.join(daemonCommandDir, "versioninfo.json"), "utf8"));
-  const expected = `${packageVersion}.0`;
+  // Windows version resources are numeric, so a release candidate (0.8.0-rc.1) stamps its core (0.8.0.0).
+  const expected = `${packageVersion.split(/[-+]/)[0]}.0`;
   const fixedFileVersion = versionInfo.FixedFileInfo?.FileVersion;
   const fixedProductVersion = versionInfo.FixedFileInfo?.ProductVersion;
   const fixedVersion = [fixedFileVersion?.Major, fixedFileVersion?.Minor, fixedFileVersion?.Patch, fixedFileVersion?.Build].join(".");

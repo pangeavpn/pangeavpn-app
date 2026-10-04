@@ -14,7 +14,8 @@ transport selection, routing, DNS and leak prevention.
 [Trust boundaries](#trust-and-privilege-boundaries) ·
 [Local API](#local-daemon-api) · [Control plane](#remote-control-plane) ·
 [Connection lifecycle](#connection-lifecycle) · [Data plane](#data-plane) ·
-[Kill switch](#kill-switch-and-lockdown) · [Health](#state-machine-and-health) ·
+[Kill switch](#kill-switch-and-lockdown) ·
+[Split tunnelling](#split-tunnelling) · [Health](#state-machine-and-health) ·
 [Process models](#process-models) · [Runtime data](#runtime-data) ·
 [Source map](#source-map)
 
@@ -128,6 +129,7 @@ client for the HTTP API registered in
 | `POST` | `/pq/offer`, `/pq/finish`, `/pq/encapsulate` | ML-KEM-768 key material for the peer's pre-shared key and the hub channel |
 | `GET` | `/logs?since=<id>` | Read in-memory daemon log entries |
 | `GET`, `POST` | `/config` | Read or replace stored profiles |
+| `GET`, `POST` | `/split-tunnel` | Read or save the excluded apps and IPv4 ranges; answers without waiting on a running connect |
 
 The two hub proxies are deliberately separate from `/connect`, because they have
 to work before any profile exists.
@@ -410,7 +412,13 @@ rules. Windows blocks at the `IPFORWARD` layers and only permits forwarding onto
 the tunnel interface; nftables and iptables carry a `forward` chain beside
 `output`. Frames bridged between containers on the same bridge keep working.
 VMs bridged straight onto the physical NIC sit below the host stack, and no
-platform can cover them.
+platform can cover them. Guests may reach [excluded ranges](#split-tunnelling)
+too. On Linux the `forward` chain lets traffic from an excluded range through
+only as the reply to a connection a guest opened (conntrack's reply direction).
+A guest whose own subnet lies inside an excluded range therefore can't open
+connections to anywhere else off-tunnel. It is still an excluded destination,
+though, so connections other hosts open to it (a published or port-forwarded
+service, say) are forwarded and its replies pass.
 
 **At boot**, the lock has to be back before the network is. Windows installs
 boot-time twins of the persistent filters to cover the window before the Base
@@ -439,6 +447,90 @@ are both removed, since macOS reuses utun numbers and Windows can reuse an
 interface index. On startup the daemon tells an intentional lock apart from
 stale firewall state, tries to adopt an existing tunnel, and cleans up stale
 platform state when it's safe to.
+
+## Split tunnelling
+
+Two kinds of traffic can skip the tunnel: excluded apps and excluded IPv4
+ranges. The settings are machine-wide, kept by the daemon in
+`split-tunnel.json`, and every account on the machine follows them. They travel
+over `GET` and `POST /split-tunnel`. A save never waits on a connect: app rules
+apply at once, and a background reconciler moves the ranges onto the live
+session as soon as it can take the session lock.
+
+**Excluded ranges** are carved out of the peer's `AllowedIPs`, the way Allow LAN
+carves out local ranges, and the kill switch permits them. The tunnel address
+and the session's resolvers stay routed through the tunnel, and ports 53 and 853
+stay blocked off it. On a live session the reconciler first permits the old and
+new ranges together, then moves the device's `AllowedIPs` and routes in place
+(no reconnect, no new handshake), then drops the old permits. A failed move
+keeps both sets permitted and retries; it never touches the connection state.
+Ranges must be IPv4, `/8` or narrower, at most 64 of them, and cost at most 1024
+tunnel routes. A server whose own `AllowedIPs` leave no room for them keeps them
+all in the tunnel and says so in `/status`.
+
+**Excluded apps** need no kernel driver. The daemon already reads every packet
+bound for the tunnel, so [`daemon/internal/splittunnel`](../daemon/internal/splittunnel)
+wraps wireguard-go's TUN device. The first packets of a new flow wait while the
+classifier finds the socket that owns it (IP Helper tables on Windows,
+`sock_diag` on Linux, the `pcblist` sysctls on macOS), then that process and the
+ancestors it was seen starting under. If the owner or a recorded ancestor
+matches an excluded app, the flow ends in userspace (TCP in a gVisor stack, UDP
+in a small NAT) and the daemon re-sends it from its own socket, pinned to the
+physical interface. Everything else, and anything the engine can't attribute
+with certainty, goes into the tunnel unchanged. The daemon's own process tree
+and the desktop app never bypass.
+
+| Platform | Off-tunnel sockets | What the kill switch permits |
+| --- | --- | --- |
+| Windows | `IP_UNICAST_IF` on the physical interface | The daemon image (`ALE_APP_ID`), on any interface but the tunnel |
+| macOS | Opened by a root broker (`--split-egress-broker`) running under the `_pangeasplit` group, with `IP_BOUND_IF` | Traffic of that group, which has no members |
+| Linux | `SO_MARK 0x1ca6c`, which skips the tunnel's policy-routing rule | Packets carrying that mark |
+
+On macOS, a socket pinned with `IP_BOUND_IF` has no route once the tunnel's
+`0.0.0.0/1` is installed: XNU's last-resort lookup of the unscoped default
+matches that `/1`, and configd never scopes the primary interface's own default.
+So while apps are excluded and a tunnel is up (the egress permit's condition),
+the daemon keeps a scoped copy of the primary default (`route add -ifscope <if>
+-proto2 default <gw>`). It follows the gateway and the primary interface, and it
+is removed when it stops being wanted, on shutdown, and after a crash at the next
+start or by the uninstaller. On the primary interface the kernel prefers it to
+configd's default even for unscoped lookups, which is why it must track configd;
+it lags by at most one refresh. A copy left on an interface that lost primary
+status is only removed on a later refresh, because configd may have just taken
+that key over. `RTF_PROTO2` lets the daemon's routing-table readers tell it apart.
+
+The split permits live only in the kill switch's memory. A restarted daemon
+never re-arms them from disk; each bring-up applies them again from
+`split-tunnel.json`, and the routes only ever follow what the lock actually
+permits. A Lockdown disconnect drops the range permits before it narrows the
+lock to the hub. The app egress permit is withdrawn once the last tunnel device
+closes. The engine logs no per-flow data, and `/status` carries counts, never
+paths or ranges.
+
+Limits of this version:
+
+- Lookups through the system resolver, and all traffic to ports 53 and 853, stay
+  in the tunnel. Geo-DNS may therefore pick servers near the VPN exit, and a
+  captive-portal login through an excluded browser fails while the tunnel is
+  down.
+- Excluded apps get no IPv6 and no relayed ICMP errors, and they only bypass
+  while a tunnel device exists. With the kill switch armed and no device they're
+  blocked like everything else.
+- Connections an app opened before it was excluded stay in the tunnel. Removing
+  an app resets its bypassed TCP connections, which reconnect through the VPN.
+- Exclusion passes to child processes only if the daemon saw the parent alive.
+  Launchers that exit at once don't pass it on; the app picker uses folder rules
+  for those.
+- Bypassed traffic is proxied: the app sees the tunnel address as its own, gets
+  no unsolicited inbound traffic, and loses TOS/ECN marks.
+- On Linux every server switch recreates the device, which resets excluded
+  connections, and strict reverse-path filtering (`rp_filter=1`) drops bypass
+  replies; the daemon reports it as `strictReversePath` and changes nothing.
+- On macOS, Safari, WebKit views and system daemons may not be excludable. The
+  macOS code is tested on synthetic data only.
+- Exclusion isn't a security boundary. Anyone who can write to an excluded path,
+  inject into an excluded process or spoof a parent process gets traffic off the
+  tunnel.
 
 ## State machine and health
 
@@ -553,6 +645,7 @@ Depending on the mode, the directory holds:
 | `config.json` | VPN profiles, including WireGuard and transport credentials |
 | `killswitch-state.json` | Persistent Lockdown intent |
 | `transport-memory.json` | Last-good transport per network fingerprint |
+| `split-tunnel.json` | Split-tunnel settings: excluded app paths and IPv4 ranges. The uninstaller removes it |
 | `settings.json` | Desktop settings, plus what a blocked client falls back on: the last server and hub IP, the node list, edge relays, control-plane REALITY and Shadowsocks credentials, and the dead-drop sequence number |
 | `logs/daemon.log` | Persistent daemon log |
 | `logs/daemon-crash.log` | Crash diagnostics |
@@ -583,4 +676,5 @@ and macOS installs.
 | WireGuard backends | [`daemon/internal/wg`](../daemon/internal/wg) |
 | Post-quantum key exchange | [`daemon/internal/pq`](../daemon/internal/pq), [Post-quantum protection](post-quantum.md) |
 | Kill switch backends | [`daemon/internal/platform`](../daemon/internal/platform) |
+| Split tunnelling | [`daemon/internal/splittunnel`](../daemon/internal/splittunnel), [`daemon/internal/api/split_tunnel.go`](../daemon/internal/api/split_tunnel.go) |
 | Build and installer model | [Binaries and packaging](binaries-and-packaging.md) |

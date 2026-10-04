@@ -1,8 +1,23 @@
-import { Menu, Notification, Tray, app, BrowserWindow, ipcMain, nativeImage, session, shell, type NativeImage } from "electron";
+import {
+  Menu,
+  Notification,
+  Tray,
+  app,
+  BrowserWindow,
+  dialog,
+  ipcMain,
+  nativeImage,
+  session,
+  shell,
+  type IpcMainInvokeEvent,
+  type NativeImage
+} from "electron";
 import os from "node:os";
 import path from "node:path";
 import type { ConfigResponse, OkResponse, Profile, StatusResponse } from "@pangeavpn/shared-types";
-import { DaemonClient, HostOfflineError, TransportExhaustedError } from "./daemonClient";
+import { DaemonClient, DaemonHttpError, HostOfflineError, TransportExhaustedError } from "./daemonClient";
+import { createAppCatalog } from "./appCatalog";
+import { createSplitTunnelWriter, protectRulesFor } from "../shared/splitTunnel";
 import { DaemonProcessManager } from "./daemonProcess";
 import { getAppSupportDir, getLegacyStateFilePath, getUserStateDir, readDaemonTokens } from "./platformPaths";
 import { getConnectedTrayIconPath, getTrayIconPath, getWindowsAppIconPath } from "./resourcePaths";
@@ -91,6 +106,8 @@ let trayDefaultImage: NativeImage | null = null;
 let trayConnectedImage: NativeImage | null = null;
 let lastDaemonRestartAttemptAtMs = 0;
 let daemonRecoveryInProgress = false;
+// A native dialog takes focus from the popover; hiding it then would strand the dialog.
+let nativeDialogOpen = false;
 let trayHintShown = false;
 const setWidth = 640;
 const setHeight = 440;
@@ -268,10 +285,10 @@ function createWindow(): void {
   });
 
   mainWindow.on("blur", () => {
-    if (isQuitting || daemonRecoveryInProgress || !anchoredWindow) return;
+    if (isQuitting || daemonRecoveryInProgress || nativeDialogOpen || !anchoredWindow) return;
     // Wait for any show animation to finish, then hide.
     const checkAndHide = () => {
-      if (!isQuitting && mainWindow?.isVisible() && !hiding) {
+      if (!isQuitting && !nativeDialogOpen && mainWindow?.isVisible() && !hiding) {
         hideMainWindow();
       }
     };
@@ -466,6 +483,10 @@ async function maybeShowTrayHint(fromTrayClick: boolean): Promise<void> {
 }
 
 function toggleMainWindowVisibility(): void {
+  if (nativeDialogOpen) {
+    mainWindow?.focus();
+    return;
+  }
   if (!mainWindow || !mainWindow.isVisible()) {
     showMainWindow();
     return;
@@ -597,6 +618,10 @@ function updateTrayMenu(): void {
         label: windowVisible ? mt("tray.hide") : mt("tray.show"),
         click: () => {
           if (windowVisible) {
+            if (nativeDialogOpen) {
+              mainWindow?.focus();
+              return;
+            }
             hideMainWindow();
             return;
           }
@@ -2304,12 +2329,99 @@ function registerServerAndDeviceHandlers(): void {
   });
 }
 
+function assertAppFrame(event: IpcMainInvokeEvent, channel: string): void {
+  if (!event.senderFrame || !event.senderFrame.url.startsWith("file://")) {
+    throw new Error(`${channel}: untrusted sender`);
+  }
+}
+
+function boundedStrings(value: unknown, max: number, channel: string): string[] {
+  if (!Array.isArray(value) || value.length > max || !value.every((item) => typeof item === "string" && item.length <= 4096)) {
+    throw new Error(`${channel}: expected at most ${max} strings`);
+  }
+  return value as string[];
+}
+
+// Electron logs a rejected handler's error to app.log, and daemon bodies or fs errors can quote app paths.
+function withoutPaths<T>(pending: Promise<T>, label: string): Promise<T> {
+  return pending.catch((error: unknown) => {
+    if (error instanceof DaemonHttpError) throw new Error(`${label}: daemon request failed (${error.status})`);
+    const code = (error as NodeJS.ErrnoException | null)?.code;
+    throw typeof code === "string" ? new Error(`${label}: ${code}`) : error;
+  });
+}
+
+function registerSplitTunnelHandlers(): void {
+  const catalog = createAppCatalog();
+  const readConfig = () =>
+    withDaemonRestartOnUnavailable(() => daemonClient.getSplitTunnel(), "split tunnel", { allowRestart: false });
+  const writer = createSplitTunnelWriter(
+    {
+      get: readConfig,
+      set: (body, current) =>
+        withDaemonRestartOnUnavailable(() => daemonClient.setSplitTunnel(body, current), "split tunnel update")
+    },
+    { platform: process.platform, protect: () => protectRulesFor(process.execPath, process.platform) }
+  );
+
+  ipcMain.handle(IPC_CHANNELS.getSplitTunnel, async () => withoutPaths(readConfig(), "getSplitTunnel"));
+
+  ipcMain.handle(IPC_CHANNELS.setSplitTunnelEnabled, async (event, enabled: unknown) => {
+    assertAppFrame(event, "setSplitTunnelEnabled");
+    if (typeof enabled !== "boolean") throw new Error("setSplitTunnelEnabled: expected a boolean");
+    return withoutPaths(writer.setEnabled(enabled), "setSplitTunnelEnabled");
+  });
+
+  ipcMain.handle(IPC_CHANNELS.setSplitTunnelApp, async (event, rule: unknown, excluded: unknown) => {
+    assertAppFrame(event, "setSplitTunnelApp");
+    if (typeof rule !== "string" || rule.length === 0 || rule.length > 4096 || typeof excluded !== "boolean") {
+      throw new Error("setSplitTunnelApp: expected a rule and a boolean");
+    }
+    return withoutPaths(writer.setApp(rule, excluded), "setSplitTunnelApp");
+  });
+
+  ipcMain.handle(IPC_CHANNELS.setSplitTunnelCidrs, async (event, text: unknown) => {
+    assertAppFrame(event, "setSplitTunnelCidrs");
+    if (typeof text !== "string" || text.length > 65536) throw new Error("setSplitTunnelCidrs: expected text");
+    return withoutPaths(writer.setCidrs(text), "setSplitTunnelCidrs");
+  });
+
+  ipcMain.handle(IPC_CHANNELS.splitTunnelListApps, async (_event, options: unknown) => {
+    const refresh = typeof options === "object" && options !== null && (options as { refresh?: unknown }).refresh === true;
+    return withoutPaths(catalog.list(refresh), "listSplitTunnelApps");
+  });
+
+  ipcMain.handle(IPC_CHANNELS.splitTunnelDescribeApps, async (_event, rules: unknown) =>
+    withoutPaths(catalog.describe(boundedStrings(rules, 512, "describeSplitTunnelApps")), "describeSplitTunnelApps")
+  );
+
+  ipcMain.handle(IPC_CHANNELS.splitTunnelGetIcons, async (_event, keys: unknown) =>
+    withoutPaths(catalog.icons(boundedStrings(keys, 256, "getSplitTunnelIcons")), "getSplitTunnelIcons")
+  );
+
+  ipcMain.handle(IPC_CHANNELS.splitTunnelBrowseApp, async (event) => {
+    assertAppFrame(event, "browseSplitTunnelApp");
+    if (!mainWindow || nativeDialogOpen) return null;
+    nativeDialogOpen = true;
+    let picked: string | undefined;
+    try {
+      const result = await dialog.showOpenDialog(mainWindow, catalog.dialogOptions());
+      picked = result.canceled ? undefined : result.filePaths[0];
+    } finally {
+      nativeDialogOpen = false;
+      if (mainWindow?.isVisible()) mainWindow.focus();
+    }
+    return picked ? withoutPaths(catalog.describePick(picked), "browseSplitTunnelApp") : null;
+  });
+}
+
 function registerIpcHandlers(): void {
   registerConnectionHandlers();
   registerAuthHandlers();
   registerTransportSettingsHandlers();
   registerStartupSettingsHandlers();
   registerServerAndDeviceHandlers();
+  registerSplitTunnelHandlers();
 }
 
 type DaemonRetryOptions = {
@@ -2584,7 +2696,9 @@ function buildApplicationMenu(): void {
         {
           label: mt("menu.hideWindow"),
           accelerator: "CmdOrCtrl+H",
-          click: () => hideMainWindow()
+          click: () => {
+            if (!nativeDialogOpen) hideMainWindow();
+          }
         },
         { type: "separator" },
         {

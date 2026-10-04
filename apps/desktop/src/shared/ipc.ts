@@ -12,6 +12,13 @@ import type {
   HubStatus
 } from "./hubMethods";
 import type { MultihopPrefs } from "./multihop";
+import type {
+  SplitTunnelAppEntry,
+  SplitTunnelBrowseResult,
+  SplitTunnelConfig,
+  SplitTunnelIcon,
+  SplitTunnelResult
+} from "./splitTunnel";
 
 export type {
   HubMethod,
@@ -20,6 +27,16 @@ export type {
   HubMethodUnavailable,
   HubStatus
 } from "./hubMethods";
+export type {
+  SplitTunnelAppEntry,
+  SplitTunnelAppKind,
+  SplitTunnelBrowseResult,
+  SplitTunnelConfig,
+  SplitTunnelErrorCode,
+  SplitTunnelIcon,
+  SplitTunnelInvalid,
+  SplitTunnelResult
+} from "./splitTunnel";
 
 /** Result of setHubMethod: `applied` is false when the last method was kept on. */
 export interface HubMethodResult {
@@ -76,6 +93,14 @@ export const IPC_CHANNELS = {
   clearLastServer: "settings:clearLastServer",
   setMultihop: "settings:setMultihop",
   getMultihop: "settings:getMultihop",
+  getSplitTunnel: "settings:getSplitTunnel",
+  setSplitTunnelEnabled: "settings:setSplitTunnelEnabled",
+  setSplitTunnelApp: "settings:setSplitTunnelApp",
+  setSplitTunnelCidrs: "settings:setSplitTunnelCidrs",
+  splitTunnelListApps: "splitTunnel:listApps",
+  splitTunnelDescribeApps: "splitTunnel:describeApps",
+  splitTunnelGetIcons: "splitTunnel:getIcons",
+  splitTunnelBrowseApp: "splitTunnel:browseApp",
   getLocale: "settings:getLocale",
   setLocale: "settings:setLocale",
   getIsPackaged: "app:getIsPackaged",
@@ -361,6 +386,22 @@ export interface PangeaApi {
   clearLastServer: () => Promise<void>;
   setMultihop: (prefs: MultihopPrefs) => Promise<void>;
   getMultihop: () => Promise<MultihopPrefs>;
+  /** Null when the service predates split tunnelling; rejects when it can't be reached. */
+  getSplitTunnel: () => Promise<SplitTunnelConfig | null>;
+  /** Each write re-reads the service's config first. Rejects on anything but a
+   *  validation failure; re-read with getSplitTunnel then. */
+  setSplitTunnelEnabled: (enabled: boolean) => Promise<SplitTunnelResult>;
+  setSplitTunnelApp: (rule: string, excluded: boolean) => Promise<SplitTunnelResult>;
+  /** The ranges field as typed; bad tokens come back by index without saving anything. */
+  setSplitTunnelCidrs: (text: string) => Promise<SplitTunnelResult>;
+  /** Installed apps, without icons. Cached; `refresh` rescans. */
+  listSplitTunnelApps: (options?: { refresh?: boolean }) => Promise<SplitTunnelAppEntry[]>;
+  /** One entry per stored rule, in order, flagged `missing` when the path is gone. */
+  describeSplitTunnelApps: (rules: string[]) => Promise<SplitTunnelAppEntry[]>;
+  /** Keys are entry ids from listSplitTunnelApps/describeSplitTunnelApps/browseSplitTunnelApp. */
+  getSplitTunnelIcons: (keys: string[]) => Promise<SplitTunnelIcon[]>;
+  /** Native file picker. Null when cancelled; adding the pick is up to the caller. */
+  browseSplitTunnelApp: () => Promise<SplitTunnelBrowseResult | null>;
   /** Stored language preference: a locale code, or "system" when unset. */
   getLocale: () => Promise<string>;
   setLocale: (locale: string) => Promise<void>;

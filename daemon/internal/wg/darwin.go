@@ -30,6 +30,12 @@ var (
 	darwinExtra   = map[string]*darwinSessionExtra{}
 )
 
+// Seams for the route-sync tests; production always execs /sbin/route.
+var (
+	addDarwinAllowedIPRoutesFn    = addDarwinAllowedIPRoutes
+	removeDarwinAllowedIPRoutesFn = removeDarwinAllowedIPRoutes
+)
+
 func storeDarwinExtra(tunnelKey string, extra *darwinSessionExtra) {
 	darwinExtraMu.Lock()
 	defer darwinExtraMu.Unlock()
@@ -104,7 +110,7 @@ func (m *wireGuardGoManager) startDarwin(ctx context.Context, profile state.Wire
 	}
 
 	// Create in-process TUN device (utun) and WireGuard device.
-	dev, tunDev, err := m.createInProcessDeviceWithFactory("utun", parsed.mtu, parsed.wgConfig, tun.CreateTUN)
+	dev, tunDev, err := m.createInProcessDeviceWithFactory("utun", parsed.mtu, parsed.wgConfig, tun.CreateTUN, tunnelInfoFor("utun", parsed))
 	if err != nil {
 		m.removeSession(tunnelKey)
 		return err
@@ -142,7 +148,7 @@ func (m *wireGuardGoManager) startDarwin(ctx context.Context, profile state.Wire
 	}
 
 	// Add allowed-IP routes via PF_ROUTE socket.
-	if err := addDarwinAllowedIPRoutes(interfaceName, allowedIPs); err != nil {
+	if err := addDarwinAllowedIPRoutes(ctx, interfaceName, allowedIPs); err != nil {
 		removeDarwinEndpointRoutes(endpointRoutes)
 		closeDevice(dev)
 		m.removeSession(tunnelKey)
@@ -240,6 +246,10 @@ func (m *wireGuardGoManager) trySwitchInPlaceDarwin(ctx context.Context, tunnelK
 		m.logs.Add(state.LogInfo, state.SourceWireGuard, "mtu changed; rebuilding the device instead of reconfiguring in place")
 		return false
 	}
+	if tunnelAddrChanged(session.tunDevice, parsed.addresses) {
+		m.logs.Add(state.LogInfo, state.SourceWireGuard, "tunnel address changed; rebuilding the device instead of reconfiguring in place")
+		return false
+	}
 
 	uapi, err := wgConfigToUAPI(stripListenPort(parsed.wgConfig))
 	if err != nil {
@@ -268,16 +278,10 @@ func (m *wireGuardGoManager) trySwitchInPlaceDarwin(ctx context.Context, tunnelK
 		session.endpointRoutes = newEndpointRoutes
 	}
 
-	// Track the union while routes are in flux, so a failure mid-diff still
-	// gets everything cleaned up by the fallback teardown.
-	oldAllowedIPs := extra.allowedIPs
-	extra.allowedIPs = mergeSpecSet(oldAllowedIPs, allowedIPs)
-	if err := addDarwinAllowedIPRoutes(session.interfaceName, subtractSpecSet(allowedIPs, oldAllowedIPs)); err != nil {
+	if err := syncDarwinAllowedIPRoutes(ctx, session, extra, allowedIPs); err != nil {
 		m.logs.Add(state.LogWarn, state.SourceWireGuard, fmt.Sprintf("in-place reconfigure: allowed-ip routes failed: %v", err))
 		return false
 	}
-	removeDarwinAllowedIPRoutes(session.interfaceName, subtractSpecSet(oldAllowedIPs, allowedIPs))
-	extra.allowedIPs = allowedIPs
 
 	newNeedsV6Lock := allowedIPsHaveIPv6(allowedIPs)
 	switch {
@@ -300,8 +304,26 @@ func (m *wireGuardGoManager) trySwitchInPlaceDarwin(ctx context.Context, tunnelK
 		extra.appliedDNS = parsed.dnsServers
 	}
 
+	updateWrappedTunnelInfo(session, parsed)
+
 	m.logs.Add(state.LogInfo, state.SourceWireGuard, fmt.Sprintf("wireguard re-pointed in place on %s", session.interfaceName))
 	return true
+}
+
+func syncDarwinAllowedIPRoutes(ctx context.Context, session *tunnelSession, extra *darwinSessionExtra, allowedIPs []string) error {
+	return syncTrackedAllowedIPs(ctx, &extra.allowedIPs, allowedIPs, expandRoutePrefixes,
+		func(add []string) error { return addDarwinAllowedIPRoutesFn(ctx, session.interfaceName, add) },
+		func(remove []string) { removeDarwinAllowedIPRoutesFn(session.interfaceName, remove) },
+	)
+}
+
+// syncAllowedIPRoutes moves the utun's routes to allowedIPs for ApplyAllowedIPs.
+func (m *wireGuardGoManager) syncAllowedIPRoutes(ctx context.Context, tunnelKey string, session *tunnelSession, _ parsedUserlandConfig, allowedIPs []string) error {
+	extra := peekDarwinExtra(tunnelKey)
+	if extra == nil {
+		return errors.New("tunnel has no recorded routes")
+	}
+	return syncDarwinAllowedIPRoutes(ctx, session, extra, allowedIPs)
 }
 
 // reapplySessionDNSLocked moves the session's DNS override to want, keeping

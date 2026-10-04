@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime"
 	"slices"
 	"strings"
 	"syscall"
@@ -24,6 +25,9 @@ import (
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/reality"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/shadowsocks"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/snowflake"
+	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/splittunnel"
+	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/splittunnel/egress"
+	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/splittunnel/procmatch"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/state"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/wg"
 )
@@ -39,14 +43,20 @@ const (
 )
 
 type daemonRuntime struct {
-	service  *api.Service
-	server   *http.Server
-	listener net.Listener
-	serveErr <-chan error
-	cancel   context.CancelFunc
+	service     *api.Service
+	splitTunnel *splittunnel.Controller
+	server      *http.Server
+	listener    net.Listener
+	serveErr    <-chan error
+	cancel      context.CancelFunc
 }
 
 func main() {
+	// The macOS egress broker is this binary re-executed by the daemon itself; it must
+	// never start a second daemon.
+	if hasFlag("--split-egress-broker") {
+		os.Exit(egress.RunBroker())
+	}
 	if hasFlag("--clear-killswitch") {
 		os.Exit(clearKillSwitchCommand())
 	}
@@ -77,17 +87,34 @@ func clearKillSwitchCommand() int {
 	logKillSwitchWarnings()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	if err := platform.NewKillSwitch().Clear(ctx); err != nil {
+	// The settings name the user's apps and never depend on the lock, so they go first.
+	splitErr := forgetSplitTunnel()
+	if splitErr != nil {
+		log.Printf("forget split tunnel settings: %v", splitErr)
+	}
+	// A daemon killed before closing its dialer leaves the macOS scoped default route behind.
+	egress.RemoveOrphanedRoutes(log.Printf)
+	if err := clearKillSwitch(ctx); err != nil {
 		log.Printf("clear kill switch: %v", err)
 		return 1
 	}
-	if err := api.ForgetSession(); err != nil {
+	if err := forgetSession(); err != nil {
 		log.Printf("forget session: %v", err)
+		return 1
+	}
+	if splitErr != nil {
 		return 1
 	}
 	log.Printf("kill switch cleared")
 	return 0
 }
+
+// Indirected for tests.
+var (
+	clearKillSwitch   = func(ctx context.Context) error { return platform.NewKillSwitch().Clear(ctx) }
+	forgetSession     = api.ForgetSession
+	forgetSplitTunnel = api.ForgetSplitTunnel
+)
 
 // logKillSwitchWarnings sends degraded-clear warnings, such as a Windows setting
 // left unrestored, and what the clear gave back to the output the uninstaller logs.
@@ -170,6 +197,9 @@ func startDaemonRuntime() (*daemonRuntime, error) {
 	// A previous daemon process may have died mid-session; restore whatever
 	// network state it left behind before serving any new requests.
 	wg.RestoreOrphanedState()
+	egress.RemoveOrphanedRoutes(func(format string, args ...any) {
+		logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf(format, args...))
+	})
 
 	machine := state.NewMachine()
 	configStore, err := state.NewConfigStore(configPath)
@@ -204,6 +234,7 @@ func startDaemonRuntime() (*daemonRuntime, error) {
 
 	service.SetShadowsocksProxy(shadowsocks.NewProxyManager(logs))
 	service.SetRealityProxy(reality.NewProxyManager(logs))
+	splitTunnel := wireSplitTunnel(service, logs, wgManager, killSwitch)
 
 	// Per-network last-good-transport cache is a best-effort optimization; a
 	// failure to open it just leaves auto-connect walking the full cascade.
@@ -253,12 +284,61 @@ func startDaemonRuntime() (*daemonRuntime, error) {
 	}()
 
 	return &daemonRuntime{
-		service:  service,
-		server:   server,
-		listener: listener,
-		serveErr: serveErr,
-		cancel:   cancel,
+		service:     service,
+		splitTunnel: splitTunnel,
+		server:      server,
+		listener:    listener,
+		serveErr:    serveErr,
+		cancel:      cancel,
 	}, nil
+}
+
+// wireSplitTunnel hands the service its stored split-tunnel settings and, where the
+// WireGuard manager can wrap its TUN, the engine that keeps excluded apps off the tunnel.
+func wireSplitTunnel(service *api.Service, logs *state.LogStore, wgManager wg.Manager, killSwitch platform.KillSwitch) *splittunnel.Controller {
+	storePath, err := api.SplitTunnelStorePath()
+	if err != nil {
+		logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("split tunnel settings cannot be saved: %v", err))
+	}
+	hooker, ok := wgManager.(interface{ SetSplitTunnelHook(wg.SplitTunnelHook) })
+	if !ok {
+		service.SetSplitTunnel(nil, storePath)
+		return nil
+	}
+	logf := func(format string, args ...any) {
+		logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf(format, args...))
+	}
+	var never []string
+	if self, err := os.Executable(); err == nil {
+		never = append(never, self)
+	}
+	permit := func(context.Context, bool) error {
+		return errors.New("this kill switch cannot let split-tunnel traffic out")
+	}
+	if permitter, ok := killSwitch.(platform.SplitTunnelPermitter); ok {
+		permit = permitter.SetSplitEgress
+	}
+	controller := splittunnel.NewController(splittunnel.ControllerOptions{
+		NewClassifier: func() (procmatch.Classifier, error) {
+			return procmatch.NewClassifier(procmatch.Options{SelfPID: os.Getpid(), NeverBypass: never, Logf: logf})
+		},
+		NewEgress: func() (egress.Dialer, error) {
+			opts := egress.Options{Logf: logf}
+			if runtime.GOOS == "darwin" {
+				gid, err := platform.SplitEgressGroupID()
+				if err != nil {
+					return nil, err
+				}
+				opts.BrokerGID = gid
+			}
+			return egress.New(opts)
+		},
+		SetEgressPermit: permit,
+		Logf:            logf,
+	})
+	hooker.SetSplitTunnelHook(controller)
+	service.SetSplitTunnel(controller, storePath)
+	return controller
 }
 
 func (r *daemonRuntime) Stop(ctx context.Context) error {
@@ -286,6 +366,19 @@ func (r *daemonRuntime) Stop(ctx context.Context) error {
 	if r.service != nil {
 		if err := r.service.Shutdown(ctx); err != nil {
 			stopErrors = append(stopErrors, fmt.Errorf("disconnect VPN: %w", err))
+		}
+	}
+	// After the tunnel is down: Close withdraws the off-tunnel egress permit, which no
+	// later process would ever re-arm.
+	if r.splitTunnel != nil {
+		closed := make(chan error, 1)
+		go func() { closed <- r.splitTunnel.Close() }()
+		select {
+		case err := <-closed:
+			if err != nil {
+				stopErrors = append(stopErrors, fmt.Errorf("close split tunnel: %w", err))
+			}
+		case <-ctx.Done():
 		}
 	}
 	return errors.Join(stopErrors...)

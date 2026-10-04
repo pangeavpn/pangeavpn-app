@@ -73,6 +73,7 @@ A Snowflake transport (WebRTC, as used by Tor) is written and wired up but switc
 | **Multihop** | Enter through one server and leave through another. The network you're on only ever sees the entry |
 | **Kill switch** | OS firewall rules block traffic if the tunnel drops (Windows WFP, Linux nftables/iptables, macOS PF) |
 | **Lockdown mode** | Optionally keeps the kill switch armed after you disconnect |
+| **Split tunnelling** | Pick apps or IPv4 ranges that skip the VPN, with no kernel driver. DNS always stays in the tunnel |
 | **Encrypted hub channel** | Each request is sealed with hybrid X25519 + ML-KEM-768 and AES-256-GCM, so it survives proxies that intercept TLS |
 | **Hub access when blocked** | Cached IP, DNS-over-HTTPS, REALITY, Shadowsocks and a CDN relay, then a signed dead drop if every known address has been burned |
 | **8 languages** | Including Persian, Arabic, Chinese, Russian and Ukrainian |
@@ -299,7 +300,6 @@ Roughly in priority order:
 
 - **Mobile clients** for Android and iOS. This is the biggest gap by far.
 - **Code-signed releases** on Windows and macOS.
-- **Split tunnelling**, per app and per CIDR.
 - **Auto-connect rules** for untrusted Wi-Fi, on boot, and after leaving a captive portal.
 - **Snowflake.** It's written but not switched on in production yet.
 - **SNI rotation and domain fronting**, to get past single-fingerprint blocks.

@@ -178,9 +178,9 @@ func allowedIPsHaveIPv6(allowedIPs []string) bool {
 	return false
 }
 
-// addDarwinAllowedIPRoutes routes WireGuard allowed-IP prefixes through the tunnel. IPv6 is
-// skipped because the tunnel has no v6 address; disableDarwinIPv6ForSession covers that leak.
-func addDarwinAllowedIPRoutes(interfaceName string, allowedIPs []string) error {
+// addDarwinAllowedIPRoutes routes WireGuard allowed-IP prefixes through the tunnel, stopping between execs once
+// ctx ends. IPv6 is skipped because the tunnel has no v6 address; disableDarwinIPv6ForSession covers that leak.
+func addDarwinAllowedIPRoutes(ctx context.Context, interfaceName string, allowedIPs []string) error {
 	for _, prefix := range allowedIPs {
 		routePrefixes, family, err := normalizedRoutesForPrefix(prefix)
 		if err != nil {
@@ -190,6 +190,9 @@ func addDarwinAllowedIPRoutes(interfaceName string, allowedIPs []string) error {
 			continue
 		}
 		for _, rp := range routePrefixes {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			_, ipNet, parseErr := net.ParseCIDR(rp)
 			if parseErr != nil {
 				return fmt.Errorf("parse route prefix %s: %w", rp, parseErr)
@@ -597,6 +600,10 @@ func darwinIPv4Routes() ([]darwinRouteEntry, error) {
 	for _, message := range messages {
 		routeMessage, ok := message.(*route.RouteMessage)
 		if !ok || routeMessage.Flags&syscall.RTF_UP == 0 {
+			continue
+		}
+		// Split tunnelling's scoped copy of the default (egress.mirrorFlags) must never pick the gateway.
+		if routeMessage.Flags&(syscall.RTF_IFSCOPE|syscall.RTF_PROTO2) == syscall.RTF_IFSCOPE|syscall.RTF_PROTO2 {
 			continue
 		}
 		destination, ok := darwinInet4Addr(routeMessage.Addrs, syscall.RTAX_DST)

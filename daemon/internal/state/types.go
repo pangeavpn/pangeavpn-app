@@ -89,6 +89,27 @@ type StatusResponse struct {
 	// Offline marks a confident OS verdict of no internet while a session is
 	// intended; clients show "no internet" instead of an endlessly failing retry.
 	Offline bool `json:"offline"`
+	// SplitTunnel summarises split tunnelling; absent where the daemon has none wired in.
+	SplitTunnel *SplitTunnelStatus `json:"splitTunnel,omitempty"`
+}
+
+// SplitTunnelStatus carries counts only: the app paths and ranges stay on GET /split-tunnel,
+// so the polled /status never carries them.
+type SplitTunnelStatus struct {
+	Enabled   bool `json:"enabled"`
+	AppCount  int  `json:"appCount"`
+	CIDRCount int  `json:"cidrCount"`
+	// AppsActive is true while excluded apps really bypass: rules set, a tunnel device
+	// pumping and the off-tunnel egress permitted.
+	AppsActive  bool `json:"appsActive"`
+	BypassFlows int  `json:"bypassFlows"`
+	// Pending marks saved settings the live session does not carry yet.
+	Pending bool `json:"pending"`
+	// UnavailableReason is "" or why excluded apps cannot bypass (classifierFailed,
+	// egressFailed, permitFailed, stackFailed, strictReversePath).
+	UnavailableReason string `json:"unavailableReason"`
+	// CIDRsDropped marks ranges kept in the tunnel because this server's routes could not fit them.
+	CIDRsDropped bool `json:"cidrsDropped,omitempty"`
 }
 
 type CloakProfile struct {

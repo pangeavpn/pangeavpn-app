@@ -14,6 +14,13 @@ import type {
   PostQuantumOffer,
   PostQuantumProvider
 } from "../shared/postQuantum.ts";
+import {
+  normalizeSplitTunnelConfig,
+  parseSplitTunnelInvalid,
+  type SplitTunnelConfig,
+  type SplitTunnelResult,
+  type SplitTunnelWriteBody
+} from "../shared/splitTunnel.ts";
 
 export class TransportExhaustedError extends Error {
   constructor() {
@@ -33,11 +40,13 @@ export class HostOfflineError extends Error {
 /** Any non-2xx daemon reply; the status tells an old daemon from a broken one. */
 export class DaemonHttpError extends Error {
   readonly status: number;
+  readonly body: string;
 
   constructor(status: number, text: string) {
     super(`daemon request failed (${status}): ${text}`);
     this.name = "DaemonHttpError";
     this.status = status;
+    this.body = text;
   }
 }
 
@@ -103,6 +112,27 @@ export class DaemonClient implements PostQuantumProvider {
     return this.orNullOnMissingRoute(
       this.request<Encapsulation>("POST", "/pq/encapsulate", { algorithm, kemPublicKey })
     );
+  }
+
+  /** Null on a daemon from before split tunnelling. */
+  async getSplitTunnel(): Promise<SplitTunnelConfig | null> {
+    const raw = await this.orNullOnMissingRoute(this.request<unknown>("GET", "/split-tunnel"));
+    return raw === null ? null : normalizeSplitTunnelConfig(raw);
+  }
+
+  /** Rejected entries come back as `ok:false`; any other failure throws. */
+  async setSplitTunnel(
+    body: SplitTunnelWriteBody,
+    current?: SplitTunnelConfig
+  ): Promise<SplitTunnelResult | null> {
+    try {
+      const raw = await this.orNullOnMissingRoute(this.request<unknown>("POST", "/split-tunnel", body));
+      return raw === null ? null : { ok: true, config: normalizeSplitTunnelConfig(raw, current) };
+    } catch (error) {
+      const invalid = error instanceof DaemonHttpError && error.status === 400 ? parseSplitTunnelInvalid(error.body) : null;
+      if (invalid) return { ok: false, invalid };
+      throw error;
+    }
   }
 
   /** A daemon from before a route answers 404; callers treat that as "not offered". */

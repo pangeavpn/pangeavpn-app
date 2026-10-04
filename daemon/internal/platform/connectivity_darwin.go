@@ -35,6 +35,9 @@ func PhysicalDefaultRoute() (iface, gateway string, err error) {
 	return iface, gateway, nil
 }
 
+// splitMirrorFlags marks the scoped default split tunnelling installs (egress.mirrorFlags).
+const splitMirrorFlags = syscall.RTF_IFSCOPE | syscall.RTF_PROTO2
+
 func physicalDefaultRoute(msgs []route.Message, nameOf func(int) string) (iface, gateway string, ok bool) {
 	for _, wantV4 := range []bool{true, false} {
 		for _, m := range msgs {
@@ -42,7 +45,8 @@ func physicalDefaultRoute(msgs []route.Message, nameOf func(int) string) (iface,
 			if !ok {
 				continue
 			}
-			if rm.Flags&syscall.RTF_UP == 0 {
+			// The split-tunnel egress mirror copies the real default; it never names the link.
+			if rm.Flags&syscall.RTF_UP == 0 || rm.Flags&splitMirrorFlags == splitMirrorFlags {
 				continue
 			}
 			if !isDefaultRoute(rm.Addrs) || isInet4(rm.Addrs[syscall.RTAX_DST]) != wantV4 {

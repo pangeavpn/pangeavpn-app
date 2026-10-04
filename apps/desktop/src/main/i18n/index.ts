@@ -33,7 +33,11 @@ export type MainMessages = Record<
   | "state.CONNECTING"
   | "state.CONNECTED"
   | "state.DISCONNECTING"
-  | "state.ERROR",
+  | "state.ERROR"
+  | "dialog.splitTunnel.title"
+  | "dialog.splitTunnel.button"
+  | "dialog.splitTunnel.apps"
+  | "dialog.splitTunnel.allFiles",
   string
 >;
 
@@ -66,7 +70,11 @@ const en: MainMessages = {
   "state.CONNECTING": "CONNECTING",
   "state.CONNECTED": "CONNECTED",
   "state.DISCONNECTING": "DISCONNECTING",
-  "state.ERROR": "ERROR"
+  "state.ERROR": "ERROR",
+  "dialog.splitTunnel.title": "Choose an app to exclude from the VPN",
+  "dialog.splitTunnel.button": "Exclude",
+  "dialog.splitTunnel.apps": "Apps",
+  "dialog.splitTunnel.allFiles": "All files"
 };
 
 const es: MainMessages = {
@@ -98,7 +106,11 @@ const es: MainMessages = {
   "state.CONNECTING": "CONECTANDO",
   "state.CONNECTED": "CONECTADO",
   "state.DISCONNECTING": "DESCONECTANDO",
-  "state.ERROR": "ERROR"
+  "state.ERROR": "ERROR",
+  "dialog.splitTunnel.title": "Elige una app para excluirla de la VPN",
+  "dialog.splitTunnel.button": "Excluir",
+  "dialog.splitTunnel.apps": "Aplicaciones",
+  "dialog.splitTunnel.allFiles": "Todos los archivos"
 };
 
 const fr: MainMessages = {
@@ -130,7 +142,11 @@ const fr: MainMessages = {
   "state.CONNECTING": "CONNEXION",
   "state.CONNECTED": "CONNECTÉ",
   "state.DISCONNECTING": "DÉCONNEXION",
-  "state.ERROR": "ERREUR"
+  "state.ERROR": "ERREUR",
+  "dialog.splitTunnel.title": "Choisissez une app à exclure du VPN",
+  "dialog.splitTunnel.button": "Exclure",
+  "dialog.splitTunnel.apps": "Applications",
+  "dialog.splitTunnel.allFiles": "Tous les fichiers"
 };
 
 const ru: MainMessages = {
@@ -162,7 +178,11 @@ const ru: MainMessages = {
   "state.CONNECTING": "ПОДКЛЮЧЕНИЕ",
   "state.CONNECTED": "ПОДКЛЮЧЕНО",
   "state.DISCONNECTING": "ОТКЛЮЧЕНИЕ",
-  "state.ERROR": "ОШИБКА"
+  "state.ERROR": "ОШИБКА",
+  "dialog.splitTunnel.title": "Выберите приложение, которое будет работать в обход VPN",
+  "dialog.splitTunnel.button": "Исключить",
+  "dialog.splitTunnel.apps": "Приложения",
+  "dialog.splitTunnel.allFiles": "Все файлы"
 };
 
 const uk: MainMessages = {
@@ -194,7 +214,11 @@ const uk: MainMessages = {
   "state.CONNECTING": "ПІДКЛЮЧЕННЯ",
   "state.CONNECTED": "ПІДКЛЮЧЕНО",
   "state.DISCONNECTING": "ВІДКЛЮЧЕННЯ",
-  "state.ERROR": "ПОМИЛКА"
+  "state.ERROR": "ПОМИЛКА",
+  "dialog.splitTunnel.title": "Виберіть застосунок, який працюватиме в обхід VPN",
+  "dialog.splitTunnel.button": "Виключити",
+  "dialog.splitTunnel.apps": "Застосунки",
+  "dialog.splitTunnel.allFiles": "Усі файли"
 };
 
 const zh: MainMessages = {
@@ -226,7 +250,11 @@ const zh: MainMessages = {
   "state.CONNECTING": "连接中",
   "state.CONNECTED": "已连接",
   "state.DISCONNECTING": "断开中",
-  "state.ERROR": "错误"
+  "state.ERROR": "错误",
+  "dialog.splitTunnel.title": "选择要排除在 VPN 之外的应用",
+  "dialog.splitTunnel.button": "排除",
+  "dialog.splitTunnel.apps": "应用",
+  "dialog.splitTunnel.allFiles": "所有文件"
 };
 
 const ar: MainMessages = {
@@ -258,7 +286,11 @@ const ar: MainMessages = {
   "state.CONNECTING": "جارٍ الاتصال",
   "state.CONNECTED": "متصل",
   "state.DISCONNECTING": "جارٍ قطع الاتصال",
-  "state.ERROR": "خطأ"
+  "state.ERROR": "خطأ",
+  "dialog.splitTunnel.title": "اختر تطبيقًا لاستثنائه من VPN",
+  "dialog.splitTunnel.button": "استثناء",
+  "dialog.splitTunnel.apps": "التطبيقات",
+  "dialog.splitTunnel.allFiles": "كل الملفات"
 };
 
 const fa: MainMessages = {
@@ -290,7 +322,11 @@ const fa: MainMessages = {
   "state.CONNECTING": "در حال اتصال",
   "state.CONNECTED": "متصل",
   "state.DISCONNECTING": "در حال قطع اتصال",
-  "state.ERROR": "خطا"
+  "state.ERROR": "خطا",
+  "dialog.splitTunnel.title": "برنامه‌ای را برای مستثنا کردن از VPN انتخاب کنید",
+  "dialog.splitTunnel.button": "مستثنا کردن",
+  "dialog.splitTunnel.apps": "برنامه‌ها",
+  "dialog.splitTunnel.allFiles": "همه فایل‌ها"
 };
 
 const CATALOGUES: Record<MainLocale, MainMessages> = { en, es, fr, ru, uk, zh, ar, fa };
