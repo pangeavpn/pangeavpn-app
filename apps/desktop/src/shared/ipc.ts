@@ -364,8 +364,8 @@ export interface PangeaApi {
   /** Developer option: send hub traffic through the tunnel, not around it. */
   setHubInTunnel: (enabled: boolean) => Promise<void>;
   getHubInTunnel: () => Promise<boolean>;
-  setPreferredTransport: (value: "auto" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "snowflake" | "wireguard") => Promise<void>;
-  getPreferredTransport: () => Promise<"auto" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "snowflake" | "wireguard">;
+  setPreferredTransport: (value: "auto" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "anytls" | "snowflake" | "wireguard") => Promise<void>;
+  getPreferredTransport: () => Promise<"auto" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "anytls" | "snowflake" | "wireguard">;
   setLaunchAtStartup: (enabled: boolean) => Promise<void>;
   getLaunchAtStartup: () => Promise<boolean>;
   /** Kill switch stays armed while disconnected. Independent of auto-connect. */
