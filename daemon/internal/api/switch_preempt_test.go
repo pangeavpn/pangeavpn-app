@@ -162,6 +162,57 @@ func TestSwitch_PreemptsRunningRebuild(t *testing.T) {
 	}
 }
 
+// A preempted rebuild used to release the device it kept, so the switch that
+// preempted it found nothing to re-point and created a new adapter.
+func TestSwitch_PreemptedRebuildLeavesDeviceToTheSwitch(t *testing.T) {
+	a, b := switchProfilePair()
+	wgMgr := &fakeInPlaceWGManager{}
+	svc := newInPlaceTestService(t, wgMgr, &fakeKillSwitch{}, a, b)
+	opts := ConnectOptions{PreferredTransport: "cloak"}
+	ctx := context.Background()
+	if err := svc.Connect(ctx, a.ID, opts); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	stops, starts, _ := deviceCounts(wgMgr)
+
+	entered := blockFirstStart(svc.cloak.(*fakeCloakManager))
+	rebuildDone := make(chan struct{})
+	go func() {
+		defer close(rebuildDone)
+		svc.attemptSessionRebuild(ctx, a, "tunnel stopped carrying traffic")
+	}()
+	awaitOrFail(t, entered, "the rebuild to reach its transport start")
+
+	switched := make(chan error, 1)
+	go func() { switched <- svc.Switch(ctx, b.ID, opts) }()
+	select {
+	case err := <-switched:
+		if err != nil {
+			t.Fatalf("Switch during a rebuild: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Switch queued behind the rebuild instead of preempting it")
+	}
+	awaitOrFail(t, rebuildDone, "the preempted rebuild to unwind")
+
+	gotStops, gotStarts, running := deviceCounts(wgMgr)
+	if gotStops != stops {
+		t.Errorf("device stopped %d times across the preemption, want 0: the switch should re-point it", gotStops-stops)
+	}
+	wgMgr.mu.Lock()
+	pins := wgMgr.pinCount
+	wgMgr.mu.Unlock()
+	if pins != 1 {
+		t.Errorf("PinEndpointRoutes called %d times, want 1: the switch must take the keep-device path", pins)
+	}
+	if !running || gotStarts != starts+1 {
+		t.Errorf("running=%v, wireguard starts = %d, want the kept device re-pointed once", running, gotStarts-starts)
+	}
+	if status := svc.Status(ctx); status.State != state.StateConnected {
+		t.Fatalf("after switch: state = %s (%s)", status.State, status.Detail)
+	}
+}
+
 // A rebuild that lost TryLock used to wipe the in-flight switch's cancel, so
 // Disconnect could not interrupt the switch and sat behind the whole cascade.
 func TestRebuild_LeavesSwitchInterruptible(t *testing.T) {

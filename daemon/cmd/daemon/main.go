@@ -75,6 +75,7 @@ func hasFlag(name string) bool {
 // clearKillSwitchCommand is the uninstaller's way to lower a lock the daemon
 // deliberately leaves behind on every exit that is not a user Disconnect.
 func clearKillSwitchCommand() int {
+	logKillSwitchWarnings()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	if err := platform.NewKillSwitch().Clear(ctx); err != nil {
@@ -87,6 +88,13 @@ func clearKillSwitchCommand() int {
 	}
 	log.Printf("kill switch cleared")
 	return 0
+}
+
+// logKillSwitchWarnings sends degraded-clear warnings, such as a Windows setting
+// left unrestored, and what the clear gave back to the output the uninstaller logs.
+func logKillSwitchWarnings() {
+	platform.KillSwitchWarnf = log.Printf
+	platform.KillSwitchInfof = log.Printf
 }
 
 func runInteractive() error {
@@ -191,9 +199,13 @@ func startDaemonRuntime() (*daemonRuntime, error) {
 	platform.KillSwitchWarnf = func(format string, args ...any) {
 		logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf(format, args...))
 	}
+	platform.KillSwitchInfof = func(format string, args ...any) {
+		logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf(format, args...))
+	}
 	service := api.NewService(machine, logs, configStore, cloakManager, naiveManager, realityManager, hysteria2Manager, shadowsocksManager, anytlsManager, snowflakeManager, wgManager, killSwitch)
 
 	service.SetShadowsocksProxy(shadowsocks.NewProxyManager(logs))
+	service.SetRealityProxy(reality.NewProxyManager(logs))
 
 	// Per-network last-good-transport cache is a best-effort optimization; a
 	// failure to open it just leaves auto-connect walking the full cascade.

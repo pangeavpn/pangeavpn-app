@@ -42,6 +42,8 @@ type gatedProbe struct {
 	shadowsocks *fakeShadowsocksManager
 	passing     map[string]bool
 	attempts    []string
+	// failNext fails that many probes whatever the transport: a stall, not a block.
+	failNext int
 }
 
 func (g *gatedProbe) runningKind() string {
@@ -62,10 +64,20 @@ func (g *gatedProbe) probe(context.Context, string, string) error {
 	defer g.mu.Unlock()
 	kind := g.runningKind()
 	g.attempts = append(g.attempts, kind)
-	if g.passing[kind] {
+	if g.failNext > 0 {
+		g.failNext--
+	} else if g.passing[kind] {
 		return nil
 	}
 	return errors.New("no reply over the tunnel")
+}
+
+// stall resets the record and fails the next n probes before passing resumes.
+func (g *gatedProbe) stall(passing map[string]bool, n int) {
+	g.reset(passing)
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.failNext = n
 }
 
 func (g *gatedProbe) order() []string {
@@ -89,6 +101,7 @@ func (g *gatedProbe) reset(passing map[string]bool) {
 	defer g.mu.Unlock()
 	g.passing = passing
 	g.attempts = nil
+	g.failNext = 0
 }
 
 func cascadeTestService(t *testing.T, passing map[string]bool) (*Service, *gatedProbe) {
@@ -135,7 +148,7 @@ func TestConnect_NoTransportCarriesTrafficExhaustsTheCascade(t *testing.T) {
 }
 
 // TestHealthCheck_DeadDataPathRestartsTheCascadeAtTheTop: when the connected
-// transport stops carrying traffic, recovery walks the whole cascade again.
+// transport will not come back, recovery walks the rest of the cascade from the top.
 func TestHealthCheck_DeadDataPathRestartsTheCascadeAtTheTop(t *testing.T) {
 	svc, probe := cascadeTestService(t, map[string]bool{"shadowsocks": true})
 	if err := svc.Connect(context.Background(), "p1", ConnectOptions{}); err != nil {
@@ -153,24 +166,110 @@ func TestHealthCheck_DeadDataPathRestartsTheCascadeAtTheTop(t *testing.T) {
 	}
 }
 
-func TestHealthCheck_DeadDataPathDemotesTheFailedTransport(t *testing.T) {
+// connectedOnShadowsocks is a session that only shadowsocks gets through, the
+// way a network that blocks every other transport looks.
+func connectedOnShadowsocks(t *testing.T) (*Service, *gatedProbe) {
+	t.Helper()
 	svc, probe := cascadeTestService(t, map[string]bool{"shadowsocks": true})
 	if err := svc.Connect(context.Background(), "p1", ConnectOptions{}); err != nil {
 		t.Fatalf("connect failed: %v", err)
 	}
+	return svc, probe
+}
 
-	probe.reset(map[string]bool{})
+// stallAndRecover fails the health rounds that call the path dead, then lets
+// passing decide the rebuild, and returns every kind probed after the stall.
+func stallAndRecover(svc *Service, probe *gatedProbe, passing map[string]bool) []string {
+	probe.stall(passing, dnsProbeFailuresBeforeRebuild)
 	runProbedHealthChecks(svc, dnsProbeFailuresBeforeRebuild)
+	return probe.order()[dnsProbeFailuresBeforeRebuild:]
+}
 
-	order := probe.recoveryOrder("shadowsocks")
-	if len(order) == 0 {
-		t.Fatal("recovery attempted no transports")
+// The shipped bug: a one-off stall on the only transport that worked sent it to
+// the back, so recovery sat through every blocked transport before redialling it.
+func TestHealthCheck_DeadDataPathRedialsTheTransportFirst(t *testing.T) {
+	svc, probe := connectedOnShadowsocks(t)
+
+	rebuild := stallAndRecover(svc, probe, map[string]bool{"shadowsocks": true})
+
+	if !slices.Equal(rebuild, []string{"shadowsocks"}) {
+		t.Fatalf("recovery probed %v, want only a shadowsocks redial", rebuild)
 	}
-	if order[0] != "reality" {
-		t.Fatalf("recovery started at %q, want reality: %v", order[0], order)
+	if got := svc.activeTransportKindSnapshot(); got != "shadowsocks" {
+		t.Fatalf("active transport after recovery = %q, want shadowsocks", got)
 	}
-	if last := order[len(order)-1]; last != "shadowsocks" {
-		t.Fatalf("the transport that died was retried at %q, want it last: %v", last, order)
+}
+
+// A redial that dies again soon is DPI killing it under load: the next rebuild
+// must not wait out the probe cooldown, and must try everything else first.
+func TestHealthCheck_TransportThatDiesAgainSoonIsDemoted(t *testing.T) {
+	svc, probe := connectedOnShadowsocks(t)
+	stallAndRecover(svc, probe, map[string]bool{"shadowsocks": true})
+
+	rebuild := stallAndRecover(svc, probe, map[string]bool{})
+
+	if len(rebuild) == 0 {
+		t.Fatal("the second death did not rebuild; the redial left the probe cooldown armed")
+	}
+	if rebuild[0] != "reality" {
+		t.Fatalf("recovery started at %q, want reality: %v", rebuild[0], rebuild)
+	}
+	if last := rebuild[len(rebuild)-1]; last != "shadowsocks" {
+		t.Fatalf("the transport that died again was retried at %q, want it last: %v", last, rebuild)
+	}
+}
+
+// Once a demoted cascade lands back on the same transport nothing else gets
+// through here, so its next stall is a redial again rather than another tour.
+func TestHealthCheck_DemotionDoesNotOutliveTheCascadeItRan(t *testing.T) {
+	svc, probe := connectedOnShadowsocks(t)
+	stallAndRecover(svc, probe, map[string]bool{"shadowsocks": true})
+	stallAndRecover(svc, probe, map[string]bool{"shadowsocks": true})
+	if got := svc.activeTransportKindSnapshot(); got != "shadowsocks" {
+		t.Fatalf("precondition: active transport = %q, want shadowsocks", got)
+	}
+
+	svc.recoveryMu.Lock()
+	svc.dnsProbeQuietUntil = time.Time{}
+	svc.recoveryMu.Unlock()
+	rebuild := stallAndRecover(svc, probe, map[string]bool{"shadowsocks": true})
+
+	if !slices.Equal(rebuild, []string{"shadowsocks"}) {
+		t.Fatalf("recovery probed %v, want only a shadowsocks redial", rebuild)
+	}
+}
+
+func TestHealthCheck_TransportThatDiesAgainAfterTheWindowIsRedialled(t *testing.T) {
+	svc, probe := connectedOnShadowsocks(t)
+	stallAndRecover(svc, probe, map[string]bool{"shadowsocks": true})
+
+	svc.recoveryMu.Lock()
+	svc.lastDeadAt = time.Now().Add(-transportFlapWindow - time.Minute)
+	svc.recoveryMu.Unlock()
+	rebuild := stallAndRecover(svc, probe, map[string]bool{"shadowsocks": true})
+
+	if !slices.Equal(rebuild, []string{"shadowsocks"}) {
+		t.Fatalf("recovery probed %v, want only a shadowsocks redial", rebuild)
+	}
+}
+
+// An explicit transport has nothing to fall back to, so a death must not arm a
+// lead or lift the cooldown for it.
+func TestHealthCheck_ExplicitTransportDeathKeepsTheCooldown(t *testing.T) {
+	svc, probe := cascadeTestService(t, map[string]bool{"shadowsocks": true})
+	if err := svc.Connect(context.Background(), "p1", ConnectOptions{PreferredTransport: "shadowsocks"}); err != nil {
+		t.Fatalf("connect failed: %v", err)
+	}
+	stallAndRecover(svc, probe, map[string]bool{"shadowsocks": true})
+
+	svc.recoveryMu.Lock()
+	quiet, lastDead := svc.dnsProbeQuietUntil, svc.lastDeadKind
+	svc.recoveryMu.Unlock()
+	if !time.Now().Before(quiet) {
+		t.Fatal("an explicit transport's rebuild lifted the probe cooldown")
+	}
+	if lastDead != "" {
+		t.Fatalf("an explicit transport's death was booked for demotion: %q", lastDead)
 	}
 }
 
@@ -290,7 +389,7 @@ func TestProveDataPath_ProbesTheLiveTunnelInterface(t *testing.T) {
 		return nil
 	}
 
-	if err := svc.proveDataPath(context.Background(), cascadeProfile().WireGuard); err != nil {
+	if err := svc.proveDataPath(context.Background(), "reality", cascadeProfile().WireGuard); err != nil {
 		t.Fatalf("proveDataPath failed: %v", err)
 	}
 	mu.Lock()
@@ -344,6 +443,7 @@ func TestHealthCheck_DeadDataPathWaitsForUsableNetwork(t *testing.T) {
 
 // TestStatus_HostNetworkOutageIsNotExhaustion: a cascade that failed because the
 // host had no route is not this server being blocked, so the app must not rotate.
+// The outage shows on the transport dials; the gate's own socket never sees it.
 func TestStatus_HostNetworkOutageIsNotExhaustion(t *testing.T) {
 	svc, probe := cascadeTestService(t, map[string]bool{"shadowsocks": true})
 	if err := svc.Connect(context.Background(), "p1", ConnectOptions{}); err != nil {
@@ -351,8 +451,9 @@ func TestStatus_HostNetworkOutageIsNotExhaustion(t *testing.T) {
 	}
 
 	probe.reset(map[string]bool{})
-	svc.probeResolver = func(context.Context, string, string) error {
-		return errors.New("dial udp 10.0.0.53:53: connect: A socket operation was attempted to an unreachable network.")
+	noRoute := errors.New("dial tcp: connectex: A socket operation was attempted to an unreachable network.")
+	for _, mgr := range []interface{ failStarts(error) }{probe.reality, probe.cloak, probe.shadowsocks} {
+		mgr.failStarts(noRoute)
 	}
 	runProbedHealthChecks(svc, dnsProbeFailuresBeforeRebuild)
 
@@ -387,6 +488,21 @@ func TestHandshakeTimeoutFor_RebuildsGetTheLongerBudget(t *testing.T) {
 	}
 }
 
+// The service the daemon really builds must let a rebuild's longer budget reach
+// the wait; a constructor default used to win over it, so every rebuild got 10s.
+func TestNewService_RebuildHandshakeBudgetReachesTheWait(t *testing.T) {
+	svc := NewService(state.NewMachine(), state.NewLogStore(10), testConfigStore(t),
+		&fakeCloakManager{}, &fakeNaiveManager{}, &fakeRealityManager{}, &fakeHysteria2Manager{},
+		&fakeShadowsocksManager{}, &fakeAnyTLSManager{}, &fakeSnowflakeManager{}, &fakeWGManager{}, &fakeKillSwitch{})
+	ctx := context.Background()
+	if got := handshakeTimeoutFor(withHandshakeBudget(ctx, rebuildHandshakeTimeout), svc.handshakeTimeout); got != rebuildHandshakeTimeout {
+		t.Fatalf("rebuild budget = %s, want %s", got, rebuildHandshakeTimeout)
+	}
+	if got := handshakeTimeoutFor(ctx, svc.handshakeTimeout); got != defaultWireGuardHandshakeTimeout {
+		t.Fatalf("connect budget = %s, want %s", got, defaultWireGuardHandshakeTimeout)
+	}
+}
+
 func TestHostNetworkUnreachable(t *testing.T) {
 	cases := map[string]bool{
 		"all configured transports failed: reality: dial tcp: connectex: A socket operation was attempted to an unreachable network.": true,
@@ -403,6 +519,51 @@ func TestHostNetworkUnreachable(t *testing.T) {
 	}
 }
 
+// TestHostNetworkUnreachable_GateRejectionIsNotAnOutage: the gate's socket is
+// pinned to the tunnel, so its "no route" is about the tunnel, never the host.
+func TestHostNetworkUnreachable_GateRejectionIsNotAnOutage(t *testing.T) {
+	gate := &dataPathGateError{errors.New("tunnel came up but did not carry traffic: 1.1.1.1: write udp: sendto: no route to host")}
+	wrapped := fmt.Errorf("reality: %w", gate)
+	if hostNetworkUnreachable(wrapped) {
+		t.Fatal("a gate rejection must not read as the host being offline")
+	}
+	exhausted := fmt.Errorf("%w: %w", ErrTransportExhausted, cascadeFailures{wrapped, errors.New("cloak: no wireguard handshake within 10s")})
+	if hostNetworkUnreachable(exhausted) {
+		t.Fatal("a cascade of gate rejections must not read as an outage")
+	}
+	if !strings.Contains(exhausted.Error(), "reality: tunnel came up but did not carry traffic") || !strings.Contains(exhausted.Error(), "; cloak: ") {
+		t.Fatalf("cascade error lost its readable list: %v", exhausted)
+	}
+	mixed := fmt.Errorf("%w: %w", ErrTransportExhausted, cascadeFailures{wrapped, errors.New("cloak: dial tcp: connect: no route to host")})
+	if !hostNetworkUnreachable(mixed) {
+		t.Fatal("a transport dial with no route out is still an outage")
+	}
+}
+
+// TestConnect_GateRejectionWithRouteWordingWalksTheWholeCascade: before, the
+// socket's "no route to host" ended the cascade after one candidate as "no internet".
+func TestConnect_GateRejectionWithRouteWordingWalksTheWholeCascade(t *testing.T) {
+	svc, probe := cascadeTestService(t, map[string]bool{})
+	svc.probeResolver = func(_ context.Context, _ string, server string) error {
+		probe.probe(context.Background(), "", server)
+		return errors.New("write udp 10.0.0.2:1->10.0.0.53:53: sendto: no route to host")
+	}
+
+	err := svc.Connect(context.Background(), "p1", ConnectOptions{})
+	if errors.Is(err, ErrHostOffline) {
+		t.Fatalf("Connect error = %v, must not be reported as an outage", err)
+	}
+	if !errors.Is(err, ErrTransportExhausted) {
+		t.Fatalf("Connect error = %v, want ErrTransportExhausted", err)
+	}
+	if order := probe.order(); len(order) < 2*dataPathGateAttempts+1 {
+		t.Fatalf("cascade stopped after the first candidate: %v", order)
+	}
+	if svc.Status(context.Background()).Offline {
+		t.Fatal("a gate rejection must not show as no internet")
+	}
+}
+
 // TestProveDataPath_OversizedReplyProvesTheTunnelCarriesTraffic covers Windows
 // WSAEMSGSIZE: the reply crossed the tunnel, only the userspace copy failed.
 func TestProveDataPath_OversizedReplyProvesTheTunnelCarriesTraffic(t *testing.T) {
@@ -412,7 +573,7 @@ func TestProveDataPath_OversizedReplyProvesTheTunnelCarriesTraffic(t *testing.T)
 
 	svc.probeResolver = func(context.Context, string, string) error { return errDNSProbeOversizedReply }
 
-	if err := svc.proveDataPath(context.Background(), cascadeProfile().WireGuard); err != nil {
+	if err := svc.proveDataPath(context.Background(), "reality", cascadeProfile().WireGuard); err != nil {
 		t.Fatalf("proveDataPath rejected a transport that carried an oversized reply: %v", err)
 	}
 }
@@ -452,7 +613,7 @@ func TestProveDataPath_BlockedTunnelStillFailsFast(t *testing.T) {
 	svc, _ := gateTestService(t)
 	calls := gateProbeCounter(svc)
 
-	if err := svc.proveDataPath(context.Background(), cascadeProfile().WireGuard); err == nil {
+	if err := svc.proveDataPath(context.Background(), "reality", cascadeProfile().WireGuard); err == nil {
 		t.Fatal("proveDataPath accepted a transport that never carried a round trip")
 	}
 	if got := calls.Load(); got != dataPathGateAttempts {
@@ -481,7 +642,7 @@ func TestProveDataPath_WaitsForALateAdapter(t *testing.T) {
 		return nil
 	}
 
-	if err := svc.proveDataPath(context.Background(), cascadeProfile().WireGuard); err != nil {
+	if err := svc.proveDataPath(context.Background(), "reality", cascadeProfile().WireGuard); err != nil {
 		t.Fatalf("proveDataPath rejected a tunnel whose adapter arrived late: %v", err)
 	}
 	mu.Lock()
@@ -494,20 +655,27 @@ func TestProveDataPath_WaitsForALateAdapter(t *testing.T) {
 	}
 }
 
-// A peer's passive keepalives move the received-byte counter on a tunnel that
-// carries nothing, so no extension may be bought with it.
+// A peer's keepalives and a rekey move the received-byte counter on a tunnel
+// that carries nothing; that much must neither rescue the gate nor extend it.
 func TestProveDataPath_KeepaliveInflatedCounterStillFailsFast(t *testing.T) {
 	svc, wgMgr := gateTestService(t)
+	markRunning(wgMgr)
 
 	var calls atomic.Int32
 	svc.probeResolver = func(context.Context, string, string) error {
-		calls.Add(1)
-		wgMgr.addBytesIn(1500)
+		if calls.Add(1) == 1 {
+			wgMgr.addBytesIn(148) // a handshake initiation from the peer
+		}
+		wgMgr.addBytesIn(32) // one keepalive per attempt
 		return errors.New("i/o timeout")
 	}
 
-	if err := svc.proveDataPath(context.Background(), cascadeProfile().WireGuard); err == nil {
+	err := svc.proveDataPath(context.Background(), "reality", cascadeProfile().WireGuard)
+	if err == nil {
 		t.Fatal("proveDataPath accepted a blocked tunnel whose peer only sent keepalives")
+	}
+	if !strings.Contains(err.Error(), "peer sent 212 bytes during the probe") {
+		t.Errorf("rejection does not carry the peer's byte count for the report: %v", err)
 	}
 	if got := calls.Load(); got != dataPathGateAttempts {
 		t.Errorf("probe attempts = %d, want %d — keepalives must not buy extra tries", got, dataPathGateAttempts)
@@ -515,6 +683,66 @@ func TestProveDataPath_KeepaliveInflatedCounterStillFailsFast(t *testing.T) {
 	if wgMgr.readyPolls == 0 {
 		t.Error("gate never checked adapter readiness")
 	}
+}
+
+// TestProveDataPath_PeerBytesRescueAProbeTheHostSwallows is the host that worked
+// before the gate existed: the peer's replies land on the device, so the transport
+// carries traffic, but nothing reaches the daemon's own socket.
+func TestProveDataPath_PeerBytesRescueAProbeTheHostSwallows(t *testing.T) {
+	svc, wgMgr := gateTestService(t)
+	markRunning(wgMgr)
+
+	var calls atomic.Int32
+	svc.probeResolver = func(context.Context, string, string) error {
+		calls.Add(1)
+		wgMgr.addBytesIn(500) // a padded resolver reply the socket never saw
+		return errors.New("i/o timeout")
+	}
+
+	if err := svc.proveDataPath(context.Background(), "reality", cascadeProfile().WireGuard); err != nil {
+		t.Fatalf("gate rejected a tunnel the peer was demonstrably answering over: %v", err)
+	}
+	if got := calls.Load(); got != dataPathGateAttempts {
+		t.Errorf("probe attempts = %d, want %d — the rescue must not buy extra tries", got, dataPathGateAttempts)
+	}
+	if !logMentions(svc, "reality tunnel carried 1000 bytes from the peer") {
+		t.Error("the rescue was not logged with the transport and the byte count")
+	}
+}
+
+// TestProveDataPath_CancelledGateIsATeardownNotAPass: a Disconnect landing
+// mid-gate must fail the bring-up, not log a verified tunnel it is tearing down.
+func TestProveDataPath_CancelledGateIsATeardownNotAPass(t *testing.T) {
+	svc, _ := gateTestService(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	svc.probeResolver = func(probeCtx context.Context, _, _ string) error {
+		cancel()
+		<-probeCtx.Done()
+		return fmt.Errorf("%w: %v", errDNSProbeInconclusive, probeCtx.Err())
+	}
+
+	err := svc.proveDataPath(ctx, "reality", cascadeProfile().WireGuard)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("proveDataPath = %v, want context.Canceled", err)
+	}
+}
+
+// markRunning models the device the gate runs against: a bring-up has started
+// WireGuard before it probes, which a direct call to the gate skips.
+func markRunning(wgMgr *fakeWGManager) {
+	wgMgr.mu.Lock()
+	defer wgMgr.mu.Unlock()
+	wgMgr.running = true
+}
+
+func logMentions(svc *Service, fragment string) bool {
+	for _, entry := range svc.logs.Since(0) {
+		if strings.Contains(entry.Msg, fragment) {
+			return true
+		}
+	}
+	return false
 }
 
 // TestProveDataPath_LateRouteIsRetriedNotTreatedAsAVerdict: a route of ours that
@@ -529,7 +757,7 @@ func TestProveDataPath_LateRouteIsRetriedNotTreatedAsAVerdict(t *testing.T) {
 		return fmt.Errorf("%w: the tunnel's route is not published yet", errDNSProbeNotReady)
 	}
 
-	err := svc.proveDataPath(context.Background(), cascadeProfile().WireGuard)
+	err := svc.proveDataPath(context.Background(), "reality", cascadeProfile().WireGuard)
 	if err == nil {
 		t.Fatal("proveDataPath passed a tunnel nothing ever left the host on")
 	}
@@ -582,4 +810,22 @@ func TestProbeResolverWithDialer_RetransmitsInsideOneAttempt(t *testing.T) {
 	if got := seen.Load(); got != 2 {
 		t.Errorf("queries sent = %d, want 2 (the original and one retransmit)", got)
 	}
+}
+
+func (f *fakeRealityManager) failStarts(err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.startErr = err
+}
+
+func (f *fakeCloakManager) failStarts(err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.startErr = err
+}
+
+func (f *fakeShadowsocksManager) failStarts(err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.startErr = err
 }

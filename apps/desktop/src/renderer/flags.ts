@@ -7,6 +7,7 @@ const FLAGS: Record<string, string> = {
   CH: '<rect width="30" height="21" fill="#D52B1E"/><rect x="13" y="4" width="4" height="13" fill="#fff"/><rect x="8.5" y="8.5" width="13" height="4" fill="#fff"/>',
   DE: '<rect width="30" height="7" fill="#000"/><rect y="7" width="30" height="7" fill="#DD0000"/><rect y="14" width="30" height="7" fill="#FFCE00"/>',
   FR: '<rect width="30" height="21" fill="#ED2939"/><rect width="20" height="21" fill="#fff"/><rect width="10" height="21" fill="#002395"/>',
+  ES: '<rect width="30" height="21" fill="#AA151B"/><rect y="5.25" width="30" height="10.5" fill="#F1BF00"/>',
   SE: '<rect width="30" height="21" fill="#006AA7"/><rect x="8" width="4.5" height="21" fill="#FECC00"/><rect y="8.5" width="30" height="4.5" fill="#FECC00"/>',
   JP: '<rect width="30" height="21" fill="#fff"/><circle cx="15" cy="10.5" r="6" fill="#BC002D"/>',
   SG: '<rect width="30" height="21" fill="#fff"/><rect width="30" height="10.5" fill="#ED2939"/>',

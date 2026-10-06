@@ -1,4 +1,4 @@
-import { Menu, Notification, Tray, app, BrowserWindow, ipcMain, nativeImage, net, session, shell, type NativeImage } from "electron";
+import { Menu, Notification, Tray, app, BrowserWindow, ipcMain, nativeImage, session, shell, type NativeImage } from "electron";
 import os from "node:os";
 import path from "node:path";
 import type { ConfigResponse, OkResponse, Profile, StatusResponse } from "@pangeavpn/shared-types";
@@ -15,7 +15,6 @@ import {
   type PublicServerInfo,
   type ServerInfo
 } from "../shared/ipc";
-import { normalHubHosts } from "../shared/hubHosts";
 import * as auth from "./auth";
 import { readSecret, writeSecret } from "./secureStore";
 import {
@@ -24,10 +23,11 @@ import {
   ConnectCancelledError,
   SubscriptionExpiredError
 } from "./pangeaApiClient";
+import type { HubRealityCreds } from "../shared/hubRealityCreds";
 import type { HubShadowsocksCreds } from "../shared/hubShadowsocksCreds";
 import type { CachedSubscription } from "../shared/cachedSubscription";
 import { beginAttempt, cancelAttempt, commitAttempt, endAttempt, isCancelled } from "./connectAttempt";
-import { setupAutoUpdater, notifyConnectionStateChange } from "./autoUpdater";
+import { LATEST_ROUTE, setupAutoUpdater } from "./autoUpdater";
 import { isSafeExternalUrl } from "./externalUrl";
 import { setLoginItemEnabled, isLoginItemEnabled, isHiddenLaunchArg } from "./loginItem";
 import { startNetworkWatcher, onNetworkChange } from "./networkWatcher";
@@ -37,6 +37,7 @@ import { sanitizeLog } from "./logSanitize";
 import { isMissingFile, readSettings, writeSettings } from "./settingsFile";
 import { LOG_FILE_NAME, installConsoleFileSink } from "./logFileSink";
 import { collectDiagnostics } from "./diagnosticsReport";
+import { collectWindowsHostSnapshot } from "./hostSnapshot";
 import { uploadDiagnostics } from "./diagnosticsUpload";
 import { classifyLoginError } from "./loginError";
 import { shouldShowTrayHint, trayHintBodyKey } from "./trayHint";
@@ -688,7 +689,6 @@ async function refreshTrayStatus(): Promise<void> {
     } finally {
       maybeNotifyStatusChange();
       updateTrayMenu();
-      notifyConnectionStateChange(trayStatusState);
     }
   })();
   trayStatusRefreshPromise = run.finally(() => {
@@ -1448,6 +1448,12 @@ async function persistHubShadowsocks(creds: HubShadowsocksCreds[]): Promise<void
   }, "hub Shadowsocks credentials");
 }
 
+async function persistHubReality(creds: HubRealityCreds[]): Promise<void> {
+  await updateSettings((settings) => {
+    settings.hubReality = creds;
+  }, "hub REALITY credentials");
+}
+
 async function persistFrontedEndpoints(endpoints: string[]): Promise<void> {
   await updateSettings((settings) => {
     settings.frontedEndpoints = endpoints;
@@ -1876,11 +1882,12 @@ function registerConnectionHandlers(): void {
         appSupportDir: getAppSupportDir(),
         crashDumpsDir: app.getPath("crashDumps"),
         logFileName: LOG_FILE_NAME,
+        daemonRing: () => daemonClient.getLogs(0),
+        hostSnapshot: process.platform === "win32" ? collectWindowsHostSnapshot : undefined,
         note: typeof note === "string" ? note : undefined
       });
       return await uploadDiagnostics(payload, {
-        hosts: normalHubHosts(),
-        fetchImpl: (url, init) => net.fetch(url, init)
+        send: (route, report, signal) => pangeaApiClient.anonymousRequest("POST", route, report, { timeoutMs: 30000, signal })
       });
     } catch (err) {
       console.warn("sendDiagnostics failed", sanitizeLog(err));
@@ -2456,6 +2463,7 @@ function applyPersistedSettings(settings: Record<string, unknown>): void {
   // Was a single object before every node's credentials were cached, so an
   // existing install still has one to migrate.
   pangeaApiClient.setCachedHubShadowsocks(settings.hubShadowsocks);
+  pangeaApiClient.setCachedHubReality(settings.hubReality);
   // Edge relays, and the last node list the hub gave us. Both are what stands
   // between a blocked hub and a client with nowhere left to go.
   pangeaApiClient.setCachedFrontedEndpoints(settings.frontedEndpoints);
@@ -2519,6 +2527,7 @@ function wirePangeaApiClient(): void {
     mainWindow?.webContents.send(IPC_CHANNELS.hubStatusChanged, status);
   });
   pangeaApiClient.onHubShadowsocksResolved((creds) => void persistHubShadowsocks(creds));
+  pangeaApiClient.onHubRealityResolved((creds) => void persistHubReality(creds));
   pangeaApiClient.onFrontedEndpointsResolved((endpoints) => void persistFrontedEndpoints(endpoints));
   pangeaApiClient.onDeadDropStateChanged((state) => void persistDeadDropState(state));
   pangeaApiClient.onServersResolved((servers) => void persistServers(servers));
@@ -2541,6 +2550,23 @@ function wirePangeaApiClient(): void {
     stop: async () => {
       try {
         await daemonClient.stopSsProxy();
+      } catch {
+        // best-effort
+      }
+    }
+  });
+  pangeaApiClient.setRealityHubProxy({
+    start: async (creds) => {
+      try {
+        return await daemonClient.startRealityProxy(creds);
+      } catch (err) {
+        console.warn("Failed to start the REALITY hub proxy:", sanitizeLog(err));
+        return null;
+      }
+    },
+    stop: async () => {
+      try {
+        await daemonClient.stopRealityProxy();
       } catch {
         // best-effort
       }
@@ -2681,7 +2707,10 @@ async function boot(): Promise<void> {
   registerIpcHandlers();
   createWindow();
   // A resolver, not a snapshot, so this stays correct across window recreates.
-  setupAutoUpdater(() => mainWindow);
+  setupAutoUpdater(() => mainWindow, {
+    ready: () => pangeaApiClient.hubPathReady(),
+    fetchLatest: (timeoutMs) => pangeaApiClient.anonymousRequest("GET", LATEST_ROUTE, undefined, { timeoutMs })
+  });
   createTray();
   watchDisplayChanges();
   if (!hiddenLaunch) {

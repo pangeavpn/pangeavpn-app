@@ -121,6 +121,53 @@
   Call PangeaResolveStrings
 !macroend
 
+; sc.exe stop returns while the daemon is still tearing the tunnel down (up to
+; tens of seconds); replacing or re-creating it before it exits fails (1072).
+!ifndef PANGEA_STOP_WAIT_TICKS
+  !define PANGEA_STOP_WAIT_TICKS 90 ; x 500 ms
+!endif
+!macro PangeaWaitServiceStopped NAME
+  Push $R4
+  Push $R5
+  Push $R6
+  Push $R7
+  Push $R8
+  Push $R9
+  StrCpy $R9 0
+  ${Do}
+    System::Call 'advapi32::OpenSCManagerW(p 0, p 0, i 0x0001) p .R8'
+    ${If} $R8 == 0
+      ${Break}
+    ${EndIf}
+    System::Call 'advapi32::OpenServiceW(p R8, w "${NAME}", i 0x0004) p .R7'
+    ${If} $R7 == 0
+      System::Call 'advapi32::CloseServiceHandle(p R8)'
+      ${Break}
+    ${EndIf}
+    System::Call '*(i, i, i, i, i, i, i) p .R6'
+    System::Call 'advapi32::QueryServiceStatus(p R7, p R6) i .R5'
+    System::Call '*$R6(i, i .R4)'
+    System::Free $R6
+    System::Call 'advapi32::CloseServiceHandle(p R7)'
+    System::Call 'advapi32::CloseServiceHandle(p R8)'
+    ${If} $R5 == 0
+    ${OrIf} $R4 == 1 ; SERVICE_STOPPED
+      ${Break}
+    ${EndIf}
+    IntOp $R9 $R9 + 1
+    ${If} $R9 >= ${PANGEA_STOP_WAIT_TICKS}
+      ${Break}
+    ${EndIf}
+    Sleep 500
+  ${Loop}
+  Pop $R9
+  Pop $R8
+  Pop $R7
+  Pop $R6
+  Pop $R5
+  Pop $R4
+!macroend
+
 !macro customInstall
   SetShellVarContext all
   CreateDirectory "$APPDATA\PangeaVPN"
@@ -146,9 +193,8 @@
   nsExec::ExecToLog 'icacls.exe "$APPDATA\PangeaVPN" /inheritance:r /grant:r *S-1-5-18:(OI)(CI)F *S-1-5-32-544:(OI)(CI)F'
 
   nsExec::ExecToLog 'sc.exe stop PangeaDaemon'
-  Sleep 500
+  !insertmacro PangeaWaitServiceStopped "PangeaDaemon"
   nsExec::ExecToLog 'sc.exe delete PangeaDaemon'
-  Sleep 500
 
   CopyFiles /SILENT "$INSTDIR\resources\daemon\PangeaDaemon.exe" "$APPDATA\PangeaVPN\PangeaDaemon.exe"
   CopyFiles /SILENT "$INSTDIR\resources\daemon\wireguard.dll" "$APPDATA\PangeaVPN\wireguard.dll"
@@ -177,7 +223,7 @@
 !macro customUnInstall
   SetShellVarContext all
   nsExec::ExecToLog 'sc.exe stop PangeaDaemon'
-  Sleep 500
+  !insertmacro PangeaWaitServiceStopped "PangeaDaemon"
   ; The daemon keeps its lock across every stop; a real uninstall must lower
   ; it, or the machine stays blocked with nothing left to unblock it.
   ${ifNot} ${isUpdated}

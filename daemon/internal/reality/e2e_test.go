@@ -17,6 +17,7 @@ import (
 	"time"
 
 	box "github.com/sagernet/sing-box"
+	"github.com/sagernet/sing-box/adapter/certificate"
 	"github.com/sagernet/sing-box/adapter/endpoint"
 	"github.com/sagernet/sing-box/adapter/inbound"
 	"github.com/sagernet/sing-box/adapter/outbound"
@@ -65,7 +66,7 @@ func serverRegistryContext(ctx context.Context) context.Context {
 	direct.RegisterOutbound(outboundRegistry)
 	dnsRegistry := dns.NewTransportRegistry()
 	dnslocal.RegisterTransport(dnsRegistry)
-	return box.Context(ctx, inboundRegistry, outboundRegistry, endpoint.NewRegistry(), dnsRegistry, boxservice.NewRegistry())
+	return box.Context(ctx, inboundRegistry, outboundRegistry, endpoint.NewRegistry(), dnsRegistry, boxservice.NewRegistry(), certificate.NewRegistry())
 }
 
 // startEchoServer starts a UDP listener that echoes every datagram back to its

@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -75,6 +76,7 @@ func TestNetworkChangeReleasesHoldAndBackoff(t *testing.T) {
 	svc.onSystemResume(context.Background(), "test resume")
 	svc.scheduleNextRecovery(3)
 
+	svc.networkKey = func() string { return "net-b" }
 	svc.onNetworkChanged()
 
 	if svc.healthHeld() {
@@ -85,6 +87,63 @@ func TestNetworkChangeReleasesHoldAndBackoff(t *testing.T) {
 	}
 	if !svc.dnsProbeDue() {
 		t.Fatal("probe schedule survived a usable-network event")
+	}
+}
+
+// A failed bring-up's own teardown fires route events a gap after Connect set its
+// retry grace; they must not start a rebuild that races the app's server cascade.
+func TestNetworkChangeFromOwnTeardownKeepsConnectRetryGrace(t *testing.T) {
+	naive := &fakeNaiveManager{startErr: errors.New("naive: handshake did not complete")}
+	svc := newTestService(t, &fakeCloakManager{}, naive, &fakeWGManager{}, &fakeKillSwitch{}, silentTunnelProfile())
+	ctx := context.Background()
+	err := svc.Connect(ctx, "p1", ConnectOptions{PreferredTransport: "naive"})
+	if err == nil || errors.Is(err, ErrHostOffline) {
+		t.Fatalf("Connect error = %v, want a failed transport", err)
+	}
+	restoreNetwork(naive)
+
+	svc.onNetworkChanged()
+	svc.runHealthCheck(ctx)
+	if transportStarted(naive) {
+		t.Fatal("a network event on the unchanged network started a rebuild inside connectRetryGrace")
+	}
+}
+
+// Only a move off the network a retry was booked on cuts its wait short.
+func TestNetworkChangeCutsBookedRetryOnlyOnARealMove(t *testing.T) {
+	bookings := []struct {
+		name string
+		book func(*Service)
+	}{
+		{"connect retry grace", func(svc *Service) { svc.deferRecovery(connectRetryGrace) }},
+		{"rebuild backoff", func(svc *Service) { svc.scheduleNextRecovery(6) }},
+	}
+	cases := []struct {
+		name    string
+		events  []string
+		wantDue bool
+	}{
+		{"same network", []string{"net-a", "net-a"}, false},
+		{"moved network", []string{"net-b"}, true},
+		{"lost then back", []string{"", "net-a"}, true},
+	}
+	for _, booking := range bookings {
+		for _, tc := range cases {
+			t.Run(booking.name+"/"+tc.name, func(t *testing.T) {
+				svc, _ := newSysEventsTestService(t)
+				network := "net-a"
+				svc.networkKey = func() string { return network }
+				booking.book(svc)
+
+				for _, next := range tc.events {
+					network = next
+					svc.onNetworkChanged()
+				}
+				if due := svc.recoveryDue(); due != tc.wantDue {
+					t.Fatalf("recovery due = %v after events on %q, want %v", due, tc.events, tc.wantDue)
+				}
+			})
+		}
 	}
 }
 

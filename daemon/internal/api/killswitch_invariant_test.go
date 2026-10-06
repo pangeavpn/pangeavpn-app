@@ -191,6 +191,102 @@ func TestClearKillSwitch_AllowedWhenIdle(t *testing.T) {
 	}
 }
 
+// A lock that went away without a Clear leaves host settings behind that only
+// a Clear restores, so a start with no lock live must release them itself.
+func TestReconcileStartup_ReleasesOrphanedSettingsOnlyWithNoLock(t *testing.T) {
+	for name, tc := range map[string]struct {
+		persisted   platform.KillSwitchState
+		liveRules   bool
+		wantRelease int
+	}{
+		"no lock":                  {wantRelease: 1},
+		"live rules with no state": {liveRules: true},
+		"persisted lock":           {persisted: platform.KillSwitchState{Active: true, EndpointIPs: []string{"198.51.100.9"}}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ks := &fakeKillSwitch{active: tc.liveRules}
+			svc := newTestService(t, &fakeCloakManager{}, &fakeNaiveManager{}, &fakeWGManager{}, ks, testProfile())
+			stubSessionRecordStore(t)
+			stubKillSwitchState(t, tc.persisted)
+
+			svc.reconcileStartup(context.Background())
+
+			if ks.releaseCount != tc.wantRelease {
+				t.Errorf("ReleaseOrphanedSettings() called %d times, want %d", ks.releaseCount, tc.wantRelease)
+			}
+		})
+	}
+}
+
+func TestReconcileStartup_ReleaseFailureIsOnlyLogged(t *testing.T) {
+	ks := &fakeKillSwitch{releaseErr: errors.New("access denied")}
+	svc := newTestService(t, &fakeCloakManager{}, &fakeNaiveManager{}, &fakeWGManager{}, ks, testProfile())
+	stubSessionRecordStore(t)
+	stubKillSwitchState(t, platform.KillSwitchState{})
+
+	svc.reconcileStartup(context.Background())
+
+	if ks.enableCount != 0 || ks.clearCount != 0 {
+		t.Errorf("enables=%d clears=%d, want a failed release to leave the lock alone", ks.enableCount, ks.clearCount)
+	}
+	if !logMentions(svc, "access denied") {
+		t.Error("failed release not logged")
+	}
+}
+
+// An unreadable state file with no live rules is still "no lock", so a pause the
+// lost state file can no longer account for must be released too.
+func TestReconcileStartup_UnreadableStateWithNoLockReleasesOrphanedSettings(t *testing.T) {
+	for name, tc := range map[string]struct {
+		liveRules   bool
+		wantRelease int
+	}{
+		"no live rules": {wantRelease: 1},
+		"live rules":    {liveRules: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ks := &fakeKillSwitch{active: tc.liveRules}
+			svc := newTestService(t, &fakeCloakManager{}, &fakeNaiveManager{}, &fakeWGManager{}, ks, testProfile())
+			stubSessionRecordStore(t)
+			original := loadKillSwitchState
+			loadKillSwitchState = func() (platform.KillSwitchState, error) {
+				return platform.KillSwitchState{}, platform.ErrKillSwitchStateUnreadable
+			}
+			t.Cleanup(func() { loadKillSwitchState = original })
+
+			svc.reconcileStartup(context.Background())
+
+			if ks.releaseCount != tc.wantRelease {
+				t.Errorf("ReleaseOrphanedSettings() called %d times, want %d", ks.releaseCount, tc.wantRelease)
+			}
+		})
+	}
+}
+
+func TestClearKillSwitch_NoLockReleasesOrphanedSettings(t *testing.T) {
+	for name, tc := range map[string]struct {
+		active      bool
+		wantClear   int
+		wantRelease int
+	}{
+		"no lock":   {wantRelease: 1},
+		"idle lock": {active: true, wantClear: 1},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ks := &fakeKillSwitch{active: tc.active}
+			svc := newTestService(t, &fakeCloakManager{}, &fakeNaiveManager{}, &fakeWGManager{}, ks, testProfile())
+			stubSessionRecordStore(t)
+
+			if err := svc.ClearKillSwitch(context.Background()); err != nil {
+				t.Fatalf("ClearKillSwitch() error = %v", err)
+			}
+			if ks.clearCount != tc.wantClear || ks.releaseCount != tc.wantRelease {
+				t.Errorf("clears=%d releases=%d, want %d and %d", ks.clearCount, ks.releaseCount, tc.wantClear, tc.wantRelease)
+			}
+		})
+	}
+}
+
 // A resolver the profile names is routed into the tunnel (Allow LAN re-includes
 // it), so an interface-wide permit only ever lets queries out once the tunnel is down.
 func TestKillSwitchPermits_NeverPermitsAResolverOutsideTheTunnel(t *testing.T) {
@@ -202,6 +298,27 @@ func TestKillSwitchPermits_NeverPermitsAResolverOutsideTheTunnel(t *testing.T) {
 		for _, resolver := range profile.WireGuard.DNS {
 			if slices.Contains(permits, resolver) {
 				t.Errorf("allowLAN=%v: permits %v include resolver %s; with the tunnel down its queries would leave on the physical NIC", allowLAN, permits, resolver)
+			}
+		}
+	}
+}
+
+// The session permits also carry running hub-proxy nodes; a node that is also a
+// named resolver must stay shut for the same reason.
+func TestSessionKillSwitchPermits_NeverPermitsAResolverOutsideTheTunnel(t *testing.T) {
+	profile := testProfile()
+	profile.WireGuard.DNS = []string{"10.8.0.1", "1.1.1.1"}
+	vouching := testProfile()
+	vouching.ID = "test-profile-2"
+	vouching.TransportEndpointIPs = []string{"1.1.1.1"}
+	svc := newTestService(t, &fakeCloakManager{}, &fakeNaiveManager{}, &fakeWGManager{}, &fakeKillSwitch{}, profile, vouching)
+	svc.SetRealityProxy(&fakeRealityProxy{port: 41000, remote: "1.1.1.1"})
+
+	for _, allowLAN := range []bool{true, false} {
+		permits := svc.sessionKillSwitchPermits(profile, allowLAN)
+		for _, resolver := range profile.WireGuard.DNS {
+			if slices.Contains(permits, resolver) {
+				t.Errorf("allowLAN=%v: permits %v include resolver %s via a hub proxy node", allowLAN, permits, resolver)
 			}
 		}
 	}

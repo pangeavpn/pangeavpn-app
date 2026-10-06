@@ -63,6 +63,27 @@ test("a missing or unreadable file becomes a section that says so, never a throw
   assert.match(section(payload, "crash-dumps"), /not present/);
 });
 
+test("the daemon's log ring is fetched over its API and redacted", async () => {
+  const payload = await collectDiagnostics(
+    sources({
+      daemonRing: async () => [
+        { ts: Date.UTC(2026, 8, 13, 9, 59, 0), level: "warn", source: "daemon", msg: "reality: tunnel came up but did not carry traffic: 1.1.1.1: i/o timeout" }
+      ]
+    })
+  );
+  const text = section(payload, "daemon-ring");
+  assert.match(text, /^2026-09-13T09:59:00\.000Z \[warn\] \[daemon\] reality: tunnel came up/);
+  assert.match(text, /\[redacted:ipv4\]: i\/o timeout/);
+});
+
+test("a daemon that does not answer leaves a ring section that says why", async () => {
+  const payload = await collectDiagnostics(
+    sources({ daemonRing: async () => { throw new Error("daemon request timeout (GET /logs)"); } })
+  );
+  assert.match(section(payload, "daemon-ring"), /^<daemon-ring unavailable: daemon request timeout/);
+  assert.match(section(await collectDiagnostics(sources()), "daemon-ring"), /not collected/);
+});
+
 test("crash dumps contribute names, sizes and times but never their bytes", async () => {
   const src = sources();
   mkdirSync(src.crashDumpsDir, { recursive: true });
@@ -102,4 +123,29 @@ test("the user note is trimmed, length-capped and redacted", async () => {
   assert.equal(normalizeNote("z".repeat(900))?.length, 500);
   const payload = await collectDiagnostics(sources({ note: "stuck on connecting" }));
   assert.equal(payload.note, "stuck on connecting");
+});
+
+test("a host snapshot lands in its own section, redacted", async () => {
+  const payload = await collectDiagnostics(
+    sources({ hostSnapshot: async () => "fw | Example Firewall | state=266240\nRunning | nordvpn-service | 1.2.3.4" })
+  );
+  const text = section(payload, "host");
+  assert.match(text, /fw \| Example Firewall/);
+  assert.match(text, /nordvpn-service \| \[redacted:ipv4\]/);
+});
+
+test("no host collector leaves a host section that says so", async () => {
+  const payload = await collectDiagnostics(sources());
+  assert.match(section(payload, "host"), /^<host not collected on this platform>$/);
+});
+
+test("a host collector that fails becomes a section with the reason", async () => {
+  const payload = await collectDiagnostics(
+    sources({
+      hostSnapshot: async () => {
+        throw new Error("powershell.exe ENOENT");
+      }
+    })
+  );
+  assert.match(section(payload, "host"), /^<host unavailable: powershell\.exe ENOENT>$/);
 });

@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="330" viewBox="0 0 960 330" role="img" aria-labelledby="title desc">
+<title id="title">How a PangeaVPN connection looks on the wire</title>
+<desc id="desc">Your device sends a WireGuard tunnel wrapped in an obfuscation transport to a Pangea node. A firewall inspecting the connection sees an ordinary HTTPS session.</desc>
+<style>
+  .panel { fill: #161412; stroke: #2a2624; }
+  .card { fill: #1f1c1a; stroke: #36312d; stroke-width: 1.2; }
+  .t { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif; font-size: 17px; font-weight: 600; fill: #fbf9f2; }
+  .s { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif; font-size: 13.5px; fill: #aea299; }
+  .cap { font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace; font-size: 11px; letter-spacing: 1.2px; fill: #7d766f; }
+  .lbl { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif; font-size: 14px; fill: #aea299; }
+  .lbl-a { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif; font-size: 14px; font-weight: 600; fill: #ec9068; }
+  .mono-a { font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace; font-size: 11.5px; letter-spacing: 1px; fill: #ec9068; }
+  .line { stroke: #7d766f; stroke-width: 1.5; fill: none; }
+  .dash { stroke: #7d766f; stroke-width: 1.3; stroke-dasharray: 4 4; fill: none; }
+  .region { fill: none; stroke: #45403b; stroke-width: 1.3; stroke-dasharray: 6 5; }
+  .acc { stroke: #e0784a; stroke-width: 2; fill: none; }
+  .acc-fill { fill: #e0784a; }
+  .line-fill { fill: #7d766f; }
+  .outer { fill: #3a2016; stroke: #e0784a; stroke-width: 1.6; }
+  .acard { fill: #2a1a13; stroke: #e0784a; stroke-width: 1.4; }
+  .slate { fill: #465062; }
+  .st { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif; font-size: 17px; font-weight: 600; fill: #ffffff; }
+  .ss { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif; font-size: 13.5px; fill: #c4cbd6; }
+  .icon { stroke: #aea299; stroke-width: 1.6; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+  .icon-a { stroke: #ec9068; stroke-width: 1.6; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+  .x { stroke: #f25c5c; stroke-width: 2.4; stroke-linecap: round; }
+  .blocked { stroke: #7d766f; stroke-width: 1.5; fill: none; opacity: 0.8; }
+  .ko { fill: #161412; }
+  .brick { fill: #2a2522; stroke: #3a3430; stroke-width: 1; }
+</style>
+<defs>
+  <marker id="arr" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <path d="M0,1 L9,5 L0,9 z" class="line-fill"/>
+  </marker>
+  <marker id="arr-a" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <path d="M0,1 L9,5 L0,9 z" class="acc-fill"/>
+  </marker>
+</defs>
+<rect class="panel" x="0.5" y="0.5" width="959" height="329" rx="18"/>
+<rect class="outer" x="180" y="122" width="600" height="116" rx="58"/>
+<text class="mono-a" x="480" y="148" text-anchor="middle">TRANSPORT  ·  REALITY / CLOAK / SHADOWSOCKS / HYSTERIA2 / NAIVEPROXY</text>
+<rect class="slate" x="232" y="160" width="496" height="58" rx="29"/>
+<text class="st" x="480" y="185" text-anchor="middle">WireGuard tunnel</text>
+<text class="ss" x="480" y="205" text-anchor="middle">your traffic, with a post-quantum pre-shared key</text>
+<rect class="card" x="36" y="110" width="180" height="140" rx="14"/>
+<g class="icon"><rect x="112.0" y="135" width="28" height="18" rx="2.5"/><path d="M107.0,157 h38"/></g>
+<text class="t" x="126.0" y="184" text-anchor="middle">Your device</text>
+<text class="s" x="126.0" y="205" text-anchor="middle">apps and browser</text>
+<text class="s" x="126.0" y="223" text-anchor="middle">kill switch armed</text>
+<rect class="card" x="744" y="110" width="180" height="140" rx="14"/>
+<g class="icon"><rect x="821.0" y="133" width="26" height="10" rx="2.5"/><rect x="821.0" y="146" width="26" height="10" rx="2.5"/><path d="M826.0,138 h0.01 M826.0,151 h0.01"/></g>
+<text class="t" x="834.0" y="184" text-anchor="middle">Pangea node</text>
+<text class="s" x="834.0" y="205" text-anchor="middle">unwraps the tunnel</text>
+<text class="s" x="834.0" y="223" text-anchor="middle">then out to the internet</text>
+<rect class="card" x="316" y="24" width="328" height="44" rx="22"/>
+<g class="icon"><path d="M334,46 q10,-9 20,0 q-10,9 -20,0 z"/><circle cx="344" cy="46" r="3"/></g>
+<text class="lbl" x="366" y="51">Firewall / DPI watching the wire</text>
+<path class="dash" d="M480,68 V116" marker-end="url(#arr)"/>
+<text class="lbl-a" x="494" y="97">sees an ordinary HTTPS session</text>
+<rect class="outer" x="250" y="280" width="28" height="15" rx="7.5"/>
+<text class="lbl" x="288" y="292.5">what the network sees</text>
+<rect class="slate" x="500" y="280" width="28" height="15" rx="7.5"/>
+<text class="lbl" x="538" y="292.5">what is actually inside</text>
+</svg>

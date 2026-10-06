@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/platform"
+	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/reach"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/state"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/transport"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/wg"
@@ -34,8 +35,8 @@ var ErrDisconnectIncomplete = errors.New("disconnect incomplete")
 
 const offlineHoldDetail = "no internet connection; connecting when the network returns"
 
-// errRebuildBusy signals rebuildSilentSession found opMu already held by a
-// real operation (Connect/Switch, or an overlapping rebuild). It is not a failed rebuild.
+// errRebuildBusy signals a recovery path found opMu already held by a real
+// operation (Connect/Switch, or an overlapping rebuild). It is not a failed rebuild.
 var errRebuildBusy = errors.New("operation in progress")
 
 // cloakManager is transport.Manager (Stop) plus Start/Status with Cloak's
@@ -95,6 +96,17 @@ type shadowsocksProxyManager interface {
 	// Credentials returns the Basic Auth username/password required to use
 	// the live proxy port; both empty when stopped.
 	Credentials() (string, string)
+	hubProxyDialer
+}
+
+// realityProxyManager is shadowsocksProxyManager over VLESS+REALITY, whose node
+// pins this user to the hub. reality.ProxyManager fits.
+type realityProxyManager interface {
+	Start(ctx context.Context, profile state.RealityProfile) (int, error)
+	Stop(ctx context.Context) error
+	Port() int
+	Credentials() (string, string)
+	hubProxyDialer
 }
 
 // snowflakeManager is transport.Manager (Stop) plus Start/Status with
@@ -141,6 +153,9 @@ type Service struct {
 	// shadowsocksProxy serves the hub control plane; nil leaves /ssproxy/*
 	// reporting unavailable. Set once at startup.
 	shadowsocksProxy shadowsocksProxyManager
+	// realityProxy is the same over REALITY; nil leaves /realityproxy/*
+	// reporting unavailable. Set once at startup.
+	realityProxy realityProxyManager
 
 	opMu sync.Mutex
 
@@ -174,12 +189,21 @@ type Service struct {
 	recoveryAttempts int
 	recoveryNextAt   time.Time
 	healthHoldUntil  time.Time
+	// recoveryNetwork is the fingerprint recoveryNextAt was booked on: our own adapter
+	// churn fires network events too, so only a move off it may cut the wait short.
+	recoveryNetwork string
 	// offlineHoldUntil backs off recovery while the host has no route out (a dial
 	// returning "unreachable network"), so a link drop holds instead of hammering restart.
 	offlineHoldUntil time.Time
 	// offlineHeld outlives the hold timer, until a bring-up succeeds or fails for
 	// another reason, so paced re-dials keep reporting "no internet". Guarded by recoveryMu.
 	offlineHeld bool
+	// keptDeviceDead marks a running device recovery or a switch kept for a session that
+	// is not up, which Connect must release rather than adopt. Guarded by recoveryMu.
+	keptDeviceDead bool
+	// netChangeGen counts network changes that cleared the holds, so an attempt that
+	// outlived one does not re-arm the hold it cleared. Guarded by recoveryMu.
+	netChangeGen uint64
 
 	// resumeFreshUntil marks the window after a host resume in which a single failed
 	// probe round is enough to rebuild; resumeNotedAt dedupes one wake's notifications.
@@ -191,15 +215,27 @@ type Service struct {
 	dnsProbeNextAt     time.Time
 	dnsProbeFailures   int
 	dnsProbeQuietUntil time.Time
+	// dataPathRescueLoggedAt is when the health loop last reported a host that
+	// swallows the daemon's probe replies while the peer keeps answering.
+	dataPathRescueLoggedAt time.Time
 
 	// dnsGuardNextAt is the earliest the DNS guard may run again. Zero (the normal
 	// state) means every health tick; it is pushed out only after a correction.
 	dnsGuardNextAt time.Time
 
-	// demotedTransport is sent to the back of the next cascade; transportsExhausted
-	// says the cascade ran out here, the app's cue to try another server.
-	demotedTransport    string
+	// recoveryLead places the transport that just died in the next cascade; lastDead*
+	// is the previous death. transportsExhausted is the app's cue to try another server.
+	recoveryLead        cascadeLead
+	lastDeadKind        string
+	lastDeadAt          time.Time
 	transportsExhausted bool
+
+	// upstreamHold* park recovery while the tunnel and the hub are both silent:
+	// the held profile, the time box's end, and the next hub probe.
+	upstreamHoldProfile string
+	upstreamHoldUntil   time.Time
+	upstreamProbeAt     time.Time
+	upstreamProbes      int
 
 	// endpointRouteRepairs counts consecutive health checks that had to re-pin the
 	// tunnel's endpoint routes, so a route that never settles can't hold off recovery.
@@ -208,6 +244,11 @@ type Service struct {
 	// probeResolver resolves over the live tunnel to prove it still carries
 	// traffic. Defaults to probeResolverOverUDP; tests stub it, and a nil value disables the check.
 	probeResolver func(ctx context.Context, tunnelInterface, server string) error
+
+	// reachProbe asks the hub over one route whether the host's own network works;
+	// tests stub it, and nil disables the check (see reach_verdict.go).
+	reachProbe    func(ctx context.Context, route reachRoute) reach.Outcome
+	reachBaseline *reachBaseline
 
 	// recoveryDelays is the backoff between reconnect attempts; the last entry
 	// repeats for every attempt beyond it. Tests shorten it.
@@ -235,8 +276,8 @@ type Service struct {
 	repairNames []string
 	repairSeq   int
 
-	// handshakeTimeout bounds how long a single transport is given to carry a
-	// first WireGuard handshake during bring-up. Defaults to defaultWireGuardHandshakeTimeout; tests set it small.
+	// handshakeTimeout overrides the per-transport handshake budget; tests set it small.
+	// Zero in production, so a rebuild's longer context budget and the default both apply.
 	handshakeTimeout time.Duration
 
 	// dataPathBudget bounds how long the bring-up gate waits on a host that has
@@ -341,28 +382,29 @@ func NewService(
 	killSwitch platform.KillSwitch,
 ) *Service {
 	return &Service{
-		machine:          machine,
-		logs:             logs,
-		config:           config,
-		cloak:            cloakManager,
-		naive:            naiveManager,
-		reality:          realityManager,
-		hysteria2:        hysteria2Manager,
-		shadowsocks:      shadowsocksManager,
-		anytls:           anytlsManager,
-		snowflake:        snowflakeManager,
-		wg:               wgManager,
-		killSwitch:       killSwitch,
-		handshakeTimeout: defaultWireGuardHandshakeTimeout,
-		dataPathBudget:   dataPathGateBudget,
-		networkKey:       currentNetworkKey,
-		hostInternet:     platform.HostInternet,
-		physicalRoute:    platform.PhysicalDefaultRoute,
-		recoveryDelays:   defaultRecoveryDelays,
-		probeResolver:    probeResolverOverUDP,
-		networkRepair:    platform.RepairNetworkAfterTunnelDisconnect,
-		systemEvents:     platform.WatchSystemEvents,
-		healthKick:       make(chan struct{}, 1),
+		machine:        machine,
+		logs:           logs,
+		config:         config,
+		cloak:          cloakManager,
+		naive:          naiveManager,
+		reality:        realityManager,
+		hysteria2:      hysteria2Manager,
+		shadowsocks:    shadowsocksManager,
+		anytls:         anytlsManager,
+		snowflake:      snowflakeManager,
+		wg:             wgManager,
+		killSwitch:     killSwitch,
+		dataPathBudget: dataPathGateBudget,
+		networkKey:     currentNetworkKey,
+		hostInternet:   platform.HostInternet,
+		physicalRoute:  platform.PhysicalDefaultRoute,
+		recoveryDelays: defaultRecoveryDelays,
+		probeResolver:  probeResolverOverUDP,
+		reachProbe:     probeReachRoute,
+		reachBaseline:  newReachBaseline(),
+		networkRepair:  platform.RepairNetworkAfterTunnelDisconnect,
+		systemEvents:   platform.WatchSystemEvents,
+		healthKick:     make(chan struct{}, 1),
 	}
 }
 
@@ -416,6 +458,43 @@ func (s *Service) ShadowsocksProxyCredentials() (string, string) {
 		return "", ""
 	}
 	return s.shadowsocksProxy.Credentials()
+}
+
+// SetRealityProxy wires the REALITY hub proxy; nil makes /realityproxy/*
+// report it unavailable.
+func (s *Service) SetRealityProxy(proxy realityProxyManager) {
+	s.realityProxy = proxy
+}
+
+// StartRealityProxy returns the proxy's loopback port. Permits the remote
+// first, or a Lockdown lock would block our own dial.
+func (s *Service) StartRealityProxy(ctx context.Context, profile state.RealityProfile) (int, error) {
+	if s.realityProxy == nil {
+		return 0, errors.New("reality proxy is not available")
+	}
+	if host := strings.TrimSpace(profile.RemoteHost); host != "" {
+		if err := s.PermitHosts(ctx, []string{host}); err != nil {
+			s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf(
+				"could not permit reality hub proxy remote %s through the kill switch: %v", host, err))
+		}
+	}
+	return s.realityProxy.Start(ctx, profile)
+}
+
+func (s *Service) StopRealityProxy(ctx context.Context) error {
+	if s.realityProxy == nil {
+		return nil
+	}
+	return s.realityProxy.Stop(ctx)
+}
+
+// RealityProxyCredentials returns the live proxy's Basic Auth
+// username/password, both empty if no proxy is running.
+func (s *Service) RealityProxyCredentials() (string, string) {
+	if s.realityProxy == nil {
+		return "", ""
+	}
+	return s.realityProxy.Credentials()
 }
 
 // activeTransport returns whichever manager is live for the current session, or nil
@@ -544,6 +623,9 @@ func (s *Service) Connect(ctx context.Context, profileID string, opts ConnectOpt
 	s.preemptRecovery()
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
+	// The user owns the session now; a silent-network hold must not rebuild what
+	// this Connect brings up or adopts.
+	s.clearUpstreamHold()
 
 	// Make this Connect interruptible by Disconnect — see cancelConnect docs.
 	connectCtx, cancel := context.WithCancel(ctx)
@@ -624,7 +706,7 @@ func (s *Service) Connect(ctx context.Context, profileID string, opts ConnectOpt
 	s.machine.Set(state.StateConnecting, "enabling kill switch")
 	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("connect requested with profile %s", profile.ID))
 	stepStart := time.Now()
-	permittedHosts := killSwitchPermitsFor(profile, opts.AllowLAN)
+	permittedHosts := s.sessionKillSwitchPermits(profile, opts.AllowLAN)
 	if err := s.killSwitch.Enable(ctx, permittedHosts, opts.AllowLAN, opts.Lockdown); err != nil {
 		s.setError(fmt.Sprintf("kill switch enable failed: %v", err))
 		return err
@@ -651,10 +733,12 @@ const connectRetryGrace = 15 * time.Second
 
 // deferRecovery pushes the next automatic rebuild out to at least d from now.
 func (s *Service) deferRecovery(d time.Duration) {
+	network := s.currentNetworkKey()
 	s.recoveryMu.Lock()
 	defer s.recoveryMu.Unlock()
 	if next := time.Now().Add(d); next.After(s.recoveryNextAt) {
 		s.recoveryNextAt = next
+		s.recoveryNetwork = network
 	}
 }
 
@@ -687,11 +771,12 @@ func (s *Service) bringUpAfterKillSwitch(ctx context.Context, profile state.Prof
 	s.machine.Set(state.StateConnecting, "starting transport")
 	stepStart := time.Now()
 
+	netGen := s.networkChangeGen()
 	networkKey := s.currentNetworkKey()
 	kind, err := s.startTransportWithHandshake(ctx, &profile, &wireGuardProfile, opts.PreferredTransport, networkKey)
 	if err != nil {
 		if errors.Is(err, ErrHostOffline) {
-			s.holdBringUpOffline(err)
+			s.holdBringUpOffline(err, netGen, networkKey)
 			return err
 		}
 		s.clearOfflineHold()
@@ -699,8 +784,11 @@ func (s *Service) bringUpAfterKillSwitch(ctx context.Context, profile state.Prof
 		return err
 	}
 	s.clearOfflineHold()
+	s.clearUpstreamHold()
+	s.setKeptDeviceDead(false)
 	s.setActiveTransportKind(kind)
 	s.rememberTransport(networkKey, kind)
+	s.refreshReachBaseline(networkKey, profile)
 	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("%s tunnel established with wireguard handshake (%dms)", kind, time.Since(stepStart).Milliseconds()))
 
 	s.setCurrentProfile(profile)
@@ -714,10 +802,10 @@ func (s *Service) bringUpAfterKillSwitch(ctx context.Context, profile state.Prof
 
 // holdBringUpOffline parks a bring-up that found no route out: ERROR carries the
 // offline flag, the kill switch stays armed, and recovery re-dials on a link.
-func (s *Service) holdBringUpOffline(err error) {
-	s.enterOfflineHold()
+func (s *Service) holdBringUpOffline(err error, netGen uint64, startKey string) {
+	armed := s.enterOfflineHold(netGen, startKey)
 	s.machine.Set(state.StateError, offlineHoldDetail)
-	s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("no route to the network; holding the connection until it returns (%v)", err))
+	s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("%s (%v)", offlineHoldNote(armed, "the connection"), err))
 }
 
 // armKillSwitchForAdoptedTunnel enables and updates the kill switch for a
@@ -728,7 +816,7 @@ func (s *Service) armKillSwitchForAdoptedTunnel(ctx context.Context, profile sta
 		return fmt.Errorf("allow-lan config transform failed: %w", err)
 	}
 	s.machine.Set(state.StateConnecting, "arming kill switch for adopted tunnel")
-	if err := s.killSwitch.Enable(ctx, killSwitchPermitsFor(profile, opts.AllowLAN), opts.AllowLAN, opts.Lockdown); err != nil {
+	if err := s.killSwitch.Enable(ctx, s.sessionKillSwitchPermits(profile, opts.AllowLAN), opts.AllowLAN, opts.Lockdown); err != nil {
 		return fmt.Errorf("kill switch enable failed for adopted tunnel: %w", err)
 	}
 	tunnel := s.resolveTunnelRef(ctx, wireGuardProfile)
@@ -1224,10 +1312,10 @@ func (s *Service) startTransportWithHandshake(ctx context.Context, profile *stat
 		return "", err
 	}
 	candidates = s.reorderByMemory(candidates, preferredTransport, networkKey)
-	candidates = s.demoteFailedTransport(candidates)
+	candidates = s.applyRecoveryLead(candidates)
 	defer s.setConnectingTransportKind("")
 
-	var failures []string
+	var failures cascadeFailures
 	for i, candidate := range candidates {
 		s.setConnectingTransportKind(candidate.kind)
 		// A fresh copy per candidate: start funcs mutate ConfigText (MTU clamp, loopback
@@ -1238,7 +1326,7 @@ func (s *Service) startTransportWithHandshake(ctx context.Context, profile *stat
 			if ctx.Err() != nil {
 				return "", ctx.Err()
 			}
-			failures = append(failures, err.Error())
+			failures = append(failures, err)
 			s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("%s transport did not establish a tunnel: %v", candidate.kind, err))
 			if hostNetworkUnreachable(err) || s.hostOffline() {
 				return "", fmt.Errorf("%w: %v", ErrHostOffline, err)
@@ -1253,10 +1341,24 @@ func (s *Service) startTransportWithHandshake(ctx context.Context, profile *stat
 	}
 
 	if !autoMode && len(failures) == 1 {
-		return "", errors.New(failures[0])
+		return "", failures[0]
 	}
-	return "", fmt.Errorf("%w: %s", ErrTransportExhausted, strings.Join(failures, "; "))
+	return "", fmt.Errorf("%w: %w", ErrTransportExhausted, failures)
 }
+
+// cascadeFailures reads like the "; " list the logs and app already know while
+// keeping each candidate's error reachable through errors.Is.
+type cascadeFailures []error
+
+func (c cascadeFailures) Error() string {
+	msgs := make([]string, 0, len(c))
+	for _, err := range c {
+		msgs = append(msgs, err.Error())
+	}
+	return strings.Join(msgs, "; ")
+}
+
+func (c cascadeFailures) Unwrap() []error { return c }
 
 // currentNetworkKey returns the fingerprint of the network the host is on, or
 // "" when it can't be determined. Nil-safe wrapper around the injectable networkKey func.
@@ -1299,33 +1401,40 @@ func (s *Service) reorderByMemory(candidates []transportCandidate, preferredTran
 	return reordered
 }
 
-// demoteFailedTransport moves the transport whose data path just died to the
-// back, so recovery tries every other way out before walking into the block.
-func (s *Service) demoteFailedTransport(candidates []transportCandidate) []transportCandidate {
-	kind := s.takeDemotedTransport()
-	if kind == "" || len(candidates) < 2 {
-		return candidates
-	}
-	demoted := make([]transportCandidate, 0, len(candidates))
-	var tail []transportCandidate
-	for _, candidate := range candidates {
-		if candidate.kind == kind {
-			tail = append(tail, candidate)
-			continue
-		}
-		demoted = append(demoted, candidate)
-	}
-	return append(demoted, tail...)
+// cascadeLead is the transport whose data path just died: redialled first, or
+// sent to the back once it keeps dying (see noteDeadTransport).
+type cascadeLead struct {
+	kind   string
+	demote bool
 }
 
-// takeDemotedTransport reads and clears the demotion, which applies to the next
-// cascade only — a later session must not inherit it.
-func (s *Service) takeDemotedTransport() string {
+func (s *Service) applyRecoveryLead(candidates []transportCandidate) []transportCandidate {
+	lead := s.takeRecoveryLead()
+	if lead.kind == "" || len(candidates) < 2 {
+		return candidates
+	}
+	var match, rest []transportCandidate
+	for _, candidate := range candidates {
+		if candidate.kind == lead.kind {
+			match = append(match, candidate)
+		} else {
+			rest = append(rest, candidate)
+		}
+	}
+	if lead.demote {
+		return append(rest, match...)
+	}
+	return append(match, rest...)
+}
+
+// takeRecoveryLead reads and clears the lead, which applies to the next cascade
+// only — a later session must not inherit it.
+func (s *Service) takeRecoveryLead() cascadeLead {
 	s.recoveryMu.Lock()
 	defer s.recoveryMu.Unlock()
-	kind := s.demotedTransport
-	s.demotedTransport = ""
-	return kind
+	lead := s.recoveryLead
+	s.recoveryLead = cascadeLead{}
+	return lead
 }
 
 // rememberTransport records kind as the last-good transport for networkKey so the
@@ -1425,7 +1534,7 @@ func (s *Service) bringUpTransport(ctx context.Context, profile *state.Profile, 
 
 	s.machine.Set(state.StateConnecting, fmt.Sprintf("checking traffic over %s", kind))
 	probeStart := time.Now()
-	if err = s.proveDataPath(ctx, *wireGuardProfile); err != nil {
+	if err = s.proveDataPath(ctx, kind, *wireGuardProfile); err != nil {
 		return fmt.Errorf("%s: %w", kind, err)
 	}
 	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("%s data path verified (%dms)", kind, time.Since(probeStart).Milliseconds()))
@@ -1558,6 +1667,7 @@ func (s *Service) Switch(ctx context.Context, newProfileID string, opts ConnectO
 	s.preemptRecovery()
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
+	s.clearUpstreamHold()
 
 	switchCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -1610,7 +1720,7 @@ func (s *Service) Switch(ctx context.Context, newProfileID string, opts ConnectO
 
 	s.machine.Set(state.StateConnecting, fmt.Sprintf("switching to %s: updating kill switch", newProfile.ID))
 	stepStart := time.Now()
-	if err := s.killSwitch.Enable(ctx, killSwitchPermitsFor(newProfile, opts.AllowLAN), opts.AllowLAN, opts.Lockdown); err != nil {
+	if err := s.killSwitch.Enable(ctx, s.sessionKillSwitchPermits(newProfile, opts.AllowLAN), opts.AllowLAN, opts.Lockdown); err != nil {
 		return refuse(err, fmt.Sprintf("kill switch re-enable failed: %v", err))
 	}
 	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("kill switch re-enabled for %s (%dms)", newProfile.ID, time.Since(stepStart).Milliseconds()))
@@ -1649,6 +1759,9 @@ func (s *Service) Switch(ctx context.Context, newProfileID string, opts ConnectO
 	s.setSessionOpts(opts)
 
 	if err := s.bringUpAfterKillSwitch(ctx, newProfile, wireGuardProfile, opts); err != nil {
+		if keepDevice && errors.Is(err, ErrHostOffline) {
+			s.setKeptDeviceDead(true)
+		}
 		if !errors.Is(err, ErrHostOffline) {
 			if keepDevice {
 				s.releaseKeptDevice(newProfile)
@@ -1670,6 +1783,7 @@ func (s *Service) ClearKillSwitch(ctx context.Context) error {
 	defer s.opMu.Unlock()
 
 	if !s.killSwitch.Active() {
+		s.releaseOrphanedLockSettings()
 		return nil
 	}
 	if why, held := s.sessionHeld(); held {
@@ -2336,15 +2450,20 @@ func (s *Service) onSystemResume(ctx context.Context, cause string) {
 // onNetworkChanged reacts to the host's connectivity moving: once the network
 // fingerprint says there is something to dial from, waiting out timers only delays recovery.
 func (s *Service) onNetworkChanged() {
-	if !s.networkLooksUsable() {
+	if !s.networkLooksUsable() || s.noPhysicalRoute() {
+		// The network the retry was booked on is gone, so its return is a real change.
+		s.recoveryMu.Lock()
+		s.recoveryNetwork = ""
+		s.recoveryMu.Unlock()
 		return
 	}
+	network := s.currentNetworkKey()
 	s.recoveryMu.Lock()
 	now := time.Now()
 	if now.Before(s.healthHoldUntil) {
 		s.healthHoldUntil = now
 	}
-	if now.Before(s.recoveryNextAt) {
+	if now.Before(s.recoveryNextAt) && (network == "" || network != s.recoveryNetwork) {
 		s.recoveryNextAt = time.Time{}
 	}
 	if now.Before(s.dnsProbeNextAt) {
@@ -2353,8 +2472,20 @@ func (s *Service) onNetworkChanged() {
 	// The link is back: drop the offline hold so the health kick below retries
 	// transport recovery now instead of waiting out the backoff window.
 	s.offlineHoldUntil = time.Time{}
+	s.upstreamProbeAt = time.Time{}
+	s.netChangeGen++
 	s.recoveryMu.Unlock()
 	s.kickHealthCheck()
+}
+
+// noPhysicalRoute is a definite "nothing to dial from". Windows' hint can still say
+// online off our own kept adapter after the uplink went, so it can't decide this alone.
+func (s *Service) noPhysicalRoute() bool {
+	if s.physicalRoute == nil {
+		return false
+	}
+	_, _, err := s.physicalRoute()
+	return errors.Is(err, platform.ErrNoDefaultRoute)
 }
 
 // kickHealthCheck asks the health loop to run now; a kick already pending is
@@ -2371,6 +2502,9 @@ func (s *Service) kickHealthCheck() {
 
 func (s *Service) runHealthCheck(ctx context.Context) {
 	if s.healthHeld() {
+		return
+	}
+	if s.tickUpstreamHold(ctx) {
 		return
 	}
 
@@ -2421,10 +2555,15 @@ func (s *Service) runHealthCheck(ctx context.Context) {
 		if s.offlineHoldActive() {
 			return
 		}
+		netGen, startKey := s.networkChangeGen(), s.currentNetworkKey()
 		if err := s.recoverActiveTransport(ctx, profile, activeKind); err != nil {
+			// Whoever holds opMu owns the session right now; the next tick re-checks.
+			if errors.Is(err, errRebuildBusy) {
+				return
+			}
 			if hostNetworkUnreachable(err) || s.hostOffline() {
-				s.enterOfflineHold()
-				s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("no route to the network; holding %s until it returns", activeKind))
+				armed := s.enterOfflineHold(netGen, startKey)
+				s.logs.Add(state.LogWarn, state.SourceDaemon, offlineHoldNote(armed, activeKind))
 				return
 			}
 			s.clearOfflineHold()
@@ -2491,8 +2630,8 @@ func (s *Service) runHealthCheck(ctx context.Context) {
 	s.resetRecovery()
 }
 
-// escalateDeadDataPath rebuilds a session whose tunnel stopped carrying traffic,
-// re-running the whole cascade rather than restarting the transport that died.
+// escalateDeadDataPath rebuilds a session whose tunnel stopped carrying traffic
+// through the whole cascade, led by the transport that died (see noteDeadTransport).
 func (s *Service) escalateDeadDataPath(ctx context.Context, profile state.Profile, activeKind string) {
 	// A tunnel with no host network under it is not a blocked transport; a
 	// cascade dialled now fails everywhere and reads as exhaustion to the app.
@@ -2502,10 +2641,45 @@ func (s *Service) escalateDeadDataPath(ctx context.Context, profile state.Profil
 			"%s tunnel stopped carrying traffic, but the host has no network to rebuild on; waiting for it", activeKind))
 		return
 	}
-	s.setDemotedTransport(activeKind)
-	s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf(
-		"%s tunnel stopped carrying traffic; trying every transport again", activeKind))
+	// Asked before the transport is marked dead: a silent network is not its fault.
+	if s.holdForSilentNetwork(ctx, profile, fmt.Sprintf("%s tunnel stopped carrying traffic", activeKind)) {
+		s.deferDataPathRebuild()
+		return
+	}
+	if s.sessionMoved(profile.ID) {
+		return
+	}
+	next := "reconnecting it"
+	if preferred := s.getSessionOpts().PreferredTransport; preferred == "" || preferred == "auto" {
+		next = "redialling it before the other transports"
+		if s.noteDeadTransport(activeKind) {
+			next = fmt.Sprintf("it died again within %s, so trying every other transport first", transportFlapWindow)
+		}
+	}
+	s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("%s tunnel stopped carrying traffic; %s", activeKind, next))
 	s.attemptSessionRebuild(ctx, profile, "tunnel stopped carrying traffic")
+}
+
+// transportFlapWindow: a transport that dies again this soon after a redial is being
+// killed under load (DPI), not stalling on a lossy path, so it goes to the back.
+const transportFlapWindow = 10 * time.Minute
+
+// noteDeadTransport sets the next cascade's lead for kind and reports whether it is demoted.
+func (s *Service) noteDeadTransport(kind string) (demote bool) {
+	s.recoveryMu.Lock()
+	defer s.recoveryMu.Unlock()
+	now := time.Now()
+	demote = kind == s.lastDeadKind && now.Sub(s.lastDeadAt) < transportFlapWindow
+	s.recoveryLead = cascadeLead{kind: kind, demote: demote}
+	if demote {
+		// Settled either way: if the cascade lands back here, nothing else gets through.
+		s.lastDeadKind, s.lastDeadAt = "", time.Time{}
+		return true
+	}
+	s.lastDeadKind, s.lastDeadAt = kind, now
+	// A redial that DPI kills again must be caught at probe cadence, not after the cooldown.
+	s.dnsProbeQuietUntil = time.Time{}
+	return false
 }
 
 // probeDataPathNow brings the next probe round forward to this tick.
@@ -2513,12 +2687,6 @@ func (s *Service) probeDataPathNow() {
 	s.recoveryMu.Lock()
 	defer s.recoveryMu.Unlock()
 	s.dnsProbeNextAt = time.Time{}
-}
-
-func (s *Service) setDemotedTransport(kind string) {
-	s.recoveryMu.Lock()
-	defer s.recoveryMu.Unlock()
-	s.demotedTransport = kind
 }
 
 // setTransportsExhausted records whether the cascade ran out on this server, so
@@ -2533,6 +2701,17 @@ func (s *Service) setTransportsExhausted(exhausted bool) {
 // having no route out (a NIC mid-resume), rather than every transport being blocked.
 func hostNetworkUnreachable(err error) bool {
 	if err == nil {
+		return false
+	}
+	if multi, ok := err.(interface{ Unwrap() []error }); ok {
+		for _, inner := range multi.Unwrap() {
+			if hostNetworkUnreachable(inner) {
+				return true
+			}
+		}
+		return false
+	}
+	if errors.Is(err, errDataPathGate) {
 		return false
 	}
 	msg := strings.ToLower(err.Error())
@@ -2600,6 +2779,9 @@ func (s *Service) attemptSessionRebuild(ctx context.Context, profile state.Profi
 	// No route out is a wait, not a failed attempt: bring-up already parked the
 	// session in the offline hold, and backoff here would only delay the reconnect.
 	if errors.Is(err, ErrHostOffline) {
+		return
+	}
+	if s.holdIfNetworkSilent(ctx, profile, err) {
 		return
 	}
 	// Exhaustion is the app's cue to rotate servers; a cascade that ran into a
@@ -2690,11 +2872,37 @@ func (s *Service) hostVerdict() (online bool, known bool) {
 // that had no route out, so an outage parks instead of hammering restart.
 const offlineHoldInterval = 12 * time.Second
 
-func (s *Service) enterOfflineHold() {
+// enterOfflineHold marks the host offline after an attempt that began at netGen on startKey.
+// Our own route writes fire network events too, so only a moved physical network skips the hold.
+func (s *Service) enterOfflineHold(netGen uint64, startKey string) (armed bool) {
+	key := s.currentNetworkKey()
+	s.recoveryMu.Lock()
+	s.offlineHeld = true
+	moved := s.netChangeGen != netGen && key != "" && key != startKey
+	armed = !moved
+	if armed {
+		s.offlineHoldUntil = time.Now().Add(offlineHoldInterval)
+	}
+	s.recoveryMu.Unlock()
+	if !armed {
+		s.kickHealthCheck()
+	}
+	return armed
+}
+
+// offlineHoldNote is the one log line for a dial that found no route, saying
+// what enterOfflineHold did about it.
+func offlineHoldNote(armed bool, what string) string {
+	if armed {
+		return fmt.Sprintf("no route to the network; holding %s until it returns", what)
+	}
+	return fmt.Sprintf("no route to the network, but it changed during the attempt; retrying %s now", what)
+}
+
+func (s *Service) networkChangeGen() uint64 {
 	s.recoveryMu.Lock()
 	defer s.recoveryMu.Unlock()
-	s.offlineHoldUntil = time.Now().Add(offlineHoldInterval)
-	s.offlineHeld = true
+	return s.netChangeGen
 }
 
 func (s *Service) offlineHoldActive() bool {
@@ -2710,11 +2918,11 @@ func (s *Service) clearOfflineHold() {
 	s.offlineHeld = false
 }
 
-// offlineNow reports "no internet" from either the instant unreachable-dial hold, or
-// the OS oracle, which lags: it downgrades only once its own probes finally time out.
+// offlineNow reports "no internet" from the dial and silent-network holds, or the
+// OS oracle, which lags: it downgrades only once its own probes finally time out.
 func (s *Service) offlineNow() bool {
 	s.recoveryMu.Lock()
-	held := s.offlineHeld
+	held := s.offlineHeld || s.upstreamHoldProfile != ""
 	s.recoveryMu.Unlock()
 	return held || s.hostOffline()
 }
@@ -2729,6 +2937,7 @@ func (s *Service) beginRecoveryAttempt() int {
 // scheduleNextRecovery books the next attempt after a failure and reports the
 // wait, so the error detail can say when the daemon will try again.
 func (s *Service) scheduleNextRecovery(attempt int) time.Duration {
+	network := s.currentNetworkKey()
 	s.recoveryMu.Lock()
 	defer s.recoveryMu.Unlock()
 
@@ -2739,6 +2948,7 @@ func (s *Service) scheduleNextRecovery(attempt int) time.Duration {
 	index := min(max(attempt-1, 0), len(delays)-1)
 	delay := delays[index]
 	s.recoveryNextAt = time.Now().Add(delay)
+	s.recoveryNetwork = network
 	return delay
 }
 
@@ -2763,6 +2973,7 @@ func (s *Service) resetRecovery() {
 	s.recoveryNextAt = time.Time{}
 	s.offlineHoldUntil = time.Time{}
 	s.offlineHeld = false
+	s.clearUpstreamHoldLocked()
 }
 
 // holdHealthChecks pauses health evaluation for d and clears any backoff, so
@@ -2841,7 +3052,7 @@ func (s *Service) rebuildSilentSession(ctx context.Context, profile state.Profil
 	// live session, but not when a resume has taken the WFP session out from under us.
 	if !s.killSwitch.Active() {
 		s.logs.Add(state.LogWarn, state.SourceDaemon, "rebuild: kill switch was not armed; re-arming before bring-up")
-		if err := s.killSwitch.Enable(ctx, killSwitchPermitsFor(profile, opts.AllowLAN), opts.AllowLAN, opts.Lockdown); err != nil {
+		if err := s.killSwitch.Enable(ctx, s.sessionKillSwitchPermits(profile, opts.AllowLAN), opts.AllowLAN, opts.Lockdown); err != nil {
 			return fmt.Errorf("kill switch re-arm failed: %w", err)
 		}
 	}
@@ -2871,8 +3082,15 @@ func (s *Service) rebuildSilentSession(ctx context.Context, profile state.Profil
 	s.setActiveTransportKind("")
 
 	if err := s.bringUpAfterKillSwitch(ctx, profile, wireGuardProfile, opts); err != nil {
-		if keepDevice && !errors.Is(err, ErrHostOffline) {
-			s.releaseKeptDevice(live)
+		// Preempted means the interrupting operation owns the device: a Switch
+		// re-points it in place, a Disconnect tears it down anyway.
+		preempted := rebuildCtx.Err() != nil
+		if keepDevice {
+			if errors.Is(err, ErrHostOffline) || preempted {
+				s.setKeptDeviceDead(true)
+			} else {
+				s.releaseKeptDevice(live)
+			}
 		}
 		return err
 	}
@@ -2903,14 +3121,28 @@ func (s *Service) releaseKeptDevice(live state.Profile) {
 	defer cancel()
 	if err := s.wg.Stop(stopCtx, withTransportBypassHosts(live)); err != nil {
 		s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("releasing the device kept for recovery: %v", err))
+		return
 	}
+	s.setKeptDeviceDead(false)
+}
+
+func (s *Service) setKeptDeviceDead(dead bool) {
+	s.recoveryMu.Lock()
+	defer s.recoveryMu.Unlock()
+	s.keptDeviceDead = dead
+}
+
+func (s *Service) keptDeviceIsDead() bool {
+	s.recoveryMu.Lock()
+	defer s.recoveryMu.Unlock()
+	return s.keptDeviceDead
 }
 
 // recoverActiveTransport restarts whichever transport is active in-place —
 // v1 has no mid-session hot failover (design spec non-goal).
 func (s *Service) recoverActiveTransport(ctx context.Context, profile state.Profile, activeKind string) error {
 	if !s.opMu.TryLock() {
-		return errors.New("operation in progress")
+		return errRebuildBusy
 	}
 	defer s.opMu.Unlock()
 
@@ -3144,7 +3376,7 @@ func (s *Service) reconcileKillSwitchForAdoptedTunnel(ctx context.Context, profi
 	locked := err == nil && persisted.Active && persisted.Locked
 	allowLAN := err == nil && persisted.AllowLAN
 
-	if err := s.killSwitch.Enable(ctx, killSwitchPermitsFor(profile, allowLAN), allowLAN, locked); err != nil {
+	if err := s.killSwitch.Enable(ctx, s.sessionKillSwitchPermits(profile, allowLAN), allowLAN, locked); err != nil {
 		s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("could not arm kill switch for adopted tunnel: %v", err))
 		return
 	}
@@ -3164,6 +3396,7 @@ func (s *Service) reconcilePersistedKillSwitch(ctx context.Context) platform.Kil
 			return platform.KillSwitchState{Active: true}
 		}
 		s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("kill switch state file is unreadable and no live rules found: %v", err))
+		s.releaseOrphanedLockSettings()
 		return platform.KillSwitchState{}
 	}
 	if !persisted.Active {
@@ -3171,6 +3404,7 @@ func (s *Service) reconcilePersistedKillSwitch(ctx context.Context) platform.Kil
 			s.logs.Add(state.LogWarn, state.SourceDaemon, "kill switch rules are live with no state file; leaving them in place")
 			return platform.KillSwitchState{Active: true}
 		}
+		s.releaseOrphanedLockSettings()
 		return persisted
 	}
 
@@ -3273,9 +3507,9 @@ func (s *Service) attachToRunningSession(ctx context.Context, profile state.Prof
 	if !status.Running {
 		return false, nil
 	}
-	// Recovery holds this device through the offline hold; its session is
-	// dead, so a connect starts clean instead of adopting it.
-	if s.offlineHoldActive() {
+	// Recovery or a switch kept this device for a session that is not up; the
+	// hold timer alone lapses on any network change, so the sticky flag decides too.
+	if s.offlineHoldActive() || s.keptDeviceIsDead() {
 		held, ok := s.getCurrentProfile()
 		if !ok {
 			held = profile
@@ -3622,7 +3856,7 @@ func validateProfile(profile state.Profile) error {
 	if profile.WireGuard.TunnelName == "" {
 		return errors.New("wireguard.tunnelName is required")
 	}
-	return nil
+	return wg.ValidateResolvers(wg.Resolvers(profile.WireGuard))
 }
 
 func parseWireGuardListenPort(configText string) (int, bool) {
@@ -3727,6 +3961,31 @@ func stunHost(raw string) string {
 	return raw
 }
 
+// sessionKillSwitchPermits adds the running hub proxies' nodes to the profile's
+// permits when a stored profile vouches for them, so the hub probe can leave by NIC.
+func (s *Service) sessionKillSwitchPermits(profile state.Profile, allowLAN bool) []string {
+	permits := killSwitchPermitsFor(profile, allowLAN)
+	vouched := s.vouchedHosts()
+	resolvers := ipLiterals(profile.WireGuard.DNS)
+	for _, remote := range s.hubProxyRemotes() {
+		if vouched[remote] && !slices.Contains(resolvers, remote) && !slices.Contains(permits, remote) {
+			permits = append(permits, remote)
+		}
+	}
+	return permits
+}
+
+func (s *Service) hubProxyRemotes() []string {
+	var hosts []string
+	if s.realityProxy != nil {
+		hosts = append(hosts, s.realityProxy.HubRemote())
+	}
+	if s.shadowsocksProxy != nil {
+		hosts = append(hosts, s.shadowsocksProxy.HubRemote())
+	}
+	return ipLiterals(hosts)
+}
+
 // killSwitchPermits is the cloak, naive, reality, hysteria2, anytls, and snowflake endpoints
 // (whichever are configured) plus any bypassHosts needing direct reachability.
 func killSwitchPermitsFor(profile state.Profile, _ bool) []string {
@@ -3824,6 +4083,23 @@ func (s *Service) dropTunnelPermit(ctx context.Context) {
 	}
 	if err := dropper.DropTunnelPermit(ctx); err != nil {
 		s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("kill switch: could not retire the tunnel permit: %v", err))
+	}
+}
+
+// orphanedSettingsReleaser undoes host settings an armed lock changed, for a
+// lock that went away without the Clear that normally restores them.
+type orphanedSettingsReleaser interface {
+	ReleaseOrphanedSettings() error
+}
+
+// releaseOrphanedLockSettings must only run once no lock is live.
+func (s *Service) releaseOrphanedLockSettings() {
+	releaser, ok := s.killSwitch.(orphanedSettingsReleaser)
+	if !ok {
+		return
+	}
+	if err := releaser.ReleaseOrphanedSettings(); err != nil {
+		s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("kill switch: could not restore host settings a previous lock changed: %v", err))
 	}
 }
 

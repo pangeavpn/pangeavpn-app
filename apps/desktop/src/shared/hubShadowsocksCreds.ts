@@ -1,3 +1,12 @@
+import {
+  firstWorking,
+  mergeAdvertised,
+  promoteEntry,
+  restoreCached,
+  seedCached,
+  type CredKind
+} from "./hubCredList.ts";
+
 /** Control-plane Shadowsocks credentials, out of pangeaApiClient so the
  *  cache rules are testable without electron. */
 export interface HubShadowsocksCreds {
@@ -6,6 +15,41 @@ export interface HubShadowsocksCreds {
   method: string;
   password: string;
 }
+
+/** Shipped control-plane nodes, so an install that has never reached the hub
+ *  still has this route in. Each listener relays only to the hub on 443. */
+export const DEFAULT_HUB_SHADOWSOCKS: readonly Readonly<HubShadowsocksCreds>[] = [
+  {
+    remoteHost: "192.248.175.17",
+    remotePort: 8489,
+    method: "2022-blake3-aes-128-gcm",
+    password: "tUnJ/XLnK31LxBHhimZP5g=="
+  },
+  {
+    remoteHost: "64.176.205.92",
+    remotePort: 8489,
+    method: "2022-blake3-aes-128-gcm",
+    password: "RsMy+zj1BTQVj+jTa8ZPfA=="
+  },
+  {
+    remoteHost: "136.244.108.254",
+    remotePort: 8489,
+    method: "2022-blake3-aes-128-gcm",
+    password: "MIASyWggp3VO21RKPCB5cA=="
+  },
+  {
+    remoteHost: "136.244.66.46",
+    remotePort: 8489,
+    method: "2022-blake3-aes-128-gcm",
+    password: "YySUjWAvg9bDSTEYA0WdEw=="
+  },
+  {
+    remoteHost: "208.76.222.40",
+    remotePort: 8489,
+    method: "2022-blake3-aes-128-gcm",
+    password: "NulRaTBF6QqLx1dRaM1F3w=="
+  }
+];
 
 // sing-shadowsocks2's shadowaead and shadowaead_2022 families; the legacy
 // shadowstream ciphers are unauthenticated, so the daemon rejects them too.
@@ -57,73 +101,23 @@ export function sameHubShadowsocks(a: HubShadowsocksCreds, b: HubShadowsocksCred
   );
 }
 
-/** Every node the hub named, deduplicated, or null when nothing changed. Caches
- *  every one, since one node's credentials would strand the client on rotation. */
-export function mergeAdvertisedCreds(
-  current: HubShadowsocksCreds[],
-  advertised: unknown[]
-): HubShadowsocksCreds[] | null {
-  const next: HubShadowsocksCreds[] = [];
-  for (const candidate of advertised) {
-    if (!isHubShadowsocksCreds(candidate)) continue;
-    const normalized = normalizeHubShadowsocksCreds(candidate);
-    if (next.some((c) => sameHubShadowsocks(c, normalized))) continue;
-    next.push(normalized);
-  }
-  if (next.length === 0) return null;
+const SHADOWSOCKS: CredKind<HubShadowsocksCreds> = {
+  isValid: isHubShadowsocksCreds,
+  normalize: normalizeHubShadowsocksCreds,
+  same: sameHubShadowsocks
+};
 
-  // Keep the node that last worked in front when the hub still lists it, so a
-  // refresh does not undo promoteCreds.
-  const leader = current[0];
-  if (leader) {
-    const at = next.findIndex((c) => sameHubShadowsocks(c, leader));
-    if (at > 0) next.unshift(next.splice(at, 1)[0]);
-  }
+export const mergeAdvertisedCreds = (current: readonly HubShadowsocksCreds[], advertised: unknown[]) =>
+  mergeAdvertised(SHADOWSOCKS, current, advertised);
 
-  const unchanged =
-    next.length === current.length && next.every((c, i) => sameHubShadowsocks(c, current[i]));
-  return unchanged ? null : next;
-}
+export const promoteCreds = promoteEntry<HubShadowsocksCreds>;
 
-/** Moves the entry that just worked to the front, so the next start skips the dead ones. */
-export function promoteCreds(
-  list: HubShadowsocksCreds[],
-  index: number
-): HubShadowsocksCreds[] | null {
-  if (index <= 0 || index >= list.length) return null;
-  const next = list.slice();
-  next.unshift(next.splice(index, 1)[0]);
-  return next;
-}
-
-/** Tries every cached node until one answers, reporting which index won. A node
- *  that throws or has a rotated key must not end the search. */
-export async function firstWorkingCreds<T>(
-  list: HubShadowsocksCreds[],
+export const firstWorkingCreds = <T>(
+  list: readonly HubShadowsocksCreds[],
   attempt: (creds: HubShadowsocksCreds, index: number) => Promise<T | null>,
   onError?: (err: unknown, index: number) => void
-): Promise<{ value: T; index: number } | null> {
-  for (const [index, creds] of list.entries()) {
-    try {
-      const value = await attempt(creds, index);
-      if (value !== null && value !== undefined) return { value, index };
-    } catch (err) {
-      onError?.(err, index);
-    }
-  }
-  return null;
-}
+) => firstWorking(list, attempt, onError);
 
-/** Accepts the pre-list single object an existing install still has on disk. */
-export function restoreCachedCreds(stored: unknown): HubShadowsocksCreds[] {
-  if (!stored) return [];
-  const list = Array.isArray(stored) ? stored : [stored];
-  const out: HubShadowsocksCreds[] = [];
-  for (const candidate of list) {
-    if (!isHubShadowsocksCreds(candidate)) continue;
-    const normalized = normalizeHubShadowsocksCreds(candidate);
-    if (out.some((c) => sameHubShadowsocks(c, normalized))) continue;
-    out.push(normalized);
-  }
-  return out;
-}
+export const restoreCachedCreds = (stored: unknown) => restoreCached(SHADOWSOCKS, stored);
+
+export const seedCachedCreds = (stored: unknown) => seedCached(SHADOWSOCKS, stored, DEFAULT_HUB_SHADOWSOCKS);

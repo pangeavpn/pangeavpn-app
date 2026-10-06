@@ -6,6 +6,8 @@ import (
 	"errors"
 	"net/netip"
 	"testing"
+
+	"golang.zx2c4.com/wireguard/windows/tunnel/winipcfg"
 )
 
 func TestPhysicalDefaultRoute_PrefersTheCheapestGatewayOnAPhysicalInterface(t *testing.T) {
@@ -21,6 +23,21 @@ func TestPhysicalDefaultRoute_PrefersTheCheapestGatewayOnAPhysicalInterface(t *t
 	}
 	if iface != "Ethernet 2" || gateway != "10.0.1.1" {
 		t.Fatalf("route = %s via %s, want Ethernet 2 via 10.0.1.1", iface, gateway)
+	}
+}
+
+func TestPhysicalDefaultRoute_AcceptsAnOnLinkDefaultOnAPointToPointLink(t *testing.T) {
+	rows := []windowsRoute{
+		{name: "pangeavpn", up: true, ifType: winipcfg.IfTypePropVirtual, gateway: netip.MustParseAddr("0.0.0.0"), metric: 1},
+		{name: "Cellular", up: true, ifType: winipcfg.IfTypeWwanpp, gateway: netip.MustParseAddr("0.0.0.0"), metric: 30},
+		{name: "Ethernet", up: true, ifType: winipcfg.IfTypeEthernetCSMACD, gateway: netip.MustParseAddr("0.0.0.0"), metric: 5},
+	}
+	iface, gateway, err := physicalDefaultRoute(rows)
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if iface != "Cellular" || gateway != "" {
+		t.Fatalf("route = %s via %q, want Cellular on-link", iface, gateway)
 	}
 }
 

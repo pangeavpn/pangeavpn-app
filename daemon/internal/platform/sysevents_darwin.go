@@ -22,5 +22,5 @@ func WatchSystemEvents(ctx context.Context) (<-chan SystemEvent, error) {
 	}
 	// os.NewFile hands the fd to the runtime poller so Close unblocks Read.
 	f := os.NewFile(uintptr(fd), "route-socket")
-	return watchRouteEvents(ctx, f), nil
+	return watchRouteEvents(ctx, f, routeEventMinGap), nil
 }

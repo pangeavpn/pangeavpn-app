@@ -1,9 +1,11 @@
 /** Ways the app may reach the hub. ensureHub tries each enabled one in order. */
-export type HubMethod = "directIp" | "shadowsocks" | "fronted" | "normal";
+export type HubMethod = "directIp" | "reality" | "shadowsocks" | "fronted" | "normal";
 
 export interface HubMethods {
   /** Cached hub IP, and DoH-resolved IP with no SNI. Survives a Lockdown lock. */
   directIp: boolean;
+  /** Hub traffic through the daemon's REALITY proxy, to a user pinned to the hub. */
+  reality: boolean;
   /** Hub traffic through the daemon's Shadowsocks proxy. */
   shadowsocks: boolean;
   /** The envelope relayed by an edge worker on shared CDN address space. */
@@ -12,10 +14,11 @@ export interface HubMethods {
   normal: boolean;
 }
 
-// Attempt order: directIp needs no lookup, fronted only leaks timing (see
-// secureChannel), normal puts the hub's name on the wire in cleartext.
+// Attempt order: directIp needs no lookup, REALITY passes for TLS where SS-2022
+// is flagged as random, fronted only leaks timing, normal names the hub in cleartext.
 export const HUB_METHOD_ORDER: readonly HubMethod[] = [
   "directIp",
+  "reality",
   "shadowsocks",
   "fronted",
   "normal"
@@ -23,6 +26,7 @@ export const HUB_METHOD_ORDER: readonly HubMethod[] = [
 
 export const DEFAULT_HUB_METHODS: HubMethods = {
   directIp: true,
+  reality: true,
   shadowsocks: true,
   fronted: true,
   normal: false
@@ -30,10 +34,13 @@ export const DEFAULT_HUB_METHODS: HubMethods = {
 
 /** Bumped when a method's default changes; normalizeHubMethods re-applies the
  *  new default once for anything stored below this. Persisted as `rev`. */
-export const HUB_METHODS_REV = 1;
+export const HUB_METHODS_REV = 2;
 
-/** Methods whose default flipped on at HUB_METHODS_REV 1. */
-const REV_1_DEFAULTS: readonly HubMethod[] = ["shadowsocks", "fronted"];
+/** Methods whose default flipped on at each rev. */
+const REV_DEFAULTS: ReadonlyArray<{ rev: number; methods: readonly HubMethod[] }> = [
+  { rev: 1, methods: ["shadowsocks", "fronted"] },
+  { rev: 2, methods: ["reality"] }
+];
 
 export function isHubMethod(value: unknown): value is HubMethod {
   return typeof value === "string" && (HUB_METHOD_ORDER as readonly string[]).includes(value);
@@ -68,20 +75,22 @@ export function normalizeHubMethods(raw: unknown): HubMethods {
   if (HUB_METHOD_ORDER.some((method) => typeof source[method] === "boolean")) {
     methods = {
       directIp: source.directIp === true,
+      reality: source.reality === true,
       shadowsocks: source.shadowsocks === true,
       fronted: source.fronted === true,
       normal: source.normal === true
     };
-    if (typeof source.rev !== "number" || source.rev < HUB_METHODS_REV) {
-      for (const method of REV_1_DEFAULTS) {
-        methods[method] = DEFAULT_HUB_METHODS[method];
-      }
+    const storedRev = typeof source.rev === "number" ? source.rev : 0;
+    for (const { rev, methods: flipped } of REV_DEFAULTS) {
+      if (storedRev >= rev) continue;
+      for (const method of flipped) methods[method] = DEFAULT_HUB_METHODS[method];
     }
   } else {
     // Migration: directIpOnly defaulted true ("never touch the domain"), so
     // normal is its inverse; a file this old predates the two newer methods.
     methods = {
       directIp: source.directIpEnabled !== false,
+      reality: DEFAULT_HUB_METHODS.reality,
       shadowsocks: DEFAULT_HUB_METHODS.shadowsocks,
       fronted: DEFAULT_HUB_METHODS.fronted,
       normal: source.directIpOnly === false

@@ -5,6 +5,7 @@ export type Translate = (key: MessageKey, params?: Record<string, string | numbe
 
 export const HUB_METHOD_TITLE_KEYS: Record<HubMethodName, MessageKey> = {
   directIp: "settings.provisioning.directIp.title",
+  reality: "settings.provisioning.hubReality.title",
   shadowsocks: "settings.provisioning.hubShadowsocks.title",
   fronted: "settings.provisioning.hubFronted.title",
   normal: "settings.provisioning.hubNormal.title"
@@ -33,7 +34,11 @@ export function hubActiveText(status: HubStatus, t: Translate): string {
  *  failure of the network. */
 export function hubTestText(result: HubMethodTestResult, t: Translate): string {
   if (result.unavailable) {
-    return t(UNAVAILABLE_KEYS[result.unavailable]);
+    const key =
+      result.unavailable === "noCredentials" && result.method === "reality"
+        ? "settings.provisioning.result.noRealityCredentials"
+        : UNAVAILABLE_KEYS[result.unavailable];
+    return t(key);
   }
   if (!result.ok) {
     return t("settings.provisioning.result.fail");

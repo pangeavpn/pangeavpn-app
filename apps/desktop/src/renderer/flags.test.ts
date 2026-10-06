@@ -3,7 +3,7 @@ import test from "node:test";
 import { hasFlag } from "./flags.ts";
 
 test("every country the hub serves or is about to serve has a drawn flag", () => {
-  for (const code of ["GB", "US", "NL", "PL", "CH"]) {
+  for (const code of ["GB", "US", "NL", "PL", "CH", "ES"]) {
     assert.ok(hasFlag(code), `${code} falls back to the globe`);
   }
 });

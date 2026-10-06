@@ -18,6 +18,7 @@ import (
 	"time"
 
 	box "github.com/sagernet/sing-box"
+	"github.com/sagernet/sing-box/adapter/certificate"
 	"github.com/sagernet/sing-box/adapter/endpoint"
 	"github.com/sagernet/sing-box/adapter/inbound"
 	"github.com/sagernet/sing-box/adapter/outbound"
@@ -39,7 +40,7 @@ func serverBoxContext(ctx context.Context) context.Context {
 	outbounds := outbound.NewRegistry()
 	direct.RegisterOutbound(outbounds)
 	sbshadowsocks.RegisterOutbound(outbounds)
-	return box.Context(ctx, inbounds, outbounds, endpoint.NewRegistry(), newDNSRegistry(), boxservice.NewRegistry())
+	return box.Context(ctx, inbounds, outbounds, endpoint.NewRegistry(), newDNSRegistry(), boxservice.NewRegistry(), certificate.NewRegistry())
 }
 
 func loopbackAddr() *badoption.Addr {

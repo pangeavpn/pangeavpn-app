@@ -127,6 +127,7 @@ const multihopEntryHint = document.getElementById("multihopEntryHint") as HTMLEl
 const hubActiveDot = document.getElementById("hubActiveDot") as HTMLElement;
 const hubActiveTextEl = document.getElementById("hubActiveText") as HTMLElement;
 const hubDirectIpToggle = document.getElementById("hubDirectIpToggle") as HTMLInputElement;
+const hubRealityToggle = document.getElementById("hubRealityToggle") as HTMLInputElement;
 const hubShadowsocksToggle = document.getElementById("hubShadowsocksToggle") as HTMLInputElement;
 const hubFrontedToggle = document.getElementById("hubFrontedToggle") as HTMLInputElement;
 const hubNormalToggle = document.getElementById("hubNormalToggle") as HTMLInputElement;
@@ -242,6 +243,7 @@ function updateSettingsSummaries(): void {
 
   const provisioning: string[] = [];
   if (hubDirectIpToggle.checked) provisioning.push(t("settings.provisioning.directIp.title"));
+  if (hubRealityToggle.checked) provisioning.push(t("settings.provisioning.hubReality.title"));
   if (hubShadowsocksToggle.checked) provisioning.push(t("settings.provisioning.hubShadowsocks.title"));
   if (hubFrontedToggle.checked) provisioning.push(t("settings.provisioning.hubFronted.title"));
   if (hubNormalToggle.checked) provisioning.push(t("settings.provisioning.hubNormal.title"));
@@ -1916,6 +1918,7 @@ settingsOverlay.addEventListener("change", updateSettingsSummaries);
 
 const hubMethodToggles: Record<HubMethodName, HTMLInputElement> = {
   directIp: hubDirectIpToggle,
+  reality: hubRealityToggle,
   shadowsocks: hubShadowsocksToggle,
   fronted: hubFrontedToggle,
   normal: hubNormalToggle
@@ -3636,7 +3639,7 @@ async function refreshServersWithRetry(): Promise<void> {
 function buildLoadIndicator(load: number | null | undefined): HTMLElement | null {
   if (typeof load !== "number" || !Number.isFinite(load)) return null;
   const pct = Math.max(0, Math.min(100, Math.round(load)));
-  const level = pct < 40 ? "low" : pct < 75 ? "mid" : "high";
+  const level = pct > 90 ? "high" : pct > 75 ? "mid" : "low";
   const el = document.createElement("div");
   el.className = `server-picker-overlay-item-load load-${level}`;
   el.title = t("serverPicker.load", { pct });

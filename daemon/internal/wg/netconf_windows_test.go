@@ -3,7 +3,9 @@
 package wg
 
 import (
+	"fmt"
 	"net/netip"
+	"slices"
 	"testing"
 
 	"golang.zx2c4.com/wireguard/windows/tunnel/winipcfg"
@@ -202,5 +204,98 @@ func TestWindowsDNSMatches(t *testing.T) {
 				t.Errorf("windowsDNSMatches(%v, %v) = %t, want %t", tc.current, tc.want, got, tc.match)
 			}
 		})
+	}
+}
+
+func routeRow(t *testing.T, luid winipcfg.LUID, destination, nextHop string, metric uint32, protocol winipcfg.RouteProtocol) winipcfg.MibIPforwardRow2 {
+	t.Helper()
+	var row winipcfg.MibIPforwardRow2
+	row.InterfaceLUID = luid
+	if err := row.DestinationPrefix.SetPrefix(netip.MustParsePrefix(destination)); err != nil {
+		t.Fatal(err)
+	}
+	if err := row.NextHop.SetAddr(netip.MustParseAddr(nextHop)); err != nil {
+		t.Fatal(err)
+	}
+	row.Metric = metric
+	row.Protocol = protocol
+	return row
+}
+
+func onLink(prefixes ...string) []*winipcfg.RouteData {
+	out := make([]*winipcfg.RouteData, 0, len(prefixes))
+	for _, p := range prefixes {
+		out = append(out, &winipcfg.RouteData{Destination: netip.MustParsePrefix(p), NextHop: netip.IPv4Unspecified()})
+	}
+	return out
+}
+
+func prefixStrings(rows []*winipcfg.MibIPforwardRow2) []string {
+	out := make([]string, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, fmt.Sprintf("%s/m%d", row.DestinationPrefix.Prefix(), row.Metric))
+	}
+	return out
+}
+
+// The customer's state: Allow LAN re-includes the tunnel's own /32, and a flush after
+// the address was set had deleted Windows' Local host route for it.
+func TestWithoutInterfaceHostRoutesDropsOnlyTheOwnAddress(t *testing.T) {
+	routes := []netip.Prefix{
+		netip.MustParsePrefix("0.0.0.0/1"),
+		netip.MustParsePrefix("10.10.1.57/32"),
+		netip.MustParsePrefix("10.10.1.0/24"),
+		netip.MustParsePrefix("1.1.1.1/32"),
+	}
+	for _, address := range []string{"10.10.1.57/32", "10.10.1.57/24"} {
+		got := withoutInterfaceHostRoutes(routes, []netip.Prefix{netip.MustParsePrefix(address)})
+		want := []netip.Prefix{routes[0], routes[2], routes[3]}
+		if !slices.Equal(got, want) {
+			t.Errorf("address %s: got %v, want %v", address, got, want)
+		}
+	}
+}
+
+// Only Windows' host route for the address survives; its multicast and broadcast
+// rows go as FlushRoutes took them, or a metric-0 tunnel swallows LAN discovery.
+func TestPlanWindowsRouteSyncKeepsOnlyTheAddressHostRoute(t *testing.T) {
+	const tunnel, other = winipcfg.LUID(53 << 48), winipcfg.LUID(71 << 48)
+	table := []winipcfg.MibIPforwardRow2{
+		routeRow(t, tunnel, "10.10.1.57/32", "0.0.0.0", 256, winipcfg.RouteProtocolLocal),
+		routeRow(t, tunnel, "224.0.0.0/4", "0.0.0.0", 256, winipcfg.RouteProtocolLocal),
+		routeRow(t, tunnel, "255.255.255.255/32", "0.0.0.0", 256, winipcfg.RouteProtocolLocal),
+		routeRow(t, tunnel, "10.10.1.57/32", "0.0.0.0", 0, winipcfg.RouteProtocolNetMgmt),
+		routeRow(t, tunnel, "1.0.0.0/8", "0.0.0.0", 0, winipcfg.RouteProtocolNetMgmt),
+		routeRow(t, tunnel, "8.8.8.8/32", "0.0.0.0", 0, winipcfg.RouteProtocolNetMgmt),
+		routeRow(t, tunnel, "2.0.0.0/7", "0.0.0.0", 5, winipcfg.RouteProtocolNetMgmt),
+		routeRow(t, other, "9.9.9.9/32", "10.3.0.1", 0, winipcfg.RouteProtocolNetMgmt),
+		routeRow(t, other, "10.3.6.159/32", "0.0.0.0", 256, winipcfg.RouteProtocolLocal),
+	}
+	addresses := []netip.Prefix{netip.MustParsePrefix("10.10.1.57/32")}
+	stale, missing := planWindowsRouteSync(table, tunnel, addresses, onLink("1.0.0.0/8", "2.0.0.0/7", "4.0.0.0/6", "4.0.0.0/6"))
+
+	want := []string{"224.0.0.0/4/m256", "255.255.255.255/32/m256", "10.10.1.57/32/m0", "8.8.8.8/32/m0", "2.0.0.0/7/m5"}
+	if got := prefixStrings(stale); !slices.Equal(got, want) {
+		t.Errorf("stale = %v, want %v", got, want)
+	}
+	var added []string
+	for _, route := range missing {
+		added = append(added, route.Destination.String())
+	}
+	if want := []string{"2.0.0.0/7", "4.0.0.0/6"}; !slices.Equal(added, want) {
+		t.Errorf("missing = %v, want %v", added, want)
+	}
+}
+
+func TestHasLocalHostRouteIgnoresOurOwnRouteForTheAddress(t *testing.T) {
+	const tunnel = winipcfg.LUID(53 << 48)
+	addr := netip.MustParseAddr("10.10.1.57")
+	ours := []winipcfg.MibIPforwardRow2{routeRow(t, tunnel, "10.10.1.57/32", "0.0.0.0", 0, winipcfg.RouteProtocolNetMgmt)}
+	if hasLocalHostRoute(ours, tunnel, addr) {
+		t.Fatal("a NetMgmt route for the address must not count as Windows' Local host route")
+	}
+	windowsOwn := append(ours, routeRow(t, tunnel, "10.10.1.57/32", "0.0.0.0", 256, winipcfg.RouteProtocolLocal))
+	if !hasLocalHostRoute(windowsOwn, tunnel, addr) {
+		t.Fatal("the Local host route was not found")
 	}
 }

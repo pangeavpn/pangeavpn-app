@@ -103,13 +103,25 @@ type fakeNaiveManager struct {
 	// boundLocalPort, when non-zero, overrides the default BoundLocalPort
 	// return value below.
 	boundLocalPort int
+
+	// startHook runs inside Start outside the lock, like fakeCloakManager's, so a
+	// test can act while a dial is in flight.
+	startHook func(ctx context.Context) error
 }
 
 func (f *fakeNaiveManager) Start(ctx context.Context, profile state.NaiveProfile) error {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.startCalled = true
 	f.startLocalPort = profile.LocalPort
+	hook := f.startHook
+	f.mu.Unlock()
+	if hook != nil {
+		if err := hook(ctx); err != nil {
+			return err
+		}
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if f.startErr != nil {
 		return f.startErr
 	}
@@ -637,9 +649,18 @@ type fakeKillSwitch struct {
 	updateCount     int
 	clearCount      int
 	dropTunnelCount int
+	releaseCount    int
 	enableErr       error
 	updateErr       error
 	clearErr        error
+	releaseErr      error
+}
+
+func (f *fakeKillSwitch) ReleaseOrphanedSettings() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.releaseCount++
+	return f.releaseErr
 }
 
 func (f *fakeKillSwitch) DropTunnelPermit(_ context.Context) error {
@@ -785,6 +806,8 @@ func newTestServiceFull(
 	// Default the OS connectivity oracle to "unknown" so networkLooksUsable
 	// falls back to networkKey; offline tests override this explicitly.
 	svc.hostInternet = func() (bool, bool) { return false, false }
+	// Hub probes dial real sockets; tests that exercise them opt back in.
+	svc.reachProbe = nil
 	return svc
 }
 
