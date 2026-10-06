@@ -14,7 +14,7 @@ import (
 
 func newInPlaceTestService(t *testing.T, wgMgr *fakeInPlaceWGManager, ks *fakeKillSwitch, profiles ...state.Profile) *Service {
 	t.Helper()
-	svc := NewService(state.NewMachine(), state.NewLogStore(100), testConfigStore(t, profiles...), &fakeCloakManager{}, &fakeNaiveManager{}, &fakeRealityManager{}, &fakeHysteria2Manager{}, &fakeShadowsocksManager{}, &fakeSnowflakeManager{}, wgMgr, ks)
+	svc := NewService(state.NewMachine(), state.NewLogStore(100), testConfigStore(t, profiles...), &fakeCloakManager{}, &fakeNaiveManager{}, &fakeRealityManager{}, &fakeHysteria2Manager{}, &fakeShadowsocksManager{}, &fakeAnyTLSManager{}, &fakeSnowflakeManager{}, wgMgr, ks)
 	stubSessionRecordStore(t)
 	svc.handshakeTimeout = 200 * time.Millisecond
 	svc.networkRepair = func(context.Context, []string) ([]string, error) { return nil, nil }

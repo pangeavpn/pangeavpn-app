@@ -80,6 +80,14 @@ type shadowsocksManager interface {
 	Status() state.TransportStatus
 }
 
+// anytlsManager is transport.Manager (Stop) plus Start/Status with AnyTLS's
+// concrete types. anytls.Manager satisfies this directly.
+type anytlsManager interface {
+	transport.Manager
+	Start(ctx context.Context, profile state.AnyTLSProfile) error
+	Status() state.TransportStatus
+}
+
 // shadowsocksProxyManager carries hub control-plane traffic: no WireGuard, no
 // activeTransport, runs before a profile exists. shadowsocks.ProxyManager fits.
 type shadowsocksProxyManager interface {
@@ -127,6 +135,7 @@ type Service struct {
 	reality     realityManager
 	hysteria2   hysteria2Manager
 	shadowsocks shadowsocksManager
+	anytls      anytlsManager
 	snowflake   snowflakeManager
 	wg          wg.Manager
 	killSwitch  platform.KillSwitch
@@ -168,7 +177,7 @@ type Service struct {
 	sessionOpts ConnectOptions
 
 	// activeMu guards activeTransportKind, which of {cloak, naive, reality, hysteria2,
-	// shadowsocks, snowflake} is live for the session; empty when disconnected.
+	// shadowsocks, anytls, snowflake} is live for the session; empty when disconnected.
 	activeMu            sync.RWMutex
 	activeTransportKind string
 	// connectingTransportKind is the cascade candidate currently being tried,
@@ -372,6 +381,7 @@ func NewService(
 	realityManager realityManager,
 	hysteria2Manager hysteria2Manager,
 	shadowsocksManager shadowsocksManager,
+	anytlsManager anytlsManager,
 	snowflakeManager snowflakeManager,
 	wgManager wg.Manager,
 	killSwitch platform.KillSwitch,
@@ -385,6 +395,7 @@ func NewService(
 		reality:        realityManager,
 		hysteria2:      hysteria2Manager,
 		shadowsocks:    shadowsocksManager,
+		anytls:         anytlsManager,
 		snowflake:      snowflakeManager,
 		wg:             wgManager,
 		killSwitch:     killSwitch,
@@ -515,6 +526,8 @@ func (s *Service) managerForKind(kind string) transport.Manager {
 		return s.hysteria2
 	case "shadowsocks":
 		return s.shadowsocks
+	case "anytls":
+		return s.anytls
 	case "snowflake":
 		return s.snowflake
 	case transportKindWireGuard:
@@ -563,8 +576,8 @@ type ConnectOptions struct {
 	// daemon restarts (re-applied on startup rather than cleared as stale).
 	Lockdown bool
 
-	// "cloak", "naive", "reality", "hysteria2", "shadowsocks", "snowflake", or
-	// "" for the auto cascade (see autoCascadeOrder).
+	// "cloak", "naive", "reality", "hysteria2", "shadowsocks", "anytls",
+	// "snowflake", or "" for the auto cascade (see autoCascadeOrder).
 	PreferredTransport string
 }
 
@@ -1080,6 +1093,41 @@ func (s *Service) startShadowsocksTransport(ctx context.Context, profile *state.
 	return nil
 }
 
+// startAnyTLSTransport runs AnyTLS's start sequence, mirroring
+// startHysteria2Transport. Cleans up (stops anytls) on its own failure.
+func (s *Service) startAnyTLSTransport(ctx context.Context, profile *state.Profile, wireGuardProfile *state.WireGuardProfile) error {
+	// De-alias from the config store's shared *AnyTLSProfile before mutating LocalPort.
+	anytlsCopy := *profile.AnyTLS
+	profile.AnyTLS = &anytlsCopy
+
+	anytlsStartProfile := *profile.AnyTLS
+	anytlsStartProfile.LocalPort = 0
+	if err := s.anytls.Start(ctx, anytlsStartProfile); err != nil {
+		return fmt.Errorf("start: %w", err)
+	}
+
+	profile.AnyTLS.LocalPort = s.rebindWireGuardEndpoint(s.anytls, profile.AnyTLS.LocalPort, wireGuardProfile)
+	anytlsRunning := func() bool { return s.anytls.Status().Running }
+	if err := s.waitForManagedTransportStable(ctx, anytlsRunning, profile.AnyTLS.LocalPort, 200*time.Millisecond); err != nil {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		_ = s.anytls.Stop(cleanupCtx)
+		cleanupCancel()
+		return err
+	}
+	if waiter, ok := s.anytls.(transport.SessionWaiter); ok {
+		waitCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		err := waiter.WaitForSession(waitCtx, 10*time.Second)
+		cancel()
+		if err != nil {
+			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 2*time.Second)
+			_ = s.anytls.Stop(cleanupCtx)
+			cleanupCancel()
+			return fmt.Errorf("session: %w", err)
+		}
+	}
+	return nil
+}
+
 // startSnowflakeTransport runs Snowflake's start sequence, mirroring
 // startHysteria2Transport. Cleans up (stops snowflake) on its own failure.
 func (s *Service) startSnowflakeTransport(ctx context.Context, profile *state.Profile, wireGuardProfile *state.WireGuardProfile) error {
@@ -1201,6 +1249,11 @@ func (s *Service) transportCandidates(profile *state.Profile, preferredTransport
 			return nil, errors.New("shadowsocks transport requested but this profile has no shadowsocks configuration")
 		}
 		return []transportCandidate{{"shadowsocks", s.startShadowsocksTransport}}, nil
+	case "anytls":
+		if profile.AnyTLS == nil {
+			return nil, errors.New("anytls transport requested but this profile has no anytls configuration")
+		}
+		return []transportCandidate{{"anytls", s.startAnyTLSTransport}}, nil
 	case "snowflake":
 		// Gated off for this release (see snowflakeReleaseGated). Re-enable by
 		// removing this guard.
@@ -1218,7 +1271,7 @@ func (s *Service) transportCandidates(profile *state.Profile, preferredTransport
 
 // autoCascadeOrder is the auto-mode fallback order, chosen for censorship
 // resistance rather than build history.
-var autoCascadeOrder = []string{"reality", "cloak", "shadowsocks", "hysteria2", "naive", "snowflake"}
+var autoCascadeOrder = []string{"reality", "cloak", "shadowsocks", "hysteria2", "naive", "anytls", "snowflake"}
 
 // autoCascade builds the auto-mode candidate list in autoCascadeOrder, keeping
 // only the transports this profile actually configures.
@@ -1258,6 +1311,11 @@ func (s *Service) transportStarter(profile *state.Profile, kind string) (transpo
 			return nil, false
 		}
 		return s.startShadowsocksTransport, true
+	case "anytls":
+		if profile.AnyTLS == nil {
+			return nil, false
+		}
+		return s.startAnyTLSTransport, true
 	case "snowflake":
 		if snowflakeReleaseGated || profile.Snowflake == nil {
 			return nil, false
@@ -1527,6 +1585,10 @@ func transportLocalPort(profile *state.Profile, kind string) int {
 	case "shadowsocks":
 		if profile.Shadowsocks != nil {
 			return profile.Shadowsocks.LocalPort
+		}
+	case "anytls":
+		if profile.AnyTLS != nil {
+			return profile.AnyTLS.LocalPort
 		}
 	case "snowflake":
 		if profile.Snowflake != nil {
@@ -2201,6 +2263,7 @@ func (s *Service) Status(ctx context.Context) state.StatusResponse {
 	realityStatus := s.reality.Status()
 	hysteria2Status := s.hysteria2.Status()
 	shadowsocksStatus := s.shadowsocks.Status()
+	anytlsStatus := s.anytls.Status()
 	snowflakeStatus := s.snowflake.Status()
 
 	wgStatus := state.WireGuardStatus{Running: false, Detail: "not connected"}
@@ -2232,6 +2295,7 @@ func (s *Service) Status(ctx context.Context) state.StatusResponse {
 		Reality:             realityStatus,
 		Hysteria2:           hysteria2Status,
 		Shadowsocks:         shadowsocksStatus,
+		AnyTLS:              anytlsStatus,
 		Snowflake:           snowflakeStatus,
 		WireGuard:           wgStatus,
 		KillSwitchActive:    s.killSwitch.Active(),
@@ -2515,6 +2579,8 @@ func (s *Service) runHealthCheck(ctx context.Context) {
 		transportRunning = s.hysteria2.Status().Running
 	case "shadowsocks":
 		transportRunning = s.shadowsocks.Status().Running
+	case "anytls":
+		transportRunning = s.anytls.Status().Running
 	case "snowflake":
 		transportRunning = s.snowflake.Status().Running
 	case transportKindWireGuard:
@@ -3180,6 +3246,16 @@ func (s *Service) recoverActiveTransport(ctx context.Context, profile state.Prof
 		start = func(ctx context.Context) error { return s.shadowsocks.Start(ctx, *profile.Shadowsocks) }
 		running = func() bool { return s.shadowsocks.Status().Running }
 		localPort = profile.Shadowsocks.LocalPort
+	case "anytls":
+		if s.anytls.Status().Running {
+			return nil
+		}
+		if profile.AnyTLS == nil {
+			return errors.New("active transport is anytls but profile has no anytls config")
+		}
+		start = func(ctx context.Context) error { return s.anytls.Start(ctx, *profile.AnyTLS) }
+		running = func() bool { return s.anytls.Status().Running }
+		localPort = profile.AnyTLS.LocalPort
 	case "snowflake":
 		if s.snowflake.Status().Running {
 			return nil
@@ -3584,6 +3660,19 @@ func (s *Service) restoreTransportForAdoption(ctx context.Context, profile *stat
 			return fmt.Errorf("wireguard tunnel is already running but shadowsocks restore failed: %w", err)
 		}
 		return nil
+	case "anytls":
+		if s.anytls.Status().Running {
+			return nil
+		}
+		if profile.AnyTLS == nil {
+			return errors.New("wireguard tunnel is already running but this profile has no anytls configuration to restore")
+		}
+		s.machine.Set(state.StateConnecting, "restoring anytls for active tunnel")
+		s.logs.Add(state.LogInfo, state.SourceDaemon, "wireguard was already running; restoring anytls process")
+		if err := s.anytls.Start(ctx, *profile.AnyTLS); err != nil {
+			return fmt.Errorf("wireguard tunnel is already running but anytls restore failed: %w", err)
+		}
+		return nil
 	case "snowflake":
 		if snowflakeReleaseGated {
 			return errors.New("snowflake transport is temporarily unavailable")
@@ -3705,6 +3794,10 @@ func deepCopyProfile(profile state.Profile) state.Profile {
 	if profile.Shadowsocks != nil {
 		shadowsocksCopy := *profile.Shadowsocks
 		out.Shadowsocks = &shadowsocksCopy
+	}
+	if profile.AnyTLS != nil {
+		anytlsCopy := *profile.AnyTLS
+		out.AnyTLS = &anytlsCopy
 	}
 	if profile.Snowflake != nil {
 		snowflakeCopy := *profile.Snowflake
@@ -3939,7 +4032,7 @@ func (s *Service) hubProxyRemotes() []string {
 	return ipLiterals(hosts)
 }
 
-// killSwitchPermits is the cloak, naive, reality, hysteria2, and snowflake endpoints
+// killSwitchPermits is the cloak, naive, reality, hysteria2, anytls, and snowflake endpoints
 // (whichever are configured) plus any bypassHosts needing direct reachability.
 func killSwitchPermitsFor(profile state.Profile, _ bool) []string {
 	return killSwitchPermits(profile)
@@ -3993,11 +4086,16 @@ func transportPermitHosts(profile state.Profile) []string {
 			out = append(out, host)
 		}
 	}
+	if profile.AnyTLS != nil {
+		if host := strings.TrimSpace(profile.AnyTLS.RemoteHost); host != "" {
+			out = append(out, host)
+		}
+	}
 	return append(out, snowflakeHosts(profile.Snowflake)...)
 }
 
 // withTransportBypassHosts adds the cloak, naive, reality, hysteria2,
-// shadowsocks and snowflake (whichever are configured) remote hosts to the bypass list.
+// shadowsocks, anytls and snowflake (whichever are configured) remote hosts to the bypass list.
 func withTransportBypassHosts(profile state.Profile) state.WireGuardProfile {
 	copyProfile := profile.WireGuard
 	copyProfile.DNS = append([]string(nil), profile.WireGuard.DNS...)
@@ -4073,6 +4171,9 @@ func (s *Service) vouchedHosts() map[string]bool {
 		}
 		if profile.Shadowsocks != nil {
 			hosts = append(hosts, profile.Shadowsocks.RemoteHost)
+		}
+		if profile.AnyTLS != nil {
+			hosts = append(hosts, profile.AnyTLS.RemoteHost)
 		}
 		if host, _, err := net.SplitHostPort(profile.WireGuard.DirectEndpoint); err == nil {
 			hosts = append(hosts, host)

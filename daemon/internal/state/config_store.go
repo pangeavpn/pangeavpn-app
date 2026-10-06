@@ -396,6 +396,12 @@ func profilePortClaims(profile Profile) ([]portClaim, error) {
 		}
 		claims = append(claims, portClaim{"shadowsocks", profile.Shadowsocks.LocalPort})
 	}
+	if profile.AnyTLS != nil {
+		if profile.AnyTLS.RemoteHost == "" {
+			return nil, fmt.Errorf("profile %s anytls missing remote host", profile.ID)
+		}
+		claims = append(claims, portClaim{"anytls", profile.AnyTLS.LocalPort})
+	}
 	if profile.Snowflake != nil {
 		if profile.Snowflake.BrokerURL == "" {
 			return nil, fmt.Errorf("profile %s snowflake missing broker url", profile.ID)
@@ -437,6 +443,7 @@ func cloneProfile(profile Profile) Profile {
 	copyProfile.Reality = cloneRealityProfile(profile.Reality)
 	copyProfile.Hysteria2 = cloneHysteria2Profile(profile.Hysteria2)
 	copyProfile.Shadowsocks = cloneShadowsocksProfile(profile.Shadowsocks)
+	copyProfile.AnyTLS = cloneAnyTLSProfile(profile.AnyTLS)
 	copyProfile.Snowflake = cloneSnowflakeProfile(profile.Snowflake)
 	return copyProfile
 }
@@ -474,6 +481,16 @@ func cloneHysteria2Profile(profile *Hysteria2Profile) *Hysteria2Profile {
 // cloneShadowsocksProfile mirrors cloneNaiveProfile: ShadowsocksProfile is
 // flat (scalar fields only), so a value copy behind a fresh pointer is enough.
 func cloneShadowsocksProfile(profile *ShadowsocksProfile) *ShadowsocksProfile {
+	if profile == nil {
+		return nil
+	}
+	copyProfile := *profile
+	return &copyProfile
+}
+
+// cloneAnyTLSProfile mirrors cloneNaiveProfile: AnyTLSProfile is flat
+// (scalar fields only), so a value copy behind a fresh pointer is enough.
+func cloneAnyTLSProfile(profile *AnyTLSProfile) *AnyTLSProfile {
 	if profile == nil {
 		return nil
 	}

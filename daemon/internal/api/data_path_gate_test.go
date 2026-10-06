@@ -110,7 +110,7 @@ func cascadeTestService(t *testing.T, passing map[string]bool) (*Service, *gated
 	reality := &fakeRealityManager{}
 	shadowsocks := &fakeShadowsocksManager{}
 	svc := newTestServiceFull(t, cloak, &fakeNaiveManager{}, reality,
-		&fakeHysteria2Manager{}, shadowsocks, &fakeSnowflakeManager{},
+		&fakeHysteria2Manager{}, shadowsocks, &fakeAnyTLSManager{}, &fakeSnowflakeManager{},
 		&fakeWGManager{}, &fakeKillSwitch{}, cascadeProfile())
 	svc.recoveryDelays = []time.Duration{0}
 	svc.networkKey = func() string { return "eth0:192.0.2.10" }
@@ -378,7 +378,7 @@ func TestRootProbeQuery_VariesWhatTheReplyWillLookLike(t *testing.T) {
 func TestProveDataPath_ProbesTheLiveTunnelInterface(t *testing.T) {
 	wgMgr := &fakeWGManager{interfaceName: "utun7"}
 	svc := newTestServiceFull(t, &fakeCloakManager{}, &fakeNaiveManager{}, &fakeRealityManager{},
-		&fakeHysteria2Manager{}, &fakeShadowsocksManager{}, &fakeSnowflakeManager{}, wgMgr, &fakeKillSwitch{}, cascadeProfile())
+		&fakeHysteria2Manager{}, &fakeShadowsocksManager{}, &fakeAnyTLSManager{}, &fakeSnowflakeManager{}, wgMgr, &fakeKillSwitch{}, cascadeProfile())
 
 	var mu sync.Mutex
 	var probedIfaces []string
@@ -493,7 +493,7 @@ func TestHandshakeTimeoutFor_RebuildsGetTheLongerBudget(t *testing.T) {
 func TestNewService_RebuildHandshakeBudgetReachesTheWait(t *testing.T) {
 	svc := NewService(state.NewMachine(), state.NewLogStore(10), testConfigStore(t),
 		&fakeCloakManager{}, &fakeNaiveManager{}, &fakeRealityManager{}, &fakeHysteria2Manager{},
-		&fakeShadowsocksManager{}, &fakeSnowflakeManager{}, &fakeWGManager{}, &fakeKillSwitch{})
+		&fakeShadowsocksManager{}, &fakeAnyTLSManager{}, &fakeSnowflakeManager{}, &fakeWGManager{}, &fakeKillSwitch{})
 	ctx := context.Background()
 	if got := handshakeTimeoutFor(withHandshakeBudget(ctx, rebuildHandshakeTimeout), svc.handshakeTimeout); got != rebuildHandshakeTimeout {
 		t.Fatalf("rebuild budget = %s, want %s", got, rebuildHandshakeTimeout)
@@ -569,7 +569,7 @@ func TestConnect_GateRejectionWithRouteWordingWalksTheWholeCascade(t *testing.T)
 func TestProveDataPath_OversizedReplyProvesTheTunnelCarriesTraffic(t *testing.T) {
 	wgMgr := &fakeWGManager{interfaceName: "utun7"}
 	svc := newTestServiceFull(t, &fakeCloakManager{}, &fakeNaiveManager{}, &fakeRealityManager{},
-		&fakeHysteria2Manager{}, &fakeShadowsocksManager{}, &fakeSnowflakeManager{}, wgMgr, &fakeKillSwitch{}, cascadeProfile())
+		&fakeHysteria2Manager{}, &fakeShadowsocksManager{}, &fakeAnyTLSManager{}, &fakeSnowflakeManager{}, wgMgr, &fakeKillSwitch{}, cascadeProfile())
 
 	svc.probeResolver = func(context.Context, string, string) error { return errDNSProbeOversizedReply }
 
@@ -603,7 +603,7 @@ func gateTestService(t *testing.T) (*Service, *fakeWGManager) {
 	t.Helper()
 	wgMgr := &fakeWGManager{interfaceName: "utun7"}
 	svc := newTestServiceFull(t, &fakeCloakManager{}, &fakeNaiveManager{}, &fakeRealityManager{},
-		&fakeHysteria2Manager{}, &fakeShadowsocksManager{}, &fakeSnowflakeManager{}, wgMgr, &fakeKillSwitch{}, cascadeProfile())
+		&fakeHysteria2Manager{}, &fakeShadowsocksManager{}, &fakeAnyTLSManager{}, &fakeSnowflakeManager{}, wgMgr, &fakeKillSwitch{}, cascadeProfile())
 	return svc, wgMgr
 }
 

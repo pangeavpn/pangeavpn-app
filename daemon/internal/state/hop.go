@@ -64,6 +64,13 @@ func ApplyHop(p Profile) Profile {
 		shadowsocks.TargetHost = loopbackHost
 		out.Shadowsocks = &shadowsocks
 	}
+	if p.AnyTLS != nil {
+		anytls := *p.AnyTLS
+		anytls.TargetPort = singBoxTargetPort(p.Hop)
+		// Same as Shadowsocks: the hop port is a loopback service on the entry.
+		anytls.TargetHost = loopbackHost
+		out.AnyTLS = &anytls
+	}
 	if p.Naive != nil {
 		naive := *p.Naive
 		naive.BridgePort = naiveBridgePort(p.Hop)
