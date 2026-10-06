@@ -11,10 +11,14 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/base64"
+	"encoding/json"
 	"encoding/pem"
+	"fmt"
 	"math/big"
 	"net"
 	"net/netip"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -28,6 +32,7 @@ import (
 	"github.com/sagernet/sing-box/option"
 	sbanytls "github.com/sagernet/sing-box/protocol/anytls"
 	"github.com/sagernet/sing-box/protocol/direct"
+	sjson "github.com/sagernet/sing/common/json"
 	"github.com/sagernet/sing/common/json/badoption"
 
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/state"
@@ -361,5 +366,77 @@ func TestE2EStartWithDifferentProfileSwitchesSession(t *testing.T) {
 	}
 	if string(got) != "via-the-second-node" {
 		t.Fatalf("round trip mismatch: %q", got)
+	}
+}
+
+// TestE2ENodeShapedServer runs the node entrypoint's anytls-in config: its catch-all
+// rule forces every UoT destination to the WireGuard port, and the hub sends only a pin.
+func TestE2ENodeShapedServer(t *testing.T) {
+	const password = "e2e-node-password"
+	const serverName = "cover.example.com"
+	certPEM, keyPEM := generateSelfSignedCert(t, serverName)
+	dir := t.TempDir()
+	certPath, keyPath := filepath.Join(dir, "anytls.crt"), filepath.Join(dir, "anytls.key")
+	if err := os.WriteFile(certPath, []byte(certPEM), 0o600); err != nil {
+		t.Fatalf("write cert: %v", err)
+	}
+	if err := os.WriteFile(keyPath, []byte(keyPEM), 0o600); err != nil {
+		t.Fatalf("write key: %v", err)
+	}
+	wgPort, closeEcho := startUDPEcho(t)
+	defer closeEcho()
+	port := pickFreeLoopbackTCPPort(t)
+
+	quote := func(v string) string { b, _ := json.Marshal(v); return string(b) }
+	config := fmt.Sprintf(`{
+  "log": {"disabled": true},
+  "inbounds": [{
+    "type": "anytls", "tag": "anytls-in", "listen": "127.0.0.1", "listen_port": %d,
+    "users": [{"password": %s}],
+    "tls": {"enabled": true, "server_name": %s, "certificate_path": %s, "key_path": %s}
+  }],
+  "outbounds": [{"type": "direct", "tag": "wg-out"}],
+  "route": {
+    "rules": [{"inbound": ["anytls-in"], "action": "route", "outbound": "wg-out", "override_address": "127.0.0.1", "override_port": %d}],
+    "final": "wg-out"
+  }
+}`, port, quote(password), quote(serverName), quote(certPath), quote(keyPath), wgPort)
+
+	serverCtx := serverBoxContext(context.Background())
+	opts, err := sjson.UnmarshalExtendedContext[option.Options](serverCtx, []byte(config))
+	if err != nil {
+		t.Fatalf("parse node config: %v", err)
+	}
+	server, err := box.New(box.Options{Context: serverCtx, Options: opts})
+	if err != nil {
+		t.Fatalf("build node box: %v", err)
+	}
+	if err := server.Start(); err != nil {
+		t.Fatalf("start node box: %v", err)
+	}
+	defer server.Close()
+
+	mgr := NewManager(state.NewLogStore(200))
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := mgr.Start(ctx, state.AnyTLSProfile{
+		RemoteHost: "127.0.0.1",
+		RemotePort: port,
+		Password:   password,
+		ServerName: serverName,
+		PinSHA256:  pinFor(t, certPEM),
+	}); err != nil {
+		t.Fatalf("Manager.Start with a pin and no insecure: %v", err)
+	}
+	defer mgr.Stop(context.Background())
+
+	payload := make([]byte, 1420)
+	copy(payload, "wireguard-to-the-default-target")
+	got, err := roundTrip(t, mgr.BoundLocalPort(), payload, 10*time.Second)
+	if err != nil {
+		t.Fatalf("round trip through the node-shaped server: %v", err)
+	}
+	if string(got) != string(payload) {
+		t.Fatalf("round trip mismatch: got %d bytes", len(got))
 	}
 }
