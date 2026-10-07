@@ -83,3 +83,21 @@ func TestReachBaseline_EvictsTheStalestNetworkAtTheCap(t *testing.T) {
 		t.Error("eviction took more than the stalest network")
 	}
 }
+
+func TestReachBaseline_UnproveDropsOnlyThatRoute(t *testing.T) {
+	b, _ := testBaseline()
+	b.record("wifi", "direct:203.0.113.7")
+	b.record("wifi", "reality:198.51.100.9")
+	b.unprove("wifi", "direct:203.0.113.7")
+	if b.proven("wifi", "direct:203.0.113.7") {
+		t.Error("unproved route still counts")
+	}
+	if !b.proven("wifi", "reality:198.51.100.9") {
+		t.Error("unprove took a sibling route with it")
+	}
+	b.unprove("wifi", "reality:198.51.100.9")
+	b.unprove("ethernet", "direct:203.0.113.7")
+	if b.fresh("wifi") {
+		t.Error("a network with no proven routes left is still fresh")
+	}
+}

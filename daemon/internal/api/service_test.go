@@ -737,6 +737,7 @@ func newTestServiceFull(
 	config := testConfigStore(t, profiles...)
 	svc := NewService(machine, logs, config, cloak, naive, reality, hysteria2, shadowsocks, snowflake, wgMgr, ks)
 	stubSessionRecordStore(t)
+	stubHubProxyPermits(t)
 	// Keep handshake-gated failure paths fast in tests; a live fake tunnel
 	// handshakes on the first status poll, so success paths are unaffected.
 	svc.handshakeTimeout = 200 * time.Millisecond

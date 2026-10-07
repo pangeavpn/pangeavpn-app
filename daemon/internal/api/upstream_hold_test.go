@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -429,5 +430,81 @@ func TestHealthCheck_SilentNetworkDoesNotMarkTheTransportDead(t *testing.T) {
 	svc.recoveryMu.Unlock()
 	if lastDead != "" || lead.kind != "" {
 		t.Fatalf("lastDeadKind=%q lead=%+v; the hold marked a working transport dead", lastDead, lead)
+	}
+}
+
+// Right after a working bring-up the network is known good, so a proven route
+// that is silent then is blocked; left proven it would cause a false hold.
+func TestConnect_RefreshUnprovesARouteThatFellSilent(t *testing.T) {
+	profile := deadDataPathProfile()
+	profile.WireGuard.BypassHosts = []string{testHubIP}
+	svc := newTestService(t, &fakeCloakManager{}, &fakeNaiveManager{}, &fakeWGManager{}, &fakeKillSwitch{}, profile)
+	svc.physicalRoute = func() (string, string, error) { return "eth0", "192.0.2.1", nil }
+	svc.probeResolver = (&fakeProbe{}).probe
+	clock := time.Now()
+	var clockMu sync.Mutex
+	svc.reachBaseline.now = func() time.Time { clockMu.Lock(); defer clockMu.Unlock(); return clock }
+	svc.reachBaseline.record(testNetwork, directRouteID)
+	clockMu.Lock()
+	clock = clock.Add(reachBaselineRefresh + time.Hour)
+	clockMu.Unlock()
+	svc.reachProbe = newFakeReach().probe
+
+	if err := svc.Connect(context.Background(), "p1", ConnectOptions{PreferredTransport: "naive"}); err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for svc.reachBaseline.proven(testNetwork, directRouteID) {
+		if time.Now().After(deadline) {
+			t.Fatal("a proven route that was silent right after a working bring-up stayed proven")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// After the time box the outage is treated like any dead data path, so the
+// transport that died is noted for the redial-then-demote logic as usual.
+func TestHealthCheck_TimeBoxExpiryNotesTheDeadTransport(t *testing.T) {
+	svc, _, _ := autoHoldTestService(t)
+	active := svc.activeTransportKindSnapshot()
+	probe := &fakeProbe{}
+	probe.setErr(errors.New("i/o timeout"))
+	svc.probeResolver = probe.probe
+	runProbedHealthChecks(svc, dnsProbeFailuresBeforeRebuild)
+	if !svc.upstreamHoldActive() || active == "" {
+		t.Fatalf("setup: hold=%v active=%q", svc.upstreamHoldActive(), active)
+	}
+	svc.recoveryMu.Lock()
+	svc.upstreamHoldUntil = time.Now().Add(-time.Second)
+	svc.recoveryMu.Unlock()
+	svc.runHealthCheck(context.Background())
+	svc.recoveryMu.Lock()
+	lastDead := svc.lastDeadKind
+	svc.recoveryMu.Unlock()
+	if lastDead != active {
+		t.Fatalf("lastDeadKind = %q, want %q noted once the hold gave up", lastDead, active)
+	}
+}
+
+// A rebuild that finds another operation holding opMu did not run, so the hold
+// must stay up and retry, not drop the reconnect the hub's answer called for.
+func TestHealthCheck_BusyRebuildKeepsTheHold(t *testing.T) {
+	svc, probe, hub, naive := holdTestService(t)
+	killDataPath(svc, probe)
+	hub.set(directRouteID, reach.Answered)
+	probe.setErr(nil)
+	svc.opMu.Lock()
+	forceUpstreamProbeDue(svc)
+	svc.runHealthCheck(context.Background())
+	svc.opMu.Unlock()
+	if transportRestarted(naive) {
+		t.Fatal("setup: the rebuild ran although opMu was held")
+	}
+	if !svc.upstreamHoldActive() {
+		t.Fatal("a rebuild that never ran dropped the hold, and with it the reconnect")
+	}
+	svc.runHealthCheck(context.Background())
+	if !transportRestarted(naive) || svc.upstreamHoldActive() {
+		t.Fatalf("restarted=%v hold=%v; the next tick must run the rebuild", transportRestarted(naive), svc.upstreamHoldActive())
 	}
 }

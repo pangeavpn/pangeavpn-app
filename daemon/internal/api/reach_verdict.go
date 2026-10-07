@@ -6,7 +6,6 @@ import (
 	"net"
 	"slices"
 	"strings"
-	"sync"
 
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/reach"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/state"
@@ -99,59 +98,122 @@ func (s *Service) appendProxyRoute(routes []reachRoute, kind string, proxy hubPr
 // sessionNodeIPs is every address the session's own transports use; a hub route
 // through one of them shares the dead tunnel's fate, so its silence proves nothing.
 func sessionNodeIPs(profile state.Profile) []string {
-	return ipLiterals(append([]string{profile.Cloak.RemoteHost}, transportPermitHosts(profile)...))
+	hosts := append([]string{profile.Cloak.RemoteHost}, transportPermitHosts(profile)...)
+	if host, _, err := net.SplitHostPort(profile.WireGuard.DirectEndpoint); err == nil {
+		hosts = append(hosts, host)
+	}
+	return ipLiterals(hosts)
 }
 
-// reachVerdictFor probes every route at once. Any echo means the network works;
-// it is offline only if each proven route off the session's own node went silent.
-func (s *Service) reachVerdictFor(ctx context.Context, profile state.Profile) (reachVerdict, string) {
+// reachRound is one probe of the routes: what each finished route said, and the
+// network the round ran on.
+type reachRound struct {
+	network  string
+	routes   []reachRoute
+	outcomes []reach.Outcome
+	done     []bool
+}
+
+func (r reachRound) summary() string {
+	parts := make([]string, 0, len(r.routes))
+	for i, route := range r.routes {
+		if r.done[i] {
+			parts = append(parts, fmt.Sprintf("%s=%s", route.id(), r.outcomes[i]))
+		}
+	}
+	return strings.Join(parts, ", ")
+}
+
+// probeHub asks every route at once from the physical NIC; stopOnAnswer ends the
+// round at the first echo. ok is false when nothing ran or the host roamed mid-round.
+func (s *Service) probeHub(ctx context.Context, profile state.Profile, stopOnAnswer bool) (round reachRound, summary string, ok bool) {
 	if s.reachProbe == nil || s.physicalRoute == nil {
-		return reachUnknown, "no probe"
+		return reachRound{}, "no probe", false
 	}
 	iface, _, err := s.physicalRoute()
 	if err != nil || iface == "" {
-		return reachUnknown, "no physical route"
+		return reachRound{}, "no physical route", false
 	}
 	routes := s.reachRoutes(profile, iface)
 	if len(routes) == 0 {
-		return reachUnknown, "no route to the hub"
+		return reachRound{}, "no route to the hub", false
 	}
-	outcomes := s.probeReachRoutes(ctx, routes)
 	network := s.currentNetworkKey()
+	outcomes, done := s.probeReachRoutes(ctx, routes, stopOnAnswer)
+	round = reachRound{network: network, routes: routes, outcomes: outcomes, done: done}
+	if s.currentNetworkKey() != network {
+		return round, "the network changed mid-round", false
+	}
+	return round, round.summary(), true
+}
+
+// reachVerdictFor asks the hub over every route. Any echo means the network works;
+// it is offline only if each proven route off the session's own node went silent.
+func (s *Service) reachVerdictFor(ctx context.Context, profile state.Profile) (reachVerdict, string) {
+	round, summary, ok := s.probeHub(ctx, profile, true)
+	if !ok {
+		return reachUnknown, summary
+	}
 	nodes := sessionNodeIPs(profile)
-	answered, refused, decisive := false, false, 0
-	parts := make([]string, 0, len(routes))
-	for i, route := range routes {
-		parts = append(parts, fmt.Sprintf("%s=%s", route.id(), outcomes[i]))
-		switch outcomes[i] {
+	refused, decisive := false, 0
+	for i, route := range round.routes {
+		if !round.done[i] {
+			continue
+		}
+		switch round.outcomes[i] {
 		case reach.Answered:
-			answered = true
-			s.reachBaseline.record(network, route.id())
+			s.reachBaseline.record(round.network, route.id())
+			return reachOnline, summary
 		case reach.Refused:
 			refused = true
 		default:
-			if !slices.Contains(nodes, route.remote) && s.reachBaseline.proven(network, route.id()) {
+			if !slices.Contains(nodes, route.remote) && s.reachBaseline.proven(round.network, route.id()) {
 				decisive++
 			}
 		}
 	}
-	summary := strings.Join(parts, ", ")
-	switch {
-	case answered:
-		return reachOnline, summary
-	case refused || decisive == 0:
+	if refused || decisive == 0 {
 		return reachUnknown, summary
-	default:
-		return reachOffline, summary
+	}
+	return reachOffline, summary
+}
+
+// reproveBaseline runs right after a working bring-up, when the network is known
+// good: a route that does not answer then is blocked, so it stops counting.
+func (s *Service) reproveBaseline(ctx context.Context, profile state.Profile) {
+	round, _, ok := s.probeHub(ctx, profile, false)
+	if !ok {
+		return
+	}
+	for i, route := range round.routes {
+		if round.outcomes[i] == reach.Answered {
+			s.reachBaseline.record(round.network, route.id())
+		} else {
+			s.reachBaseline.unprove(round.network, route.id())
+		}
 	}
 }
 
-func (s *Service) probeReachRoutes(ctx context.Context, routes []reachRoute) []reach.Outcome {
-	outcomes := make([]reach.Outcome, len(routes))
-	var wg sync.WaitGroup
+type reachResult struct {
+	index   int
+	outcome reach.Outcome
+}
+
+func (s *Service) probeReachRoutes(ctx context.Context, routes []reachRoute, stopOnAnswer bool) ([]reach.Outcome, []bool) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	results := make(chan reachResult, len(routes))
 	for i, route := range routes {
-		wg.Go(func() { outcomes[i] = s.reachProbe(ctx, route) })
+		go func() { results <- reachResult{index: i, outcome: s.reachProbe(ctx, route)} }()
 	}
-	wg.Wait()
-	return outcomes
+	outcomes := make([]reach.Outcome, len(routes))
+	done := make([]bool, len(routes))
+	for range routes {
+		result := <-results
+		outcomes[result.index], done[result.index] = result.outcome, true
+		if stopOnAnswer && result.outcome == reach.Answered {
+			break
+		}
+	}
+	return outcomes, done
 }

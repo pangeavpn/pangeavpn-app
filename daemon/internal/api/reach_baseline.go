@@ -65,6 +65,19 @@ func (b *reachBaseline) forget(network string) {
 	delete(b.networks, network)
 }
 
+func (b *reachBaseline) unprove(network, route string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	routes, ok := b.networks[network]
+	if !ok {
+		return
+	}
+	delete(routes, route)
+	if len(routes) == 0 {
+		delete(b.networks, network)
+	}
+}
+
 func (b *reachBaseline) evictStalestLocked() {
 	if len(b.networks) < reachBaselineMaxNetworks {
 		return
