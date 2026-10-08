@@ -226,11 +226,11 @@ main() {
     DMG_URL=""
     SAW_RELEASE=""
 
-    # Accepts the hub's "url" and GitHub's "browser_download_url" asset shapes.
-    # GitHub pretty-prints its JSON, so a space may follow the colon.
+    # Accepts the hub's "url" and GitHub's "browser_download_url" asset shapes, but only
+    # this repo's release assets: a spoofed hub reply must not pick where the DMG comes from.
     extract_dmg_url() {
         tr ',' '\n' < "$RELEASE_FILE" \
-            | grep -Eo '"(url|browser_download_url)":[[:space:]]*"https://[^"]+'"$ARCH_TAG"'-installer\.dmg"' \
+            | grep -Eo '"(url|browser_download_url)":[[:space:]]*"https://github\.com/pangeavpn/pangeavpn-app/releases/download/[^"]+'"$ARCH_TAG"'-installer\.dmg"' \
             | head -1 \
             | sed -E 's/.*"(https:[^"]+)".*/\1/' \
             || true
@@ -294,8 +294,11 @@ main() {
             fail "The download failed its integrity check - the file is damaged or was altered in transit. Do not install it. Try again; if this keeps happening, your network may be interfering."
         fi
         log "Download verified."
+    elif [[ "${PANGEA_ALLOW_UNVERIFIED:-}" == "1" ]]; then
+        warn "Couldn't verify this download. Installing anyway because PANGEA_ALLOW_UNVERIFIED=1 is set."
     else
-        warn "Couldn't reach the file used to verify this download. Continuing - the download itself completed normally."
+        # Blocking only the checksum must not downgrade a root install to an unverified one.
+        fail "Couldn't fetch the file that verifies this download, so it won't be installed. Try again in a few minutes or on another network, or get the installer from ${DOWNLOAD_URL}. To install without verification, run the installer again with PANGEA_ALLOW_UNVERIFIED=1 set."
     fi
 
     log "Preparing the download..."
