@@ -11,7 +11,22 @@ import (
 )
 
 func hostSettings() envSettings {
-	return envSettings{resolve: resolveDarwin}
+	return envSettings{resolve: resolveDarwin, translocated: isTranslocationMount}
+}
+
+// isTranslocationMount reports whether root sits on the read-only nullfs mount Gatekeeper makes
+// for a translocated app under the same AppTranslocation/<id>; no unprivileged process can.
+func isTranslocationMount(root string) bool {
+	var st unix.Statfs_t
+	if err := unix.Statfs(root, &st); err != nil {
+		return false
+	}
+	if unix.ByteSliceToString(st.Fstypename[:]) != "nullfs" || st.Flags&unix.MNT_RDONLY == 0 {
+		return false
+	}
+	mount := unix.ByteSliceToString(st.Mntonname[:])
+	idDir := strings.TrimSuffix(root, "/d")
+	return mount == root || mount == idDir
 }
 
 // resolveDarwin adds the symlink-free form and the kernel vnode path, which is what

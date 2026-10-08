@@ -19,7 +19,8 @@ func winEnv() *ruleEnv {
 
 func darwinEnv() *ruleEnv {
 	return newRuleEnv("darwin", envSettings{
-		own: []string{"/Applications/PangeaVPN.app/Contents/MacOS/pangea-daemon"},
+		own:          []string{"/Applications/PangeaVPN.app/Contents/MacOS/pangea-daemon"},
+		translocated: func(string) bool { return true },
 	})
 }
 
@@ -350,6 +351,42 @@ func TestMatchDarwinBundles(t *testing.T) {
 		{"/private/var/folders/xy/abc/T/AppTranslocation/0A1B-2C3D/d/Bar.app/Contents/MacOS/Bar", false},
 		{"/private/var/folders/xy/abc/T/AppTranslocation/0A1B-2C3D/d/tool", false},
 	})
+}
+
+// A lookalike translocation tree outside the system's mount must not borrow a bundle's
+// exclusion: the user can write to their own temp dir and home.
+func TestMatchDarwinTranslocationNeedsTheSystemMount(t *testing.T) {
+	var asked []string
+	mounted := true
+	env := newRuleEnv("darwin", envSettings{
+		translocated: func(root string) bool {
+			asked = append(asked, root)
+			return mounted
+		},
+	})
+	r := compileIn(t, env, "/Applications/Foo.app")
+	const real = "/private/var/folders/xy/abc/T/AppTranslocation/0A1B-2C3D/d/Foo.app/Contents/MacOS/Foo"
+	checkMatches(t, r, []matchCase{
+		{real, true},
+		{"/Users/eve/AppTranslocation/1/d/Foo.app/Contents/MacOS/Foo", false},
+		{"/tmp/AppTranslocation/1/d/Foo.app/Contents/MacOS/Foo", false},
+		{"/private/var/folders/xy/abc/T/AppTranslocation/0A1B-2C3D/x/Foo.app/Contents/MacOS/Foo", false},
+		{"/private/var/folders/xy/abc/T/AppTranslocation/0A1B-2C3D/d/Other/Foo.app/Contents/MacOS/Foo", false},
+		{"/private/var/folders/xy/abc/T/AppTranslocation//d/Foo.app/Contents/MacOS/Foo", false},
+		{"/private/var/folders/xy/abc/T/AppTranslocation/0A1B-2C3D/d/Foo.app", false},
+	})
+	if len(asked) == 0 || asked[0] != "/private/var/folders/xy/abc/T/AppTranslocation/0A1B-2C3D/d" {
+		t.Fatalf("verifier asked about %q, want the translocation mount root", asked)
+	}
+
+	mounted = false
+	if r.MatchPath(real) {
+		t.Error("a translocation path off the system mount matched")
+	}
+	noVerifier := compileIn(t, newRuleEnv("darwin", envSettings{}), "/Applications/Foo.app")
+	if noVerifier.MatchPath(real) {
+		t.Error("a translocation path matched with no way to verify its mount")
+	}
 }
 
 func TestMatchLinuxSnap(t *testing.T) {

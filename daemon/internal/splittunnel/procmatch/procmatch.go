@@ -37,11 +37,12 @@ type RuleError struct {
 
 // Rules is an immutable compiled rule set.
 type Rules struct {
-	goos  string
-	rules []compiledRule
-	idx   matchIndex
-	res   *resolution
-	never *Rules
+	goos         string
+	rules        []compiledRule
+	idx          matchIndex
+	res          *resolution
+	never        *Rules
+	translocated func(root string) bool
 }
 
 type compiledRule struct {

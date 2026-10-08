@@ -56,6 +56,7 @@ func compileRules(env *ruleEnv, entries, neverBypass []string) (*Rules, []RuleEr
 	}
 	rules := newRules(env.goos, out)
 	rules.never = never
+	rules.translocated = env.translocated
 	rules.startResolve(env, true, neverRules)
 	return rules, errs
 }
@@ -73,6 +74,7 @@ func compileImages(env *ruleEnv, paths []string) *Rules {
 		return nil
 	}
 	rules := newRules(env.goos, out)
+	rules.translocated = env.translocated
 	rules.startResolve(env, false, nil)
 	return rules
 }
@@ -138,31 +140,29 @@ func (r *Rules) MatchChain(chain []string) bool {
 	return false
 }
 
-// matchTranslocated matches Gatekeeper-translocated bundles by their bundle name.
+// matchTranslocated matches a Gatekeeper-translocated copy of an excluded bundle by name. The
+// mount is verified too, since the user's own temp dir could otherwise hold a lookalike tree.
 func (r *Rules) matchTranslocated(p string) bool {
-	_, rest, ok := strings.Cut(p, "/AppTranslocation/")
+	if !strings.HasPrefix(p, "/private/var/folders/") {
+		return false
+	}
+	head, rest, ok := strings.Cut(p, "/AppTranslocation/")
 	if !ok {
 		return false
 	}
-	name := ""
-	for _, part := range strings.Split(rest, "/") {
-		if strings.HasSuffix(strings.ToLower(part), ".app") {
-			name = part
-			break
-		}
-	}
-	if name == "" {
+	// <id>/d/<Name>.app/<inside the bundle>
+	parts := strings.SplitN(rest, "/", 4)
+	if len(parts) < 4 || parts[0] == "" || parts[1] != "d" || !strings.HasSuffix(strings.ToLower(parts[2]), ".app") {
 		return false
 	}
-	if r.idx.hasBundle(name) {
-		return true
-	}
-	if r.res != nil {
+	name := parts[2]
+	known := r.idx.hasBundle(name)
+	if !known && r.res != nil {
 		if extra := r.res.extra.Load(); extra != nil && extra.hasBundle(name) {
-			return true
+			known = true
 		}
 	}
-	return false
+	return known && r.translocated != nil && r.translocated(head+"/AppTranslocation/"+parts[0]+"/d")
 }
 
 // matchIndex answers exact matches by map and prefix matches by scan.
