@@ -868,20 +868,26 @@ async function reconnectExistingProfile(): Promise<boolean> {
   // Tracked as a cancellable attempt, or Stop has nothing to interrupt here.
   const attempt = beginAttempt();
   try {
-    return await connectExistingProfile(attempt);
+    const reconnected = await connectExistingProfile(attempt);
+    if (!reconnected && isCancelled(attempt)) throw new ConnectCancelledError();
+    return reconnected;
+  } catch (err) {
+    // Stop interrupts the daemon mid-connect, which answers 500 "context canceled".
+    throw isCancelled(attempt) ? new ConnectCancelledError() : err;
   } finally {
     endAttempt(attempt);
     connectionAttemptRunning = false;
   }
 }
 
-// Only reachability failures are worth retrying against the existing profile —
-// a hub that answered no (removed/lapsed) already deprovisioned that peer.
+// Only hub reachability failures are worth retrying on the existing profile: a hub
+// that answered has already replaced that peer, and a daemon error is not the hub's.
 function isHubReachabilityFailure(err: unknown): boolean {
   return !(
     err instanceof AuthError ||
     err instanceof SubscriptionExpiredError ||
-    err instanceof ConnectCancelledError
+    err instanceof ConnectCancelledError ||
+    err instanceof DaemonHttpError
   );
 }
 
@@ -906,8 +912,8 @@ async function connectFromTray(): Promise<void> {
     try {
       if (await reconnectExistingProfile()) return;
     } catch (error) {
-      // Parked until the network returns; the status refresh shows it.
-      if (error instanceof HostOfflineError) return;
+      // Parked until the network returns, or stopped by the user; the status refresh shows either.
+      if (error instanceof HostOfflineError || error instanceof ConnectCancelledError) return;
       if (!(error instanceof TransportExhaustedError)) throw error;
       exhaustedServerId = lastServerId;
     }
@@ -1313,6 +1319,7 @@ async function provisionAndConnect(
       reconnected = await reconnectExistingProfile();
     } catch (fallbackErr) {
       if (fallbackErr instanceof HostOfflineError) return { ok: false, error: "offline" };
+      if (fallbackErr instanceof ConnectCancelledError) return { ok: false, error: "cancelled" };
       throw fallbackErr;
     }
     if (reconnected) {
