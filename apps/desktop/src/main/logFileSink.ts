@@ -1,12 +1,14 @@
-import { closeSync, constants, fstatSync, mkdirSync, openSync, renameSync, writeSync } from "node:fs";
+import { closeSync, constants, fstatSync, ftruncateSync, mkdirSync, openSync, readSync, writeSync } from "node:fs";
 import path from "node:path";
 import { sanitizeLog } from "./logSanitize.ts";
 
 export const LOG_FILE_NAME = "pangeavpn.log";
 // O_NOFOLLOW refuses a symlink left in the log directory. Windows has no
 // equivalent for Node to ask for, so there it contributes nothing.
-const OPEN_FLAGS =
-  constants.O_WRONLY | constants.O_CREAT | constants.O_APPEND | (constants.O_NOFOLLOW ?? 0);
+const NO_FOLLOW = constants.O_NOFOLLOW ?? 0;
+// No O_APPEND: Windows opens an appending file without the right to truncate it.
+const OPEN_FLAGS = constants.O_RDWR | constants.O_CREAT | NO_FOLLOW;
+const ROLL_FLAGS = constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | NO_FOLLOW;
 const DEFAULT_MAX_BYTES = 512 * 1024;
 const LEVELS = ["log", "warn", "error"] as const;
 
@@ -36,16 +38,15 @@ export function createLogWriter(
       }
       const line = formatLogLine(level, parts);
       fd = openSync(file, OPEN_FLAGS);
-      // Measured through the descriptor being written to, so nothing can swap
-      // the file for another one in between.
+      // Measured and rolled through the descriptor being written to, never the
+      // path again, so nothing can swap the file for another one in between.
       const { size } = fstatSync(fd);
+      let at = size;
       if (size > 0 && size + Buffer.byteLength(line) > maxBytes) {
-        closeSync(fd);
-        fd = -1;
-        renameSync(file, rolled);
-        fd = openSync(file, OPEN_FLAGS);
+        rollOver(fd, size, rolled);
+        at = 0;
       }
-      writeSync(fd, line);
+      writeSync(fd, line, at);
     } catch {
       // Swallowed on purpose.
     } finally {
@@ -58,6 +59,19 @@ export function createLogWriter(
       }
     }
   };
+}
+
+/** Copies the open log into the rollover file, then empties it in place. */
+function rollOver(fd: number, size: number, rolled: string): void {
+  const kept = Buffer.alloc(size);
+  const read = readSync(fd, kept, 0, size, 0);
+  const out = openSync(rolled, ROLL_FLAGS);
+  try {
+    writeSync(out, kept, 0, read);
+  } finally {
+    closeSync(out);
+  }
+  ftruncateSync(fd, 0);
 }
 
 export function installConsoleFileSink(dir: string, maxBytes?: number): () => void {

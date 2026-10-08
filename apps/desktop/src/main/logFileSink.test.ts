@@ -37,6 +37,33 @@ test("the file is capped and keeps exactly one rollover", () => {
   assert.ok(!existsSync(`${file}.2`));
 });
 
+test("a rollover moves the old lines to .1 and starts the log afresh", () => {
+  const dir = tempDir();
+  const write = createLogWriter(dir, 200);
+  write("log", [`first ${"x".repeat(120)}`]);
+  write("log", [`second ${"y".repeat(120)}`]);
+  const file = path.join(dir, LOG_FILE_NAME);
+  const rolled = readFileSync(`${file}.1`, "utf8");
+  const current = readFileSync(file, "utf8");
+  assert.match(rolled, /first x+/);
+  assert.doesNotMatch(rolled, /second/);
+  assert.match(current, /second y+/);
+  assert.doesNotMatch(current, /first/);
+});
+
+test("a symlink left at the rollover path is not written through", { skip: process.platform === "win32" }, () => {
+  const dir = tempDir();
+  const outside = path.join(tempDir(), "outside.txt");
+  writeFileSync(outside, "untouched");
+  symlinkSync(outside, path.join(dir, `${LOG_FILE_NAME}.1`));
+
+  const write = createLogWriter(dir, 200);
+  write("log", [`first ${"x".repeat(120)}`]);
+  write("log", [`second ${"y".repeat(120)}`]);
+
+  assert.equal(readFileSync(outside, "utf8"), "untouched");
+});
+
 // Skipped on Windows, which has no O_NOFOLLOW for Node to ask for.
 test("a symlink left at the log path is not written through", { skip: process.platform === "win32" }, () => {
   const dir = tempDir();
