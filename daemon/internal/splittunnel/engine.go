@@ -412,7 +412,10 @@ func (e *engine) decideTCP(info *pktInfo, pkt []byte, now time.Time) action {
 func (e *engine) newTCPLocked(key flowKey, isn uint32, pkt []byte, now time.Time, prev []abortTarget) action {
 	if !e.gateOpen() || e.pending >= e.lim.pendingFlows || e.pendingCost+engineBufSize > e.lim.pendingBytes {
 		if len(prev) > 0 {
-			go runTargets(prev)
+			go func() {
+				defer e.recoverFault()
+				runTargets(prev)
+			}()
 		}
 		return actTunnel
 	}
@@ -594,6 +597,14 @@ func (e *engine) pump() {
 			e.d.setTerm(err)
 			return
 		}
+	}
+}
+
+// recoverFault, deferred first in a goroutine outside safely, gives a panic there the same
+// tunnel-only fallback instead of taking down the privileged daemon.
+func (e *engine) recoverFault() {
+	if r := recover(); r != nil {
+		e.d.fault(r)
 	}
 }
 

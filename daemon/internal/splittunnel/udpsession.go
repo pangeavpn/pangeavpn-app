@@ -79,6 +79,7 @@ func (e *engine) startSessionLocked(f *flow, now time.Time) {
 
 func (s *udpSession) run(gen uint64) {
 	e := s.e
+	defer e.recoverFault()
 	conn, err := s.listen()
 	e.listenDone(s, err)
 	if err != nil {
@@ -255,6 +256,7 @@ func (s *udpSession) write(conn net.PacketConn, o udpOut) {
 }
 
 func (s *udpSession) read(conn net.PacketConn) {
+	defer s.e.recoverFault()
 	bp := udpReadPool.Get().(*[]byte)
 	defer udpReadPool.Put(bp)
 	buf := *bp

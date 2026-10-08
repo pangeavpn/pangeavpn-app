@@ -68,7 +68,14 @@ func (c *Controller) networkHint() {
 	if now-last < int64(c.lim.unreachableEvery) || !c.lastHint.CompareAndSwap(last, now) {
 		return
 	}
-	go func() { _ = c.refreshNetwork() }()
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				c.log.printf("split tunnel: network refresh panicked: %v", r)
+			}
+		}()
+		_ = c.refreshNetwork()
+	}()
 }
 
 type splice struct {

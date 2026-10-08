@@ -833,6 +833,23 @@ func expectQuickClose(t *testing.T, h *harness) {
 	}
 }
 
+// gVisor runs handleTCP on a goroutine of its own, outside safely: a panic in the bypass
+// dial must still end in tunnel-only operation, not a crashed daemon.
+func TestPanicInBypassDialFailsSafe(t *testing.T) {
+	h := newHarness(t, harnessOpts{kind: kindWindows, peer: true})
+	h.eg.mu.Lock()
+	h.eg.hook = func(context.Context, netip.AddrPort) (net.Conn, error) { panic("egress bug") }
+	h.eg.mu.Unlock()
+	h.cls.set(41270, true, appGame)
+	h.setRules(appGame)
+	go func() {
+		if c, _, _ := h.dial(41270, dst(remoteA, 7270), 3*time.Second); c != nil {
+			c.Close()
+		}
+	}()
+	expectFaultedTunnelOnly(t, h, h.engine(), 41271)
+}
+
 func TestPanicInLockedEngineSectionFailsSafe(t *testing.T) {
 	t.Run("worker", func(t *testing.T) {
 		h := newHarness(t, harnessOpts{kind: kindWindows, peer: true})
