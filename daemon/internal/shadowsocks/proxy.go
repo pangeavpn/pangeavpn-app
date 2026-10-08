@@ -216,7 +216,10 @@ func (p *ProxyManager) watchHealth(ctx context.Context, generation uint64, port 
 			continue
 		}
 		p.mu.Lock()
+		var engine *box.Box
+		var cancel context.CancelFunc
 		if p.generation == generation {
+			engine, cancel = p.engine, p.cancel
 			p.running = false
 			p.engine = nil
 			p.cancel = nil
@@ -225,6 +228,13 @@ func (p *ProxyManager) watchHealth(ctx context.Context, generation uint64, port 
 			p.password = ""
 		}
 		p.mu.Unlock()
+		// A dead inbound still leaves its outbound and goroutines; release them, outside the lock.
+		if cancel != nil {
+			cancel()
+		}
+		if engine != nil {
+			_ = engine.Close()
+		}
 		return
 	}
 }
