@@ -48,8 +48,15 @@ var (
 	pfKillStates   = killPFStates
 	pfDisable      = disablePF
 	pfRemoveAnchor = removePFAnchor
+	pfFlushSplit   = func(ctx context.Context) error { return flushPFAnchor(ctx, pfSplitAnchorPath) }
 	splitEgressGID = SplitEgressGroupID
 )
+
+// pfSplitError is a split-anchor failure behind a main lock already loaded and verified live.
+type pfSplitError struct{ err error }
+
+func (e *pfSplitError) Error() string { return e.err.Error() }
+func (e *pfSplitError) Unwrap() error { return e.err }
 
 type darwinKillSwitch struct {
 	// opMu serialises Enable/Update/Clear; stateMu guards the flags so
@@ -128,17 +135,22 @@ func (ks *darwinKillSwitch) Enable(ctx context.Context, endpointHosts []string, 
 	}
 
 	if err := ks.render(ctx, ksRules{EndpointIPs: ips, Tunnel: tunnelInterface, AllowLAN: allowLAN, Split: ks.split}); err != nil {
-		// The caller's ctx is often the one that just died; cleanup gets its own.
-		cleanupCtx, cancel := context.WithTimeout(context.Background(), pfCleanupGrace)
-		defer cancel()
-		if !wasActive {
-			_ = pfDisable(cleanupCtx, token)
-			_ = pfRemoveAnchor(cleanupCtx)
-			ks.pfSplit = splitPermits{}
-		} else if rbErr := ks.render(cleanupCtx, ksRules{EndpointIPs: prev.EndpointIPs, Tunnel: prev.TunnelInterface, AllowLAN: prev.AllowLAN, Split: ks.split}); rbErr != nil {
-			KillSwitchWarn("kill switch enable: rollback to previous ruleset failed: %v", rbErr)
+		var splitErr *pfSplitError
+		if !errors.As(err, &splitErr) {
+			// The caller's ctx is often the one that just died; cleanup gets its own.
+			cleanupCtx, cancel := context.WithTimeout(context.Background(), pfCleanupGrace)
+			defer cancel()
+			if !wasActive {
+				_ = pfDisable(cleanupCtx, token)
+				_ = pfRemoveAnchor(cleanupCtx)
+				ks.pfSplit = splitPermits{}
+			} else if rbErr := ks.render(cleanupCtx, ksRules{EndpointIPs: prev.EndpointIPs, Tunnel: prev.TunnelInterface, AllowLAN: prev.AllowLAN, Split: ks.split}); rbErr != nil {
+				KillSwitchWarn("kill switch enable: rollback to previous ruleset failed: %v", rbErr)
+			}
+			return fmt.Errorf("kill switch enable: %w", err)
 		}
-		return fmt.Errorf("kill switch enable: %w", err)
+		// The block rule is live; tearing it down over the split permits would unlock the host.
+		KillSwitchWarn("kill switch enable: armed without the split-tunnel permits: %v", err)
 	}
 
 	if firstActivation {
@@ -189,7 +201,11 @@ func (ks *darwinKillSwitch) Update(ctx context.Context, tunnel TunnelRef) error 
 	}
 
 	if err := ks.render(ctx, ksRules{EndpointIPs: st.EndpointIPs, Tunnel: tunnelInterface, AllowLAN: allowLAN, Split: ks.split}); err != nil {
-		return fmt.Errorf("kill switch update: %w", err)
+		var splitErr *pfSplitError
+		if !errors.As(err, &splitErr) {
+			return fmt.Errorf("kill switch update: %w", err)
+		}
+		KillSwitchWarn("kill switch update: lock updated without the split-tunnel permits: %v", err)
 	}
 
 	st.TunnelInterface = tunnelInterface
@@ -290,13 +306,29 @@ func (ks *darwinKillSwitch) render(ctx context.Context, r ksRules) error {
 		gid = ks.egressGID
 	}
 	if err := pfApply(ctx, r, gid); err != nil {
+		var splitErr *pfSplitError
+		if !errors.As(err, &splitErr) {
+			return err
+		}
+		// An empty split anchor fails the permits closed; the stale set it held could be wider.
+		if ferr := pfFlushSplit(ctx); ferr != nil {
+			return &pfSplitError{err: fmt.Errorf("%w; emptying the split anchor also failed: %v", splitErr.err, ferr)}
+		}
+		r.Split = splitPermits{}
+		ks.killDroppedRanges(ctx, r)
 		return err
 	}
+	ks.killDroppedRanges(ctx, r)
+	return nil
+}
+
+// killDroppedRanges ends the states of ranges r no longer permits. Egress-group states need
+// no kill: those sockets are the split engine's own, closed before the permit is withdrawn.
+func (ks *darwinKillSwitch) killDroppedRanges(ctx context.Context, r ksRules) {
 	if gone := splitRangesToKill(ks.pfSplit.CIDRs, r); len(gone) > 0 {
 		pfKillStates(ctx, gone, r.Tunnel)
 	}
 	ks.pfSplit = r.Split.clone()
-	return nil
 }
 
 func (ks *darwinKillSwitch) Active() bool {
@@ -357,7 +389,10 @@ func applyPFAnchor(ctx context.Context, r ksRules, egressGID int) error {
 	if err := verifyPFAnchorLive(ctx); err != nil {
 		return fmt.Errorf("verify pf anchor: %w", err)
 	}
-	return loadPFSplitAnchor(ctx, pfSplitRules(r.Split, egressGID))
+	if err := loadPFSplitAnchor(ctx, pfSplitRules(r.Split, egressGID)); err != nil {
+		return &pfSplitError{err: err}
+	}
+	return nil
 }
 
 // loadPFSplitAnchor swaps the split rules into the child anchor the file hooks,
