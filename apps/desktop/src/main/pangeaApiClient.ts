@@ -15,7 +15,7 @@ import {
   type HubMethodTestResult,
   type HubStatus
 } from "../shared/hubMethods";
-import { firstWorking, mergeAdvertised, promoteEntry } from "../shared/hubCredList";
+import { fastestWorking, firstWorking, mergeAdvertised, promoteEntry } from "../shared/hubCredList";
 import { REALITY_CREDS, seedRealityCreds, type HubRealityCreds } from "../shared/hubRealityCreds";
 import {
   mergeAdvertisedCreds,
@@ -121,6 +121,8 @@ const DOH_PROVIDERS = [
   { url: "https://9.9.9.9:5053/dns-query", accept: "application/dns-json" },       // Quad9
   { url: "https://94.140.14.14/dns-query", accept: "application/dns-json" },       // AdGuard
 ];
+// A healthy network still asks only the first provider; a blocked one gives up in ~6s, not 12s.
+const DOH_STAGGER_MS = 1000;
 
 interface BootstrapResponse {
   vpnAccessToken: string;
@@ -169,10 +171,17 @@ interface DohResponse {
 // name to chase (A, AAAA) — a CNAME in the same array must never be used.
 const DOH_ADDRESS_RECORD_TYPES = new Set([1, 28]);
 
-/** Try a single DoH provider */
-async function tryDoHProvider(providerUrl: string, accept: string, hostname: string): Promise<string | null> {
+/** Try a single DoH provider; `raceDone` aborts it once another provider has answered. */
+async function tryDoHProvider(
+  providerUrl: string,
+  accept: string,
+  hostname: string,
+  raceDone?: AbortSignal
+): Promise<string | null> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 3000);
+  const onRaceDone = (): void => controller.abort();
+  raceDone?.addEventListener("abort", onRaceDone, { once: true });
   try {
     const sep = providerUrl.includes("?") ? "&" : "?";
     const response = await fetch(`${providerUrl}${sep}name=${hostname}&type=A`, {
@@ -192,20 +201,27 @@ async function tryDoHProvider(providerUrl: string, accept: string, hostname: str
     console.log(`[DoH] ${providerUrl} returned no usable A/AAAA answers for ${hostname}`);
     return null;
   } catch (err) {
-    console.log(`[DoH] ${providerUrl} failed: ${sanitizeLog(err)}`);
+    if (!raceDone?.aborted) console.log(`[DoH] ${providerUrl} failed: ${sanitizeLog(err)}`);
     return null;
   } finally {
     clearTimeout(timer);
+    raceDone?.removeEventListener("abort", onRaceDone);
   }
 }
 
-/** Resolve hostname via DNS-over-HTTPS, trying multiple providers */
+/** Resolve hostname via DNS-over-HTTPS, racing every provider */
 async function resolveViaDoH(hostname: string): Promise<string | null> {
   console.log(`[DoH] Resolving ${hostname} via ${DOH_PROVIDERS.length} providers...`);
-  for (const provider of DOH_PROVIDERS) {
-    const ip = await tryDoHProvider(provider.url, provider.accept, hostname);
-    if (ip) return ip;
-  }
+  // Overlapped, not taken in turn: on a network that drops DoH, four 3s timeouts in
+  // a row held the hub's relay paths back by 12s and timed out the user's connect.
+  const raceDone = new AbortController();
+  const won = await fastestWorking(
+    DOH_PROVIDERS,
+    (provider) => tryDoHProvider(provider.url, provider.accept, hostname, raceDone.signal),
+    DOH_STAGGER_MS
+  );
+  raceDone.abort();
+  if (won) return won.value;
   console.log(`[DoH] All providers failed for ${hostname}`);
   return null;
 }
