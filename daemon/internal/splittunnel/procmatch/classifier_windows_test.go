@@ -580,3 +580,45 @@ func TestStillStartedAtTellsAReusedPid(t *testing.T) {
 		t.Error("a pid with no process was accepted")
 	}
 }
+
+// Windows lists a dual-stack socket in the IPv4 owner tables too, so its IPv4 flows resolve.
+func TestLiveDualStackSocketsHaveAnOwner(t *testing.T) {
+	c, err := NewClassifier(Options{SelfPID: os.Getpid(), Logf: t.Logf})
+	if err != nil {
+		t.Fatalf("NewClassifier: %v", err)
+	}
+	defer c.Close()
+	ln, err := net.Listen("tcp", ":0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	client, err := net.Dial("tcp4", netip.AddrPortFrom(netip.MustParseAddr("127.0.0.1"), addrPortOf(ln.Addr()).Port()).String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	server, err := ln.Accept()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+	pc, err := net.ListenPacket("udp", ":0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pc.Close()
+	if a := pc.LocalAddr().(*net.UDPAddr).AddrPort().Addr(); !a.Is6() {
+		t.Skipf("no dual-stack UDP socket here (%v)", a)
+	}
+	flows := []FlowID{
+		{Proto: protoTCP, App: addrPortOf(server.LocalAddr()), Remote: addrPortOf(server.RemoteAddr())},
+		{Proto: protoUDP, App: netip.AddrPortFrom(netip.MustParseAddr("127.0.0.1"), addrPortOf(pc.LocalAddr()).Port()), Remote: netip.MustParseAddrPort("127.0.0.1:9")},
+	}
+	pids, _ := c.(*winClassifier).owners(flows)
+	for i, pid := range pids {
+		if pid != os.Getpid() {
+			t.Errorf("flow %d (%v): owner %d, want %d", i, flows[i].App, pid, os.Getpid())
+		}
+	}
+}
