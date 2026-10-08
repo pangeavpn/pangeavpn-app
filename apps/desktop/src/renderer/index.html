@@ -133,6 +133,25 @@
         </nav>
       </header>
 
+      <section id="expiredScreen" class="expired-screen" role="alertdialog" aria-labelledby="expiredTitle" aria-describedby="expiredBody" hidden>
+        <div class="expired-content">
+          <span class="expired-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 3h11M6.5 21h11"/><path d="M7.5 3c0 4.5 4.5 5.6 4.5 9s-4.5 4.5-4.5 9"/><path d="M16.5 3c0 4.5-4.5 5.6-4.5 9s4.5 4.5 4.5 9"/><path d="M9.8 18.6c.9-.9 3.5-.9 4.4 0"/></svg>
+          </span>
+          <span class="hero-kicker expired-kicker"><strong data-i18n="expired.kicker">No active subscription</strong></span>
+          <h2 id="expiredTitle" class="expired-headline" data-i18n="expired.title">Your time has run out</h2>
+          <p id="expiredBody" class="expired-body" data-i18n="expired.body">This account has no time left, so PangeaVPN can't connect. Add time on the billing page, then come back and check again.</p>
+          <p id="expiredDate" class="expired-date" hidden></p>
+          <div class="expired-actions">
+            <button id="expiredBillingBtn" class="btn-primary btn-lg" type="button" data-i18n="expired.billing">Go to billing</button>
+            <button id="expiredRecheckBtn" class="btn-ghost btn-lg" type="button" data-i18n="expired.recheck">I've added time</button>
+            <button id="expiredDisconnectBtn" class="btn-quiet btn-lg" type="button" hidden data-i18n="expired.disconnect">Disconnect to open billing</button>
+            <button id="expiredSignOutBtn" class="btn-quiet btn-lg" type="button" data-i18n="settings.account.signOut">Sign Out</button>
+          </div>
+          <p id="expiredMessage" class="expired-message" role="status" aria-live="polite"></p>
+        </div>
+      </section>
+
       <div class="stage">
         <div class="map-stage">
           <div id="mapHost" class="map-host"></div>
