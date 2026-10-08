@@ -621,6 +621,8 @@ func (s *Service) Connect(ctx context.Context, profileID string, opts ConnectOpt
 	// The user owns the session now; a silent-network hold must not rebuild what
 	// this Connect brings up or adopts.
 	s.clearUpstreamHold()
+	// Nor may a lead left by a rebuild that never ran reorder this cascade.
+	_ = s.takeRecoveryLead()
 
 	// Make this Connect interruptible by Disconnect — see cancelConnect docs.
 	connectCtx, cancel := context.WithCancel(ctx)
@@ -1630,6 +1632,7 @@ func (s *Service) Switch(ctx context.Context, newProfileID string, opts ConnectO
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
 	s.clearUpstreamHold()
+	_ = s.takeRecoveryLead()
 
 	switchCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
