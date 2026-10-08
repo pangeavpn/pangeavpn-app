@@ -919,3 +919,28 @@ func TestLookupFailsCountOnlyMissingSockets(t *testing.T) {
 		t.Fatalf("LookupFails = %d after a missing socket, want 1", n)
 	}
 }
+
+// Past the linger cap a finished flow skips linger for the bounded ended cache, so a burst of
+// short connections cannot grow the table every scan walks under e.mu.
+func TestFinishedFlowsPastTheLingerCapSkipLinger(t *testing.T) {
+	e := &engine{tcp: map[flowKey]*flow{}, lim: defaultLimits}
+	e.lim.lingerCap = 3
+	e.endedTCP.init(16)
+	var flows []*flow
+	for i := range 4 {
+		f := &flow{proto: protoTCP, key: flowKey{srcPort: uint16(40000 + i), dst: dst(remoteA, 443)}, state: stateBypass}
+		e.tcp[f.key] = f
+		flows = append(flows, f)
+	}
+	for _, f := range flows {
+		e.finishFlow(f, e.lim.linger)
+	}
+	now := time.Now()
+	for i, f := range flows {
+		_, inTable := e.tcp[f.key]
+		ended := e.endedTCP.get(f.key, now) != nil
+		if lingers := i >= 2; inTable != lingers || ended == lingers || (lingers && f.state != stateLinger) {
+			t.Fatalf("flow %d: in table %v, ended %v, state %v; want lingering=%v", i, inTable, ended, f.state, lingers)
+		}
+	}
+}

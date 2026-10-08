@@ -28,6 +28,7 @@ type limits struct {
 	pendingTimeout time.Duration
 	tunnelTTL      time.Duration
 	linger         time.Duration
+	lingerCap      int
 	dialFailLinger time.Duration
 	endedTTL       time.Duration
 	embryonicTTL   time.Duration
@@ -69,6 +70,7 @@ var defaultLimits = limits{
 	pendingTimeout: time.Second,
 	tunnelTTL:      30 * time.Second,
 	linger:         41 * time.Second,
+	lingerCap:      8192,
 	dialFailLinger: 10 * time.Second,
 	endedTTL:       2 * time.Minute,
 	embryonicTTL:   30 * time.Second,
@@ -80,7 +82,7 @@ var defaultLimits = limits{
 
 	// One 65507-byte datagram at MTU 1280 is 53 fragments, each held in a 2 KiB buffer.
 	udpQueueBytes:    112 << 10,
-	udpSessions:      4096,
+	udpSessions:      1024, // one per app socket, not per peer; each pins a 64 KiB read buffer
 	udpCreating:      64,
 	udpPeers:         4096,
 	udpSendQ:         64,
@@ -1002,8 +1004,15 @@ func (e *engine) finishFlow(f *flow, linger time.Duration) {
 	e.releaseLiveLocked(f)
 	f.ep, f.phys = nil, nil
 	if e.tcp[f.key] == f && f.state == stateBypass {
-		f.state = stateLinger
 		f.endedAt = now
+		// Past the cap it goes straight to the bounded ended cache: a burst of short connections
+		// must not grow the table every scan walks under e.mu. Late segments are dropped there.
+		if len(e.tcp) >= e.lim.lingerCap && !f.draining {
+			delete(e.tcp, f.key)
+			e.endedTCP.put(f.key, 0, now.Add(e.lim.endedTTL))
+			return
+		}
+		f.state = stateLinger
 		f.deadline = now.Add(linger)
 	}
 }
