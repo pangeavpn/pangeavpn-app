@@ -413,11 +413,23 @@ func assertSplitRangeFilter(t *testing.T, f *fakeFilter, cidr string) {
 	if f.weight != weightSplitPermit || f.action != cFWP_ACTION_PERMIT {
 		t.Fatalf("range filter %q: weight=%d action=%#x", f.name, f.weight, f.action)
 	}
-	if f.layer != cFWPM_LAYER_ALE_AUTH_CONNECT_V4 && f.layer != cFWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4 {
+	wantConds := 1
+	switch f.layer {
+	case cFWPM_LAYER_ALE_AUTH_CONNECT_V4:
+	case cFWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4:
+		// A host in the range must not open TCP connections to local services.
+		wantConds = 2
+	default:
 		t.Fatalf("range filter %q on layer %v", f.name, f.layer)
 	}
-	if len(f.conditions) != 1 || f.conditions[0].field != cFWPM_CONDITION_IP_REMOTE_ADDRESS || f.conditions[0].kind != cFWP_V4_ADDR_MASK || f.conditions[0].addr != want {
+	if len(f.conditions) != wantConds || f.conditions[0].field != cFWPM_CONDITION_IP_REMOTE_ADDRESS || f.conditions[0].kind != cFWP_V4_ADDR_MASK || f.conditions[0].addr != want {
 		t.Fatalf("range filter %q conditions = %+v, want remote address %s", f.name, f.conditions, cidr)
+	}
+	if wantConds == 2 {
+		c := f.conditions[1]
+		if c.field != cFWPM_CONDITION_IP_PROTOCOL || c.match != cFWP_MATCH_EQUAL || c.kind != cFWP_UINT8 || c.value != uint64(cIPPROTO_UDP) {
+			t.Fatalf("inbound range filter %q protocol condition = %+v, want UDP only", f.name, c)
+		}
 	}
 }
 

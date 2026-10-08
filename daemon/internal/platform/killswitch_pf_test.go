@@ -192,10 +192,13 @@ func TestBuildPFRules_SplitRulesStayOutOfTheAnchorFile(t *testing.T) {
 		}
 	}
 	split := strings.Join(pfSplitRules(splitBoth, 437), "\n")
-	for _, want := range []string{"pass out quick inet to 198.51.100.0/24", "pass in quick inet from 203.0.113.0/25", "group 437"} {
+	for _, want := range []string{"pass out quick inet to 198.51.100.0/24", "pass out quick inet to 203.0.113.0/25", "group 437"} {
 		if !strings.Contains(split, want) {
 			t.Fatalf("split anchor lacks %q:\n%s", want, split)
 		}
+	}
+	if strings.Contains(split, "pass in") {
+		t.Fatalf("split anchor admits unsolicited inbound from an excluded range:\n%s", split)
 	}
 }
 
@@ -208,8 +211,8 @@ func pfLineIndex(rules, want string) int {
 	return -1
 }
 
-// Excluded ranges pass both ways, but a resolver inside one is still blocked
-// first; every split rule lands before block out all, tunnel or not.
+// Excluded ranges pass out (replies by state), but a resolver inside one is still
+// blocked first; every split rule lands before block out all, tunnel or not.
 func TestBuildPFRules_SplitRangesPassButResolversInThemDoNot(t *testing.T) {
 	split := splitPermits{CIDRs: []string{"198.51.100.0/24", "203.0.113.0/25"}}
 	for _, tunnel := range []string{"utun9", ""} {
@@ -218,12 +221,14 @@ func TestBuildPFRules_SplitRangesPassButResolversInThemDoNot(t *testing.T) {
 		for _, cidr := range split.CIDRs {
 			block := pfLineIndex(rules, "block out quick inet proto { tcp udp } to "+cidr+" port { 53 853 }")
 			out := pfLineIndex(rules, "pass out quick inet to "+cidr)
-			in := pfLineIndex(rules, "pass in quick inet from "+cidr)
-			if block < 0 || out < 0 || in < 0 {
+			if block < 0 || out < 0 {
 				t.Fatalf("tunnel %q: rules for %s missing:\n%s", tunnel, cidr, rules)
 			}
-			if !(block < out && out < blockAll && in < blockAll) {
-				t.Fatalf("tunnel %q: %s order wrong (block=%d out=%d in=%d blockAll=%d):\n%s", tunnel, cidr, block, out, in, blockAll, rules)
+			if !(block < out && out < blockAll) {
+				t.Fatalf("tunnel %q: %s order wrong (block=%d out=%d blockAll=%d):\n%s", tunnel, cidr, block, out, blockAll, rules)
+			}
+			if pfLineIndex(rules, "pass in quick inet from "+cidr) >= 0 {
+				t.Fatalf("tunnel %q: %s admits unsolicited inbound:\n%s", tunnel, cidr, rules)
 			}
 		}
 		if tunnel != "" && pfLineIndex(rules, "pass out quick on utun9 all") > pfLineIndex(rules, "block out quick inet proto { tcp udp } to 198.51.100.0/24 port { 53 853 }") {

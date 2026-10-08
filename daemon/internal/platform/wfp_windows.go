@@ -995,24 +995,42 @@ func (e *wfpEngine) addPermitSplitEgress(appID *wtFwpByteBlob, tunnelLUID uint64
 	return ids, err
 }
 
-// addPermitSplitCIDR permits an excluded destination range both ways, under the
-// DNS block so a resolver inside it still cannot be reached off-tunnel.
+// addPermitSplitCIDR permits an excluded destination range, under the DNS block so a
+// resolver inside it still cannot be reached off-tunnel.
 func (e *wfpEngine) addPermitSplitCIDR(cidr string) ([]uint64, error) {
 	addrMask, err := parseV4CIDRAddrMask(cidr)
 	if err != nil {
 		return nil, err
 	}
-	conditions := []wtFwpmFilterCondition0{
-		{
-			fieldKey:  cFWPM_CONDITION_IP_REMOTE_ADDRESS,
-			matchType: cFWP_MATCH_EQUAL,
-			conditionValue: wtFwpConditionValue0{
-				_type: cFWP_V4_ADDR_MASK,
-				value: uintptr(unsafe.Pointer(&addrMask)),
-			},
+	remote := wtFwpmFilterCondition0{
+		fieldKey:  cFWPM_CONDITION_IP_REMOTE_ADDRESS,
+		matchType: cFWP_MATCH_EQUAL,
+		conditionValue: wtFwpConditionValue0{
+			_type: cFWP_V4_ADDR_MASK,
+			value: uintptr(unsafe.Pointer(&addrMask)),
 		},
 	}
-	ids, err := e.addALEPermitPair("PangeaVPN Allow Split Range "+cidr, weightSplitPermit, conditions)
-	runtime.KeepAlive(&addrMask)
-	return ids, err
+	udp := wtFwpmFilterCondition0{
+		fieldKey:  cFWPM_CONDITION_IP_PROTOCOL,
+		matchType: cFWP_MATCH_EQUAL,
+		conditionValue: wtFwpConditionValue0{
+			_type: cFWP_UINT8,
+			value: uintptr(cIPPROTO_UDP),
+		},
+	}
+	defer runtime.KeepAlive(&addrMask)
+	name := "PangeaVPN Allow Split Range " + cidr
+	ids := make([]uint64, 0, 2)
+	id, err := e.addFilter(cFWPM_LAYER_ALE_AUTH_CONNECT_V4, name, weightSplitPermit, cFWP_ACTION_PERMIT, []wtFwpmFilterCondition0{remote})
+	if err != nil {
+		return ids, err
+	}
+	ids = append(ids, id)
+	// TCP replies ride the connect's authorisation, so inbound is UDP only: a host in the
+	// range can no longer open connections to local TCP services (SMB, RDP, dev servers).
+	id, err = e.addFilter(cFWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4, name+" Inbound", weightSplitPermit, cFWP_ACTION_PERMIT, []wtFwpmFilterCondition0{remote, udp})
+	if err != nil {
+		return ids, err
+	}
+	return append(ids, id), nil
 }
