@@ -249,6 +249,7 @@ npm run dev
 | Command | What it does |
 |---|---|
 | `npm run dev` | UI and daemon, rebuilt on change and wired together |
+| `npm run preview` | The UI alone in a browser at `127.0.0.1:5199`, on a fake daemon and hub; query options like `?sub=expired&state=CONNECTED&lang=ru` pick the scenario |
 | `npm run build` | Compile `shared-types`, then the desktop app, then the daemon |
 | `npm test` | TypeScript and Go test suites |
 | `npm run build-bin:windows` | NSIS installer (x64 + arm64) |
