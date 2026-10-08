@@ -30,6 +30,13 @@ export function toAppEntry(candidate: CatalogCandidate): SplitTunnelAppEntry {
   return entry;
 }
 
+/** A path on a local disk: no UNC share or device namespace, whose very stat would reach out
+ *  (on Windows, an SMB connection that hands over the user's NTLM hash). */
+export function isLocalAbsolutePath(p: string, platform: string): boolean {
+  if (platform === "win32") return /^[a-zA-Z]:[\\/]/.test(p);
+  return p.startsWith("/") && !p.startsWith("//");
+}
+
 export function ruleKind(rule: string, platform: string): SplitTunnelAppKind {
   if (platform === "win32") return /[\\/]$/.test(rule) ? "dir" : "file";
   if (platform === "darwin" && /\.app\/?$/i.test(rule)) return "bundle";

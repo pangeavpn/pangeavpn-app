@@ -22,6 +22,7 @@ import {
   parseInternetShortcut,
   parseRegSteamPath,
   parseVdf,
+  isLocalAbsolutePath,
   ruleKind,
   ruleMatchesPath,
   scriptRuleDir,
@@ -607,6 +608,21 @@ test("linux dirs and icon lookups follow XDG order", () => {
   assert.ok(!icons.some((path) => path.includes("/scalable/") && path.endsWith(".png")));
   assert.deepEqual(linuxIconCandidates("/snap/firefox/current/default256.png", {}, "/home/dana"), ["/snap/firefox/current/default256.png"]);
   assert.deepEqual(linuxIconCandidates("../etc/x", {}, "/home/dana"), []);
+});
+
+test("only local absolute paths are local: no share or device namespace is ever stat'd", () => {
+  assert.ok(isLocalAbsolutePath("C:\\Games\\Foo\\foo.exe", "win32"));
+  assert.ok(isLocalAbsolutePath("d:/tools/x.exe", "win32"));
+  assert.ok(!isLocalAbsolutePath("\\\\attacker\\share\\x.exe", "win32"));
+  assert.ok(!isLocalAbsolutePath("//attacker/share/x.exe", "win32"));
+  assert.ok(!isLocalAbsolutePath("\\\\?\\C:\\Games\\x.exe", "win32"));
+  assert.ok(!isLocalAbsolutePath("\\\\.\\pipe\\x", "win32"));
+  assert.ok(!isLocalAbsolutePath("Games\\x.exe", "win32"));
+  assert.ok(!isLocalAbsolutePath("C:x.exe", "win32"));
+  assert.ok(isLocalAbsolutePath("/Applications/Foo.app", "darwin"));
+  assert.ok(isLocalAbsolutePath("/usr/bin/foo", "linux"));
+  assert.ok(!isLocalAbsolutePath("//server/share/foo", "linux"));
+  assert.ok(!isLocalAbsolutePath("usr/bin/foo", "linux"));
 });
 
 test("rule kinds and display names follow the per-OS forms", () => {
