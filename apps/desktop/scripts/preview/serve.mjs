@@ -70,10 +70,14 @@ http
     if (url.pathname === "/__mock-bridge.js") return send(res, 200, types[".js"], fs.readFileSync(mockFile));
 
     const file = path.resolve(distDir, `.${decodeURIComponent(url.pathname)}`);
-    if (!file.startsWith(distDir + path.sep) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) {
+    if (!file.startsWith(distDir + path.sep)) return send(res, 404, "text/plain", "not found");
+    // One read, no exists-then-read: a missing file or a directory both land in the catch.
+    let body;
+    try {
+      body = fs.readFileSync(file);
+    } catch {
       return send(res, 404, "text/plain", "not found");
     }
-    let body = fs.readFileSync(file);
     if (path.basename(file) === "index.html") {
       // Ahead of the module script, so the bridge exists before the renderer looks for it.
       body = body.toString().replace('<script type="module"', '<script src="/__mock-bridge.js"></script>\n    <script type="module"');
