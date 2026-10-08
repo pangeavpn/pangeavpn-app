@@ -28,9 +28,15 @@ type frameConn struct {
 	oob  []byte
 }
 
+// The oob buffer holds 64 separate one-descriptor messages: a truncated read tears the whole
+// broker session down, so a burst must never outgrow it.
 func newFrameConn(c *net.UnixConn) *frameConn {
-	return &frameConn{c: c, rbuf: make([]byte, 4096), oob: make([]byte, unix.CmsgSpace(16*4))}
+	return &frameConn{c: c, rbuf: make([]byte, 4096), oob: make([]byte, 64*unix.CmsgSpace(4))}
 }
+
+// frameWriteTimeout bounds a write to a peer that stopped reading, which would otherwise hold
+// wmu forever and stall every request queued behind it.
+const frameWriteTimeout = 10 * time.Second
 
 func (f *frameConn) readFrame() ([]byte, error) {
 	for {
@@ -94,6 +100,8 @@ func (f *frameConn) closeFDs() {
 func (f *frameConn) writeFrame(frame []byte, file *os.File) error {
 	f.wmu.Lock()
 	defer f.wmu.Unlock()
+	_ = f.c.SetWriteDeadline(time.Now().Add(frameWriteTimeout))
+	defer func() { _ = f.c.SetWriteDeadline(time.Time{}) }()
 	if file == nil {
 		_, err := f.c.Write(frame)
 		return err
@@ -259,6 +267,7 @@ func spawnBroker(exe string, args, env []string, cred *syscall.Credential) (*bro
 	}
 	cmd := exec.Command(exe, args...)
 	cmd.Env = env
+	cmd.Dir = "/"
 	cmd.ExtraFiles = []*os.File{child}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Credential: cred}
 	err = cmd.Start()

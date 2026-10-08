@@ -39,7 +39,8 @@ func New(opts Options) (Dialer, error) {
 		return nil, fmt.Errorf("split egress: %w", err)
 	}
 	cred := &syscall.Credential{Uid: 0, Gid: uint32(opts.BrokerGID)}
-	spawn := func() (*brokerProc, error) { return spawnBroker(exe, []string{brokerFlag}, nil, cred) }
+	// An empty env, not nil: nil inherits the daemon's whole environment into a root child.
+	spawn := func() (*brokerProc, error) { return spawnBroker(exe, []string{brokerFlag}, []string{}, cred) }
 	log := newRateLog(opts.Logf)
 	m := newRouteMirror(fetchRoutes, runRoute, interfaceState, log)
 	d := &darwinDialer{ids: newIdentityCache(func() (Identity, error) { return resolvePhysical(m) }), broker: newBrokerClient(spawn, log), mirror: m}
