@@ -43,7 +43,7 @@ export function createLogWriter(
       const { size } = fstatSync(fd);
       let at = size;
       if (size > 0 && size + Buffer.byteLength(line) > maxBytes) {
-        rollOver(fd, size, rolled);
+        rollOver(fd, size, rolled, maxBytes);
         at = 0;
       }
       writeSync(fd, line, at);
@@ -61,15 +61,20 @@ export function createLogWriter(
   };
 }
 
-/** Copies the open log into the rollover file, then empties it in place. */
-function rollOver(fd: number, size: number, rolled: string): void {
-  const kept = Buffer.alloc(size);
-  const read = readSync(fd, kept, 0, size, 0);
-  const out = openSync(rolled, ROLL_FLAGS);
+/** Copies the open log's last maxBytes into the rollover file, then empties it in place. */
+function rollOver(fd: number, size: number, rolled: string, maxBytes: number): void {
   try {
-    writeSync(out, kept, 0, read);
-  } finally {
-    closeSync(out);
+    const keep = Math.min(size, maxBytes);
+    const kept = Buffer.alloc(keep);
+    const read = readSync(fd, kept, 0, keep, size - keep);
+    const out = openSync(rolled, ROLL_FLAGS);
+    try {
+      writeSync(out, kept, 0, read);
+    } finally {
+      closeSync(out);
+    }
+  } catch {
+    // A locked or unwritable .1 costs the old lines, never the log itself.
   }
   ftruncateSync(fd, 0);
 }
