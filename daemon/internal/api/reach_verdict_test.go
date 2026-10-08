@@ -31,14 +31,30 @@ type fakeReach struct {
 	// duringProbe runs mid-probe, standing in for a user operation that lands
 	// while the probe holds no lock.
 	duringProbe func()
+	// blocking routes hang until their probe is cancelled; cancelled lists them.
+	blocking  map[string]bool
+	cancelled []string
 }
 
 func newFakeReach() *fakeReach { return &fakeReach{outcomes: map[string]reach.Outcome{}} }
 
-func (f *fakeReach) probe(_ context.Context, route reachRoute) reach.Outcome {
+func (f *fakeReach) probe(ctx context.Context, route reachRoute) reach.Outcome {
 	time.Sleep(f.delay)
 	if f.duringProbe != nil {
 		f.duringProbe()
+	}
+	f.mu.Lock()
+	blocks := f.blocking[route.id()]
+	f.mu.Unlock()
+	if blocks {
+		select {
+		case <-ctx.Done():
+			f.mu.Lock()
+			f.cancelled = append(f.cancelled, route.id())
+			f.mu.Unlock()
+		case <-time.After(3 * time.Second):
+		}
+		return reach.Silent
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -292,5 +308,63 @@ func TestConnect_NeverPermitsAnUnvouchedHubProxyNode(t *testing.T) {
 	defer ks.mu.Unlock()
 	if slices.Contains(ks.enableEndpoints, "198.51.100.77") {
 		t.Fatal("permitted a node no stored profile vouches for")
+	}
+}
+
+// A plain-WireGuard session names its node only in DirectEndpoint; a hub route
+// through that node shares the dead tunnel's fate just the same.
+func TestReachVerdict_DirectEndpointNodeSharesFate(t *testing.T) {
+	profile := testProfile()
+	profile.WireGuard.DirectEndpoint = "198.51.100.30:51820"
+	svc, _ := verdictTestService(t, &fakeKillSwitch{}, profile)
+	svc.SetRealityProxy(&fakeRealityProxy{port: 41000, remote: "198.51.100.30"})
+	svc.reachBaseline.record(testNetwork, reachRouteReality+":198.51.100.30")
+	if v, _ := svc.reachVerdictFor(context.Background(), profile); v != reachUnknown {
+		t.Fatalf("verdict = %v, want unknown: the only proven route runs through the session's own node", v)
+	}
+}
+
+// One echo already decides "online", so a route still hanging (say, through the
+// dead node) must not hold the health loop for its whole timeout.
+func TestReachVerdict_FirstAnswerEndsTheRound(t *testing.T) {
+	svc, hub := verdictTestService(t, &fakeKillSwitch{}, reachProfile(), vouchingProfile())
+	svc.SetRealityProxy(&fakeRealityProxy{port: 41000, remote: testProxyNode})
+	svc.SetShadowsocksProxy(&fakeShadowsocksProxy{remote: "198.51.100.10"})
+	hub.set(reachRouteReality+":"+testProxyNode, reach.Answered)
+	hub.blocking = map[string]bool{reachRouteShadowsocks + ":198.51.100.10": true}
+	start := time.Now()
+	v, _ := svc.reachVerdictFor(context.Background(), reachProfile())
+	if v != reachOnline {
+		t.Fatalf("verdict = %v, want online", v)
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Fatalf("round took %s after the first answer", elapsed)
+	}
+	deadline := time.Now().Add(time.Second)
+	for {
+		hub.mu.Lock()
+		cancelled := slices.Contains(hub.cancelled, reachRouteShadowsocks+":198.51.100.10")
+		hub.mu.Unlock()
+		if cancelled {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the still-running probe was never cancelled")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// Answers gathered while the host moved networks describe neither network, so
+// nothing may be recorded and the verdict must not lean on them.
+func TestReachVerdict_RoamMidRoundRecordsNothing(t *testing.T) {
+	svc, hub := verdictTestService(t, &fakeKillSwitch{}, reachProfile())
+	hub.set(directRouteID, reach.Answered)
+	hub.duringProbe = func() { svc.networkKey = func() string { return "wlan0:198.51.100.40" } }
+	if v, _ := svc.reachVerdictFor(context.Background(), reachProfile()); v != reachUnknown {
+		t.Fatalf("verdict = %v, want unknown after a roam mid-round", v)
+	}
+	if svc.reachBaseline.proven(testNetwork, directRouteID) || svc.reachBaseline.proven("wlan0:198.51.100.40", directRouteID) {
+		t.Fatal("an answer from a round that straddled two networks was recorded")
 	}
 }

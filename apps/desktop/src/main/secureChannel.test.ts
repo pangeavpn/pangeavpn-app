@@ -81,6 +81,20 @@ function makeHub() {
   };
 }
 
+// The hub refuses envelopes sealed outside its window, and the send time is
+// inside the ciphertext so a captured request cannot be re-dated.
+function assertFreshSendTime(ts: unknown): void {
+  assert.equal(typeof ts, "number");
+  assert.ok(Math.abs(Date.now() - (ts as number)) < 5_000, `ts ${String(ts)} is not the send time`);
+}
+
+test("v1 seals its send time with the request", () => {
+  const { envelope, aesKey } = encryptRequest("GET", "/api/x", { a: "b" }, undefined);
+  const { ts, ...request } = decryptResponse(aesKey, envelope) as unknown as Record<string, unknown>;
+  assertFreshSendTime(ts);
+  assert.deepEqual(request, { method: "GET", route: "/api/x", headers: { a: "b" } });
+});
+
 test("v1 request and response round-trip under the derived key", () => {
   const { envelope, aesKey } = encryptRequest("GET", "/api/x", { a: "b" }, undefined);
   assert.ok(envelope.eph && envelope.iv && envelope.ct && envelope.tag);
@@ -105,7 +119,8 @@ test("v2 round-trips against a hub holding both static keys", skipWithoutMlKem, 
 
   const keys = hub.keysFor(envelope.eph, envelope.kem);
   const aad = v2AssociatedData(envelope.eph, envelope.kem);
-  const request = JSON.parse(hub.open(keys.c2s, envelope, aad));
+  const { ts, ...request } = JSON.parse(hub.open(keys.c2s, envelope, aad));
+  assertFreshSendTime(ts);
   assert.deepEqual(request, {
     method: "POST",
     route: "/api/register",
