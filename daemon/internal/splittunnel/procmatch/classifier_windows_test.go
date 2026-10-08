@@ -553,3 +553,30 @@ func BenchmarkRefresh(b *testing.B) {
 	c.mu.Unlock()
 	b.ReportMetric(float64(c.Stats().PathFails), "pathfails")
 }
+
+// A path read without a handle only counts while the pid still has the start time it was read for.
+func TestStillStartedAtTellsAReusedPid(t *testing.T) {
+	var buf []byte
+	procs, err := systemProcesses(&buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	self, start := os.Getpid(), int64(0)
+	for _, p := range procs {
+		if p.pid == self {
+			start = p.start
+		}
+	}
+	if start == 0 {
+		t.Fatal("own process missing from the snapshot")
+	}
+	if !stillStartedAt(self, start) {
+		t.Error("the live process was taken for a reused pid")
+	}
+	if stillStartedAt(self, start+1) {
+		t.Error("a different start time was accepted")
+	}
+	if stillStartedAt(1<<30, start) {
+		t.Error("a pid with no process was accepted")
+	}
+}
