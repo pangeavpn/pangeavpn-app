@@ -139,8 +139,9 @@ func parseDiagMsg(data []byte) (diagRow, bool) {
 		if l < 4 || l > len(attrs) {
 			break
 		}
-		if ne.Uint16(attrs[2:])&nlaTypeMask == diagAttrV6Only && l >= 5 {
-			r.v6only = attrs[4] != 0
+		attr := attrs[:l]
+		if ne.Uint16(attr[2:])&nlaTypeMask == diagAttrV6Only && len(attr) > 4 {
+			r.v6only = attr[4] != 0
 		}
 		l = (l + 3) &^ 3
 		if l >= len(attrs) {
