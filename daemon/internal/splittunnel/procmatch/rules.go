@@ -31,16 +31,33 @@ func CompileRulesProtected(entries, neverBypass []string) (*Rules, []RuleError) 
 	return compileRules(hostEnv(), entries, neverBypass)
 }
 
+// ValidateRules reports what CompileRulesProtected would refuse, without the background
+// resolution a compile starts (filesystem work as root that a validate-only caller discards).
+func ValidateRules(entries, neverBypass []string) []RuleError {
+	env := hostEnv()
+	_, errs := checkEntries(env, entries, parseImages(env, neverBypass))
+	return errs
+}
+
 func compileRules(env *ruleEnv, entries, neverBypass []string) (*Rules, []RuleError) {
 	never := compileImages(env, neverBypass)
 	var neverRules []compiledRule
 	if never != nil {
 		neverRules = never.rules
 	}
+	out, errs := checkEntries(env, entries, neverRules)
+	rules := newRules(env.goos, out)
+	rules.never = never
+	rules.translocated = env.translocated
+	rules.startResolve(env, true, neverRules)
+	return rules, errs
+}
+
+func checkEntries(env *ruleEnv, entries []string, never []compiledRule) ([]compiledRule, []RuleError) {
 	var errs []RuleError
 	var out []compiledRule
 	for i, entry := range entries {
-		r, code := env.check(entry, neverRules)
+		r, code := env.check(entry, never)
 		if code != "" {
 			errs = append(errs, RuleError{Index: i, Code: code})
 			continue
@@ -54,15 +71,10 @@ func compileRules(env *ruleEnv, entries, neverBypass []string) (*Rules, []RuleEr
 		}
 		out = append(out, r)
 	}
-	rules := newRules(env.goos, out)
-	rules.never = never
-	rules.translocated = env.translocated
-	rules.startResolve(env, true, neverRules)
-	return rules, errs
+	return out, errs
 }
 
-// compileImages builds a matcher for protected images without applying the rule policy.
-func compileImages(env *ruleEnv, paths []string) *Rules {
+func parseImages(env *ruleEnv, paths []string) []compiledRule {
 	var out []compiledRule
 	for _, p := range paths {
 		r, code := parseRule(env.goos, p)
@@ -70,6 +82,12 @@ func compileImages(env *ruleEnv, paths []string) *Rules {
 			out = append(out, r)
 		}
 	}
+	return out
+}
+
+// compileImages builds a matcher for protected images without applying the rule policy.
+func compileImages(env *ruleEnv, paths []string) *Rules {
+	out := parseImages(env, paths)
 	if len(out) == 0 {
 		return nil
 	}

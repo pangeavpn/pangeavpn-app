@@ -559,3 +559,24 @@ func TestResolveDeadline(t *testing.T) {
 		t.Fatal("raw forms must match before resolution finishes")
 	}
 }
+
+func TestValidateRulesAgreesWithCompile(t *testing.T) {
+	var entries []string
+	switch runtime.GOOS {
+	case "windows":
+		entries = []string{`C:\Games\`, "relative", `C:\Windows\explorer.exe`, `C:\Games\`, `C:\Tools\x.exe`}
+	case "darwin":
+		entries = []string{"/Applications/Foo.app", "relative", "/sbin/launchd", "/Applications/Foo.app", "/opt/x"}
+	default:
+		entries = []string{"/opt/game/", "relative", "/sbin/init", "/opt/game/", "/opt/x"}
+	}
+	never := []string{entries[4]}
+	_, compiled := CompileRulesProtected(entries, never)
+	validated := ValidateRules(entries, never)
+	if fmt.Sprint(validated) != fmt.Sprint(compiled) {
+		t.Fatalf("ValidateRules = %v, CompileRulesProtected = %v", validated, compiled)
+	}
+	if len(validated) != 3 {
+		t.Fatalf("want relative, system and own-image refusals, got %v", validated)
+	}
+}
