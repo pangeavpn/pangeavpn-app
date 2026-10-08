@@ -90,6 +90,12 @@ function gcmOpen(key: Buffer, encrypted: EncryptedResponse, aad?: Buffer): strin
   return Buffer.concat([decipher.update(Buffer.from(encrypted.ct, "base64")), decipher.final()]).toString("utf8");
 }
 
+// The send time rides inside the ciphertext: the hub refuses envelopes sealed
+// outside its window, so a captured request cannot be replayed indefinitely.
+function innerRequestJson(method: string, route: string, headers: Record<string, string>, body: unknown): string {
+  return JSON.stringify({ method, route, headers, body, ts: Date.now() });
+}
+
 export function encryptRequest(
   method: string,
   route: string,
@@ -99,7 +105,7 @@ export function encryptRequest(
   // Fresh ephemeral client keypair per request (ephemeral-static ECDH against the pinned server key; not PFS)
   const { ephB64, sharedSecret } = ephemeralAgreement(serverPublicKey);
   const aesKey = Buffer.from(hkdfSync("sha256", sharedSecret, HKDF_SALT, HKDF_INFO, 32));
-  const sealed = gcmSeal(aesKey, JSON.stringify({ method, route, headers, body }));
+  const sealed = gcmSeal(aesKey, innerRequestJson(method, route, headers, body));
   return { envelope: { eph: ephB64, ...sealed }, aesKey };
 }
 
@@ -139,7 +145,7 @@ export function encryptRequestV2(
   const { ephB64, sharedSecret } = ephemeralAgreement(serverKey);
   const keys = deriveV2Keys(sharedSecret, kemSecret);
   const aad = v2AssociatedData(ephB64, kem.kemCiphertext);
-  const sealed = gcmSeal(keys.c2s, JSON.stringify({ method, route, headers, body }), aad);
+  const sealed = gcmSeal(keys.c2s, innerRequestJson(method, route, headers, body), aad);
   return {
     route: "/v2/secure",
     envelope: { eph: ephB64, kem: kem.kemCiphertext, ...sealed },

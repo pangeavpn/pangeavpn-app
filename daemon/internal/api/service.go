@@ -431,6 +431,7 @@ func (s *Service) StartShadowsocksProxy(ctx context.Context, profile state.Shado
 		return 0, errors.New("shadowsocks proxy is not available")
 	}
 	if host := strings.TrimSpace(profile.RemoteHost); host != "" {
+		s.noteHubProxyPermit(host)
 		if err := s.PermitHosts(ctx, []string{host}); err != nil {
 			s.logs.Add(state.LogWarn, state.SourceShadowsocks, fmt.Sprintf(
 				"could not permit shadowsocks hub proxy remote %s through the kill switch: %v", host, err))
@@ -468,6 +469,7 @@ func (s *Service) StartRealityProxy(ctx context.Context, profile state.RealityPr
 		return 0, errors.New("reality proxy is not available")
 	}
 	if host := strings.TrimSpace(profile.RemoteHost); host != "" {
+		s.noteHubProxyPermit(host)
 		if err := s.PermitHosts(ctx, []string{host}); err != nil {
 			s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf(
 				"could not permit reality hub proxy remote %s through the kill switch: %v", host, err))
@@ -2626,15 +2628,25 @@ func (s *Service) escalateDeadDataPath(ctx context.Context, profile state.Profil
 	if s.sessionMoved(profile.ID) {
 		return
 	}
+	s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf(
+		"%s tunnel stopped carrying traffic; %s", activeKind, s.noteDeadForCascade(activeKind)))
+	s.attemptSessionRebuild(ctx, profile, "tunnel stopped carrying traffic")
+}
+
+// noteDeadForCascade marks kind for the next cascade as a dead data path does
+// (redialled first, demoted if it keeps dying) and says what happens next.
+func (s *Service) noteDeadForCascade(kind string) string {
 	next := "reconnecting it"
+	if kind == "" {
+		return next
+	}
 	if preferred := s.getSessionOpts().PreferredTransport; preferred == "" || preferred == "auto" {
 		next = "redialling it before the other transports"
-		if s.noteDeadTransport(activeKind) {
+		if s.noteDeadTransport(kind) {
 			next = fmt.Sprintf("it died again within %s, so trying every other transport first", transportFlapWindow)
 		}
 	}
-	s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("%s tunnel stopped carrying traffic; %s", activeKind, next))
-	s.attemptSessionRebuild(ctx, profile, "tunnel stopped carrying traffic")
+	return next
 }
 
 // transportFlapWindow: a transport that dies again this soon after a redial is being
@@ -2739,15 +2751,16 @@ func (s *Service) retryDroppedSession(ctx context.Context) {
 }
 
 // attemptSessionRebuild runs one rebuild and books the result against the retry
-// schedule: success clears it, failure backs the next attempt off.
-func (s *Service) attemptSessionRebuild(ctx context.Context, profile state.Profile, cause string) {
+// schedule; ran is false only when another operation held opMu and nothing ran.
+func (s *Service) attemptSessionRebuild(ctx context.Context, profile state.Profile, cause string) (ran bool) {
 	s.setTransportsExhausted(false)
 	err := s.rebuildSilentSession(ctx, profile)
 	if errors.Is(err, errRebuildBusy) {
 		// A real operation (or an overlapping rebuild) already owns opMu;
 		// this tick simply didn't get to run, which must not burn a retry attempt or push the backoff out.
-		return
+		return false
 	}
+	ran = true
 	// Cancelled means a user operation took over and owns the state from here;
 	// booking it would stamp a stale error over that operation.
 	if errors.Is(err, context.Canceled) {
@@ -2787,6 +2800,7 @@ func (s *Service) attemptSessionRebuild(ctx context.Context, profile state.Profi
 		s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("session recovered after %d reconnect attempts", attempt))
 	}
 	s.resetRecovery()
+	return ran
 }
 
 // sessionIsHealthy reports whether the session is in fact carrying traffic fail-closed:
@@ -3379,7 +3393,7 @@ func (s *Service) reconcilePersistedKillSwitch(ctx context.Context) platform.Kil
 
 	// No DNS here: port 53 may already be blocked, so the persisted IPs and
 	// the hub literal are all that can be permitted.
-	endpoints := mergeUniqueSorted(persisted.EndpointIPs, ipLiterals(s.storedControlPlaneHosts()))
+	endpoints := s.withoutHubProxyPermits(mergeUniqueSorted(persisted.EndpointIPs, ipLiterals(s.storedControlPlaneHosts())))
 	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("re-applying kill switch left by the previous process (lockdown=%v)", persisted.Locked))
 	var enableErr error
 	for attempt := 1; attempt <= startupLockReapplyAttempts; attempt++ {
@@ -3923,11 +3937,14 @@ func (s *Service) sessionKillSwitchPermits(profile state.Profile, allowLAN bool)
 	permits := killSwitchPermitsFor(profile, allowLAN)
 	vouched := s.vouchedHosts()
 	resolvers := ipLiterals(profile.WireGuard.DNS)
+	var proxyOnly []string
 	for _, remote := range s.hubProxyRemotes() {
 		if vouched[remote] && !slices.Contains(resolvers, remote) && !slices.Contains(permits, remote) {
 			permits = append(permits, remote)
+			proxyOnly = append(proxyOnly, remote)
 		}
 	}
+	s.recordHubProxyPermits(proxyOnly)
 	return permits
 }
 

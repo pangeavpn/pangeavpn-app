@@ -130,7 +130,9 @@ func (s *Service) tickUpstreamHold(ctx context.Context) bool {
 	if !now.Before(until) {
 		s.clearUpstreamHold()
 		s.reachBaseline.forget(s.currentNetworkKey())
-		s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("the network is still silent after %s; trying every transport", upstreamHoldLimit))
+		kind := s.activeTransportKindSnapshot()
+		s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf(
+			"the network is still silent after %s; treating the %s tunnel as dead, %s", upstreamHoldLimit, kind, s.noteDeadForCascade(kind)))
 		s.attemptSessionRebuild(ctx, profile, "tunnel stopped carrying traffic")
 		return true
 	}
@@ -146,14 +148,27 @@ func (s *Service) tickUpstreamHold(ctx context.Context) bool {
 		s.scheduleUpstreamProbe()
 		return true
 	}
-	s.clearUpstreamHold()
 	if verdict == reachOnline {
 		s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("the network is back (%s); rebuilding the tunnel", summary))
 	} else {
 		s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("the hub's routes changed (%s); trying every transport", summary))
 	}
-	s.attemptSessionRebuild(ctx, profile, "tunnel stopped carrying traffic")
+	// The hold stays up until the rebuild really runs: when another operation holds
+	// opMu this tick, the next tick asks again instead of dropping the reconnect.
+	if s.attemptSessionRebuild(ctx, profile, "tunnel stopped carrying traffic") {
+		s.clearUpstreamHold()
+	} else {
+		s.probeUpstreamNow()
+	}
 	return true
+}
+
+func (s *Service) probeUpstreamNow() {
+	s.recoveryMu.Lock()
+	defer s.recoveryMu.Unlock()
+	if s.upstreamHoldProfile != "" {
+		s.upstreamProbeAt = time.Time{}
+	}
 }
 
 // refreshReachBaseline proves, at most once per refresh window per network, which
@@ -165,6 +180,6 @@ func (s *Service) refreshReachBaseline(network string, profile state.Profile) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*reach.Timeout)
 		defer cancel()
-		s.reachVerdictFor(ctx, profile)
+		s.reproveBaseline(ctx, profile)
 	}()
 }
