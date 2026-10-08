@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
-import { npmCmd, relPath, rootDir, runOrThrow, sha256File, writeJson } from "./shared.mjs";
+import { electronVersion, npmCmd, relPath, rootDir, runOrThrow, sha256File, writeJson } from "./shared.mjs";
 
 const platformName = "linux";
 const archTargets = [
@@ -51,7 +51,7 @@ for (const target of archTargets) {
       `--${target.arch}`,
       "--publish",
       "never",
-      "--config.electronVersion=41.5.0"
+      `--config.electronVersion=${electronVersion}`
     ],
     { cwd: rootDir, shell: true }
   );

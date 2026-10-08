@@ -118,7 +118,7 @@ sudo mkdir -p "$INSTALL_DIR"
 info "Packaging AppImage..."
 run_as_user npm exec --workspace @pangeavpn/desktop electron-builder -- \
   --projectDir . --linux AppImage --"$(uname -m | sed 's/x86_64/x64/;s/aarch64/arm64/')" \
-  --publish never --config.electronVersion=41.5.0
+  --publish never --config.electronVersion="$(node -p "require('./node_modules/electron/package.json').version")"
 
 APPIMAGE=$(find "$REPO_ROOT/dist/installers" -name '*.AppImage' -printf '%T@ %p\n' | sort -rn | head -1 | cut -d' ' -f2-)
 if [ -z "$APPIMAGE" ]; then

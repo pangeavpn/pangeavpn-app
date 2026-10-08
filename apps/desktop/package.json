@@ -28,7 +28,7 @@
   "build": {
     "appId": "com.pangea.pangeavpn",
     "productName": "PangeaVPN",
-    "electronVersion": "41.5.0",
+    "electronVersion": "41.10.6",
     "electronFuses": {
       "runAsNode": false,
       "enableCookieEncryption": true,
