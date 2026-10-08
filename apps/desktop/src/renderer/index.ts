@@ -385,10 +385,16 @@ function subscriptionText(sub: SubscriptionInfo | null): { text: string; warn: b
 
 // Guards against a slow earlier call overwriting a newer one's verdict.
 let entitlementGeneration = 0;
+let latestEntitlementCheck: Promise<boolean> = Promise.resolve(false);
 
 /** Ask the hub whether this account may connect; a "no" raises the expired screen. Resolves
  *  false when the hub could not be asked; the verdict lands no sooner than `holdMs`. */
-async function refreshEntitlement(holdMs = 0): Promise<boolean> {
+function refreshEntitlement(holdMs = 0): Promise<boolean> {
+  latestEntitlementCheck = checkEntitlement(holdMs);
+  return latestEntitlementCheck;
+}
+
+async function checkEntitlement(holdMs: number): Promise<boolean> {
   if (!pangeaApi) return false;
   const gen = ++entitlementGeneration;
   const held = new Promise((resolve) => setTimeout(resolve, holdMs));
@@ -1250,7 +1256,13 @@ async function recheckEntitlement(): Promise<void> {
   expiredRecheckBtn.setAttribute("aria-busy", "true");
   expiredRecheckBtn.replaceChildren(spinner, t("expired.checking"));
   expiredMessage.classList.add("is-refreshing");
-  const answered = await refreshEntitlement(RECHECK_HOLD_MS);
+  let check = refreshEntitlement(RECHECK_HOLD_MS);
+  let answered = await check;
+  // A check started meanwhile (window focus) owns the verdict, so report the one that landed last.
+  while (check !== latestEntitlementCheck) {
+    check = latestEntitlementCheck;
+    answered = await check;
+  }
   expiredRecheckBtn.disabled = false;
   expiredRecheckBtn.removeAttribute("aria-busy");
   expiredRecheckBtn.textContent = t("expired.recheck");
@@ -4450,8 +4462,10 @@ function updateAuthUI(): void {
     loginBtn.hidden = !pangeaApi;
     menuDevicesBtn.hidden = true;
     serverPanel.hidden = true;
-    // A lapsed account must not keep looking entitled through the next sign-in.
+    // A lapsed account must not keep looking entitled through the next sign-in, and a
+    // check still in flight for it must not land on whoever signs in next.
     entitled = null;
+    entitlementGeneration++;
   }
   updateServerControlStates();
 }

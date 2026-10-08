@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -23,9 +24,11 @@ type routeMirror struct {
 	now   func() time.Time
 	log   *rateLog
 
+	// Atomic so setWanted, called under the network lock, never waits behind a sync's route commands.
+	unwanted atomic.Bool
+
 	mu         sync.Mutex
 	closed     bool
-	unwanted   bool
 	staleSince map[scopedDefault]time.Time
 	failed     scopedDefault
 	retryAt    time.Time
@@ -37,9 +40,7 @@ func newRouteMirror(fetch func() ([]ribRoute, error), run func(args ...string) e
 
 // setWanted says whether off-tunnel sockets need the mirror now; the next sync acts on it.
 func (m *routeMirror) setWanted(wanted bool) {
-	m.mu.Lock()
-	m.unwanted = !wanted
-	m.mu.Unlock()
+	m.unwanted.Store(!wanted)
 }
 
 func (m *routeMirror) sync(routes []ribRoute) {
@@ -49,7 +50,7 @@ func (m *routeMirror) sync(routes []ribRoute) {
 		return
 	}
 	plan := planDarwinMirror(routes, m.iface)
-	if m.unwanted {
+	if m.unwanted.Load() {
 		plan.Remove, plan.Add = darwinMirrors(routes, m.iface), nil
 	}
 	m.removeStale(plan)

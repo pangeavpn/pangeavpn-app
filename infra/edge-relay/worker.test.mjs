@@ -59,3 +59,20 @@ test("refuses an empty or oversized body", async (t) => {
   assert.equal((await worker.fetch(post("https://relay.example/v2/secure", big))).status, 400);
   assert.equal(calls.length, 0);
 });
+
+test("refuses a declared oversized body without reading it", async (t) => {
+  const calls = stubUpstream(t);
+  const body = new ReadableStream({
+    pull() {
+      throw new Error("the body was read");
+    }
+  });
+  const req = new Request("https://relay.example/v2/secure", {
+    method: "POST",
+    body,
+    duplex: "half",
+    headers: { "Content-Type": "application/json", "Content-Length": String(10 * 1024 * 1024) }
+  });
+  assert.equal((await worker.fetch(req)).status, 400);
+  assert.equal(calls.length, 0);
+});

@@ -1,10 +1,21 @@
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const desktopDir = path.resolve(scriptDir, "..");
 const rootDir = path.resolve(desktopDir, "..", "..");
+
+// electron-builder bundles build.electronVersion, not the installed electron; a stale pin ships an old runtime.
+const desktopRequire = createRequire(path.join(desktopDir, "package.json"));
+const pinnedElectron = desktopRequire("./package.json").build?.electronVersion;
+const installedElectron = desktopRequire("electron/package.json").version;
+if (pinnedElectron !== installedElectron) {
+  throw new Error(
+    `build.electronVersion is ${pinnedElectron} but electron ${installedElectron} is installed; set them to the same version.`
+  );
+}
 
 const isWin = process.platform === "win32";
 const daemonName = isWin ? "PangeaDaemon.exe" : "daemon";

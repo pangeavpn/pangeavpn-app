@@ -2393,18 +2393,21 @@ function registerSplitTunnelHandlers(): void {
     return withoutPaths(writer.setCidrs(text), "setSplitTunnelCidrs");
   });
 
-  ipcMain.handle(IPC_CHANNELS.splitTunnelListApps, async (_event, options: unknown) => {
+  ipcMain.handle(IPC_CHANNELS.splitTunnelListApps, async (event, options: unknown) => {
+    assertAppFrame(event, "listSplitTunnelApps");
     const refresh = typeof options === "object" && options !== null && (options as { refresh?: unknown }).refresh === true;
     return withoutPaths(catalog.list(refresh), "listSplitTunnelApps");
   });
 
-  ipcMain.handle(IPC_CHANNELS.splitTunnelDescribeApps, async (_event, rules: unknown) =>
-    withoutPaths(catalog.describe(boundedStrings(rules, 512, "describeSplitTunnelApps")), "describeSplitTunnelApps")
-  );
+  ipcMain.handle(IPC_CHANNELS.splitTunnelDescribeApps, async (event, rules: unknown) => {
+    assertAppFrame(event, "describeSplitTunnelApps");
+    return withoutPaths(catalog.describe(boundedStrings(rules, 512, "describeSplitTunnelApps")), "describeSplitTunnelApps");
+  });
 
-  ipcMain.handle(IPC_CHANNELS.splitTunnelGetIcons, async (_event, keys: unknown) =>
-    withoutPaths(catalog.icons(boundedStrings(keys, 256, "getSplitTunnelIcons")), "getSplitTunnelIcons")
-  );
+  ipcMain.handle(IPC_CHANNELS.splitTunnelGetIcons, async (event, keys: unknown) => {
+    assertAppFrame(event, "getSplitTunnelIcons");
+    return withoutPaths(catalog.icons(boundedStrings(keys, 256, "getSplitTunnelIcons")), "getSplitTunnelIcons");
+  });
 
   ipcMain.handle(IPC_CHANNELS.splitTunnelBrowseApp, async (event) => {
     assertAppFrame(event, "browseSplitTunnelApp");

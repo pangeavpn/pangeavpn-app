@@ -23,6 +23,12 @@ export default {
       return new Response("Method not allowed", { status: 405, headers: { Allow: "POST" } });
     }
 
+    // A declared oversize body is refused before it is buffered at all.
+    const declared = Number(request.headers.get("Content-Length") ?? "0");
+    if (declared > MAX_BODY_BYTES) {
+      return new Response("Bad request", { status: 400 });
+    }
+
     const body = await request.arrayBuffer();
     if (body.byteLength === 0 || body.byteLength > MAX_BODY_BYTES) {
       return new Response("Bad request", { status: 400 });

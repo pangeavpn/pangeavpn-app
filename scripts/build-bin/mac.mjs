@@ -4,7 +4,7 @@ import path from "node:path";
 import process from "node:process";
 import { spawnSync } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
-import { npmCmd, relPath, rootDir, runOrThrow, selectArchTargets, sha256File, writeJson } from "./shared.mjs";
+import { electronVersion, npmCmd, relPath, rootDir, runOrThrow, selectArchTargets, sha256File, writeJson } from "./shared.mjs";
 import { resolveNaiveCgoConfig } from "../lib/naive-cgo.mjs";
 
 const platformName = "mac";
@@ -73,7 +73,7 @@ for (const target of archTargets) {
       `--${target.arch}`,
       "--publish",
       "never",
-      "--config.electronVersion=41.5.0"
+      `--config.electronVersion=${electronVersion}`
     ],
     {
       cwd: rootDir,

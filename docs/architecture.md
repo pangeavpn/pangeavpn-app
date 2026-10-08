@@ -528,9 +528,16 @@ Limits of this version:
   replies; the daemon reports it as `strictReversePath` and changes nothing.
 - On macOS, Safari, WebKit views and system daemons may not be excludable. The
   macOS code is tested on synthetic data only.
-- Exclusion isn't a security boundary. Anyone who can write to an excluded path,
-  inject into an excluded process or spoof a parent process gets traffic off the
-  tunnel.
+- Exclusion isn't a security boundary against software already running as the
+  user. Anyone who can write to an excluded path or inject into an excluded
+  process gets traffic off the tunnel. On Windows any program can name an
+  excluded app as the parent of a process it starts
+  (`PROC_THREAD_ATTRIBUTE_PARENT_PROCESS`), and that child inherits the
+  exclusion; telling a faked parent from a real one would need a kernel-process
+  ETW consumer or a driver. Lookalikes are refused where the OS makes that
+  possible: a translocated macOS bundle only counts on Gatekeeper's own
+  read-only mount, and on Linux a process in another mount namespace only
+  matches when its image is the excluded file itself, by inode.
 
 ## State machine and health
 

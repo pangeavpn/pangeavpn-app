@@ -525,3 +525,28 @@ func TestClassifierObservesTheLatestRulesAfterRacingEdits(t *testing.T) {
 		h.close()
 	}
 }
+
+// Compiling starts background resolution that a hung filesystem can strand, so a repeat of the
+// last input must not compile again; a changed input must.
+func TestSetRulesSkipsCompilingAnUnchangedInput(t *testing.T) {
+	c := NewController(ControllerOptions{})
+	defer c.Close()
+	compiles := 0
+	c.compile = func(apps, never []string) (*ruleSet, []procmatch.RuleError) {
+		compiles++
+		return fakeCompile(apps, never)
+	}
+	first := c.SetRules([]string{appGame, "relative/app"}, []string{"/pangea/daemon"})
+	again := c.SetRules([]string{appGame, "relative/app"}, []string{"/pangea/daemon"})
+	if compiles != 1 {
+		t.Fatalf("an unchanged input compiled %d times, want once", compiles)
+	}
+	if len(again) != len(first) {
+		t.Fatalf("a repeat reported %v, the first call %v", again, first)
+	}
+	c.SetRules([]string{appGame, appChat}, []string{"/pangea/daemon"})
+	c.SetRules([]string{appGame, appChat}, nil)
+	if compiles != 3 {
+		t.Fatalf("changed apps or protected images compiled %d times in total, want 3", compiles)
+	}
+}

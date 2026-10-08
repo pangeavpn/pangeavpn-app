@@ -23,6 +23,9 @@ type darwinSplitHarness struct {
 	killed      []string
 	killTunnels []string
 	failNext    int
+	splitFail   int
+	flushes     int
+	removals    int
 	gid         int
 	gidErr      error
 }
@@ -35,9 +38,11 @@ func newDarwinSplitHarness(t *testing.T) *darwinSplitHarness {
 
 	prevApply, prevEnable, prevIsEnabled, prevVerify := pfApply, pfEnable, pfIsEnabled, pfVerifyLive
 	prevFlush, prevKill, prevDisable, prevRemove, prevGID := pfFlushStates, pfKillStates, pfDisable, pfRemoveAnchor, splitEgressGID
+	prevFlushSplit := pfFlushSplit
 	t.Cleanup(func() {
 		pfApply, pfEnable, pfIsEnabled, pfVerifyLive = prevApply, prevEnable, prevIsEnabled, prevVerify
 		pfFlushStates, pfKillStates, pfDisable, pfRemoveAnchor, splitEgressGID = prevFlush, prevKill, prevDisable, prevRemove, prevGID
+		pfFlushSplit = prevFlushSplit
 	})
 	pfApply = func(_ context.Context, r ksRules, gid int) error {
 		r.EndpointIPs = slices.Clone(r.EndpointIPs)
@@ -47,6 +52,14 @@ func newDarwinSplitHarness(t *testing.T) *darwinSplitHarness {
 			h.failNext--
 			return errors.New("pfctl: syntax error")
 		}
+		if h.splitFail > 0 {
+			h.splitFail--
+			return &pfSplitError{err: errors.New("load pf split anchor: resource busy")}
+		}
+		return nil
+	}
+	pfFlushSplit = func(context.Context) error {
+		h.flushes++
 		return nil
 	}
 	pfEnable = func(context.Context) (string, error) { return "4242", nil }
@@ -58,9 +71,57 @@ func newDarwinSplitHarness(t *testing.T) *darwinSplitHarness {
 		h.killTunnels = append(h.killTunnels, tunnel)
 	}
 	pfDisable = func(context.Context, string) error { return nil }
-	pfRemoveAnchor = func(context.Context) error { return nil }
+	pfRemoveAnchor = func(context.Context) error {
+		h.removals++
+		return nil
+	}
 	splitEgressGID = func() (int, error) { return h.gid, h.gidErr }
 	return h
+}
+
+// A split-anchor failure on a first arm (a daemon restart under a live lock) must keep the
+// verified main lock and fail the permits closed, never unlock the host.
+func TestDarwinSplitPermits_SplitFailureKeepsTheLock(t *testing.T) {
+	h := newDarwinSplitHarness(t)
+	ctx := t.Context()
+	if err := h.ks.SetSplitCIDRs(ctx, []string{"198.51.100.0/24"}); err != nil {
+		t.Fatal(err)
+	}
+	h.splitFail = 1
+	if err := h.ks.Enable(ctx, []string{"203.0.113.5"}, false, false); err != nil {
+		t.Fatalf("Enable failed over the split anchor alone: %v", err)
+	}
+	if h.removals != 0 {
+		t.Fatalf("the main anchor was removed %d times", h.removals)
+	}
+	if active, _ := h.ks.snapshotState(); !active {
+		t.Fatal("the lock is not recorded as armed")
+	}
+	if h.flushes != 1 || !h.ks.pfSplit.equal(splitPermits{}) {
+		t.Fatalf("split anchor flushed %d times, live permits %+v; want one flush and none", h.flushes, h.ks.pfSplit)
+	}
+
+	if err := h.ks.SetSplitCIDRs(ctx, []string{"198.51.100.0/24"}); err != nil {
+		t.Fatalf("retry after the failure: %v", err)
+	}
+	if !h.ks.pfSplit.equal(splitPermits{CIDRs: []string{"198.51.100.0/24"}}) {
+		t.Fatalf("a retry did not restore the permits: %+v", h.ks.pfSplit)
+	}
+}
+
+func TestDarwinSplitPermits_SplitFailureOnASetterIsRetried(t *testing.T) {
+	h := newDarwinSplitHarness(t)
+	ctx := t.Context()
+	if err := h.ks.Enable(ctx, []string{"203.0.113.5"}, false, false); err != nil {
+		t.Fatal(err)
+	}
+	h.splitFail = 1
+	if err := h.ks.SetSplitCIDRs(ctx, []string{"198.51.100.0/24"}); err == nil {
+		t.Fatal("a failed split render reported success, so nothing would retry it")
+	}
+	if h.removals != 0 {
+		t.Fatalf("the main anchor was removed %d times", h.removals)
+	}
 }
 
 func (h *darwinSplitHarness) last() pfRender {

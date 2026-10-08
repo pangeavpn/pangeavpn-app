@@ -833,6 +833,23 @@ func expectQuickClose(t *testing.T, h *harness) {
 	}
 }
 
+// gVisor runs handleTCP on a goroutine of its own, outside safely: a panic in the bypass
+// dial must still end in tunnel-only operation, not a crashed daemon.
+func TestPanicInBypassDialFailsSafe(t *testing.T) {
+	h := newHarness(t, harnessOpts{kind: kindWindows, peer: true})
+	h.eg.mu.Lock()
+	h.eg.hook = func(context.Context, netip.AddrPort) (net.Conn, error) { panic("egress bug") }
+	h.eg.mu.Unlock()
+	h.cls.set(41270, true, appGame)
+	h.setRules(appGame)
+	go func() {
+		if c, _, _ := h.dial(41270, dst(remoteA, 7270), 3*time.Second); c != nil {
+			c.Close()
+		}
+	}()
+	expectFaultedTunnelOnly(t, h, h.engine(), 41271)
+}
+
 func TestPanicInLockedEngineSectionFailsSafe(t *testing.T) {
 	t.Run("worker", func(t *testing.T) {
 		h := newHarness(t, harnessOpts{kind: kindWindows, peer: true})
@@ -900,5 +917,30 @@ func TestLookupFailsCountOnlyMissingSockets(t *testing.T) {
 	c.Close()
 	if n := h.c.Status().Counters.LookupFails; n != 1 {
 		t.Fatalf("LookupFails = %d after a missing socket, want 1", n)
+	}
+}
+
+// Past the linger cap a finished flow skips linger for the bounded ended cache, so a burst of
+// short connections cannot grow the table every scan walks under e.mu.
+func TestFinishedFlowsPastTheLingerCapSkipLinger(t *testing.T) {
+	e := &engine{tcp: map[flowKey]*flow{}, lim: defaultLimits}
+	e.lim.lingerCap = 3
+	e.endedTCP.init(16)
+	var flows []*flow
+	for i := range 4 {
+		f := &flow{proto: protoTCP, key: flowKey{srcPort: uint16(40000 + i), dst: dst(remoteA, 443)}, state: stateBypass}
+		e.tcp[f.key] = f
+		flows = append(flows, f)
+	}
+	for _, f := range flows {
+		e.finishFlow(f, e.lim.linger)
+	}
+	now := time.Now()
+	for i, f := range flows {
+		_, inTable := e.tcp[f.key]
+		ended := e.endedTCP.get(f.key, now) != nil
+		if lingers := i >= 2; inTable != lingers || ended == lingers || (lingers && f.state != stateLinger) {
+			t.Fatalf("flow %d: in table %v, ended %v, state %v; want lingering=%v", i, inTable, ended, f.state, lingers)
+		}
 	}
 }

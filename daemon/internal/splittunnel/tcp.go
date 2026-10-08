@@ -28,6 +28,7 @@ var splicePool = sync.Pool{New: func() any {
 // handleTCP is the forwarder handler. The dial happens before the handshake with the app
 // completes (lazy handshake), so a failed dial reaches the app as a refusal.
 func (e *engine) handleTCP(r *tcp.ForwarderRequest) {
+	defer e.recoverFault()
 	id := r.ID()
 	key := flowKey{
 		srcPort: id.RemotePort,
@@ -145,6 +146,7 @@ func (e *engine) splice(f *flow, app *gonet.TCPConn, ep tcpip.Endpoint, phys net
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
+		defer e.recoverFault()
 		bp := splicePool.Get().(*[]byte)
 		defer splicePool.Put(bp)
 		buf := *bp

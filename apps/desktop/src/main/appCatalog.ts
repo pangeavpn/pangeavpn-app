@@ -25,6 +25,7 @@ import {
   parseDesktopEntry,
   parseInternetShortcut,
   parseRegSteamPath,
+  isLocalAbsolutePath,
   ruleKind,
   selectDesktopEntries,
   settleWithin,
@@ -216,6 +217,7 @@ async function linuxIcon(name: string): Promise<string> {
 }
 
 async function iconFor(source: IconSource, platform: string): Promise<string> {
+  if (source.kind !== "theme" && !isLocalAbsolutePath(source.path, platform)) return "";
   if (source.kind === "image") {
     const image = nativeImage.createFromPath(source.path);
     return image.isEmpty() ? "" : image.resize({ width: 32, height: 32 }).toDataURL();
@@ -465,7 +467,7 @@ export function createAppCatalog(): AppCatalog {
 
   async function describeRule(rule: string): Promise<CatalogCandidate> {
     const known = byRule.get(splitRuleKey(rule, platform));
-    const present = await exists(rule);
+    const present = isLocalAbsolutePath(rule, platform) && (await exists(rule));
     if (known && present) return { ...known, rule };
     const kind = ruleKind(rule, platform);
     const candidate: CatalogCandidate = {

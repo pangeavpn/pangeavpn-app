@@ -92,10 +92,11 @@ flowchart LR
 | [`scripts/build-bin/linux.mjs`](../scripts/build-bin/linux.mjs) | Builds the AppImage and `.deb` for x64 and arm64 |
 | [`apps/desktop/package.json`](../apps/desktop/package.json) | electron-builder resources, targets, names and installer options |
 
-The platform scripts pass `--config.electronVersion=41.5.0` to
-electron-builder, and the package's own build config sets the same
-`electronVersion`. Both match the `electron` dependency, so keep all three in
-step when you upgrade Electron.
+electron-builder bundles the Electron runtime named by `electronVersion`, not
+the installed `electron` package. The platform scripts and `install-linux.sh`
+read that version from the installed package. The package's own build config
+still has to name it, and `verify-pack-resources.mjs` fails the build when it
+drifts, so bump `build.electronVersion` along with the `electron` dependency.
 
 ## Daemon build
 

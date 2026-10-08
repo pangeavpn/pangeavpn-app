@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -92,6 +93,8 @@ type Controller struct {
 	cancel context.CancelFunc
 
 	setMu sync.Mutex
+	// The last SetRules input, under setMu: a repeat skips compiling, whose resolution can hang.
+	last *setRulesInput
 
 	mu            sync.Mutex
 	closed        bool
@@ -154,15 +157,29 @@ func (c *Controller) WrapTUN(dev tun.Device, info wg.TunnelInfo) tun.Device {
 	return d
 }
 
+type setRulesInput struct {
+	apps, never []string
+	errs        []procmatch.RuleError
+}
+
+func (in *setRulesInput) same(apps, never []string) bool {
+	return in != nil && slices.Equal(in.apps, apps) && slices.Equal(in.never, never)
+}
+
 // SetRules replaces the excluded-app rules (empty apps turns app exclusion off). It
 // returns once flows that lost their exclusion have been reset.
 func (c *Controller) SetRules(apps []string, neverBypass []string) []procmatch.RuleError {
+	c.setMu.Lock()
+	defer c.setMu.Unlock()
+	if c.last.same(apps, neverBypass) {
+		c.retryEngines()
+		return c.last.errs
+	}
 	rs, errs := c.compile(apps, neverBypass)
 	if len(errs) > 0 {
 		c.log.printf("split tunnel: %d app rules refused (%s)", len(errs), ruleErrorSummary(errs))
 	}
-	c.setMu.Lock()
-	defer c.setMu.Unlock()
+	c.last = &setRulesInput{apps: slices.Clone(apps), never: slices.Clone(neverBypass), errs: errs}
 	c.mu.Lock()
 	if c.closed || c.rules.sameAs(rs) {
 		c.mu.Unlock()

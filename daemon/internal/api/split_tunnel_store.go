@@ -330,10 +330,7 @@ func dedupeSplitApps(apps []string) []string {
 
 // compileSplitApps checks app entries against the per-OS policy and the protected
 // images; indirected so tests can stand in for the host's policy.
-var compileSplitApps = func(apps, neverBypass []string) []procmatch.RuleError {
-	_, errs := procmatch.CompileRulesProtected(apps, neverBypass)
-	return errs
-}
+var compileSplitApps = procmatch.ValidateRules
 
 func validateSplitApps(apps, neverBypass []string) []splitTunnelInvalid {
 	if len(apps) > maxSplitInput {

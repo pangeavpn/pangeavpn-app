@@ -134,8 +134,8 @@ func pfUnicastSource(cidr string) bool {
 	return cidr != "224.0.0.0/4" && cidr != "255.255.255.255/32" && cidr != "ff02::/16"
 }
 
-// pfSplitRules lets excluded ranges and the egress group's sockets out, except to
-// resolvers, which stay behind the tunnel like the LAN's.
+// pfSplitRules lets excluded ranges and the egress group out, resolvers excepted. No pass in:
+// replies ride the pass out's state, so a host in a range gets no unsolicited way in.
 func pfSplitRules(split splitPermits, egressGID int) []string {
 	cidrs := renderableSplitCIDRs(split.CIDRs)
 	var rules []string
@@ -144,7 +144,6 @@ func pfSplitRules(split splitPermits, egressGID int) []string {
 	}
 	for _, cidr := range cidrs {
 		rules = append(rules, fmt.Sprintf("pass out quick inet to %s", cidr))
-		rules = append(rules, fmt.Sprintf("pass in quick inet from %s", cidr))
 	}
 	if split.Egress && egressGID > 0 {
 		rules = append(rules, fmt.Sprintf("block out quick proto { tcp udp } to any port { 53 853 } group %d", egressGID))

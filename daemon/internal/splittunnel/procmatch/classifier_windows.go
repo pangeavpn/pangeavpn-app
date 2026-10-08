@@ -447,11 +447,26 @@ func (c *winClassifier) pathFor(pid int, start int64) string {
 		}
 	}
 	c.fallbacks.Add(1)
-	if p, ok := c.ntPath(pid); ok {
+	// No handle pins the process here, so the pid may have been reused while the path was read.
+	if p, ok := c.ntPath(pid); ok && stillStartedAt(pid, start) {
 		return p
 	}
 	c.pathFails.Add(1)
 	return ""
+}
+
+func stillStartedAt(pid int, start int64) bool {
+	var buf []byte
+	procs, err := systemProcesses(&buf)
+	if err != nil {
+		return false
+	}
+	for _, p := range procs {
+		if p.pid == pid {
+			return p.start == start
+		}
+	}
+	return false
 }
 
 // selfTest resolves the classifier's own loopback TCP and UDP sockets to its process and image.

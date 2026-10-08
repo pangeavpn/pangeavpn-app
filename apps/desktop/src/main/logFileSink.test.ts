@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtempSync, readFileSync, existsSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, existsSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createLogWriter, formatLogLine, installConsoleFileSink, LOG_FILE_NAME } from "./logFileSink.ts";
@@ -49,6 +49,32 @@ test("a rollover moves the old lines to .1 and starts the log afresh", () => {
   assert.doesNotMatch(rolled, /second/);
   assert.match(current, /second y+/);
   assert.doesNotMatch(current, /first/);
+});
+
+test("a rollover file that cannot be written costs the old lines, not the log", () => {
+  const dir = tempDir();
+  const file = path.join(dir, LOG_FILE_NAME);
+  mkdirSync(`${file}.1`);
+  const write = createLogWriter(dir, 200);
+  write("log", [`first ${"x".repeat(120)}`]);
+  write("log", [`second ${"y".repeat(120)}`]);
+  write("log", ["third"]);
+  const current = readFileSync(file, "utf8");
+  assert.match(current, /second y+/);
+  assert.match(current, /third/);
+  assert.doesNotMatch(current, /first/);
+});
+
+test("an oversized log from an older build rolls over its tail only", () => {
+  const dir = tempDir();
+  const file = path.join(dir, LOG_FILE_NAME);
+  writeFileSync(file, `${"old ".repeat(2000)}tail-marker\n`);
+  const write = createLogWriter(dir, 200);
+  write("log", ["fresh"]);
+  const rolled = readFileSync(`${file}.1`, "utf8");
+  assert.ok(rolled.length <= 200, `rolled ${rolled.length} bytes`);
+  assert.match(rolled, /tail-marker/);
+  assert.match(readFileSync(file, "utf8"), /fresh/);
 });
 
 test("a symlink left at the rollover path is not written through", { skip: process.platform === "win32" }, () => {

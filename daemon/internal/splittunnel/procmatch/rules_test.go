@@ -19,7 +19,8 @@ func winEnv() *ruleEnv {
 
 func darwinEnv() *ruleEnv {
 	return newRuleEnv("darwin", envSettings{
-		own: []string{"/Applications/PangeaVPN.app/Contents/MacOS/pangea-daemon"},
+		own:          []string{"/Applications/PangeaVPN.app/Contents/MacOS/pangea-daemon"},
+		translocated: func(string) bool { return true },
 	})
 }
 
@@ -352,6 +353,42 @@ func TestMatchDarwinBundles(t *testing.T) {
 	})
 }
 
+// A lookalike translocation tree outside the system's mount must not borrow a bundle's
+// exclusion: the user can write to their own temp dir and home.
+func TestMatchDarwinTranslocationNeedsTheSystemMount(t *testing.T) {
+	var asked []string
+	mounted := true
+	env := newRuleEnv("darwin", envSettings{
+		translocated: func(root string) bool {
+			asked = append(asked, root)
+			return mounted
+		},
+	})
+	r := compileIn(t, env, "/Applications/Foo.app")
+	const real = "/private/var/folders/xy/abc/T/AppTranslocation/0A1B-2C3D/d/Foo.app/Contents/MacOS/Foo"
+	checkMatches(t, r, []matchCase{
+		{real, true},
+		{"/Users/eve/AppTranslocation/1/d/Foo.app/Contents/MacOS/Foo", false},
+		{"/tmp/AppTranslocation/1/d/Foo.app/Contents/MacOS/Foo", false},
+		{"/private/var/folders/xy/abc/T/AppTranslocation/0A1B-2C3D/x/Foo.app/Contents/MacOS/Foo", false},
+		{"/private/var/folders/xy/abc/T/AppTranslocation/0A1B-2C3D/d/Other/Foo.app/Contents/MacOS/Foo", false},
+		{"/private/var/folders/xy/abc/T/AppTranslocation//d/Foo.app/Contents/MacOS/Foo", false},
+		{"/private/var/folders/xy/abc/T/AppTranslocation/0A1B-2C3D/d/Foo.app", false},
+	})
+	if len(asked) == 0 || asked[0] != "/private/var/folders/xy/abc/T/AppTranslocation/0A1B-2C3D/d" {
+		t.Fatalf("verifier asked about %q, want the translocation mount root", asked)
+	}
+
+	mounted = false
+	if r.MatchPath(real) {
+		t.Error("a translocation path off the system mount matched")
+	}
+	noVerifier := compileIn(t, newRuleEnv("darwin", envSettings{}), "/Applications/Foo.app")
+	if noVerifier.MatchPath(real) {
+		t.Error("a translocation path matched with no way to verify its mount")
+	}
+}
+
 func TestMatchLinuxSnap(t *testing.T) {
 	r := compileIn(t, linuxEnv(), "/snap/bin/firefox", "/opt/app/bin/app")
 	checkMatches(t, r, []matchCase{
@@ -520,5 +557,26 @@ func TestResolveDeadline(t *testing.T) {
 	r, _ := compileRules(env, []string{"/opt/slow/slow", "/opt/fast/fast"}, nil)
 	if !r.MatchPath("/opt/slow/slow") || !r.MatchPath("/opt/fast/fast") {
 		t.Fatal("raw forms must match before resolution finishes")
+	}
+}
+
+func TestValidateRulesAgreesWithCompile(t *testing.T) {
+	var entries []string
+	switch runtime.GOOS {
+	case "windows":
+		entries = []string{`C:\Games\`, "relative", `C:\Windows\explorer.exe`, `C:\Games\`, `C:\Tools\x.exe`}
+	case "darwin":
+		entries = []string{"/Applications/Foo.app", "relative", "/sbin/launchd", "/Applications/Foo.app", "/opt/x"}
+	default:
+		entries = []string{"/opt/game/", "relative", "/sbin/init", "/opt/game/", "/opt/x"}
+	}
+	never := []string{entries[4]}
+	_, compiled := CompileRulesProtected(entries, never)
+	validated := ValidateRules(entries, never)
+	if fmt.Sprint(validated) != fmt.Sprint(compiled) {
+		t.Fatalf("ValidateRules = %v, CompileRulesProtected = %v", validated, compiled)
+	}
+	if len(validated) != 3 {
+		t.Fatalf("want relative, system and own-image refusals, got %v", validated)
 	}
 }

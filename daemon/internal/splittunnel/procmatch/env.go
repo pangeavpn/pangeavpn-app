@@ -17,17 +17,20 @@ type envSettings struct {
 	initExe     string
 	own         []string
 	resolve     func(raw string, kind RuleKind) []string
+	// translocated confirms a ".../AppTranslocation/<id>/d" path is the system's mount.
+	translocated func(root string) bool
 }
 
 // ruleEnv holds one OS flavour's validation policy, independent of the host OS.
 type ruleEnv struct {
-	goos        string
-	systemRoots []string
-	usersRoots  []string
-	broad       []string
-	protected   []compiledRule
-	own         []compiledRule
-	resolve     func(raw string, kind RuleKind) []string
+	goos         string
+	systemRoots  []string
+	usersRoots   []string
+	broad        []string
+	protected    []compiledRule
+	own          []compiledRule
+	resolve      func(raw string, kind RuleKind) []string
+	translocated func(root string) bool
 }
 
 var winProtectedNames = map[string]bool{
@@ -56,7 +59,7 @@ var linuxInterpreters = map[string]bool{
 var linuxInterpreterPrefixes = []string{"python", "perl", "ruby", "wine", "systemd"}
 
 func newRuleEnv(goos string, s envSettings) *ruleEnv {
-	e := &ruleEnv{goos: goos, resolve: s.resolve}
+	e := &ruleEnv{goos: goos, resolve: s.resolve, translocated: s.translocated}
 	switch goos {
 	case "windows":
 		e.initWindows(s)
