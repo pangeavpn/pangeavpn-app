@@ -100,13 +100,22 @@ If the list ever ends up empty, the method does nothing. `tryFrontedPath` logs
 forwards no `CF-Connecting-IP` or `X-Forwarded-For`, so the relay tells the hub
 nothing about who's calling.
 
-That has a cost. `app.js` mounts `clientRateLimit` (30 requests a minute per
-source address) ahead of both secure routes, so every client on one relay shares
-the budget of Cloudflare's egress address, and heavy use throttles all of them
-together. The inner request the hub re-dispatches is skipped, so each envelope
-only counts once. If this becomes a problem, exempt the relay on the hub side.
-Don't forward the client address, because keeping it off the wire is the whole
-point of this path.
+That has a cost. The hub rate-limits per source address, so every client on one
+relay shares the budget of Cloudflare's egress address. Two limits sit ahead of
+both secure routes: 600 requests a minute overall and 120 envelopes a minute.
+The sealed request inside also counts against the credential limits, keyed by
+that same address: 30 a minute on every route that checks a credential, and a
+15-minute lockout after 5 bad license keys. Heavy use, or one client guessing
+keys, throttles everyone on the relay.
+
+If this becomes a problem, list the relay's egress addresses in the hub's
+`RELAY_PEER_IPS`. The credential limits then count each credential separately,
+under a ceiling of 600 a minute for the relay; the two outer limits stay per
+address. `RELAY_PEER_IPS` takes exact addresses, so a wide Cloudflare egress
+range would need CIDR support added on the hub first. The hub's
+`RateLimitStats` table records when these limits refuse traffic (see
+`docs/rate-limits.md` in PangeaHubServer). Don't forward the client address,
+because keeping it off the wire is the whole point of this path.
 
 The Worker's only limits on its own side are that it accepts POST only, on those
 two routes, with bodies up to 64 KB.
