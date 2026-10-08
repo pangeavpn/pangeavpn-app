@@ -19,6 +19,8 @@ type procFS struct {
 	fdents []byte
 	buf    []byte
 	link   []byte
+	// mntNS is the daemon's own mount namespace ("" when unreadable, which skips sameImage).
+	mntNS string
 
 	fdReads   uint64
 	statReads uint64
@@ -29,14 +31,18 @@ func openProcFS(root string) (*procFS, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &procFS{
+	p := &procFS{
 		root:   root,
 		rootfd: fd,
 		dents:  make([]byte, 32<<10),
 		fdents: make([]byte, 16<<10),
 		buf:    make([]byte, 4<<10),
 		link:   make([]byte, unix.PathMax),
-	}, nil
+	}
+	if n, err := unix.Readlinkat(fd, "self/ns/mnt", p.link); err == nil {
+		p.mntNS = string(p.link[:n])
+	}
+	return p, nil
 }
 
 func (p *procFS) close() {
@@ -234,16 +240,69 @@ func (p *procFS) exeLink(dirfd, pid int) (string, error) {
 // sandbox's /app/... mapped onto its host deployment.
 func (p *procFS) matchPath(dirfd, pid int, link string) string {
 	exe := cleanExeLink(link)
-	if len(exe) > 5 && exe[:5] == "/app/" {
+	if len(exe) > 5 && exe[:5] == "/app/" && !p.flatpakInfoBlocks(dirfd, pid) {
 		name := "root/.flatpak-info"
-		if dirfd < 0 {
-			dirfd, name = p.rootfd, pidName(pid, name)
+		at := dirfd
+		if at < 0 {
+			at, name = p.rootfd, pidName(pid, name)
 		}
-		if info, err := p.readRegular(dirfd, name, 64<<10); err == nil {
+		if info, err := p.readRegular(at, name, 64<<10); err == nil {
 			exe = flatpakMatchPath(exe, flatpakAppPath(info))
 		}
 	}
+	// The exe link and /.flatpak-info are both the process's own view: another mount namespace
+	// can show any binary at an excluded app's path, so there the path must be that very file.
+	if p.foreignMountNS(dirfd, pid) && !p.sameImage(dirfd, pid, exe) {
+		return ""
+	}
 	return exe
+}
+
+func (p *procFS) foreignMountNS(dirfd, pid int) bool {
+	if p.mntNS == "" {
+		return false
+	}
+	name := "ns/mnt"
+	if dirfd < 0 {
+		dirfd, name = p.rootfd, pidName(pid, name)
+	}
+	n, err := unix.Readlinkat(dirfd, name, p.link)
+	return err != nil || string(p.link[:n]) != p.mntNS
+}
+
+// sameImage reports whether the process's image is the file at hostPath in this namespace.
+// Cached attributes only, so neither stat can wait on a dead NFS or FUSE server.
+func (p *procFS) sameImage(dirfd, pid int, hostPath string) bool {
+	if hostPath == "" {
+		return false
+	}
+	name := "exe"
+	if dirfd < 0 {
+		dirfd, name = p.rootfd, pidName(pid, name)
+	}
+	var img, host unix.Statx_t
+	if unix.Statx(dirfd, name, unix.AT_STATX_DONT_SYNC, unix.STATX_INO, &img) != nil {
+		return false
+	}
+	if unix.Statx(unix.AT_FDCWD, hostPath, unix.AT_STATX_DONT_SYNC, unix.STATX_INO, &host) != nil {
+		return false
+	}
+	return img.Ino == host.Ino && img.Dev_major == host.Dev_major && img.Dev_minor == host.Dev_minor
+}
+
+// flatpakInfoBlocks reports a /.flatpak-info on a FUSE or network mount, whose read could wait
+// forever under the classifier lock; a real sandbox writes it to a local filesystem.
+func (p *procFS) flatpakInfoBlocks(dirfd, pid int) bool {
+	name := "mountinfo"
+	if dirfd < 0 {
+		dirfd, name = p.rootfd, pidName(pid, name)
+	}
+	b, err := p.readAt(dirfd, name, 1<<20)
+	if err != nil {
+		return !errors.Is(err, unix.ENOENT)
+	}
+	fstype, ok := mountFSType(b, "/.flatpak-info")
+	return ok && blockingFSType(fstype)
 }
 
 func (p *procFS) exePath(dirfd, pid int) (string, error) {

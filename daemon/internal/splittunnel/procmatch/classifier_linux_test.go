@@ -1049,3 +1049,87 @@ func TestLinuxFakeMissBudget(t *testing.T) {
 		t.Fatalf("median miss batch %v", times[len(times)/2])
 	}
 }
+
+func (f *fakeProcRoot) setMountNS(pid int, ns string) {
+	f.t.Helper()
+	dir := filepath.Join(f.root, "self")
+	if pid > 0 {
+		dir = f.dir(pid)
+	}
+	f.must(os.MkdirAll(filepath.Join(dir, "ns"), 0o755))
+	f.must(os.Symlink(ns, filepath.Join(dir, "ns", "mnt")))
+}
+
+// Another mount namespace can show any binary at an excluded app's path (unshare plus a bind
+// mount, or a container), so there the exe path only counts when it is that very file.
+func TestLinuxForeignMountNamespaceNeedsTheSameImage(t *testing.T) {
+	f := newFakeProcRoot(t)
+	host := t.TempDir()
+	firefox, evil := filepath.Join(host, "firefox"), filepath.Join(host, "evil")
+	f.must(os.WriteFile(firefox, []byte("real"), 0o755))
+	f.must(os.WriteFile(evil, []byte("evil"), 0o755))
+	f.setMountNS(0, "mnt:[4026531840]")
+	f.add(fakeProc{pid: 100, ppid: 1, start: 10, exe: firefox})
+	f.setMountNS(100, "mnt:[4026531840]")
+	f.add(fakeProc{pid: 200, ppid: 1, start: 20, exe: firefox})
+	f.setMountNS(200, "mnt:[4026532999]")
+	f.add(fakeProc{pid: 300, ppid: 1, start: 30, exe: filepath.Join(host, "gone")})
+	f.setMountNS(300, "mnt:[4026532999]")
+	f.add(fakeProc{pid: 400, ppid: 1, start: 40, exe: filepath.Join(host, "gone")})
+	f.setMountNS(400, "mnt:[4026531840]")
+	f.add(fakeProc{pid: 500, ppid: 1, start: 50, exe: firefox})
+	f.add(fakeProc{pid: 501, ppid: 1, start: 51, exe: filepath.Join(host, "gone")})
+
+	p, err := openProcFS(f.root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer p.close()
+	if p.mntNS != "mnt:[4026531840]" {
+		t.Fatalf("own mount namespace = %q", p.mntNS)
+	}
+	for _, tc := range []struct {
+		pid  int
+		want string
+		why  string
+	}{
+		{100, firefox, "same namespace"},
+		{200, firefox, "foreign namespace, the very file"},
+		{300, "", "foreign namespace, a path that is not this file"},
+		{400, filepath.Join(host, "gone"), "same namespace keeps the link as before"},
+		{500, firefox, "an unreadable namespace counts as foreign, and this is the very file"},
+		{501, "", "an unreadable namespace counts as foreign, and this path is not the file"},
+	} {
+		if got, err := p.exePath(-1, tc.pid); err != nil || got != tc.want {
+			t.Errorf("pid %d (%s): exePath = %q, %v; want %q", tc.pid, tc.why, got, err, tc.want)
+		}
+	}
+	if !p.sameImage(-1, 200, firefox) || p.sameImage(-1, 200, evil) || p.sameImage(-1, 200, "") {
+		t.Error("sameImage does not tell the image's own file from another one")
+	}
+}
+
+// A sandbox's /.flatpak-info on FUSE or a network mount could block the read under the
+// classifier lock, so it is not read at all and the /app path matches nothing.
+func TestLinuxFlatpakInfoOnABlockingMountIsNotRead(t *testing.T) {
+	f := newFakeProcRoot(t)
+	appPath := "/var/lib/flatpak/app/com.example.App/x86_64/stable/abc"
+	f.add(fakeProc{pid: 600, ppid: 1, start: 60, exe: "/app/bin/app", flatpak: appPath})
+	f.add(fakeProc{pid: 700, ppid: 1, start: 70, exe: "/app/bin/app", flatpak: appPath})
+	local := "22 1 8:1 / / rw - ext4 /dev/sda1 rw\n42 22 0:53 / /.flatpak-info ro - tmpfs tmpfs ro\n"
+	fuse := "22 1 8:1 / / rw - ext4 /dev/sda1 rw\n43 22 0:54 / /.flatpak-info ro - fuse.hang hang ro\n"
+	f.must(os.WriteFile(filepath.Join(f.dir(600), "mountinfo"), []byte(local), 0o644))
+	f.must(os.WriteFile(filepath.Join(f.dir(700), "mountinfo"), []byte(fuse), 0o644))
+
+	p, err := openProcFS(f.root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer p.close()
+	if got, _ := p.exePath(-1, 600); got != appPath+"/bin/app" {
+		t.Errorf("local /.flatpak-info: exePath = %q, want the host deployment", got)
+	}
+	if got, _ := p.exePath(-1, 700); got != "/app/bin/app" {
+		t.Errorf("FUSE /.flatpak-info: exePath = %q, want the untranslated /app path", got)
+	}
+}

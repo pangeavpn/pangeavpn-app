@@ -120,3 +120,37 @@ func TestFlatpakTranslation(t *testing.T) {
 		t.Fatal("sandbox-relative path matched")
 	}
 }
+
+func TestMountFSType(t *testing.T) {
+	info := "22 1 8:1 / / rw,relatime shared:1 - ext4 /dev/sda1 rw\n" +
+		"30 22 0:40 / /run rw shared:2 - tmpfs tmpfs rw\n" +
+		"41 22 0:52 / /home/eve/my\\040mount rw - fuse.sshfs eve@host: rw\n" +
+		"42 22 0:53 /flatpak-info /.flatpak-info ro - tmpfs tmpfs ro\n" +
+		"43 22 0:54 / /.flatpak-info ro - fuse.evil evil ro\n" +
+		"malformed line\n"
+	cases := []struct {
+		target, want string
+	}{
+		{"/usr/bin/x", "ext4"},
+		{"/run/user/1000/x", "tmpfs"},
+		{"/runner/x", "ext4"},
+		{"/home/eve/my mount/f", "fuse.sshfs"},
+		{"/.flatpak-info", "fuse.evil"},
+	}
+	for _, tc := range cases {
+		if got, ok := mountFSType([]byte(info), tc.target); !ok || got != tc.want {
+			t.Errorf("mountFSType(%q) = %q, %v; want %q", tc.target, got, ok, tc.want)
+		}
+	}
+	if _, ok := mountFSType([]byte("garbage\n"), "/x"); ok {
+		t.Error("a listing with no mounts reported one")
+	}
+	for fstype, want := range map[string]bool{
+		"fuse": true, "fuseblk": true, "fuse.sshfs": true, "nfs4": true, "cifs": true, "9p": true,
+		"ext4": false, "tmpfs": false, "btrfs": false, "overlay": false, "squashfs": false,
+	} {
+		if got := blockingFSType(fstype); got != want {
+			t.Errorf("blockingFSType(%q) = %v, want %v", fstype, got, want)
+		}
+	}
+}
