@@ -405,6 +405,17 @@ export const zh = {
   "sub.expires": "到期",
   "sub.pastDue": "付款逾期",
   "sub.expired": "订阅已到期",
+  "expired.kicker": "无有效订阅",
+  "expired.title": "您的时长已用完",
+  "expired.body": "此账户已无剩余时长，PangeaVPN 无法连接。请在账单页面充值，然后回到这里重新检查。",
+  "expired.date": "已于 {date} 用完",
+  "expired.billing": "前往账单页面",
+  "expired.disconnect": "断开连接以打开账单页面",
+  "expired.recheck": "我已充值",
+  "expired.checking": "正在检查…",
+  "expired.stillExpired": "此账户暂无时长。如果您刚刚付款，请稍等一分钟后重试。",
+  "expired.checkFailed": "无法连接 PangeaVPN 进行检查，请稍后重试。",
+  "expired.restored": "时长已添加，您可以重新连接了。",
 
   // ── Session / auth toasts ─────────────────────────────
   "auth.signedOutRetry": "您已退出登录，请重新登录。",

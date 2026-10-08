@@ -862,6 +862,140 @@ body[data-theme="light"] .login-brand {
   min-height: calc(100% - var(--header-h));
 }
 
+/* Covers the stage but not the header, so an expired account keeps its menu. */
+.expired-screen {
+  position: fixed;
+  inset: var(--header-h) 0 0 0;
+  z-index: 50;
+  display: grid;
+  place-items: safe center;
+  padding: 4px 24px 12px;
+  background: var(--bg-base);
+  overflow-y: auto;
+}
+
+.expired-screen::-webkit-scrollbar { width: 0; height: 0; }
+
+.expired-screen[hidden] { display: none; }
+
+.shell.is-expired { overflow: hidden; }
+
+.expired-content {
+  width: 100%;
+  max-width: 340px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  text-align: center;
+}
+
+.expired-mark {
+  width: 40px;
+  height: 40px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 999px;
+  color: var(--accent);
+  background: var(--accent-glow);
+}
+
+.expired-mark svg { width: 20px; height: 20px; }
+
+.hero-kicker.expired-kicker strong { color: var(--warning); }
+
+/* --warning is ~2:1 on cream; small caps need the darker amber to stay legible. */
+body[data-theme="light"] .hero-kicker.expired-kicker strong { color: #b45309; }
+
+.expired-headline {
+  margin: 0;
+  font-family: "Sora", "Space Grotesk", sans-serif;
+  font-size: 1.4rem;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+  color: var(--text-primary);
+}
+
+.expired-body {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.expired-date {
+  margin: 0;
+  max-height: 3em;
+  overflow: hidden;
+  font-size: 0.74rem;
+  color: var(--text-muted);
+}
+
+.expired-actions {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-top: 8px;
+}
+
+/* Stacked buttons in a long language must still fit the 440px window. */
+.expired-actions .btn-lg {
+  padding-block: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.expired-actions .btn-lg[hidden] { display: none; }
+
+/* Mid-check is not an error, so the busy button must not take the disabled dimming. */
+.expired-actions button[aria-busy="true"]:disabled { opacity: 1; cursor: progress; }
+
+.expired-actions .spinner { width: 13px; height: 13px; flex: none; }
+
+/* Folded, its -8px margin cancels the column gap so nothing is left behind. */
+.expired-message {
+  margin: -8px 0 0;
+  max-height: 0;
+  overflow: hidden;
+  opacity: 0;
+  transform: translateY(-6px);
+  font-size: 0.76rem;
+  line-height: 1.4;
+  color: var(--text-secondary);
+}
+
+.expired-message.is-shown {
+  margin-top: 2px;
+  max-height: 4.5em;
+  opacity: 1;
+  transform: none;
+}
+
+.expired-message.is-shown.is-refreshing { opacity: 0.35; }
+
+/* Heights animate rather than snap, so the centred column glides to its new place. */
+.expired-mark,
+.expired-date,
+.expired-message {
+  transition: height 320ms ease, max-height 320ms ease, margin 320ms ease, opacity 240ms ease, transform 320ms ease;
+}
+
+/* A fourth button or a check result needs the room the mark and date take. */
+.expired-content.is-compact .expired-mark { height: 0; margin-bottom: -8px; opacity: 0; }
+.expired-content.has-message .expired-date { max-height: 0; margin-bottom: -8px; opacity: 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  .expired-mark,
+  .expired-date,
+  .expired-message { transition: opacity 150ms ease; transform: none; }
+}
+
 .map-stage {
   width: 268px;
   flex: none;

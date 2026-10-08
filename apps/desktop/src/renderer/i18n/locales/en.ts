@@ -405,6 +405,17 @@ export const en = {
   "sub.expires": "Expires",
   "sub.pastDue": "Payment past due",
   "sub.expired": "Subscription expired",
+  "expired.kicker": "No active subscription",
+  "expired.title": "Your time has run out",
+  "expired.body": "This account has no time left, so PangeaVPN can't connect. Add time on the billing page, then come back and check again.",
+  "expired.date": "Ran out on {date}",
+  "expired.billing": "Go to billing",
+  "expired.disconnect": "Disconnect to open billing",
+  "expired.recheck": "I've added time",
+  "expired.checking": "Checking…",
+  "expired.stillExpired": "No time on this account yet. If you've just paid, give it a minute and try again.",
+  "expired.checkFailed": "Couldn't reach PangeaVPN to check. Try again in a moment.",
+  "expired.restored": "Time added — you can connect again.",
 
   // ── Session / auth toasts ─────────────────────────────
   "auth.signedOutRetry": "You've been signed out. Please sign in again.",

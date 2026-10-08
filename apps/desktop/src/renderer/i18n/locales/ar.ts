@@ -405,6 +405,17 @@ export const ar = {
   "sub.expires": "ينتهي",
   "sub.pastDue": "الدفع متأخر",
   "sub.expired": "انتهى الاشتراك",
+  "expired.kicker": "لا يوجد اشتراك نشط",
+  "expired.title": "انتهى وقتك",
+  "expired.body": "لم يتبقَّ وقت في هذا الحساب، لذا لا يمكن لـ PangeaVPN الاتصال. أضف وقتًا من صفحة الفوترة، ثم عُد إلى هنا وتحقق مجددًا.",
+  "expired.date": "انتهى في {date}",
+  "expired.billing": "الذهاب إلى الفوترة",
+  "expired.disconnect": "قطع الاتصال لفتح صفحة الفوترة",
+  "expired.recheck": "أضفتُ وقتًا",
+  "expired.checking": "جارٍ التحقق…",
+  "expired.stillExpired": "لا يوجد وقت في هذا الحساب بعد. إذا كنت قد دفعت للتو، فانتظر دقيقة وحاول مجددًا.",
+  "expired.checkFailed": "تعذّر الوصول إلى PangeaVPN للتحقق. حاول مجددًا بعد قليل.",
+  "expired.restored": "تمت إضافة الوقت — يمكنك الاتصال مجددًا.",
 
   // ── Session / auth toasts ─────────────────────────────
   "auth.signedOutRetry": "تم تسجيل خروجك. يرجى تسجيل الدخول مرة أخرى.",

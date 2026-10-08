@@ -51,6 +51,46 @@ export async function firstWorking<C, T>(
   return null;
 }
 
+/** firstWorking with attempts overlapping, each started staggerMs after the one
+ *  before: settles on the first answer, or null once every attempt has failed. */
+export function fastestWorking<C, T>(
+  list: readonly C[],
+  attempt: (creds: C, index: number) => Promise<T | null>,
+  staggerMs = 0
+): Promise<{ value: T; index: number } | null> {
+  return new Promise((resolve) => {
+    let pending = list.length;
+    let settled = false;
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    const finish = (result: { value: T; index: number } | null): void => {
+      if (settled) return;
+      settled = true;
+      timers.forEach(clearTimeout);
+      resolve(result);
+    };
+    const launch = (creds: C, index: number): void => {
+      Promise.resolve()
+        .then(() => attempt(creds, index))
+        .then((value) => {
+          if (value !== null && value !== undefined) finish({ value, index });
+        })
+        .catch(() => undefined)
+        .finally(() => {
+          pending -= 1;
+          if (pending === 0) finish(null);
+        });
+    };
+    if (pending === 0) {
+      finish(null);
+      return;
+    }
+    list.forEach((creds, index) => {
+      if (index === 0 || staggerMs <= 0) launch(creds, index);
+      else timers.push(setTimeout(() => launch(creds, index), index * staggerMs));
+    });
+  });
+}
+
 /** Valid entries, normalized and deduplicated. Accepts a bare object too, the
  *  pre-list shape an existing install may still have on disk. */
 export function restoreCached<C>(kind: CredKind<C>, stored: unknown): C[] {

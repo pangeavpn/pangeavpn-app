@@ -138,6 +138,15 @@ const serverPanel = document.getElementById("serverPanel") as HTMLElement;
 const serverSelect = document.getElementById("serverSelect") as HTMLSelectElement;
 const serverConnectBtn = document.getElementById("serverConnectBtn") as HTMLButtonElement;
 const serverDisconnectBtn = document.getElementById("serverDisconnectBtn") as HTMLButtonElement;
+const stage = document.querySelector<HTMLElement>(".stage")!;
+const expiredScreen = document.getElementById("expiredScreen") as HTMLElement;
+const expiredDate = document.getElementById("expiredDate") as HTMLParagraphElement;
+const expiredBillingBtn = document.getElementById("expiredBillingBtn") as HTMLButtonElement;
+const expiredRecheckBtn = document.getElementById("expiredRecheckBtn") as HTMLButtonElement;
+const expiredMessage = document.getElementById("expiredMessage") as HTMLParagraphElement;
+const expiredContent = expiredScreen.querySelector<HTMLElement>(".expired-content")!;
+const expiredDisconnectBtn = document.getElementById("expiredDisconnectBtn") as HTMLButtonElement;
+const expiredSignOutBtn = document.getElementById("expiredSignOutBtn") as HTMLButtonElement;
 const serverRotateBtn = document.getElementById("serverRotateBtn") as HTMLButtonElement;
 const heroPath = document.getElementById("heroPath") as HTMLElement;
 const heroPathEntry = document.getElementById("heroPathEntry") as HTMLElement;
@@ -229,6 +238,7 @@ let connectInFlight = false;
 // Hub's verdict on whether this account may connect; null until asked. Never
 // derived from subscription.status — prepaid plans stay "active" once lapsed.
 let entitled: boolean | null = null;
+let expiredAt: string | null = null;
 
 // The service is the only store for split tunnelling; these mirror its last reply.
 let splitLoad: SplitLoad = "loading";
@@ -376,26 +386,26 @@ function subscriptionText(sub: SubscriptionInfo | null): { text: string; warn: b
 // Guards against a slow earlier call overwriting a newer one's verdict.
 let entitlementGeneration = 0;
 
-/** Ask the hub whether this account may connect. Toasts once per transition
- *  into expired — the only notice a lapsed prepaid customer ever gets. */
-async function refreshEntitlement(): Promise<void> {
-  if (!pangeaApi) return;
+/** Ask the hub whether this account may connect; a "no" raises the expired screen. Resolves
+ *  false when the hub could not be asked; the verdict lands no sooner than `holdMs`. */
+async function refreshEntitlement(holdMs = 0): Promise<boolean> {
+  if (!pangeaApi) return false;
   const gen = ++entitlementGeneration;
+  const held = new Promise((resolve) => setTimeout(resolve, holdMs));
   let sub: SubscriptionInfo | null = null;
   try {
     sub = await pangeaApi.getSubscription();
   } catch {
-    return; // offline or hub down — leave the previous verdict alone
+    await held;
+    return false;
   }
-  if (gen !== entitlementGeneration) return; // superseded by a newer check
+  await held;
+  if (gen !== entitlementGeneration) return true; // a newer check owns the verdict
   // Absent on older hubs: assume entitled rather than locking someone out.
-  const next = sub === null ? null : sub.entitled !== false;
-  const wasEntitled = entitled;
-  entitled = next;
-  if (next === false && wasEntitled !== false) {
-    showToast(t("connect.expired"), 8000);
-  }
+  entitled = sub === null ? null : sub.entitled !== false;
+  expiredAt = sub?.expiresAt ?? null;
   updateServerControlStates();
+  return true;
 }
 
 // Fetched fresh each time Settings opens so expiry/renewal is always current.
@@ -418,6 +428,7 @@ async function refreshSubscription(): Promise<void> {
   // Settings just told us the truth — keep the connect gate in step with it.
   if (sub) {
     entitled = sub.entitled !== false;
+    expiredAt = sub.expiresAt;
     updateServerControlStates();
   }
 }
@@ -1021,6 +1032,7 @@ document.addEventListener("visibilitychange", () => {
   // showing whatever was true up to two seconds before the window reappeared.
   pollNow();
   void refreshServersWithRetry();
+  if (authState.authenticated) void refreshEntitlement();
 });
 
 document.addEventListener("keydown", (e) => {
@@ -1191,9 +1203,11 @@ loginBtn.addEventListener("click", () => {
   updateAuthUI();
 });
 
-logoutBtn.addEventListener("click", async () => {
+logoutBtn.addEventListener("click", () => void signOut(logoutBtn));
+
+async function signOut(trigger: HTMLButtonElement): Promise<void> {
   if (!pangeaApi) return;
-  logoutBtn.disabled = true;
+  trigger.disabled = true;
   setUiMessage(t("auth.signingOut"));
   try {
     await pangeaApi.logout();
@@ -1207,9 +1221,86 @@ logoutBtn.addEventListener("click", async () => {
   } catch (error) {
     setUiMessage(reportError("signOut", error));
   } finally {
-    logoutBtn.disabled = false;
+    trigger.disabled = false;
   }
+}
+
+const BILLING_URL = "https://pangeavpn.org/app/billing";
+// The wanted state: the screen stays unhidden while it animates out.
+let expiredShown = false;
+let expiredSwapGeneration = 0;
+
+expiredBillingBtn.addEventListener("click", () => void window.openExternal?.(BILLING_URL));
+expiredRecheckBtn.addEventListener("click", () => void recheckEntitlement());
+// A tunnel can outlive the subscription with no peer behind it, and then billing won't load.
+expiredDisconnectBtn.addEventListener("click", () => serverDisconnectBtn.click());
+expiredSignOutBtn.addEventListener("click", () => void signOut(expiredSignOutBtn));
+window.addEventListener("focus", () => {
+  if (expiredShown) void refreshEntitlement();
 });
+
+// Long enough to read "Checking…", so a fast answer settles instead of flashing past.
+const RECHECK_HOLD_MS = 700;
+
+async function recheckEntitlement(): Promise<void> {
+  const spinner = document.createElement("span");
+  spinner.className = "spinner";
+  spinner.setAttribute("aria-hidden", "true");
+  expiredRecheckBtn.disabled = true;
+  expiredRecheckBtn.setAttribute("aria-busy", "true");
+  expiredRecheckBtn.replaceChildren(spinner, t("expired.checking"));
+  expiredMessage.classList.add("is-refreshing");
+  const answered = await refreshEntitlement(RECHECK_HOLD_MS);
+  expiredRecheckBtn.disabled = false;
+  expiredRecheckBtn.removeAttribute("aria-busy");
+  expiredRecheckBtn.textContent = t("expired.recheck");
+  if (!answered) setExpiredMessage(t("expired.checkFailed"));
+  else if (entitled === false) setExpiredMessage(t("expired.stillExpired"));
+  else if (entitled === true) showToast(t("expired.restored"), 5000, true);
+  expiredMessage.classList.remove("is-refreshing");
+}
+
+// Clearing keeps the old text so the fold closes over it rather than over nothing.
+function setExpiredMessage(text: string): void {
+  if (text) expiredMessage.textContent = text;
+  expiredMessage.classList.toggle("is-shown", Boolean(text));
+  expiredMessage.setAttribute("aria-hidden", String(!text));
+  syncExpiredLayout();
+}
+
+function syncExpiredLayout(): void {
+  const hasMessage = expiredMessage.classList.contains("is-shown");
+  expiredContent.classList.toggle("has-message", hasMessage);
+  expiredContent.classList.toggle("is-compact", hasMessage || !expiredDisconnectBtn.hidden);
+}
+
+function syncExpiredScreen(): void {
+  const show = authState.authenticated && entitled === false;
+  const date = formatSubscriptionDate(expiredAt).trim();
+  expiredDate.textContent = date ? t("expired.date", { date }) : "";
+  expiredDate.hidden = !date;
+  expiredDisconnectBtn.hidden = serverDisconnectBtn.disabled;
+  syncExpiredLayout();
+  if (show === expiredShown) return;
+
+  expiredShown = show;
+  const gen = ++expiredSwapGeneration;
+  const host = expiredScreen.parentElement!;
+  const focusWasBehind = stage.contains(document.activeElement);
+  stage.inert = show;
+  host.classList.toggle("is-expired", show);
+  if (show) {
+    setExpiredMessage("");
+    host.scrollTop = 0;
+    expiredScreen.hidden = false;
+    void animateIn(expiredScreen);
+    if (focusWasBehind) expiredBillingBtn.focus();
+  } else {
+    void animateOut(expiredScreen).then(() => {
+      if (gen === expiredSwapGeneration) expiredScreen.hidden = true;
+    });
+  }
+}
 
 const loginTokenInput = document.getElementById("loginTokenInput") as HTMLInputElement;
 const cachedTokenBtn = document.getElementById("cachedTokenBtn") as HTMLButtonElement;
@@ -3115,6 +3206,28 @@ function animateOut(el: HTMLElement): Promise<void> {
   });
 }
 
+/** animateOut in reverse: fades in while sliding from the right. */
+function animateIn(el: HTMLElement): Promise<void> {
+  return new Promise((resolve) => {
+    el.style.transition = "none";
+    el.style.opacity = "0";
+    el.style.transform = "translateX(30px)";
+    void el.offsetHeight;
+    el.style.transition = "opacity 250ms ease, transform 250ms ease";
+    el.style.opacity = "1";
+    el.style.transform = "translateX(0)";
+    const done = () => {
+      el.removeEventListener("transitionend", done);
+      el.style.transition = "";
+      el.style.opacity = "";
+      el.style.transform = "";
+      resolve();
+    };
+    el.addEventListener("transitionend", done, { once: true });
+    setTimeout(done, 300);
+  });
+}
+
 async function hideLoadingScreen(): Promise<void> {
   await animateOut(loadingScreen);
   loadingScreen.style.display = "none";
@@ -4796,6 +4909,7 @@ function updateServerControlStates(): void {
     !connectInFlight && !disconnectingVisual && fullyDisconnected && !killSwitchArmed;
   serverDisconnectBtn.textContent = connectInFlight ? t("hero.stop") : t("hero.disconnect");
   serverRotateBtn.disabled = busy || !canRotate();
+  syncExpiredScreen();
 }
 
 function updateControlStates(): void {

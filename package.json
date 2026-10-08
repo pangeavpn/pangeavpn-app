@@ -1,6 +1,6 @@
 {
   "name": "pangea-vpn",
-  "version": "0.8.0-rc.2",
+  "version": "0.8.0-rc.3",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -8,6 +8,7 @@
   ],
   "scripts": {
     "dev": "node ./scripts/dev.mjs",
+    "preview": "npm run preview --workspace @pangeavpn/desktop",
     "build": "npm run build --workspace @pangeavpn/shared-types && npm run build --workspace @pangeavpn/desktop && node ./scripts/build-daemon.mjs",
     "build-bin:windows": "node ./scripts/build-bin/windows.mjs",
     "build-bin:windows:x64": "node ./scripts/build-bin/windows.mjs --arch x64",
