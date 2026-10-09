@@ -22,20 +22,43 @@ const CH = {
   getDoh: "pangea:getDoh",
   setHubMethod: "pangea:setHubMethod",
   getHubMethods: "pangea:getHubMethods",
+  getHubStatus: "pangea:getHubStatus",
+  testHubMethod: "pangea:testHubMethod",
+  hubStatusChanged: "pangea:hubStatusChanged",
   setAllowLan: "pangea:setAllowLan",
   getAllowLan: "pangea:getAllowLan",
+  setPostQuantum: "settings:setPostQuantum",
+  getPostQuantum: "settings:getPostQuantum",
   setWireguardMtu: "settings:setWireguardMtu",
   getWireguardMtu: "settings:getWireguardMtu",
   setCustomDns: "settings:setCustomDns",
   getCustomDns: "settings:getCustomDns",
+  setHubInTunnel: "settings:setHubInTunnel",
+  getHubInTunnel: "settings:getHubInTunnel",
   setPreferredTransport: "settings:setPreferredTransport",
   getPreferredTransport: "settings:getPreferredTransport",
   setLaunchAtStartup: "settings:setLaunchAtStartup",
   getLaunchAtStartup: "settings:getLaunchAtStartup",
-  setAlwaysConnected: "settings:setAlwaysConnected",
-  getAlwaysConnected: "settings:getAlwaysConnected",
+  setLockdown: "settings:setLockdown",
+  getLockdown: "settings:getLockdown",
+  setAutoConnect: "settings:setAutoConnect",
+  setDeadDrop: "settings:setDeadDrop",
+  getDeadDrop: "settings:getDeadDrop",
+  getAutoConnect: "settings:getAutoConnect",
+  setNotifications: "settings:setNotifications",
+  getNotifications: "settings:getNotifications",
   getLastServer: "settings:getLastServer",
   clearLastServer: "settings:clearLastServer",
+  setMultihop: "settings:setMultihop",
+  getMultihop: "settings:getMultihop",
+  getSplitTunnel: "settings:getSplitTunnel",
+  setSplitTunnelEnabled: "settings:setSplitTunnelEnabled",
+  setSplitTunnelApp: "settings:setSplitTunnelApp",
+  setSplitTunnelCidrs: "settings:setSplitTunnelCidrs",
+  splitTunnelListApps: "splitTunnel:listApps",
+  splitTunnelDescribeApps: "splitTunnel:describeApps",
+  splitTunnelGetIcons: "splitTunnel:getIcons",
+  splitTunnelBrowseApp: "splitTunnel:browseApp",
   getLocale: "settings:getLocale",
   setLocale: "settings:setLocale",
   getIsPackaged: "app:getIsPackaged",
@@ -43,6 +66,7 @@ const CH = {
   cacheServers: "pangea:cacheServers",
   listDevices: "pangea:listDevices",
   removeDevice: "pangea:removeDevice",
+  renameDevice: "pangea:renameDevice",
   getSubscription: "pangea:getSubscription",
   checkForUpdates: "app:checkForUpdates",
   downloadAppUpdate: "app:downloadAppUpdate",
@@ -50,8 +74,14 @@ const CH = {
   updateAvailable: "app:updateAvailable",
   updateNotAvailable: "app:updateNotAvailable",
   updateError: "app:updateError",
-  updateDownloadProgress: "app:updateDownloadProgress",
-  updateDownloaded: "app:updateDownloaded",
+  openExternal: "app:openExternal",
+  openLogsFolder: "app:openLogsFolder",
+  sendDiagnostics: "app:sendDiagnostics",
+  authInvalidated: "auth:invalidated",
+  rememberAccountNumber: "auth:rememberAccountNumber",
+  getRememberedAccountNumber: "auth:getRememberedAccountNumber",
+  getAccountNumber: "auth:getAccountNumber",
+  clearRememberedAccountNumber: "auth:clearRememberedAccountNumber",
 } as const;
 
 const daemonApi = {
@@ -70,31 +100,60 @@ const pangeaApi = {
   logout: () => ipcRenderer.invoke(CH.authLogout),
   getAuthState: () => ipcRenderer.invoke(CH.authGetState),
   getServers: () => ipcRenderer.invoke(CH.getServers),
-  provisionAndConnect: (serverIds: string[]) =>
-    ipcRenderer.invoke(CH.provisionAndConnect, serverIds),
+  provisionAndConnect: (serverIds: string[], entryServerId?: string | null) =>
+    ipcRenderer.invoke(CH.provisionAndConnect, serverIds, entryServerId ?? null),
   cancelConnect: () => ipcRenderer.invoke(CH.cancelConnect),
-  provisionAndSwitch: (serverIds: string[]) =>
-    ipcRenderer.invoke(CH.provisionAndSwitch, serverIds),
+  provisionAndSwitch: (serverIds: string[], entryServerId?: string | null) =>
+    ipcRenderer.invoke(CH.provisionAndSwitch, serverIds, entryServerId ?? null),
   setDoh: (enabled: boolean) => ipcRenderer.invoke(CH.setDoh, enabled),
   getDoh: () => ipcRenderer.invoke(CH.getDoh),
   setHubMethod: (method: string, enabled: boolean) =>
     ipcRenderer.invoke(CH.setHubMethod, method, enabled),
   getHubMethods: () => ipcRenderer.invoke(CH.getHubMethods),
+  getHubStatus: () => ipcRenderer.invoke(CH.getHubStatus),
+  testHubMethod: (method: string) => ipcRenderer.invoke(CH.testHubMethod, method),
+  onHubStatusChanged: (callback: (status: unknown) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, status: unknown) => callback(status);
+    ipcRenderer.on(CH.hubStatusChanged, listener);
+    return () => ipcRenderer.removeListener(CH.hubStatusChanged, listener);
+  },
   setAllowLan: (enabled: boolean) => ipcRenderer.invoke(CH.setAllowLan, enabled),
   getAllowLan: () => ipcRenderer.invoke(CH.getAllowLan),
+  setPostQuantum: (enabled: boolean) => ipcRenderer.invoke(CH.setPostQuantum, enabled),
+  getPostQuantum: () => ipcRenderer.invoke(CH.getPostQuantum),
   setWireguardMtu: (mtu: number) => ipcRenderer.invoke(CH.setWireguardMtu, mtu),
   getWireguardMtu: () => ipcRenderer.invoke(CH.getWireguardMtu),
   setCustomDns: (value: string) => ipcRenderer.invoke(CH.setCustomDns, value),
   getCustomDns: () => ipcRenderer.invoke(CH.getCustomDns),
-  setPreferredTransport: (value: "auto" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "snowflake") =>
+  setHubInTunnel: (enabled: boolean) => ipcRenderer.invoke(CH.setHubInTunnel, enabled),
+  getHubInTunnel: () => ipcRenderer.invoke(CH.getHubInTunnel),
+  setPreferredTransport: (value: "auto" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "snowflake" | "wireguard") =>
     ipcRenderer.invoke(CH.setPreferredTransport, value),
   getPreferredTransport: () => ipcRenderer.invoke(CH.getPreferredTransport),
   setLaunchAtStartup: (enabled: boolean) => ipcRenderer.invoke(CH.setLaunchAtStartup, enabled),
   getLaunchAtStartup: () => ipcRenderer.invoke(CH.getLaunchAtStartup),
-  setAlwaysConnected: (enabled: boolean) => ipcRenderer.invoke(CH.setAlwaysConnected, enabled),
-  getAlwaysConnected: () => ipcRenderer.invoke(CH.getAlwaysConnected),
+  setLockdown: (enabled: boolean) => ipcRenderer.invoke(CH.setLockdown, enabled),
+  getLockdown: () => ipcRenderer.invoke(CH.getLockdown),
+  setAutoConnect: (enabled: boolean) => ipcRenderer.invoke(CH.setAutoConnect, enabled),
+  setDeadDrop: (enabled: boolean) => ipcRenderer.invoke(CH.setDeadDrop, enabled),
+  getDeadDrop: () => ipcRenderer.invoke(CH.getDeadDrop),
+  getAutoConnect: () => ipcRenderer.invoke(CH.getAutoConnect),
+  setNotifications: (enabled: boolean) => ipcRenderer.invoke(CH.setNotifications, enabled),
+  getNotifications: () => ipcRenderer.invoke(CH.getNotifications),
   getLastServer: () => ipcRenderer.invoke(CH.getLastServer),
   clearLastServer: () => ipcRenderer.invoke(CH.clearLastServer),
+  setMultihop: (prefs: unknown) => ipcRenderer.invoke(CH.setMultihop, prefs),
+  getMultihop: () => ipcRenderer.invoke(CH.getMultihop),
+  getSplitTunnel: () => ipcRenderer.invoke(CH.getSplitTunnel),
+  setSplitTunnelEnabled: (enabled: boolean) => ipcRenderer.invoke(CH.setSplitTunnelEnabled, enabled),
+  setSplitTunnelApp: (rule: string, excluded: boolean) =>
+    ipcRenderer.invoke(CH.setSplitTunnelApp, rule, excluded),
+  setSplitTunnelCidrs: (text: string) => ipcRenderer.invoke(CH.setSplitTunnelCidrs, text),
+  listSplitTunnelApps: (options?: { refresh?: boolean }) =>
+    ipcRenderer.invoke(CH.splitTunnelListApps, { refresh: options?.refresh === true }),
+  describeSplitTunnelApps: (rules: string[]) => ipcRenderer.invoke(CH.splitTunnelDescribeApps, rules),
+  getSplitTunnelIcons: (keys: string[]) => ipcRenderer.invoke(CH.splitTunnelGetIcons, keys),
+  browseSplitTunnelApp: () => ipcRenderer.invoke(CH.splitTunnelBrowseApp),
   getLocale: () => ipcRenderer.invoke(CH.getLocale),
   setLocale: (locale: string) => ipcRenderer.invoke(CH.setLocale, locale),
   getIsPackaged: () => ipcRenderer.invoke(CH.getIsPackaged),
@@ -102,27 +161,35 @@ const pangeaApi = {
   cacheServers: (servers: unknown[]) => ipcRenderer.invoke(CH.cacheServers, servers),
   listDevices: () => ipcRenderer.invoke(CH.listDevices),
   removeDevice: (deviceId: string) => ipcRenderer.invoke(CH.removeDevice, deviceId),
+  renameDevice: (deviceId: string, friendlyName: string) =>
+    ipcRenderer.invoke(CH.renameDevice, deviceId, friendlyName),
   getSubscription: () => ipcRenderer.invoke(CH.getSubscription),
+  rememberAccountNumber: (accountNumber: string) =>
+    ipcRenderer.invoke(CH.rememberAccountNumber, accountNumber),
+  getRememberedAccountNumber: () => ipcRenderer.invoke(CH.getRememberedAccountNumber),
+  getAccountNumber: () => ipcRenderer.invoke(CH.getAccountNumber),
+  clearRememberedAccountNumber: () => ipcRenderer.invoke(CH.clearRememberedAccountNumber),
 };
 
 const autoUpdaterApi = {
   checkForUpdates: () => ipcRenderer.invoke(CH.checkForUpdates),
   downloadUpdate: () => ipcRenderer.invoke(CH.downloadAppUpdate),
   installUpdate: () => ipcRenderer.invoke(CH.installUpdate),
-  onUpdateAvailable: (callback: (info: { version: string; releaseNotes?: string }) => void) => {
-    ipcRenderer.on(CH.updateAvailable, (_event, info) => callback(info));
+  onUpdateAvailable: (callback: (info: { version: string; releaseNotes?: string; macOnly?: boolean }) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, info: { version: string; releaseNotes?: string; macOnly?: boolean }) =>
+      callback(info);
+    ipcRenderer.on(CH.updateAvailable, listener);
+    return () => ipcRenderer.removeListener(CH.updateAvailable, listener);
   },
   onUpdateNotAvailable: (callback: () => void) => {
-    ipcRenderer.on(CH.updateNotAvailable, () => callback());
+    const listener = () => callback();
+    ipcRenderer.on(CH.updateNotAvailable, listener);
+    return () => ipcRenderer.removeListener(CH.updateNotAvailable, listener);
   },
   onUpdateError: (callback: (message: string) => void) => {
-    ipcRenderer.on(CH.updateError, (_event, message: string) => callback(message));
-  },
-  onDownloadProgress: (callback: (percent: number) => void) => {
-    ipcRenderer.on(CH.updateDownloadProgress, (_event, percent: number) => callback(percent));
-  },
-  onUpdateDownloaded: (callback: () => void) => {
-    ipcRenderer.on(CH.updateDownloaded, () => callback());
+    const listener = (_event: Electron.IpcRendererEvent, message: string) => callback(message);
+    ipcRenderer.on(CH.updateError, listener);
+    return () => ipcRenderer.removeListener(CH.updateError, listener);
   },
 };
 
@@ -130,10 +197,13 @@ contextBridge.exposeInMainWorld("daemonApi", daemonApi);
 contextBridge.exposeInMainWorld("pangeaApi", pangeaApi);
 contextBridge.exposeInMainWorld("autoUpdater", autoUpdaterApi);
 contextBridge.exposeInMainWorld("appPlatform", process.platform);
-contextBridge.exposeInMainWorld("openExternal", (url: string) => ipcRenderer.invoke("app:openExternal", url));
+contextBridge.exposeInMainWorld("openExternal", (url: string) => ipcRenderer.invoke(CH.openExternal, url));
+contextBridge.exposeInMainWorld("openLogsFolder", () => ipcRenderer.invoke(CH.openLogsFolder));
+contextBridge.exposeInMainWorld("sendDiagnostics", (note?: string) =>
+  ipcRenderer.invoke(CH.sendDiagnostics, note)
+);
 contextBridge.exposeInMainWorld("onAuthInvalidated", (callback: () => void) => {
-  ipcRenderer.on("auth:invalidated", () => callback());
-});
-contextBridge.exposeInMainWorld("onSubscriptionExpired", (callback: () => void) => {
-  ipcRenderer.on("subscription:expired", () => callback());
+  const listener = () => callback();
+  ipcRenderer.on(CH.authInvalidated, listener);
+  return () => ipcRenderer.removeListener(CH.authInvalidated, listener);
 });

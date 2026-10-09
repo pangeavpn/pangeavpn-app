@@ -1,131 +1,332 @@
 #!/bin/bash
-# PangeaVPN macOS one-shot online installer.
-#
-# Downloads the latest release DMG for this Mac's architecture, strips the
-# quarantine flag, mounts it, runs the bundled installer (which installs the
-# .pkg, sets up the LaunchDaemon, and ad-hoc signs the daemon), then cleans
-# up.  Users can run this with a single command:
-#
-#   curl -fsSL https://pangeavpn.org/install-mac.sh | bash
-#
-# No prior downloads or App Store required.
+
+# PangeaVPN macOS online installer: curl -fsSL https://pangeavpn.org/install-mac.sh | bash
+# Asks stable or pre-release; PANGEA_CHANNEL=stable|prerelease skips the question.
 
 set -euo pipefail
 
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-RED='\033[0;31m'
-NC='\033[0m'
+# Colour only when writing to a terminal, so piped output stays readable.
+# ACCENT is the nearest 256-colour match to the app's terra accent (#c3562b).
+if [[ -t 1 ]]; then
+    if [[ "$(tput colors 2>/dev/null || echo 0)" -ge 256 ]]; then
+        ACCENT='\033[38;5;166m'
+    else
+        ACCENT='\033[0;33m'
+    fi
+    YELLOW='\033[1;33m'; RED='\033[0;31m'; NC='\033[0m'
+else
+    ACCENT=''; YELLOW=''; RED=''; NC=''
+fi
 
-log()  { printf "${GREEN}==> %s${NC}\n" "$1"; }
+SUPPORT_URL="https://pangeavpn.org/contact"
+DOWNLOAD_URL="https://pangeavpn.org/download"
+
+log()  { printf "${ACCENT}==> %s${NC}\n" "$1"; }
 warn() { printf "${YELLOW}Warning: %s${NC}\n" "$1"; }
-fail() { printf "${RED}Error: %s${NC}\n" "$1" >&2; exit 1; }
+fail() {
+    printf "${RED}Error: %s${NC}\n" "$1" >&2
+    printf "Need help? %s\n" "$SUPPORT_URL" >&2
+    exit 1
+}
+
+# Block art needs a UTF-8 terminal; anything else gets a plain header.
+banner() {
+    if [[ -n "${PANGEA_BANNER_SHOWN:-}" ]]; then
+        return 0
+    fi
+    export PANGEA_BANNER_SHOWN=1
+    if [[ ! -t 1 || "${LC_ALL:-${LC_CTYPE:-${LANG:-}}}" != *[Uu][Tt][Ff]* ]]; then
+        echo ""
+        echo "  PangeaVPN - macOS installer"
+        echo ""
+        return 0
+    fi
+    echo ""
+    printf "%b" "$ACCENT"
+    cat <<'ART'
+      ▄███████▄
+    ▄████████████████▄
+   ███████████████████▄
+  █████████████████████▄
+  ███████████████████████▄▄▄          P A N G E A   V P N
+   ▀████████████████████████
+     ▀▀▀▀▀▀███████████████▀           macOS installer
+           ▀████████████▀
+             ███████████
+            ████████████
+             █████████▀
+              ███████▀
+               ████▀
+ART
+    printf "%b" "$NC"
+    echo ""
+}
 
 HUB_LATEST_URL="${PANGEA_HUB_URL:-https://api.pangeavpn.org/api/desktop/latest}"
-GITHUB_LATEST_URL="https://api.github.com/repos/pangeavpn/pangeavpn-app/releases/latest"
+GITHUB_RELEASES_URL="https://api.github.com/repos/pangeavpn/pangeavpn-app/releases"
 
-[[ "$(uname)" == "Darwin" ]] || fail "This installer only supports macOS."
+CHANNEL="stable"
 
-case "$(uname -m)" in
-    arm64)  ARCH_TAG="arm64" ;;
-    x86_64) ARCH_TAG="x64"   ;;
-    *)      fail "Unsupported architecture: $(uname -m). Need Apple Silicon (arm64) or Intel (x86_64)." ;;
-esac
+choose_channel() {
+    case "${PANGEA_CHANNEL:-}" in
+        stable|prerelease) CHANNEL="$PANGEA_CHANNEL"; return 0 ;;
+        "") ;;
+        *) warn "Ignoring PANGEA_CHANNEL=${PANGEA_CHANNEL} (use stable or prerelease)." ;;
+    esac
+    # Under `curl | bash` stdin is this script, so ask on the terminal; none means stable.
+    { true < /dev/tty; } 2>/dev/null || return 0
+    local answer="" left
+    printf "\nWhich version would you like to install?\n" > /dev/tty
+    printf "  1) Stable (recommended)\n" > /dev/tty
+    printf "  2) Pre-release - early access to new features, may have bugs\n" > /dev/tty
+    for (( left = 5; left > 0; left-- )); do
+        printf "\rPress 1 or 2. Stable starts in %ds... " "$left" > /dev/tty
+        if read -r -s -n 1 -t 1 answer < /dev/tty; then
+            break
+        fi
+    done
+    printf "\n\n" > /dev/tty
+    [[ "$answer" == "2" ]] && CHANNEL="prerelease"
+    return 0
+}
 
-MACOS_MAJOR="$(sw_vers -productVersion | cut -d. -f1)"
-if [[ "$MACOS_MAJOR" -lt 12 ]]; then
-    fail "PangeaVPN requires macOS 12 (Monterey) or later. You are on $(sw_vers -productVersion)."
-fi
+SUDO_KEEPALIVE_PID=""
+TMPDIR_PANGEA=""
+MOUNT_POINT=""
 
-log "Detected macOS $(sw_vers -productVersion) on $ARCH_TAG"
+HTTP_STATUS=""
 
-# ── Resolve the DMG URL for this arch ───────────────────────────────────────
-# Prefer the hub (cached, censorship-resistant via api.pangeavpn.org).
-# Fall back to GitHub directly if the hub is unreachable.
-log "Looking up the latest release..."
+# Everything below downloads from hosts that rate limit by source IP, and our
+# users share exit addresses — so a 429 is an expected condition, not a failure.
+RETRYABLE_STATUSES=" 000 408 425 429 500 502 503 504 "
+MAX_ATTEMPTS=4
+MAX_BACKOFF_SECONDS=60
 
-RELEASE_JSON=""
-if RELEASE_JSON="$(curl -fsSL --max-time 8 "$HUB_LATEST_URL" 2>/dev/null)" && [[ -n "$RELEASE_JSON" ]]; then
-    : # got it from the hub
-elif RELEASE_JSON="$(curl -fsSL --max-time 12 "$GITHUB_LATEST_URL" 2>/dev/null)"; then
-    : # GitHub fallback
-else
-    fail "Could not reach the release index. Check your internet connection."
-fi
+# Sets HTTP_STATUS so callers can tell a throttle apart from a block. Honours
+# Retry-After when the server sends one, otherwise backs off quadratically.
+http_fetch() {
+    local url="$1" dest="$2" mode="${3:-quiet}" max_attempts="${4:-$MAX_ATTEMPTS}"
+    local attempt=1 header_file code wait_for
 
-# Pull out the matching arch DMG URL.  We accept both response shapes:
-#   - hub:    {"assets":[{"url":"https://...arm64-installer.dmg", ...}]}
-#   - github: {"assets":[{"browser_download_url":"https://...arm64-installer.dmg", ...}]}
-# Avoid jq dependency — grep+sed is good enough for these well-known fields.
-DMG_URL="$(
-    printf "%s" "$RELEASE_JSON" \
-        | tr ',' '\n' \
-        | grep -Eo '"(url|browser_download_url)":"https://[^"]+'"$ARCH_TAG"'-installer\.dmg"' \
+    # Falls back beside the destination: an unreadable header file would leave
+    # awk below reading stdin, which under `curl | bash` is the script itself.
+    header_file="$(mktemp -t pangea-hdr)" || header_file="${dest}.headers"
+
+    while :; do
+        # No -f: a 4xx/5xx must reach the status check below rather than being
+        # flattened into curl's exit code, which cannot tell 429 from 404.
+        if [[ "$mode" == "progress" ]]; then
+            code="$(curl -L --progress-bar -D "$header_file" -w '%{http_code}' -o "$dest" "$url")" || code="000"
+        else
+            # Lookups fail over to a sibling URL, so a dead path gets seconds,
+            # not the download's patient retry budget.
+            local max_time=25
+            [[ "$mode" == "lookup" ]] && max_time=10
+            code="$(curl -sSL --max-time "$max_time" -D "$header_file" -w '%{http_code}' -o "$dest" "$url" 2>/dev/null)" || code="000"
+        fi
+        HTTP_STATUS="$code"
+
+        if [[ "$code" == 2* ]]; then
+            rm -f "$header_file"
+            return 0
+        fi
+        if [[ "$RETRYABLE_STATUSES" != *" $code "* || "$attempt" -ge "$max_attempts" ]]; then
+            rm -f "$header_file"
+            return 1
+        fi
+
+        wait_for="$(awk 'tolower($1) == "retry-after:" { print $2 }' < "$header_file" 2>/dev/null | tr -d '\r' | tail -1 || true)"
+        if [[ ! "$wait_for" =~ ^[0-9]+$ ]]; then
+            wait_for=$(( attempt * attempt * 2 ))
+        fi
+        if [[ "$wait_for" -gt "$MAX_BACKOFF_SECONDS" ]]; then
+            wait_for="$MAX_BACKOFF_SECONDS"
+        fi
+
+        if [[ "$code" == "429" ]]; then
+            warn "The download server is busy (too many installs from your network). Waiting ${wait_for}s, then trying again."
+        else
+            warn "Download server returned ${code}. Retrying in ${wait_for}s."
+        fi
+        sleep "$wait_for"
+        attempt=$(( attempt + 1 ))
+    done
+}
+
+cleanup() {
+    if [[ -n "$SUDO_KEEPALIVE_PID" ]]; then
+        kill "$SUDO_KEEPALIVE_PID" 2>/dev/null || true
+    fi
+    if [[ -n "$MOUNT_POINT" ]]; then
+        hdiutil detach "$MOUNT_POINT" -quiet 2>/dev/null \
+            || hdiutil detach "$MOUNT_POINT" -force -quiet 2>/dev/null || true
+    fi
+    if [[ -n "$TMPDIR_PANGEA" ]]; then
+        rm -rf "$TMPDIR_PANGEA"
+    fi
+    return 0
+}
+
+# Everything lives in main() so a download truncated mid-transfer cannot run
+# a partial script — bash only executes it once the final line has arrived.
+main() {
+    trap cleanup EXIT
+
+    banner
+
+    [[ "$(uname)" == "Darwin" ]] || fail "This installer only supports macOS."
+
+    case "$(uname -m)" in
+        arm64)  ARCH_TAG="arm64" ;;
+        x86_64) ARCH_TAG="x64"   ;;
+        *)      fail "This Mac's processor type ($(uname -m)) isn't supported. PangeaVPN runs on Apple Silicon and Intel Macs." ;;
+    esac
+
+    MACOS_MAJOR="$(sw_vers -productVersion | cut -d. -f1)"
+    if [[ "$MACOS_MAJOR" -lt 12 ]]; then
+        fail "PangeaVPN requires macOS 12 (Monterey) or later. You are on $(sw_vers -productVersion)."
+    fi
+
+    log "Detected macOS $(sw_vers -productVersion) on $ARCH_TAG"
+
+    # ── Ask for admin rights up front ───────────────────────────────────────
+    # Prompting before the download avoids stalling on a password mid-install.
+    if ! sudo -n true 2>/dev/null; then
+        log "PangeaVPN installs a background service, which needs your Mac login password."
+        log "You'll be asked once, now. Typing won't show on screen - that's normal."
+    fi
+    if ! sudo -v; then
+        fail "Could not get administrator access. If you mistyped your password, run the installer again. Otherwise use an admin account."
+    fi
+
+    # Refresh the 5-minute sudo timestamp so a slow download cannot expire it.
+    while true; do sudo -n true || true; sleep 50; kill -0 "$$" 2>/dev/null || exit; done 2>/dev/null &
+    SUDO_KEEPALIVE_PID=$!
+    # disown it, or the shell prints a "Terminated" job notice over the
+    # closing message when the cleanup trap kills it.
+    disown "$SUDO_KEEPALIVE_PID" 2>/dev/null || true
+
+    choose_channel
+
+    # ── Resolve the DMG URL for this arch ───────────────────────────────────
+    # Prefer the hub (censorship-resistant); fall back to GitHub if unreachable.
+    if [[ "$CHANNEL" == "prerelease" ]]; then
+        log "Looking up the latest pre-release..."
+        HUB_URL="${HUB_LATEST_URL}?channel=prerelease"
+        # Newest-created first, so the first DMG is the most recent release of either kind.
+        GITHUB_URL="${GITHUB_RELEASES_URL}?per_page=10"
+    else
+        log "Looking up the latest stable release..."
+        HUB_URL="$HUB_LATEST_URL"
+        GITHUB_URL="${GITHUB_RELEASES_URL}/latest"
+    fi
+
+    TMPDIR_PANGEA="$(mktemp -d -t pangeavpn-install)"
+    RELEASE_FILE="$TMPDIR_PANGEA/release.json"
+    DMG_URL=""
+    SAW_RELEASE=""
+
+    # Accepts the hub's "url" and GitHub's "browser_download_url" asset shapes, but only
+    # this repo's release assets: a spoofed hub reply must not pick where the DMG comes from.
+    extract_dmg_url() {
+        tr ',' '\n' < "$RELEASE_FILE" \
+            | grep -Eo '"(url|browser_download_url)":[[:space:]]*"https://github\.com/pangeavpn/pangeavpn-app/releases/download/[^"]+'"$ARCH_TAG"'-installer\.dmg"' \
+            | head -1 \
+            | sed -E 's/.*"(https:[^"]+)".*/\1/' \
+            || true
+    }
+
+    # A source only counts once it yields a DMG for this arch. Filtered networks
+    # answer the hub with a 200 HTML block page, which must not end the lookup.
+    try_release_source() {
+        http_fetch "$1" "$RELEASE_FILE" lookup "$2" && [[ -s "$RELEASE_FILE" ]] || return 1
+        grep -q '"assets"' "$RELEASE_FILE" && SAW_RELEASE=1
+        DMG_URL="$(extract_dmg_url)"
+        [[ -n "$DMG_URL" ]]
+    }
+
+    # One quick try each: hub traffic is routed around the tunnel, so a hostile
+    # network blackholing it must not cost minutes before falling back to GitHub.
+    if try_release_source "$HUB_URL" 1 || try_release_source "$GITHUB_URL" 2; then
+        :
+    elif [[ -n "$SAW_RELEASE" ]]; then
+        fail "The latest release has no download for this Mac yet. It may still be uploading - try again in a few minutes, or see ${DOWNLOAD_URL}"
+    elif [[ "$HTTP_STATUS" == "429" || "$HTTP_STATUS" == "403" ]]; then
+        fail "The download server is refusing new requests from your network right now (HTTP ${HTTP_STATUS}) - usually because many people share your connection. Wait a few minutes and run this again, or download directly from ${DOWNLOAD_URL}"
+    else
+        fail "Could not reach the download server (HTTP ${HTTP_STATUS}). If the rest of your internet works, your network may be blocking it - try a different network, or get the installer from ${DOWNLOAD_URL}"
+    fi
+
+    # Read from the DMG's release tag so the version shown is the one downloaded.
+    VERSION="$(printf "%s" "$DMG_URL" | sed -nE 's@.*/releases/download/v?([^/]+)/.*@\1@p' || true)"
+    if [[ -n "$VERSION" ]]; then
+        log "Latest version: $VERSION"
+        if [[ "$CHANNEL" == "prerelease" && "$VERSION" != *-* ]]; then
+            log "No pre-release is newer than this stable release, so installing it instead."
+        fi
+    fi
+    log "Downloading: $(basename "$DMG_URL")"
+
+    # ── Download to a temp dir we own ───────────────────────────────────────
+    DMG_PATH="$TMPDIR_PANGEA/PangeaVPN.dmg"
+
+    if ! http_fetch "$DMG_URL" "$DMG_PATH" progress; then
+        if [[ "$HTTP_STATUS" == "429" ]]; then
+            fail "The download server is refusing new requests from your network right now - usually because many people share your connection. Wait a few minutes and run this again, or download directly from ${DOWNLOAD_URL}"
+        fi
+        fail "Download failed (HTTP ${HTTP_STATUS}). Check your connection and try again, or get the installer from ${DOWNLOAD_URL}"
+    fi
+
+    # ── Verify the download ─────────────────────────────────────────────────
+    # Catches a truncated or altered file before it becomes a confusing failure.
+    DMG_NAME="$(basename "$DMG_URL")"
+    SUMS_URL="$(dirname "$DMG_URL")/SHA256SUMS.txt"
+    SUMS_PATH="$TMPDIR_PANGEA/SHA256SUMS.txt"
+
+    EXPECTED_SHA=""
+    if http_fetch "$SUMS_URL" "$SUMS_PATH"; then
+        EXPECTED_SHA="$(awk -v f="$DMG_NAME" '$2 == f { print $1; exit }' "$SUMS_PATH")"
+    fi
+
+    if [[ -n "$EXPECTED_SHA" ]]; then
+        ACTUAL_SHA="$(shasum -a 256 "$DMG_PATH" | awk '{ print $1 }')"
+        if [[ "$ACTUAL_SHA" != "$EXPECTED_SHA" ]]; then
+            fail "The download failed its integrity check - the file is damaged or was altered in transit. Do not install it. Try again; if this keeps happening, your network may be interfering."
+        fi
+        log "Download verified."
+    elif [[ "${PANGEA_ALLOW_UNVERIFIED:-}" == "1" ]]; then
+        warn "Couldn't verify this download. Installing anyway because PANGEA_ALLOW_UNVERIFIED=1 is set."
+    else
+        # Blocking only the checksum must not downgrade a root install to an unverified one.
+        fail "Couldn't fetch the file that verifies this download, so it won't be installed. Try again in a few minutes or on another network, or get the installer from ${DOWNLOAD_URL}. To install without verification, run the installer again with PANGEA_ALLOW_UNVERIFIED=1 set."
+    fi
+
+    log "Preparing the download..."
+    xattr -dr com.apple.quarantine "$DMG_PATH" 2>/dev/null || true
+
+    # ── Open the disk image ─────────────────────────────────────────────────
+    log "Opening the installer..."
+    MOUNT_OUTPUT="$(hdiutil attach "$DMG_PATH" -nobrowse -readonly -noverify -plist 2>/dev/null)" \
+        || fail "Could not open the downloaded installer. It may be damaged - try running this again."
+    MOUNT_POINT="$(printf "%s" "$MOUNT_OUTPUT" \
+        | grep -E '<string>/Volumes/' \
         | head -1 \
-        | sed -E 's/.*"(https:[^"]+)".*/\1/'
-)"
+        | sed -E 's@.*<string>(/Volumes/[^<]+)</string>.*@\1@' \
+        || true)"
+    if [[ -z "$MOUNT_POINT" || ! -d "$MOUNT_POINT" ]]; then
+        fail "Could not open the downloaded installer. It may be damaged - try running this again."
+    fi
 
-if [[ -z "$DMG_URL" ]]; then
-    fail "No ${ARCH_TAG}-installer.dmg in the latest release. The release may still be uploading — try again in a few minutes."
-fi
+    # ── Delegate to the install-mac.sh inside the DMG ───────────────────────
+    # It ships with each release, so it is the source of truth for the setup.
+    BUNDLED_INSTALLER="$MOUNT_POINT/install-mac.sh"
+    PKG_FILE="$(find "$MOUNT_POINT" -maxdepth 1 -name "*.pkg" -print 2>/dev/null | head -1 || true)"
 
-VERSION="$(printf "%s" "$RELEASE_JSON" | grep -Eo '"(version|tag_name)":"[^"]+"' | head -1 | sed -E 's/.*"([^"]+)"$/\1/' | sed 's/^v//')"
-log "Latest version: ${VERSION:-unknown}"
-log "Downloading: $(basename "$DMG_URL")"
+    if [[ ! -f "$BUNDLED_INSTALLER" || -z "$PKG_FILE" ]]; then
+        fail "This download is incomplete or damaged. Please try again, or report it at ${SUPPORT_URL}"
+    fi
 
-# ── Download to a temp dir we own ───────────────────────────────────────────
-TMPDIR_PANGEA="$(mktemp -d -t pangeavpn-install)"
-trap 'rm -rf "$TMPDIR_PANGEA"' EXIT
-DMG_PATH="$TMPDIR_PANGEA/PangeaVPN.dmg"
-
-if ! curl -fL --progress-bar -o "$DMG_PATH" "$DMG_URL"; then
-    fail "Download failed. Check your internet connection and try again."
-fi
-
-# Strip the quarantine xattr BEFORE mounting so Gatekeeper doesn't block the
-# bundled install script.
-log "Stripping quarantine attribute..."
-xattr -dr com.apple.quarantine "$DMG_PATH" 2>/dev/null || true
-
-# ── Mount the DMG read-only ─────────────────────────────────────────────────
-log "Mounting installer image..."
-MOUNT_OUTPUT="$(hdiutil attach "$DMG_PATH" -nobrowse -readonly -noverify -plist 2>/dev/null)" || \
-    fail "Failed to mount $DMG_PATH"
-MOUNT_POINT="$(printf "%s" "$MOUNT_OUTPUT" \
-    | grep -E '<string>/Volumes/' \
-    | head -1 \
-    | sed -E 's@.*<string>(/Volumes/[^<]+)</string>.*@\1@')"
-if [[ -z "$MOUNT_POINT" || ! -d "$MOUNT_POINT" ]]; then
-    fail "Could not determine mount point for the DMG."
-fi
-trap 'hdiutil detach "$MOUNT_POINT" -quiet 2>/dev/null || true; rm -rf "$TMPDIR_PANGEA"' EXIT
-
-# ── Quit any running app so installer can replace it ────────────────────────
-if pgrep -f "/Applications/PangeaVPN.app/Contents/MacOS" >/dev/null 2>&1; then
-    log "Quitting running PangeaVPN.app..."
-    osascript -e 'tell application "PangeaVPN" to quit' 2>/dev/null || true
-    sleep 1
-fi
-
-# ── Delegate to the install-mac.sh inside the DMG ───────────────────────────
-# That script is the source of truth for installing the .pkg, setting up the
-# LaunchDaemon, generating the daemon token, and ad-hoc signing the daemon
-# binary on Apple Silicon. It's published with each release and matches the
-# .pkg version-for-version.
-BUNDLED_INSTALLER="$MOUNT_POINT/install-mac.sh"
-PKG_FILE="$(find "$MOUNT_POINT" -maxdepth 1 -name "*.pkg" -print 2>/dev/null | head -1)"
-
-if [[ -f "$BUNDLED_INSTALLER" ]]; then
-    log "Running bundled installer..."
     bash "$BUNDLED_INSTALLER" "$PKG_FILE"
-elif [[ -n "$PKG_FILE" ]]; then
-    warn "Bundled install-mac.sh missing — running the .pkg directly. Daemon may need a manual signing pass."
-    sudo installer -pkg "$PKG_FILE" -target /
-    sudo xattr -dr com.apple.quarantine /Applications/PangeaVPN.app 2>/dev/null || true
-    sudo codesign --force --deep --sign - /Applications/PangeaVPN.app 2>/dev/null || \
-        warn "codesign on /Applications/PangeaVPN.app failed. The app may still launch but Apple Silicon may complain."
-else
-    fail "DMG mounted but contained no .pkg. Release artifact looks broken."
-fi
+}
 
-log "Done. PangeaVPN is installed in /Applications."
+main "$@"

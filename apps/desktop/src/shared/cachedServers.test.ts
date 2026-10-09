@@ -47,6 +47,11 @@ test("optional transport blocks pass through, but only as objects", () => {
   assert.equal(isCachedServer(server({ snowflake: [] })), false);
 });
 
+test("a null optional block passes through like an absent one", () => {
+  assert.equal(isCachedServer(server({ naive: null })), true);
+  assert.equal(isCachedServer(server({ reality: null, hysteria2: null })), true);
+});
+
 test("non-objects are rejected", () => {
   assert.equal(isCachedServer(undefined), false);
   assert.equal(isCachedServer(null), false);

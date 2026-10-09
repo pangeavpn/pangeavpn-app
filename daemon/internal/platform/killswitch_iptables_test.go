@@ -10,16 +10,23 @@ import (
 	"testing"
 )
 
-// Replays a command plan against a model of the kernel's chain state, so a test
-// can assert what the real firewall looked like at every step. Untagged on
-// purpose: the fallback is Linux-only but there is no Linux CI job.
+// Replays a command plan against a model of the kernel's chain state, so a
+// test can assert what the real firewall looked like at every step.
 type iptablesModel struct {
-	chains      map[string][]string
-	outputJumps []string
+	chains       map[string][]string
+	outputJumps  []string
+	forwardJumps []string
 }
 
 func newIPTablesModel() *iptablesModel {
 	return &iptablesModel{chains: map[string][]string{}}
+}
+
+func (m *iptablesModel) jumps(hook string) *[]string {
+	if hook == "FORWARD" {
+		return &m.forwardJumps
+	}
+	return &m.outputJumps
 }
 
 // stripWait drops the leading "-w N" that every command carries.
@@ -41,13 +48,15 @@ func (m *iptablesModel) apply(rawArgs []string) {
 		m.chains[args[1]] = nil
 	case len(args) >= 2 && args[0] == "-X":
 		delete(m.chains, args[1])
-	case len(args) >= 5 && args[0] == "-I" && args[1] == "OUTPUT":
-		m.outputJumps = append([]string{args[len(args)-1]}, m.outputJumps...)
-	case len(args) >= 4 && args[0] == "-D" && args[1] == "OUTPUT":
+	case len(args) >= 5 && args[0] == "-I" && (args[1] == "OUTPUT" || args[1] == "FORWARD"):
+		jumps := m.jumps(args[1])
+		*jumps = append([]string{args[len(args)-1]}, *jumps...)
+	case len(args) >= 4 && args[0] == "-D" && (args[1] == "OUTPUT" || args[1] == "FORWARD"):
+		jumps := m.jumps(args[1])
 		target := args[len(args)-1]
-		for i, jump := range m.outputJumps {
+		for i, jump := range *jumps {
 			if jump == target {
-				m.outputJumps = append(m.outputJumps[:i], m.outputJumps[i+1:]...)
+				*jumps = append((*jumps)[:i], (*jumps)[i+1:]...)
 				break
 			}
 		}
@@ -99,7 +108,66 @@ func (m *iptablesModel) filtering(binary string) bool {
 }
 
 func isV6Chain(name string) bool {
-	return name == ipt6ChainName || name == ipt6ChainNameAlt
+	return name == ipt6ChainName || name == ipt6ChainNameAlt || name == ipt6FwdChainName || name == ipt6FwdChainNameAlt
+}
+
+// hookFiltering is filtering() for either hook: a jump to a chain that ends in
+// DROP, for the family the binary serves.
+func (m *iptablesModel) hookFiltering(hook, binary string) bool {
+	for _, jump := range *m.jumps(hook) {
+		if isV6Chain(jump) != (binary == "ip6tables") {
+			continue
+		}
+		rules := m.chains[jump]
+		if len(rules) > 0 && rules[len(rules)-1] == "-j DROP" {
+			return true
+		}
+	}
+	return false
+}
+
+// runHook is run() for the FORWARD hook, whose chains are staged separately.
+func (m *iptablesModel) runHook(plan []iptablesCommand, hook string, armed bool) string {
+	breach := ""
+	for _, cmd := range plan {
+		m.apply(cmd.Args)
+		if !armed || breach != "" {
+			continue
+		}
+		if !m.hookFiltering(hook, "iptables") {
+			breach = "iptables " + strings.Join(cmd.Args, " ")
+		} else if !m.hookFiltering(hook, "ip6tables") {
+			breach = "ip6tables " + strings.Join(cmd.Args, " ")
+		}
+	}
+	return breach
+}
+
+// liveHookChain returns the rules of the complete chain the hook reaches.
+func (m *iptablesModel) liveHookChain(hook, binary string) []string {
+	for _, jump := range *m.jumps(hook) {
+		if isV6Chain(jump) != (binary == "ip6tables") {
+			continue
+		}
+		rules := m.chains[jump]
+		if len(rules) > 0 && rules[len(rules)-1] == "-j DROP" {
+			return rules
+		}
+	}
+	return nil
+}
+
+func (m *iptablesModel) liveHookChainName(hook, binary string) string {
+	for _, jump := range *m.jumps(hook) {
+		if isV6Chain(jump) != (binary == "ip6tables") {
+			continue
+		}
+		rules := m.chains[jump]
+		if len(rules) > 0 && rules[len(rules)-1] == "-j DROP" {
+			return jump
+		}
+	}
+	return ""
 }
 
 // run feeds a plan through the model, reporting the first command after which a
@@ -153,7 +221,7 @@ func TestIPTablesApplyPlan_NeverLeavesOutputUnfiltered(t *testing.T) {
 
 	// Cold start: nothing installed, so a gap before the first jumps land is
 	// expected and harmless.
-	model.run(iptablesApplyPlan(iptChainName, ipt6ChainName, []string{"203.0.113.5"}, "wg-test", false), false)
+	model.run(iptablesApplyPlan(iptChainName, ipt6ChainName, lockRules([]string{"203.0.113.5"}, "wg-test", false)), false)
 	if !model.filtering("iptables") || !model.filtering("ip6tables") {
 		t.Fatalf("not filtering after the first apply: jumps=%v", model.outputJumps)
 	}
@@ -163,7 +231,7 @@ func TestIPTablesApplyPlan_NeverLeavesOutputUnfiltered(t *testing.T) {
 	second := iptablesApplyPlan(
 		iptablesStagingChain(model.v4Live()),
 		iptables6StagingChain(model.v6Live()),
-		[]string{"198.51.100.9"}, "wg-test", false,
+		lockRules([]string{"198.51.100.9"}, "wg-test", false),
 	)
 	if breach := model.run(second, true); breach != "" {
 		t.Fatalf("kill switch went fail-open during re-arm at %q", breach)
@@ -173,7 +241,7 @@ func TestIPTablesApplyPlan_NeverLeavesOutputUnfiltered(t *testing.T) {
 	third := iptablesApplyPlan(
 		iptablesStagingChain(model.v4Live()),
 		iptables6StagingChain(model.v6Live()),
-		[]string{"203.0.113.7"}, "wg-test", true,
+		lockRules([]string{"203.0.113.7"}, "wg-test", true),
 	)
 	if breach := model.run(third, true); breach != "" {
 		t.Fatalf("kill switch went fail-open during third arm at %q", breach)
@@ -189,11 +257,11 @@ func TestIPTablesApplyPlan_NeverLeavesOutputUnfiltered(t *testing.T) {
 // The permitted set must not grow across switches.
 func TestIPTablesApplyPlan_ReArmReplacesEndpoints(t *testing.T) {
 	model := newIPTablesModel()
-	model.run(iptablesApplyPlan(iptChainName, ipt6ChainName, []string{"203.0.113.5"}, "wg-test", false), false)
+	model.run(iptablesApplyPlan(iptChainName, ipt6ChainName, lockRules([]string{"203.0.113.5"}, "wg-test", false)), false)
 	model.run(iptablesApplyPlan(
 		iptablesStagingChain(model.v4Live()),
 		iptables6StagingChain(model.v6Live()),
-		[]string{"198.51.100.9"}, "wg-test", false,
+		lockRules([]string{"198.51.100.9"}, "wg-test", false),
 	), false)
 
 	rules := strings.Join(model.liveChain("PANGEAVPN_KS"), "\n")
@@ -208,7 +276,7 @@ func TestIPTablesApplyPlan_ReArmReplacesEndpoints(t *testing.T) {
 // Turning Allow LAN off must actually close the LAN hole on the next arm.
 func TestIPTablesApplyPlan_AllowLANCanBeTurnedOff(t *testing.T) {
 	model := newIPTablesModel()
-	model.run(iptablesApplyPlan(iptChainName, ipt6ChainName, []string{"203.0.113.5"}, "wg-test", true), false)
+	model.run(iptablesApplyPlan(iptChainName, ipt6ChainName, lockRules([]string{"203.0.113.5"}, "wg-test", true)), false)
 	if !strings.Contains(strings.Join(model.liveChain("PANGEAVPN_KS"), "\n"), "192.168.0.0/16") {
 		t.Fatal("LAN permit missing when allowLAN is on")
 	}
@@ -216,7 +284,7 @@ func TestIPTablesApplyPlan_AllowLANCanBeTurnedOff(t *testing.T) {
 	model.run(iptablesApplyPlan(
 		iptablesStagingChain(model.v4Live()),
 		iptables6StagingChain(model.v6Live()),
-		[]string{"203.0.113.5"}, "wg-test", false,
+		lockRules([]string{"203.0.113.5"}, "wg-test", false),
 	), false)
 	if strings.Contains(strings.Join(model.liveChain("PANGEAVPN_KS"), "\n"), "192.168.0.0/16") {
 		t.Fatal("LAN permit survived allowLAN being turned off")
@@ -244,7 +312,7 @@ func TestIPTablesStagingChain_AlwaysAvoidsTheLiveChain(t *testing.T) {
 // A partial teardown can leave the v6 jump pointing at an emptied chain, so the
 // jump alone is not proof it is filtering.
 func TestIPTablesApplyPlan_AlwaysRebuildsIPv6(t *testing.T) {
-	plan := iptablesApplyPlan(iptChainNameAlt, ipt6ChainNameAlt, nil, "", false)
+	plan := iptablesApplyPlan(iptChainNameAlt, ipt6ChainNameAlt, lockRules(nil, "", false))
 	var sawDrop, sawJump bool
 	for _, cmd := range plan {
 		if cmd.Binary != "ip6tables" {
@@ -266,7 +334,7 @@ func TestIPTablesApplyPlan_AlwaysRebuildsIPv6(t *testing.T) {
 // A v6 failure after the v4 swap would abort Enable with v4 already on the new
 // endpoints, making Switch's "still on the old server" recovery wrong.
 func TestIPTablesApplyPlan_IPv6PrecedesTheIPv4Swap(t *testing.T) {
-	plan := iptablesApplyPlan(iptChainName, ipt6ChainName, []string{"203.0.113.5"}, "wg-test", false)
+	plan := iptablesApplyPlan(iptChainName, ipt6ChainName, lockRules([]string{"203.0.113.5"}, "wg-test", false))
 	lastRequiredV6, firstV4Endpoint := -1, -1
 	for i, cmd := range plan {
 		args := strings.Join(stripWait(cmd.Args), " ")
@@ -287,7 +355,8 @@ func TestIPTablesApplyPlan_IPv6PrecedesTheIPv4Swap(t *testing.T) {
 
 func TestIPTablesApplyPlan_EveryCommandCarriesTheLockWait(t *testing.T) {
 	plans := [][]iptablesCommand{
-		iptablesApplyPlan(iptChainName, ipt6ChainName, []string{"203.0.113.5"}, "wg-test", true),
+		iptablesApplyPlan(iptChainName, ipt6ChainName, lockRules([]string{"203.0.113.5"}, "wg-test", true)),
+		iptablesForwardPlan(iptFwdChainName, ipt6FwdChainName, lockRules(nil, "wg-test", true)),
 		iptablesRemovePlan(),
 	}
 	for _, plan := range plans {
@@ -309,16 +378,17 @@ func TestIPTablesRemovePlan_ClearsEveryChainName(t *testing.T) {
 		seen = append(seen, cmd.Binary+" "+strings.Join(stripWait(cmd.Args), " "))
 	}
 	joined := strings.Join(seen, "\n")
-	for _, chain := range []string{iptChainName, iptChainNameAlt, ipt6ChainName, ipt6ChainNameAlt} {
+	for _, chain := range []string{iptChainName, iptChainNameAlt, ipt6ChainName, ipt6ChainNameAlt, iptFwdChainName, iptFwdChainNameAlt, ipt6FwdChainName, ipt6FwdChainNameAlt} {
 		if !strings.Contains(joined, "-X "+chain) {
 			t.Fatalf("teardown never deletes chain %s:\n%s", chain, joined)
 		}
 	}
+	for _, hook := range []string{"OUTPUT", "FORWARD"} {
+		if !strings.Contains(joined, "-D "+hook+" -j ") {
+			t.Fatalf("teardown never unhooks the %s jumps:\n%s", hook, joined)
+		}
+	}
 }
-
-// ---------------------------------------------------------------------------
-// Probe behaviour — the difference between "no such rule" and "couldn't tell"
-// ---------------------------------------------------------------------------
 
 // Wraps a real *exec.ExitError, matching how runIPTablesCommand wraps failures.
 func exitCodeError(t *testing.T, code int) error {
@@ -382,14 +452,17 @@ func TestApplyIPTablesRules_RefusesWhenTheLiveChainIsUnknown(t *testing.T) {
 	var mutating []string
 	runIPTablesCommand = func(_ context.Context, binary string, args ...string) error {
 		stripped := stripWait(args)
-		if len(stripped) > 0 && stripped[0] == "-C" {
+		switch stripped[0] {
+		case "-C":
 			return locked
+		case "-S":
+			return nil
 		}
 		mutating = append(mutating, binary+" "+strings.Join(stripped, " "))
 		return nil
 	}
 
-	err := applyIPTablesRules(context.Background(), []string{"203.0.113.5"}, "wg-test", false)
+	err := applyIPTablesRules(context.Background(), lockRules([]string{"203.0.113.5"}, "wg-test", false))
 	if err == nil {
 		t.Fatal("apply proceeded despite being unable to determine the live chain")
 	}
@@ -413,11 +486,456 @@ func TestLiveIPTablesChain_IgnoresAHookedButEmptiedChain(t *testing.T) {
 		return absent
 	}
 
-	live, ok := liveIPTablesChain(context.Background(), "iptables", iptChainName, iptChainNameAlt)
+	live, ok := liveIPTablesChain(context.Background(), "iptables", "OUTPUT", iptChainName, iptChainNameAlt)
 	if !ok {
 		t.Fatal("probe should have been able to answer")
 	}
 	if live != "" {
 		t.Fatalf("a hooked-but-emptied chain was reported live as %q", live)
+	}
+}
+
+// iptables is the v4 binary; a v6 prefix in the LAN permits makes it reject
+// the rule and the whole arm fails.
+func TestIPTablesApplyPlan_LANPermitsAreIPv4Only(t *testing.T) {
+	plan := iptablesApplyPlan(iptChainName, ipt6ChainName, lockRules([]string{"198.51.100.20"}, "wg0", true))
+
+	sawLAN := false
+	for _, cmd := range plan {
+		if cmd.Binary != "iptables" {
+			continue
+		}
+		joined := strings.Join(cmd.Args, " ")
+		if strings.Contains(joined, "192.168.0.0/16") {
+			sawLAN = true
+		}
+		if strings.Contains(joined, "::") {
+			t.Errorf("IPv6 address in an iptables command: %s", joined)
+		}
+	}
+	if !sawLAN {
+		t.Fatal("expected the IPv4 LAN permits to be present with allowLAN on")
+	}
+}
+
+// On an nft-only host the iptables chains were never created, and a sweep that
+// counted that backend's failures stranded Clear — leaving the switch "active".
+func TestRemoveIPTablesRules_SkipsAnUnusableBackend(t *testing.T) {
+	original := runIPTablesCommand
+	defer func() { runIPTablesCommand = original }()
+
+	var attempted []string
+	runIPTablesCommand = func(_ context.Context, binary string, args ...string) error {
+		stripped := stripWait(args)
+		if len(stripped) == 2 && stripped[0] == "-S" && stripped[1] == "OUTPUT" {
+			if binary == "ip6tables" {
+				return errors.New("can't initialize ip6tables table 'filter'")
+			}
+			return nil
+		}
+		attempted = append(attempted, binary)
+		if binary == "ip6tables" {
+			return errors.New("can't initialize ip6tables table 'filter'")
+		}
+		return exitCodeError(t, 1)
+	}
+
+	if err := removeIPTablesRules(context.Background()); err != nil {
+		t.Fatalf("clear failed over a backend that cannot hold rules: %v", err)
+	}
+	for _, binary := range attempted {
+		if binary == "ip6tables" {
+			t.Fatal("swept ip6tables after it failed to list OUTPUT")
+		}
+	}
+}
+
+// The usable backend still has to report a real half-teardown.
+func TestRemoveIPTablesRules_StillReportsUsableBackendFailures(t *testing.T) {
+	original := runIPTablesCommand
+	defer func() { runIPTablesCommand = original }()
+
+	locked := exitCodeError(t, 4)
+	runIPTablesCommand = func(_ context.Context, _ string, args ...string) error {
+		stripped := stripWait(args)
+		if len(stripped) == 2 && stripped[0] == "-S" && stripped[1] == "OUTPUT" {
+			return nil
+		}
+		return locked
+	}
+
+	if err := removeIPTablesRules(context.Background()); err == nil {
+		t.Fatal("xtables lock contention was reported as a complete teardown")
+	}
+}
+
+// nf_tables iptables exits 2 for a -D/-C jump whose chain is absent (legacy
+// exits 1); a clear that finds no chain must not report teardown incomplete.
+func TestRemoveIPTablesRules_TreatsAMissingChainAsAlreadyGone(t *testing.T) {
+	original := runIPTablesCommand
+	defer func() { runIPTablesCommand = original }()
+
+	noChainJump := exitCodeError(t, 2)
+	noChain := exitCodeError(t, 1)
+	runIPTablesCommand = func(_ context.Context, _ string, args ...string) error {
+		stripped := stripWait(args)
+		switch {
+		case len(stripped) >= 2 && stripped[0] == "-S" && stripped[1] == "OUTPUT":
+			return nil
+		case stripped[0] == "-D" || stripped[0] == "-C":
+			return noChainJump
+		default:
+			return noChain
+		}
+	}
+
+	if err := removeIPTablesRules(context.Background()); err != nil {
+		t.Fatalf("clearing an already-clean firewall reported a failure: %v", err)
+	}
+}
+
+// Same backend quirk on the apply side: with no chain installed yet the jump
+// probe exits 2, which must read as "nothing live", not "unanswerable".
+func TestLiveIPTablesChain_NoChainOnNfTablesMeansNothingLive(t *testing.T) {
+	original := runIPTablesCommand
+	defer func() { runIPTablesCommand = original }()
+
+	noChainJump := exitCodeError(t, 2)
+	noChain := exitCodeError(t, 1)
+	runIPTablesCommand = func(_ context.Context, _ string, args ...string) error {
+		stripped := stripWait(args)
+		if stripped[0] == "-C" {
+			return noChainJump
+		}
+		return noChain
+	}
+
+	live, ok := liveIPTablesChain(context.Background(), "iptables", "OUTPUT", iptChainName, iptChainNameAlt)
+	if !ok {
+		t.Fatal("a firewall with no kill-switch chain was reported as unanswerable")
+	}
+	if live != "" {
+		t.Fatalf("live chain = %q, want none", live)
+	}
+}
+
+// Docker, libvirt and friends never traverse OUTPUT; the forward chain has to
+// hold across re-arms exactly like the output one.
+func TestIPTablesForwardPlan_NeverLeavesForwardUnfiltered(t *testing.T) {
+	model := newIPTablesModel()
+
+	model.runHook(iptablesForwardPlan(iptFwdChainName, ipt6FwdChainName, lockRules(nil, "wg-test", false)), "FORWARD", false)
+	if !model.hookFiltering("FORWARD", "iptables") || !model.hookFiltering("FORWARD", "ip6tables") {
+		t.Fatalf("not filtering FORWARD after the first apply: jumps=%v", model.forwardJumps)
+	}
+
+	second := iptablesForwardPlan(
+		iptablesForwardStagingChain(model.liveHookChainName("FORWARD", "iptables")),
+		iptables6ForwardStagingChain(model.liveHookChainName("FORWARD", "ip6tables")),
+		lockRules(nil, "wg-test", true),
+	)
+	if breach := model.runHook(second, "FORWARD", true); breach != "" {
+		t.Fatalf("forward filtering went fail-open during re-arm at %q", breach)
+	}
+
+	third := iptablesForwardPlan(
+		iptablesForwardStagingChain(model.liveHookChainName("FORWARD", "iptables")),
+		iptables6ForwardStagingChain(model.liveHookChainName("FORWARD", "ip6tables")),
+		lockRules(nil, "wg-test", false),
+	)
+	if breach := model.runHook(third, "FORWARD", true); breach != "" {
+		t.Fatalf("forward filtering went fail-open during third arm at %q", breach)
+	}
+	if got := len(model.forwardJumps); got != 2 {
+		t.Fatalf("expected one IPv4 and one IPv6 FORWARD jump after settling, got %d: %v", got, model.forwardJumps)
+	}
+	if got := len(model.chains); got != 2 {
+		t.Fatalf("expected exactly two forward chains to survive, got %d: %v", got, model.chains)
+	}
+}
+
+// A guest may leave through the tunnel and get its replies back, and nothing
+// else: the endpoint itself is only for the host's own WireGuard socket.
+func TestIPTablesForwardPlan_PermitsTunnelBothWaysAndNothingElse(t *testing.T) {
+	model := newIPTablesModel()
+	model.runHook(iptablesForwardPlan(iptFwdChainName, ipt6FwdChainName, lockRules(nil, "wg-test", false)), "FORWARD", false)
+
+	rules := strings.Join(model.liveHookChain("FORWARD", "iptables"), "\n")
+	for _, want := range []string{"-o wg-test -j ACCEPT", "-i wg-test -j ACCEPT"} {
+		if !strings.Contains(rules, want) {
+			t.Errorf("forward chain lacks %q:\n%s", want, rules)
+		}
+	}
+	if strings.Contains(rules, "-d ") {
+		t.Errorf("forward chain permits a destination with allowLAN off:\n%s", rules)
+	}
+	if !strings.HasSuffix(rules, "-j DROP") {
+		t.Errorf("forward chain does not end in DROP:\n%s", rules)
+	}
+	v6 := strings.Join(model.liveHookChain("FORWARD", "ip6tables"), "\n")
+	if strings.Contains(v6, "wg-test") {
+		t.Errorf("IPv6 forward chain permits the tunnel, which carries IPv4 only:\n%s", v6)
+	}
+}
+
+// Bridged container-to-container frames pass through FORWARD via br_netfilter
+// and never leave the host; a kernel without xt_physdev must still arm, though.
+func TestIPTablesForwardPlan_BridgedAcceptIsBestEffort(t *testing.T) {
+	plan := iptablesForwardPlan(iptFwdChainName, ipt6FwdChainName, lockRules(nil, "wg-test", false))
+	saw := map[string]bool{}
+	for _, cmd := range plan {
+		args := strings.Join(stripWait(cmd.Args), " ")
+		if !strings.Contains(args, "--physdev-is-bridged") {
+			continue
+		}
+		if !cmd.BestEffort {
+			t.Fatalf("%s %s is required; a kernel without xt_physdev could never arm", cmd.Binary, args)
+		}
+		saw[cmd.Binary] = true
+	}
+	if !saw["iptables"] || !saw["ip6tables"] {
+		t.Fatalf("bridged traffic is not accepted for both families: %v", saw)
+	}
+}
+
+// A lock held with no tunnel (Lockdown while disconnected) forwards nothing.
+func TestIPTablesForwardPlan_WithoutTunnelHasNoInterfaceAccept(t *testing.T) {
+	model := newIPTablesModel()
+	model.runHook(iptablesForwardPlan(iptFwdChainName, ipt6FwdChainName, lockRules(nil, "", false)), "FORWARD", false)
+	for _, rule := range model.liveHookChain("FORWARD", "iptables") {
+		if strings.HasPrefix(rule, "-o ") || strings.HasPrefix(rule, "-i ") {
+			t.Fatalf("forward chain names an interface with no tunnel up: %q", rule)
+		}
+	}
+}
+
+func TestIPTablesForwardPlan_FollowsAllowLAN(t *testing.T) {
+	model := newIPTablesModel()
+	model.runHook(iptablesForwardPlan(iptFwdChainName, ipt6FwdChainName, lockRules(nil, "wg-test", true)), "FORWARD", false)
+	if !strings.Contains(strings.Join(model.liveHookChain("FORWARD", "iptables"), "\n"), "-d 192.168.0.0/16 -j ACCEPT") {
+		t.Fatal("forward LAN permit missing when allowLAN is on")
+	}
+}
+
+func TestIPTablesForwardStagingChain_AlwaysAvoidsTheLiveChain(t *testing.T) {
+	if got := iptablesForwardStagingChain(""); got != iptFwdChainName {
+		t.Fatalf("cold start staged into %q, want %q", got, iptFwdChainName)
+	}
+	if iptablesForwardStagingChain(iptFwdChainName) == iptFwdChainName || iptablesForwardStagingChain(iptFwdChainNameAlt) == iptFwdChainNameAlt {
+		t.Fatal("staged into the live IPv4 forward chain")
+	}
+	if iptables6ForwardStagingChain(ipt6FwdChainName) == ipt6FwdChainName || iptables6ForwardStagingChain(ipt6FwdChainNameAlt) == ipt6FwdChainNameAlt {
+		t.Fatal("staged into the live IPv6 forward chain")
+	}
+}
+
+// The live-chain probe must ask about the hook it is given, or a FORWARD
+// rebuild would stage into a chain OUTPUT happens to reach.
+func TestLiveIPTablesChain_ProbesTheGivenHook(t *testing.T) {
+	original := runIPTablesCommand
+	defer func() { runIPTablesCommand = original }()
+
+	absent := exitCodeError(t, 1)
+	var hooksProbed []string
+	runIPTablesCommand = func(_ context.Context, _ string, args ...string) error {
+		stripped := stripWait(args)
+		if len(stripped) >= 4 && stripped[0] == "-C" && stripped[2] == "-j" {
+			hooksProbed = append(hooksProbed, stripped[1])
+		}
+		return absent
+	}
+
+	if _, ok := liveIPTablesChain(context.Background(), "iptables", "FORWARD", iptFwdChainName, iptFwdChainNameAlt); !ok {
+		t.Fatal("probe should have been able to answer")
+	}
+	for _, hook := range hooksProbed {
+		if hook != "FORWARD" {
+			t.Fatalf("probed %s while asked about FORWARD", hook)
+		}
+	}
+}
+
+// Allow LAN must not reopen the resolver hole in either hook: the drops sit after
+// the tunnel accept (a tunnel-side resolver still resolves) and before the LAN accepts.
+func TestIPTablesPlans_AllowLANStillBlocksResolversOnTheLAN(t *testing.T) {
+	model := newIPTablesModel()
+	model.run(iptablesApplyPlan(iptChainName, ipt6ChainName, lockRules([]string{"203.0.113.5"}, "wg-test", true)), false)
+	model.runHook(iptablesForwardPlan(iptFwdChainName, ipt6FwdChainName, lockRules(nil, "wg-test", true)), "FORWARD", false)
+
+	chains := map[string][]string{
+		"OUTPUT":  model.liveChain("PANGEAVPN_KS"),
+		"FORWARD": model.liveHookChain("FORWARD", "iptables"),
+	}
+	for hook, rules := range chains {
+		joined := strings.Join(rules, "\n")
+		tunnel := strings.Index(joined, "-o wg-test -j ACCEPT")
+		lan := strings.Index(joined, "-d 192.168.0.0/16 -j ACCEPT")
+		for _, drop := range []string{"-p udp --dport 53 -j DROP", "-p tcp --dport 53 -j DROP", "-p udp --dport 853 -j DROP", "-p tcp --dport 853 -j DROP"} {
+			at := strings.Index(joined, drop)
+			if at < 0 {
+				t.Fatalf("%s chain lacks %q under allowLAN:\n%s", hook, drop, joined)
+			}
+			if !(tunnel < at && at < lan) {
+				t.Fatalf("%s chain: %q at %d must follow the tunnel accept (%d) and precede the LAN accepts (%d):\n%s", hook, drop, at, tunnel, lan, joined)
+			}
+		}
+	}
+
+	bare := newIPTablesModel()
+	bare.run(iptablesApplyPlan(iptChainName, ipt6ChainName, lockRules([]string{"203.0.113.5"}, "wg-test", false)), false)
+	if strings.Contains(strings.Join(bare.liveChain("PANGEAVPN_KS"), "\n"), "--dport 53 -j DROP") {
+		t.Fatal("resolver drops emitted with allowLAN off and no split permits, where only the tunnel is reachable anyway")
+	}
+}
+
+var iptResolverDrops = []string{
+	"-p udp --dport 53 -j DROP",
+	"-p udp --dport 853 -j DROP",
+	"-p tcp --dport 53 -j DROP",
+	"-p tcp --dport 853 -j DROP",
+}
+
+func splitIPTablesModel(r ksRules) *iptablesModel {
+	model := newIPTablesModel()
+	model.run(iptablesApplyPlan(iptChainName, ipt6ChainName, r), false)
+	model.runHook(iptablesForwardPlan(iptFwdChainName, ipt6FwdChainName, r), "FORWARD", false)
+	return model
+}
+
+// The whole OUTPUT chain, in order: drops once after the tunnel, then the mark,
+// the LAN, the excluded ranges, and DROP last.
+func TestIPTablesApplyPlan_SplitOutputOrder(t *testing.T) {
+	cases := map[string]struct {
+		tunnel   string
+		allowLAN bool
+	}{
+		"tunnel":             {"wg-test", false},
+		"no tunnel":          {"", false},
+		"tunnel + allow LAN": {"wg-test", true},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			model := splitIPTablesModel(splitRules([]string{"203.0.113.5"}, tc.tunnel, tc.allowLAN, splitBoth))
+			want := []string{
+				"-o lo -j ACCEPT",
+				"-p udp --sport 68 --dport 67 -d 255.255.255.255 -j ACCEPT",
+				"-d 203.0.113.5 -j ACCEPT",
+			}
+			if tc.tunnel != "" {
+				want = append(want, "-o "+tc.tunnel+" -j ACCEPT")
+			}
+			want = append(want, iptResolverDrops...)
+			want = append(want, "-m mark --mark 0x1ca6c -j ACCEPT")
+			if tc.allowLAN {
+				for _, cidr := range LANAllowPrefixes {
+					want = append(want, "-d "+cidr+" -j ACCEPT")
+				}
+			}
+			for _, cidr := range splitBoth.CIDRs {
+				want = append(want, "-d "+cidr+" -j ACCEPT")
+			}
+			want = append(want, "-j DROP")
+
+			got := model.liveChain("PANGEAVPN_KS")
+			if strings.Join(got, "\n") != strings.Join(want, "\n") {
+				t.Fatalf("OUTPUT chain:\n%s\n\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+			}
+			v6 := strings.Join(model.chains[model.v6Live()], "\n")
+			if strings.Contains(v6, "mark") || strings.Contains(v6, "198.51.100.0/24") {
+				t.Fatalf("IPv6 chain carries split permits; bypass is IPv4 only:\n%s", v6)
+			}
+		})
+	}
+}
+
+// Forward: drops after the tunnel, then each excluded range both ways (routed
+// guests' replies only match by source, and only as replies), DROP last, never the mark.
+func TestIPTablesForwardPlan_SplitOrderAndReplies(t *testing.T) {
+	for _, tunnel := range []string{"wg-test", ""} {
+		r := splitRules([]string{"203.0.113.5"}, tunnel, false, splitBoth)
+		model := splitIPTablesModel(r)
+		want := []string{"-m physdev --physdev-is-bridged -j ACCEPT"}
+		if tunnel != "" {
+			want = append(want, "-o "+tunnel+" -j ACCEPT", "-i "+tunnel+" -j ACCEPT")
+		}
+		want = append(want, iptResolverDrops...)
+		for _, cidr := range splitBoth.CIDRs {
+			want = append(want, "-d "+cidr+" -j ACCEPT", "-s "+cidr+" -m conntrack --ctdir REPLY -j ACCEPT")
+		}
+		want = append(want, "-j DROP")
+		for _, cmd := range iptablesForwardPlan(iptFwdChainName, ipt6FwdChainName, r) {
+			joined := strings.Join(cmd.Args, " ")
+			if strings.Contains(joined, " -s ") && !strings.Contains(joined, "--ctdir REPLY") {
+				t.Errorf("tunnel %q: FORWARD accepts by source alone: %s", tunnel, joined)
+			}
+			// A kernel without xt_conntrack must still arm; guests then just get no replies.
+			if strings.Contains(joined, "--ctdir") && !cmd.BestEffort {
+				t.Errorf("tunnel %q: reply accept is mandatory, so a host without conntrack could not arm: %s", tunnel, joined)
+			}
+		}
+
+		got := model.liveHookChain("FORWARD", "iptables")
+		if strings.Join(got, "\n") != strings.Join(want, "\n") {
+			t.Fatalf("tunnel %q FORWARD chain:\n%s\n\nwant:\n%s", tunnel, strings.Join(got, "\n"), strings.Join(want, "\n"))
+		}
+		if v6 := strings.Join(model.liveHookChain("FORWARD", "ip6tables"), "\n"); strings.Contains(v6, "198.51.100.0/24") {
+			t.Fatalf("IPv6 forward chain carries an IPv4 range:\n%s", v6)
+		}
+	}
+}
+
+// Egress alone reopens OUTPUT for the marked sockets, so the drops return there;
+// guests never carry the mark, so FORWARD stays as it was.
+func TestIPTablesPlans_EgressOnly(t *testing.T) {
+	model := splitIPTablesModel(splitRules([]string{"203.0.113.5"}, "wg-test", false, splitPermits{Egress: true}))
+	output := strings.Join(model.liveChain("PANGEAVPN_KS"), "\n")
+	drop := strings.Index(output, "-p tcp --dport 853 -j DROP")
+	mark := strings.Index(output, "-m mark --mark 0x1ca6c -j ACCEPT")
+	if drop < 0 || mark < 0 || mark < drop {
+		t.Fatalf("OUTPUT chain must drop resolvers before accepting the mark:\n%s", output)
+	}
+	forward := strings.Join(model.liveHookChain("FORWARD", "iptables"), "\n")
+	if strings.Contains(forward, "--dport") || strings.Contains(forward, "mark") {
+		t.Fatalf("FORWARD chain changed for egress alone:\n%s", forward)
+	}
+
+	ranges := splitIPTablesModel(splitRules([]string{"203.0.113.5"}, "wg-test", false, splitPermits{CIDRs: []string{"198.51.100.0/24"}}))
+	if strings.Contains(strings.Join(ranges.liveChain("PANGEAVPN_KS"), "\n"), "mark") {
+		t.Fatal("mark accepted without the egress permit")
+	}
+}
+
+func TestIPTablesPlans_RevalidateSplitCIDRs(t *testing.T) {
+	split := splitPermits{CIDRs: append([]string{"198.51.100.0/24"}, hostileSplitCIDRs...)}
+	r := splitRules(nil, "wg-test", false, split)
+	plans := append(iptablesApplyPlan(iptChainName, ipt6ChainName, r), iptablesForwardPlan(iptFwdChainName, ipt6FwdChainName, r)...)
+	saw := false
+	for _, cmd := range plans {
+		joined := strings.Join(cmd.Args, " ")
+		for _, bad := range hostileSplitCIDRs {
+			if bad != "" && strings.Contains(joined, bad) {
+				t.Errorf("invalid range %q reached %s %s", bad, cmd.Binary, joined)
+			}
+		}
+		saw = saw || strings.Contains(joined, "-d 198.51.100.0/24")
+	}
+	if !saw {
+		t.Fatal("valid range lost alongside the invalid ones")
+	}
+}
+
+// Taking the split permits away again must leave a chain with no trace of them.
+func TestIPTablesApplyPlan_SplitPermitsCanBeWithdrawn(t *testing.T) {
+	model := splitIPTablesModel(splitRules([]string{"203.0.113.5"}, "wg-test", false, splitBoth))
+	model.run(iptablesApplyPlan(
+		iptablesStagingChain(model.v4Live()),
+		iptables6StagingChain(model.v6Live()),
+		lockRules([]string{"203.0.113.5"}, "wg-test", false),
+	), true)
+	output := strings.Join(model.liveChain("PANGEAVPN_KS"), "\n")
+	for _, gone := range []string{"mark", "198.51.100.0/24", "--dport 53"} {
+		if strings.Contains(output, gone) {
+			t.Fatalf("%q survived withdrawing the split permits:\n%s", gone, output)
+		}
 	}
 }

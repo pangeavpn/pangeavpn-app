@@ -6,16 +6,53 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
+	"net/netip"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
+	"syscall"
+	"time"
+
+	"golang.org/x/net/route"
+
+	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/platform"
 )
 
-// ---------------------------------------------------------------------------
-// Interface configuration via ifconfig (non-cgo)
-// ---------------------------------------------------------------------------
+// darwinRouteTimeout bounds one route(8) call made from the health tick.
+const darwinRouteTimeout = 5 * time.Second
+
+// darwinExecTimeout bounds ifconfig/route/networksetup calls: a hung configd
+// must never pin the wg manager lock that /status blocks on.
+var darwinExecTimeout = 10 * time.Second
+
+func darwinCmdCombined(name string, args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), darwinExecTimeout)
+	defer cancel()
+	return exec.CommandContext(ctx, name, args...).CombinedOutput()
+}
+
+func darwinCmdRun(name string, args ...string) error {
+	_, err := darwinCmdCombined(name, args...)
+	return err
+}
+
+// Every command here runs as root; PATH-based lookup is avoidable and not worth the risk.
+const (
+	ifconfigPath     = "/sbin/ifconfig"
+	routePath        = "/sbin/route"
+	networksetupPath = "/usr/sbin/networksetup"
+)
+
+// darwinDNSUnknownMarker flags a service whose original DNS state could not
+// be read, so restore leaves it untouched instead of assuming automatic.
+const darwinDNSUnknownMarker = "?"
+
+// Interface configuration via ifconfig (non-cgo).
 
 // configureDarwinAddresses assigns CIDR addresses to the named interface.
 func configureDarwinAddresses(interfaceName string, addresses []string) error {
@@ -28,19 +65,19 @@ func configureDarwinAddresses(interfaceName string, addresses []string) error {
 		if v4 := ip.To4(); v4 != nil {
 			mask := net.IP(ipNet.Mask).To4()
 			// utun is point-to-point: ifconfig <iface> inet <addr> <addr> netmask <mask>
-			out, err := exec.Command("ifconfig", interfaceName,
+			out, err := darwinCmdCombined(ifconfigPath, interfaceName,
 				"inet", v4.String(), v4.String(),
 				"netmask", mask.String(),
-			).CombinedOutput()
+			)
 			if err != nil {
 				return fmt.Errorf("add ipv4 address %s on %s: %w (%s)", cidr, interfaceName, err, strings.TrimSpace(string(out)))
 			}
 		} else {
 			ones, _ := ipNet.Mask.Size()
-			out, err := exec.Command("ifconfig", interfaceName,
+			out, err := darwinCmdCombined(ifconfigPath, interfaceName,
 				"inet6", ip.String(),
 				"prefixlen", fmt.Sprintf("%d", ones),
-			).CombinedOutput()
+			)
 			if err != nil {
 				return fmt.Errorf("add ipv6 address %s on %s: %w (%s)", cidr, interfaceName, err, strings.TrimSpace(string(out)))
 			}
@@ -51,20 +88,18 @@ func configureDarwinAddresses(interfaceName string, addresses []string) error {
 
 // bringDarwinInterfaceUp sets the interface to UP state.
 func bringDarwinInterfaceUp(interfaceName string) error {
-	out, err := exec.Command("ifconfig", interfaceName, "up").CombinedOutput()
+	out, err := darwinCmdCombined(ifconfigPath, interfaceName, "up")
 	if err != nil {
 		return fmt.Errorf("bring up %s: %w (%s)", interfaceName, err, strings.TrimSpace(string(out)))
 	}
 	return nil
 }
 
-// ---------------------------------------------------------------------------
-// Route management via route(8)
-// ---------------------------------------------------------------------------
+// Route management via route(8).
 
 // darwinDefaultGatewayV4 returns the IPv4 default gateway address.
 func darwinDefaultGatewayV4() (string, error) {
-	out, err := exec.Command("route", "-n", "get", "default").CombinedOutput()
+	out, err := darwinCmdCombined(routePath, "-n", "get", "default")
 	if err != nil {
 		return "", fmt.Errorf("query default gateway: %w (%s)", err, strings.TrimSpace(string(out)))
 	}
@@ -72,8 +107,8 @@ func darwinDefaultGatewayV4() (string, error) {
 	scanner := bufio.NewScanner(bytes.NewReader(out))
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
-		if strings.HasPrefix(line, "gateway:") {
-			gw := strings.TrimSpace(strings.TrimPrefix(line, "gateway:"))
+		if rest, ok := strings.CutPrefix(line, "gateway:"); ok {
+			gw := strings.TrimSpace(rest)
 			if gw != "" {
 				return gw, nil
 			}
@@ -82,33 +117,44 @@ func darwinDefaultGatewayV4() (string, error) {
 	return "", errors.New("default ipv4 gateway not found")
 }
 
+// isDarwinRouteExists reports whether a route(8) failure means the route was
+// already present, so it can still be tracked instead of dropped from added.
+func isDarwinRouteExists(output []byte) bool {
+	text := strings.ToLower(string(output))
+	return strings.Contains(text, "file exists") || strings.Contains(text, "already in table")
+}
+
 // addDarwinEndpointRoutes adds host routes for WireGuard endpoint IPs
 // through the default gateway so endpoint traffic bypasses the tunnel.
 func addDarwinEndpointRoutes(ctx context.Context, endpointHosts []string) ([]routeSpec, error) {
-	routes := resolveEndpointRoutes(ctx, endpointHosts)
+	routes, resolveErr := resolveEndpointRoutes(ctx, endpointHosts)
+	if resolveErr != nil {
+		return nil, fmt.Errorf("resolve endpoint hosts: %w", resolveErr)
+	}
 	if len(routes) == 0 {
 		return nil, nil
 	}
 
-	gw, gwErr := darwinDefaultGatewayV4()
+	gw, err := darwinDefaultGatewayV4()
+	if err != nil {
+		return nil, fmt.Errorf("resolve default gateway for endpoint routes: %w", err)
+	}
+
 	added := make([]routeSpec, 0, len(routes))
+	var errs []error
 	for _, route := range routes {
 		if route.family == "inet6" {
-			continue // IPv6 endpoint routes not supported via this path
-		}
-		if gwErr != nil {
-			continue
+			continue // no v6 bypass path yet; disableDarwinIPv6ForSession covers the leak instead
 		}
 
-		out, err := exec.Command("route", "-n", "add", "-host", route.destination, "-gateway", gw).CombinedOutput()
-		if err != nil {
-			// Route may already exist; not fatal.
-			_ = out
+		out, err := darwinCmdCombined(routePath, "-n", "add", "-host", route.destination, "-gateway", gw)
+		if err != nil && !isDarwinRouteExists(out) {
+			errs = append(errs, fmt.Errorf("add endpoint route %s via %s: %w (%s)", route.destination, gw, err, strings.TrimSpace(string(out))))
 			continue
 		}
 		added = append(added, route)
 	}
-	return added, nil
+	return added, errors.Join(errs...)
 }
 
 // removeDarwinEndpointRoutes removes previously added endpoint bypass routes.
@@ -117,34 +163,50 @@ func removeDarwinEndpointRoutes(routes []routeSpec) {
 		if route.family == "inet6" {
 			continue
 		}
-		_ = exec.Command("route", "-n", "delete", "-host", route.destination).Run()
+		_ = darwinCmdRun(routePath, "-n", "delete", "-host", route.destination)
 	}
 }
 
-// addDarwinAllowedIPRoutes adds routes for WireGuard allowed-IP prefixes
-// through the tunnel interface.
-func addDarwinAllowedIPRoutes(interfaceName string, allowedIPs []string) error {
+// allowedIPsHaveIPv6 reports whether any AllowedIPs prefix is IPv6; such a
+// prefix can never be routed since the tunnel only gets IPv4 addresses.
+func allowedIPsHaveIPv6(allowedIPs []string) bool {
+	for _, prefix := range allowedIPs {
+		if _, family, err := normalizedRoutesForPrefix(prefix); err == nil && family == "inet6" {
+			return true
+		}
+	}
+	return false
+}
+
+// addDarwinAllowedIPRoutes routes WireGuard allowed-IP prefixes through the tunnel, stopping between execs once
+// ctx ends. IPv6 is skipped because the tunnel has no v6 address; disableDarwinIPv6ForSession covers that leak.
+func addDarwinAllowedIPRoutes(ctx context.Context, interfaceName string, allowedIPs []string) error {
 	for _, prefix := range allowedIPs {
 		routePrefixes, family, err := normalizedRoutesForPrefix(prefix)
 		if err != nil {
 			return err
 		}
 		if family == "inet6" {
-			continue // IPv6 tunnel routes not supported via this path yet
+			continue
 		}
 		for _, rp := range routePrefixes {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			_, ipNet, parseErr := net.ParseCIDR(rp)
 			if parseErr != nil {
 				return fmt.Errorf("parse route prefix %s: %w", rp, parseErr)
 			}
 
 			mask := net.IP(ipNet.Mask).To4()
-			out, err := exec.Command("route", "-n", "add",
+			out, err := darwinCmdCombined(routePath, "-n", "add",
 				"-net", ipNet.IP.String(),
 				"-netmask", mask.String(),
 				"-interface", interfaceName,
-			).CombinedOutput()
-			if err != nil {
+			)
+			// Overlapping AllowedIPs representations (0.0.0.0/0 vs its split
+			// halves) can collide on the same physical route; that's not a failure.
+			if err != nil && !isDarwinRouteExists(out) {
 				return fmt.Errorf("add route %s via %s: %w (%s)", rp, interfaceName, err, strings.TrimSpace(string(out)))
 			}
 		}
@@ -152,8 +214,9 @@ func addDarwinAllowedIPRoutes(interfaceName string, allowedIPs []string) error {
 	return nil
 }
 
-// removeDarwinAllowedIPRoutes removes allowed-IP routes.
-func removeDarwinAllowedIPRoutes(allowedIPs []string) {
+// removeDarwinAllowedIPRoutes removes allowed-IP routes, scoped to
+// interfaceName so it can never match a same-prefix physical route.
+func removeDarwinAllowedIPRoutes(interfaceName string, allowedIPs []string) {
 	for _, prefix := range allowedIPs {
 		routePrefixes, family, err := normalizedRoutesForPrefix(prefix)
 		if err != nil || family == "inet6" {
@@ -165,21 +228,79 @@ func removeDarwinAllowedIPRoutes(allowedIPs []string) {
 				continue
 			}
 			mask := net.IP(ipNet.Mask).To4()
-			_ = exec.Command("route", "-n", "delete",
+			_ = darwinCmdRun(routePath, "-n", "delete",
 				"-net", ipNet.IP.String(),
 				"-netmask", mask.String(),
-			).Run()
+				"-interface", interfaceName,
+			)
 		}
 	}
 }
 
-// ---------------------------------------------------------------------------
-// DNS management via networksetup (non-cgo)
-// ---------------------------------------------------------------------------
+// IPv6 lockdown via networksetup (non-cgo).
+
+// darwinIPv6State records a network service's IPv6 mode before it was
+// disabled for the session, so it can be restored afterwards.
+type darwinIPv6State struct {
+	service string
+	mode    string
+}
+
+// getDarwinIPv6Mode reads a service's current IPv6 setting ("Automatic",
+// "Off", "Manual", ...) from networksetup -getinfo. Empty means unreadable.
+func getDarwinIPv6Mode(serviceName string) string {
+	out, err := darwinCmdCombined(networksetupPath, "-getinfo", serviceName)
+	if err != nil {
+		return ""
+	}
+	for line := range strings.SplitSeq(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if rest, ok := strings.CutPrefix(line, "IPv6:"); ok {
+			return strings.TrimSpace(rest)
+		}
+	}
+	return ""
+}
+
+// disableDarwinIPv6ForSession turns off IPv6 on every active network service
+// so v6 traffic can't leave over the physical link while the tunnel is up.
+func disableDarwinIPv6ForSession() ([]darwinIPv6State, error) {
+	services, err := listDarwinNetworkServices()
+	if err != nil {
+		return nil, err
+	}
+
+	states := make([]darwinIPv6State, 0, len(services))
+	for _, svc := range services {
+		mode := getDarwinIPv6Mode(svc)
+		if mode == "" || strings.EqualFold(mode, "Off") {
+			continue
+		}
+		if _, err := darwinCmdCombined(networksetupPath, "-setv6off", svc); err != nil {
+			continue
+		}
+		states = append(states, darwinIPv6State{service: svc, mode: mode})
+	}
+	return states, nil
+}
+
+// restoreDarwinIPv6 re-enables IPv6 on services disabled for the session.
+// Manual configs are restored as automatic since the original values aren't captured.
+func restoreDarwinIPv6(states []darwinIPv6State) {
+	for _, s := range states {
+		if strings.EqualFold(s.mode, "LinkLocal") {
+			_ = darwinCmdRun(networksetupPath, "-setv6linklocal", s.service)
+			continue
+		}
+		_ = darwinCmdRun(networksetupPath, "-setv6automatic", s.service)
+	}
+}
+
+// DNS management via networksetup (non-cgo).
 
 // listDarwinNetworkServices returns all non-hardware-port network service names.
 func listDarwinNetworkServices() ([]string, error) {
-	out, err := exec.Command("networksetup", "-listallnetworkservices").CombinedOutput()
+	out, err := darwinCmdCombined(networksetupPath, "-listallnetworkservices")
 	if err != nil {
 		return nil, fmt.Errorf("list network services: %w (%s)", err, strings.TrimSpace(string(out)))
 	}
@@ -197,12 +318,12 @@ func listDarwinNetworkServices() ([]string, error) {
 	return services, nil
 }
 
-// getDarwinDNSServers returns the current DNS servers for a network service.
-// Returns nil if DNS is set to automatic/DHCP.
+// getDarwinDNSServers returns the current DNS servers for a network service:
+// nil if automatic/DHCP, or a single unknown-marker entry if unreadable.
 func getDarwinDNSServers(serviceName string) []string {
-	out, err := exec.Command("networksetup", "-getdnsservers", serviceName).CombinedOutput()
+	out, err := darwinCmdCombined(networksetupPath, "-getdnsservers", serviceName)
 	if err != nil {
-		return nil
+		return []string{darwinDNSUnknownMarker}
 	}
 
 	trimmed := strings.TrimSpace(string(out))
@@ -212,13 +333,44 @@ func getDarwinDNSServers(serviceName string) []string {
 	}
 
 	var servers []string
-	for _, line := range strings.Split(trimmed, "\n") {
+	for line := range strings.SplitSeq(trimmed, "\n") {
 		server := strings.TrimSpace(line)
 		if server != "" && net.ParseIP(server) != nil {
 			servers = append(servers, server)
 		}
 	}
+	if len(servers) == 0 {
+		return []string{darwinDNSUnknownMarker}
+	}
 	return servers
+}
+
+// isDarwinDNSUnknown reports whether servers is the unknown-state marker.
+func isDarwinDNSUnknown(servers []string) bool {
+	return len(servers) == 1 && servers[0] == darwinDNSUnknownMarker
+}
+
+// darwinDNSListsEqual reports whether two ordered DNS server lists match.
+func darwinDNSListsEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// setDarwinDNSServers points serviceName's DNS at dnsServers.
+func setDarwinDNSServers(serviceName string, dnsServers []string) error {
+	args := append([]string{"-setdnsservers", serviceName}, dnsServers...)
+	out, err := darwinCmdCombined(networksetupPath, args...)
+	if err != nil {
+		return fmt.Errorf("set DNS for service %s: %w (%s)", serviceName, err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 // applyDarwinDNSServers sets DNS servers on all active network services and
@@ -240,12 +392,10 @@ func applyDarwinDNSServers(dnsServers []string) ([]darwinDNSOverride, error) {
 	for _, svc := range services {
 		origDNS := getDarwinDNSServers(svc)
 
-		args := append([]string{"-setdnsservers", svc}, dnsServers...)
-		out, err := exec.Command("networksetup", args...).CombinedOutput()
-		if err != nil {
+		if err := setDarwinDNSServers(svc, dnsServers); err != nil {
 			// Roll back any overrides already applied.
 			_ = restoreDarwinDNSServers(overrides)
-			return nil, fmt.Errorf("set DNS for service %s: %w (%s)", svc, err, strings.TrimSpace(string(out)))
+			return nil, err
 		}
 
 		overrides = append(overrides, darwinDNSOverride{
@@ -257,7 +407,8 @@ func applyDarwinDNSServers(dnsServers []string) ([]darwinDNSOverride, error) {
 	return overrides, nil
 }
 
-// restoreDarwinDNSServers restores original DNS settings for all overridden services.
+// restoreDarwinDNSServers restores original DNS settings for all overridden
+// services; one whose original state was unreadable is left alone.
 func restoreDarwinDNSServers(overrides []darwinDNSOverride) error {
 	if len(overrides) == 0 {
 		return nil
@@ -265,6 +416,10 @@ func restoreDarwinDNSServers(overrides []darwinDNSOverride) error {
 
 	var failures []string
 	for _, override := range overrides {
+		if isDarwinDNSUnknown(override.dnsServers) {
+			continue
+		}
+
 		var args []string
 		if len(override.dnsServers) == 0 {
 			// Restore to automatic/DHCP.
@@ -273,7 +428,7 @@ func restoreDarwinDNSServers(overrides []darwinDNSOverride) error {
 			args = append([]string{"-setdnsservers", override.service}, override.dnsServers...)
 		}
 
-		out, err := exec.Command("networksetup", args...).CombinedOutput()
+		out, err := darwinCmdCombined(networksetupPath, args...)
 		if err != nil {
 			failures = append(failures, fmt.Sprintf("%s: %v (%s)", override.service, err, strings.TrimSpace(string(out))))
 		}
@@ -281,6 +436,332 @@ func restoreDarwinDNSServers(overrides []darwinDNSOverride) error {
 
 	if len(failures) > 0 {
 		return fmt.Errorf("failed restoring DNS on services: %s", strings.Join(failures, ", "))
+	}
+	return nil
+}
+
+// ensureSessionDNS re-applies want to every active network service, covering
+// drift on already-overridden services and ones that joined after bring-up.
+func ensureSessionDNS(session *tunnelSession, want []string) (bool, error) {
+	if session == nil || len(want) == 0 {
+		return false, nil
+	}
+
+	services, err := listDarwinNetworkServices()
+	if err != nil {
+		return false, err
+	}
+
+	covered := make(map[string]bool, len(session.dnsOverrides))
+	for _, o := range session.dnsOverrides {
+		covered[o.service] = true
+	}
+
+	changed := false
+	var errs []error
+	for _, svc := range services {
+		current := getDarwinDNSServers(svc)
+		if !covered[svc] {
+			if err := setDarwinDNSServers(svc, want); err != nil {
+				errs = append(errs, err)
+				continue
+			}
+			session.dnsOverrides = append(session.dnsOverrides, darwinDNSOverride{service: svc, dnsServers: current})
+			changed = true
+			continue
+		}
+		if isDarwinDNSUnknown(current) || darwinDNSListsEqual(current, want) {
+			continue
+		}
+		if err := setDarwinDNSServers(svc, want); err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		changed = true
+	}
+
+	if changed {
+		_ = persistDarwinDNSState(session.dnsOverrides)
+	}
+	return changed, errors.Join(errs...)
+}
+
+// DNS pre-state persistence, so a fresh daemon can restore after a crash.
+
+// darwinDNSStateEntry is the on-disk form of a darwinDNSOverride; the struct
+// itself has unexported fields and lives in the shared session type.
+type darwinDNSStateEntry struct {
+	Service    string   `json:"service"`
+	DNSServers []string `json:"dnsServers"`
+}
+
+func darwinDNSStateFile() (string, error) {
+	dir, err := platform.AppSupportDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "darwin-dns-session.json"), nil
+}
+
+// persistDarwinDNSState writes the DNS pre-state to disk. If the daemon dies
+// before Stop runs, a fresh process can find this and restore the host's DNS.
+func persistDarwinDNSState(overrides []darwinDNSOverride) error {
+	path, err := darwinDNSStateFile()
+	if err != nil {
+		return err
+	}
+
+	entries := make([]darwinDNSStateEntry, 0, len(overrides))
+	for _, o := range overrides {
+		entries = append(entries, darwinDNSStateEntry{Service: o.service, DNSServers: o.dnsServers})
+	}
+
+	data, err := json.Marshal(entries)
+	if err != nil {
+		return fmt.Errorf("marshal dns state: %w", err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		return fmt.Errorf("write dns state: %w", err)
+	}
+	return nil
+}
+
+// clearDarwinDNSState removes the persisted DNS pre-state after a normal stop
+// or a completed startup restore.
+func clearDarwinDNSState() {
+	path, err := darwinDNSStateFile()
+	if err != nil {
+		return
+	}
+	_ = os.Remove(path)
+}
+
+// loadDarwinDNSState reads a persisted DNS pre-state, if any is on disk.
+func loadDarwinDNSState() ([]darwinDNSOverride, error) {
+	path, err := darwinDNSStateFile()
+	if err != nil {
+		return nil, err
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	var entries []darwinDNSStateEntry
+	if err := json.Unmarshal(data, &entries); err != nil {
+		return nil, fmt.Errorf("unmarshal dns state: %w", err)
+	}
+
+	overrides := make([]darwinDNSOverride, 0, len(entries))
+	for _, e := range entries {
+		overrides = append(overrides, darwinDNSOverride{service: e.Service, dnsServers: e.DNSServers})
+	}
+	return overrides, nil
+}
+
+// restoreOrphanedDarwinDNSState restores DNS from a previous session's
+// pre-state if the daemon starts and finds one on disk (e.g. after a crash).
+func restoreOrphanedDarwinDNSState() {
+	overrides, err := loadDarwinDNSState()
+	if err != nil || len(overrides) == 0 {
+		return
+	}
+	_ = restoreDarwinDNSServers(overrides)
+	clearDarwinDNSState()
+}
+
+// darwinRouteEntry is one IPv4 route as the kernel reports it.
+type darwinRouteEntry struct {
+	destination netip.Addr
+	maskBits    int
+	gateway     netip.Addr
+	ifIndex     int
+	host        bool
+	viaGateway  bool
+}
+
+// darwinIPv4Routes reads the kernel's IPv4 routing table directly, rather
+// than asking `route get`, since the tunnel's own 0.0.0.0/1 would shadow it.
+func darwinIPv4Routes() ([]darwinRouteEntry, error) {
+	rib, err := route.FetchRIB(syscall.AF_INET, route.RIBTypeRoute, 0)
+	if err != nil {
+		return nil, fmt.Errorf("read routing table: %w", err)
+	}
+	messages, err := route.ParseRIB(route.RIBTypeRoute, rib)
+	if err != nil {
+		return nil, fmt.Errorf("parse routing table: %w", err)
+	}
+
+	entries := make([]darwinRouteEntry, 0, len(messages))
+	for _, message := range messages {
+		routeMessage, ok := message.(*route.RouteMessage)
+		if !ok || routeMessage.Flags&syscall.RTF_UP == 0 {
+			continue
+		}
+		// Split tunnelling's scoped copy of the default (egress.mirrorFlags) must never pick the gateway.
+		if routeMessage.Flags&(syscall.RTF_IFSCOPE|syscall.RTF_PROTO2) == syscall.RTF_IFSCOPE|syscall.RTF_PROTO2 {
+			continue
+		}
+		destination, ok := darwinInet4Addr(routeMessage.Addrs, syscall.RTAX_DST)
+		if !ok {
+			continue
+		}
+
+		entry := darwinRouteEntry{
+			destination: destination,
+			maskBits:    darwinMaskBits(routeMessage.Addrs),
+			ifIndex:     routeMessage.Index,
+			host:        routeMessage.Flags&syscall.RTF_HOST != 0,
+			viaGateway:  routeMessage.Flags&syscall.RTF_GATEWAY != 0,
+		}
+		if gateway, ok := darwinInet4Addr(routeMessage.Addrs, syscall.RTAX_GATEWAY); ok {
+			entry.gateway = gateway
+		}
+		entries = append(entries, entry)
+	}
+	return entries, nil
+}
+
+func darwinInet4Addr(addrs []route.Addr, index int) (netip.Addr, bool) {
+	if index >= len(addrs) {
+		return netip.Addr{}, false
+	}
+	addr, ok := addrs[index].(*route.Inet4Addr)
+	if !ok {
+		return netip.Addr{}, false
+	}
+	return netip.AddrFrom4(addr.IP), true
+}
+
+// darwinMaskBits reads a prefix length, treating an absent mask as zero. Host
+// routes carry no mask and are identified by their flag instead.
+func darwinMaskBits(addrs []route.Addr) int {
+	mask, ok := darwinInet4Addr(addrs, syscall.RTAX_NETMASK)
+	if !ok {
+		return 0
+	}
+	ones, _ := net.IPMask(mask.AsSlice()).Size()
+	return ones
+}
+
+// darwinDefaultGateway picks the next hop the bypass hangs off: a real 0.0.0.0/0 with a usable
+// gateway, never the tunnel's own. Ties break on the lower interface index so calls agree.
+func darwinDefaultGateway(entries []darwinRouteEntry, tunnelIndex int) (netip.Addr, bool) {
+	var best netip.Addr
+	bestIndex := 0
+	found := false
+
+	for _, entry := range entries {
+		if entry.host || entry.maskBits != 0 || !entry.destination.IsUnspecified() {
+			continue
+		}
+		if entry.ifIndex == tunnelIndex || !entry.viaGateway {
+			continue
+		}
+		if !entry.gateway.IsValid() || entry.gateway.IsUnspecified() {
+			continue
+		}
+		if !found || entry.ifIndex < bestIndex {
+			best, bestIndex, found = entry.gateway, entry.ifIndex, true
+		}
+	}
+	return best, found
+}
+
+func darwinHostRoute(entries []darwinRouteEntry, destination netip.Addr) (darwinRouteEntry, bool) {
+	for _, entry := range entries {
+		if entry.host && entry.destination == destination {
+			return entry, true
+		}
+	}
+	return darwinRouteEntry{}, false
+}
+
+// endpointRouteNeedsRepair reports whether the bypass has stopped doing its
+// job. An on-link entry counts as healthy: re-pinning it would fight the ARP entry.
+func endpointRouteNeedsRepair(current darwinRouteEntry, found bool, tunnelIndex int, gateway netip.Addr) bool {
+	if !found {
+		return true
+	}
+	if current.ifIndex == tunnelIndex {
+		return true
+	}
+	if !current.viaGateway {
+		return false
+	}
+	return current.gateway != gateway
+}
+
+// ensureSessionEndpointRoutes re-pins the endpoint bypass routes to the host's current default
+// gateway. Without it a link drop or gateway change lets the endpoint fall back to the tunnel.
+func ensureSessionEndpointRoutes(ctx context.Context, session *tunnelSession, _ map[uint64]struct{}) (bool, error) {
+	if session == nil || len(session.endpointRoutes) == 0 {
+		return false, nil
+	}
+
+	entries, err := darwinIPv4Routes()
+	if err != nil {
+		return false, err
+	}
+
+	tunnelIndex := 0
+	if iface, err := net.InterfaceByName(session.interfaceName); err == nil {
+		tunnelIndex = iface.Index
+	}
+	// No off-tunnel gateway to pin to right now: mid-roam, or the link is down.
+	// A quiet skip leaves it for a later tick instead of logging every 3s.
+	gateway, ok := darwinDefaultGateway(entries, tunnelIndex)
+	if !ok {
+		return false, nil
+	}
+
+	repaired := false
+	var errs []error
+	for _, endpointRoute := range session.endpointRoutes {
+		if endpointRoute.family != "inet" {
+			continue
+		}
+		destination, err := netip.ParseAddr(endpointRoute.destination)
+		if err != nil {
+			continue
+		}
+
+		current, found := darwinHostRoute(entries, destination)
+		if !endpointRouteNeedsRepair(current, found, tunnelIndex, gateway) {
+			continue
+		}
+
+		// Only a route already found by exact address is removed, so this can
+		// never take out the covering route the endpoint would fall back to.
+		if found {
+			if err := runDarwinRoute(ctx, "delete", "-host", endpointRoute.destination); err != nil {
+				errs = append(errs, err)
+				continue
+			}
+		}
+		if err := runDarwinRoute(ctx, "add", "-host", endpointRoute.destination, "-gateway", gateway.String()); err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		repaired = true
+	}
+
+	return repaired, errors.Join(errs...)
+}
+
+// runDarwinRoute runs one route(8) command under a deadline: it runs on the
+// health tick, so a wedged routing socket would stall every check behind it.
+func runDarwinRoute(ctx context.Context, args ...string) error {
+	commandCtx, cancel := context.WithTimeout(ctx, darwinRouteTimeout)
+	defer cancel()
+
+	out, err := exec.CommandContext(commandCtx, routePath, append([]string{"-n"}, args...)...).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("route %s: %w (%s)", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
 	}
 	return nil
 }

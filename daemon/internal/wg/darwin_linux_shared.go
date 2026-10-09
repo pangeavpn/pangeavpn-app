@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"golang.zx2c4.com/wireguard/conn"
 	"golang.zx2c4.com/wireguard/device"
@@ -22,20 +24,33 @@ import (
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/state"
 )
 
-// wireGuardGoManager is the in-process WireGuard backend for supported OSes.
-// It creates a TUN device and WireGuard device entirely within the daemon
-// process using the imported wireguard-go packages.
+// wireGuardGoManager is the in-process WireGuard backend for supported OSes,
+// using the imported wireguard-go packages to create the TUN and device.
 type wireGuardGoManager struct {
 	logs     *state.LogStore
 	mu       sync.Mutex
 	sessions map[string]*tunnelSession
+	// guardMu serialises the exec-heavy repair guards against teardown, so
+	// m.mu stays a map lock and /status never waits behind networksetup.
+	guardMu   sync.Mutex
+	splitHook atomic.Pointer[splitHookRef]
 }
+
+// Seams for tests; production always points at the real repairs and the OS socket bind.
+var (
+	ensureSessionDNSFn            = ensureSessionDNS
+	ensureSessionEndpointRoutesFn = ensureSessionEndpointRoutes
+	newDeviceBind                 = conn.NewDefaultBind
+)
 
 // tunnelSession holds state for an active in-process WireGuard tunnel.
 type tunnelSession struct {
 	interfaceName string
 	device        *device.Device
 	tunDevice     tun.Device
+	// deviceMTU is the clamped MTU the TUN runs at; an in-place reconfigure must
+	// resize the device (Windows) or decline when the new profile needs another.
+	deviceMTU int
 
 	// Networking state for cleanup.
 	endpointRoutes   []routeSpec
@@ -92,6 +107,56 @@ type parsedUserlandConfig struct {
 
 type tunFactory func(interfaceName string, mtu int) (tun.Device, error)
 
+// Server-supplied MTU is clamped to this range; outside it, common values
+// like 68 or 65536 either blackhole traffic or trigger fragmentation.
+const (
+	minWireGuardMTU = 1280
+	maxWireGuardMTU = 1500
+)
+
+// mergeSpecSet returns existing plus extra with duplicates dropped, first
+// occurrence order preserved. Used to reconcile tracked route sets.
+func mergeSpecSet[T comparable](existing, extra []T) []T {
+	seen := make(map[T]struct{}, len(existing)+len(extra))
+	merged := make([]T, 0, len(existing)+len(extra))
+	for _, spec := range append(append([]T{}, existing...), extra...) {
+		if _, dup := seen[spec]; dup {
+			continue
+		}
+		seen[spec] = struct{}{}
+		merged = append(merged, spec)
+	}
+	return merged
+}
+
+// subtractSpecSet returns the entries of from that are not in remove.
+func subtractSpecSet[T comparable](from, remove []T) []T {
+	drop := make(map[T]struct{}, len(remove))
+	for _, spec := range remove {
+		drop[spec] = struct{}{}
+	}
+	var out []T
+	for _, spec := range from {
+		if _, dropped := drop[spec]; !dropped {
+			out = append(out, spec)
+		}
+	}
+	return out
+}
+
+// clampWireGuardDeviceMTU is the MTU the TUN device is actually created with.
+func clampWireGuardDeviceMTU(mtu int) int {
+	switch {
+	case mtu <= 0:
+		return device.DefaultMTU
+	case mtu < minWireGuardMTU:
+		return minWireGuardMTU
+	case mtu > maxWireGuardMTU:
+		return maxWireGuardMTU
+	}
+	return mtu
+}
+
 func newWireGuardGoManager(logs *state.LogStore) *wireGuardGoManager {
 	return &wireGuardGoManager{
 		logs:     logs,
@@ -122,31 +187,28 @@ func (m *wireGuardGoManager) Preflight(_ context.Context, profile state.WireGuar
 	return nil
 }
 
-// ---------------------------------------------------------------------------
-// In-process device lifecycle
-// ---------------------------------------------------------------------------
+// In-process device lifecycle.
 
-// createInProcessDeviceWithFactory creates a TUN device via the supplied
-// factory and a WireGuard device, applies the UAPI configuration, and brings
-// the device up. The caller is responsible for platform-specific
-// address/route/DNS configuration on the returned interface.
+// createInProcessDeviceWithFactory creates a TUN and WireGuard device, applies
+// the UAPI config, and brings it up; the caller handles address/route/DNS.
 func (m *wireGuardGoManager) createInProcessDeviceWithFactory(
 	interfaceName string,
 	mtu int,
 	wgConfig string,
 	createTUN tunFactory,
+	info TunnelInfo,
 ) (*device.Device, tun.Device, error) {
-	if mtu <= 0 {
-		mtu = device.DefaultMTU
-	}
+	mtu = clampWireGuardDeviceMTU(mtu)
 
 	tunDev, err := createTUN(interfaceName, mtu)
 	if err != nil {
 		return nil, nil, fmt.Errorf("create tun device %s: %w", interfaceName, err)
 	}
+	// The wrapper is what wireguard-go reads and what the session keeps, so close paths reach it.
+	tunDev = m.wrapTUN(tunDev, info)
 
 	logger := newWGLogger(m.logs)
-	dev := device.NewDevice(tunDev, conn.NewDefaultBind(), logger)
+	dev := device.NewDevice(tunDev, newDeviceBind(), logger)
 
 	uapi, err := wgConfigToUAPI(wgConfig)
 	if err != nil {
@@ -174,9 +236,7 @@ func closeDevice(dev *device.Device) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Session management
-// ---------------------------------------------------------------------------
+// Session management.
 
 func (m *wireGuardGoManager) session(tunnelKey string) (*tunnelSession, bool) {
 	m.mu.Lock()
@@ -185,19 +245,17 @@ func (m *wireGuardGoManager) session(tunnelKey string) (*tunnelSession, bool) {
 	return s, ok
 }
 
-// peerStats reads aggregate rx/tx bytes and the most recent peer handshake
-// time (Unix seconds; 0 if no peer has ever handshaked) from all peers via
-// UAPI. WireGuard's UAPI dump reports these per peer; we sum the byte counters
-// and take the newest handshake across peers.
-func peerStats(dev *device.Device) (rxBytes, txBytes, lastHandshakeUnix int64) {
+// peerStats sums rx/tx bytes and the newest peer handshake time (Unix
+// seconds; 0 if none) across all peers via UAPI. A failed read is an error.
+func peerStats(dev *device.Device) (rxBytes, txBytes, lastHandshakeUnix int64, err error) {
 	if dev == nil {
-		return 0, 0, 0
+		return 0, 0, 0, nil
 	}
 	ipcData, err := dev.IpcGet()
 	if err != nil {
-		return 0, 0, 0
+		return 0, 0, 0, fmt.Errorf("read wireguard device stats: %w", err)
 	}
-	for _, line := range strings.Split(ipcData, "\n") {
+	for line := range strings.SplitSeq(ipcData, "\n") {
 		switch {
 		case strings.HasPrefix(line, "rx_bytes="):
 			if v, err := strconv.ParseInt(line[len("rx_bytes="):], 10, 64); err == nil {
@@ -213,7 +271,55 @@ func peerStats(dev *device.Device) (rxBytes, txBytes, lastHandshakeUnix int64) {
 			}
 		}
 	}
-	return rxBytes, txBytes, lastHandshakeUnix
+	return rxBytes, txBytes, lastHandshakeUnix, nil
+}
+
+// sessionStats resolves the session and its peer stats under a single lock,
+// so it can never race a concurrent Stop tearing the session down mid-read.
+func (m *wireGuardGoManager) sessionStats(tunnelKey string) (rxBytes, txBytes, lastHandshakeUnix int64, active bool, err error) {
+	m.mu.Lock()
+	s, ok := m.sessions[tunnelKey]
+	m.mu.Unlock()
+	if !ok || s == nil || s.device == nil {
+		return 0, 0, 0, false, nil
+	}
+	rxBytes, txBytes, lastHandshakeUnix, err = peerStats(s.device)
+	return rxBytes, txBytes, lastHandshakeUnix, true, err
+}
+
+// RebindDeviceSockets reopens every live device's UDP bind (same port), for
+// sockets a host resume left tied to a pre-sleep address. Returns the count.
+func (m *wireGuardGoManager) RebindDeviceSockets(_ context.Context) int {
+	m.mu.Lock()
+	sessions := make([]*tunnelSession, 0, len(m.sessions))
+	for _, s := range m.sessions {
+		if s != nil && s.device != nil {
+			sessions = append(sessions, s)
+		}
+	}
+	m.mu.Unlock()
+
+	rebound := 0
+	for _, s := range sessions {
+		if err := s.device.BindUpdate(); err != nil {
+			m.logs.Add(state.LogWarn, state.SourceWireGuard, fmt.Sprintf("resume socket rebind failed on %s: %v", s.interfaceName, err))
+			continue
+		}
+		rebound++
+	}
+	return rebound
+}
+
+// reserveSession claims tunnelKey with a placeholder so two concurrent Starts
+// can't both pass; follow with storeSession or removeSession to release it.
+func (m *wireGuardGoManager) reserveSession(tunnelKey string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if s, ok := m.sessions[tunnelKey]; ok && s != nil {
+		return fmt.Errorf("wireguard tunnel %s is already running", tunnelKey)
+	}
+	m.sessions[tunnelKey] = &tunnelSession{}
+	return nil
 }
 
 func (m *wireGuardGoManager) storeSession(tunnelKey string, s *tunnelSession) {
@@ -226,6 +332,18 @@ func (m *wireGuardGoManager) removeSession(tunnelKey string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delete(m.sessions, tunnelKey)
+}
+
+// takeSession claims a session for teardown, dropping it from the map in the
+// same step, so a repair guard sharing the lock never redoes what teardown just removed.
+func (m *wireGuardGoManager) takeSession(tunnelKey string) (*tunnelSession, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s, ok := m.sessions[tunnelKey]
+	if ok {
+		delete(m.sessions, tunnelKey)
+	}
+	return s, ok
 }
 
 func (m *wireGuardGoManager) hasActiveDevice(tunnelKey string) bool {
@@ -266,9 +384,63 @@ func (m *wireGuardGoManager) ActiveInterfaceName(_ context.Context, profile stat
 	return interfaceName, nil
 }
 
-// ---------------------------------------------------------------------------
-// Config parsing
-// ---------------------------------------------------------------------------
+// ActiveTunnelLUID reports the Windows interface LUID of the live tunnel device, naming the
+// adapter exactly where a rebuilt name still resolves to the old one. Zero on other platforms.
+func (m *wireGuardGoManager) ActiveTunnelLUID(_ context.Context, profile state.WireGuardProfile) (uint64, error) {
+	if strings.TrimSpace(profile.TunnelName) == "" {
+		return 0, errors.New("wireguard tunnelName is required")
+	}
+
+	session, ok := m.session(sanitizeTunnelName(profile.TunnelName))
+	if !ok || session == nil {
+		return 0, fmt.Errorf("wireguard tunnel %s is not running", profile.TunnelName)
+	}
+	return session.windowsLUID, nil
+}
+
+// TunnelReady reports whether the host has made the tunnel's adapter usable.
+// Windows publishes the address and its routes well after Start returns.
+func (m *wireGuardGoManager) TunnelReady(_ context.Context, profile state.WireGuardProfile) (bool, error) {
+	if strings.TrimSpace(profile.TunnelName) == "" {
+		return false, errors.New("wireguard tunnelName is required")
+	}
+
+	session, ok := m.session(sanitizeTunnelName(profile.TunnelName))
+	if !ok || session == nil {
+		return false, fmt.Errorf("wireguard tunnel %s is not running", profile.TunnelName)
+	}
+	return tunnelSessionReady(session, profile)
+}
+
+// EnsureEndpointRoutes re-pins the session's endpoint bypass routes to the host's current default
+// route. The lock is held throughout so the repair cannot race a teardown of the same session.
+func (m *wireGuardGoManager) EnsureEndpointRoutes(ctx context.Context, profile state.WireGuardProfile) (bool, error) {
+	if strings.TrimSpace(profile.TunnelName) == "" {
+		return false, nil
+	}
+
+	// guardMu, not m.mu, fences the repair against teardown: a Stop waits on
+	// it before restoring state, and a repair sees no session after a Stop.
+	m.guardMu.Lock()
+	defer m.guardMu.Unlock()
+
+	m.mu.Lock()
+	session, ok := m.sessions[sanitizeTunnelName(profile.TunnelName)]
+	excludeLUIDs := make(map[uint64]struct{}, len(m.sessions))
+	for _, s := range m.sessions {
+		if s != nil && s.windowsLUID != 0 {
+			excludeLUIDs[s.windowsLUID] = struct{}{}
+		}
+	}
+	m.mu.Unlock()
+	if !ok || session == nil {
+		return false, nil
+	}
+
+	return ensureSessionEndpointRoutesFn(ctx, session, excludeLUIDs)
+}
+
+// Config parsing.
 
 func parseUserlandConfig(input string) (parsedUserlandConfig, error) {
 	scanner := bufio.NewScanner(strings.NewReader(input))
@@ -346,13 +518,13 @@ func parseKeyValue(line string) (string, string, bool) {
 	if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
 		return "", "", false
 	}
-	index := strings.Index(line, "=")
-	if index < 0 {
+	rawKey, rawValue, ok := strings.Cut(line, "=")
+	if !ok {
 		return "", "", false
 	}
 
-	key := strings.TrimSpace(line[:index])
-	value := stripInlineComment(line[index+1:])
+	key := strings.TrimSpace(rawKey)
+	value := stripInlineComment(rawValue)
 	if key == "" {
 		return "", "", false
 	}
@@ -405,9 +577,7 @@ func parseEndpointHost(value string) string {
 	return strings.TrimSpace(strings.Trim(cleaned, "[]"))
 }
 
-// ---------------------------------------------------------------------------
-// Merge and normalize utilities
-// ---------------------------------------------------------------------------
+// Merge and normalize utilities.
 
 func mergeEndpointHosts(endpointHosts []string, bypassHosts []string) []string {
 	if len(bypassHosts) == 0 {
@@ -431,6 +601,59 @@ func mergeDNSServers(configDNS []string, profileDNS []string) []string {
 	merged = append(merged, configDNS...)
 	merged = append(merged, profileDNS...)
 	return uniqueStringsPreserveOrder(merged)
+}
+
+// EnsureDNS re-asserts the live session's resolvers on the host: a tunnel can
+// carry traffic fine while the host silently stops pointing at those resolvers.
+func (m *wireGuardGoManager) EnsureDNS(_ context.Context, profile state.WireGuardProfile) (bool, error) {
+	if strings.TrimSpace(profile.TunnelName) == "" {
+		return false, nil
+	}
+	want := Resolvers(profile)
+	if len(want) == 0 {
+		return false, nil
+	}
+
+	// Same contract as EnsureEndpointRoutes: guardMu fences the repair
+	// against a Disconnect re-installing stale DNS mid-teardown.
+	m.guardMu.Lock()
+	defer m.guardMu.Unlock()
+
+	m.mu.Lock()
+	session, ok := m.sessions[sanitizeTunnelName(profile.TunnelName)]
+	m.mu.Unlock()
+	if !ok || session == nil {
+		return false, nil
+	}
+	return ensureSessionDNSFn(session, want)
+}
+
+// Resolvers reports the DNS servers a session brings the interface up with,
+// applying the same config-then-profile merge Start does; an unparseable config falls back to the profile's own list.
+func Resolvers(profile state.WireGuardProfile) []string {
+	parsed, err := parseUserlandConfig(profile.ConfigText)
+	if err != nil {
+		return uniqueStringsPreserveOrder(profile.DNS)
+	}
+	return mergeDNSServers(parsed.dnsServers, profile.DNS)
+}
+
+// ProbeResolvers is Resolvers without loopback: a local DNS proxy answers the
+// host fine but can never be reached from a socket pinned to the tunnel.
+func ProbeResolvers(profile state.WireGuardProfile) []string {
+	var out []string
+	for _, server := range Resolvers(profile) {
+		if addr, err := netip.ParseAddr(strings.TrimSpace(server)); err == nil && addr.IsLoopback() {
+			continue
+		}
+		out = append(out, server)
+	}
+	return out
+}
+
+// ValidateResolvers rejects DNS servers no tunnel session could ever use.
+func ValidateResolvers(servers []string) error {
+	return validateIPv4DNSServers(servers)
 }
 
 func validateParsedIPv4Only(parsed parsedUserlandConfig) ([]string, error) {
@@ -480,6 +703,9 @@ func validateIPv4DNSServers(dnsServers []string) error {
 		if !addr.Is4() {
 			return fmt.Errorf("IPv6 DNS server is not supported: %s", trimmed)
 		}
+		if addr.IsUnspecified() || addr.IsLinkLocalUnicast() || addr.IsMulticast() || addr == netip.AddrFrom4([4]byte{255, 255, 255, 255}) {
+			return fmt.Errorf("DNS server %s cannot be reached through the tunnel", trimmed)
+		}
 	}
 	return nil
 }
@@ -525,28 +751,32 @@ func uniqueStringsPreserveOrder(values []string) []string {
 	return out
 }
 
-// ---------------------------------------------------------------------------
-// Endpoint route resolution (shared logic, platform apply/remove is separate)
-// ---------------------------------------------------------------------------
+// Endpoint route resolution (shared logic, platform apply/remove is separate).
 
-func resolveEndpointRoutes(ctx context.Context, endpointHosts []string) []routeSpec {
+func resolveEndpointRoutes(ctx context.Context, endpointHosts []string) ([]routeSpec, error) {
 	if len(endpointHosts) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	unique := map[string]routeSpec{}
+	var lastErr error
 	for _, host := range endpointHosts {
-		for _, ip := range resolveHostIPs(ctx, host) {
+		ips, err := resolveHostIPs(ctx, host)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		for _, ip := range ips {
 			if shouldSkipEndpointRouteIP(ip) {
 				continue
 			}
-
-			v4 := ip.To4()
-			if v4 == nil {
+			if v4 := ip.To4(); v4 != nil {
+				route := routeSpec{family: "inet", destination: v4.String()}
+				unique["inet:"+route.destination] = route
 				continue
 			}
-			route := routeSpec{family: "inet", destination: v4.String()}
-			unique["inet:"+route.destination] = route
+			route := routeSpec{family: "inet6", destination: ip.String()}
+			unique["inet6:"+route.destination] = route
 		}
 	}
 
@@ -560,7 +790,13 @@ func resolveEndpointRoutes(ctx context.Context, endpointHosts []string) []routeS
 		}
 		return routes[i].family < routes[j].family
 	})
-	return routes
+
+	// Only surface the error when it left us with nothing to bypass with;
+	// a partial resolution still protects the endpoints that did resolve.
+	if len(routes) == 0 && lastErr != nil {
+		return nil, lastErr
+	}
+	return routes, nil
 }
 
 func shouldSkipEndpointRouteIP(ip net.IP) bool {
@@ -571,19 +807,29 @@ func shouldSkipEndpointRouteIP(ip net.IP) bool {
 		ip.IsLinkLocalMulticast() || ip.IsLinkLocalUnicast()
 }
 
-func resolveHostIPs(ctx context.Context, host string) []net.IP {
+// hostResolveTimeout caps a lookup whose context has no deadline: mid-switch
+// it would otherwise hang on a tunnel that is already a black hole.
+const hostResolveTimeout = 5 * time.Second
+
+var lookupHostIPs = func(ctx context.Context, host string) ([]net.IP, error) {
+	return net.DefaultResolver.LookupIP(ctx, "ip", host)
+}
+
+func resolveHostIPs(ctx context.Context, host string) ([]net.IP, error) {
 	if host == "" {
-		return nil
+		return nil, nil
 	}
 	if ip := net.ParseIP(host); ip != nil {
-		if v4 := ip.To4(); v4 != nil {
-			return []net.IP{v4}
-		}
-		return nil
+		return []net.IP{ip}, nil
 	}
-	ips, err := net.DefaultResolver.LookupIP(ctx, "ip4", host)
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, hostResolveTimeout)
+		defer cancel()
+	}
+	ips, err := lookupHostIPs(ctx, host)
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("resolve endpoint host %q: %w", host, err)
 	}
-	return ips
+	return ips, nil
 }

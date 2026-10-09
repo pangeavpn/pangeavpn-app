@@ -6,6 +6,7 @@ import path from "node:path";
 import process from "node:process";
 
 const npmCmd = "npm";
+const MAC_DAEMON_LABEL = "com.pangea.pangeavpn.daemon";
 const isWin = process.platform === "win32";
 const goCmd = resolveGoCommand();
 const sudoContext = resolveSudoContext();
@@ -13,20 +14,21 @@ const sudoContext = resolveSudoContext();
 runNpmOrExit(["run", "build", "--workspace", "@pangeavpn/shared-types"]);
 ensureSudoUserRuntimeFiles();
 
-const daemonWasRunning = await isDaemonReachable();
-if (daemonWasRunning && !isWin) {
-  console.log("Detected existing daemon on 127.0.0.1:8787, reusing it for dev.");
-}
-
-if (daemonWasRunning && isWin) {
-  console.log("Detected existing daemon on 127.0.0.1:8787, restarting with latest elevated build.");
+// Reusing whatever already held the port meant dev silently tested a stale
+// daemon binary instead of the working tree.
+const daemonAlreadyListening = (await isDaemonReachable()) || (!isWin && isPortHeldPosix());
+if (daemonAlreadyListening) {
+  console.log("Detected existing daemon on 127.0.0.1:8787, replacing it with the current source.");
+  if (!isWin) {
+    stopManagedDaemonService();
+  }
   killPort8787();
 }
 
 const children = [];
 let stopping = false;
 
-const daemonHandle = isWin ? await startWindowsElevatedDaemon() : daemonWasRunning ? null : await startDaemon();
+const daemonHandle = isWin ? await startWindowsElevatedDaemon() : await startDaemon();
 
 if (daemonHandle?.managed && daemonHandle.child) {
   children.push(daemonHandle.child);
@@ -39,7 +41,7 @@ if (daemonHandle?.managed && daemonHandle.child) {
   });
 }
 
-if (!daemonWasRunning && daemonHandle?.managed) {
+if (daemonHandle?.managed) {
   console.log("Waiting for daemon to be ready...");
   const ready = await waitForDaemon(60000, daemonHandle.child);
   if (!ready) {
@@ -51,44 +53,113 @@ if (!daemonWasRunning && daemonHandle?.managed) {
 const desktop = startDesktopProcess();
 children.push(desktop);
 
+// Shutdown must never block on a password prompt, so it only reuses a sudo
+// ticket the startup takeover already acquired.
 function killDaemonSync() {
-  if (isWin) {
-    try {
-      spawnSync("taskkill", ["/F", "/IM", "PangeaDaemon.exe"], {
-        stdio: "pipe",
-        shell: false,
-        timeout: 5000
-      });
-    } catch {
-      // best-effort
-    }
-  } else {
-    killPort8787();
+  killPort8787({ interactive: false });
+}
+
+// launchd restarts the installed service the moment it dies, so the job has
+// to be booted out before the port can be taken.
+function stopManagedDaemonService() {
+  if (process.platform !== "darwin") {
+    return;
+  }
+  acquireSudo();
+  const result = spawnSync("sudo", ["launchctl", "bootout", "system/" + MAC_DAEMON_LABEL], {
+    stdio: "pipe",
+    shell: false,
+    timeout: 10000
+  });
+  if ((result.status ?? 1) === 0) {
+    console.log("Stopped the installed daemon service. It comes back on reboot or reinstall.");
   }
 }
 
-function killPort8787() {
+function killPort8787({ interactive = true } = {}) {
   try {
     if (isWin) {
       const result = spawnSync("netstat", ["-ano", "-p", "TCP"], { stdio: "pipe", shell: false, timeout: 5000 });
       const output = (result.stdout ?? "").toString();
+      const pids = new Set();
       for (const line of output.split("\n")) {
-        if (line.includes("127.0.0.1:8787") && line.includes("LISTENING")) {
+        if (line.includes(":8787") && line.includes("LISTENING")) {
           const pid = line.trim().split(/\s+/).pop();
           if (pid && pid !== "0") {
-            spawnSync("taskkill", ["/F", "/PID", pid], { stdio: "pipe", shell: false, timeout: 5000 });
+            pids.add(pid);
           }
         }
       }
-    } else {
-      const result = spawnSync("lsof", ["-ti", "tcp:8787"], { stdio: "pipe", shell: false, timeout: 5000 });
-      const pids = (result.stdout ?? "").toString().trim().split("\n").filter(Boolean);
+
       for (const pid of pids) {
-        spawnSync("kill", ["-9", pid], { stdio: "pipe", shell: false, timeout: 3000 });
+        spawnSync("taskkill", ["/F", "/T", "/PID", pid], { stdio: "pipe", shell: false, timeout: 5000 });
+      }
+
+      // The daemon is elevated, so a normal taskkill can be denied. Retry the
+      // listener PIDs from an elevated PowerShell process when necessary.
+      if (pids.size > 0 && isPort8787ReachableSync()) {
+        const killCommand = [
+          "$ErrorActionPreference = 'SilentlyContinue'",
+          "Get-NetTCPConnection -LocalPort 8787 -State Listen | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }",
+          "Get-Process -Name 'PangeaDaemon' | Stop-Process -Force"
+        ].join("; ");
+        const encoded = psEncodedCommand(killCommand);
+        spawnSync("powershell.exe", [
+          "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command",
+          `Start-Process powershell.exe -Verb RunAs -Wait -WindowStyle Hidden -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-EncodedCommand','${encoded}'`
+        ], { stdio: "inherit", shell: false, timeout: 15000 });
+      }
+
+      const deadline = Date.now() + 5000;
+      while (Date.now() < deadline && isPort8787ReachableSync()) {
+        sleepSync(100);
+      }
+    } else {
+      // -sTCP:LISTEN is not optional: without it lsof also lists everything
+      // connected to 8787, which includes this process and Electron.
+      if (interactive) {
+        acquireSudo();
+      }
+      const pids = listeningPidsPosix().filter((pid) => pid !== String(process.pid) && pid !== String(process.ppid));
+      if (pids.length === 0) {
+        return;
+      }
+      const sudoArgs = interactive ? ["kill", "-9"] : ["-n", "kill", "-9"];
+      for (const pid of pids) {
+        spawnSync("sudo", [...sudoArgs, pid], { stdio: "pipe", shell: false, timeout: 3000 });
+      }
+      const freeBy = Date.now() + 5000;
+      while (Date.now() < freeBy && isPortHeldPosix()) {
+        sleepSync(100);
+      }
+      if (isPortHeldPosix()) {
+        console.warn("Port 8787 is still held after the takeover; the new daemon will fail to bind.");
       }
     }
   } catch {
     // best-effort
+  }
+}
+
+function listeningPidsPosix() {
+  const result = spawnSync("lsof", ["-ti", "tcp:8787", "-sTCP:LISTEN"], { stdio: "pipe", shell: false, timeout: 5000 });
+  return (result.stdout ?? "").toString().trim().split("\n").filter(Boolean);
+}
+
+function isPortHeldPosix() {
+  return listeningPidsPosix().length > 0;
+}
+
+function isPort8787ReachableSync() {
+  const result = spawnSync("netstat", ["-ano", "-p", "TCP"], { stdio: "pipe", shell: false, timeout: 3000 });
+  return (result.stdout ?? "").toString().split("\n").some((line) => line.includes(":8787") && line.includes("LISTENING"));
+}
+
+function sleepSync(durationMs) {
+  const deadline = Date.now() + durationMs;
+  while (Date.now() < deadline) {
+    // Atomics.wait sleeps without spinning while keeping this lifecycle step synchronous.
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.min(50, deadline - Date.now()));
   }
 }
 
@@ -161,11 +232,18 @@ async function handleDaemonExit(code) {
     return;
   }
 
-  if ((code ?? 1) !== 0 && (await isDaemonReachable())) {
-    console.warn("Daemon startup exited, but another daemon is reachable; continuing.");
+  if ((code ?? 1) !== 0 && (await isDaemonHealthy())) {
+    console.warn("Daemon startup exited, but another healthy daemon is serving; continuing.");
     return;
   }
 
+  if ((code ?? 1) !== 0 && (await isDaemonReachable())) {
+    console.error("Another daemon owns 127.0.0.1:8787 but is not serving requests (it answers /ping only).");
+    console.error("It is likely wedged. Kill it, then rerun dev:");
+    console.error("  sudo launchctl bootout system/com.pangea.pangeavpn.daemon");
+    console.error("  sudo kill -9 $(sudo lsof -tiTCP:8787 -sTCP:LISTEN)");
+    console.error('Its logs: "/Library/Application Support/pangeavpn-desktop/logs/daemon-crash.log"');
+  }
   shutdown(code ?? 1);
 }
 
@@ -180,9 +258,12 @@ async function startDaemon() {
   }
 
   if (goCmd) {
+    // with_utls matches the packaged builds: sing-box compiles uTLS out by
+    // default and VLESS+REALITY refuses to start without it.
+    const goRunArgs = ["run", "-tags", "with_utls", "./cmd/daemon"];
     const [cmd, args] = needsSudo
-      ? ["sudo", [...buildSudoEnvArgs(daemonEnv), goCmd, "run", "./cmd/daemon"]]
-      : [goCmd, ["run", "./cmd/daemon"]];
+      ? ["sudo", [...buildSudoEnvArgs(daemonEnv), goCmd, ...goRunArgs]]
+      : [goCmd, goRunArgs];
     return {
       managed: true,
       child: spawn(cmd, args, {
@@ -365,20 +446,7 @@ function startDesktopProcess() {
   }
 
   console.log(`Detected sudo launch; starting desktop process as ${sudoContext.user}.`);
-  const args = [
-    "-u",
-    sudoContext.user,
-    "env",
-    `HOME=${sudoContext.home}`,
-    `USER=${sudoContext.user}`,
-    `LOGNAME=${sudoContext.user}`,
-    `PATH=${process.env.PATH ?? ""}`,
-    npmCmd,
-    "run",
-    "dev",
-    "--workspace",
-    "@pangeavpn/desktop"
-  ];
+  const args = sudoUserCommandArgs([npmCmd, "run", "dev", "--workspace", "@pangeavpn/desktop"]);
   return spawn("sudo", args, {
     stdio: "inherit",
     shell: false,
@@ -393,17 +461,7 @@ function runNpmOrExit(args) {
     return;
   }
 
-  const commandArgs = [
-    "-u",
-    sudoContext.user,
-    "env",
-    `HOME=${sudoContext.home}`,
-    `USER=${sudoContext.user}`,
-    `LOGNAME=${sudoContext.user}`,
-    `PATH=${process.env.PATH ?? ""}`,
-    npmCmd,
-    ...args
-  ];
+  const commandArgs = sudoUserCommandArgs([npmCmd, ...args]);
   runOrExit("sudo", commandArgs, { shell: false });
 }
 
@@ -411,6 +469,19 @@ function buildSudoEnvArgs(env) {
   const keys = ["HOME", "USER", "LOGNAME", "PATH", "GOMODCACHE", "GOCACHE", "GOTMPDIR"];
   const pairs = keys.filter((k) => env[k] != null).map((k) => `${k}=${env[k]}`);
   return ["env", ...pairs];
+}
+
+function sudoUserCommandArgs(command) {
+  return [
+    "-u",
+    sudoContext.user,
+    "env",
+    `HOME=${sudoContext.home}`,
+    `USER=${sudoContext.user}`,
+    `LOGNAME=${sudoContext.user}`,
+    `PATH=${process.env.PATH ?? ""}`,
+    ...command
+  ];
 }
 
 function resolveAppSupportDir(home) {
@@ -444,28 +515,12 @@ function ensureSudoUserRuntimeFiles() {
       "}"
     ].join(" ");
 
-    const args = [
-      "-u",
-      sudoContext.user,
-      "env",
-      `HOME=${sudoContext.home}`,
-      `USER=${sudoContext.user}`,
-      `LOGNAME=${sudoContext.user}`,
-      `PATH=${process.env.PATH ?? ""}`,
-      "node",
-      "-e",
-      initScript,
-      appDir,
-      tokenPath,
-      configPath
-    ];
-
+    const args = sudoUserCommandArgs(["node", "-e", initScript, appDir, tokenPath, configPath]);
     runOrExit("sudo", args, { shell: false });
     return;
   }
 
-  // Running as normal user — daemon will be elevated via sudo later.
-  // Create runtime files now so the daemon (as root) reads the existing
+  // Create runtime files now so an elevated daemon reads the existing
   // token instead of creating a root-owned one the user cannot read.
   if (isWin) {
     return;
@@ -550,6 +605,44 @@ async function isDaemonReachable() {
   } finally {
     clearTimeout(timer);
   }
+}
+
+// A wedged daemon still answers the unauthenticated /ping; only an
+// authenticated /status round trip proves it can actually serve the app.
+async function isDaemonHealthy() {
+  const token = readDaemonTokenPosix();
+  if (!token) {
+    return false;
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 4000);
+  try {
+    const response = await fetch("http://127.0.0.1:8787/status", {
+      method: "GET",
+      headers: { Authorization: `Bearer ${token}` },
+      signal: controller.signal
+    });
+    return response.ok;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function readDaemonTokenPosix() {
+  const tokenPaths = [
+    "/Library/Application Support/pangeavpn-desktop/daemon-token.txt",
+    "/Library/Application Support/PangeaVPN/daemon-token.txt"
+  ];
+  for (const tokenPath of tokenPaths) {
+    const result = spawnSync("sudo", ["-n", "cat", tokenPath], { stdio: "pipe", shell: false, timeout: 3000 });
+    const token = (result.stdout ?? "").toString().trim();
+    if ((result.status ?? 1) === 0 && token) {
+      return token;
+    }
+  }
+  return null;
 }
 
 function sleep(ms) {

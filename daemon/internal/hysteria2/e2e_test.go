@@ -7,8 +7,10 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/base64"
 	"encoding/pem"
 	"math/big"
 	"net"
@@ -24,9 +26,8 @@ import (
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/state"
 )
 
-// generateSelfSignedCert builds an in-memory ECDSA cert/key pair for the
-// test's Hysteria2 server, so no filesystem temp files or external CA are
-// needed.
+// generateSelfSignedCert builds an in-memory ECDSA cert/key pair for the test's
+// Hysteria2 server, so no filesystem temp files or external CA are needed.
 func generateSelfSignedCert(t *testing.T, commonName string) (certPEM, keyPEM string) {
 	t.Helper()
 	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -55,10 +56,21 @@ func generateSelfSignedCert(t *testing.T, commonName string) (certPEM, keyPEM st
 	return string(certOut), string(keyOut)
 }
 
+// pinFor returns the base64 SPKI SHA-256 of the cert, the value nodes.json
+// carries as hysteria2.pinSha256 and validateProfile requires with Insecure.
+func pinFor(t *testing.T, certPEM string) string {
+	t.Helper()
+	block, _ := pem.Decode([]byte(certPEM))
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		t.Fatalf("parse certificate: %v", err)
+	}
+	sum := sha256.Sum256(cert.RawSubjectPublicKeyInfo)
+	return base64.StdEncoding.EncodeToString(sum[:])
+}
+
 // startHysteria2TestServer runs a real sing-box Hysteria2 server (Salamander
-// obfs + TLS) that forwards everything through a direct outbound, exactly
-// like a production node's transport server would forward decrypted traffic
-// to its co-located WireGuard listener.
+// obfs + TLS) that forwards everything through a direct outbound, like a production node.
 func startHysteria2TestServer(t *testing.T, port int, certPEM, keyPEM, serverName, authPassword, obfsPassword string) func() {
 	t.Helper()
 	opts := option.Options{
@@ -116,12 +128,8 @@ func startUDPEcho(t *testing.T) (port int, closeFn func()) {
 	return conn.LocalAddr().(*net.UDPAddr).Port, func() { conn.Close() }
 }
 
-// TestE2EClientToServerRoundTrip proves the full client-to-server path:
-// real self-signed cert, real Hysteria2 server with Salamander obfs, this
-// package's Manager (mixed inbound + hysteria2 outbound + UDP bridge)
-// talking to it, a byte payload pushed through the bridge's loopback UDP
-// socket (exactly where WireGuard's peer Endpoint would point), relayed by
-// the server to an echo listener, and read back.
+// TestE2EClientToServerRoundTrip proves the full client-to-server path: a real
+// cert, a real Hysteria2 server, and this package's Manager relaying through the bridge.
 func TestE2EClientToServerRoundTrip(t *testing.T) {
 	const serverName = "hysteria2-e2e.pangeavpn.test"
 	certPEM, keyPEM := generateSelfSignedCert(t, serverName)
@@ -139,12 +147,11 @@ func TestE2EClientToServerRoundTrip(t *testing.T) {
 	stopServer := startHysteria2TestServer(t, hyPort, certPEM, keyPEM, serverName, authPassword, obfsPassword)
 	defer stopServer()
 
-	// Server forwards to the echo listener regardless of what destination
-	// the client requests (route.Final defaults to the sole "direct"
-	// outbound), so point the bridge's fixed relay target at it.
-	old := relayDestination
-	relayDestination = net.JoinHostPort("127.0.0.1", strconv.Itoa(echoPort))
-	defer func() { relayDestination = old }()
+	// Server forwards to the echo listener regardless of requested destination,
+	// so point the bridge's fixed relay target at it.
+	old := relayDestinationOverride
+	relayDestinationOverride = net.JoinHostPort("127.0.0.1", strconv.Itoa(echoPort))
+	defer func() { relayDestinationOverride = old }()
 
 	profile := state.Hysteria2Profile{
 		LocalPort:    0,
@@ -153,7 +160,8 @@ func TestE2EClientToServerRoundTrip(t *testing.T) {
 		ServerName:   serverName,
 		Password:     authPassword,
 		ObfsPassword: obfsPassword,
-		Insecure:     true, // self-signed test cert
+		Insecure:     true,
+		PinSHA256:    pinFor(t, certPEM),
 	}
 
 	logs := state.NewLogStore(200)
@@ -198,4 +206,71 @@ func TestE2EClientToServerRoundTrip(t *testing.T) {
 	}
 
 	t.Logf("client-to-server round trip OK: %d bytes through hysteria2+salamander tunnel", n)
+}
+
+// Hops within a one-port range equal to the server's port, so the client
+// deterministically lands on the listener while exercising NewHopPacketConn.
+func TestE2EPortHopping(t *testing.T) {
+	const serverName = "hysteria2-hop.pangeavpn.test"
+	certPEM, keyPEM := generateSelfSignedCert(t, serverName)
+
+	hyPort, err := pickFreeLoopbackUDPPort()
+	if err != nil {
+		t.Fatalf("pick hysteria2 server port: %v", err)
+	}
+	echoPort, closeEcho := startUDPEcho(t)
+	defer closeEcho()
+
+	const authPassword = "hop-auth-password"
+	const obfsPassword = "hop-salamander-password"
+	stopServer := startHysteria2TestServer(t, hyPort, certPEM, keyPEM, serverName, authPassword, obfsPassword)
+	defer stopServer()
+
+	old := relayDestination
+	relayDestination = net.JoinHostPort("127.0.0.1", strconv.Itoa(echoPort))
+	defer func() { relayDestination = old }()
+
+	profile := state.Hysteria2Profile{
+		RemoteHost:   "127.0.0.1",
+		RemotePort:   hyPort,
+		ServerName:   serverName,
+		Password:     authPassword,
+		ObfsPassword: obfsPassword,
+		Insecure:     true,
+		PinSHA256:    pinFor(t, certPEM),
+		RemotePorts:  []string{strconv.Itoa(hyPort) + ":" + strconv.Itoa(hyPort)},
+	}
+
+	logs := state.NewLogStore(200)
+	mgr := NewManager(logs)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := mgr.Start(ctx, profile); err != nil {
+		t.Fatalf("Manager.Start: %v", err)
+	}
+	defer mgr.Stop(context.Background())
+	if err := mgr.WaitForSession(ctx, 10*time.Second); err != nil {
+		t.Fatalf("Manager.WaitForSession (hopping): %v", err)
+	}
+
+	wgSocket, err := net.DialUDP("udp", nil, &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: mgr.BoundLocalPort()})
+	if err != nil {
+		t.Fatalf("dial bridge loopback: %v", err)
+	}
+	defer wgSocket.Close()
+
+	payload := []byte("hop-payload-through-server-ports")
+	if _, err := wgSocket.Write(payload); err != nil {
+		t.Fatalf("write payload: %v", err)
+	}
+	wgSocket.SetReadDeadline(time.Now().Add(10 * time.Second))
+	buf := make([]byte, 2048)
+	n, err := wgSocket.Read(buf)
+	if err != nil {
+		t.Fatalf("read round-tripped payload: %v", err)
+	}
+	if string(buf[:n]) != string(payload) {
+		t.Fatalf("round trip mismatch: got %q, want %q", buf[:n], payload)
+	}
+	t.Logf("port-hopping round trip OK: %d bytes via ServerPorts", n)
 }

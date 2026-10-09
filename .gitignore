@@ -19,6 +19,11 @@ daemon/**/*.syso
 docs/CLAUDE.md
 daemon/coverage.out
 coverage.out
+# Staged naive cgo artifacts, built from the naiveproxy checkout by
+# scripts/lib/naive-cgo.mjs — outputs, never sources.
+daemon/internal/naive/android/
+daemon/internal/naive/**/*.a
+daemon/internal/naive/**/*.lib
 
 # Android / Gradle build outputs (mirrors apps/android/.gitignore, which only
 # exists on the android branch — these keep master's status clean too)

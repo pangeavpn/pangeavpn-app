@@ -2,10 +2,11 @@ package cloak
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/base64"
+	"encoding/binary"
 	"errors"
 	"fmt"
-	"math/rand/v2"
 	"net"
 	"os"
 	"strconv"
@@ -18,6 +19,7 @@ import (
 	"github.com/pangeavpn/cloak/common"
 	mux "github.com/pangeavpn/cloak/multiplex"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/state"
+	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/transport"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -26,6 +28,13 @@ type Manager interface {
 	Stop(ctx context.Context) error
 	Status() state.CloakStatus
 }
+
+var (
+	_ transport.SessionWaiter     = (*inProcessManager)(nil)
+	_ transport.BoundPortReporter = (*inProcessManager)(nil)
+)
+
+var hookOnce sync.Once
 
 func NewManager(logs *state.LogStore) Manager {
 	return &inProcessManager{logs: logs}
@@ -41,28 +50,25 @@ type inProcessManager struct {
 	mu            sync.RWMutex
 	logs          *state.LogStore
 	running       bool
+	starting      bool
 	stopping      bool
 	udpConn       *net.UDPConn
 	done          chan struct{}
 	session       chan struct{}
 	hasSession    bool
+	sesh          *mux.Session
 	sessionCtx    context.Context
 	sessionCancel context.CancelFunc
-	// boundLocalPort is the actual loopback UDP port the listener is bound
-	// to. Differs from profile.LocalPort when the caller requested dynamic
-	// allocation (LocalPort=0). Zero when not running.
+	// boundLocalPort is the actual bound port; differs from profile.LocalPort
+	// when the caller requested dynamic allocation (LocalPort=0).
 	boundLocalPort int
 	// generation bumps every Start; goroutine cleanup only clobbers shared
-	// state if its generation still matches the current one. Prevents a
-	// zombie RouteUDP goroutine from a previous Start from nuking the state
-	// owned by a fresh Start.
+	// state if its generation still matches the current one.
 	generation uint64
 }
 
-// cancellableDialer wraps a net.Dialer so that TCP dials are bound to a
-// context. When the context is cancelled, in-flight Dial calls return
-// immediately with context.Canceled, which lets MakeSession's retry loop
-// exit in bounded time during Stop().
+// cancellableDialer wraps a net.Dialer so TCP dials are bound to a context,
+// letting MakeSession's retry loop exit in bounded time during Stop().
 type cancellableDialer struct {
 	ctx    context.Context
 	dialer *net.Dialer
@@ -76,36 +82,43 @@ func (m *inProcessManager) Start(ctx context.Context, profile state.CloakProfile
 	_ = ctx
 
 	m.mu.Lock()
-	if m.running {
+	if m.running || m.starting {
 		m.mu.Unlock()
 		return nil
+	}
+	m.starting = true
+	m.mu.Unlock()
+
+	clearStarting := func() {
+		m.mu.Lock()
+		m.starting = false
+		m.mu.Unlock()
 	}
 
 	remoteHost := strings.TrimSpace(profile.RemoteHost)
 	if remoteHost == "" {
-		m.mu.Unlock()
+		clearStarting()
 		return errors.New("cloak remote host is required")
 	}
 
 	rawConfig, err := buildRawConfig(profile, remoteHost)
 	if err != nil {
-		m.mu.Unlock()
+		clearStarting()
 		return fmt.Errorf("build cloak config: %w", err)
 	}
 
 	localAddr := net.JoinHostPort(rawConfig.LocalHost, rawConfig.LocalPort)
 	udpAddr, err := net.ResolveUDPAddr("udp", localAddr)
 	if err != nil {
-		m.mu.Unlock()
+		clearStarting()
 		return fmt.Errorf("resolve local UDP addr %s: %w", localAddr, err)
 	}
 
-	// Retry ListenUDP briefly in case a previous cloak instance's socket is
-	// still being released by the OS (rare race on reconnect, but seen in
-	// the wild on all platforms). Total wait <= ~1 second.
+	// Retry briefly in case a previous cloak instance's socket is still being
+	// released by the OS. Total wait <= ~1s; runs without holding m.mu.
 	udpConn, err := listenUDPWithRetry(udpAddr, 10, 100*time.Millisecond)
 	if err != nil {
-		m.mu.Unlock()
+		clearStarting()
 		return fmt.Errorf("listen UDP %s: %w", localAddr, err)
 	}
 
@@ -121,7 +134,7 @@ func (m *inProcessManager) Start(ctx context.Context, profile state.CloakProfile
 	localConfig, remoteConfig, authInfo, err := rawConfig.ProcessRawConfig(worldState)
 	if err != nil {
 		udpConn.Close()
-		m.mu.Unlock()
+		clearStarting()
 		return fmt.Errorf("process cloak config: %w", err)
 	}
 	_ = localConfig // we manage the UDP listener ourselves
@@ -129,14 +142,17 @@ func (m *inProcessManager) Start(ctx context.Context, profile state.CloakProfile
 	done := make(chan struct{})
 	session := make(chan struct{})
 	sessionCtx, sessionCancel := context.WithCancel(context.Background())
+	m.mu.Lock()
 	m.generation++
 	generation := m.generation
 	m.udpConn = udpConn
 	m.running = true
+	m.starting = false
 	m.stopping = false
 	m.done = done
 	m.session = session
 	m.hasSession = false
+	m.sesh = nil
 	m.sessionCtx = sessionCtx
 	m.sessionCancel = sessionCancel
 	m.boundLocalPort = boundPort
@@ -147,9 +163,11 @@ func (m *inProcessManager) Start(ctx context.Context, profile state.CloakProfile
 	m.logs.Add(state.LogInfo, state.SourceCloak, fmt.Sprintf("cloak remote=%s encryption=%s numConn=%d udp=%t",
 		remoteConfig.RemoteAddr, profile.EncryptionMethod, remoteConfig.NumConn, authInfo.Unordered))
 
-	// Install logrus hook so vendored Cloak logs go into our LogStore.
-	hook := &logStoreHook{logs: m.logs}
-	log.AddHook(hook)
+	// Install the logrus hook exactly once; logrus has no removal API, so
+	// re-adding it on every Start would duplicate every log line N times.
+	hookOnce.Do(func() {
+		log.AddHook(&logStoreHook{logs: m.logs})
+	})
 
 	netDialer := &net.Dialer{}
 	if DialerControl != nil {
@@ -157,7 +175,11 @@ func (m *inProcessManager) Start(ctx context.Context, profile state.CloakProfile
 	}
 	dialer := &cancellableDialer{ctx: sessionCtx, dialer: netDialer}
 
-	var sessionCounter uint32
+	// Seed from a fresh random value each Start so a reconnect before the
+	// server reaps the previous session doesn't reuse its SessionId.
+	var idBuf [4]byte
+	rand.Read(idBuf[:])
+	sessionCounter := binary.BigEndian.Uint32(idBuf[:])
 	newSession := func() *mux.Session {
 		sessionCounter++
 		authInfo.SessionId = sessionCounter
@@ -167,7 +189,12 @@ func (m *inProcessManager) Start(ctx context.Context, profile state.CloakProfile
 			// Returning nil signals RouteUDP to exit cleanly.
 			return nil
 		}
-		m.markSessionEstablished()
+		if !m.markSessionEstablished(generation, sesh) {
+			// A newer Start has already superseded this generation; don't
+			// hand a stale session to WaitForSession callers.
+			sesh.Close()
+			return nil
+		}
 		return sesh
 	}
 
@@ -177,15 +204,21 @@ func (m *inProcessManager) Start(ctx context.Context, profile state.CloakProfile
 		m.mu.Lock()
 		wasStopping := m.stopping
 		// Only clear shared state if this goroutine still owns the current
-		// generation. A zombie goroutine from a previous Start must not
-		// clobber state belonging to a newer Start.
+		// generation; a zombie goroutine must not clobber a newer Start.
 		if m.generation == generation {
 			m.running = false
 			m.udpConn = nil
 			m.done = nil
+			if m.session != nil {
+				close(m.session)
+			}
 			m.session = nil
 			m.stopping = false
 			m.boundLocalPort = 0
+			if m.sesh != nil {
+				m.sesh.Close()
+				m.sesh = nil
+			}
 			if m.sessionCancel != nil {
 				m.sessionCancel()
 			}
@@ -207,9 +240,7 @@ func (m *inProcessManager) Start(ctx context.Context, profile state.CloakProfile
 }
 
 // listenUDPWithRetry attempts to bind a UDP socket, retrying on transient
-// "address already in use" style errors that can occur immediately after a
-// previous cloak instance released the port. Returns the first successful
-// conn or the last error after attempts are exhausted.
+// "address already in use" errors from a just-released port.
 func listenUDPWithRetry(addr *net.UDPAddr, attempts int, delay time.Duration) (*net.UDPConn, error) {
 	if attempts < 1 {
 		attempts = 1
@@ -237,24 +268,31 @@ func isAddrInUseErr(err error) bool {
 		return true
 	}
 	s := err.Error()
-	// Covers: Linux "address already in use", macOS "address already in use",
-	// Windows "Only one usage of each socket address (protocol/network address/port)
-	// is normally permitted" (WSAEADDRINUSE).
+	// Covers Linux/macOS's message and Windows's WSAEADDRINUSE wording.
 	return strings.Contains(s, "address already in use") ||
 		strings.Contains(s, "Only one usage of each socket address")
 }
 
-func (m *inProcessManager) markSessionEstablished() {
+// Records sesh as the live session and signals WaitForSession, unless a
+// newer Start has superseded generation, in which case it returns false.
+func (m *inProcessManager) markSessionEstablished(generation uint64, sesh *mux.Session) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.hasSession {
-		return
+	if m.generation != generation {
+		return false
 	}
-	m.hasSession = true
-	if m.session != nil {
-		close(m.session)
-		m.session = nil
+	if m.sesh != nil && m.sesh != sesh {
+		m.sesh.Close()
 	}
+	m.sesh = sesh
+	if !m.hasSession {
+		m.hasSession = true
+		if m.session != nil {
+			close(m.session)
+			m.session = nil
+		}
+	}
+	return true
 }
 
 func (m *inProcessManager) WaitForSession(ctx context.Context, timeout time.Duration) error {
@@ -302,22 +340,18 @@ func (m *inProcessManager) Stop(ctx context.Context) error {
 	udpConn := m.udpConn
 	done := m.done
 	sessionCancel := m.sessionCancel
+	generation := m.generation
 	m.mu.Unlock()
 
-	// Cancel the session context first so any in-flight MakeSession retry
-	// loops (dialer blocked on TCP connect/sleep) unblock immediately. Then
-	// close the UDP socket which kicks RouteUDP out of its ReadFrom loop.
-	// Order matters: cancelling first prevents a racing retry from holding
-	// the dialer open while we wait.
+	// Cancel first so any in-flight MakeSession retry unblocks immediately,
+	// then close the UDP socket to kick RouteUDP out of its ReadFrom loop.
 	if sessionCancel != nil {
 		sessionCancel()
 	}
 	udpConn.Close()
 
-	// Wait for RouteUDP's goroutine to finish releasing state. It should now
-	// exit in bounded time because MakeSession honors the cancelled context.
-	// Keep a generous ceiling to avoid hanging the disconnect flow if
-	// something downstream (e.g. the underlying mux session close) misbehaves.
+	// Wait for RouteUDP's goroutine to finish; generous ceiling in case
+	// something downstream (e.g. the mux session close) misbehaves.
 	timer := time.NewTimer(5 * time.Second)
 	defer timer.Stop()
 
@@ -325,28 +359,36 @@ func (m *inProcessManager) Stop(ctx context.Context) error {
 	case <-done:
 		return nil
 	case <-timer.C:
-		m.forceResetStateLocked()
+		m.forceResetStateLocked(generation)
 		m.logs.Add(state.LogWarn, state.SourceCloak, "cloak stop timed out; forced shutdown (RouteUDP may still be draining)")
 		return nil
 	case <-ctx.Done():
-		m.forceResetStateLocked()
+		m.forceResetStateLocked(generation)
 		return nil
 	}
 }
 
-// forceResetStateLocked drops shared state to a stopped configuration even
-// if the RouteUDP goroutine has not finished. Safe to call when Stop's wait
-// has timed out; the goroutine's generation check will prevent it from later
-// clobbering a fresh Start.
-func (m *inProcessManager) forceResetStateLocked() {
+// Drops shared state to stopped even if RouteUDP hasn't finished. No-ops if
+// generation is stale: a fresh Start already owns the current state.
+func (m *inProcessManager) forceResetStateLocked(generation uint64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.generation != generation {
+		return
+	}
 	m.running = false
 	m.boundLocalPort = 0
 	m.udpConn = nil
 	m.done = nil
+	if m.session != nil {
+		close(m.session)
+	}
 	m.session = nil
 	m.stopping = false
+	if m.sesh != nil {
+		m.sesh.Close()
+		m.sesh = nil
+	}
 	if m.sessionCancel != nil {
 		m.sessionCancel()
 	}
@@ -372,10 +414,8 @@ func (m *inProcessManager) Status() state.CloakStatus {
 	}
 }
 
-// BoundLocalPort reports the loopback UDP port the manager is currently bound
-// to, or 0 when not running. Callers that requested dynamic allocation
-// (LocalPort=0) use this to discover the kernel-assigned port so downstream
-// config (e.g. WireGuard peer endpoint) can be rewritten to match.
+// BoundLocalPort reports the loopback UDP port the manager is bound to, or 0
+// when not running; used to discover a dynamically-allocated (LocalPort=0) port.
 func (m *inProcessManager) BoundLocalPort() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -407,9 +447,8 @@ func buildRawConfig(profile state.CloakProfile, remoteHost string) (*client.RawC
 		serverName = "www.microsoft.com"
 	}
 
-	// LocalPort == 0 is intentional: it requests an ephemeral port from the
-	// kernel. Loopback-only, so any port works — this sidesteps Windows
-	// Hyper-V UDP exclusion ranges that can claim 51820 at boot.
+	// LocalPort == 0 requests an ephemeral port, sidestepping Windows Hyper-V
+	// UDP exclusion ranges that can claim 51820 at boot.
 	localPort := strconv.Itoa(profile.LocalPort)
 	if profile.LocalPort < 0 {
 		return nil, fmt.Errorf("LocalPort must be >= 0, got %d", profile.LocalPort)
@@ -420,9 +459,16 @@ func buildRawConfig(profile state.CloakProfile, remoteHost string) (*client.RawC
 		remotePort = "443"
 	}
 
+	// The server resolves this against its own ProxyBook, so an exit the node
+	// was not configured for is refused there rather than relayed.
+	proxyMethod := profile.ProxyMethod
+	if proxyMethod == "" {
+		proxyMethod = state.DefaultCloakProxyMethod
+	}
+
 	return &client.RawConfig{
 		ServerName:       serverName,
-		ProxyMethod:      "wireguard",
+		ProxyMethod:      proxyMethod,
 		EncryptionMethod: encMethod,
 		UID:              uid,
 		PublicKey:        pubKey,
@@ -459,9 +505,4 @@ func (h *logStoreHook) Fire(entry *log.Entry) error {
 		h.logs.Add(state.LogInfo, state.SourceCloak, entry.Message)
 	}
 	return nil
-}
-
-// init seeds the session counter offset so concurrent daemons don't collide.
-func init() {
-	_ = rand.Uint32()
 }

@@ -1,18 +1,5 @@
-// Generates the NSIS installer BMP artwork from the committed source PNGs.
-//
-// NSIS/MUI requires 24-bit BMP images at exact pixel sizes for the assisted
-// installer's welcome/finish sidebar (164x314) and inner-page header (150x57).
-// This script downscales the high-res source PNGs in build/art-src to those
-// exact dimensions, flattening onto the brand background (no transparency),
-// and writes 24-bit BMPs into build/.
-//
-// The generated BMPs are committed, so CI does not need to run this — it is a
-// dev-time asset step. Rendering uses PowerShell's System.Drawing and therefore
-// only runs on Windows; on other platforms it no-ops and the committed BMPs are
-// used as-is. If a source PNG is missing it falls back to compositing the app
-// logo (build/PangeaVPN.png).
-//
-// Usage: node ./scripts/build-installer-art.mjs
+// Generates the committed NSIS installer BMP artwork from build/art-src, at the
+// sizes NSIS/MUI requires. Dev-time only; Windows-only (PowerShell), no-op elsewhere.
 
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";

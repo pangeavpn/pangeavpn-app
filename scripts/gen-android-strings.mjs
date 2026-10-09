@@ -49,12 +49,9 @@ const KEY_MAP = {
   "hero.connect": "hero_connect",
   "hero.disconnect": "hero_disconnect",
   "hero.selectServer": "hero_select_server",
-  "hero.provisioning": "hero_provisioning",
-  "hero.disconnecting": "hero_disconnecting",
   "hero.noServers": "hero_no_servers",
   "hero.region": "hero_region",
   "hero.allRegions": "hero_all_regions",
-  "hero.refreshServers": "hero_refresh_servers",
   "hero.headline.DISCONNECTED": "hero_headline_disconnected",
   "hero.headline.CONNECTING": "hero_headline_connecting",
   "hero.headline.CONNECTED": "hero_headline_connected",
@@ -80,13 +77,6 @@ const KEY_MAP = {
   "state.CONNECTED": "state_connected",
   "state.DISCONNECTING": "state_disconnecting",
   "state.ERROR": "state_error",
-  "status.transport.cloak": "transport_status_cloak",
-  "status.transport.reality": "transport_status_reality",
-  "status.transport.shadowsocks": "transport_status_shadowsocks",
-  "status.transport.hysteria2": "transport_status_hysteria2",
-  "status.transport.naive": "transport_status_naive",
-  "status.transport.snowflake": "transport_status_snowflake",
-  "status.transport.none": "transport_status_none",
   "settings.transport.heading": "settings_transport_heading",
   "settings.transport.description": "settings_transport_description",
   "settings.transport.auto": "settings_transport_auto",
@@ -96,17 +86,17 @@ const KEY_MAP = {
   "settings.transport.hysteria2": "settings_transport_hysteria2",
   "settings.transport.snowflake": "settings_transport_snowflake",
   "serverPicker.noServersForTransport": "server_picker_none_for_transport",
-  "settings.censorship.heading": "settings_censorship_heading",
-  "settings.censorship.description": "settings_censorship_description",
-  "settings.censorship.directIp.title": "settings_censorship_directip_title",
-  "settings.censorship.directIp.hint": "settings_censorship_directip_hint",
-  "settings.censorship.hubShadowsocks.title": "settings_censorship_shadowsocks_title",
-  "settings.censorship.hubShadowsocks.hint": "settings_censorship_shadowsocks_hint",
-  "settings.censorship.hubFronted.title": "settings_censorship_fronted_title",
-  "settings.censorship.hubFronted.hint": "settings_censorship_fronted_hint",
-  "settings.censorship.hubNormal.title": "settings_censorship_normal_title",
-  "settings.censorship.hubNormal.hint": "settings_censorship_normal_hint",
-  "settings.censorship.lastMethod": "settings_censorship_last_method",
+  "settings.provisioning.heading": "settings_censorship_heading",
+  "settings.provisioning.description": "settings_censorship_description",
+  "settings.provisioning.directIp.title": "settings_censorship_directip_title",
+  "settings.provisioning.directIp.hint": "settings_censorship_directip_hint",
+  "settings.provisioning.hubShadowsocks.title": "settings_censorship_shadowsocks_title",
+  "settings.provisioning.hubShadowsocks.hint": "settings_censorship_shadowsocks_hint",
+  "settings.provisioning.hubFronted.title": "settings_censorship_fronted_title",
+  "settings.provisioning.hubFronted.hint": "settings_censorship_fronted_hint",
+  "settings.provisioning.hubNormal.title": "settings_censorship_normal_title",
+  "settings.provisioning.hubNormal.hint": "settings_censorship_normal_hint",
+  "settings.provisioning.lastMethod": "settings_censorship_last_method",
   "settings.network.heading": "settings_network_heading",
   "settings.network.description": "settings_network_description",
   "settings.network.allowLan.title": "settings_network_allowlan_title",
@@ -125,6 +115,42 @@ const KEY_MAP = {
 
 // Mobile-only strings, translated inline for all 8 locales.
 const MOBILE_ONLY = {
+  hero_provisioning: {
+    en: "Provisioning...", es: "Aprovisionando...", fr: "Provisionnement...", ru: "Подготовка...",
+    uk: "Підготовка...", zh: "正在配置...", ar: "جارٍ التجهيز...", fa: "در حال آماده‌سازی..."
+  },
+  hero_disconnecting: {
+    en: "Disconnecting...", es: "Desconectando...", fr: "Déconnexion...", ru: "Отключение...",
+    uk: "Відключення...", zh: "正在断开...", ar: "جارٍ قطع الاتصال...", fa: "در حال قطع اتصال..."
+  },
+  transport_status_cloak: {
+    en: "Obfuscation: Cloak", es: "Ofuscación: Cloak", fr: "Obfuscation : Cloak", ru: "Обфускация: Cloak",
+    uk: "Обфускація: Cloak", zh: "混淆：Cloak", ar: "التمويه: Cloak", fa: "مبهم‌سازی: Cloak"
+  },
+  transport_status_reality: {
+    en: "Obfuscation: VLESS+REALITY", es: "Ofuscación: VLESS+REALITY", fr: "Obfuscation : VLESS+REALITY", ru: "Обфускация: VLESS+REALITY",
+    uk: "Обфускація: VLESS+REALITY", zh: "混淆：VLESS+REALITY", ar: "التمويه: VLESS+REALITY", fa: "مبهم‌سازی: VLESS+REALITY"
+  },
+  transport_status_shadowsocks: {
+    en: "Obfuscation: Shadowsocks", es: "Ofuscación: Shadowsocks", fr: "Obfuscation : Shadowsocks", ru: "Обфускация: Shadowsocks",
+    uk: "Обфускація: Shadowsocks", zh: "混淆：Shadowsocks", ar: "التمويه: Shadowsocks", fa: "مبهم‌سازی: Shadowsocks"
+  },
+  transport_status_hysteria2: {
+    en: "Obfuscation: Hysteria2", es: "Ofuscación: Hysteria2", fr: "Obfuscation : Hysteria2", ru: "Обфускация: Hysteria2",
+    uk: "Обфускація: Hysteria2", zh: "混淆：Hysteria2", ar: "التمويه: Hysteria2", fa: "مبهم‌سازی: Hysteria2"
+  },
+  transport_status_naive: {
+    en: "Obfuscation: NaiveProxy", es: "Ofuscación: NaiveProxy", fr: "Obfuscation : NaiveProxy", ru: "Обфускация: NaiveProxy",
+    uk: "Обфускація: NaiveProxy", zh: "混淆：NaiveProxy", ar: "التمويه: NaiveProxy", fa: "مبهم‌سازی: NaiveProxy"
+  },
+  transport_status_snowflake: {
+    en: "Obfuscation: Snowflake", es: "Ofuscación: Snowflake", fr: "Obfuscation : Snowflake", ru: "Обфускация: Snowflake",
+    uk: "Обфускація: Snowflake", zh: "混淆：Snowflake", ar: "التمويه: Snowflake", fa: "مبهم‌سازی: Snowflake"
+  },
+  transport_status_none: {
+    en: "", es: "", fr: "", ru: "",
+    uk: "", zh: "", ar: "", fa: ""
+  },
   toggle_on: {
     en: "On", es: "Activado", fr: "Activé", ru: "Вкл",
     uk: "Увімк", zh: "开启", ar: "مفعّل", fa: "روشن"

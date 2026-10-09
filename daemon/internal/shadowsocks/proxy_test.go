@@ -37,18 +37,41 @@ func TestProxyManager_StartStopLifecycle(t *testing.T) {
 
 func TestProxyManager_DoubleStartReturnsSamePort(t *testing.T) {
 	mgr := NewProxyManager(state.NewLogStore(100))
-	first, err := mgr.Start(context.Background(), startableProfile(t))
+	profile := startableProfile(t)
+	first, err := mgr.Start(context.Background(), profile)
 	if err != nil {
 		t.Fatalf("first Start: %v", err)
 	}
 	t.Cleanup(func() { mgr.Stop(context.Background()) })
 
-	second, err := mgr.Start(context.Background(), startableProfile(t))
+	second, err := mgr.Start(context.Background(), profile)
 	if err != nil {
 		t.Fatalf("second Start: %v", err)
 	}
 	if second != first {
 		t.Fatalf("second Start rebound to %d, want the live %d", second, first)
+	}
+}
+
+// A Start with a different profile while running must rebind rather than
+// keep serving the old (possibly revoked) node under a stale "success".
+func TestProxyManager_StartWithDifferentProfileRebinds(t *testing.T) {
+	mgr := NewProxyManager(state.NewLogStore(100))
+	if _, err := mgr.Start(context.Background(), startableProfile(t)); err != nil {
+		t.Fatalf("first Start: %v", err)
+	}
+	t.Cleanup(func() { mgr.Stop(context.Background()) })
+
+	firstUser, firstPass := mgr.Credentials()
+	second, err := mgr.Start(context.Background(), startableProfile(t))
+	if err != nil {
+		t.Fatalf("second Start: %v", err)
+	}
+	if second <= 0 {
+		t.Fatalf("second Start = %d, want a fresh bind", second)
+	}
+	if user, pass := mgr.Credentials(); user == firstUser || pass == firstPass {
+		t.Fatal("Credentials() did not rotate on a profile switch")
 	}
 }
 

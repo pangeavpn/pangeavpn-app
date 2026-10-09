@@ -1,13 +1,7 @@
 //go:build transport_e2e
 
-// Client-to-server proof: starts a real sing-box VLESS+REALITY server locally
-// (with its own REALITY keypair and a local TLS "dest"/handshake target),
-// starts this package's Manager against it, and pushes a real UDP payload
-// through to a local echo listener reached via the server's implicit direct
-// outbound. Requires -tags with_utls (REALITY needs uTLS; sing-box compiles
-// it out by default — see manager.go's package doc).
-//
-// Run: go test -tags "transport_e2e with_utls" ./internal/reality/... -run E2E -v
+// Client-to-server proof: starts a real sing-box VLESS+REALITY server locally,
+// runs this package's Manager against it, and pushes a UDP payload through to a local echo listener.
 package reality
 
 import (
@@ -23,6 +17,7 @@ import (
 	"time"
 
 	box "github.com/sagernet/sing-box"
+	"github.com/sagernet/sing-box/adapter/certificate"
 	"github.com/sagernet/sing-box/adapter/endpoint"
 	"github.com/sagernet/sing-box/adapter/inbound"
 	"github.com/sagernet/sing-box/adapter/outbound"
@@ -63,8 +58,7 @@ func freeTCPPort(t *testing.T) int {
 }
 
 // serverRegistryContext registers just what the test's VLESS+REALITY server
-// needs: the vless inbound and (explicitly, for clarity) the direct
-// outbound sing-box already wires in as the implicit default.
+// needs: the vless inbound and the direct outbound.
 func serverRegistryContext(ctx context.Context) context.Context {
 	inboundRegistry := inbound.NewRegistry()
 	vless.RegisterInbound(inboundRegistry)
@@ -72,12 +66,11 @@ func serverRegistryContext(ctx context.Context) context.Context {
 	direct.RegisterOutbound(outboundRegistry)
 	dnsRegistry := dns.NewTransportRegistry()
 	dnslocal.RegisterTransport(dnsRegistry)
-	return box.Context(ctx, inboundRegistry, outboundRegistry, endpoint.NewRegistry(), dnsRegistry, boxservice.NewRegistry())
+	return box.Context(ctx, inboundRegistry, outboundRegistry, endpoint.NewRegistry(), dnsRegistry, boxservice.NewRegistry(), certificate.NewRegistry())
 }
 
-// startEchoServer starts a UDP listener that echoes every datagram back to
-// its sender. Stands in for "the node's local WireGuard listener" that the
-// REALITY server's implicit direct outbound relays decoded traffic to.
+// startEchoServer starts a UDP listener that echoes every datagram back to its
+// sender, standing in for the node's local WireGuard listener.
 func startEchoServer(t *testing.T) (port int, stop func()) {
 	t.Helper()
 	conn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
@@ -103,9 +96,8 @@ func startEchoServer(t *testing.T) (port int, stop func()) {
 	}
 }
 
-// startRealityServer builds and starts a real sing-box VLESS+REALITY server
-// on 127.0.0.1:serverPort, authenticating uuid/shortID against privateKey,
-// with destPort as its REALITY camouflage handshake target.
+// startRealityServer builds and starts a real sing-box VLESS+REALITY server on
+// 127.0.0.1:serverPort, with destPort as its REALITY camouflage handshake target.
 func startRealityServer(t *testing.T, serverPort int, uuid, sni, privateKey, shortID string, destPort int) *box.Box {
 	t.Helper()
 	listenAddr := badoption.Addr(netip.MustParseAddr("127.0.0.1"))

@@ -27,7 +27,6 @@ permissions:
   contents: read
 
 env:
-  GO_VERSION: '1.25.0'
   JAVA_VERSION: '17'
   ANDROID_API: '24'
   # r30 to match the NDK Chromium 150 bundles: the naive archive carries that
@@ -40,11 +39,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version: ${{ env.GO_VERSION }}
+          go-version-file: daemon/go.mod
           cache-dependency-path: daemon/go.sum
 
       - name: Host tests
@@ -81,16 +80,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
-      - uses: actions/setup-java@v5
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           distribution: temurin
           java-version: ${{ env.JAVA_VERSION }}
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version: ${{ env.GO_VERSION }}
+          go-version-file: daemon/go.mod
           cache-dependency-path: daemon/go.sum
 
       - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
@@ -104,7 +103,7 @@ jobs:
           go install golang.org/x/mobile/cmd/gobind@latest
           gomobile init
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: '24'
 
@@ -156,7 +155,7 @@ jobs:
         working-directory: apps/android
         run: ./gradlew --no-daemon :app-mobile:assembleRelease :app-tv:assembleRelease
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: android-debug-apks
           if-no-files-found: error
@@ -169,9 +168,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: '24'
 

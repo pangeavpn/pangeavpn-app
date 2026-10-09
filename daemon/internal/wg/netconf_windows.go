@@ -9,7 +9,9 @@ import (
 	"math"
 	"net"
 	"net/netip"
+	"slices"
 	"strings"
+	"time"
 
 	"golang.org/x/sys/windows"
 	"golang.zx2c4.com/wireguard/windows/tunnel/winipcfg"
@@ -44,6 +46,15 @@ func windowsInterfaceLUID(tunDev any, interfaceName string) (uint64, error) {
 	return uint64(luid), nil
 }
 
+// windowsInterfaceAlias reads the adapter's live friendly name by LUID.
+func windowsInterfaceAlias(luidValue uint64) string {
+	row, err := winipcfg.LUID(luidValue).Interface()
+	if err != nil || row == nil {
+		return ""
+	}
+	return strings.TrimSpace(row.Alias())
+}
+
 func configureWindowsInterface(luidValue uint64, addresses []string, allowedIPs []string, dnsServers []string, mtu int) error {
 	if luidValue == 0 {
 		return errors.New("invalid interface LUID")
@@ -59,46 +70,28 @@ func configureWindowsInterface(luidValue uint64, addresses []string, allowedIPs 
 	if err != nil {
 		return fmt.Errorf("parse allowed-ips routes: %w", err)
 	}
+	allowed4 = withoutInterfaceHostRoutes(allowed4, addresses4)
+	allowed6 = withoutInterfaceHostRoutes(allowed6, addresses6)
 
-	routes4 := make([]*winipcfg.RouteData, 0, len(allowed4))
-	routes6 := make([]*winipcfg.RouteData, 0, len(allowed6))
-	hasDefault4 := false
-	hasDefault6 := false
-	for _, prefix := range allowed4 {
-		if prefix.Bits() <= 1 {
-			hasDefault4 = true
-		}
-		routes4 = append(routes4, &winipcfg.RouteData{
-			Destination: prefix,
-			NextHop:     netip.IPv4Unspecified(),
-			Metric:      0,
-		})
-	}
-	for _, prefix := range allowed6 {
-		if prefix.Bits() <= 1 {
-			hasDefault6 = true
-		}
-		routes6 = append(routes6, &winipcfg.RouteData{
-			Destination: prefix,
-			NextHop:     netip.IPv6Unspecified(),
-			Metric:      0,
-		})
-	}
+	routes4 := onLinkRouteData(allowed4, netip.IPv4Unspecified())
+	routes6 := onLinkRouteData(allowed6, netip.IPv6Unspecified())
 
 	var errs []error
-	if err := luid.SetRoutesForFamily(windowsFamilyV4, routes4); err != nil {
-		errs = append(errs, fmt.Errorf("set IPv4 routes: %w", err))
-	}
-	if err := luid.SetRoutesForFamily(windowsFamilyV6, routes6); err != nil {
-		errs = append(errs, fmt.Errorf("set IPv6 routes: %w", err))
-	}
 	if err := luid.SetIPAddressesForFamily(windowsFamilyV4, addresses4); err != nil {
 		errs = append(errs, fmt.Errorf("set IPv4 addresses: %w", err))
 	}
 	if err := luid.SetIPAddressesForFamily(windowsFamilyV6, addresses6); err != nil {
 		errs = append(errs, fmt.Errorf("set IPv6 addresses: %w", err))
 	}
-	if err := configureWindowsIPInterface(luid, mtu, hasDefault4, hasDefault6); err != nil {
+	// Addresses first: an on-link default route can fail ERROR_NOT_FOUND on an
+	// interface with no address configured yet.
+	if err := setWindowsRoutesForFamily(luid, windowsFamilyV4, addresses4, routes4); err != nil {
+		errs = append(errs, fmt.Errorf("set IPv4 routes: %w", err))
+	}
+	if err := setWindowsRoutesForFamily(luid, windowsFamilyV6, addresses6, routes6); err != nil {
+		errs = append(errs, fmt.Errorf("set IPv6 routes: %w", err))
+	}
+	if err := configureWindowsIPInterface(luid, mtu); err != nil {
 		errs = append(errs, err)
 	}
 	if err := applyWindowsDNSServers(luid, dnsServers); err != nil {
@@ -106,6 +99,176 @@ func configureWindowsInterface(luidValue uint64, addresses []string, allowedIPs 
 	}
 
 	return errors.Join(errs...)
+}
+
+// setWindowsRoutesForFamily syncs the tunnel's routes instead of FlushRoutes, which
+// deletes the Local host route of the address just set and so all inbound (24H2+, no VMP).
+func setWindowsRoutesForFamily(luid winipcfg.LUID, family winipcfg.AddressFamily, addresses []netip.Prefix, routes []*winipcfg.RouteData) error {
+	table, err := winipcfg.GetIPForwardTable2(family)
+	if err != nil {
+		return err
+	}
+	stale, missing := planWindowsRouteSync(table, luid, addresses, routes)
+	var errs []error
+	for _, row := range stale {
+		if err := row.Delete(); err != nil && !errors.Is(err, windows.ERROR_NOT_FOUND) {
+			errs = append(errs, fmt.Errorf("delete route %s: %w", row.DestinationPrefix.Prefix(), err))
+		}
+	}
+	for _, route := range missing {
+		if err := luid.AddRoute(route.Destination, route.NextHop, route.Metric); err != nil && !errors.Is(err, windows.ERROR_OBJECT_ALREADY_EXISTS) {
+			errs = append(errs, fmt.Errorf("add route %s: %w", route.Destination, err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func onLinkRouteData(prefixes []netip.Prefix, nextHop netip.Addr) []*winipcfg.RouteData {
+	routes := make([]*winipcfg.RouteData, 0, len(prefixes))
+	for _, prefix := range prefixes {
+		routes = append(routes, &winipcfg.RouteData{Destination: prefix, NextHop: nextHop, Metric: 0})
+	}
+	return routes
+}
+
+// syncWindowsAllowedIPRoutes moves a live tunnel's IPv4 routes to allowedIPs without a gap: a
+// failed add returns before any delete, so whatever the old routes covered stays in the tunnel.
+func syncWindowsAllowedIPRoutes(luidValue uint64, addresses []string, allowedIPs []string) error {
+	if luidValue == 0 {
+		return errors.New("invalid interface LUID")
+	}
+	luid := winipcfg.LUID(luidValue)
+	addresses4, _, err := parseWindowsPrefixes(addresses)
+	if err != nil {
+		return fmt.Errorf("parse interface addresses: %w", err)
+	}
+	allowed4, _, err := parseWindowsRoutePrefixes(allowedIPs)
+	if err != nil {
+		return fmt.Errorf("parse allowed-ips routes: %w", err)
+	}
+	routes := onLinkRouteData(withoutInterfaceHostRoutes(allowed4, addresses4), netip.IPv4Unspecified())
+
+	table, err := winipcfg.GetIPForwardTable2(windowsFamilyV4)
+	if err != nil {
+		return err
+	}
+	addFirst, stale, addAfter := planWindowsAllowedIPSync(table, luid, addresses4, routes)
+	if err := addWindowsTunnelRoutes(luid, addFirst); err != nil {
+		return err
+	}
+	var errs []error
+	for _, row := range stale {
+		if err := row.Delete(); err != nil && !errors.Is(err, windows.ERROR_NOT_FOUND) {
+			errs = append(errs, fmt.Errorf("delete route %s: %w", row.DestinationPrefix.Prefix(), err))
+		}
+	}
+	if err := addWindowsTunnelRoutes(luid, addAfter); err != nil {
+		errs = append(errs, err)
+	}
+	return errors.Join(errs...)
+}
+
+// planWindowsAllowedIPSync splits planWindowsRouteSync's adds into those safe before the deletes and
+// those re-adding a stale row's own destination and next hop. Windows' own Local rows are left alone.
+func planWindowsAllowedIPSync(table []winipcfg.MibIPforwardRow2, luid winipcfg.LUID, addresses []netip.Prefix, routes []*winipcfg.RouteData) (addFirst []*winipcfg.RouteData, stale []*winipcfg.MibIPforwardRow2, addAfter []*winipcfg.RouteData) {
+	planned, missing := planWindowsRouteSync(table, luid, addresses, routes)
+	staleKeys := make(map[windowsRouteKey]struct{}, len(planned))
+	for _, row := range planned {
+		if row.Protocol == winipcfg.RouteProtocolLocal {
+			continue
+		}
+		stale = append(stale, row)
+		staleKeys[windowsRouteKey{row.DestinationPrefix.Prefix().Masked(), row.NextHop.Addr()}] = struct{}{}
+	}
+	for _, route := range missing {
+		if _, clash := staleKeys[windowsRouteKey{route.Destination.Masked(), route.NextHop}]; clash {
+			addAfter = append(addAfter, route)
+		} else {
+			addFirst = append(addFirst, route)
+		}
+	}
+	return addFirst, stale, addAfter
+}
+
+func addWindowsTunnelRoutes(luid winipcfg.LUID, routes []*winipcfg.RouteData) error {
+	var errs []error
+	for _, route := range routes {
+		if err := luid.AddRoute(route.Destination, route.NextHop, route.Metric); err != nil && !errors.Is(err, windows.ERROR_OBJECT_ALREADY_EXISTS) {
+			errs = append(errs, fmt.Errorf("add route %s: %w", route.Destination, err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+type windowsRouteKey struct {
+	destination netip.Prefix
+	nextHop     netip.Addr
+}
+
+// planWindowsRouteSync picks the interface's rows to delete and the routes to add. Only Windows'
+// host route for an address stays; its 224/4 and broadcast rows would pull LAN discovery in.
+func planWindowsRouteSync(table []winipcfg.MibIPforwardRow2, luid winipcfg.LUID, addresses []netip.Prefix, routes []*winipcfg.RouteData) (stale []*winipcfg.MibIPforwardRow2, missing []*winipcfg.RouteData) {
+	want := make(map[windowsRouteKey]uint32, len(routes))
+	for _, route := range routes {
+		want[windowsRouteKey{route.Destination.Masked(), route.NextHop}] = route.Metric
+	}
+	kept := make(map[windowsRouteKey]bool, len(routes))
+	for i := range table {
+		row := &table[i]
+		if row.InterfaceLUID != luid {
+			continue
+		}
+		if row.Protocol == winipcfg.RouteProtocolLocal && isInterfaceHostRoute(row.DestinationPrefix.Prefix(), addresses) {
+			continue
+		}
+		key := windowsRouteKey{row.DestinationPrefix.Prefix().Masked(), row.NextHop.Addr()}
+		if metric, ok := want[key]; ok && metric == row.Metric && !kept[key] {
+			kept[key] = true
+			continue
+		}
+		stale = append(stale, row)
+	}
+	for _, route := range routes {
+		key := windowsRouteKey{route.Destination.Masked(), route.NextHop}
+		if !kept[key] {
+			kept[key] = true
+			missing = append(missing, route)
+		}
+	}
+	return stale, missing
+}
+
+// withoutInterfaceHostRoutes drops routes that are exactly an interface address:
+// Windows installs that host route itself, and a second one breaks local delivery.
+func withoutInterfaceHostRoutes(routes, addresses []netip.Prefix) []netip.Prefix {
+	out := make([]netip.Prefix, 0, len(routes))
+	for _, route := range routes {
+		if !isInterfaceHostRoute(route, addresses) {
+			out = append(out, route)
+		}
+	}
+	return out
+}
+
+func isInterfaceHostRoute(route netip.Prefix, addresses []netip.Prefix) bool {
+	for _, address := range addresses {
+		if route.Bits() == address.Addr().BitLen() && route.Addr() == address.Addr() {
+			return true
+		}
+	}
+	return false
+}
+
+// hasLocalHostRoute reports whether Windows' own host route for addr is on the interface.
+func hasLocalHostRoute(table []winipcfg.MibIPforwardRow2, luid winipcfg.LUID, addr netip.Addr) bool {
+	host := netip.PrefixFrom(addr, addr.BitLen())
+	for i := range table {
+		row := &table[i]
+		if row.InterfaceLUID == luid && row.Protocol == winipcfg.RouteProtocolLocal && row.DestinationPrefix.Prefix() == host {
+			return true
+		}
+	}
+	return false
 }
 
 func clearWindowsInterfaceConfig(luidValue uint64) error {
@@ -138,41 +301,69 @@ func clearWindowsInterfaceConfig(luidValue uint64) error {
 	return errors.Join(errs...)
 }
 
-func configureWindowsIPInterface(luid winipcfg.LUID, mtu int, hasDefault4 bool, hasDefault6 bool) error {
+func configureWindowsIPInterface(luid winipcfg.LUID, mtu int) error {
 	var errs []error
 
-	if err := tuneWindowsIPInterface(luid, windowsFamilyV4, mtu, hasDefault4); err != nil {
+	if err := tuneWindowsIPInterface(luid, windowsFamilyV4, mtu); err != nil {
 		errs = append(errs, fmt.Errorf("configure IPv4 interface settings: %w", err))
 	}
-	if err := tuneWindowsIPInterface(luid, windowsFamilyV6, mtu, hasDefault6); err != nil {
+	if err := tuneWindowsIPInterface(luid, windowsFamilyV6, mtu); err != nil {
 		errs = append(errs, fmt.Errorf("configure IPv6 interface settings: %w", err))
 	}
 
 	return errors.Join(errs...)
 }
 
-func tuneWindowsIPInterface(luid winipcfg.LUID, family winipcfg.AddressFamily, mtu int, forceMetric bool) error {
-	row, err := luid.IPInterface(family)
-	if err != nil {
-		if errors.Is(err, windows.ERROR_NOT_FOUND) {
-			return nil
+const windowsIPInterfaceRetries = 20
+const windowsIPInterfaceRetryDelay = 50 * time.Millisecond
+
+// tuneWindowsIPInterface waits for the row to publish, then forces metric 0;
+// best-effort, since aborting on a metric that won't stick regressed connects.
+func tuneWindowsIPInterface(luid winipcfg.LUID, family winipcfg.AddressFamily, mtu int) error {
+	var row *winipcfg.MibIPInterfaceRow
+	var err error
+	for attempt := 0; attempt < windowsIPInterfaceRetries; attempt++ {
+		row, err = luid.IPInterface(family)
+		if err == nil {
+			break
 		}
+		if !errors.Is(err, windows.ERROR_NOT_FOUND) {
+			return err
+		}
+		time.Sleep(windowsIPInterfaceRetryDelay)
+	}
+	// The family's row may never publish (e.g. IPv6 disabled on this NIC): that
+	// is a metric we could not tune, not a bring-up failure.
+	if err != nil {
+		return nil
+	}
+
+	applyWindowsIPInterfaceTuning(row, mtu)
+	if err := row.Set(); err != nil {
 		return err
 	}
 
+	// Best-effort corrective re-apply: a metric that does not read back as 0 is
+	// a soft preference issue, never a reason to abort a connect.
+	if verify, verr := luid.IPInterface(family); verr == nil && (verify.UseAutomaticMetric || verify.Metric != 0) {
+		applyWindowsIPInterfaceTuning(verify, mtu)
+		_ = verify.Set()
+	}
+	return nil
+}
+
+func applyWindowsIPInterfaceTuning(row *winipcfg.MibIPInterfaceRow, mtu int) {
 	row.RouterDiscoveryBehavior = winipcfg.RouterDiscoveryDisabled
 	row.DadTransmits = 0
 	row.ManagedAddressConfigurationSupported = false
 	row.OtherStatefulConfigurationSupported = false
-
 	if mtu > 0 && mtu <= math.MaxUint32 {
 		row.NLMTU = uint32(mtu)
 	}
-	if forceMetric {
-		row.UseAutomaticMetric = false
-		row.Metric = 0
-	}
-	return row.Set()
+	// Route selection and DNS preference order by interface metric, so an
+	// automatic metric leaves the tunnel merely tied, not decisively ahead.
+	row.UseAutomaticMetric = false
+	row.Metric = 0
 }
 
 func applyWindowsDNSServers(luid winipcfg.LUID, dnsServers []string) error {
@@ -207,13 +398,66 @@ func applyWindowsDNSServers(luid winipcfg.LUID, dnsServers []string) error {
 	return errors.Join(errs...)
 }
 
-func addWindowsEndpointRoutes(ctx context.Context, tunnelLUID uint64, endpointHosts []string) ([]windowsRouteSpec, error) {
-	routes := resolveEndpointRoutes(ctx, endpointHosts)
+// ensureSessionDNS re-applies want when the host has stopped pointing at
+// exactly those resolvers, reporting whether it had to correct anything.
+func ensureSessionDNS(session *tunnelSession, want []string) (bool, error) {
+	if session == nil || session.windowsLUID == 0 {
+		return false, nil
+	}
+	luid := winipcfg.LUID(session.windowsLUID)
+
+	wanted4, wanted6, err := parseWindowsDNSAddrs(want)
+	if err != nil {
+		return false, err
+	}
+	if len(wanted4) == 0 {
+		return false, nil
+	}
+
+	current, err := luid.DNS()
+	if err != nil {
+		return false, fmt.Errorf("read interface DNS: %w", err)
+	}
+	if windowsDNSMatches(current, wanted4, wanted6) {
+		return false, nil
+	}
+	if err := luid.SetDNS(windowsFamilyV4, wanted4, nil); err != nil {
+		return false, fmt.Errorf("re-apply IPv4 DNS: %w", err)
+	}
+	// The tunnel is IPv4-only: any IPv6 resolvers Windows picked up mid-session
+	// must be wiped, not just outnumbered, or it keeps preferring them.
+	if err := luid.SetDNS(windowsFamilyV6, wanted6, nil); err != nil && !errors.Is(err, windows.ERROR_NOT_FOUND) {
+		return false, fmt.Errorf("re-apply IPv6 DNS: %w", err)
+	}
+	return true, nil
+}
+
+// windowsDNSMatches reports whether the interface's resolvers are exactly
+// want4 followed by want6, in order — order is preference, so it matters.
+func windowsDNSMatches(current []netip.Addr, want4, want6 []netip.Addr) bool {
+	got4 := make([]netip.Addr, 0, len(want4))
+	got6 := make([]netip.Addr, 0, len(want6))
+	for _, addr := range current {
+		unmapped := addr.Unmap()
+		if unmapped.Is4() {
+			got4 = append(got4, unmapped)
+		} else {
+			got6 = append(got6, unmapped)
+		}
+	}
+	return slices.Equal(got4, want4) && slices.Equal(got6, want6)
+}
+
+func addWindowsEndpointRoutes(ctx context.Context, excludeLUIDs map[uint64]struct{}, endpointHosts []string) ([]windowsRouteSpec, error) {
+	routes, resolveErr := resolveEndpointRoutes(ctx, endpointHosts)
+	if resolveErr != nil {
+		return nil, resolveErr
+	}
 	if len(routes) == 0 {
 		return nil, nil
 	}
 
-	defaultRoutes, err := windowsDefaultRoutesByFamily(tunnelLUID)
+	defaultRoutes, err := windowsDefaultRoutesByFamily(excludeLUIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -235,38 +479,141 @@ func addWindowsEndpointRoutes(ctx context.Context, tunnelLUID uint64, endpointHo
 			bits = 32
 		}
 
-		destination := netip.PrefixFrom(addr, bits).Masked()
-		routeData := &winipcfg.RouteData{
-			Destination: destination,
-			NextHop:     defaultRoute.nextHop,
-			Metric:      0,
+		spec := windowsRouteSpec{
+			interfaceLUID: uint64(defaultRoute.interfaceLUID),
+			destination:   netip.PrefixFrom(addr, bits).Masked().String(),
+			nextHop:       defaultRoute.nextHop.String(),
 		}
-		if err := defaultRoute.interfaceLUID.AddRoutes([]*winipcfg.RouteData{routeData}); err != nil {
-			if errors.Is(err, windows.ERROR_OBJECT_ALREADY_EXISTS) {
-				continue
-			}
-			errs = append(errs, fmt.Errorf("add endpoint route %s via %s: %w", destination.String(), defaultRoute.nextHop.String(), err))
+		if _, err := addWindowsRoute(spec); err != nil {
+			errs = append(errs, err)
 			continue
 		}
-
-		added = append(added, windowsRouteSpec{
-			interfaceLUID: uint64(defaultRoute.interfaceLUID),
-			destination:   destination.String(),
-			nextHop:       defaultRoute.nextHop.String(),
-		})
+		// Adopt a pre-existing route too — most likely left by a crashed prior
+		// session — so this session's teardown cleans it up either way.
+		added = append(added, spec)
 	}
 
 	return added, errors.Join(errs...)
 }
 
+// ensureSessionEndpointRoutes re-pins bypass routes to the host's current
+// default route, reporting whether it had to repair anything.
+func ensureSessionEndpointRoutes(_ context.Context, session *tunnelSession, excludeLUIDs map[uint64]struct{}) (bool, error) {
+	if session == nil || session.windowsLUID == 0 || len(session.windowsRoutes) == 0 {
+		return false, nil
+	}
+
+	defaultRoutes, err := windowsDefaultRoutesByFamily(excludeLUIDs)
+	if err != nil {
+		return false, fmt.Errorf("read default routes: %w", err)
+	}
+
+	repaired := false
+	var errs []error
+	var stale []windowsRouteSpec
+	for i := range session.windowsRoutes {
+		current := session.windowsRoutes[i]
+		want, ok := plannedEndpointRoute(current, defaultRoutes)
+		if !ok {
+			continue
+		}
+		if want == current && windowsRouteIsPresent(current) {
+			continue
+		}
+
+		// New route in before the old one goes out: removing first risks a
+		// failed add leaving the node with no path at all.
+		created, err := addWindowsRoute(want)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		if want == current && !created {
+			// The route was there all along; the lookup just couldn't confirm it,
+			// so reporting a repair here would be a false positive every tick.
+			continue
+		}
+		if want != current {
+			if err := removeWindowsEndpointRoutes([]windowsRouteSpec{current}); err != nil {
+				// Removal failed, so the stale route is still on the host. Keep it
+				// tracked separately so stopWindows still deletes it later.
+				errs = append(errs, err)
+				stale = append(stale, current)
+			}
+		}
+		session.windowsRoutes[i] = want
+		repaired = true
+	}
+	if len(stale) > 0 {
+		session.windowsRoutes = append(session.windowsRoutes, stale...)
+	}
+
+	return repaired, errors.Join(errs...)
+}
+
+// plannedEndpointRoute reports where a recorded bypass route should point now.
+// ok is false mid-roam or when the link is down, leaving the spec as-is.
+func plannedEndpointRoute(spec windowsRouteSpec, defaultRoutes map[string]windowsDefaultRoute) (windowsRouteSpec, bool) {
+	destination, err := netip.ParsePrefix(strings.TrimSpace(spec.destination))
+	if err != nil {
+		return windowsRouteSpec{}, false
+	}
+
+	family := "inet"
+	if !destination.Addr().Is4() {
+		family = "inet6"
+	}
+	defaultRoute, ok := defaultRoutes[family]
+	if !ok {
+		return windowsRouteSpec{}, false
+	}
+
+	return windowsRouteSpec{
+		interfaceLUID: uint64(defaultRoute.interfaceLUID),
+		destination:   spec.destination,
+		nextHop:       defaultRoute.nextHop.String(),
+	}, true
+}
+
+// windowsRouteIsPresent reports whether the route is still in the forwarding
+// table; anything it cannot confirm counts as absent, since re-adding is free.
+func windowsRouteIsPresent(spec windowsRouteSpec) bool {
+	destination, nextHop, err := parseWindowsRouteSpec(spec)
+	if err != nil {
+		return false
+	}
+	return windowsPrefixRouteIsPresent(winipcfg.LUID(spec.interfaceLUID), destination, nextHop)
+}
+
+// windowsPrefixRouteIsPresent is the same check for a route already parsed —
+// the tunnel's own on-link routes, whose next hop is the unspecified address.
+func windowsPrefixRouteIsPresent(luid winipcfg.LUID, destination netip.Prefix, nextHop netip.Addr) bool {
+	row, err := luid.Route(destination, nextHop)
+	return err == nil && row != nil
+}
+
+// addWindowsRoute installs the route and reports whether it created it, so
+// callers can tell a real repair from a no-op.
+func addWindowsRoute(spec windowsRouteSpec) (bool, error) {
+	destination, nextHop, err := parseWindowsRouteSpec(spec)
+	if err != nil {
+		return false, err
+	}
+
+	routeData := &winipcfg.RouteData{Destination: destination, NextHop: nextHop, Metric: 0}
+	if err := winipcfg.LUID(spec.interfaceLUID).AddRoutes([]*winipcfg.RouteData{routeData}); err != nil {
+		if errors.Is(err, windows.ERROR_OBJECT_ALREADY_EXISTS) {
+			return false, nil
+		}
+		return false, fmt.Errorf("add endpoint route %s via %s: %w", destination.String(), nextHop.String(), err)
+	}
+	return true, nil
+}
+
 func removeWindowsEndpointRoutes(routes []windowsRouteSpec) error {
 	var errs []error
 	for _, route := range routes {
-		destination, err := netip.ParsePrefix(strings.TrimSpace(route.destination))
-		if err != nil {
-			continue
-		}
-		nextHop, err := netip.ParseAddr(strings.TrimSpace(route.nextHop))
+		destination, nextHop, err := parseWindowsRouteSpec(route)
 		if err != nil {
 			continue
 		}
@@ -279,11 +626,22 @@ func removeWindowsEndpointRoutes(routes []windowsRouteSpec) error {
 	return errors.Join(errs...)
 }
 
-func windowsDefaultRoutesByFamily(excludeLUID uint64) (map[string]windowsDefaultRoute, error) {
-	out := make(map[string]windowsDefaultRoute, 2)
-	exclude := winipcfg.LUID(excludeLUID)
+func parseWindowsRouteSpec(spec windowsRouteSpec) (netip.Prefix, netip.Addr, error) {
+	destination, err := netip.ParsePrefix(strings.TrimSpace(spec.destination))
+	if err != nil {
+		return netip.Prefix{}, netip.Addr{}, fmt.Errorf("invalid endpoint route destination %q: %w", spec.destination, err)
+	}
+	nextHop, err := netip.ParseAddr(strings.TrimSpace(spec.nextHop))
+	if err != nil {
+		return netip.Prefix{}, netip.Addr{}, fmt.Errorf("invalid endpoint route next hop %q: %w", spec.nextHop, err)
+	}
+	return destination, nextHop, nil
+}
 
-	v4, ok, err := bestWindowsDefaultRoute(windowsFamilyV4, exclude)
+func windowsDefaultRoutesByFamily(excludeLUIDs map[uint64]struct{}) (map[string]windowsDefaultRoute, error) {
+	out := make(map[string]windowsDefaultRoute, 2)
+
+	v4, ok, err := bestWindowsDefaultRoute(windowsFamilyV4, excludeLUIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -291,7 +649,7 @@ func windowsDefaultRoutesByFamily(excludeLUID uint64) (map[string]windowsDefault
 		out["inet"] = v4
 	}
 
-	v6, ok, err := bestWindowsDefaultRoute(windowsFamilyV6, exclude)
+	v6, ok, err := bestWindowsDefaultRoute(windowsFamilyV6, excludeLUIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -302,7 +660,7 @@ func windowsDefaultRoutesByFamily(excludeLUID uint64) (map[string]windowsDefault
 	return out, nil
 }
 
-func bestWindowsDefaultRoute(family winipcfg.AddressFamily, excludeLUID winipcfg.LUID) (windowsDefaultRoute, bool, error) {
+func bestWindowsDefaultRoute(family winipcfg.AddressFamily, excludeLUIDs map[uint64]struct{}) (windowsDefaultRoute, bool, error) {
 	table, err := winipcfg.GetIPForwardTable2(family)
 	if err != nil {
 		return windowsDefaultRoute{}, false, err
@@ -318,12 +676,17 @@ func bestWindowsDefaultRoute(family winipcfg.AddressFamily, excludeLUID winipcfg
 		if !prefix.IsValid() || prefix.Bits() != 0 {
 			continue
 		}
-		if row.InterfaceLUID == excludeLUID || row.Loopback {
+		if _, excluded := excludeLUIDs[uint64(row.InterfaceLUID)]; excluded || row.Loopback {
 			continue
 		}
 
 		nextHop := row.NextHop.Addr()
 		if !nextHop.IsValid() || nextHop.IsLoopback() || nextHop.IsMulticast() {
+			continue
+		}
+		// An on-link default belongs to a tunnel, not a gateway; pinning the
+		// bypass to one would route WireGuard through a tunnel.
+		if nextHop.IsUnspecified() {
 			continue
 		}
 
@@ -337,7 +700,10 @@ func bestWindowsDefaultRoute(family winipcfg.AddressFamily, excludeLUID winipcfg
 			metric += uint64(ipif.Metric)
 		}
 
-		if !bestFound || metric < best.metric {
+		// Ties break on the lower LUID, not table order, so repeated elections
+		// agree instead of flapping the bypass on every health check.
+		if !bestFound || metric < best.metric ||
+			(metric == best.metric && row.InterfaceLUID < best.interfaceLUID) {
 			best = windowsDefaultRoute{
 				interfaceLUID: row.InterfaceLUID,
 				nextHop:       nextHop,

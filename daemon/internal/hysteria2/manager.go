@@ -1,8 +1,5 @@
-// Package hysteria2 wraps sing-box's Hysteria2 (QUIC + Salamander
-// obfuscation) client as an in-process DPI-evasion transport, mirroring
-// cloak.Manager and naive.Manager's shape: a loopback UDP listener
-// WireGuard's peer Endpoint points at, bridging its traffic through the
-// tunnel to the real WireGuard server.
+// Package hysteria2 wraps sing-box's Hysteria2 (QUIC + Salamander) client as
+// an in-process DPI-evasion transport, mirroring cloak.Manager's shape.
 package hysteria2
 
 import (
@@ -28,12 +25,19 @@ var (
 	_ transport.BoundPortReporter = (*Manager)(nil)
 )
 
+const maxPortPickAttempts = 3
+
 type Manager struct {
+	// opMu serializes Start/Stop end-to-end so concurrent restarts can never
+	// build two live boxes/bridges at once, nor Stop observe a half-finished Start.
+	opMu sync.Mutex
+
 	mu      sync.RWMutex
 	logs    *state.LogStore
 	running bool
 	box     *box.Box
 	bridge  *udpBridge
+	profile state.Hysteria2Profile
 }
 
 func NewManager(logs *state.LogStore) *Manager {
@@ -43,47 +47,86 @@ func NewManager(logs *state.LogStore) *Manager {
 // Start builds a client-side sing-box instance (mixed inbound + hysteria2
 // outbound) and a UDP bridge in front of it, then leaves both running.
 func (m *Manager) Start(ctx context.Context, profile state.Hysteria2Profile) error {
+	m.opMu.Lock()
+	defer m.opMu.Unlock()
+
 	m.mu.RLock()
 	running := m.running
+	current := m.profile
+	oldBox := m.box
+	oldBridge := m.bridge
+	dead := running && oldBridge != nil && oldBridge.isDead()
 	m.mu.RUnlock()
-	if running {
-		return nil
+
+	if running && !dead {
+		if profilesEqual(current, profile) {
+			return nil
+		}
+		return fmt.Errorf("hysteria2: already running with a different profile; stop first")
+	}
+	if dead {
+		// The bridge's pumps died but nobody called Stop yet; tear down the
+		// stale instance before rebuilding so its port/goroutines aren't leaked.
+		if oldBridge != nil {
+			oldBridge.Close()
+		}
+		if oldBox != nil {
+			oldBox.Close()
+		}
+		m.mu.Lock()
+		m.running = false
+		m.box = nil
+		m.bridge = nil
+		m.mu.Unlock()
 	}
 
 	if err := validateProfile(profile); err != nil {
 		return fmt.Errorf("hysteria2: %w", err)
 	}
 
-	mixedPort, err := pickFreeLoopbackPort()
-	if err != nil {
-		return fmt.Errorf("hysteria2: pick internal port: %w", err)
-	}
+	var (
+		b         *box.Box
+		bridge    *udpBridge
+		mixedPort int
+	)
+	for attempt := 0; ; attempt++ {
+		var err error
+		mixedPort, err = pickFreeLoopbackPort()
+		if err != nil {
+			return fmt.Errorf("hysteria2: pick internal port: %w", err)
+		}
 
-	opts, err := buildClientOptions(profile, mixedPort)
-	if err != nil {
-		return fmt.Errorf("hysteria2: %w", err)
-	}
+		opts, err := buildClientOptions(profile, mixedPort)
+		if err != nil {
+			return fmt.Errorf("hysteria2: %w", err)
+		}
 
-	b, err := box.New(box.Options{Context: newBoxContext(context.Background()), Options: opts})
-	if err != nil {
-		return fmt.Errorf("hysteria2: build box: %w", err)
-	}
-	if err := b.Start(); err != nil {
-		b.Close()
-		return fmt.Errorf("hysteria2: start box: %w", err)
-	}
+		b, err = box.New(box.Options{Context: newBoxContext(context.Background()), Options: opts})
+		if err != nil {
+			return fmt.Errorf("hysteria2: build box: %w", err)
+		}
+		if err := b.Start(); err != nil {
+			b.Close()
+			if isAddrInUseErr(err) && attempt < maxPortPickAttempts-1 {
+				continue
+			}
+			return fmt.Errorf("hysteria2: start box: %w", err)
+		}
 
-	mixedAddr := fmt.Sprintf("127.0.0.1:%d", mixedPort)
-	bridge, err := newUDPBridge(ctx, m.logs, profile.LocalPort, mixedAddr)
-	if err != nil {
-		b.Close()
-		return fmt.Errorf("hysteria2: %w", err)
+		mixedAddr := fmt.Sprintf("127.0.0.1:%d", mixedPort)
+		bridge, err = newUDPBridge(ctx, m.logs, profile.LocalPort, mixedAddr, profile.TargetPort)
+		if err != nil {
+			b.Close()
+			return fmt.Errorf("hysteria2: %w", err)
+		}
+		break
 	}
 
 	m.mu.Lock()
 	m.running = true
 	m.box = b
 	m.bridge = bridge
+	m.profile = profile
 	m.mu.Unlock()
 
 	m.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("hysteria2 started (pid=%d) listening on 127.0.0.1:%d", os.Getpid(), bridge.boundPort()))
@@ -91,25 +134,35 @@ func (m *Manager) Start(ctx context.Context, profile state.Hysteria2Profile) err
 }
 
 func (m *Manager) Stop(ctx context.Context) error {
-	m.mu.Lock()
-	if !m.running {
-		m.mu.Unlock()
-		return nil
-	}
+	m.opMu.Lock()
+	defer m.opMu.Unlock()
+
+	m.mu.RLock()
+	running := m.running
 	b := m.box
 	bridge := m.bridge
+	m.mu.RUnlock()
+	if !running {
+		return nil
+	}
+
+	if bridge != nil {
+		bridge.Close()
+	}
+	var closeErr error
+	if b != nil {
+		closeErr = b.Close()
+	}
+
+	m.mu.Lock()
 	m.running = false
 	m.box = nil
 	m.bridge = nil
 	m.mu.Unlock()
 
-	if bridge != nil {
-		bridge.Close()
-	}
-	if b != nil {
-		if err := b.Close(); err != nil {
-			return fmt.Errorf("hysteria2: stop box: %w", err)
-		}
+	if closeErr != nil {
+		m.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("hysteria2 stop: box close failed: %v", closeErr))
+		return fmt.Errorf("hysteria2: stop box: %w", closeErr)
 	}
 	m.logs.Add(state.LogInfo, state.SourceDaemon, "hysteria2 stopped")
 	return nil
@@ -118,7 +171,7 @@ func (m *Manager) Stop(ctx context.Context) error {
 func (m *Manager) Status() state.TransportStatus {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	if !m.running {
+	if !m.running || (m.bridge != nil && m.bridge.isDead()) {
 		return state.TransportStatus{}
 	}
 	pid := os.Getpid()
@@ -130,22 +183,19 @@ func (m *Manager) Status() state.TransportStatus {
 func (m *Manager) BoundLocalPort() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	if !m.running || m.bridge == nil {
+	if !m.running || m.bridge == nil || m.bridge.isDead() {
 		return 0
 	}
 	return m.bridge.boundPort()
 }
 
-// WaitForSession forces and proves the Hysteria2 QUIC handshake and
-// Salamander/password auth against the remote server by opening (then
-// immediately closing) a packet session on the same outbound instance the
-// bridge's traffic flows through. sing-quic's client caches the resulting
-// QUIC connection and reuses it for later traffic, so this is a real
-// warm-up rather than a disposable probe.
+// WaitForSession forces and proves the Hysteria2 handshake by opening (then
+// closing) a packet session on the same outbound the bridge uses.
 func (m *Manager) WaitForSession(ctx context.Context, timeout time.Duration) error {
 	m.mu.RLock()
 	b := m.box
-	running := m.running
+	running := m.running && (m.bridge == nil || !m.bridge.isDead())
+	targetPort := m.profile.TargetPort
 	m.mu.RUnlock()
 	if !running || b == nil {
 		return fmt.Errorf("hysteria2: not running")
@@ -162,7 +212,7 @@ func (m *Manager) WaitForSession(ctx context.Context, timeout time.Duration) err
 	waitCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	target, err := net.ResolveUDPAddr("udp", relayDestination)
+	target, err := net.ResolveUDPAddr("udp", relayDestination(targetPort))
 	if err != nil {
 		return fmt.Errorf("hysteria2: resolve relay destination: %w", err)
 	}

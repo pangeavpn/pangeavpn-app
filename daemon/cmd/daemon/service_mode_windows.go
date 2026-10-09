@@ -5,19 +5,22 @@ package main
 import (
 	"context"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
 	"golang.org/x/sys/windows/svc"
+	"golang.org/x/sys/windows/svc/eventlog"
 )
 
 const daemonServiceName = "PangeaDaemon"
 
 func shouldRunAsService() bool {
-	for _, arg := range os.Args[1:] {
-		if strings.EqualFold(strings.TrimSpace(arg), "--service") {
-			return true
-		}
+	hasServiceFlag := slices.ContainsFunc(os.Args[1:], func(arg string) bool {
+		return strings.EqualFold(strings.TrimSpace(arg), "--service")
+	})
+	if hasServiceFlag {
+		return true
 	}
 
 	isService, err := svc.IsWindowsService()
@@ -44,6 +47,7 @@ func (w *windowsServiceRunner) Execute(args []string, requests <-chan svc.Change
 
 	runtime, err := startDaemonRuntime()
 	if err != nil {
+		reportStartFailure(err)
 		return true, serviceStartError
 	}
 
@@ -52,16 +56,11 @@ func (w *windowsServiceRunner) Execute(args []string, requests <-chan svc.Change
 	for {
 		select {
 		case <-runtime.serveErr:
-			stopCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
-			_ = stopDaemonRuntime(stopCtx, runtime)
-			cancel()
+			_ = stopDaemonRuntimeWithTimeout(runtime)
 			return true, serviceHTTPError
 		case request, ok := <-requests:
 			if !ok {
-				stopCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
-				stopErr := stopDaemonRuntime(stopCtx, runtime)
-				cancel()
-				if stopErr != nil {
+				if stopDaemonRuntimeWithTimeout(runtime) != nil {
 					return true, serviceStopError
 				}
 				return false, 0
@@ -72,10 +71,7 @@ func (w *windowsServiceRunner) Execute(args []string, requests <-chan svc.Change
 				changes <- request.CurrentStatus
 			case svc.Stop, svc.Shutdown:
 				changes <- svc.Status{State: svc.StopPending, WaitHint: uint32(shutdownTimeout / time.Millisecond)}
-				stopCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
-				stopErr := stopDaemonRuntime(stopCtx, runtime)
-				cancel()
-				if stopErr != nil {
+				if stopDaemonRuntimeWithTimeout(runtime) != nil {
 					return true, serviceStopError
 				}
 				return false, 0
@@ -84,4 +80,22 @@ func (w *windowsServiceRunner) Execute(args []string, requests <-chan svc.Change
 			}
 		}
 	}
+}
+
+func stopDaemonRuntimeWithTimeout(runtime *daemonRuntime) error {
+	stopCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer cancel()
+	return stopDaemonRuntime(stopCtx, runtime)
+}
+
+// The daemon's own log lives in the state dir, so a failure to reach that dir
+// is invisible anywhere but the Windows event log.
+func reportStartFailure(err error) {
+	_ = eventlog.InstallAsEventCreate(daemonServiceName, eventlog.Error)
+	elog, openErr := eventlog.Open(daemonServiceName)
+	if openErr != nil {
+		return
+	}
+	defer elog.Close()
+	_ = elog.Error(serviceStartError, "daemon failed to start: "+err.Error())
 }

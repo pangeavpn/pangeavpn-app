@@ -54,31 +54,62 @@ type WireGuardStatus struct {
 	Detail   string `json:"detail"`
 	BytesIn  int64  `json:"bytesIn"`
 	BytesOut int64  `json:"bytesOut"`
-	// LastHandshakeUnix is the most recent successful WireGuard handshake with
-	// any peer, in Unix seconds; 0 means no handshake has completed yet. The
-	// interface can be Running with no handshake (device up, peer unreached),
-	// which is why connection readiness gates on this, not on Running alone.
+	// LastHandshakeUnix is the latest handshake with any peer, in Unix seconds
+	// (0 = none yet); readiness gates on this since the interface can be up unreached.
 	LastHandshakeUnix int64 `json:"lastHandshakeUnix"`
+	// PostQuantum is true when every peer carries an ML-KEM-derived pre-shared key.
+	PostQuantum bool `json:"postQuantum"`
 }
 
 type StatusResponse struct {
 	State  DaemonState `json:"state"`
 	Detail string      `json:"detail"`
+	// ProfileID is the profile the session runs on (or is held for), "" when idle.
+	ProfileID string `json:"profileId,omitempty"`
 	// ActiveTransport is "cloak", "naive", "reality", "hysteria2", "shadowsocks",
-	// "snowflake", or "" when disconnected.
-	ActiveTransport  string          `json:"activeTransport"`
-	Cloak            CloakStatus     `json:"cloak"`
-	Naive            TransportStatus `json:"naive"`
-	Reality          TransportStatus `json:"reality"`
-	Hysteria2        TransportStatus `json:"hysteria2"`
-	Shadowsocks      TransportStatus `json:"shadowsocks"`
-	Snowflake        TransportStatus `json:"snowflake"`
-	WireGuard        WireGuardStatus `json:"wireguard"`
-	KillSwitchActive bool            `json:"killSwitchActive"`
-	// Reconnecting marks an ERROR the daemon is still working on: the session
-	// dropped on its own and rebuilds are being retried on a backoff. Clients
-	// show it as a connection in progress rather than a dead one.
+	// "snowflake", "wireguard" (no transport at all), or "" when disconnected.
+	ActiveTransport string `json:"activeTransport"`
+	// ConnectingTransport is the candidate the cascade is trying right now,
+	// "" outside a bring-up. Lets clients show "via X" while connecting.
+	ConnectingTransport string          `json:"connectingTransport"`
+	Cloak               CloakStatus     `json:"cloak"`
+	Naive               TransportStatus `json:"naive"`
+	Reality             TransportStatus `json:"reality"`
+	Hysteria2           TransportStatus `json:"hysteria2"`
+	Shadowsocks         TransportStatus `json:"shadowsocks"`
+	Snowflake           TransportStatus `json:"snowflake"`
+	WireGuard           WireGuardStatus `json:"wireguard"`
+	KillSwitchActive    bool            `json:"killSwitchActive"`
+	// Reconnecting marks an ERROR the daemon is still working on via backoff
+	// retries; clients show it as in-progress rather than a dead connection.
 	Reconnecting bool `json:"reconnecting"`
+	// TransportsExhausted marks a session no transport gets traffic through here.
+	// Clients rotate servers on it; the daemon cannot, a server being a profile.
+	TransportsExhausted bool `json:"transportsExhausted"`
+	// Offline marks a confident OS verdict of no internet while a session is
+	// intended; clients show "no internet" instead of an endlessly failing retry.
+	Offline bool `json:"offline"`
+	// SplitTunnel summarises split tunnelling; absent where the daemon has none wired in.
+	SplitTunnel *SplitTunnelStatus `json:"splitTunnel,omitempty"`
+}
+
+// SplitTunnelStatus carries counts only: the app paths and ranges stay on GET /split-tunnel,
+// so the polled /status never carries them.
+type SplitTunnelStatus struct {
+	Enabled   bool `json:"enabled"`
+	AppCount  int  `json:"appCount"`
+	CIDRCount int  `json:"cidrCount"`
+	// AppsActive is true while excluded apps really bypass: rules set, a tunnel device
+	// pumping and the off-tunnel egress permitted.
+	AppsActive  bool `json:"appsActive"`
+	BypassFlows int  `json:"bypassFlows"`
+	// Pending marks saved settings the live session does not carry yet.
+	Pending bool `json:"pending"`
+	// UnavailableReason is "" or why excluded apps cannot bypass (classifierFailed,
+	// egressFailed, permitFailed, stackFailed, strictReversePath).
+	UnavailableReason string `json:"unavailableReason"`
+	// CIDRsDropped marks ranges kept in the tunnel because this server's routes could not fit them.
+	CIDRsDropped bool `json:"cidrsDropped,omitempty"`
 }
 
 type CloakProfile struct {
@@ -91,11 +122,13 @@ type CloakProfile struct {
 	Password         string `json:"password"`
 	// Cover SNI Cloak presents; empty => buildRawConfig defaults to www.microsoft.com.
 	ServerName string `json:"serverName,omitempty"`
+	// ProxyMethod is the server-side ProxyBook key naming where decoded
+	// traffic goes. Empty => DefaultCloakProxyMethod. Set by ApplyHop.
+	ProxyMethod string `json:"proxyMethod,omitempty"`
 }
 
 // NaiveProfile carries per-device NaiveProxy credentials, hub-provisioned
-// the same way CloakProfile is. Nil on a Profile means no NaiveProxy
-// fallback is configured for that profile.
+// the same way CloakProfile is. Nil means no NaiveProxy fallback configured.
 type NaiveProfile struct {
 	LocalPort  int    `json:"localPort"`
 	RemoteHost string `json:"remoteHost"`
@@ -105,11 +138,13 @@ type NaiveProfile struct {
 	// ServerName is the cover SNI presented during the TLS handshake
 	// (naive's --proxy host), analogous to CloakProfile.ServerName.
 	ServerName string `json:"serverName,omitempty"`
+	// BridgePort is the remote node's framed-UDP bridge this tunnel dials
+	// through the CONNECT stream. Zero => DefaultNaiveBridgePort. Set by ApplyHop.
+	BridgePort int `json:"bridgePort,omitempty"`
 }
 
 // RealityProfile carries per-device VLESS+REALITY credentials, hub-provisioned
-// the same way NaiveProfile is. Nil on a Profile means no REALITY transport
-// is configured for that profile.
+// the same way NaiveProfile is. Nil means no REALITY transport configured.
 type RealityProfile struct {
 	LocalPort  int    `json:"localPort"`
 	RemoteHost string `json:"remoteHost"`
@@ -124,17 +159,12 @@ type RealityProfile struct {
 	// ServerName is the REALITY SNI / camouflage target hostname.
 	ServerName string `json:"serverName,omitempty"`
 	// TargetPort is the loopback port on the remote node that decoded UDP
-	// is forwarded to (the node's local WireGuard listener). Defaults to
-	// 51820 (WireGuard's standard port) when zero.
+	// is forwarded to (the node's WireGuard listener). Defaults to 51820.
 	TargetPort int `json:"targetPort,omitempty"`
 }
 
-// Hysteria2Profile carries per-device Hysteria2 (QUIC transport, Salamander
-// obfuscation) credentials, hub-provisioned the same way NaiveProfile is.
-// Nil on a Profile means no Hysteria2 transport is configured for that
-// profile. The real destination this tunnel relays WireGuard traffic to
-// (the node's WireGuard listener) is not carried here — same convention as
-// Cloak/NaiveProxy: it is a fixed server-side detail, not client config.
+// Hysteria2Profile carries per-device Hysteria2 (QUIC, Salamander obfuscation)
+// credentials, hub-provisioned the same way NaiveProfile is; nil means unconfigured.
 type Hysteria2Profile struct {
 	LocalPort  int    `json:"localPort"`
 	RemoteHost string `json:"remoteHost"`
@@ -154,6 +184,12 @@ type Hysteria2Profile struct {
 	// PinSHA256 is a base64-encoded SHA-256 hash of the server certificate's
 	// public key; when set, the cert is pinned regardless of Insecure.
 	PinSHA256 string `json:"pinSha256,omitempty"`
+	// RemotePorts are "start:end" UDP ranges the client hops across so a network
+	// blocking the single RemotePort can't stop the tunnel; empty disables hopping.
+	RemotePorts []string `json:"remotePorts,omitempty"`
+	// TargetPort is the loopback port on the remote node that decoded UDP is
+	// forwarded to. Zero => DefaultWireGuardPort. Set by ApplyHop.
+	TargetPort int `json:"targetPort,omitempty"`
 }
 
 // ShadowsocksProfile carries per-node Shadowsocks (AEAD or SS-2022) settings.
@@ -174,11 +210,7 @@ type ShadowsocksProfile struct {
 }
 
 // SnowflakeProfile carries per-device Tor Snowflake (WebRTC rendezvous)
-// settings. Unlike Cloak/NaiveProxy/REALITY/Hysteria2, Snowflake has no
-// single fixed remote host: rendezvous happens against a broker (optionally
-// via domain fronting or an AMP cache), and the actual data-plane peer is a
-// volunteer WebRTC proxy discovered dynamically per-session. Nil on a
-// Profile means no Snowflake transport is configured for that profile.
+// settings; unlike other transports it has no fixed remote host, only a broker.
 type SnowflakeProfile struct {
 	LocalPort int    `json:"localPort"`
 	BrokerURL string `json:"brokerURL"`
@@ -202,12 +234,40 @@ type WireGuardProfile struct {
 	TunnelName  string   `json:"tunnelName"`
 	DNS         []string `json:"dns"`
 	BypassHosts []string `json:"bypassHosts,omitempty"`
+	// HubInTunnel keeps BypassHosts out of the routing bypass so hub traffic
+	// goes through the tunnel; they stay kill-switch permitted either way.
+	HubInTunnel bool `json:"hubInTunnel,omitempty"`
+	// DirectEndpoint is the node's own WireGuard listener as host:port, used
+	// by the direct "wireguard" method; empty requires a transport in front.
+	DirectEndpoint string `json:"directEndpoint,omitempty"`
+}
+
+// DefaultWireGuardPort is where a node's own WireGuard listener sits, and so
+// where every transport forwards decoded traffic on a single-hop profile.
+const DefaultWireGuardPort = 51820
+
+// HopProfile makes a profile multihop: the transport terminates on an entry
+// node relaying WireGuard to the exit node holding the peer. Nil means single-hop.
+type HopProfile struct {
+	// SingBoxPort is the entry's loopback hop port for REALITY, Hysteria2
+	// and Shadowsocks.
+	SingBoxPort int `json:"singBoxPort"`
+	// CloakProxyMethod is the entry's ProxyBook key routing to this exit.
+	CloakProxyMethod string `json:"cloakProxyMethod,omitempty"`
+	// NaiveBridgePort is the entry's framed-UDP bridge for this exit.
+	NaiveBridgePort int `json:"naiveBridgePort,omitempty"`
+	// EntryRegion and ExitRegion label the session for the UI. Display only;
+	// routing never reads them.
+	EntryRegion string `json:"entryRegion,omitempty"`
+	ExitRegion  string `json:"exitRegion,omitempty"`
 }
 
 type Profile struct {
 	ID    string       `json:"id"`
 	Name  string       `json:"name"`
 	Cloak CloakProfile `json:"cloak"`
+	// Hop is optional; nil means single-hop. See HopProfile.
+	Hop *HopProfile `json:"hop,omitempty"`
 	// Naive is optional; nil means this profile has no NaiveProxy fallback
 	// configured and Connect only ever tries Cloak.
 	Naive *NaiveProfile `json:"naive,omitempty"`
@@ -223,11 +283,8 @@ type Profile struct {
 	// Snowflake is optional; nil means this profile has no Snowflake
 	// transport configured.
 	Snowflake *SnowflakeProfile `json:"snowflake,omitempty"`
-	// TransportEndpointIPs are this node's transport endpoints as raw IPs, as
-	// the hub reported them. The kill switch permits these and WireGuard routes
-	// them outside the tunnel with no DNS lookup — a lookup is impossible
-	// behind an engaged Lockdown lock, which blocks DNS, so without these only
-	// Cloak (whose remote host is already an IP) could get out.
+	// TransportEndpointIPs are this node's transport endpoints as raw IPs. The
+	// kill switch permits these with no DNS lookup, which Lockdown mode blocks.
 	TransportEndpointIPs []string         `json:"transportEndpointIPs,omitempty"`
 	WireGuard            WireGuardProfile `json:"wireguard"`
 }

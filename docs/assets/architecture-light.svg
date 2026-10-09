@@ -1,0 +1,86 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="560" viewBox="0 0 960 560" role="img" aria-labelledby="title desc">
+<title id="title">PangeaVPN architecture</title>
+<desc id="desc">On the device, a sandboxed renderer talks to the Electron main process over IPC. The main process talks to the Pangea hub through a sealed envelope and to the privileged Go daemon over Bearer-authenticated HTTP on 127.0.0.1:8787. The daemon runs WireGuard in-process and wraps it in an obfuscation transport that reaches a VPN node.</desc>
+<style>
+  .panel { fill: #fbf9f2; stroke: #ebe5da; }
+  .card { fill: #ffffff; stroke: #e1dace; stroke-width: 1.2; }
+  .t { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif; font-size: 17px; font-weight: 600; fill: #1e1c1c; }
+  .s { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif; font-size: 13.5px; fill: #6d685f; }
+  .cap { font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace; font-size: 11px; letter-spacing: 1.2px; fill: #9a948a; }
+  .lbl { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif; font-size: 14px; fill: #6d685f; }
+  .lbl-a { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif; font-size: 14px; font-weight: 600; fill: #b34d25; }
+  .mono-a { font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace; font-size: 11.5px; letter-spacing: 1px; fill: #b34d25; }
+  .line { stroke: #a39c91; stroke-width: 1.5; fill: none; }
+  .dash { stroke: #a39c91; stroke-width: 1.3; stroke-dasharray: 4 4; fill: none; }
+  .region { fill: none; stroke: #cfc7ba; stroke-width: 1.3; stroke-dasharray: 6 5; }
+  .acc { stroke: #c3562b; stroke-width: 2; fill: none; }
+  .acc-fill { fill: #c3562b; }
+  .line-fill { fill: #a39c91; }
+  .outer { fill: #f6e3d8; stroke: #c3562b; stroke-width: 1.6; }
+  .acard { fill: #fbeee6; stroke: #c3562b; stroke-width: 1.4; }
+  .slate { fill: #434c59; }
+  .st { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif; font-size: 17px; font-weight: 600; fill: #ffffff; }
+  .ss { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif; font-size: 13.5px; fill: #cdd3dc; }
+  .icon { stroke: #6d685f; stroke-width: 1.6; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+  .icon-a { stroke: #b34d25; stroke-width: 1.6; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+  .x { stroke: #d94141; stroke-width: 2.4; stroke-linecap: round; }
+  .blocked { stroke: #a39c91; stroke-width: 1.5; fill: none; opacity: 0.8; }
+  .ko { fill: #fbf9f2; }
+  .brick { fill: #e9e2d6; stroke: #d8cfc1; stroke-width: 1; }
+</style>
+<defs>
+  <marker id="arr" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <path d="M0,1 L9,5 L0,9 z" class="line-fill"/>
+  </marker>
+  <marker id="arr-a" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <path d="M0,1 L9,5 L0,9 z" class="acc-fill"/>
+  </marker>
+</defs>
+<rect class="panel" x="0.5" y="0.5" width="959" height="559" rx="18"/>
+<rect class="region" x="24" y="24" width="640" height="512" rx="16"/>
+<text class="cap" x="44" y="52">YOUR DEVICE</text>
+<rect class="card" x="56" y="76" width="240" height="76" rx="14"/>
+<text class="t" x="176.0" y="107" text-anchor="middle">Renderer</text>
+<text class="s" x="176.0" y="128" text-anchor="middle">sandboxed, no Node access</text>
+<rect class="card" x="56" y="232" width="240" height="76" rx="14"/>
+<text class="t" x="176.0" y="263" text-anchor="middle">Your apps</text>
+<text class="s" x="176.0" y="284" text-anchor="middle">all OS traffic</text>
+<rect class="slate" x="56" y="404" width="240" height="96" rx="14"/>
+<text class="st" x="176.0" y="435" text-anchor="middle">WireGuard</text>
+<text class="ss" x="176.0" y="456" text-anchor="middle">in-process Go library</text>
+<text class="ss" x="176.0" y="474" text-anchor="middle">ML-KEM-768 pre-shared key</text>
+<rect class="card" x="392" y="76" width="240" height="76" rx="14"/>
+<text class="t" x="512.0" y="107" text-anchor="middle">Electron main</text>
+<text class="s" x="512.0" y="128" text-anchor="middle">hub client, credentials, tray</text>
+<rect class="card" x="392" y="232" width="240" height="76" rx="14"/>
+<text class="t" x="512.0" y="263" text-anchor="middle">Go daemon</text>
+<text class="s" x="512.0" y="284" text-anchor="middle">privileged, owns the tunnel</text>
+<rect class="acard" x="392" y="404" width="240" height="96" rx="14"/>
+<text class="t" x="512.0" y="435" text-anchor="middle">Transport</text>
+<text class="s" x="512.0" y="456" text-anchor="middle">REALITY, Cloak, Shadowsocks,</text>
+<text class="s" x="512.0" y="474" text-anchor="middle">Hysteria2 or NaiveProxy</text>
+<rect class="card" x="720" y="76" width="216" height="76" rx="14"/>
+<text class="t" x="828.0" y="107" text-anchor="middle">Pangea hub</text>
+<text class="s" x="828.0" y="128" text-anchor="middle">auth and provisioning</text>
+<rect class="card" x="720" y="414" width="216" height="76" rx="14"/>
+<text class="t" x="828.0" y="445" text-anchor="middle">VPN node</text>
+<text class="s" x="828.0" y="466" text-anchor="middle">egress to the internet</text>
+<path class="line" d="M300,114 H388" marker-start="url(#arr)" marker-end="url(#arr)"/>
+<text class="lbl" x="344" y="104" text-anchor="middle" style="font-size:12.5px">IPC</text>
+<path class="line" d="M512,156 V228" marker-end="url(#arr)"/>
+<text class="lbl" x="524" y="187" style="font-size:12.5px">Bearer-auth HTTP</text>
+<text class="cap" x="524" y="205" style="letter-spacing:0.4px">127.0.0.1:8787</text>
+<path class="line" d="M176,312 V400" marker-end="url(#arr)"/>
+<path class="line" d="M300,452 H388" marker-end="url(#arr)"/>
+<path class="dash" d="M492,312 V400" marker-end="url(#arr)"/>
+<path class="dash" d="M420,312 C420,360 256,352 256,400" marker-end="url(#arr)"/>
+<text class="lbl" x="504" y="362" style="font-size:12.5px">runs both</text>
+<rect class="ko" x="656" y="84" width="16" height="64"/>
+<rect class="ko" x="656" y="422" width="16" height="64"/>
+<path class="line" d="M636,114 H716" marker-start="url(#arr)" marker-end="url(#arr)"/>
+<text class="lbl" x="676" y="100" text-anchor="middle" style="font-size:12.5px">sealed</text>
+<text class="lbl" x="676" y="136" text-anchor="middle" style="font-size:12.5px">envelope</text>
+<path class="acc" d="M636,452 H716" marker-start="url(#arr-a)" marker-end="url(#arr-a)"/>
+<text class="lbl-a" x="676" y="438" text-anchor="middle" style="font-size:12.5px">looks like</text>
+<text class="lbl-a" x="676" y="474" text-anchor="middle" style="font-size:12.5px">HTTPS</text>
+</svg>

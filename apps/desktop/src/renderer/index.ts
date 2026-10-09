@@ -2,6 +2,7 @@ import type { LogEntry, StatusResponse } from "@pangeavpn/shared-types";
 import {
   initAutoConnect,
   notifyStatusTick,
+  notifyConnectRequested,
   notifyUserConnected,
   notifyUserDisconnected,
   notifyToggleChanged,
@@ -9,26 +10,62 @@ import {
   getUserIntent
 } from "./autoConnect.js";
 import { pickRandomServer, resolveSelection } from "./serverPick.js";
+import { resolveEntry } from "./multihop.js";
+import { planRotation, recordRotation } from "./serverRotation.js";
 import { buildDriftMap } from "./driftMap.js";
 import { dnsChoiceFor, dnsServersFor, type DnsChoice } from "./dnsPresets.js";
 import { buildFlag } from "./flags.js";
 import { formatAccountNumberInput, normalizeAccountNumber } from "./accountNumber.js";
-import { shouldShowExpiredScreen } from "./expiredScreen.js";
+import { loginErrorText } from "./loginErrorText.js";
 import {
   buildServerRetryOrder,
   groupRegions,
   orderByRecent,
   pickNode,
   promoteRecent,
+  regionKeyOf,
   regionOfServer,
   type Region
 } from "./regions.js";
 import { scheduleConnectionMessages } from "./connectionProgress.js";
+import { HUB_METHOD_TITLE_KEYS, hubActiveText, hubTestText } from "./hubStatusText.js";
+import {
+  ACCENT_NAMES,
+  ACCENT_THEMES,
+  resolveAccent,
+  swatchColor,
+  type AccentName
+} from "./accentThemes.js";
 import {
   daemonHealthAfterFailure,
   daemonHealthAfterSuccess,
   initialDaemonHealth
 } from "./daemonHealth.js";
+import {
+  fallbackSplitEntry,
+  groupSplitRows,
+  isolateAuto,
+  isolateLtr,
+  middleEllipsis,
+  placeChildren,
+  splitAppErrorText,
+  splitAppsUnavailable,
+  splitChipVisible,
+  splitCidrErrorText,
+  splitCidrsAdjusted,
+  splitEntryKey,
+  splitEntryPath,
+  splitInvalidByRule,
+  splitPaneNote,
+  splitPickerSummary,
+  splitRailSummary,
+  splitRangesSaveError,
+  splitRowNote,
+  splitRuleKey,
+  splitStatusOf,
+  type SplitLoad,
+  type SplitStatusSummary
+} from "./splitTunnelView.js";
 import {
   t,
   initLocale,
@@ -66,10 +103,26 @@ const factSessionEl = document.getElementById("factSession") as HTMLSpanElement;
 const factViaEl = document.getElementById("factVia") as HTMLSpanElement;
 const regionSlots = document.getElementById("regionSlots") as HTMLElement;
 const regionMoreCount = document.getElementById("regionMoreCount") as HTMLElement;
-const themeToggleBtn = document.getElementById("themeToggleBtn") as HTMLButtonElement;
+// One in the shell header, one on the sign-in screen — both stay in step.
+const themeToggleBtns = Array.from(document.querySelectorAll<HTMLButtonElement>(".theme-toggle"));
 const uiMessageEl = document.getElementById("uiMessage") as HTMLParagraphElement;
 const appVersionEl = document.getElementById("appVersion") as HTMLSpanElement;
 const copyDiagnosticsBtn = document.getElementById("copyDiagnosticsBtn") as HTMLButtonElement;
+const openLogsFolderBtn = document.getElementById("openLogsFolderBtn") as HTMLButtonElement;
+const sendDiagnosticsBtn = document.getElementById("sendDiagnosticsBtn") as HTMLButtonElement;
+const settingsSendDiagnosticsBtn = document.getElementById("settingsSendDiagnosticsBtn") as HTMLButtonElement;
+const diagnosticsModal = document.getElementById("diagnosticsModal") as HTMLElement;
+const diagnosticsConfirm = document.getElementById("diagnosticsConfirm") as HTMLElement;
+const diagnosticsResult = document.getElementById("diagnosticsResult") as HTMLElement;
+const diagnosticsResultTitle = document.getElementById("diagnosticsResultTitle") as HTMLParagraphElement;
+const diagnosticsResultBody = document.getElementById("diagnosticsResultBody") as HTMLParagraphElement;
+const diagnosticsCode = document.getElementById("diagnosticsCode") as HTMLParagraphElement;
+const diagnosticsNote = document.getElementById("diagnosticsNote") as HTMLInputElement;
+const diagnosticsSendBtn = document.getElementById("diagnosticsSendBtn") as HTMLButtonElement;
+const diagnosticsCancelBtn = document.getElementById("diagnosticsCancelBtn") as HTMLButtonElement;
+const diagnosticsCloseBtn = document.getElementById("diagnosticsCloseBtn") as HTMLButtonElement;
+const diagnosticsDoneBtn = document.getElementById("diagnosticsDoneBtn") as HTMLButtonElement;
+const diagnosticsCopyCodeBtn = document.getElementById("diagnosticsCopyCodeBtn") as HTMLButtonElement;
 const copyLogsBtn = document.getElementById("copyLogsBtn") as HTMLButtonElement;
 const clearLogsBtn = document.getElementById("clearLogsBtn") as HTMLButtonElement;
 const logsEl = document.getElementById("logs") as HTMLDivElement;
@@ -85,20 +138,51 @@ const serverPanel = document.getElementById("serverPanel") as HTMLElement;
 const serverSelect = document.getElementById("serverSelect") as HTMLSelectElement;
 const serverConnectBtn = document.getElementById("serverConnectBtn") as HTMLButtonElement;
 const serverDisconnectBtn = document.getElementById("serverDisconnectBtn") as HTMLButtonElement;
-const serverRefreshBtn = document.getElementById("serverRefreshBtn") as HTMLButtonElement;
+const stage = document.querySelector<HTMLElement>(".stage")!;
+const expiredScreen = document.getElementById("expiredScreen") as HTMLElement;
+const expiredDate = document.getElementById("expiredDate") as HTMLParagraphElement;
+const expiredBillingBtn = document.getElementById("expiredBillingBtn") as HTMLButtonElement;
+const expiredRecheckBtn = document.getElementById("expiredRecheckBtn") as HTMLButtonElement;
+const expiredMessage = document.getElementById("expiredMessage") as HTMLParagraphElement;
+const expiredContent = expiredScreen.querySelector<HTMLElement>(".expired-content")!;
+const expiredDisconnectBtn = document.getElementById("expiredDisconnectBtn") as HTMLButtonElement;
+const expiredSignOutBtn = document.getElementById("expiredSignOutBtn") as HTMLButtonElement;
+const serverRotateBtn = document.getElementById("serverRotateBtn") as HTMLButtonElement;
+const heroPath = document.getElementById("heroPath") as HTMLElement;
+const heroPathEntry = document.getElementById("heroPathEntry") as HTMLElement;
+const heroPathExit = document.getElementById("heroPathExit") as HTMLElement;
+const heroPq = document.getElementById("heroPq") as HTMLElement;
+const heroSplit = document.getElementById("heroSplit") as HTMLElement;
+const heroServerLabel = document.getElementById("heroServerLabel") as HTMLElement;
+const multihopPanel = document.getElementById("multihopPanel") as HTMLElement;
+const multihopToggle = document.getElementById("multihopToggle") as HTMLInputElement;
+const multihopEntry = document.getElementById("multihopEntry") as HTMLElement;
+const multihopEntryChips = document.getElementById("multihopEntryChips") as HTMLElement;
+const multihopEntryHint = document.getElementById("multihopEntryHint") as HTMLElement;
+const hubActiveDot = document.getElementById("hubActiveDot") as HTMLElement;
+const hubActiveTextEl = document.getElementById("hubActiveText") as HTMLElement;
 const hubDirectIpToggle = document.getElementById("hubDirectIpToggle") as HTMLInputElement;
+const hubRealityToggle = document.getElementById("hubRealityToggle") as HTMLInputElement;
 const hubShadowsocksToggle = document.getElementById("hubShadowsocksToggle") as HTMLInputElement;
 const hubFrontedToggle = document.getElementById("hubFrontedToggle") as HTMLInputElement;
 const hubNormalToggle = document.getElementById("hubNormalToggle") as HTMLInputElement;
 const allowLanToggle = document.getElementById("allowLanToggle") as HTMLInputElement;
+const postQuantumToggle = document.getElementById("postQuantumToggle") as HTMLInputElement;
 const dnsPresetSelect = document.getElementById("dnsPresetSelect") as HTMLSelectElement;
 const customDnsField = document.getElementById("customDnsField") as HTMLElement;
 const customDnsInput = document.getElementById("customDnsInput") as HTMLInputElement;
 const wireguardMtuInput = document.getElementById("wireguardMtuInput") as HTMLInputElement;
+const hubInTunnelToggle = document.getElementById("hubInTunnelToggle") as HTMLInputElement;
+const developerSection = document.getElementById("secDeveloper") as HTMLElement;
+const developerNavItem = document.getElementById("settingsNavDeveloper") as HTMLButtonElement;
 const preferredTransportSelect = document.getElementById("preferredTransportSelect") as HTMLSelectElement;
 const launchAtStartupToggle = document.getElementById("launchAtStartupToggle") as HTMLInputElement;
-const alwaysConnectedToggle = document.getElementById("alwaysConnectedToggle") as HTMLInputElement;
+const autoConnectToggle = document.getElementById("autoConnectToggle") as HTMLInputElement;
+const deadDropToggle = document.getElementById("deadDropToggle") as HTMLInputElement;
+const lockdownToggle = document.getElementById("lockdownToggle") as HTMLInputElement;
+const notificationsToggle = document.getElementById("notificationsToggle") as HTMLInputElement;
 const loginScreen = document.getElementById("loginScreen") as HTMLElement;
+const loginSettingsBtn = document.getElementById("loginSettingsBtn") as HTMLButtonElement;
 const loginScreenBtn = document.getElementById("loginScreenBtn") as HTMLButtonElement;
 const loginScreenMessage = document.getElementById("loginScreenMessage") as HTMLParagraphElement;
 const heroCard = document.getElementById("heroCard") as HTMLElement;
@@ -108,13 +192,22 @@ const manageSubLink = document.getElementById("manageSubLink") as HTMLAnchorElem
 const menuSettingsBtn = document.getElementById("menuSettingsBtn") as HTMLButtonElement;
 const settingsOverlay = document.getElementById("settingsOverlay") as HTMLElement;
 const settingsOverlayCloseBtn = document.getElementById("settingsOverlayCloseBtn") as HTMLButtonElement;
+const settingsPane = document.getElementById("settingsPane") as HTMLElement;
+const settingsNav = document.getElementById("settingsNav") as HTMLElement;
+const settingsAccountActions = document.getElementById("settingsAccountActions") as HTMLElement;
+const settingsAccountBar = document.getElementById("settingsAccountBar") as HTMLElement;
 const accountSubscription = document.getElementById("accountSubscription") as HTMLSpanElement;
-const setCensorshipValue = document.getElementById("setCensorshipValue") as HTMLSpanElement;
+const setProvisioningValue = document.getElementById("setProvisioningValue") as HTMLSpanElement;
 const setTransportValue = document.getElementById("setTransportValue") as HTMLSpanElement;
 const setNetworkValue = document.getElementById("setNetworkValue") as HTMLSpanElement;
+const setSplitTunnelValue = document.getElementById("setSplitTunnelValue") as HTMLSpanElement;
 const setStartupValue = document.getElementById("setStartupValue") as HTMLSpanElement;
+const setNotificationsValue = document.getElementById("setNotificationsValue") as HTMLSpanElement;
+const setDeveloperValue = document.getElementById("setDeveloperValue") as HTMLSpanElement;
 const setLanguageValue = document.getElementById("setLanguageValue") as HTMLSpanElement;
 const checkUpdatesBtn = document.getElementById("checkUpdatesBtn") as HTMLButtonElement;
+const setAppearanceValue = document.getElementById("setAppearanceValue") as HTMLSpanElement;
+const accentSwatches = document.getElementById("accentSwatches") as HTMLElement | null;
 const settingsVersionEl = document.getElementById("settingsVersion") as HTMLSpanElement;
 const serverPickerBtn = document.getElementById("serverPickerBtn") as HTMLButtonElement;
 const serverPickerOverlay = document.getElementById("serverPickerOverlay") as HTMLElement;
@@ -123,6 +216,8 @@ const serverPickerOverlayCloseBtn = document.getElementById("serverPickerOverlay
 
 type ThemeMode = "light" | "dark";
 const THEME_STORAGE_KEY = "pangea-vpn-theme";
+const ACCENT_STORAGE_KEY = "pangea-vpn-accent";
+const TOAST_HOVER_DISMISS_MS = 200;
 const COLLAPSE_STATE_KEY = "pangea-vpn-collapse-state";
 
 let currentDaemonState: StatusResponse["state"] = "DISCONNECTED";
@@ -130,7 +225,8 @@ let latestStatus: StatusResponse | null = null;
 let uiRefreshing = false;
 let uiWorking = false;
 let lastServerIdLocal: string | null = null;
-let alwaysConnectedLocal = false;
+let autoConnectLocal = false;
+let lockdownLocal = false;
 let logsCursor = 0;
 let logEntries: LogEntry[] = [];
 let authState: AuthState = { authenticated: false, user: null };
@@ -142,6 +238,47 @@ let connectInFlight = false;
 // Hub's verdict on whether this account may connect; null until asked. Never
 // derived from subscription.status — prepaid plans stay "active" once lapsed.
 let entitled: boolean | null = null;
+let expiredAt: string | null = null;
+
+// The service is the only store for split tunnelling; these mirror its last reply.
+let splitLoad: SplitLoad = "loading";
+let splitConfig: SplitTunnelConfig | null = null;
+let splitConfigKeys = new Set<string>();
+let splitLive: SplitStatusSummary | null = null;
+let splitLoadSeq = 0;
+let splitLoadAt = 0;
+let splitToggleBusy = false;
+let splitCidrsBusy = false;
+let splitCatalog: SplitTunnelAppEntry[] | null = null;
+let splitCatalogState: "idle" | "loading" | "failed" | "ready" = "idle";
+let splitCatalogPending: Promise<void> | null = null;
+let splitCatalogAt = 0;
+const splitIcons = new Map<string, string>();
+const splitIconQueue = new Set<string>();
+let splitIconsInFlight = false;
+
+interface SplitRow {
+  key: string;
+  row: HTMLElement;
+  toggle: HTMLInputElement;
+  icon: HTMLElement;
+  path: HTMLElement;
+  note: HTMLElement;
+}
+
+// One visit to the picker: rows keep their place until it is opened again.
+let splitPaneGen = 0;
+let splitRowSeq = 0;
+let splitDescribed = false;
+let splitPinned: string[] = [];
+const splitSession = new Set<string>();
+const splitEntries = new Map<string, SplitTunnelAppEntry>();
+const splitRows = new Map<string, SplitRow>();
+const splitInvalid = new Map<string, SplitTunnelErrorCode>();
+const splitBusy = new Set<string>();
+let splitIconObserver: IntersectionObserver | null = null;
+let splitTouched = false;
+const splitPlatform: string = window.appPlatform ?? "";
 
 // Mirrors shared/mtu.ts — the renderer can't import it without clobbering
 // main's CommonJS copy in dist. Display only; keep in step with the input.
@@ -149,10 +286,12 @@ const MTU_MIN = 1280;
 const MTU_MAX = 1420;
 const MTU_DEFAULT = 1380;
 
-themeToggleBtn.addEventListener("click", () => {
-  const nextTheme: ThemeMode = document.body.dataset.theme === "dark" ? "light" : "dark";
-  applyTheme(nextTheme);
-});
+for (const btn of themeToggleBtns) {
+  btn.addEventListener("click", () => {
+    const nextTheme: ThemeMode = document.body.dataset.theme === "dark" ? "light" : "dark";
+    applyTheme(nextTheme);
+  });
+}
 
 menuBtn.addEventListener("click", () => {
   const isOpen = menuDropdown.classList.contains("open");
@@ -179,29 +318,42 @@ manageSubLink.addEventListener("click", (e) => {
 function updateSettingsSummaries(): void {
   const off = t("settings.summary.off");
 
-  const censorship: string[] = [];
-  if (hubDirectIpToggle.checked) censorship.push(t("settings.censorship.directIp.title"));
-  if (hubShadowsocksToggle.checked) censorship.push(t("settings.censorship.hubShadowsocks.title"));
-  if (hubFrontedToggle.checked) censorship.push(t("settings.censorship.hubFronted.title"));
-  if (hubNormalToggle.checked) censorship.push(t("settings.censorship.hubNormal.title"));
-  setCensorshipValue.textContent = censorship.length ? censorship.join(" · ") : off;
+  const provisioning: string[] = [];
+  if (hubDirectIpToggle.checked) provisioning.push(t("settings.provisioning.directIp.title"));
+  if (hubRealityToggle.checked) provisioning.push(t("settings.provisioning.hubReality.title"));
+  if (hubShadowsocksToggle.checked) provisioning.push(t("settings.provisioning.hubShadowsocks.title"));
+  if (hubFrontedToggle.checked) provisioning.push(t("settings.provisioning.hubFronted.title"));
+  if (hubNormalToggle.checked) provisioning.push(t("settings.provisioning.hubNormal.title"));
+  const provisioningSummary = provisioning.length ? provisioning.join(" · ") : off;
+  setProvisioningValue.textContent = provisioningSummary;
+  provisioningPickerValue.textContent = provisioningSummary;
 
   const transport = preferredTransportSelect.selectedOptions[0];
   setTransportValue.textContent = transport ? transport.textContent : "";
+  syncTransportChoice();
 
   const network = [`MTU ${wireguardMtuInput.value || MTU_DEFAULT}`];
   const dnsChoice = dnsPresetSelect.selectedOptions[0];
   if (dnsPresetSelect.value !== "automatic" && dnsChoice) network.push(dnsChoice.textContent ?? "DNS");
   if (allowLanToggle.checked) network.push(t("settings.network.allowLan.title"));
+  // The badge, not the title: the full name overflows the nav summary line.
+  if (postQuantumToggle.checked) network.push(t("hero.postQuantumBadge"));
   setNetworkValue.textContent = network.join(" · ");
+  renderSplitSummaries();
 
   const startup: string[] = [];
   if (launchAtStartupToggle.checked) startup.push(t("settings.startup.launch.title"));
-  if (alwaysConnectedToggle.checked) startup.push(t("settings.startup.lockdown.title"));
+  if (autoConnectToggle.checked) startup.push(t("settings.startup.autoConnect.title"));
+  if (lockdownToggle.checked) startup.push(t("settings.startup.lockdown.title"));
   setStartupValue.textContent = startup.length ? startup.join(" · ") : off;
+
+  setNotificationsValue.textContent = notificationsToggle.checked ? t("settings.notifications.status.title") : off;
+  setDeveloperValue.textContent = hubInTunnelToggle.checked ? t("settings.developer.hubInTunnel.title") : off;
 
   const language = languageSelect?.selectedOptions[0];
   setLanguageValue.textContent = language ? language.textContent : "";
+
+  setAppearanceValue.textContent = accentLabel(currentAccent);
 }
 
 function formatSubscriptionDate(iso: string | null): string {
@@ -231,25 +383,35 @@ function subscriptionText(sub: SubscriptionInfo | null): { text: string; warn: b
   return { text: t("sub.none"), warn: false };
 }
 
-/** Ask the hub whether this account may connect. Toasts once per transition
- *  into expired — the only notice a lapsed prepaid customer ever gets. */
-async function refreshEntitlement(): Promise<void> {
-  if (!pangeaApi) return;
+// Guards against a slow earlier call overwriting a newer one's verdict.
+let entitlementGeneration = 0;
+let latestEntitlementCheck: Promise<boolean> = Promise.resolve(false);
+
+/** Ask the hub whether this account may connect; a "no" raises the expired screen. Resolves
+ *  false when the hub could not be asked; the verdict lands no sooner than `holdMs`. */
+function refreshEntitlement(holdMs = 0): Promise<boolean> {
+  latestEntitlementCheck = checkEntitlement(holdMs);
+  return latestEntitlementCheck;
+}
+
+async function checkEntitlement(holdMs: number): Promise<boolean> {
+  if (!pangeaApi) return false;
+  const gen = ++entitlementGeneration;
+  const held = new Promise((resolve) => setTimeout(resolve, holdMs));
   let sub: SubscriptionInfo | null = null;
   try {
     sub = await pangeaApi.getSubscription();
   } catch {
-    return; // offline or hub down — leave the previous verdict alone
+    await held;
+    return false;
   }
+  await held;
+  if (gen !== entitlementGeneration) return true; // a newer check owns the verdict
   // Absent on older hubs: assume entitled rather than locking someone out.
-  const next = sub === null ? null : sub.entitled !== false;
-  const wasEntitled = entitled;
-  entitled = next;
-  if (next === false && wasEntitled !== false) {
-    showToast(t("connect.expired"), 8000);
-  }
+  entitled = sub === null ? null : sub.entitled !== false;
+  expiredAt = sub?.expiresAt ?? null;
   updateServerControlStates();
-  applyEntitlementUI();
+  return true;
 }
 
 // Fetched fresh each time Settings opens so expiry/renewal is always current.
@@ -272,84 +434,33 @@ async function refreshSubscription(): Promise<void> {
   // Settings just told us the truth — keep the connect gate in step with it.
   if (sub) {
     entitled = sub.entitled !== false;
+    expiredAt = sub.expiresAt;
     updateServerControlStates();
-    applyEntitlementUI();
   }
 }
-
-// ── Subscription expired screen ───────────────────────────────
-
-const stage = document.querySelector(".stage") as HTMLElement;
-const subExpiredScreen = document.getElementById("subExpiredScreen") as HTMLElement;
-const subExpiredAccount = document.getElementById("subExpiredAccount") as HTMLElement;
-const subExpiredDevice = document.getElementById("subExpiredDevice") as HTMLElement;
-const subExpiredTopUpBtn = document.getElementById("subExpiredTopUpBtn") as HTMLButtonElement;
-const subExpiredRecheckBtn = document.getElementById("subExpiredRecheckBtn") as HTMLButtonElement;
-const subExpiredSignOutBtn = document.getElementById("subExpiredSignOutBtn") as HTMLButtonElement;
-const subExpiredMessage = document.getElementById("subExpiredMessage") as HTMLElement;
-
-const TOP_UP_URL = "https://pangeavpn.org/app";
-
-// Masked like the cached-token button: enough to tell two accounts apart
-// without putting the whole credential on screen.
-function maskedAccountNumber(): string {
-  const cached = localStorage.getItem("pangea:lastToken");
-  if (!cached) return t("common.dash");
-  return cached.length > 4
-    ? cached.slice(0, 4) + "•".repeat(Math.min(cached.length - 4, 12))
-    : "•".repeat(cached.length);
-}
-
-// Swaps the stage for the expired screen. The header stays mounted, so theme
-// and settings remain reachable while the account is out of time.
-function applyEntitlementUI(): void {
-  const show = shouldShowExpiredScreen(entitled, currentDaemonState);
-  if (show && subExpiredScreen.hidden) {
-    subExpiredAccount.textContent = maskedAccountNumber();
-    subExpiredDevice.textContent = localStorage.getItem(MY_DEVICE_NAME_KEY) ?? t("common.dash");
-    subExpiredMessage.textContent = "";
-  }
-  subExpiredScreen.hidden = !show;
-  stage.hidden = show;
-}
-
-subExpiredTopUpBtn.addEventListener("click", () => {
-  window.openExternal?.(TOP_UP_URL);
-});
-
-subExpiredRecheckBtn.addEventListener("click", async () => {
-  subExpiredRecheckBtn.disabled = true;
-  subExpiredMessage.textContent = t("subExpired.checking");
-  try {
-    await refreshEntitlement();
-    // Still expired: say so, otherwise applyEntitlementUI has already left.
-    if (entitled === false) subExpiredMessage.textContent = t("subExpired.stillExpired");
-  } finally {
-    subExpiredRecheckBtn.disabled = false;
-  }
-});
-
-subExpiredSignOutBtn.addEventListener("click", () => {
-  logoutBtn.click();
-});
 
 // ── Overlay focus management ──────────────────────────────────
 
-// Overlays cover the shell but leave it in the tab order, so the shell goes
-// `inert` on open; focus moves in, and is restored on close.
+// Overlays leave the layer below in the tab order, so it goes `inert` on open;
+// focus moves in and is restored on close.
 const overlayReturnFocus: Array<HTMLElement | null> = [];
+
+// A function, not a const: `shell` is declared further down the module.
+function overlayUnderlays(): HTMLElement[] {
+  return [shell, loginScreen];
+}
 
 function activateOverlay(overlay: HTMLElement): void {
   overlayReturnFocus.push(document.activeElement as HTMLElement | null);
-  shell.setAttribute("inert", "");
+  for (const el of overlayUnderlays()) el.setAttribute("inert", "");
   const focusTarget = overlay.querySelector<HTMLElement>("button:not([hidden]), [href], input, select, textarea");
   window.setTimeout(() => (focusTarget ?? overlay).focus(), 0);
 }
 
 function deactivateOverlay(): void {
-  // Only re-enable the shell once no full-screen overlay remains open.
+  // Only re-enable the layer below once no full-screen overlay remains open.
   if (!settingsOverlay.classList.contains("visible") && !serverPickerOverlay.classList.contains("visible")) {
-    shell.removeAttribute("inert");
+    for (const el of overlayUnderlays()) el.removeAttribute("inert");
   }
   const prev = overlayReturnFocus.pop();
   prev?.focus?.();
@@ -358,21 +469,82 @@ function deactivateOverlay(): void {
 // True while a modal is stacked above the full-screen overlays, so their Escape
 // handlers can defer to the top layer instead of closing the layer beneath it.
 function isSubModalOpen(): boolean {
-  return devicesModal.classList.contains("visible") || updateOverlay.classList.contains("visible");
+  return (
+    devicesModal.classList.contains("visible") ||
+    diagnosticsModal.classList.contains("visible") ||
+    updateOverlay.classList.contains("visible")
+  );
 }
+
+const accountNumberValue = document.getElementById("accountNumberValue") as HTMLSpanElement;
+const accountNumberToggleBtn = document.getElementById("accountNumberToggleBtn") as HTMLButtonElement;
+const accountNumberCopyBtn = document.getElementById("accountNumberCopyBtn") as HTMLButtonElement;
+const ACCOUNT_NUMBER_MASK = "••••-••••-••••-••••-••••-••••";
+let revealedAccountNumber: string | null = null;
+
+function hideAccountNumber(): void {
+  revealedAccountNumber = null;
+  accountNumberValue.textContent = ACCOUNT_NUMBER_MASK;
+  accountNumberValue.classList.remove("revealed");
+  accountNumberToggleBtn.textContent = t("settings.account.show");
+  accountNumberCopyBtn.hidden = true;
+  accountNumberCopyBtn.classList.remove("copied");
+}
+
+// Fetched only on demand so the credential never sits in the DOM unasked.
+async function revealAccountNumber(): Promise<void> {
+  const number = pangeaApi ? await pangeaApi.getAccountNumber().catch(() => null) : null;
+  if (!number) {
+    accountNumberValue.textContent = t("common.dash");
+    return;
+  }
+  revealedAccountNumber = formatAccountNumberInput(number);
+  accountNumberValue.textContent = revealedAccountNumber;
+  accountNumberValue.classList.add("revealed");
+  accountNumberToggleBtn.textContent = t("settings.account.hide");
+  accountNumberCopyBtn.hidden = false;
+}
+
+accountNumberToggleBtn.addEventListener("click", () => {
+  if (revealedAccountNumber) hideAccountNumber();
+  else void revealAccountNumber();
+});
+
+accountNumberCopyBtn.addEventListener("click", async () => {
+  if (!revealedAccountNumber) return;
+  try {
+    await copyTextToClipboard(revealedAccountNumber);
+    accountNumberCopyBtn.classList.add("copied");
+    setTimeout(() => accountNumberCopyBtn.classList.remove("copied"), 2000);
+  } catch (error) {
+    showToast(reportError("copyAccountNumber", error));
+  }
+});
 
 function openSettings(): void {
   settingsOverlay.classList.add("visible");
   settingsOverlay.setAttribute("aria-hidden", "false");
+  // Always open on the section list, never on a picker left over from last time.
+  closeSubpane(false);
   settingsVersionEl.textContent = appVersionEl.textContent || t("common.dash");
   updateSettingsSummaries();
-  void refreshSubscription();
+  settingsSpyLockUntil = 0;
+  settingsPane.scrollTo({ top: 0, behavior: "auto" });
+  sizeSettingsTail();
+  syncSettingsNav();
+  // Signed out, the account rows have nothing to act on — Settings is still
+  // reachable from the sign-in screen for language, theme and bypass methods.
+  settingsAccountActions.hidden = !authState.authenticated;
+  settingsAccountBar.hidden = !authState.authenticated;
+  if (authState.authenticated) void refreshSubscription();
+  void loadSplitTunnel();
   activateOverlay(settingsOverlay);
 }
 
 function closeSettings(): void {
   settingsOverlay.classList.remove("visible");
   settingsOverlay.setAttribute("aria-hidden", "true");
+  hideAccountNumber();
   deactivateOverlay();
 }
 
@@ -382,14 +554,272 @@ menuSettingsBtn.addEventListener("click", () => {
   openSettings();
 });
 
+loginSettingsBtn.addEventListener("click", openSettings);
+
 settingsOverlayCloseBtn.addEventListener("click", closeSettings);
+
+// ── Settings nav rail ─────────────────────────────────────────
+
+const settingsNavItems = Array.from(settingsNav.querySelectorAll<HTMLButtonElement>(".settings-nav-item"));
+const settingsSections = settingsNavItems
+  .map((item) => document.getElementById(item.dataset.settingsTarget ?? ""))
+  .filter((el): el is HTMLElement => el !== null);
+
+// Distance below the pane's top edge at which a section counts as "current".
+const SETTINGS_JUMP_GUTTER = 14;
+// Muzzles the scroll spy while a click-driven smooth scroll is in flight, so
+// the rail doesn't flicker through every section the pane passes on the way.
+let settingsSpyLockUntil = 0;
+
+function markSettingsNav(sectionId: string): void {
+  for (const item of settingsNavItems) {
+    const active = item.dataset.settingsTarget === sectionId;
+    const wasActive = item.classList.contains("is-active");
+    item.classList.toggle("is-active", active);
+    if (active) item.setAttribute("aria-current", "true");
+    else item.removeAttribute("aria-current");
+    if (active && !wasActive) revealNavItem(item);
+  }
+}
+
+// The rail overflows at 640x440. Scrolled by hand: scrollIntoView could also move the off-screen overlay's ancestors.
+function revealNavItem(item: HTMLElement): void {
+  const rail = settingsNav.getBoundingClientRect();
+  const box = item.getBoundingClientRect();
+  if (box.top < rail.top) settingsNav.scrollTop -= rail.top - box.top;
+  else if (box.bottom > rail.bottom) settingsNav.scrollTop += box.bottom - rail.bottom;
+}
+
+/** Light up whichever section currently sits at the top of the pane. */
+function syncSettingsNav(): void {
+  if (Date.now() < settingsSpyLockUntil || settingsSections.length === 0) return;
+  const scrollTop = settingsPane.scrollTop;
+  if (scrollTop + settingsPane.clientHeight >= settingsPane.scrollHeight - 4) {
+    const shown = settingsSections.filter((section) => !section.hidden);
+    if (shown.length > 0) markSettingsNav(shown[shown.length - 1].id);
+    return;
+  }
+  const visible = settingsSections.filter((section) => !section.hidden);
+  if (visible.length === 0) return;
+  let active = visible[0];
+  for (const section of visible) {
+    if (section.offsetTop - scrollTop <= SETTINGS_JUMP_GUTTER * 2) active = section;
+  }
+  markSettingsNav(active.id);
+}
+
+/** Tail room so the last (short) section can still scroll to the top of the
+ *  pane — otherwise its rail row could only ever light up at full scroll. */
+function sizeSettingsTail(): void {
+  const visible = settingsSections.filter((section) => !section.hidden);
+  const last = visible[visible.length - 1];
+  if (!last) return;
+  const room = settingsPane.clientHeight - last.offsetHeight - SETTINGS_JUMP_GUTTER * 2;
+  settingsPane.style.paddingBottom = `${Math.max(24, room)}px`;
+}
+
+for (const item of settingsNavItems) {
+  item.addEventListener("click", () => {
+    const target = document.getElementById(item.dataset.settingsTarget ?? "");
+    if (!target) return;
+    // The rail is also the way back out of a picker that took over the pane.
+    closeSubpane(false);
+    markSettingsNav(target.id);
+    settingsSpyLockUntil = Date.now() + 700;
+    // offsetTop is measured from the pane's padding edge, so subtracting the
+    // gutter leaves the section sitting where the pane's own padding puts it.
+    settingsPane.scrollTop = Math.max(0, target.offsetTop - SETTINGS_JUMP_GUTTER);
+  });
+}
+
+settingsPane.addEventListener("scroll", syncSettingsNav, { passive: true });
+
+// ── Connection method picker (full right pane) ────────────────
+
+const transportPane = document.getElementById("transportPane") as HTMLElement;
+const transportOptions = document.getElementById("transportOptions") as HTMLElement;
+const transportPickerBtn = document.getElementById("transportPickerBtn") as HTMLButtonElement;
+const transportPickerValue = document.getElementById("transportPickerValue") as HTMLElement;
+const transportBackBtn = document.getElementById("transportBackBtn") as HTMLButtonElement;
+
+// One line of explanation per method. Anything absent here just renders its
+// label, so a newly ungated option can ship before its copy does.
+const TRANSPORT_DESCRIPTIONS: Record<string, MessageKey> = {
+  auto: "settings.transport.auto.desc",
+  cloak: "settings.transport.cloak.desc",
+  naive: "settings.transport.naive.desc",
+  reality: "settings.transport.reality.desc",
+  hysteria2: "settings.transport.hysteria2.desc",
+  shadowsocks: "settings.transport.shadowsocks.desc",
+  wireguard: "settings.transport.wireguard.desc"
+};
+
+const CHECK_SVG =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7"/></svg>';
+
+/** Build one row per option in the (hidden) select that holds the real state. */
+function renderTransportOptions(): void {
+  transportOptions.replaceChildren();
+  for (const option of Array.from(preferredTransportSelect.options)) {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "option-row";
+    row.setAttribute("role", "radio");
+    row.dataset.value = option.value;
+
+    const copy = document.createElement("span");
+    copy.className = "option-copy";
+
+    const title = document.createElement("span");
+    title.className = "option-title";
+    title.textContent = option.textContent;
+    copy.appendChild(title);
+
+    const descKey = TRANSPORT_DESCRIPTIONS[option.value];
+    if (descKey) {
+      const desc = document.createElement("span");
+      desc.className = "option-desc";
+      desc.textContent = t(descKey);
+      copy.appendChild(desc);
+    }
+
+    const check = document.createElement("span");
+    check.className = "option-check";
+    check.innerHTML = CHECK_SVG;
+
+    row.append(copy, check);
+    row.addEventListener("click", () => selectTransport(option.value));
+    transportOptions.appendChild(row);
+  }
+  syncTransportChoice();
+}
+
+/** Mirror the select's current value onto the rows and the section button. */
+function syncTransportChoice(): void {
+  const current = preferredTransportSelect.value;
+  transportPickerValue.textContent = preferredTransportSelect.selectedOptions[0]?.textContent ?? "";
+  for (const row of Array.from(transportOptions.children)) {
+    row.setAttribute("aria-checked", String((row as HTMLElement).dataset.value === current));
+  }
+}
+
+/** Route the choice back through the select so every existing handler runs. */
+function selectTransport(value: string): void {
+  if (preferredTransportSelect.value === value) return;
+  preferredTransportSelect.value = value;
+  syncTransportChoice();
+  preferredTransportSelect.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+// ── Sub-panes ─────────────────────────────────────────────────
+
+// A section whose options are too wordy for the section list hands them a whole
+// pane instead, owning the pane, its opening row, and the rail item.
+interface Subpane {
+  pane: HTMLElement;
+  trigger: HTMLButtonElement;
+  back: HTMLButtonElement;
+  section: string;
+  render?: () => void;
+  initialFocus: () => HTMLElement | null;
+}
+
+const provisioningPane = document.getElementById("provisioningPane") as HTMLElement;
+const provisioningPickerBtn = document.getElementById("provisioningPickerBtn") as HTMLButtonElement;
+const provisioningPickerValue = document.getElementById("provisioningPickerValue") as HTMLElement;
+const provisioningBackBtn = document.getElementById("provisioningBackBtn") as HTMLButtonElement;
+
+const splitTunnelSection = document.getElementById("secSplitTunnel") as HTMLElement;
+const splitTunnelState = document.getElementById("splitTunnelState") as HTMLElement;
+const splitTunnelStateText = document.getElementById("splitTunnelStateText") as HTMLElement;
+const splitTunnelRetryBtn = document.getElementById("splitTunnelRetryBtn") as HTMLButtonElement;
+const splitTunnelControls = document.getElementById("splitTunnelControls") as HTMLElement;
+const splitTunnelToggle = document.getElementById("splitTunnelToggle") as HTMLInputElement;
+const splitTunnelPickerBtn = document.getElementById("splitTunnelPickerBtn") as HTMLButtonElement;
+const splitTunnelPickerValue = document.getElementById("splitTunnelPickerValue") as HTMLElement;
+const splitTunnelAppsNote = document.getElementById("splitTunnelAppsNote") as HTMLElement;
+const splitTunnelCidrsInput = document.getElementById("splitTunnelCidrsInput") as HTMLInputElement;
+const splitTunnelCidrsError = document.getElementById("splitTunnelCidrsError") as HTMLElement;
+const splitTunnelCidrsDropped = document.getElementById("splitTunnelCidrsDropped") as HTMLElement;
+const splitTunnelPending = document.getElementById("splitTunnelPending") as HTMLElement;
+const splitTunnelLockdownHint = document.getElementById("splitTunnelLockdownHint") as HTMLElement;
+const splitTunnelPane = document.getElementById("splitTunnelPane") as HTMLElement;
+const splitTunnelBackBtn = document.getElementById("splitTunnelBackBtn") as HTMLButtonElement;
+const splitTunnelSearch = document.getElementById("splitTunnelSearch") as HTMLInputElement;
+const splitTunnelPaneNote = document.getElementById("splitTunnelPaneNote") as HTMLElement;
+const splitTunnelPaneNoteText = document.getElementById("splitTunnelPaneNoteText") as HTMLElement;
+const splitTunnelTurnOnBtn = document.getElementById("splitTunnelTurnOnBtn") as HTMLButtonElement;
+const splitTunnelList = document.getElementById("splitTunnelList") as HTMLElement;
+const splitTunnelLive = document.getElementById("splitTunnelLive") as HTMLElement;
+const splitTunnelBrowseBtn = document.getElementById("splitTunnelBrowseBtn") as HTMLButtonElement;
+
+const subpanes: Subpane[] = [
+  {
+    pane: transportPane,
+    trigger: transportPickerBtn,
+    back: transportBackBtn,
+    section: "secTransport",
+    render: renderTransportOptions,
+    initialFocus: () => transportOptions.querySelector<HTMLElement>('[aria-checked="true"]')
+  },
+  {
+    pane: provisioningPane,
+    trigger: provisioningPickerBtn,
+    back: provisioningBackBtn,
+    section: "secProvisioning",
+    initialFocus: () => provisioningPane.querySelector<HTMLElement>(".toggle-switch")
+  },
+  {
+    pane: splitTunnelPane,
+    trigger: splitTunnelPickerBtn,
+    back: splitTunnelBackBtn,
+    section: "secSplitTunnel",
+    render: renderSplitPane,
+    initialFocus: () => splitTunnelSearch
+  }
+];
+
+let activeSubpane: Subpane | null = null;
+
+function isSubpaneOpen(): boolean {
+  return activeSubpane !== null;
+}
+
+function openSubpane(entry: Subpane): void {
+  entry.render?.();
+  settingsPane.hidden = true;
+  for (const other of subpanes) other.pane.hidden = other !== entry;
+  entry.trigger.setAttribute("aria-expanded", "true");
+  activeSubpane = entry;
+  markSettingsNav(entry.section);
+  (entry.initialFocus() ?? entry.back).focus();
+}
+
+function closeSubpane(restoreFocus: boolean): void {
+  const entry = activeSubpane;
+  if (!entry) return;
+  entry.pane.hidden = true;
+  entry.trigger.setAttribute("aria-expanded", "false");
+  activeSubpane = null;
+  settingsPane.hidden = false;
+  syncSettingsNav();
+  if (restoreFocus) entry.trigger.focus();
+}
+
+for (const entry of subpanes) {
+  entry.trigger.addEventListener("click", () => openSubpane(entry));
+  entry.back.addEventListener("click", () => closeSubpane(true));
+}
 
 document.addEventListener("keydown", (e) => {
   // Defer to a stacked modal (Devices / Update) so Escape backs out one layer.
   if (e.key === "Escape" && settingsOverlay.classList.contains("visible") && !isSubModalOpen()) {
     e.preventDefault();
     e.stopPropagation();
-    closeSettings();
+    // A picker filling the pane is a layer of its own: back out to the sections
+    // first, and only close Settings on a second press.
+    if (isSubpaneOpen()) closeSubpane(true);
+    else closeSettings();
   }
 });
 
@@ -413,14 +843,208 @@ function closeServerPicker(): void {
 serverPickerBtn.addEventListener("click", openServerPicker);
 serverPickerOverlayCloseBtn.addEventListener("click", closeServerPicker);
 
+// ── Multihop ───────────────────────────────────────────────
+let multihopLocal = false;
+// Entry picked by hand; null lets the lightest entry outside the exit region win.
+let entryChoiceLocal: string | null = null;
+// Entry of the live (or last) session, so the route strip shows what is really in use.
+let activeEntryId: string | null = null;
+// What the route chip last rendered; polls arrive every second and rarely change it.
+let heroPathKey = "";
+
+const hasEntryCapableServers = (): boolean => servers.some((s) => s.multihop === true);
+
+const multihopActive = (): boolean => multihopLocal;
+
+function entryFor(exitId: string): ServerInfo | null {
+  return resolveEntry(getVisibleServers(), exitId, entryChoiceLocal);
+}
+
+function entryRegionKeyFor(exitId: string): string | null {
+  const entry = entryFor(exitId);
+  return entry ? regionKeyOf(entry) : null;
+}
+
+/** null: single-hop. undefined: multihop is on but nothing can serve as the entry. */
+function hopFor(exitId: string): string | null | undefined {
+  if (!multihopActive()) return null;
+  return entryFor(exitId)?.id;
+}
+
+function connectPlanFor(serverId: string): { exits: string[]; entry: string | null } | null {
+  const entry = hopFor(serverId);
+  if (entry === undefined) return null;
+  return { exits: serverRetryPlan(serverId).filter((id) => id !== entry), entry };
+}
+
+function regionNameOf(server: ServerInfo): string {
+  return regionOfServer(visibleRegions, server.id)?.name ?? server.name;
+}
+
+async function persistMultihop(): Promise<void> {
+  if (!pangeaApi) return;
+  try {
+    await pangeaApi.setMultihop({ enabled: multihopLocal, entryServerId: entryChoiceLocal });
+  } catch (error) {
+    console.warn("[multihop] could not save", error);
+  }
+}
+
+// Debounced so a flurry of entry/toggle clicks becomes one switch (one
+// re-registration) instead of one re-dial per click.
+let multihopRedialTimer: ReturnType<typeof setTimeout> | null = null;
+function applyMultihopChange(): void {
+  renderServers();
+  void persistMultihop();
+  if (multihopRedialTimer) clearTimeout(multihopRedialTimer);
+  multihopRedialTimer = setTimeout(() => {
+    multihopRedialTimer = null;
+    if (currentDaemonState === "CONNECTED" && !serverWorking && !connectInFlight && !disconnectingVisual && serverSelect.value) {
+      void switchToServer(serverSelect.value);
+    }
+  }, 600);
+}
+
+multihopToggle.addEventListener("change", () => {
+  multihopLocal = multihopToggle.checked;
+  if (multihopLocal && !entryFor(serverSelect.value)) showToast(t("multihop.noEntries"));
+  applyMultihopChange();
+});
+
+function chooseEntry(entryId: string | null): void {
+  entryChoiceLocal = entryId;
+  applyMultihopChange();
+}
+
+function buildEntryChip(region: Region | null, selected: boolean, blocked: boolean): HTMLElement {
+  const chip = document.createElement("button");
+  chip.type = "button";
+  chip.className = "multihop-chip";
+  chip.setAttribute("role", "radio");
+  chip.setAttribute("aria-checked", String(selected));
+  chip.disabled = blocked;
+  const name = document.createElement("span");
+  name.className = "multihop-chip-name";
+  if (region) {
+    name.textContent = region.name;
+    chip.append(buildFlag(region.country, "multihop-chip-flag"), name);
+    if (blocked) chip.title = t("multihop.sameAsExit");
+    chip.addEventListener("click", () => chooseEntry(pickNode(region).id));
+  } else {
+    const icon = document.createElement("span");
+    icon.className = "multihop-chip-auto";
+    icon.innerHTML =
+      '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 3l1.9 5.6 5.6 1.9-5.6 1.9L12 18l-1.9-5.6-5.6-1.9 5.6-1.9z"/></svg>';
+    name.textContent = t("multihop.auto");
+    chip.append(icon, name);
+    chip.addEventListener("click", () => chooseEntry(null));
+  }
+  return chip;
+}
+
+function renderMultihopPanel(): void {
+  const available = authState.authenticated && hasEntryCapableServers();
+  multihopPanel.hidden = !available;
+  if (!available) return;
+  multihopToggle.checked = multihopLocal;
+  multihopEntry.hidden = !multihopLocal;
+  if (!multihopLocal) return;
+
+  const exitId = serverSelect.value;
+  const exitRegion = exitId ? regionKeyOf({ id: exitId }) : null;
+  const regions = groupRegions(getVisibleServers().filter((s) => s.multihop === true));
+  const chosenRegion = entryChoiceLocal ? regionKeyOf({ id: entryChoiceLocal }) : null;
+  const chosenUsable =
+    chosenRegion !== null && chosenRegion !== exitRegion && regions.some((r) => r.key === chosenRegion);
+
+  multihopEntryChips.replaceChildren(
+    buildEntryChip(null, !chosenUsable, false),
+    ...regions.map((region) =>
+      buildEntryChip(region, chosenUsable && region.key === chosenRegion, region.key === exitRegion)
+    )
+  );
+
+  const resolved = entryFor(exitId);
+  multihopEntryHint.textContent = chosenUsable
+    ? ""
+    : resolved
+      ? t("multihop.autoVia", { region: regionNameOf(resolved) })
+      : t("multihop.noEntries");
+}
+
+window.addEventListener("resize", () => {
+  heroPathKey = "";
+  renderHeroPath();
+});
+
+function fillPathNode(el: HTMLElement, server: ServerInfo | null, roleKey: MessageKey): void {
+  el.classList.toggle("is-missing", !server);
+  el.title = t(roleKey);
+  const name = document.createElement("span");
+  name.className = "hero-path-name";
+  name.textContent = server ? regionNameOf(server) : t("multihop.none");
+  el.replaceChildren(buildFlag(server?.country ?? "", "hero-path-flag"), name);
+}
+
+/** Sub-pixel accurate: scrollWidth rounds away an overflow that still triggers the ellipsis. */
+function isTextClipped(el: HTMLElement): boolean {
+  const range = document.createRange();
+  range.selectNodeContents(el);
+  return range.getBoundingClientRect().width > el.getBoundingClientRect().width + 0.5;
+}
+
+function renderHeroPath(): void {
+  const labelKey: MessageKey = multihopActive() ? "multihop.exitRegions" : "hero.region";
+  heroServerLabel.dataset.i18n = labelKey;
+  heroServerLabel.textContent = t(labelKey);
+
+  const connected = currentDaemonState === "CONNECTED" && !disconnectingVisual;
+  const exitId = (connected && lastServerIdLocal) || serverSelect.value;
+  const show = authState.authenticated && multihopActive() && servers.length > 0 && Boolean(exitId);
+  heroPath.hidden = !show;
+  if (!show) {
+    heroPathKey = "";
+    return;
+  }
+
+  const live = connected && activeEntryId !== null;
+  const entry = live ? servers.find((s) => s.id === activeEntryId) ?? null : entryFor(exitId);
+  const exit = servers.find((s) => s.id === exitId) ?? null;
+  // The state text and the PQ and Split chips share the row, so any of them leaves this chip less room.
+  const key = [live, entry?.id ?? "", exit?.id ?? "", localeTag(), stateEl.textContent, heroPq.hidden, heroSplit.hidden].join("|");
+  if (key === heroPathKey) return;
+  heroPathKey = key;
+  heroPath.dataset.live = String(live);
+  fillPathNode(heroPathEntry, entry, "multihop.entry");
+  fillPathNode(heroPathExit, exit, "multihop.exit");
+  // Flags alone beat clipped names when the row is tight.
+  heroPath.classList.remove("is-compact");
+  const names = Array.from(heroPath.querySelectorAll<HTMLElement>(".hero-path-name"));
+  if (names.some(isTextClipped)) heroPath.classList.add("is-compact");
+  heroPath.setAttribute(
+    "aria-label",
+    t("multihop.pathAria", {
+      entry: entry ? regionNameOf(entry) : t("multihop.none"),
+      exit: exit ? regionNameOf(exit) : t("multihop.none")
+    })
+  );
+}
+
 // Keep the server list current whenever the app comes back into view — shown
 // from the tray, restored from minimize, or otherwise unhidden.
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible") void refreshServersWithRetry();
+  if (document.visibilityState !== "visible") return;
+  // Hidden drops to the idle cadence, so sample once straight away rather than
+  // showing whatever was true up to two seconds before the window reappeared.
+  pollNow();
+  void refreshServersWithRetry();
+  if (authState.authenticated) void refreshEntitlement();
 });
 
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape" && serverPickerOverlay.classList.contains("visible")) {
+  // Defer to a stacked modal (Devices / Update) the same way Settings does —
+  // stopPropagation doesn't stop a sibling listener on the same document.
+  if (e.key === "Escape" && serverPickerOverlay.classList.contains("visible") && !isSubModalOpen()) {
     e.preventDefault();
     e.stopPropagation();
     closeServerPicker();
@@ -435,6 +1059,10 @@ document.addEventListener("keydown", (e) => {
     e.preventDefault();
     e.stopPropagation();
     devicesModal.classList.remove("visible");
+  } else if (diagnosticsModal.classList.contains("visible")) {
+    e.preventDefault();
+    e.stopPropagation();
+    closeDiagnosticsModal();
   } else if (updateOverlay.classList.contains("visible")) {
     e.preventDefault();
     e.stopPropagation();
@@ -477,6 +1105,96 @@ copyDiagnosticsBtn.addEventListener("click", async () => {
   }
 });
 
+openLogsFolderBtn.addEventListener("click", () => {
+  void window.openLogsFolder?.();
+});
+
+function closeDiagnosticsModal(): void {
+  diagnosticsModal.classList.remove("visible");
+}
+
+function openDiagnosticsModal(): void {
+  diagnosticsNote.value = "";
+  diagnosticsConfirm.hidden = false;
+  diagnosticsResult.hidden = true;
+  diagnosticsCode.hidden = true;
+  diagnosticsCopyCodeBtn.hidden = true;
+  diagnosticsCopyCodeBtn.textContent = t("diagnostics.copyCode");
+  diagnosticsCopyCodeBtn.disabled = false;
+  diagnosticsSendBtn.disabled = false;
+  diagnosticsSendBtn.textContent = t("diagnostics.send");
+  diagnosticsModal.classList.add("visible");
+  diagnosticsNote.focus();
+}
+
+function showDiagnosticsResult(result: DiagnosticsSendResult): void {
+  diagnosticsConfirm.hidden = true;
+  diagnosticsResult.hidden = false;
+  if (result.ok) {
+    diagnosticsResultTitle.textContent = t("diagnostics.sentTitle");
+    diagnosticsCode.textContent = result.reportCode;
+    diagnosticsCode.hidden = false;
+    diagnosticsCopyCodeBtn.hidden = false;
+    diagnosticsResultBody.textContent = t("diagnostics.sentBody");
+    return;
+  }
+  diagnosticsResultTitle.textContent = t("diagnostics.failedTitle");
+  diagnosticsCode.hidden = true;
+  diagnosticsCopyCodeBtn.hidden = true;
+  diagnosticsResultBody.textContent =
+    result.reason === "rejected" ? t("diagnostics.rejectedBody") : t("diagnostics.failedBody");
+}
+
+sendDiagnosticsBtn.addEventListener("click", () => {
+  openDiagnosticsModal();
+});
+
+settingsSendDiagnosticsBtn.addEventListener("click", () => {
+  openDiagnosticsModal();
+});
+
+diagnosticsCancelBtn.addEventListener("click", closeDiagnosticsModal);
+diagnosticsCloseBtn.addEventListener("click", closeDiagnosticsModal);
+diagnosticsDoneBtn.addEventListener("click", closeDiagnosticsModal);
+diagnosticsModal.addEventListener("click", (e) => {
+  if (e.target === diagnosticsModal) closeDiagnosticsModal();
+});
+
+let copyCodeResetTimer: ReturnType<typeof setTimeout> | null = null;
+
+diagnosticsCopyCodeBtn.addEventListener("click", async () => {
+  try {
+    await copyTextToClipboard(diagnosticsCode.textContent ?? "");
+  } catch (error) {
+    setUiMessage(reportError("copyReportCode", error));
+    return;
+  }
+  // The toast sits behind the modal, so the confirmation has to be on the button.
+  if (copyCodeResetTimer) clearTimeout(copyCodeResetTimer);
+  diagnosticsCopyCodeBtn.textContent = t("diagnostics.codeCopied");
+  diagnosticsCopyCodeBtn.disabled = true;
+  copyCodeResetTimer = setTimeout(() => {
+    diagnosticsCopyCodeBtn.textContent = t("diagnostics.copyCode");
+    diagnosticsCopyCodeBtn.disabled = false;
+    copyCodeResetTimer = null;
+  }, 1600);
+});
+
+diagnosticsSendBtn.addEventListener("click", async () => {
+  const send = window.sendDiagnostics;
+  if (!send) {
+    showDiagnosticsResult({ ok: false, reason: "unreachable" });
+    return;
+  }
+  diagnosticsSendBtn.disabled = true;
+  diagnosticsSendBtn.textContent = t("diagnostics.sending");
+  try {
+    showDiagnosticsResult(await send(diagnosticsNote.value));
+  } catch {
+    showDiagnosticsResult({ ok: false, reason: "unreachable" });
+  }
+});
+
 clearLogsBtn.addEventListener("click", () => {
   const lastSeenTs = logEntries.length > 0 ? logEntries[logEntries.length - 1].ts : logsCursor;
   logsCursor = Math.max(logsCursor, lastSeenTs);
@@ -491,16 +1209,16 @@ loginBtn.addEventListener("click", () => {
   updateAuthUI();
 });
 
-logoutBtn.addEventListener("click", async () => {
+logoutBtn.addEventListener("click", () => void signOut(logoutBtn));
+
+async function signOut(trigger: HTMLButtonElement): Promise<void> {
   if (!pangeaApi) return;
-  logoutBtn.disabled = true;
+  trigger.disabled = true;
   setUiMessage(t("auth.signingOut"));
   try {
     await pangeaApi.logout();
     localStorage.removeItem(MY_DEVICE_NAME_KEY);
     authState = { authenticated: false, user: null };
-    entitled = null;
-    applyEntitlementUI();
     servers = [];
     updateAuthUI();
     renderServers();
@@ -509,17 +1227,113 @@ logoutBtn.addEventListener("click", async () => {
   } catch (error) {
     setUiMessage(reportError("signOut", error));
   } finally {
-    logoutBtn.disabled = false;
+    trigger.disabled = false;
   }
+}
+
+const BILLING_URL = "https://pangeavpn.org/app/billing";
+// The wanted state: the screen stays unhidden while it animates out.
+let expiredShown = false;
+let expiredSwapGeneration = 0;
+
+expiredBillingBtn.addEventListener("click", () => void window.openExternal?.(BILLING_URL));
+expiredRecheckBtn.addEventListener("click", () => void recheckEntitlement());
+// A tunnel can outlive the subscription with no peer behind it, and then billing won't load.
+expiredDisconnectBtn.addEventListener("click", () => serverDisconnectBtn.click());
+expiredSignOutBtn.addEventListener("click", () => void signOut(expiredSignOutBtn));
+window.addEventListener("focus", () => {
+  if (expiredShown) void refreshEntitlement();
 });
+
+// Long enough to read "Checking…", so a fast answer settles instead of flashing past.
+const RECHECK_HOLD_MS = 700;
+
+async function recheckEntitlement(): Promise<void> {
+  const spinner = document.createElement("span");
+  spinner.className = "spinner";
+  spinner.setAttribute("aria-hidden", "true");
+  expiredRecheckBtn.disabled = true;
+  expiredRecheckBtn.setAttribute("aria-busy", "true");
+  expiredRecheckBtn.replaceChildren(spinner, t("expired.checking"));
+  expiredMessage.classList.add("is-refreshing");
+  let check = refreshEntitlement(RECHECK_HOLD_MS);
+  let answered = await check;
+  // A check started meanwhile (window focus) owns the verdict, so report the one that landed last.
+  while (check !== latestEntitlementCheck) {
+    check = latestEntitlementCheck;
+    answered = await check;
+  }
+  expiredRecheckBtn.disabled = false;
+  expiredRecheckBtn.removeAttribute("aria-busy");
+  expiredRecheckBtn.textContent = t("expired.recheck");
+  if (!answered) setExpiredMessage(t("expired.checkFailed"));
+  else if (entitled === false) setExpiredMessage(t("expired.stillExpired"));
+  else if (entitled === true) showToast(t("expired.restored"), 5000, true);
+  expiredMessage.classList.remove("is-refreshing");
+}
+
+// Clearing keeps the old text so the fold closes over it rather than over nothing.
+function setExpiredMessage(text: string): void {
+  if (text) expiredMessage.textContent = text;
+  expiredMessage.classList.toggle("is-shown", Boolean(text));
+  expiredMessage.setAttribute("aria-hidden", String(!text));
+  syncExpiredLayout();
+}
+
+function syncExpiredLayout(): void {
+  const hasMessage = expiredMessage.classList.contains("is-shown");
+  expiredContent.classList.toggle("has-message", hasMessage);
+  expiredContent.classList.toggle("is-compact", hasMessage || !expiredDisconnectBtn.hidden);
+}
+
+function syncExpiredScreen(): void {
+  const show = authState.authenticated && entitled === false;
+  const date = formatSubscriptionDate(expiredAt).trim();
+  expiredDate.textContent = date ? t("expired.date", { date }) : "";
+  expiredDate.hidden = !date;
+  expiredDisconnectBtn.hidden = serverDisconnectBtn.disabled;
+  syncExpiredLayout();
+  if (show === expiredShown) return;
+
+  expiredShown = show;
+  const gen = ++expiredSwapGeneration;
+  const host = expiredScreen.parentElement!;
+  const focusWasBehind = stage.contains(document.activeElement);
+  stage.inert = show;
+  host.classList.toggle("is-expired", show);
+  if (show) {
+    setExpiredMessage("");
+    host.scrollTop = 0;
+    expiredScreen.hidden = false;
+    void animateIn(expiredScreen);
+    if (focusWasBehind) expiredBillingBtn.focus();
+  } else {
+    void animateOut(expiredScreen).then(() => {
+      if (gen === expiredSwapGeneration) expiredScreen.hidden = true;
+    });
+  }
+}
 
 const loginTokenInput = document.getElementById("loginTokenInput") as HTMLInputElement;
 const cachedTokenBtn = document.getElementById("cachedTokenBtn") as HTMLButtonElement;
 
-// Show cached token button if a previous token exists. The token is masked (the
-// click handler reads the real value from storage) to match the Settings viewer.
-function refreshCachedTokenBtn(): void {
-  const cached = localStorage.getItem("pangea:lastToken");
+// One-time migration off the old cleartext localStorage account number, now
+// that it's kept in the main-process secure store instead.
+async function migrateLegacyLastToken(): Promise<void> {
+  if (!pangeaApi) return;
+  const legacy = localStorage.getItem("pangea:lastToken");
+  if (!legacy) return;
+  localStorage.removeItem("pangea:lastToken");
+  try {
+    await pangeaApi.rememberAccountNumber(legacy);
+  } catch {
+    // best-effort — worst case the user re-enters it once
+  }
+}
+
+// Masked (the click handler reads the real value from storage) to match Settings.
+async function refreshCachedTokenBtn(): Promise<void> {
+  const cached = pangeaApi ? await pangeaApi.getRememberedAccountNumber().catch(() => null) : null;
   if (cached) {
     const masked = cached.length > 4
       ? cached.slice(0, 4) + "•".repeat(Math.min(cached.length - 4, 12))
@@ -531,10 +1345,10 @@ function refreshCachedTokenBtn(): void {
     cachedTokenBtn.hidden = true;
   }
 }
-refreshCachedTokenBtn();
+void migrateLegacyLastToken().then(refreshCachedTokenBtn);
 
-cachedTokenBtn.addEventListener("click", () => {
-  const cached = localStorage.getItem("pangea:lastToken");
+cachedTokenBtn.addEventListener("click", async () => {
+  const cached = pangeaApi ? await pangeaApi.getRememberedAccountNumber().catch(() => null) : null;
   if (cached) {
     loginTokenInput.value = cached;
     loginTokenInput.dispatchEvent(new Event("input"));
@@ -578,7 +1392,7 @@ loginTokenInput.addEventListener("paste", () => {
 const loginDashboardLink = document.getElementById("loginDashboardLink") as HTMLAnchorElement;
 loginDashboardLink.addEventListener("click", (e) => {
   e.preventDefault();
-  window.openExternal?.("https://pangeavpn.org/");
+  window.openExternal?.("https://pangeavpn.org/app");
 });
 
 // ── Device management screen (login-flow: device limit reached) ──
@@ -653,6 +1467,23 @@ async function showDevicesModal(): Promise<void> {
   }
 }
 
+function findMyDeviceId(devices: DeviceInfo[]): string | null {
+  // Preferred: the main process flags our row by identity pubkey, so a rename
+  // from the website can't break the match. Sync the local name while here.
+  const pubkeyMatch = devices.find((d) => d.isCurrentDevice);
+  if (pubkeyMatch) {
+    if (pubkeyMatch.friendlyName) localStorage.setItem(MY_DEVICE_NAME_KEY, pubkeyMatch.friendlyName);
+    return pubkeyMatch.id;
+  }
+  // Old-hub fallback: names come from a small pool, so two devices can collide
+  // on the same name — pick only the most recently added match.
+  const myName = localStorage.getItem(MY_DEVICE_NAME_KEY);
+  const myMatches = myName !== null ? devices.filter((d) => d.friendlyName === myName) : [];
+  return myMatches.length > 0
+    ? myMatches.reduce((latest, d) => (d.createdAt > latest.createdAt ? d : latest)).id
+    : null;
+}
+
 function renderDevicesModalList(devices: DeviceInfo[]): void {
   devicesModalList.innerHTML = "";
   if (devices.length === 0) {
@@ -661,54 +1492,157 @@ function renderDevicesModalList(devices: DeviceInfo[]): void {
   }
   devicesModalMessage.textContent = "";
 
-  // Match the stored local name against the list to identify "this device".
-  const myName = localStorage.getItem(MY_DEVICE_NAME_KEY);
+  const myDeviceId = findMyDeviceId(devices);
   // Put "this device" at the top so the user sees it first.
   const sorted = [...devices].sort((a, b) => {
-    const aMine = myName !== null && a.friendlyName === myName;
-    const bMine = myName !== null && b.friendlyName === myName;
+    const aMine = a.id === myDeviceId;
+    const bMine = b.id === myDeviceId;
     if (aMine === bMine) return 0;
     return aMine ? -1 : 1;
   });
 
   for (const device of sorted) {
-    const name = device.friendlyName || generateFallbackName();
-    const isMine = myName !== null && device.friendlyName === myName;
-    const dateStr = formatDeviceDate(device.createdAt);
-    const item = document.createElement("div");
-    item.className = "device-item";
-    item.dataset.deviceId = device.id;
-    const info = document.createElement("div");
-    info.className = "device-info";
-    const nameSpan = document.createElement("span");
-    nameSpan.className = "device-name";
-    nameSpan.textContent = name;
-    if (isMine) {
-      nameSpan.appendChild(document.createTextNode(" "));
-      const badge = document.createElement("span");
-      badge.className = "device-current-badge";
-      badge.textContent = t("devices.thisDevice");
-      nameSpan.appendChild(badge);
-    }
-    const dateSpan = document.createElement("span");
-    dateSpan.className = "device-date";
-    dateSpan.textContent = t("devices.added", { date: dateStr });
-    info.appendChild(nameSpan);
-    info.appendChild(dateSpan);
-    const removeBtn = document.createElement("button");
-    removeBtn.className = "device-remove-btn";
-    if (isMine) {
-      removeBtn.textContent = t("devices.current");
-      removeBtn.disabled = true;
-      removeBtn.title = t("devices.currentTitle");
-    } else {
-      removeBtn.textContent = t("devices.remove");
-      removeBtn.addEventListener("click", () => void handleDevicesModalRemove(device.id, item, removeBtn));
-    }
-    item.appendChild(info);
-    item.appendChild(removeBtn);
-    devicesModalList.appendChild(item);
+    devicesModalList.appendChild(buildDevicesModalItem(device, device.id === myDeviceId));
   }
+}
+
+function buildDevicesModalItem(device: DeviceInfo, isMine: boolean): HTMLElement {
+  const name = device.friendlyName || generateFallbackName();
+  const item = document.createElement("div");
+  item.className = "device-item";
+  item.dataset.deviceId = device.id;
+  const info = document.createElement("div");
+  info.className = "device-info";
+  const nameSpan = document.createElement("span");
+  nameSpan.className = "device-name";
+  const nameText = document.createElement("span");
+  nameText.textContent = name;
+  nameSpan.appendChild(nameText);
+  if (isMine) {
+    nameSpan.appendChild(document.createTextNode(" "));
+    const badge = document.createElement("span");
+    badge.className = "device-current-badge";
+    badge.textContent = t("devices.thisDevice");
+    nameSpan.appendChild(badge);
+  }
+  const dateSpan = document.createElement("span");
+  dateSpan.className = "device-date";
+  dateSpan.textContent = t("devices.added", { date: formatDeviceDate(device.createdAt) });
+  info.appendChild(nameSpan);
+  info.appendChild(dateSpan);
+
+  const actions = document.createElement("div");
+  actions.className = "device-actions";
+  const renameBtn = document.createElement("button");
+  renameBtn.className = "device-rename-btn";
+  renameBtn.textContent = t("devices.rename");
+  let currentName = device.friendlyName;
+  renameBtn.addEventListener("click", () =>
+    startDeviceRename(device.id, isMine, { info, nameSpan, nameText, actions }, {
+      get: () => currentName,
+      set: (n) => { currentName = n; }
+    })
+  );
+  actions.appendChild(renameBtn);
+  const removeBtn = document.createElement("button");
+  removeBtn.className = "device-remove-btn";
+  if (isMine) {
+    removeBtn.textContent = t("devices.current");
+    removeBtn.disabled = true;
+    removeBtn.title = t("devices.currentTitle");
+  } else {
+    removeBtn.textContent = t("devices.remove");
+    removeBtn.addEventListener("click", () => void handleDevicesModalRemove(device.id, item, removeBtn));
+  }
+  actions.appendChild(removeBtn);
+
+  item.appendChild(info);
+  item.appendChild(actions);
+  return item;
+}
+
+interface DeviceRowEls {
+  info: HTMLElement;
+  nameSpan: HTMLElement;
+  nameText: HTMLElement;
+  actions: HTMLElement;
+}
+
+function startDeviceRename(
+  deviceId: string,
+  isMine: boolean,
+  els: DeviceRowEls,
+  name: { get: () => string | null; set: (n: string) => void }
+): void {
+  if (els.info.querySelector(".device-rename-input")) return;
+  const input = document.createElement("input");
+  input.type = "text";
+  input.maxLength = 64;
+  input.className = "device-rename-input";
+  input.value = name.get() ?? "";
+  input.setAttribute("aria-label", t("devices.renameLabel"));
+  els.nameSpan.hidden = true;
+  els.info.insertBefore(input, els.nameSpan);
+
+  const rowButtons = Array.from(els.actions.children) as HTMLElement[];
+  for (const b of rowButtons) b.hidden = true;
+
+  const saveBtn = document.createElement("button");
+  saveBtn.className = "device-rename-save-btn";
+  saveBtn.textContent = t("devices.renameSave");
+  const cancelBtn = document.createElement("button");
+  cancelBtn.className = "device-rename-btn";
+  cancelBtn.textContent = t("devices.renameCancel");
+  els.actions.appendChild(saveBtn);
+  els.actions.appendChild(cancelBtn);
+
+  const finish = (): void => {
+    input.remove();
+    saveBtn.remove();
+    cancelBtn.remove();
+    els.nameSpan.hidden = false;
+    for (const b of rowButtons) b.hidden = false;
+  };
+
+  const save = async (): Promise<void> => {
+    if (!pangeaApi) return;
+    const newName = input.value.trim();
+    if (!newName) {
+      input.focus();
+      return;
+    }
+    saveBtn.disabled = true;
+    cancelBtn.disabled = true;
+    devicesModalMessage.textContent = "";
+    try {
+      await pangeaApi.renameDevice(deviceId, newName);
+      name.set(newName);
+      els.nameText.textContent = newName;
+      if (isMine) localStorage.setItem(MY_DEVICE_NAME_KEY, newName);
+      showToast(t("devices.renamed"), 4000, true);
+      finish();
+    } catch (err) {
+      saveBtn.disabled = false;
+      cancelBtn.disabled = false;
+      devicesModalMessage.textContent = reportError("renameDevice", err, t("devices.renameFailed"));
+    }
+  };
+
+  saveBtn.addEventListener("click", () => void save());
+  cancelBtn.addEventListener("click", finish);
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      void save();
+    } else if (e.key === "Escape") {
+      // Keep the modal open — back out of the edit only.
+      e.preventDefault();
+      e.stopPropagation();
+      finish();
+    }
+  });
+  input.focus();
+  input.select();
 }
 
 async function handleDevicesModalRemove(deviceId: string, itemEl: HTMLElement, btn: HTMLButtonElement): Promise<void> {
@@ -793,7 +1727,7 @@ deviceLimitContinueBtn.addEventListener("click", async () => {
   try {
     authState = await pangeaApi.login(pendingLoginToken);
     if (authState.authenticated) {
-      localStorage.setItem("pangea:lastToken", pendingLoginToken);
+      pangeaApi.rememberAccountNumber(pendingLoginToken).catch(() => {});
       pendingLoginToken = null;
       deviceLimitScreen.hidden = true;
       loginScreenMessage.textContent = "";
@@ -814,7 +1748,7 @@ deviceLimitContinueBtn.addEventListener("click", async () => {
         // best-effort
       }
     } else {
-      deviceLimitMessage.textContent = authState.error || t("login.signInFailed");
+      deviceLimitMessage.textContent = loginErrorText(authState.error, t);
     }
   } catch (err) {
     deviceLimitMessage.textContent = reportError("deviceLimitSignIn", err);
@@ -866,7 +1800,7 @@ loginScreenBtn.addEventListener("click", async () => {
   try {
     authState = await pangeaApi.login(token);
     if (authState.authenticated) {
-      localStorage.setItem("pangea:lastToken", token);
+      pangeaApi.rememberAccountNumber(token).catch(() => {});
       loginScreenMessage.textContent = "";
       loginTokenInput.value = "";
       updateAuthUI();
@@ -880,10 +1814,8 @@ loginScreenBtn.addEventListener("click", async () => {
       loginTokenInput.disabled = false;
       loginScreenMessage.textContent = "";
       await showDeviceLimitScreen(token);
-    } else if (authState.error) {
-      loginScreenMessage.textContent = authState.error;
     } else {
-      loginScreenMessage.textContent = t("login.invalidToken");
+      loginScreenMessage.textContent = loginErrorText(authState.error, t);
     }
   } catch (error) {
     loginScreenMessage.textContent = reportError("signIn", error);
@@ -918,6 +1850,13 @@ serverConnectBtn.addEventListener("click", async () => {
     return;
   }
 
+  const plan = connectPlanFor(serverId);
+  if (!plan) {
+    setUiMessage(t("connect.noEntry"));
+    return;
+  }
+
+  notifyConnectRequested();
   serverWorking = true;
   connectInFlight = true;
   const connectingSince = showConnectingState();
@@ -925,16 +1864,23 @@ serverConnectBtn.addEventListener("click", async () => {
   setUiMessage(t("connect.provisioning"));
   const clearProgressMessages = startConnectionProgressMessages();
   try {
-    const result = await pangeaApi.provisionAndConnect(serverRetryPlan(serverId));
+    const result = await pangeaApi.provisionAndConnect(plan.exits, plan.entry);
     clearProgressMessages();
-    if (result.ok) {
-      applyConnectedServer(result.serverId);
+    if (result.ok && getUserIntent() === "disconnected") {
+      // Stop landed after the tunnel came up and main couldn't cancel it — the
+      // disconnect handler is tearing it down; don't resurrect "connected".
+      setUiMessage(t("connect.cancelled"));
+    } else if (result.ok) {
+      applyConnectedServer(result.serverId, result.entryServerId);
       setUiMessage(t("connect.connected"));
       notifyUserConnected();
       void refreshLastServer();
     } else if ((result as { error?: string }).error === "cancelled") {
       // The user stopped it — not a failure, so no error styling.
       setUiMessage(t("connect.cancelled"));
+    } else if ((result as { error?: string }).error === "offline") {
+      // The daemon is holding the session and connects once the network is back.
+      setUiMessage(t("connect.offline"));
     } else {
       setUiMessage(t("connect.failed"));
       // The most likely reason a connect is refused outright: re-check so the
@@ -961,9 +1907,9 @@ serverConnectBtn.addEventListener("click", async () => {
         // ignore
       }
     }
-    setUiMessage(reportError("serverConnect", error));
+    const message = reportError("serverConnect", error);
     await settleConnectingState(connectingSince);
-    await refreshStatus();
+    await showErrorUnlessConnected(message);
   } finally {
     clearProgressMessages();
     connectingVisual = false;
@@ -973,31 +1919,68 @@ serverConnectBtn.addEventListener("click", async () => {
   }
 });
 
-async function switchToServer(serverId: string): Promise<void> {
-  if (!pangeaApi || !daemonApi) return;
-  if (!serverId) return;
+// A hub error thrown after the daemon already recovered on its own would
+// stick a scary message under a live tunnel; trust the daemon's answer.
+async function showErrorUnlessConnected(message: string): Promise<void> {
+  const status = await refreshStatus();
+  if (status?.state === "CONNECTED" && getUserIntent() !== "disconnected") {
+    setUiMessage(t("connect.connected"));
+    notifyUserConnected();
+  } else {
+    setUiMessage(message);
+  }
+}
 
+/** The daemon is up on the requested exit (with or without a hop) and the user still wants it. */
+function landedOn(status: StatusResponse | null, serverId: string): boolean {
+  return status?.state === "CONNECTED" && status.serverId === serverId && getUserIntent() !== "disconnected";
+}
+
+async function switchToServer(
+  serverId: string,
+  plan: readonly string[] = serverRetryPlan(serverId)
+): Promise<ConnectResult | null> {
+  if (!pangeaApi || !daemonApi) return null;
+  if (!serverId) return null;
+  const hop = hopFor(serverId);
+  if (hop === undefined) {
+    setUiMessage(t("connect.noEntry"));
+    return null;
+  }
+
+  notifyConnectRequested();
   serverWorking = true;
   connectInFlight = true;
   const connectingSince = showConnectingState();
   updateServerControlStates();
   setUiMessage(t("connect.switching"));
   const clearProgressMessages = startConnectionProgressMessages();
+  let switchFailed = false;
   try {
-    const result = await pangeaApi.provisionAndSwitch(serverRetryPlan(serverId));
+    const result = await pangeaApi.provisionAndSwitch(plan.filter((id) => id !== hop), hop);
     clearProgressMessages();
-    if (result.ok) {
-      applyConnectedServer(result.serverId);
+    if (result.ok && getUserIntent() === "disconnected") {
+      setUiMessage(t("connect.cancelled"));
+    } else if (result.ok) {
+      applyConnectedServer(result.serverId, result.entryServerId);
       setUiMessage(t("connect.connected"));
       notifyUserConnected();
       void refreshLastServer();
     } else if (result.error === "cancelled") {
       setUiMessage(t("connect.cancelled"));
+    } else if (result.error === "offline") {
+      setUiMessage(t("connect.offline"));
     } else {
-      setUiMessage(t("connect.switchFailed"));
+      switchFailed = true;
     }
     await settleConnectingState(connectingSince);
-    await refreshStatus();
+    const status = await refreshStatus();
+    // Only a tunnel that ended up on the chosen server counts; still sitting on
+    // the old one is a failed switch, however healthy it is.
+    if (switchFailed) {
+      setUiMessage(landedOn(status, serverId) ? t("connect.connected") : t("connect.switchFailed"));
+    }
+    return result;
   } catch (error) {
     clearProgressMessages();
     if (pangeaApi) {
@@ -1009,15 +1992,21 @@ async function switchToServer(serverId: string): Promise<void> {
           updateAuthUI();
           renderServers();
           showToast(t("auth.signedOutRetry"));
-          return;
+          return null;
         }
       } catch {
         // ignore
       }
     }
-    setUiMessage(reportError("serverSwitch", error));
+    const message = reportError("serverSwitch", error);
     await settleConnectingState(connectingSince);
-    await refreshStatus();
+    if (landedOn(await refreshStatus(), serverId)) {
+      setUiMessage(t("connect.connected"));
+      notifyUserConnected();
+    } else {
+      setUiMessage(message);
+    }
+    return null;
   } finally {
     clearProgressMessages();
     connectingVisual = false;
@@ -1027,80 +2016,155 @@ async function switchToServer(serverId: string): Promise<void> {
   }
 }
 
-serverDisconnectBtn.addEventListener("click", async () => {
+// Deliberately not `async`: the teardown runs detached so the screen goes idle
+// on the click, not on the daemon's reply. A blocked hub used to strand it here.
+serverDisconnectBtn.addEventListener("click", () => {
   if (!daemonApi) return;
 
   // Mid-connect this is Stop: cancel the attempt in main, or it brings the
   // tunnel up a moment later. Its own finally clears the busy state.
-  if (connectInFlight && pangeaApi) {
-    clearActiveConnectionMessages?.();
-    notifyUserDisconnected();
-    setUiMessage(t("connect.cancelled"));
-    try {
-      await pangeaApi.cancelConnect();
-    } catch (error) {
-      setUiMessage(reportError("cancelConnect", error));
-    }
-    await refreshStatus();
-    return;
-  }
+  const stoppingAttempt = connectInFlight && pangeaApi !== null;
 
+  clearActiveConnectionMessages?.();
   notifyUserDisconnected();
-  serverWorking = true;
-  updateServerControlStates();
-  try {
-    setUiMessage(t("connect.disconnecting"));
-    const result = await daemonApi.disconnect();
-    setUiMessage(result.ok ? t("connect.disconnected") : t("connect.disconnectFailed"));
-    await refreshStatus();
-  } catch (error) {
-    setUiMessage(reportError("serverDisconnect", error));
-  } finally {
-    serverWorking = false;
-    updateServerControlStates();
-  }
+  beginOptimisticDisconnect();
+  setUiMessage(stoppingAttempt ? t("connect.cancelled") : t("connect.disconnecting"));
+
+  void (async () => {
+    try {
+      if (stoppingAttempt) {
+        // cancelConnect() is a no-op once main has committed the attempt, so
+        // follow with an explicit teardown — a redundant disconnect is a no-op.
+        await pangeaApi?.cancelConnect();
+        await daemonApi.disconnect();
+      } else {
+        const result = await daemonApi.disconnect();
+        if (!result.ok) setUiMessage(t("connect.disconnectFailed"));
+      }
+    } catch (error) {
+      setUiMessage(reportError(stoppingAttempt ? "cancelConnect" : "serverDisconnect", error));
+    } finally {
+      await reconcileDisconnect();
+    }
+  })();
 });
 
-serverRefreshBtn.addEventListener("click", async () => {
-  await refreshServers();
-});
+/** Polls until the daemon confirms the teardown the user already sees, so a
+ *  tunnel that outlived its optimistic window is not left misreported. */
+async function reconcileDisconnect(): Promise<void> {
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const status = await refreshStatus();
+    // A newer Connect supersedes this Stop — bail before touching its message.
+    if (!disconnectingVisual) return;
+    if (!status || status.state === "DISCONNECTED") {
+      if (status) setUiMessage(t("connect.disconnected"));
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 750));
+  }
+}
+
+serverRotateBtn.addEventListener("click", () => void rotateServer());
+
+// Where this rotation cycle has been. Persisted so a relaunch resumes the
+// cycle instead of handing back the server the user just left.
+const ROTATION_KEY = "pangea:rotationVisited";
+let rotationVisited: string[] = readRotation();
+
+function readRotation(): string[] {
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(ROTATION_KEY) ?? "[]");
+    return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveRotation(): void {
+  try {
+    localStorage.setItem(ROTATION_KEY, JSON.stringify(rotationVisited));
+  } catch {
+    // Losing the list costs at most one repeat, so carry on.
+  }
+}
+
+function rotationFrom(serverId: string): ReturnType<typeof planRotation> {
+  return planRotation(buildServerRetryOrder(getVisibleServers(), serverId), serverId, rotationVisited);
+}
+
+function canRotate(): boolean {
+  if (currentDaemonState !== "CONNECTED" || serverWorking || connectInFlight || disconnectingVisual) return false;
+  if (!authState.authenticated || entitled === false) return false;
+  return rotationFrom(serverSelect.value).plan.length > 0;
+}
+
+// The plan lands on the first server that answers; everything before it is
+// remembered as tried so the next press moves on rather than retrying it.
+async function rotateServer(): Promise<void> {
+  if (!canRotate()) return;
+  const leaving = serverSelect.value;
+  const { plan, visited } = rotationFrom(leaving);
+  const region = regionOfServer(visibleRegions, plan[0]);
+  if (region) rememberRegion(region.key);
+  serverSelect.value = plan[0];
+  syncServerPicker();
+  const result = await switchToServer(plan[0], plan);
+  // A Stop that raced the switch is neither a landing nor a failed attempt.
+  const cancelled = getUserIntent() === "disconnected";
+  const landed = result?.ok && !cancelled ? result.serverId ?? null : null;
+  if (!cancelled) {
+    rotationVisited = recordRotation(visited, leaving, plan, landed);
+    saveRotation();
+  }
+  if (landed) {
+    pinnedNodeId = landed;
+  } else {
+    serverSelect.value = leaving;
+    syncServerPicker();
+  }
+  renderServers();
+}
 
 // Settings toggles sit under the overlay that covers #uiMessage, so feedback
 // goes through showToast; each reverts its checkbox if the backend call fails.
 settingsOverlay.addEventListener("change", updateSettingsSummaries);
 
-type HubMethodName = "directIp" | "shadowsocks" | "fronted" | "normal";
-type HubMethodState = {
-  directIp: boolean;
-  shadowsocks: boolean;
-  fronted: boolean;
-  normal: boolean;
-};
-
 const hubMethodToggles: Record<HubMethodName, HTMLInputElement> = {
   directIp: hubDirectIpToggle,
+  reality: hubRealityToggle,
   shadowsocks: hubShadowsocksToggle,
   fronted: hubFrontedToggle,
   normal: hubNormalToggle
 };
 
-const hubMethodLabels: Record<HubMethodName, MessageKey> = {
-  directIp: "settings.censorship.directIp.title",
-  shadowsocks: "settings.censorship.hubShadowsocks.title",
-  fronted: "settings.censorship.hubFronted.title",
-  normal: "settings.censorship.hubNormal.title"
-};
+const hubMethodNames = Object.keys(hubMethodToggles) as HubMethodName[];
+
+function hubMethodElement<T extends HTMLElement>(name: HubMethodName, suffix: string): T {
+  const id = `hub${name.charAt(0).toUpperCase()}${name.slice(1)}${suffix}`;
+  return document.getElementById(id) as T;
+}
+
+const hubMethodBadges = Object.fromEntries(
+  hubMethodNames.map((name) => [name, hubMethodElement<HTMLElement>(name, "Badge")])
+) as Record<HubMethodName, HTMLElement>;
+
+const hubMethodResults = Object.fromEntries(
+  hubMethodNames.map((name) => [name, hubMethodElement<HTMLElement>(name, "Result")])
+) as Record<HubMethodName, HTMLElement>;
+
+const hubMethodTestButtons = Object.fromEntries(
+  hubMethodNames.map((name) => [name, hubMethodElement<HTMLButtonElement>(name, "TestBtn")])
+) as Record<HubMethodName, HTMLButtonElement>;
 
 /** Mirrors main-process state onto the switches, and locks the last one on so
  *  the user cannot leave the app with no way to reach the hub. */
-function renderHubMethods(methods: HubMethodState): void {
-  const names = Object.keys(hubMethodToggles) as HubMethodName[];
-  const enabled = names.filter((name) => methods[name]);
-  for (const name of names) {
+function renderHubMethods(methods: HubMethodFlags): void {
+  const enabled = hubMethodNames.filter((name) => methods[name]);
+  for (const name of hubMethodNames) {
     const toggle = hubMethodToggles[name];
     toggle.checked = methods[name];
     toggle.disabled = enabled.length === 1 && methods[name];
-    toggle.title = toggle.disabled ? t("settings.censorship.lastMethod") : "";
+    toggle.title = toggle.disabled ? t("settings.provisioning.lastMethod") : "";
   }
   updateSettingsSummaries();
 }
@@ -1113,11 +2177,11 @@ function wireHubMethodToggle(name: HubMethodName): void {
       const result = await pangeaApi.setHubMethod(name, requested);
       renderHubMethods(result.methods);
       if (!result.applied) {
-        showToast(t("settings.censorship.lastMethod"), 4000, true);
+        showToast(t("settings.provisioning.lastMethod"), 4000, true);
         return;
       }
       showToast(
-        `${t(hubMethodLabels[name])} — ${requested ? t("toggle.hubMethod.on") : t("toggle.hubMethod.off")}`,
+        `${t(HUB_METHOD_TITLE_KEYS[name])} — ${requested ? t("toggle.hubMethod.on") : t("toggle.hubMethod.off")}`,
         3000,
         true
       );
@@ -1128,20 +2192,83 @@ function wireHubMethodToggle(name: HubMethodName): void {
   });
 }
 
-(Object.keys(hubMethodToggles) as HubMethodName[]).forEach(wireHubMethodToggle);
+hubMethodNames.forEach(wireHubMethodToggle);
 
-allowLanToggle.addEventListener("change", async () => {
-  if (!pangeaApi) return;
-  try {
-    await pangeaApi.setAllowLan(allowLanToggle.checked);
-    showToast(allowLanToggle.checked
-      ? t("toggle.allowLan.on")
-      : t("toggle.allowLan.off"), 4000, true);
-  } catch (err) {
-    allowLanToggle.checked = !allowLanToggle.checked;
-    showToast(reportError("allowLan", err, t("toggle.updateFailed")));
+/** Names the method carrying account traffic right now, on the row and in the
+ *  line above the list. */
+function renderHubStatus(status: HubStatus): void {
+  for (const name of hubMethodNames) {
+    hubMethodBadges[name].hidden = status.active !== name;
   }
-});
+  hubActiveDot.dataset.state = status.active ? "live" : "idle";
+  hubActiveTextEl.textContent = hubActiveText(status, t);
+}
+
+/** Probes one method on demand. Every button is locked while a probe runs —
+ *  the main process only tests one at a time. */
+function wireHubMethodTest(name: HubMethodName): void {
+  hubMethodTestButtons[name].addEventListener("click", async () => {
+    if (!pangeaApi) return;
+    const output = hubMethodResults[name];
+    output.hidden = false;
+    output.dataset.state = "pending";
+    output.textContent = t("settings.provisioning.testing");
+    for (const other of hubMethodNames) hubMethodTestButtons[other].disabled = true;
+    try {
+      const result = await pangeaApi.testHubMethod(name);
+      output.dataset.state = result.ok ? "ok" : result.unavailable ? "unavailable" : "fail";
+      output.textContent = hubTestText(result, t);
+      renderHubStatus(await pangeaApi.getHubStatus());
+    } catch (err) {
+      output.dataset.state = "fail";
+      output.textContent = reportError(`hubTest:${name}`, err, t("settings.provisioning.result.fail"));
+    } finally {
+      for (const other of hubMethodNames) hubMethodTestButtons[other].disabled = false;
+    }
+  });
+}
+
+hubMethodNames.forEach(wireHubMethodTest);
+
+/** Wires a plain boolean settings toggle: persist, toast, revert on failure. */
+function wireBooleanToggle(
+  toggle: HTMLInputElement,
+  setter: (value: boolean) => Promise<unknown>,
+  messageKeys: { on: MessageKey; off: MessageKey },
+  errorContext: string
+): void {
+  toggle.addEventListener("change", async () => {
+    if (!pangeaApi) return;
+    try {
+      await setter(toggle.checked);
+      showToast(t(toggle.checked ? messageKeys.on : messageKeys.off), 4000, true);
+    } catch (err) {
+      toggle.checked = !toggle.checked;
+      showToast(reportError(errorContext, err, t("toggle.updateFailed")));
+    }
+  });
+}
+
+wireBooleanToggle(
+  allowLanToggle,
+  (value) => pangeaApi!.setAllowLan(value),
+  { on: "toggle.allowLan.on", off: "toggle.allowLan.off" },
+  "allowLan"
+);
+
+wireBooleanToggle(
+  postQuantumToggle,
+  (value) => pangeaApi!.setPostQuantum(value),
+  { on: "toggle.postQuantum.on", off: "toggle.postQuantum.off" },
+  "postQuantum"
+);
+
+wireBooleanToggle(
+  hubInTunnelToggle,
+  (value) => pangeaApi!.setHubInTunnel(value),
+  { on: "toggle.hubInTunnel.on", off: "toggle.hubInTunnel.off" },
+  "hubInTunnel"
+);
 
 // Commits on blur/Enter. Main owns validation and returns what it actually
 // stored, so the field always ends up showing the truth rather than the typo.
@@ -1218,7 +2345,7 @@ customDnsInput.addEventListener("change", async () => {
 preferredTransportSelect.addEventListener("change", async () => {
   if (!pangeaApi) return;
   const previous = preferredTransportSelect.dataset.previousValue ?? "auto";
-  const choice = preferredTransportSelect.value as "auto" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "snowflake";
+  const choice = preferredTransportSelect.value as TransportChoice;
   try {
     await pangeaApi.setPreferredTransport(choice);
     preferredTransportSelect.dataset.previousValue = choice;
@@ -1227,6 +2354,8 @@ preferredTransportSelect.addEventListener("change", async () => {
     showToast(t("toggle.preferredTransport.updated"), 4000, true);
   } catch (err) {
     preferredTransportSelect.value = previous;
+    // The revert lands after the change event, so the picker needs telling.
+    syncTransportChoice();
     showToast(reportError("preferredTransport", err, t("toggle.updateFailed")));
   }
 });
@@ -1244,37 +2373,735 @@ launchAtStartupToggle.addEventListener("change", async () => {
   }
 });
 
-alwaysConnectedToggle.addEventListener("change", async () => {
+autoConnectToggle.addEventListener("change", async () => {
   if (!pangeaApi) return;
-  alwaysConnectedLocal = alwaysConnectedToggle.checked;
+  autoConnectLocal = autoConnectToggle.checked;
   try {
-    await pangeaApi.setAlwaysConnected(alwaysConnectedLocal);
+    await pangeaApi.setAutoConnect(autoConnectLocal);
   } catch (err) {
-    alwaysConnectedLocal = !alwaysConnectedLocal;
-    alwaysConnectedToggle.checked = alwaysConnectedLocal;
+    autoConnectLocal = !autoConnectLocal;
+    autoConnectToggle.checked = autoConnectLocal;
+    showToast(reportError("autoConnect", err, t("toggle.autoConnect.failed")));
+    return;
+  }
+  notifyToggleChanged(autoConnectLocal);
+  if (autoConnectLocal) {
+    showToast(t("toggle.autoConnect.on"), 4000, true);
+    void attemptInitialAutoConnect();
+  } else {
+    showToast(t("toggle.autoConnect.off"), 4000, true);
+  }
+});
+
+notificationsToggle.addEventListener("change", async () => {
+  if (!pangeaApi) return;
+  const requested = notificationsToggle.checked;
+  try {
+    await pangeaApi.setNotifications(requested);
+  } catch (err) {
+    notificationsToggle.checked = !requested;
+    showToast(reportError("notifications", err, t("toggle.notifications.failed")));
+    return;
+  }
+  showToast(t(requested ? "toggle.notifications.on" : "toggle.notifications.off"), 4000, true);
+});
+
+deadDropToggle.addEventListener("change", async () => {
+  if (!pangeaApi) return;
+  const requested = deadDropToggle.checked;
+  try {
+    await pangeaApi.setDeadDrop(requested);
+  } catch (err) {
+    deadDropToggle.checked = !requested;
+    showToast(reportError("deadDrop", err, t("toggle.updateFailed")));
+    return;
+  }
+  showToast(requested ? t("toggle.deadDrop.on") : t("toggle.deadDrop.off"), 4000, true);
+});
+
+lockdownToggle.addEventListener("change", async () => {
+  if (!pangeaApi) return;
+  lockdownLocal = lockdownToggle.checked;
+  try {
+    await pangeaApi.setLockdown(lockdownLocal);
+  } catch (err) {
+    lockdownLocal = !lockdownLocal;
+    lockdownToggle.checked = lockdownLocal;
     showToast(reportError("lockdown", err, t("toggle.lockdown.failed")));
     return;
   }
-  notifyToggleChanged(alwaysConnectedLocal);
-  if (alwaysConnectedLocal) {
-    showToast(t("toggle.lockdown.on"), 5000, true);
-    void attemptInitialAutoConnect();
-  } else {
-    showToast(t("toggle.lockdown.off"), 4000, true);
+  showToast(lockdownLocal ? t("toggle.lockdown.on") : t("toggle.lockdown.off"), 5000, true);
+});
+
+const SPLIT_ICON_BATCH = 16;
+const SPLIT_CATALOG_MAX_AGE_MS = 120_000;
+const SPLIT_RELOAD_MS = 5000;
+const SPLIT_APP_GLYPH =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="3"/><path d="M3.5 9h17"/><path d="M7 6.8h.01M9.5 6.8h.01"/></svg>';
+const SPLIT_FOLDER_GLYPH =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2.5h7a2 2 0 0 1 2 2v7.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2Z"/></svg>';
+
+
+function setSplitNote(el: HTMLElement, text: string, tone?: string): void {
+  el.textContent = text;
+  el.hidden = text === "";
+  if (tone && text) el.dataset.tone = tone;
+  else delete el.dataset.tone;
+}
+
+function loadedSplitConfig(): SplitTunnelConfig | null {
+  return splitLoad === "loaded" ? splitConfig : null;
+}
+
+function splitAppsInfo(): { text: string; blocking: boolean } | null {
+  const config = loadedSplitConfig();
+  if (!config) return null;
+  return splitAppsUnavailable(
+    { appsSupported: config.appsSupported, unavailableReason: splitLive?.unavailableReason ?? config.unavailableReason },
+    t
+  );
+}
+
+function renderSplitSummaries(): void {
+  setSplitTunnelValue.textContent = splitRailSummary(splitLoad, splitConfig, t);
+  splitTunnelPickerValue.textContent =
+    splitLoad === "loaded"
+      ? splitPickerSummary(splitConfig, t)
+      : splitLoad === "loading"
+        ? t("common.loading")
+        : t("common.dash");
+  splitTunnelLockdownHint.hidden = !lockdownToggle.checked;
+}
+
+function renderSplitSection(): void {
+  const config = loadedSplitConfig();
+  splitTunnelState.hidden = config !== null;
+  splitTunnelState.dataset.state = splitLoad;
+  splitTunnelStateText.textContent =
+    splitLoad === "unreachable"
+      ? t("settings.splitTunnel.unreachable")
+      : splitLoad === "unsupported"
+        ? t("settings.splitTunnel.unsupported")
+        : config
+          ? ""
+          : t("common.loading");
+  splitTunnelRetryBtn.hidden = splitLoad !== "unreachable";
+  splitTunnelControls.hidden = splitLoad === "unsupported";
+  if (splitLoad === "loading") splitTunnelControls.setAttribute("aria-busy", "true");
+  else splitTunnelControls.removeAttribute("aria-busy");
+  splitTunnelToggle.disabled = !config;
+  splitTunnelPickerBtn.disabled = !config;
+  splitTunnelCidrsInput.disabled = !config;
+  if (config) {
+    if (!splitToggleBusy) splitTunnelToggle.checked = config.enabled;
+    const keepTyped =
+      splitCidrsBusy ||
+      document.activeElement === splitTunnelCidrsInput ||
+      splitTunnelCidrsInput.getAttribute("aria-invalid") === "true";
+    if (!keepTyped) splitTunnelCidrsInput.value = config.cidrs.join(", ");
+  }
+  const apps = splitAppsInfo();
+  setSplitNote(splitTunnelAppsNote, apps?.text ?? "", apps?.blocking ? "error" : "warn");
+  const dropped = config !== null && (splitLive?.cidrsDropped ?? config.cidrsDropped);
+  setSplitNote(splitTunnelCidrsDropped, dropped ? t("settings.splitTunnel.ranges.dropped") : "", "warn");
+  splitTunnelPending.hidden = !(config && (splitLive?.pending ?? config.pending));
+  renderSplitSummaries();
+  renderSplitPaneState();
+}
+
+function setSplitConfig(load: SplitLoad, config: SplitTunnelConfig | null): void {
+  splitLoad = load;
+  splitConfig = config;
+  splitConfigKeys = new Set((config?.apps ?? []).map((rule) => `rule:${splitRuleKey(rule, splitPlatform)}`));
+  renderSplitSection();
+  syncSplitRows();
+  if (load !== "loaded" && activeSubpane?.pane === splitTunnelPane) closeSubpane(true);
+}
+
+// A write's reply is newer than any read still in flight, and than the last /status sample.
+function applySplitConfig(config: SplitTunnelConfig): void {
+  splitLoadSeq++;
+  splitLive = null;
+  setSplitConfig("loaded", config);
+}
+
+async function loadSplitTunnel(): Promise<void> {
+  const api = pangeaApi;
+  if (!api) return;
+  const seq = ++splitLoadSeq;
+  splitLoadAt = Date.now();
+  if (splitLoad !== "loaded") {
+    splitLoad = "loading";
+    renderSplitSection();
+  }
+  let config: SplitTunnelConfig | null;
+  try {
+    config = (await api.getSplitTunnel()) ?? null;
+  } catch (err) {
+    if (seq !== splitLoadSeq) return;
+    console.error("[splitTunnel]", err);
+    setSplitConfig("unreachable", null);
+    return;
+  }
+  if (seq !== splitLoadSeq) return;
+  setSplitConfig(config ? "loaded" : "unsupported", config);
+}
+
+/** Any failure but a validation one means the UI may be out of step, so it re-reads the service. */
+async function runSplitWrite(
+  context: string,
+  write: () => Promise<SplitTunnelResult>
+): Promise<SplitTunnelResult | null> {
+  try {
+    const result = await write();
+    if (result.ok) applySplitConfig(result.config);
+    return result;
+  } catch (err) {
+    showToast(reportError(context, err, t("toggle.updateFailed")));
+    await loadSplitTunnel();
+    return null;
+  }
+}
+
+function setSplitCidrError(text: string): void {
+  setSplitNote(splitTunnelCidrsError, text, "error");
+  if (text) splitTunnelCidrsInput.setAttribute("aria-invalid", "true");
+  else splitTunnelCidrsInput.removeAttribute("aria-invalid");
+}
+
+function showSplitInvalid(invalid: readonly SplitTunnelInvalid[], fromRanges = false): void {
+  for (const [key, code] of splitInvalidByRule(invalid, splitPlatform)) splitInvalid.set(key, code);
+  const ranges = fromRanges ? splitRangesSaveError(invalid, splitPlatform, t) : splitCidrErrorText(invalid, t);
+  if (ranges) setSplitCidrError(ranges);
+  const messages = [
+    ...new Set(invalid.filter((item) => item.field === "apps").map((item) => splitAppErrorText(item.code, t)))
+  ];
+  if (ranges && !fromRanges) messages.push(ranges);
+  if (messages.length > 0) showToast(messages.join(" "));
+  syncSplitRows();
+}
+
+splitTunnelRetryBtn.addEventListener("click", async () => {
+  await loadSplitTunnel();
+  if (document.activeElement === document.body) {
+    (splitLoad === "unreachable" ? splitTunnelRetryBtn : splitTunnelToggle).focus();
   }
 });
+
+// Disabling a switch mid-write would drop keyboard focus, so a busy one just ignores clicks.
+splitTunnelToggle.addEventListener("click", (event) => {
+  if (splitToggleBusy) event.preventDefault();
+});
+
+async function setSplitEnabled(requested: boolean): Promise<void> {
+  const api = pangeaApi;
+  if (!api || splitLoad !== "loaded" || splitToggleBusy) return;
+  splitToggleBusy = true;
+  splitTunnelToggle.checked = requested;
+  splitTunnelToggle.setAttribute("aria-busy", "true");
+  const result = await runSplitWrite("splitTunnelEnabled", () => api.setSplitTunnelEnabled(requested));
+  splitToggleBusy = false;
+  splitTunnelToggle.removeAttribute("aria-busy");
+  if (result?.ok) showToast(t(requested ? "toggle.splitTunnel.on" : "toggle.splitTunnel.off"), 4000, true);
+  else if (result) showSplitInvalid(result.invalid);
+  renderSplitSection();
+}
+
+splitTunnelToggle.addEventListener("change", () => void setSplitEnabled(splitTunnelToggle.checked));
+
+// The picker hides the section's switch, so its "off" note carries one of its own.
+splitTunnelTurnOnBtn.addEventListener("click", async () => {
+  const hadFocus = document.activeElement === splitTunnelTurnOnBtn;
+  await setSplitEnabled(true);
+  if (hadFocus && splitTunnelTurnOnBtn.hidden) splitTunnelSearch.focus();
+});
+
+// Commits on blur/Enter only: a bad entry keeps the text as typed and says what is wrong with it.
+splitTunnelCidrsInput.addEventListener("change", () => void saveSplitCidrs());
+
+async function saveSplitCidrs(): Promise<void> {
+  const api = pangeaApi;
+  if (!api || splitLoad !== "loaded") return;
+  const typed = splitTunnelCidrsInput.value;
+  splitCidrsBusy = true;
+  splitTunnelCidrsInput.readOnly = true;
+  splitTunnelCidrsInput.setAttribute("aria-busy", "true");
+  const result = await runSplitWrite("splitTunnelCidrs", () => api.setSplitTunnelCidrs(typed));
+  splitCidrsBusy = false;
+  splitTunnelCidrsInput.readOnly = false;
+  splitTunnelCidrsInput.removeAttribute("aria-busy");
+  if (!result) return;
+  if (!result.ok) {
+    showSplitInvalid(result.invalid, true);
+    return;
+  }
+  setSplitCidrError("");
+  const stored = result.config.cidrs;
+  splitTunnelCidrsInput.value = stored.join(", ");
+  const cidrs = stored.map(isolateLtr).join(", ");
+  const key: MessageKey =
+    stored.length === 0
+      ? "settings.splitTunnel.ranges.cleared"
+      : splitCidrsAdjusted(typed, stored)
+        ? "settings.splitTunnel.ranges.adjusted"
+        : "settings.splitTunnel.ranges.saved";
+  showToast(t(key, { cidrs }), 5000, true);
+}
+
+function ensureSplitCatalog(refresh: boolean): Promise<void> {
+  const api = pangeaApi;
+  if (!api) return Promise.resolve();
+  if (splitCatalogPending) return splitCatalogPending;
+  if (splitCatalog && !refresh) return Promise.resolve();
+  if (!splitCatalog) splitCatalogState = "loading";
+  splitCatalogPending = (async () => {
+    try {
+      const entries = await api.listSplitTunnelApps(refresh ? { refresh: true } : undefined);
+      splitCatalog = Array.isArray(entries) ? entries : [];
+      splitCatalogState = "ready";
+      splitCatalogAt = Date.now();
+    } catch (err) {
+      console.error("[splitTunnelCatalog]", err);
+      if (!splitCatalog) splitCatalogState = "failed";
+    } finally {
+      splitCatalogPending = null;
+    }
+  })();
+  return splitCatalogPending;
+}
+
+// The scan walks the disk, so it starts once the section is in view rather than at launch.
+function prefetchSplitCatalog(): void {
+  if (splitLoad === "loaded" && !splitCatalog && splitCatalogState !== "failed") void ensureSplitCatalog(false);
+}
+
+splitTunnelPickerBtn.addEventListener("pointerenter", prefetchSplitCatalog);
+splitTunnelPickerBtn.addEventListener("focus", prefetchSplitCatalog);
+new IntersectionObserver(
+  (records) => {
+    if (settingsOverlay.classList.contains("visible") && records.some((record) => record.isIntersecting)) {
+      prefetchSplitCatalog();
+    }
+  },
+  { root: settingsPane }
+).observe(splitTunnelSection);
+
+function renderSplitPaneState(): void {
+  const apps = splitAppsInfo();
+  const note = splitPaneNote(apps, loadedSplitConfig()?.enabled ?? null, t);
+  setSplitNote(splitTunnelPaneNoteText, note?.text ?? "", note?.tone);
+  splitTunnelPaneNote.hidden = !note;
+  splitTunnelTurnOnBtn.hidden = !note?.turnOn;
+  splitTunnelBrowseBtn.disabled = splitLoad !== "loaded" || apps?.blocking === true;
+}
+
+function renderSplitPane(): void {
+  const gen = ++splitPaneGen;
+  splitTunnelSearch.value = "";
+  splitTouched = false;
+  splitDescribed = false;
+  splitPinned = [];
+  splitSession.clear();
+  splitEntries.clear();
+  splitRows.clear();
+  splitInvalid.clear();
+  splitIconQueue.clear();
+  splitIconObserver?.disconnect();
+  splitIconObserver = new IntersectionObserver(onSplitRowsVisible, { root: splitTunnelPane, rootMargin: "48px 0px" });
+  splitTunnelPane.scrollTop = 0;
+  renderSplitPaneState();
+  drawSplitList();
+  const hadCatalog = splitCatalog !== null;
+  const stale = hadCatalog && Date.now() - splitCatalogAt > SPLIT_CATALOG_MAX_AGE_MS;
+  // The scan's request goes first, so the main process describes the stored rules against its result.
+  const catalogLoad = ensureSplitCatalog(stale);
+  void describeSplitRules(splitConfig?.apps ?? [], gen);
+  void catalogLoad.then(() => {
+    if (gen === splitPaneGen && !(hadCatalog && splitTouched)) drawSplitList();
+  });
+}
+
+async function describeSplitRules(rules: readonly string[], gen: number): Promise<void> {
+  let described: SplitTunnelAppEntry[] = [];
+  if (rules.length > 0 && pangeaApi) {
+    try {
+      const reply = await pangeaApi.describeSplitTunnelApps([...rules]);
+      described = Array.isArray(reply) ? reply : [];
+    } catch (err) {
+      console.error("[splitTunnelDescribe]", err);
+      described = rules.map((rule) => fallbackSplitEntry(rule, splitPlatform));
+    }
+  }
+  if (gen !== splitPaneGen) return;
+  for (const entry of described) {
+    const key = splitEntryKey(entry, splitPlatform);
+    splitEntries.set(key, entry);
+    splitSession.add(key);
+  }
+  splitDescribed = true;
+  drawSplitList();
+}
+
+function splitGroupTitle(text: string): HTMLElement {
+  const title = document.createElement("h4");
+  title.className = "split-group-title";
+  title.textContent = text;
+  return title;
+}
+
+function splitEmptyLine(text: string, working = false): HTMLElement {
+  const line = document.createElement("p");
+  line.className = "split-empty";
+  if (working) {
+    const spinner = document.createElement("span");
+    spinner.className = "spinner";
+    spinner.setAttribute("aria-hidden", "true");
+    line.append(spinner);
+  }
+  line.append(text);
+  return line;
+}
+
+function announceSplit(text: string): void {
+  if (splitTunnelLive.textContent !== text) splitTunnelLive.textContent = text;
+}
+
+/** Groups and orders the rows. Runs on open, on search and as data arrives, never on a toggle. */
+function drawSplitList(): void {
+  const searching = splitTunnelSearch.value.trim() !== "";
+  const catalogWorking = splitCatalogState === "loading" || splitCatalogState === "idle";
+  splitTunnelList.setAttribute("aria-busy", String(!splitDescribed || catalogWorking));
+  if (!splitDescribed) {
+    splitTunnelList.replaceChildren(splitEmptyLine(t("common.loading"), true));
+    announceSplit(t("settings.splitTunnel.apps.finding"));
+    return;
+  }
+
+  const catalogKeys: string[] = [];
+  for (const entry of splitCatalog ?? []) {
+    const key = splitEntryKey(entry, splitPlatform);
+    if (!splitEntries.has(key)) splitEntries.set(key, entry);
+    catalogKeys.push(key);
+  }
+  for (const rule of splitConfig?.apps ?? []) {
+    const key = `rule:${splitRuleKey(rule, splitPlatform)}`;
+    if (!splitEntries.has(key)) splitEntries.set(key, fallbackSplitEntry(rule, splitPlatform));
+  }
+  const groups = groupSplitRows({
+    entries: splitEntries,
+    pinned: splitPinned,
+    excluded: new Set([...splitConfigKeys, ...splitSession]),
+    catalog: catalogKeys,
+    query: splitTunnelSearch.value,
+    locale: localeTag()
+  });
+
+  const nodes: HTMLElement[] = [];
+  const shown: SplitRow[] = [];
+  const total = groups.excluded.length + groups.catalog.length;
+  const addRows = (keys: string[]): void => {
+    for (const key of keys) {
+      const row = splitRowFor(key);
+      shown.push(row);
+      nodes.push(row.row);
+    }
+  };
+  if (searching && total === 0 && !catalogWorking) {
+    nodes.push(splitEmptyLine(t("settings.splitTunnel.apps.noMatch", { query: isolateAuto(splitTunnelSearch.value.trim()) })));
+  } else {
+    if (groups.excluded.length > 0 || !searching) {
+      nodes.push(splitGroupTitle(t("settings.splitTunnel.apps.groupExcluded")));
+      if (groups.excluded.length === 0) nodes.push(splitEmptyLine(t("settings.splitTunnel.apps.noneExcluded")));
+      addRows(groups.excluded);
+    }
+    const installed = t("settings.splitTunnel.apps.groupInstalled");
+    if (catalogWorking) {
+      nodes.push(splitGroupTitle(installed), splitEmptyLine(t("settings.splitTunnel.apps.finding"), true));
+    } else if (splitCatalogState === "failed") {
+      nodes.push(splitGroupTitle(installed), splitEmptyLine(t("settings.splitTunnel.apps.listFailed")));
+    } else if (groups.catalog.length > 0) {
+      nodes.push(splitGroupTitle(installed));
+      addRows(groups.catalog);
+    } else if (!searching && (splitCatalog?.length ?? 0) === 0) {
+      nodes.push(splitGroupTitle(installed), splitEmptyLine(t("settings.splitTunnel.apps.noneInstalled")));
+    }
+  }
+  placeChildren(splitTunnelList, nodes);
+  for (const row of shown) {
+    syncSplitRow(row);
+    splitIconObserver?.observe(row.row);
+  }
+  announceSplit(
+    catalogWorking
+      ? t("settings.splitTunnel.apps.finding")
+      : searching && total === 0
+        ? t("settings.splitTunnel.apps.noMatch", { query: splitTunnelSearch.value.trim() })
+        : t("settings.splitTunnel.apps.found", { count: total })
+  );
+}
+
+function splitRowFor(key: string): SplitRow {
+  const existing = splitRows.get(key);
+  if (existing) return existing;
+  const entry = splitEntries.get(key)!;
+  const id = `splitApp${++splitRowSeq}`;
+
+  const row = document.createElement("div");
+  row.className = "option-row option-row-toggle split-app-row";
+  row.id = id;
+  row.dataset.key = key;
+
+  const icon = document.createElement("span");
+  icon.className = "split-app-icon";
+  icon.dataset.iconId = entry.id;
+  icon.innerHTML = entry.kind === "dir" ? SPLIT_FOLDER_GLYPH : SPLIT_APP_GLYPH;
+
+  const copy = document.createElement("span");
+  copy.className = "option-copy";
+  const titleLine = document.createElement("span");
+  titleLine.className = "option-title-line";
+  const name = document.createElement("label");
+  name.className = "option-title split-app-name";
+  name.htmlFor = `${id}-switch`;
+  name.dir = "auto";
+  name.textContent = entry.name;
+  titleLine.append(name);
+  if (entry.kind === "dir") {
+    const badge = document.createElement("span");
+    badge.className = "split-badge";
+    badge.textContent = t("settings.splitTunnel.apps.folder");
+    badge.title = t("settings.splitTunnel.apps.folderHint");
+    titleLine.append(badge);
+  }
+  const full = splitEntryPath(entry);
+  const path = document.createElement("span");
+  path.className = "option-desc split-app-path";
+  path.id = `${id}-path`;
+  path.dir = "ltr";
+  path.title = full;
+  path.dataset.full = full;
+  path.textContent = full;
+  const note = document.createElement("span");
+  note.className = "split-app-note";
+  note.id = `${id}-note`;
+  note.hidden = true;
+  copy.append(titleLine, path, note);
+
+  const toggle = document.createElement("input");
+  toggle.type = "checkbox";
+  toggle.className = "toggle-switch";
+  toggle.id = `${id}-switch`;
+  toggle.setAttribute("aria-describedby", `${id}-path ${id}-note`);
+  row.append(icon, copy, toggle);
+
+  const splitRow: SplitRow = { key, row, toggle, icon, path, note };
+  toggle.addEventListener("click", (event) => {
+    if (splitBusy.has(key)) event.preventDefault();
+  });
+  toggle.addEventListener("change", () => void toggleSplitApp(splitRow, toggle.checked));
+  splitRows.set(key, splitRow);
+  return splitRow;
+}
+
+function syncSplitRow(splitRow: SplitRow): void {
+  const entry = splitEntries.get(splitRow.key);
+  if (!entry) return;
+  const busy = splitBusy.has(splitRow.key);
+  const configured = splitConfigKeys.has(splitRow.key);
+  if (!busy) splitRow.toggle.checked = configured;
+  // Where the service can't exclude apps, a row can still be switched off, just not on.
+  const blocked = splitAppsInfo()?.blocking === true && !configured && !busy;
+  splitRow.toggle.disabled = splitLoad !== "loaded" || !entry.rule || blocked;
+  if (busy) splitRow.row.setAttribute("aria-busy", "true");
+  else splitRow.row.removeAttribute("aria-busy");
+  const invalid = splitInvalid.get(splitRow.key);
+  if (invalid) splitRow.toggle.setAttribute("aria-invalid", "true");
+  else splitRow.toggle.removeAttribute("aria-invalid");
+  const note = splitRowNote(entry, invalid, t);
+  setSplitNote(splitRow.note, note?.text ?? "", note?.tone);
+}
+
+function syncSplitRows(): void {
+  for (const splitRow of splitRows.values()) syncSplitRow(splitRow);
+  renderSplitPaneState();
+}
+
+async function toggleSplitApp(splitRow: SplitRow, excluded: boolean): Promise<void> {
+  const api = pangeaApi;
+  const rule = splitEntries.get(splitRow.key)?.rule;
+  if (!api || !rule || splitLoad !== "loaded") return;
+  splitTouched = true;
+  splitBusy.add(splitRow.key);
+  splitInvalid.delete(splitRow.key);
+  syncSplitRow(splitRow);
+  const result = await runSplitWrite("splitTunnelApp", () => api.setSplitTunnelApp(rule, excluded));
+  splitBusy.delete(splitRow.key);
+  if (result && !result.ok) showSplitInvalid(result.invalid);
+  syncSplitRows();
+}
+
+function onSplitRowsVisible(records: IntersectionObserverEntry[]): void {
+  for (const record of records) {
+    if (!record.isIntersecting) continue;
+    const splitRow = splitRows.get((record.target as HTMLElement).dataset.key ?? "");
+    if (!splitRow || splitRow.row !== record.target) continue;
+    splitIconObserver?.unobserve(record.target);
+    fitSplitPath(splitRow.path);
+    const iconId = splitRow.icon.dataset.iconId ?? "";
+    const icon = splitIcons.get(iconId);
+    if (icon !== undefined) showSplitIcon(splitRow, icon);
+    else if (iconId) splitIconQueue.add(iconId);
+  }
+  void pumpSplitIcons();
+}
+
+/** Trims the path from the middle until it fits, so the app's own folder and file stay readable. */
+function fitSplitPath(el: HTMLElement): void {
+  const full = el.dataset.full ?? "";
+  el.textContent = full;
+  if (el.clientWidth === 0 || el.scrollWidth <= el.clientWidth) return;
+  let low = 8;
+  let high = full.length - 1;
+  let best = middleEllipsis(full, low);
+  while (low <= high) {
+    const mid = (low + high) >> 1;
+    const candidate = middleEllipsis(full, mid);
+    el.textContent = candidate;
+    if (el.scrollWidth <= el.clientWidth) {
+      best = candidate;
+      low = mid + 1;
+    } else {
+      high = mid - 1;
+    }
+  }
+  el.textContent = best;
+}
+
+function showSplitIcon(splitRow: SplitRow, icon: string): void {
+  if (!icon || splitRow.icon.dataset.loaded === "true") return;
+  const img = document.createElement("img");
+  img.alt = "";
+  img.width = 24;
+  img.height = 24;
+  img.decoding = "async";
+  img.addEventListener("error", () => {
+    splitRow.icon.dataset.loaded = "false";
+    splitRow.icon.innerHTML = SPLIT_APP_GLYPH;
+  });
+  img.src = icon;
+  splitRow.icon.replaceChildren(img);
+  splitRow.icon.dataset.loaded = "true";
+}
+
+// One request at a time: the main process resolves icons serially anyway, so more would only queue there.
+async function pumpSplitIcons(): Promise<void> {
+  const api = pangeaApi;
+  if (!api || splitIconsInFlight || splitIconQueue.size === 0) return;
+  const batch = [...splitIconQueue].slice(0, SPLIT_ICON_BATCH);
+  for (const id of batch) splitIconQueue.delete(id);
+  splitIconsInFlight = true;
+  try {
+    const icons = await api.getSplitTunnelIcons(batch);
+    for (const item of Array.isArray(icons) ? icons : []) {
+      if (!batch.includes(item.key)) continue;
+      splitIcons.set(item.key, typeof item.icon === "string" && item.icon.startsWith("data:image/") ? item.icon : "");
+    }
+  } catch (err) {
+    console.error("[splitTunnelIcons]", err);
+  } finally {
+    splitIconsInFlight = false;
+  }
+  for (const id of batch) {
+    if (!splitIcons.has(id)) splitIcons.set(id, "");
+  }
+  for (const splitRow of splitRows.values()) {
+    const id = splitRow.icon.dataset.iconId ?? "";
+    if (batch.includes(id)) showSplitIcon(splitRow, splitIcons.get(id) ?? "");
+  }
+  void pumpSplitIcons();
+}
+
+splitTunnelSearch.addEventListener("input", () => {
+  splitTouched = true;
+  drawSplitList();
+});
+
+// A non-empty search swallows Escape; an empty one lets it close the pane.
+splitTunnelSearch.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape" || splitTunnelSearch.value === "") return;
+  event.preventDefault();
+  event.stopPropagation();
+  splitTunnelSearch.value = "";
+  drawSplitList();
+});
+
+splitTunnelBrowseBtn.addEventListener("click", () => void browseSplitApp());
+
+async function browseSplitApp(): Promise<void> {
+  const api = pangeaApi;
+  if (!api || splitLoad !== "loaded") return;
+  let picked: SplitTunnelBrowseResult | null = null;
+  try {
+    picked = (await api.browseSplitTunnelApp()) ?? null;
+  } catch (err) {
+    showToast(reportError("splitTunnelBrowse", err, t("toggle.updateFailed")));
+  }
+  if (!picked || !picked.ok || !picked.entry.rule) {
+    if (picked && !picked.ok) {
+      showToast(t(picked.reason === "ownImage" ? "settings.splitTunnel.browse.ownImage" : "settings.splitTunnel.browse.notAnApp"));
+    } else if (picked) {
+      showToast(splitRowNote(picked.entry, undefined, t)?.text ?? t("settings.splitTunnel.browse.notAnApp"));
+    }
+    splitTunnelBrowseBtn.focus();
+    return;
+  }
+  const entry = picked.entry;
+  const key = splitEntryKey(entry, splitPlatform);
+  const name = isolateAuto(entry.name);
+  splitTouched = true;
+  if (!splitRows.has(key)) splitEntries.set(key, entry);
+  splitPinned = [key, ...splitPinned.filter((pinned) => pinned !== key)];
+  splitSession.add(key);
+  splitTunnelSearch.value = "";
+  drawSplitList();
+  const splitRow = splitRowFor(key);
+  splitTunnelPane.scrollTo({ top: 0 });
+  splitRow.toggle.focus();
+  if (splitConfigKeys.has(key)) {
+    showToast(t("settings.splitTunnel.apps.already", { name }), 4000, true);
+    return;
+  }
+  splitRow.toggle.checked = true;
+  await toggleSplitApp(splitRow, true);
+  if (!splitConfigKeys.has(key)) return;
+  const added = splitConfig?.enabled ? "settings.splitTunnel.apps.added" : "settings.splitTunnel.apps.addedOff";
+  showToast(t(added, { name }), 4000, true);
+}
+
+function syncSplitStatus(status: StatusResponse): void {
+  const live = splitStatusOf(status);
+  if (
+    live &&
+    (live.pending !== splitLive?.pending ||
+      live.unavailableReason !== splitLive?.unavailableReason ||
+      live.cidrsDropped !== splitLive?.cidrsDropped)
+  ) {
+    splitLive = live;
+    if (splitLoad === "loaded") renderSplitSection();
+  }
+  if (splitLoad === "unreachable" && Date.now() - splitLoadAt > SPLIT_RELOAD_MS) void loadSplitTunnel();
+}
 
 async function refreshLastServer(): Promise<void> {
   if (!pangeaApi) return;
   try {
     const last = await pangeaApi.getLastServer();
     lastServerIdLocal = last.lastServerId;
+    activeEntryId = last.lastEntryServerId ?? null;
   } catch {
     // best-effort
   }
 }
-
-
 
 const loadingScreen = document.getElementById("loadingScreen") as HTMLElement;
 const loadingMessage = document.getElementById("loadingMessage") as HTMLParagraphElement;
@@ -1289,7 +3116,7 @@ let daemonRecoveryReturnFocus: HTMLElement | null = null;
 let daemonRecoveryResolvers: Array<() => void> = [];
 const daemonRecoveryInerted = new Set<HTMLElement>();
 
-function showDaemonRecovery(): void {
+function showDaemonRecovery(reason = ""): void {
   if (!daemonRecoveryScreen.hidden) return;
 
   daemonRecoveryReturnFocus = document.activeElement as HTMLElement | null;
@@ -1302,7 +3129,7 @@ function showDaemonRecovery(): void {
   }
   daemonRecoveryScreen.hidden = false;
   daemonRecoveryScreen.dataset.state = "error";
-  daemonRecoveryMessage.textContent = "";
+  daemonRecoveryMessage.textContent = reason;
   daemonRecoveryBtn.disabled = false;
   daemonRecoveryBtn.removeAttribute("aria-busy");
   daemonRecoveryButtonLabel.textContent = t("daemonRecovery.restart");
@@ -1328,9 +3155,17 @@ function completeDaemonRecovery(force = false): void {
   for (const resolve of resolvers) resolve();
 }
 
-function waitForDaemonRecovery(): Promise<void> {
-  showDaemonRecovery();
+function waitForDaemonRecovery(reason = ""): Promise<void> {
+  showDaemonRecovery(reason);
   return new Promise((resolve) => daemonRecoveryResolvers.push(resolve));
+}
+
+// Electron reports an IPC rejection as "Error invoking remote method 'x':
+// Error: <original>". Only the original half means anything to the user.
+function daemonErrorText(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error);
+  const unwrapped = /Error invoking remote method '[^']*':\s*(?:[A-Za-z]*Error:\s*)?([\s\S]*)$/.exec(raw);
+  return (unwrapped ? unwrapped[1] : raw).trim();
 }
 
 daemonRecoveryBtn.addEventListener("click", async () => {
@@ -1383,27 +3218,63 @@ function animateOut(el: HTMLElement): Promise<void> {
   });
 }
 
+/** animateOut in reverse: fades in while sliding from the right. */
+function animateIn(el: HTMLElement): Promise<void> {
+  return new Promise((resolve) => {
+    el.style.transition = "none";
+    el.style.opacity = "0";
+    el.style.transform = "translateX(30px)";
+    void el.offsetHeight;
+    el.style.transition = "opacity 250ms ease, transform 250ms ease";
+    el.style.opacity = "1";
+    el.style.transform = "translateX(0)";
+    const done = () => {
+      el.removeEventListener("transitionend", done);
+      el.style.transition = "";
+      el.style.opacity = "";
+      el.style.transform = "";
+      resolve();
+    };
+    el.addEventListener("transitionend", done, { once: true });
+    setTimeout(done, 300);
+  });
+}
+
 async function hideLoadingScreen(): Promise<void> {
   await animateOut(loadingScreen);
   loadingScreen.style.display = "none";
 }
 
+// Bumped on every shell/login-screen swap so a stale animateOut().then() from
+// a superseded call can't remove a screen that was shown again in the meantime.
+let shellLoginGeneration = 0;
+
 function showAppShell(): void {
+  const gen = ++shellLoginGeneration;
   if (loginScreen.parentNode) {
     const ls = loginScreen;
-    animateOut(ls).then(() => ls.remove());
+    void animateOut(ls).then(() => {
+      if (gen === shellLoginGeneration && ls.parentNode) ls.remove();
+    });
   }
   shell.removeAttribute("hidden");
   shell.style.display = "";
+  // The shell is becoming the primary screen — never leave it stuck from a
+  // stale overlay close (see deactivateOverlay's guard on other overlays).
+  shell.removeAttribute("inert");
 }
 
 function showLoginScreen(): void {
+  shellLoginGeneration++;
   shell.setAttribute("hidden", "");
   // Hide device limit screen if it was showing
   const dlScreen = document.getElementById("deviceLimitScreen");
   if (dlScreen) dlScreen.hidden = true;
   if (!loginScreen.parentNode) document.body.insertBefore(loginScreen, shell);
   loginScreen.hidden = false;
+  // Same reasoning as shell above: this screen must always be interactive
+  // when shown, regardless of any overlay's inert bookkeeping.
+  loginScreen.removeAttribute("inert");
   loginScreen.style.opacity = "";
   loginScreen.style.transform = "";
   refreshCachedTokenBtn();
@@ -1444,12 +3315,16 @@ function initLanguagePicker(): void {
     languageSelect.append(option);
   }
 
-  // Reflect the stored preference (System default vs. a pinned language).
+  // Reflect the stored preference (System default vs. a pinned language),
+  // unless the user already picked one while this round-trip was in flight.
+  let userChangedLanguage = false;
   void readStoredLocale().then((stored) => {
+    if (userChangedLanguage) return;
     languageSelect.value = stored && stored.length > 0 ? stored : LANGUAGE_SYSTEM;
   });
 
   languageSelect.addEventListener("change", () => {
+    userChangedLanguage = true;
     const choice = languageSelect.value;
     void pangeaApi?.setLocale?.(choice).catch(() => {});
     if (languageRestartHint) languageRestartHint.hidden = false;
@@ -1459,10 +3334,12 @@ function initLanguagePicker(): void {
 
 async function init(): Promise<void> {
   initTheme();
+  initAccent();
   mapHost.replaceChildren(buildDriftMap());
   setInterval(renderSessionClock, 1000);
   await applyStoredLocale();
   initLanguagePicker();
+  initAccentPicker();
 
   if (!daemonApi) {
     loadingMessage.textContent = t("app.loading.cantStart");
@@ -1472,20 +3349,23 @@ async function init(): Promise<void> {
   // Poll until daemon responds (max 30s), then offer an explicit elevated
   // recovery instead of leaving the user stranded on the loading screen.
   const maxAttempts = 60;
+  // Show the daemon's own refusal reason as soon as there is one, rather than
+  // counting silently down to a generic failure.
+  let lastDaemonError = "";
   for (let i = 0; i < maxAttempts; i++) {
     const remaining = Math.ceil((maxAttempts - i) * 0.5);
-    loadingMessage.textContent = t("app.loading.progress", { remaining });
+    loadingMessage.textContent = lastDaemonError || t("app.loading.progress", { remaining });
     try {
       const status = await daemonApi.getStatus();
       if (status) {
         break;
       }
-    } catch {
-      // not ready
+    } catch (error) {
+      lastDaemonError = daemonErrorText(error);
     }
     if (i === maxAttempts - 1) {
-      loadingMessage.textContent = t("app.loading.didntStart");
-      await waitForDaemonRecovery();
+      loadingMessage.textContent = lastDaemonError || t("app.loading.didntStart");
+      await waitForDaemonRecovery(lastDaemonError);
     }
     await new Promise((r) => setTimeout(r, 500));
   }
@@ -1511,14 +3391,6 @@ async function init(): Promise<void> {
     showToast(t("auth.signedOutRetry"));
   });
 
-  // The hub refused this account for lack of time, not a bad identity — the
-  // session stays, the screen takes over.
-  window.onSubscriptionExpired?.(() => {
-    entitled = false;
-    updateServerControlStates();
-    applyEntitlementUI();
-  });
-
   initCollapsibleSections();
   await renderAppVersion();
   updateBusyIndicator();
@@ -1526,10 +3398,15 @@ async function init(): Promise<void> {
 
   if (pangeaApi) {
     try {
-      renderHubMethods(await pangeaApi.getHubMethods());
+      const hubStatus = await pangeaApi.getHubStatus();
+      renderHubMethods(hubStatus.methods);
+      renderHubStatus(hubStatus);
+      pangeaApi.onHubStatusChanged(renderHubStatus);
       allowLanToggle.checked = await pangeaApi.getAllowLan();
+      postQuantumToggle.checked = await pangeaApi.getPostQuantum();
       syncDnsControls(await pangeaApi.getCustomDns());
       wireguardMtuInput.value = String(await pangeaApi.getWireguardMtu());
+      hubInTunnelToggle.checked = await pangeaApi.getHubInTunnel();
       const preferredTransport = await pangeaApi.getPreferredTransport();
       preferredTransportSelect.value = preferredTransport;
       preferredTransportSelect.dataset.previousValue = preferredTransport;
@@ -1545,26 +3422,57 @@ async function init(): Promise<void> {
       } else {
         launchAtStartupToggle.checked = await pangeaApi.getLaunchAtStartup();
       }
-      alwaysConnectedLocal = await pangeaApi.getAlwaysConnected();
-      alwaysConnectedToggle.checked = alwaysConnectedLocal;
+      autoConnectLocal = await pangeaApi.getAutoConnect();
+      autoConnectToggle.checked = autoConnectLocal;
+      lockdownLocal = await pangeaApi.getLockdown();
+      lockdownToggle.checked = lockdownLocal;
+      deadDropToggle.checked = await pangeaApi.getDeadDrop();
+      notificationsToggle.checked = await pangeaApi.getNotifications();
       const last = await pangeaApi.getLastServer();
       lastServerIdLocal = last.lastServerId;
+      activeEntryId = last.lastEntryServerId ?? null;
+      const hop = await pangeaApi.getMultihop();
+      multihopLocal = hop.enabled;
+      entryChoiceLocal = hop.entryServerId;
     } catch {
       // defaults already in place
     }
 
+    // Its own load: a service without the route, or one still starting, must not cost the settings above.
+    void loadSplitTunnel();
+
     initAutoConnect({
-      getEnabled: () => alwaysConnectedLocal,
+      getEnabled: () => autoConnectLocal,
       getAuthenticated: () => authState.authenticated,
       getDaemonState: () => currentDaemonState,
+      getDaemonReconnecting: () => latestStatus?.reconnecting === true,
       getUserIntent,
       getConnectionInFlight: () => connectInFlight,
+      setConnectionInFlight: (inFlight: boolean) => {
+        connectInFlight = inFlight;
+        updateServerControlStates();
+      },
       getLastServerId: () => lastServerIdLocal,
       getFallbackServerId: () => pickRandomServer(getVisibleServers())?.id ?? null,
-      provisionAndSwitch: (serverId: string) => pangeaApi.provisionAndConnect(serverRetryPlan(serverId)),
+      getVisibleServers: () => getVisibleServers(),
+      // Marks the attempt in-flight so Stop can find and cancel it — otherwise
+      // an auto-connect is invisible to the button and cannot be interrupted.
+      provisionAndSwitch: (serverId: string) => {
+        const plan = connectPlanFor(serverId);
+        if (!plan) return Promise.resolve({ ok: false, error: "no-entry" });
+        connectInFlight = true;
+        updateServerControlStates();
+        return pangeaApi.provisionAndConnect(plan.exits, plan.entry).finally(() => {
+          connectInFlight = false;
+          updateServerControlStates();
+        });
+      },
       // Pull the server auto-connect settled on into the picker, so it can't sit
       // on "Select server" while we're actually connected.
-      onConnected: () => void refreshLastServer().then(renderServers)
+      onConnected: () => void refreshLastServer().then(() => {
+        if (pinnedNodeId && pinnedNodeId !== lastServerIdLocal) pinnedNodeId = null;
+        renderServers();
+      })
     });
 
     await loadCachedServers();
@@ -1572,7 +3480,7 @@ async function init(): Promise<void> {
       await refreshServers();
     }
 
-    if (alwaysConnectedLocal && authState.authenticated) {
+    if (autoConnectLocal && authState.authenticated) {
       void attemptInitialAutoConnect();
     }
   }
@@ -1580,24 +3488,25 @@ async function init(): Promise<void> {
   // Check for updates regardless of auth state.
   checkForUpdate();
 
-  let pollInterval = 2000;
-  const pollMin = 2000;
-  const pollMax = 10000;
+  schedulePoll();
 
-  function schedulePoll(): void {
+  // Logs stay slow deliberately: each pass re-renders the whole pane, and no
+  // one reads a log tail four times a second.
+  let logsInterval = 2000;
+  const logsMax = 15000;
+
+  function scheduleLogsPoll(): void {
     setTimeout(async () => {
       try {
-        await refreshStatus();
         await refreshLogs();
-        pollInterval = pollMin; // reset on success
+        logsInterval = 2000;
       } catch {
-        pollInterval = Math.min(pollInterval * 2, pollMax); // backoff on error
+        logsInterval = Math.min(logsInterval * 2, logsMax);
       }
-      notifyStatusTick();
-      schedulePoll();
-    }, pollInterval);
+      scheduleLogsPoll();
+    }, logsInterval);
   }
-  schedulePoll();
+  scheduleLogsPoll();
 }
 
 const updateOverlay = document.getElementById("updateOverlay") as HTMLElement;
@@ -1608,14 +3517,19 @@ const updateDownloadBtn = document.getElementById("updateDownloadBtn") as HTMLBu
 const updateMessageEl = document.getElementById("updateMessage") as HTMLParagraphElement;
 const updateMacInstall = document.getElementById("updateMacInstall") as HTMLElement;
 const updateMacCommand = document.getElementById("updateMacCommand") as HTMLElement;
+const updateMacCommandAlt = document.getElementById("updateMacCommandAlt") as HTMLElement;
+const updateMacCopyBtn = document.getElementById("updateMacCopyBtn") as HTMLButtonElement;
+const updateMacCopyAltBtn = document.getElementById("updateMacCopyAltBtn") as HTMLButtonElement;
 const menuBadge = document.getElementById("menuBadge") as HTMLSpanElement;
 const menuUpdateBtn = document.getElementById("menuUpdateBtn") as HTMLButtonElement;
 
 const MAC_INSTALL_COMMAND = "curl -fsSL https://pangeavpn.org/install-mac.sh | bash";
+// Raw GitHub mirror of the same installer, for networks that block pangeavpn.org.
+const MAC_INSTALL_COMMAND_ALT =
+  "curl -fsSL https://raw.githubusercontent.com/pangeavpn/pangeavpn-app/master/scripts/install-mac-online.sh | bash";
 const isMacPlatform = window.appPlatform === "darwin";
 
 let pendingUpdate: { version: string; macOnly?: boolean } | null = null;
-let updateDownloaded = false;
 let currentAppVersion = "";
 const UPDATE_DISMISSED_KEY = "pangea-vpn-update-dismissed";
 const updater = window.autoUpdater;
@@ -1633,20 +3547,18 @@ function showUpdateModal(): void {
   updateCurrentVersionEl.textContent = currentAppVersion || "-";
   updateLatestVersionEl.textContent = pendingUpdate.version;
   updateDownloadBtn.disabled = false;
+  updateDownloadBtn.hidden = isMacPlatform;
   if (isMacPlatform) {
     updateMacCommand.textContent = MAC_INSTALL_COMMAND;
+    updateMacCommandAlt.textContent = MAC_INSTALL_COMMAND_ALT;
+    updateMacCopyBtn.textContent = t("update.copy");
+    updateMacCopyAltBtn.textContent = t("update.copy");
     updateMacInstall.hidden = false;
-    updateDownloadBtn.textContent = t("update.copyCommand");
     updateMessageEl.textContent = "";
   } else {
     updateMacInstall.hidden = true;
-    if (updateDownloaded) {
-      updateDownloadBtn.textContent = t("update.restartToUpdate");
-      updateMessageEl.textContent = t("update.readyToInstall");
-    } else {
-      updateDownloadBtn.textContent = t("update.download");
-      updateMessageEl.textContent = "";
-    }
+    updateDownloadBtn.textContent = t("update.download");
+    updateMessageEl.textContent = "";
   }
   updateOverlay.classList.add("visible");
 }
@@ -1663,13 +3575,6 @@ if (updater) {
     menuBadge.hidden = false;
     menuUpdateBtn.hidden = false;
     showUpdateModal();
-  });
-
-  updater.onUpdateDownloaded(() => {
-    updateDownloaded = true;
-    updateDownloadBtn.disabled = false;
-    updateDownloadBtn.textContent = t("update.restartToUpdate");
-    updateMessageEl.textContent = t("update.readyToInstall");
   });
 
   updater.onUpdateError((message) => {
@@ -1695,20 +3600,6 @@ menuUpdateBtn.addEventListener("click", () => {
   showUpdateModal();
 });
 
-// checkForUpdates() resolves with the latest release whether or not it's newer,
-// so compare against the running version; onUpdateAvailable shows the modal.
-function isNewerVersion(candidate: string, current: string): boolean {
-  const parse = (v: string): number[] => v.replace(/^v/, "").split(".").map((n) => parseInt(n, 10) || 0);
-  const a = parse(candidate);
-  const b = parse(current);
-  for (let i = 0; i < Math.max(a.length, b.length); i++) {
-    const x = a[i] ?? 0;
-    const y = b[i] ?? 0;
-    if (x !== y) return x > y;
-  }
-  return false;
-}
-
 checkUpdatesBtn.addEventListener("click", async () => {
   if (!updater) {
     showToast(t("update.unavailable"));
@@ -1719,10 +3610,10 @@ checkUpdatesBtn.addEventListener("click", async () => {
   checkUpdatesBtn.textContent = t("update.checking");
   try {
     const info = await updater.checkForUpdates();
-    if (info && isNewerVersion(info.version, currentAppVersion)) {
-      // Open the update modal directly so it's actionable from Settings, even if
-      // this version was dismissed earlier (which would otherwise suppress it).
-      pendingUpdate = pendingUpdate ?? { version: info.version };
+    if (info?.available) {
+      // Open the modal even if this version was dismissed earlier, and always
+      // take the version just reported — a stale pending one would be wrong.
+      pendingUpdate = { version: info.version };
       localStorage.removeItem(UPDATE_DISMISSED_KEY);
       showUpdateModal();
     } else if (info) {
@@ -1738,37 +3629,32 @@ checkUpdatesBtn.addEventListener("click", async () => {
   }
 });
 
-async function copyMacInstallCommand(): Promise<void> {
+async function copyMacInstallCommand(command: string, btn: HTMLButtonElement): Promise<void> {
   try {
-    await navigator.clipboard.writeText(MAC_INSTALL_COMMAND);
-    updateDownloadBtn.textContent = t("update.copied");
+    await copyTextToClipboard(command);
+    btn.textContent = t("update.copied");
+    btn.classList.add("copied");
     updateMessageEl.textContent = t("update.macPasteHint");
     setTimeout(() => {
-      updateDownloadBtn.textContent = t("update.copyCommand");
+      btn.textContent = t("update.copy");
+      btn.classList.remove("copied");
     }, 2000);
   } catch (error) {
     updateMessageEl.textContent = reportError("updateCopyCommand", error);
   }
 }
 
-updateMacCommand.addEventListener("click", () => {
-  void copyMacInstallCommand();
-});
+for (const el of [updateMacCommand, updateMacCopyBtn]) {
+  el.addEventListener("click", () => void copyMacInstallCommand(MAC_INSTALL_COMMAND, updateMacCopyBtn));
+}
+for (const el of [updateMacCommandAlt, updateMacCopyAltBtn]) {
+  el.addEventListener("click", () => void copyMacInstallCommand(MAC_INSTALL_COMMAND_ALT, updateMacCopyAltBtn));
+}
 
 updateDownloadBtn.addEventListener("click", async () => {
-  if (!pendingUpdate) return;
-
-  if (isMacPlatform) {
-    await copyMacInstallCommand();
-    return;
-  }
+  if (!pendingUpdate || isMacPlatform) return;
 
   if (!updater) return;
-
-  if (updateDownloaded) {
-    updater.installUpdate();
-    return;
-  }
 
   updateDownloadBtn.disabled = true;
   updateDownloadBtn.textContent = t("update.opening");
@@ -1809,9 +3695,13 @@ async function renderAppVersion(): Promise<void> {
   }
 }
 
-// Logs is a debug/advanced area; reveal it only when verbose errors are on.
+// Logs and developer options are debug areas; reveal them only when verbose
+// errors are on.
 function applyVerboseErrorsUi(): void {
   logsSection.hidden = !verboseErrors;
+  developerSection.hidden = !verboseErrors;
+  developerNavItem.hidden = !verboseErrors;
+  sizeSettingsTail();
 }
 applyVerboseErrorsUi();
 
@@ -1973,7 +3863,10 @@ async function refreshStatus(): Promise<StatusResponse | null> {
   } catch (error) {
     daemonHealth = daemonHealthAfterFailure(daemonHealth);
     if (daemonHealth.recoveryRequired) showDaemonRecovery();
-    setUiMessage(reportError("status", error));
+    // A missed local poll is a daemon hiccup, not the user's internet; the
+    // recovery screen covers persistent failure.
+    const message = reportError("status", error);
+    if (verboseErrors) setUiMessage(message);
     return null;
   }
 }
@@ -1985,24 +3878,32 @@ async function refreshLogs(): Promise<void> {
   try {
     const since = logsCursor > 0 ? logsCursor + 1 : 0;
     const entries = await daemonApi.getLogs(since);
-    if (entries.length > 0) {
-      logsCursor = entries[entries.length - 1].ts;
-      logEntries = [...logEntries, ...entries];
-      if (logEntries.length > 4000) {
-        logEntries = logEntries.slice(-4000);
-      }
+    if (entries.length === 0) return;
+    // A batch is not guaranteed ascending; trust the max, not the last entry.
+    logsCursor = entries.reduce((max, e) => Math.max(max, e.ts), logsCursor);
+    logEntries = [...logEntries, ...entries];
+    if (logEntries.length > 4000) {
+      logEntries = logEntries.slice(-4000);
     }
     renderLogs(logEntries);
   } catch (error) {
-    setUiMessage(reportError("logFetch", error));
+    const message = reportError("logFetch", error);
+    if (verboseErrors) setUiMessage(message);
   }
 }
 
+// Steps up a unit before the mantissa reaches four digits: "1023.4 KB" is
+// both odd and too wide for the fact strip.
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+  const units = ["KB", "MB", "GB", "TB"];
+  let value = bytes / 1024;
+  let unit = 0;
+  while (value >= 999.95 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return `${value.toFixed(unit >= 2 ? 2 : 1)} ${units[unit]}`;
 }
 
 let lastCloakWasDown = false;
@@ -2016,6 +3917,7 @@ const TRANSPORT_LABELS: Record<string, string> = {
   shadowsocks: "Shadowsocks",
   hysteria2: "Hysteria2",
   snowflake: "Snowflake",
+  wireguard: "WireGuard",
 };
 
 // The status block for whichever transport is currently active, so the pill
@@ -2024,7 +3926,7 @@ const EM_DASH = "—";
 
 /** The {x} placeholder lets each locale put the stressed word where its own
  *  grammar needs it, without putting markup in the catalogues. */
-function setHeadline(state: StatusResponse["state"]): void {
+function setHeadline(state: StatusResponse["state"] | "KILL_SWITCH"): void {
   const [before, after = ""] = t(("hero.headline." + state) as MessageKey).split("{x}");
   const strong = document.createElement("strong");
   strong.textContent = t(("hero.emphasis." + state) as MessageKey);
@@ -2033,13 +3935,138 @@ function setHeadline(state: StatusResponse["state"]): void {
 
 const MIN_CONNECTING_MS = 600;
 
+// 4Hz while a transition is in flight, so a state change lands on screen
+// almost immediately; 1Hz once settled, so the session clock ticks in seconds.
+const POLL_FAST_MS = 250;
+const POLL_IDLE_MS = 1000;
+// Nobody is watching a hidden window, so it keeps the old lazier cadence.
+const POLL_HIDDEN_MS = 2000;
+const POLL_MAX_MS = 10000;
+
+// The daemon reports CONNECTED before the last of the teardown/route work is
+// done, so the fast cadence outlives the transition that triggered it.
+const POLL_FAST_TRAILING_MS = 3000;
+
+let lastTransitionAt = 0;
+let pollTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** Is the connection moving, either really or as far as the user can see? */
+function inTransition(): boolean {
+  return (
+    connectingVisual ||
+    disconnectingVisual ||
+    connectInFlight ||
+    serverWorking ||
+    currentDaemonState === "CONNECTING" ||
+    currentDaemonState === "DISCONNECTING"
+  );
+}
+
+function nextPollDelay(): number {
+  // Hidden means the tray is the only thing on screen, and main polls that
+  // itself — visibilitychange forces a fresh sample the moment we come back.
+  if (document.hidden) return POLL_HIDDEN_MS;
+  if (inTransition()) {
+    lastTransitionAt = Date.now();
+    return POLL_FAST_MS;
+  }
+  return Date.now() - lastTransitionAt < POLL_FAST_TRAILING_MS ? POLL_FAST_MS : POLL_IDLE_MS;
+}
+
+// Fast only while something is actually moving. A settled tunnel changes state
+// when the user asks it to, so 4Hz idle polling buys nothing.
+let pollBackoff = 0;
+
+function schedulePoll(): void {
+  const delay = pollBackoff > 0 ? pollBackoff : nextPollDelay();
+  pollTimer = setTimeout(async () => {
+    pollTimer = null;
+    // refreshStatus swallows its own errors and reports null; treat that as the
+    // failure the backoff was always meant to respond to.
+    const status = await refreshStatus();
+    pollBackoff = status ? 0 : Math.min(Math.max(pollBackoff * 2, POLL_IDLE_MS), POLL_MAX_MS);
+    notifyStatusTick();
+    schedulePoll();
+  }, delay);
+}
+
+/** Collapses the wait when something has just changed, so a click is not left
+ *  sitting behind an idle-cadence timer that was scheduled before it. */
+function pollNow(): void {
+  lastTransitionAt = Date.now();
+  if (pollTimer === null) return;
+  clearTimeout(pollTimer);
+  pollTimer = null;
+  void (async () => {
+    await refreshStatus();
+    notifyStatusTick();
+    schedulePoll();
+  })();
+}
+
+// How long the UI will present a disconnect the daemon has not confirmed. Past
+// this the truth wins, however unwelcome — a lie that never expires is worse.
+const OPTIMISTIC_DISCONNECT_MS = 12000;
+
+// Set the instant Stop or Disconnect is pressed, so the user is out of the
+// tunnel on screen before the daemon has finished tearing it down.
+let disconnectingVisual = false;
+let disconnectRequestedAt = 0;
+
+function beginOptimisticDisconnect(): void {
+  disconnectingVisual = true;
+  disconnectRequestedAt = Date.now();
+  pollNow();
+  connectingVisual = false;
+  connectedSince = null;
+  renderDisconnectedState();
+  updateControlStates();
+}
+
+function renderDisconnectedState(): void {
+  heroCard.dataset.state = "DISCONNECTED";
+  document.body.dataset.state = "DISCONNECTED";
+  stateEl.textContent = t("state.DISCONNECTED");
+  detailEl.textContent = "";
+  detailEl.title = "";
+  setHeadline("DISCONNECTED");
+  serverConnectBtn.hidden = false;
+  serverDisconnectBtn.hidden = true;
+}
+
+/** True while the optimistic view still stands: the daemon has not yet agreed,
+ *  and the grace window has not run out. */
+function holdingOptimisticDisconnect(state: StatusResponse["state"]): boolean {
+  if (!disconnectingVisual) return false;
+  if (state === "DISCONNECTED") {
+    disconnectingVisual = false;
+    return false;
+  }
+  if (Date.now() - disconnectRequestedAt > OPTIMISTIC_DISCONNECT_MS) {
+    disconnectingVisual = false;
+    return false;
+  }
+  return true;
+}
+
 // The 2s status poll samples straight past a connect/switch's transient
 // states, so while we are driving one the hero follows the operation, not the poll.
 let connectingVisual = false;
 
+// The daemon has left CONNECTED since this connect/switch began, so the next
+// CONNECTED poll is the new session, not a stale sample of the old one.
+let connectOpSawTransition = false;
+
 function showConnectingState(): number {
+  // A new Connect supersedes any Stop still waiting on its daemon confirmation.
+  disconnectingVisual = false;
   connectingVisual = true;
+  connectOpSawTransition = false;
+  // Switching servers starts a brand-new session — don't carry over the old
+  // elapsed time while the new one connects.
+  connectedSince = null;
   renderConnectingState();
+  pollNow();
   return Date.now();
 }
 
@@ -2048,6 +4075,7 @@ function renderConnectingState(): void {
   document.body.dataset.state = "CONNECTING";
   stateEl.textContent = t("state.CONNECTING");
   detailEl.textContent = "";
+  detailEl.title = "";
   setHeadline("CONNECTING");
 }
 
@@ -2080,32 +4108,104 @@ function renderSessionClock(): void {
     : `${pad(minutes)}:${pad(seconds)}`;
 }
 
+// The offline hold resolves without a click, so the corner message must follow
+// the poll: "no internet" while it lasts, Connected/Disconnected once it lands.
+let offlineResolutionPending = false;
+
+function announceOfflineTransition(showOffline: boolean, daemonState: StatusResponse["state"]): void {
+  const opInFlight = connectInFlight || serverWorking || disconnectingVisual;
+  if (showOffline) {
+    // Idle-disconnected with no internet promises nothing, so no held message.
+    if (daemonState === "DISCONNECTED") {
+      offlineResolutionPending = false;
+      return;
+    }
+    if (!offlineResolutionPending && !opInFlight) setUiMessage(t("connect.offline"));
+    offlineResolutionPending = true;
+    return;
+  }
+  if (!offlineResolutionPending || opInFlight) return;
+  if (daemonState === "CONNECTED") {
+    offlineResolutionPending = false;
+    setUiMessage(t("connect.connected"));
+  } else if (daemonState === "DISCONNECTED") {
+    offlineResolutionPending = false;
+    setUiMessage(t("connect.disconnected"));
+  }
+}
+
 function renderStatus(status: StatusResponse): void {
   latestStatus = status;
   currentDaemonState = status.state;
-  // A lapsed user who just disconnected is now safe to move onto the screen.
-  applyEntitlementUI();
+
+  // Beats connectingVisual: Stop was pressed after Connect, so it is the newer
+  // instruction, and a teardown in progress is already "off" to the user.
+  const optimisticallyOff = holdingOptimisticDisconnect(status.state);
+
+  // Once the daemon has left CONNECTED and come back, the tunnel is up — stop
+  // pinning the hero to CONNECTING while the IPC reply is still in flight.
+  if (connectingVisual && !optimisticallyOff) {
+    if (status.state !== "CONNECTED") {
+      connectOpSawTransition = true;
+    } else if (connectOpSawTransition) {
+      connectingVisual = false;
+    }
+  }
+
+  // The OS says there is no internet: label it plainly and let CSS tone down the
+  // ERROR styling via [data-offline], rather than reading as a failing connect.
+  const showOffline = status.offline === true && !optimisticallyOff && !connectingVisual;
+  document.body.dataset.offline = showOffline ? "true" : "false";
+  heroCard.dataset.offline = showOffline ? "true" : "false";
+  announceOfflineTransition(showOffline, status.state);
 
   // A poll landing mid-switch must not yank the hero back off CONNECTING.
-  if (connectingVisual) {
+  if (optimisticallyOff) {
+    renderDisconnectedState();
+  } else if (connectingVisual) {
     renderConnectingState();
   } else {
-    stateEl.textContent = t(("state." + status.state) as MessageKey);
-    detailEl.textContent = status.detail;
-    heroCard.dataset.state = status.state;
-    document.body.dataset.state = status.state;
-    setHeadline(status.state);
+    // Also covers DISCONNECTED: after a reinstall the daemon can re-arm a
+    // Lockdown lock and sit idle with the kill switch on.
+    const killSwitchHolding =
+      !showOffline &&
+      status.killSwitchActive === true &&
+      status.state !== "CONNECTED" &&
+      status.state !== "CONNECTING";
+    stateEl.textContent = showOffline
+      ? t("state.NO_INTERNET")
+      : killSwitchHolding
+        ? t("state.KILL_SWITCH")
+        : t(("state." + status.state) as MessageKey);
+    detailEl.textContent = killSwitchHolding
+      ? t(lockdownLocal ? "hero.killSwitchLockdown" : "hero.killSwitchBlocking")
+      : status.detail;
+    detailEl.title = status.detail;
+    heroCard.dataset.state = killSwitchHolding ? "KILL_SWITCH" : status.state;
+    document.body.dataset.state = killSwitchHolding ? "KILL_SWITCH" : status.state;
+    setHeadline(killSwitchHolding ? "KILL_SWITCH" : status.state);
   }
 
   // Throughput stats
-  const connected = status.state === "CONNECTED";
+  const connected = status.state === "CONNECTED" && !optimisticallyOff;
   const wg = status.wireguard as StatusResponse["wireguard"] & { bytesIn?: number; bytesOut?: number };
-  connectedSince = connected ? connectedSince ?? Date.now() : null;
+  // While pinned to CONNECTING, a CONNECTED sample is the old session's; the
+  // clock starts when the pin releases so it never counts under "Connecting".
+  connectedSince = connected && !connectingVisual ? connectedSince ?? Date.now() : null;
   rxBytesEl.textContent = connected ? formatBytes(wg.bytesIn ?? 0) : EM_DASH;
   txBytesEl.textContent = connected ? formatBytes(wg.bytesOut ?? 0) : EM_DASH;
-  factViaEl.textContent = status.activeTransport
+  // Mid-connect, name the candidate the cascade is trying; the trailing
+  // ellipsis marks it as an attempt rather than an established session.
+  const viaLabel = status.activeTransport
     ? TRANSPORT_LABELS[status.activeTransport] ?? status.activeTransport
-    : EM_DASH;
+    : status.connectingTransport
+      ? `${TRANSPORT_LABELS[status.connectingTransport] ?? status.connectingTransport}…`
+      : EM_DASH;
+  factViaEl.textContent = viaLabel;
+  // A post-quantum keyed tunnel looks like any other; the chip is its only tell.
+  heroPq.hidden = !(connected && wg.postQuantum === true);
+  heroSplit.hidden = !splitChipVisible(connected, status);
+  syncSplitStatus(status);
   renderSessionClock();
 
   // Recovery toast — cloak was down last poll, now it's back
@@ -2114,24 +4214,40 @@ function renderStatus(status: StatusResponse): void {
   }
   lastCloakWasDown = !status.cloak.running && connected;
 
-  // Show connect vs disconnect button.
-  // Show disconnect in ERROR state too — kill switch may still be active.
-  const showDisconnect = connected || status.state === "CONNECTING" || status.state === "ERROR";
+  // An idle armed kill switch needs the escape hatch too, but only with
+  // Lockdown off — with it on, Disconnect would just keep the lock.
+  const killSwitchIdleArmed =
+    !optimisticallyOff &&
+    status.killSwitchActive === true &&
+    status.state !== "CONNECTED" &&
+    status.state !== "CONNECTING";
+  const showDisconnect =
+    !optimisticallyOff &&
+    (connected ||
+      status.state === "CONNECTING" ||
+      status.state === "ERROR" ||
+      (killSwitchIdleArmed && !lockdownLocal));
   serverConnectBtn.hidden = showDisconnect;
   serverDisconnectBtn.hidden = !showDisconnect;
 
+  if (!optimisticallyOff) reconcileUiMessage(status.state);
+
+  renderHeroPath();
   updateControlStates();
   updateBusyIndicator();
 }
 
 function renderLogs(entries: LogEntry[]): void {
+  // Only follow the tail if the user was already reading it — otherwise a
+  // 2s poll yanks them away from whatever they scrolled back to see.
+  const wasNearBottom = logsEl.scrollHeight - logsEl.scrollTop - logsEl.clientHeight < 40;
   const lines = entries.slice(-300).map((entry) => {
     const date = new Date(entry.ts).toLocaleTimeString(localeTag());
     return `[${date}] ${entry.level.toUpperCase()} ${entry.source}: ${entry.msg}`;
   });
 
   logsEl.textContent = lines.join("\n");
-  logsEl.scrollTop = logsEl.scrollHeight;
+  if (wasNearBottom) logsEl.scrollTop = logsEl.scrollHeight;
 }
 
 function initTheme(): void {
@@ -2149,8 +4265,10 @@ function initTheme(): void {
 function applyTheme(theme: ThemeMode): void {
   document.documentElement.dataset.theme = theme;
   document.body.dataset.theme = theme;
-  themeToggleBtn.textContent = theme === "dark" ? "\u2600" : "\u263D";
-  themeToggleBtn.setAttribute("aria-pressed", String(theme === "dark"));
+  for (const btn of themeToggleBtns) {
+    btn.textContent = theme === "dark" ? "\u2600" : "\u263D";
+    btn.setAttribute("aria-pressed", String(theme === "dark"));
+  }
 
   try {
     window.localStorage.setItem(THEME_STORAGE_KEY, theme);
@@ -2159,8 +4277,106 @@ function applyTheme(theme: ThemeMode): void {
   }
 }
 
+let currentAccent: AccentName = resolveAccent(null);
+
+function accentLabel(name: AccentName): string {
+  return t(`settings.appearance.color.${name}`);
+}
+
+function initAccent(): void {
+  let stored: string | null = null;
+  try {
+    stored = window.localStorage.getItem(ACCENT_STORAGE_KEY);
+  } catch {
+    stored = null;
+  }
+
+  applyAccent(resolveAccent(stored));
+}
+
+// Overrides the :root defaults in styles.css; the per-theme alphas there are
+// derived from --accent-rgb, so they follow along.
+function applyAccent(accent: AccentName): void {
+  currentAccent = accent;
+  const { rgb, hover } = ACCENT_THEMES[accent];
+  document.documentElement.style.setProperty("--accent-rgb", rgb);
+  document.documentElement.style.setProperty("--accent-hover", hover);
+
+  for (const btn of accentSwatches?.querySelectorAll<HTMLButtonElement>(".accent-swatch") ?? []) {
+    btn.setAttribute("aria-pressed", String(btn.dataset.accent === accent));
+  }
+  setAppearanceValue.textContent = accentLabel(accent);
+
+  try {
+    window.localStorage.setItem(ACCENT_STORAGE_KEY, accent);
+  } catch {
+    // Ignore storage failures in restricted environments.
+  }
+}
+
+function initAccentPicker(): void {
+  if (!accentSwatches) return;
+  accentSwatches.replaceChildren();
+
+  for (const name of ACCENT_NAMES) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "accent-swatch";
+    btn.dataset.accent = name;
+    btn.style.setProperty("--swatch", swatchColor(name));
+    btn.setAttribute("aria-pressed", String(name === currentAccent));
+    btn.setAttribute("aria-label", accentLabel(name));
+    btn.title = accentLabel(name);
+    btn.addEventListener("click", () => applyAccent(name));
+    accentSwatches.append(btn);
+  }
+
+  setAppearanceValue.textContent = accentLabel(currentAccent);
+}
+
 function setUiMessage(message: string): void {
   uiMessageEl.textContent = message;
+}
+
+// Flow messages describe an operation that has ended; anything else (a real
+// error string) is sticky until the user acts, so reconciliation skips it.
+function flowMessages(): Set<string> {
+  return new Set([
+    "",
+    t("connect.cancelled"),
+    t("connect.disconnecting"),
+    t("connect.provisioning"),
+    t("connect.switching"),
+    t("connect.connected"),
+    t("connect.failed"),
+    t("connect.switchFailed"),
+    t("connect.offline"),
+    t("connect.stillConnecting"),
+    t("connect.takingLonger"),
+    t("connect.stillWorking"),
+    t("common.retrying")
+  ]);
+}
+
+// A flow writes #uiMessage once and finishes; nothing re-checked it, so a
+// "cancelled" could sit under a tunnel the daemon later brought up on its own.
+function reconcileUiMessage(state: string): void {
+  if (connectInFlight || serverWorking || connectingVisual) return;
+  const current = uiMessageEl.textContent ?? "";
+  if (!flowMessages().has(current)) return;
+
+  if (state === "CONNECTED" && getUserIntent() !== "disconnected") {
+    if (current !== t("connect.connected")) setUiMessage(t("connect.connected"));
+    return;
+  }
+  // "cancelled" stays while disconnected: it truthfully names how it ended.
+  const lies =
+    state === "DISCONNECTED"
+      ? [t("connect.connected"), t("connect.disconnecting"), t("connect.provisioning"), t("connect.switching")]
+      : state === "ERROR"
+        ? [t("connect.connected")]
+        : [];
+  if (lies.includes(current)) setUiMessage("");
 }
 
 let clearActiveConnectionMessages: (() => void) | null = null;
@@ -2188,10 +4404,43 @@ function showToast(message: string, durationMs = 5000, success = false): void {
   toast.textContent = message;
   container.appendChild(toast);
 
-  setTimeout(() => {
+  let hoverTimer = 0;
+  let dismissed = false;
+
+  const dismiss = (): void => {
+    if (dismissed) return;
+    dismissed = true;
+    window.clearTimeout(autoTimer);
+    window.clearTimeout(hoverTimer);
+    document.removeEventListener("pointermove", trackPointer);
     toast.classList.add("toast-out");
-    toast.addEventListener("animationend", () => toast.remove(), { once: true });
-  }, durationMs);
+    const remove = (): void => toast.remove();
+    toast.addEventListener("animationend", remove, { once: true });
+    // Fallback: a backgrounded/throttled renderer may never fire animationend.
+    window.setTimeout(remove, 500);
+  };
+
+  // The toast ignores the pointer so the UI underneath stays clickable, which
+  // rules out pointerenter — hit-test the pointer against its box instead.
+  const trackPointer = (event: PointerEvent): void => {
+    const box = toast.getBoundingClientRect();
+    const over =
+      event.clientX >= box.left &&
+      event.clientX <= box.right &&
+      event.clientY >= box.top &&
+      event.clientY <= box.bottom;
+
+    if (over) {
+      if (!hoverTimer) hoverTimer = window.setTimeout(dismiss, TOAST_HOVER_DISMISS_MS);
+      return;
+    }
+
+    window.clearTimeout(hoverTimer);
+    hoverTimer = 0;
+  };
+
+  const autoTimer = window.setTimeout(dismiss, durationMs);
+  document.addEventListener("pointermove", trackPointer);
 }
 
 function updateBusyIndicator(): void {
@@ -2205,11 +4454,18 @@ function updateAuthUI(): void {
     menuDevicesBtn.hidden = false;
     serverPanel.hidden = false;
   } else {
+    // Close any overlay left open over the sign-in screen — otherwise it stays
+    // visible on top, and deactivateOverlay never gets to clear inert either.
+    if (settingsOverlay.classList.contains("visible")) closeSettings();
+    if (serverPickerOverlay.classList.contains("visible")) closeServerPicker();
     showLoginScreen();
     loginBtn.hidden = !pangeaApi;
     menuDevicesBtn.hidden = true;
-    closeSettings();
     serverPanel.hidden = true;
+    // A lapsed account must not keep looking entitled through the next sign-in, and a
+    // check still in flight for it must not land on whoever signs in next.
+    entitled = null;
+    entitlementGeneration++;
   }
   updateServerControlStates();
 }
@@ -2269,7 +4525,7 @@ async function refreshServersWithRetry(): Promise<void> {
 function buildLoadIndicator(load: number | null | undefined): HTMLElement | null {
   if (typeof load !== "number" || !Number.isFinite(load)) return null;
   const pct = Math.max(0, Math.min(100, Math.round(load)));
-  const level = pct < 40 ? "low" : pct < 75 ? "mid" : "high";
+  const level = pct > 90 ? "high" : pct > 75 ? "mid" : "low";
   const el = document.createElement("div");
   el.className = `server-picker-overlay-item-load load-${level}`;
   el.title = t("serverPicker.load", { pct });
@@ -2286,10 +4542,18 @@ function buildLoadIndicator(load: number | null | undefined): HTMLElement | null
   return el;
 }
 
-type TransportChoice = "auto" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "snowflake";
+type TransportChoice =
+  | "auto"
+  | "cloak"
+  | "naive"
+  | "reality"
+  | "hysteria2"
+  | "shadowsocks"
+  | "snowflake"
+  | "wireguard";
 
-// Supported means the hub advertised that transport's block. cloak is always
-// present; "auto" matches every server and falls back across what it offers.
+// Supported means the hub advertised that transport's block — except
+// "wireguard", which every node listens for regardless.
 function serverSupportsTransport(server: ServerInfo, transport: TransportChoice): boolean {
   switch (transport) {
     case "naive":
@@ -2321,9 +4585,13 @@ function serverRetryPlan(initialServerId: string): string[] {
     : [initialServerId];
 }
 
-function applyConnectedServer(serverId: string | undefined): void {
+function applyConnectedServer(serverId: string | undefined, entryServerId?: string): void {
   if (!serverId) return;
   lastServerIdLocal = serverId;
+  activeEntryId = entryServerId ?? null;
+  // A pin that no longer names the active node is stale — don't let it label
+  // a region the user never pinned.
+  if (pinnedNodeId && pinnedNodeId !== serverId) pinnedNodeId = null;
   serverSelect.value = serverId;
   syncServerPicker();
 }
@@ -2378,7 +4646,12 @@ function activateRegion(region: Region, nodeId: string | null): void {
 
   // Only commit the selection when an action will actually run, so the slots
   // can't drift out of sync with the connected node.
-  if (currentDaemonState === "CONNECTED") {
+  if (disconnectingVisual) {
+    // A disconnect is still pending confirmation — CONNECTED here just means
+    // no poll has caught up yet, so switching would resurrect the tunnel.
+    serverSelect.value = target.id;
+    syncServerPicker();
+  } else if (currentDaemonState === "CONNECTED") {
     serverSelect.value = target.id;
     syncServerPicker();
     void switchToServer(target.id);
@@ -2389,6 +4662,10 @@ function activateRegion(region: Region, nodeId: string | null): void {
   } else {
     serverSelect.value = target.id;
     syncServerPicker();
+    if (entitled === false) {
+      showToast(t("connect.expired"));
+      setUiMessage(t("sub.expired"));
+    }
   }
 }
 
@@ -2402,6 +4679,13 @@ function buildRegionRow(region: Region, forPicker: boolean): HTMLElement {
   row.className = "region-row";
   row.dataset.key = region.key;
   row.setAttribute("aria-current", String(isCurrent));
+  // A hand-picked entry locks its region out of the exits (the hub refuses the pair); an auto entry just moves.
+  const isEntry = !isCurrent && multihopActive() && entryRegionKeyFor(serverSelect.value) === region.key;
+  const entryPinned = isEntry && entryChoiceLocal !== null && regionKeyOf({ id: entryChoiceLocal }) === region.key;
+  if (entryPinned) {
+    row.disabled = true;
+    row.classList.add("is-entry");
+  }
 
   row.append(buildFlag(region.country));
 
@@ -2432,7 +4716,14 @@ function buildRegionRow(region: Region, forPicker: boolean): HTMLElement {
   tick.setAttribute("aria-hidden", "true");
   tick.innerHTML =
     '<path d="m5 13 4.5 4.5L19 7" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>';
-  row.append(tick);
+  if (isEntry) {
+    const badge = document.createElement("span");
+    badge.className = "region-entry-badge";
+    badge.textContent = t("multihop.entryBadge");
+    row.append(badge);
+  } else {
+    row.append(tick);
+  }
 
   row.addEventListener("click", () => activateRegion(region, null));
 
@@ -2522,6 +4813,8 @@ function renderServers(): void {
     regionSlots.replaceChildren(emptyNotice(noneForTransport));
     serverPickerOverlayList.replaceChildren(emptyNotice(noneForTransport));
     regionMoreCount.textContent = "";
+    multihopPanel.hidden = true;
+    heroPath.hidden = true;
     return;
   }
 
@@ -2569,9 +4862,12 @@ function syncServerPicker(): void {
 
   const remaining = visibleRegions.length - slots.length;
   regionMoreCount.textContent = remaining > 0 ? t("region.more", { count: String(remaining) }) : "";
-  serverPickerBtn.hidden = visibleRegions.length <= SLOT_COUNT;
+  // Multihop options live in the picker, so it stays reachable even with few regions.
+  serverPickerBtn.hidden = visibleRegions.length <= SLOT_COUNT && !hasEntryCapableServers();
 
   renderRegionPicker(ordered);
+  renderMultihopPanel();
+  renderHeroPath();
 }
 
 function renderRegionPicker(ordered: readonly Region[]): void {
@@ -2590,23 +4886,18 @@ function renderRegionPicker(ordered: readonly Region[]): void {
     groups.push(heading, box);
   };
 
+  const allKey: MessageKey = multihopActive() ? "multihop.exitRegions" : "serverPicker.all";
   if (recent.length > 0) {
     addGroup("serverPicker.recent", recent);
-    addGroup("serverPicker.all", rest);
+    addGroup(allKey, rest);
   } else {
-    addGroup("serverPicker.all", ordered);
+    addGroup(allKey, ordered);
   }
 
   serverPickerOverlayList.replaceChildren(...groups);
 }
 
 function updateServerControlStates(): void {
-  if (!authState.authenticated || servers.length === 0) {
-    serverConnectBtn.disabled = true;
-    serverDisconnectBtn.disabled = true;
-    return;
-  }
-
   const daemonBusy = currentDaemonState === "CONNECTING" || currentDaemonState === "DISCONNECTING";
   const busy = uiRefreshing || uiWorking || serverWorking || daemonBusy;
 
@@ -2614,16 +4905,25 @@ function updateServerControlStates(): void {
     ? latestStatus.state === "DISCONNECTED" && !latestStatus.cloak.running && !latestStatus.wireguard.running
     : true;
 
-  // Not hoisted into the guard above: that would also disable Disconnect and
-  // strand a connected user who switched to a transport no server supports.
   serverConnectBtn.disabled =
-    busy || !fullyDisconnected || getVisibleServers().length === 0 || entitled === false;
-  // Stop is live for the whole attempt — a hard cancel, no unsafe window.
-  // Outside an attempt the standard disabled-while-busy rule applies.
-  serverDisconnectBtn.disabled = connectInFlight
-    ? false
-    : !latestStatus || latestStatus.state === "DISCONNECTED" || latestStatus.state === "DISCONNECTING" || busy;
+    !authState.authenticated
+    || servers.length === 0
+    || busy
+    || !fullyDisconnected
+    || getVisibleServers().length === 0
+    || entitled === false;
+
+  // An armed kill switch is exactly when the escape hatch matters most: no
+  // tunnel, no internet, and this button is what clears the block.
+  const killSwitchArmed = latestStatus?.killSwitchActive === true;
+
+  // Disconnect is the escape hatch, so it is gated on one thing only: there is
+  // nothing left to tear down. Busy, signed-out and error states all keep it live.
+  serverDisconnectBtn.disabled =
+    !connectInFlight && !disconnectingVisual && fullyDisconnected && !killSwitchArmed;
   serverDisconnectBtn.textContent = connectInFlight ? t("hero.stop") : t("hero.disconnect");
+  serverRotateBtn.disabled = busy || !canRotate();
+  syncExpiredScreen();
 }
 
 function updateControlStates(): void {
@@ -2633,7 +4933,10 @@ function updateControlStates(): void {
 function loadCollapseStates(): Record<string, boolean> {
   try {
     const raw = localStorage.getItem(COLLAPSE_STATE_KEY);
-    return raw ? JSON.parse(raw) : {};
+    const parsed: unknown = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, boolean>)
+      : {};
   } catch {
     return {};
   }
@@ -2642,7 +4945,11 @@ function loadCollapseStates(): Record<string, boolean> {
 function saveCollapseState(key: string, open: boolean): void {
   const states = loadCollapseStates();
   states[key] = open;
-  localStorage.setItem(COLLAPSE_STATE_KEY, JSON.stringify(states));
+  try {
+    localStorage.setItem(COLLAPSE_STATE_KEY, JSON.stringify(states));
+  } catch {
+    // Ignore storage failures in restricted environments.
+  }
 }
 
 function initCollapsibleSections(): void {

@@ -3,23 +3,54 @@
 package platform
 
 import (
-	"strings"
+	"context"
+	"net"
 	"testing"
+	"time"
 )
 
-func TestBuildPFRules_IPv4OnlyAllowRules(t *testing.T) {
-	rules := buildPFRules([]string{"198.51.100.20", "2001:db8::20"}, "utun9", false)
+// buildPFRules is covered by killswitch_pf_test.go, which is untagged so it
+// runs where there is CI; only darwinKillSwitch itself is tested here.
 
-	if !strings.Contains(rules, "pass out quick inet proto { tcp udp } to 198.51.100.20") {
-		t.Fatalf("missing IPv4 endpoint allow rule:\n%s", rules)
+// The shipped wedge: Enable held the one mutex Active() needs across DNS
+// resolution and pfctl, so a hung resolve froze every /status response.
+func TestDarwinKillSwitch_ActiveDoesNotBlockBehindEnable(t *testing.T) {
+	t.Setenv("PANGEA_APP_SUPPORT_DIR", t.TempDir())
+	prevLookup := lookupResolverIP
+	defer func() { lookupResolverIP = prevLookup }()
+
+	resolveStarted := make(chan struct{})
+	release := make(chan struct{})
+	lookupResolverIP = func(ctx context.Context, _, _ string) ([]net.IP, error) {
+		close(resolveStarted)
+		select {
+		case <-release:
+		case <-ctx.Done():
+		}
+		return nil, context.Canceled
 	}
-	if strings.Contains(rules, "2001:db8::20") {
-		t.Fatalf("unexpected IPv6 endpoint rule:\n%s", rules)
+
+	ks := &darwinKillSwitch{}
+	enableCtx, cancelEnable := context.WithCancel(context.Background())
+	enableDone := make(chan struct{})
+	go func() {
+		defer close(enableDone)
+		_ = ks.Enable(enableCtx, []string{"node.example.com"}, false, false)
+	}()
+	<-resolveStarted
+
+	activeDone := make(chan bool, 1)
+	go func() { activeDone <- ks.Active() }()
+	select {
+	case active := <-activeDone:
+		if active {
+			t.Error("kill switch reported active before Enable completed")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Active() blocked behind an in-flight Enable")
 	}
-	if !strings.Contains(rules, "pass out quick inet proto udp from any port 68 to any port 67") {
-		t.Fatalf("missing IPv4 DHCP allow rule:\n%s", rules)
-	}
-	if !strings.Contains(rules, "pass out quick on utun9 inet all") {
-		t.Fatalf("missing IPv4-only tunnel allow rule:\n%s", rules)
-	}
+
+	cancelEnable()
+	close(release)
+	<-enableDone
 }

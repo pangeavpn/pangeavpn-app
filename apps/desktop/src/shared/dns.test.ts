@@ -32,6 +32,23 @@ test("rejects invalid addresses and unsupported IPv6", () => {
   assert.equal(normalizeCustomDns("1.1.1.1, nope"), null);
 });
 
+test("rejects resolvers that can never be reached through the tunnel", () => {
+  assert.equal(normalizeCustomDns("192.168.1.1"), null);
+  assert.equal(normalizeCustomDns("10.0.0.1"), null);
+  assert.equal(normalizeCustomDns("172.20.0.53"), null);
+  assert.equal(normalizeCustomDns("100.64.0.1"), null);
+  assert.equal(normalizeCustomDns("0.0.0.0"), null);
+  assert.equal(normalizeCustomDns("169.254.1.1"), null);
+  assert.equal(normalizeCustomDns("224.0.0.251"), null);
+  assert.equal(normalizeCustomDns("255.255.255.255"), null);
+  assert.equal(normalizeCustomDns("1.1.1.1, 192.168.1.1"), null);
+});
+
+test("keeps a loopback resolver: a local DNS proxy answers the host", () => {
+  assert.deepEqual(normalizeCustomDns("127.0.0.1"), ["127.0.0.1"]);
+  assert.deepEqual(normalizeCustomDns("172.15.0.1, 172.32.0.1"), ["172.15.0.1", "172.32.0.1"]);
+});
+
 test("rejects untrusted non-string settings values", () => {
   assert.equal(normalizeCustomDns(null), null);
   assert.equal(normalizeCustomDns(undefined), null);
@@ -48,6 +65,14 @@ test("custom DNS replaces the server DNS in both WireGuard representations", () 
 
 test("blank custom DNS falls back to the VPN server DNS", () => {
   assert.deepEqual(resolveWireGuardDns("10.0.0.1, 10.0.0.2", null), {
+    servers: ["10.0.0.1", "10.0.0.2"],
+    configValue: "10.0.0.1, 10.0.0.2"
+  });
+});
+
+// Finding 8: an empty array means "use the server default", not "no DNS".
+test("an empty custom DNS array falls back to the VPN server DNS", () => {
+  assert.deepEqual(resolveWireGuardDns("10.0.0.1, 10.0.0.2", []), {
     servers: ["10.0.0.1", "10.0.0.2"],
     configValue: "10.0.0.1, 10.0.0.2"
   });

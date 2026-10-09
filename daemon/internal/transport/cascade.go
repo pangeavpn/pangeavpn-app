@@ -40,9 +40,9 @@ type Memory interface {
 	Lookup(networkKey string) (string, bool)
 }
 
-// AutoCascadeOrder is the auto-mode fallback order. Consecutive rungs hide in
-// deliberately different ways, so one block rarely stops the next attempt.
-var AutoCascadeOrder = []string{"cloak", "reality", "shadowsocks", "hysteria2", "naive", "snowflake"}
+// AutoCascadeOrder is the auto-mode fallback order. REALITY leads as it survives
+// active probing; consecutive rungs hide differently, so one block rarely stops the next.
+var AutoCascadeOrder = []string{"reality", "cloak", "shadowsocks", "hysteria2", "naive", "snowflake"}
 
 // knownKinds keeps an explicit request for something else an "unknown"
 // error rather than silently reporting it as unconfigured.

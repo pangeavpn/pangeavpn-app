@@ -22,10 +22,7 @@ export interface ShadowsocksProfileBlock {
   udpOverTcp?: boolean;
 }
 
-/**
- * @param shadowsocks the hub's shadowsocks block for this node
- * @param nodeIp the node address the hub already named (cloak.remoteHost)
- */
+/** nodeIp is the node address the hub already named (cloak.remoteHost). */
 export function buildShadowsocksProfile(
   shadowsocks: ShadowsocksServerInfo,
   nodeIp: string

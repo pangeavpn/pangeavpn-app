@@ -1,11 +1,17 @@
 import crypto from "node:crypto";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs/promises";
+import { createRequire } from "node:module";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
 export const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
+
+// The installed electron, so the runtime electron-builder bundles is the one the app was tested on.
+export const electronVersion = createRequire(path.join(rootDir, "apps", "desktop", "package.json"))(
+  "electron/package.json"
+).version;
 export const isWin = process.platform === "win32";
 export const npmCmd = isWin ? "npm.cmd" : "npm";
 

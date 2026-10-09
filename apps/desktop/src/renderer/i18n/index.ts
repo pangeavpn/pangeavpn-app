@@ -49,12 +49,34 @@ function interpolate(template: string, params?: Params): string {
   );
 }
 
+// Marker for catalogue values with CLDR plural forms, e.g.
+// "@plural:one={count} server|few={count} servers|other={count} servers".
+// Selected via Intl.PluralRules on the "count" param; unmarked strings pass through.
+const PLURAL_PREFIX = "@plural:";
+
+function resolvePlural(template: string, locale: Locale, params?: Params): string {
+  if (!template.startsWith(PLURAL_PREFIX)) return template;
+  const forms = new Map(
+    template
+      .slice(PLURAL_PREFIX.length)
+      .split("|")
+      .map((seg) => {
+        const i = seg.indexOf("=");
+        return [seg.slice(0, i), seg.slice(i + 1)] as const;
+      })
+  );
+  const count = Number(params?.count ?? 0);
+  const category = new Intl.PluralRules(locale).select(count);
+  return forms.get(category) ?? forms.get("other") ?? template;
+}
+
 /**
  * Translate a key for the active locale. Falls back to English if the active
  * catalogue somehow lacks the key (defensive — the type system prevents it).
  */
 export function t(key: MessageKey, params?: Params): string {
-  const template = activeCatalogue[key] ?? en[key] ?? key;
+  const raw = activeCatalogue[key] ?? en[key] ?? key;
+  const template = resolvePlural(raw, activeLocale, params);
   return interpolate(template, params);
 }
 
@@ -70,11 +92,17 @@ export function resolveLocale(stored?: string | null): Locale {
   return detected ?? DEFAULT_LOCALE;
 }
 
+// Keys whose markup (e.g. <strong>/<em>) must survive translation, not be
+// flattened to text. Catalogue values for these are trusted static markup.
+const HTML_KEYS: ReadonlySet<MessageKey> = new Set(["update.macStep"] as MessageKey[]);
+
 /** Apply `data-i18n*` annotations under `root` to their translated strings. */
 export function applyStaticText(root: ParentNode = document): void {
   root.querySelectorAll<HTMLElement>("[data-i18n]").forEach((el) => {
     const key = el.dataset.i18n as MessageKey | undefined;
-    if (key) el.textContent = t(key);
+    if (!key) return;
+    if (HTML_KEYS.has(key)) el.innerHTML = t(key);
+    else el.textContent = t(key);
   });
   applyAttr(root, "data-i18n-placeholder", "placeholder");
   applyAttr(root, "data-i18n-aria-label", "aria-label");
@@ -101,4 +129,12 @@ export function initLocale(locale: Locale): void {
   html.lang = locale;
   html.dir = meta.dir;
   applyStaticText(document);
+  forceLtr("logs");
+  forceLtr("loginTokenInput");
+}
+
+/** Diagnostic/input text is always LTR content, even under an RTL page direction. */
+function forceLtr(id: string): void {
+  const el = document.getElementById(id);
+  if (el) el.dir = "ltr";
 }

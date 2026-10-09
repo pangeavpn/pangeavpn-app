@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
-import { npmCmd, relPath, rootDir, runOrThrow, selectArchTargets, sha256File, writeJson } from "./shared.mjs";
+import { electronVersion, npmCmd, relPath, rootDir, runOrThrow, selectArchTargets, sha256File, writeJson } from "./shared.mjs";
 
 const platformName = "windows";
 const appBuilderPath = path.join(rootDir, "node_modules", "app-builder-bin", "win", "x64", "app-builder.exe");
@@ -18,7 +18,9 @@ if (process.platform !== "win32") {
 const archTargets = selectArchTargets(allArchTargets, "Windows");
 
 await cleanOutput();
-runOrThrow(npmCmd, ["install", "--workspace", "@pangeavpn/desktop", "--include=dev"], { cwd: rootDir, shell: true });
+// No audit or fund: a release build must not wait on npm's advisory service,
+// which can 503 or hang for npm's full fetch timeout while the tree is fine.
+runOrThrow(npmCmd, ["install", "--workspace", "@pangeavpn/desktop", "--include=dev", "--no-audit", "--no-fund"], { cwd: rootDir, shell: true });
 runOrThrow(npmCmd, ["run", "build", "--workspace", "@pangeavpn/shared-types"], { cwd: rootDir, shell: true });
 runOrThrow(npmCmd, ["run", "build", "--workspace", "@pangeavpn/desktop"], { cwd: rootDir, shell: true });
 
@@ -51,7 +53,7 @@ for (const target of archTargets) {
       `--${target.arch}`,
       "--publish",
       "never",
-      "--config.electronVersion=34.1.0"
+      `--config.electronVersion=${electronVersion}`
     ],
     {
       cwd: rootDir,

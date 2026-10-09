@@ -1,0 +1,107 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="372" viewBox="0 0 960 372" role="img" aria-labelledby="title desc">
+<title id="title">Why the edge relay exists</title>
+<desc id="desc">A censor that enumerates and null-routes Pangea's own IP addresses blocks the cached IP, the DoH-resolved IP, the REALITY and Shadowsocks proxies and plain HTTPS at once. The edge relay sits on CDN anycast space shared with much of the web, and forwards the sealed envelope to the hub.</desc>
+<style>
+  .panel { fill: #161412; stroke: #2a2624; }
+  .card { fill: #1f1c1a; stroke: #36312d; stroke-width: 1.2; }
+  .t { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif; font-size: 17px; font-weight: 600; fill: #fbf9f2; }
+  .s { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif; font-size: 13.5px; fill: #aea299; }
+  .cap { font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace; font-size: 11px; letter-spacing: 1.2px; fill: #7d766f; }
+  .lbl { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif; font-size: 14px; fill: #aea299; }
+  .lbl-a { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif; font-size: 14px; font-weight: 600; fill: #ec9068; }
+  .mono-a { font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace; font-size: 11.5px; letter-spacing: 1px; fill: #ec9068; }
+  .line { stroke: #7d766f; stroke-width: 1.5; fill: none; }
+  .dash { stroke: #7d766f; stroke-width: 1.3; stroke-dasharray: 4 4; fill: none; }
+  .region { fill: none; stroke: #45403b; stroke-width: 1.3; stroke-dasharray: 6 5; }
+  .acc { stroke: #e0784a; stroke-width: 2; fill: none; }
+  .acc-fill { fill: #e0784a; }
+  .line-fill { fill: #7d766f; }
+  .outer { fill: #3a2016; stroke: #e0784a; stroke-width: 1.6; }
+  .acard { fill: #2a1a13; stroke: #e0784a; stroke-width: 1.4; }
+  .slate { fill: #465062; }
+  .st { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif; font-size: 17px; font-weight: 600; fill: #ffffff; }
+  .ss { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif; font-size: 13.5px; fill: #c4cbd6; }
+  .icon { stroke: #aea299; stroke-width: 1.6; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+  .icon-a { stroke: #ec9068; stroke-width: 1.6; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+  .x { stroke: #f25c5c; stroke-width: 2.4; stroke-linecap: round; }
+  .blocked { stroke: #7d766f; stroke-width: 1.5; fill: none; opacity: 0.8; }
+  .ko { fill: #161412; }
+  .brick { fill: #2a2522; stroke: #3a3430; stroke-width: 1; }
+</style>
+<defs>
+  <marker id="arr" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <path d="M0,1 L9,5 L0,9 z" class="line-fill"/>
+  </marker>
+  <marker id="arr-a" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <path d="M0,1 L9,5 L0,9 z" class="acc-fill"/>
+  </marker>
+</defs>
+<rect class="panel" x="0.5" y="0.5" width="959" height="371" rx="18"/>
+<rect class="card" x="40" y="70" width="190" height="150" rx="14"/>
+<g class="icon"><rect x="121.0" y="95" width="28" height="18" rx="2.5"/><path d="M116.0,117 h38"/></g>
+<text class="t" x="135.0" y="144" text-anchor="middle">PangeaVPN client</text>
+<text class="s" x="135.0" y="165" text-anchor="middle">behind a censor</text>
+<rect class="region" x="486" y="46" width="440" height="190" rx="16"/>
+<text class="cap" x="506" y="72">OUR ADDRESS SPACE</text>
+<rect class="card" x="510" y="88" width="190" height="130" rx="14"/>
+<g class="icon"><rect x="592.0" y="111" width="26" height="10" rx="2.5"/><rect x="592.0" y="124" width="26" height="10" rx="2.5"/><path d="M597.0,116 h0.01 M597.0,129 h0.01"/></g>
+<text class="t" x="605.0" y="162" text-anchor="middle">Pangea hub</text>
+<text class="s" x="605.0" y="183" text-anchor="middle">api.pangeavpn.org</text>
+<rect class="card" x="716" y="88" width="190" height="130" rx="14"/>
+<g class="icon"><rect x="798.0" y="111" width="26" height="10" rx="2.5"/><rect x="798.0" y="124" width="26" height="10" rx="2.5"/><path d="M803.0,116 h0.01 M803.0,129 h0.01"/></g>
+<text class="t" x="811.0" y="162" text-anchor="middle">VPN nodes</text>
+<text class="s" x="811.0" y="183" text-anchor="middle">REALITY and</text>
+<text class="s" x="811.0" y="201" text-anchor="middle">Shadowsocks proxies</text>
+<rect class="brick" x="412" y="46" width="14" height="19"/>
+<rect class="brick" x="426" y="46" width="14" height="19"/>
+<rect class="brick" x="440" y="46" width="12" height="19"/>
+<rect class="brick" x="412" y="65" width="7" height="19"/>
+<rect class="brick" x="419" y="65" width="14" height="19"/>
+<rect class="brick" x="433" y="65" width="14" height="19"/>
+<rect class="brick" x="447" y="65" width="5" height="19"/>
+<rect class="brick" x="412" y="84" width="14" height="19"/>
+<rect class="brick" x="426" y="84" width="14" height="19"/>
+<rect class="brick" x="440" y="84" width="12" height="19"/>
+<rect class="brick" x="412" y="103" width="7" height="19"/>
+<rect class="brick" x="419" y="103" width="14" height="19"/>
+<rect class="brick" x="433" y="103" width="14" height="19"/>
+<rect class="brick" x="447" y="103" width="5" height="19"/>
+<rect class="brick" x="412" y="122" width="14" height="19"/>
+<rect class="brick" x="426" y="122" width="14" height="19"/>
+<rect class="brick" x="440" y="122" width="12" height="19"/>
+<rect class="brick" x="412" y="141" width="7" height="19"/>
+<rect class="brick" x="419" y="141" width="14" height="19"/>
+<rect class="brick" x="433" y="141" width="14" height="19"/>
+<rect class="brick" x="447" y="141" width="5" height="19"/>
+<rect class="brick" x="412" y="160" width="14" height="19"/>
+<rect class="brick" x="426" y="160" width="14" height="19"/>
+<rect class="brick" x="440" y="160" width="12" height="19"/>
+<rect class="brick" x="412" y="179" width="7" height="19"/>
+<rect class="brick" x="419" y="179" width="14" height="19"/>
+<rect class="brick" x="433" y="179" width="14" height="19"/>
+<rect class="brick" x="447" y="179" width="5" height="19"/>
+<rect class="brick" x="412" y="198" width="14" height="19"/>
+<rect class="brick" x="426" y="198" width="14" height="19"/>
+<rect class="brick" x="440" y="198" width="12" height="19"/>
+<rect class="brick" x="412" y="217" width="7" height="19"/>
+<rect class="brick" x="419" y="217" width="14" height="19"/>
+<rect class="brick" x="433" y="217" width="14" height="19"/>
+<rect class="brick" x="447" y="217" width="5" height="19"/>
+<text class="lbl" x="432" y="34" text-anchor="middle">censor null-routes our IPs</text>
+<path class="blocked" d="M234,104 H400"/>
+<path class="x" d="M397,98 l12,12 M409,98 l-12,12"/>
+<text class="lbl" x="246" y="95" style="font-size:12.5px">cached or DoH IP</text>
+<path class="blocked" d="M234,145 H400"/>
+<path class="x" d="M397,139 l12,12 M409,139 l-12,12"/>
+<text class="lbl" x="246" y="136" style="font-size:12.5px">REALITY / Shadowsocks</text>
+<path class="blocked" d="M234,186 H400"/>
+<path class="x" d="M397,180 l12,12 M409,180 l-12,12"/>
+<text class="lbl" x="246" y="177" style="font-size:12.5px">plain HTTPS</text>
+<rect class="acard" x="290" y="276" width="260" height="76" rx="14"/>
+<text class="t" x="420.0" y="307" text-anchor="middle">Edge relay</text>
+<text class="s" x="420.0" y="328" text-anchor="middle">CDN anycast, shared with the web</text>
+<path class="acc" d="M135,224 V314 H286" marker-end="url(#arr-a)"/>
+<path class="acc" d="M554,314 H605 V222" marker-end="url(#arr-a)"/>
+<text class="lbl-a" x="622" y="294">forwards the sealed envelope</text>
+<text class="lbl" x="622" y="314">sees timing, never content</text>
+</svg>

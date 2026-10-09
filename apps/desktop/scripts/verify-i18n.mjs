@@ -1,9 +1,5 @@
-// Verifies the localisation catalogues beyond what the TypeScript compiler
-// checks (tsc already guarantees key completeness via `satisfies Messages`):
-//   1. no empty string values in any locale
-//   2. every key's {placeholder} set matches the English source
-//   3. every data-i18n* key used in index.html exists in the catalogue
-// Run: node scripts/verify-i18n.mjs   (exits non-zero on any failure)
+// Verifies localisation beyond what tsc checks: no empty values, placeholder sets
+// matching English, and every data-i18n* key in index.html existing in the catalogue.
 
 import fs from "node:fs";
 import path from "node:path";

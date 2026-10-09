@@ -7,10 +7,8 @@ import (
 	"fmt"
 )
 
-// KeyPair is an X25519 REALITY key pair. PrivateKey configures the server
-// side (kept secret); PublicKey is distributed to clients. Both are
-// base64.RawURLEncoding, matching sing-box's option.*RealityOptions field
-// encoding (see common/tls/reality_{client,server}.go).
+// KeyPair is an X25519 REALITY key pair. PrivateKey configures the server side
+// (kept secret); PublicKey is distributed to clients. Both are base64.RawURLEncoding.
 type KeyPair struct {
 	PrivateKey string
 	PublicKey  string

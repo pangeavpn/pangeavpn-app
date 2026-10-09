@@ -61,7 +61,8 @@ export const Hysteria2ProfileSchema = z.object({
   upMbps: z.number().int().nonnegative().optional(),
   downMbps: z.number().int().nonnegative().optional(),
   insecure: z.boolean().optional(),
-  pinSha256: z.string().optional()
+  pinSha256: z.string().optional(),
+  remotePorts: z.array(z.string()).optional()
 });
 
 export const ShadowsocksProfileSchema = z.object({
@@ -91,13 +92,40 @@ export const WireGuardProfileSchema = z.object({
   configText: z.string(),
   tunnelName: z.string().min(1),
   dns: z.array(z.string()),
-  bypassHosts: z.array(z.string()).optional()
+  bypassHosts: z.array(z.string()).optional(),
+  /** Routes `bypassHosts` (the hub) through the tunnel instead of around it. */
+  hubInTunnel: z.boolean().optional(),
+  /**
+   * The node's own WireGuard listener as host:port. `configText` always points
+   * at a loopback transport bridge instead, so this is what the daemon rewrites
+   * the Endpoint line to when the user picks plain WireGuard. Absent means that
+   * method is unavailable for this profile.
+   */
+  directEndpoint: z.string().optional()
+});
+
+/**
+ * Present only on a multihop profile: the transport terminates on an entry
+ * node that relays WireGuard to the exit node holding the peer. The selectors
+ * differ because the wire protocols do, and every one is issued by the hub —
+ * the client never derives them from a node ordering it should not know.
+ */
+export const HopProfileSchema = z.object({
+  singBoxPort: z.number().int().positive(),
+  cloakProxyMethod: z.string().min(1),
+  naiveBridgePort: z.number().int().positive().optional(),
+  // The entry's public relay port for direct-WireGuard multihop; absent means
+  // direct mode isn't offered for this hop, only the obfuscation transports.
+  wireguardPort: z.number().int().positive().optional(),
+  entryRegion: z.string().min(1),
+  exitRegion: z.string().min(1)
 });
 
 export const ProfileSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
   cloak: CloakProfileSchema,
+  hop: HopProfileSchema.optional(),
   /**
    * Every transport endpoint of this profile's node as a raw IP, straight from
    * the hub. The daemon permits these through the kill switch and routes them
@@ -122,7 +150,10 @@ export const StatusResponseSchema = z.object({
   state: DaemonStateSchema,
   detail: z.string(),
   activeTransport: z
-    .enum(["cloak", "naive", "reality", "hysteria2", "shadowsocks", "snowflake", ""])
+    .enum(["cloak", "naive", "reality", "hysteria2", "shadowsocks", "snowflake", "wireguard", ""])
+    .default(""),
+  connectingTransport: z
+    .enum(["cloak", "naive", "reality", "hysteria2", "shadowsocks", "snowflake", "wireguard", ""])
     .default(""),
   cloak: z.object({
     running: z.boolean(),
@@ -152,19 +183,51 @@ export const StatusResponseSchema = z.object({
     running: z.boolean(),
     detail: z.string(),
     bytesIn: z.number().default(0),
-    bytesOut: z.number().default(0)
+    bytesOut: z.number().default(0),
+    // Connection readiness gates on this; older daemons omit it.
+    lastHandshakeUnix: z.number().optional(),
+    // Every peer carries an ML-KEM-derived pre-shared key. Older daemons omit it.
+    postQuantum: z.boolean().default(false)
   }),
   killSwitchActive: z.boolean().default(false),
   // An ERROR the daemon is still retrying by itself, after a session dropped
   // on its own. Older daemons omit it.
-  reconnecting: z.boolean().default(false)
+  reconnecting: z.boolean().default(false),
+  // A live session whose every transport stopped getting traffic through this
+  // server; the client answers by rotating servers. Older daemons omit it.
+  transportsExhausted: z.boolean().default(false),
+  // The OS reports no internet (link physically down) while a session is
+  // intended; the client shows "no internet" and holds. Older daemons omit it.
+  offline: z.boolean().default(false),
+  // The profile the session runs on. Older daemons omit it; the desktop's main
+  // process derives serverId from it for the renderer.
+  profileId: z.string().optional(),
+  serverId: z.string().optional(),
+  // Split tunnelling, as counts only (GET /split-tunnel has the lists). Absent from
+  // daemons without it.
+  splitTunnel: z
+    .object({
+      enabled: z.boolean(),
+      appCount: z.number().default(0),
+      cidrCount: z.number().default(0),
+      appsActive: z.boolean().default(false),
+      bypassFlows: z.number().default(0),
+      pending: z.boolean().default(false),
+      unavailableReason: z.string().default(""),
+      cidrsDropped: z.boolean().optional()
+    })
+    .optional()
 });
 
 export const ConnectRequestSchema = z.object({
   profileId: z.string().min(1),
+  // "wireguard" is the direct method: no transport, straight to the node. Only
+  // ever set when the user asks for it — the daemon's auto cascade never picks it.
   preferredTransport: z
-    .enum(["cloak", "naive", "reality", "hysteria2", "shadowsocks", "snowflake"])
-    .optional()
+    .enum(["cloak", "naive", "reality", "hysteria2", "shadowsocks", "snowflake", "wireguard"])
+    .optional(),
+  allowLAN: z.boolean().optional(),
+  lockdown: z.boolean().optional()
 });
 
 export const OkResponseSchema = z.object({

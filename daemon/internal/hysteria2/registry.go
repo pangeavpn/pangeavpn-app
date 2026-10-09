@@ -4,6 +4,7 @@ import (
 	"context"
 
 	box "github.com/sagernet/sing-box"
+	"github.com/sagernet/sing-box/adapter/certificate"
 	"github.com/sagernet/sing-box/adapter/endpoint"
 	"github.com/sagernet/sing-box/adapter/inbound"
 	"github.com/sagernet/sing-box/adapter/outbound"
@@ -16,9 +17,7 @@ import (
 )
 
 // inboundRegistry registers only what the client-side box needs: a local
-// mixed (SOCKS+HTTP) inbound to front the tunnel. Deliberately narrower than
-// sing-box's own "include" package (which registers every protocol behind
-// build tags) — we want exactly one inbound type, nothing else.
+// mixed (SOCKS+HTTP) inbound, deliberately narrower than sing-box's "include" package.
 func inboundRegistry() *inbound.Registry {
 	r := inbound.NewRegistry()
 	mixed.RegisterInbound(r)
@@ -35,9 +34,8 @@ func outboundRegistry() *outbound.Registry {
 	return r
 }
 
-// dnsTransportRegistry needs at least the "local" transport registered —
-// sing-box's DNS router falls back to it and panics-via-error if it's
-// missing, even though this package never issues DNS lookups of its own.
+// dnsTransportRegistry needs at least the "local" transport registered — sing-box's
+// DNS router falls back to it and panics-via-error if it's missing.
 func dnsTransportRegistry() *dns.TransportRegistry {
 	r := dns.NewTransportRegistry()
 	dnslocal.RegisterTransport(r)
@@ -47,5 +45,5 @@ func dnsTransportRegistry() *dns.TransportRegistry {
 // newBoxContext builds a context carrying the minimal registries above, the
 // prerequisite box.New expects for constructing inbounds/outbounds/DNS.
 func newBoxContext(ctx context.Context) context.Context {
-	return box.Context(ctx, inboundRegistry(), outboundRegistry(), endpoint.NewRegistry(), dnsTransportRegistry(), boxService.NewRegistry())
+	return box.Context(ctx, inboundRegistry(), outboundRegistry(), endpoint.NewRegistry(), dnsTransportRegistry(), boxService.NewRegistry(), certificate.NewRegistry())
 }

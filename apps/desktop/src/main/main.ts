@@ -1,27 +1,62 @@
-import { Menu, Notification, Tray, app, BrowserWindow, ipcMain, nativeImage, session, shell, type NativeImage } from "electron";
+import {
+  Menu,
+  Notification,
+  Tray,
+  app,
+  BrowserWindow,
+  dialog,
+  ipcMain,
+  nativeImage,
+  session,
+  shell,
+  type IpcMainInvokeEvent,
+  type NativeImage
+} from "electron";
+import os from "node:os";
 import path from "node:path";
-import type { OkResponse, Profile, StatusResponse } from "@pangeavpn/shared-types";
-import { DaemonClient, TransportExhaustedError } from "./daemonClient";
+import type { ConfigResponse, OkResponse, Profile, StatusResponse } from "@pangeavpn/shared-types";
+import { DaemonClient, DaemonHttpError, HostOfflineError, TransportExhaustedError } from "./daemonClient";
+import { createAppCatalog } from "./appCatalog";
+import { createSplitTunnelWriter, protectRulesFor } from "../shared/splitTunnel";
 import { DaemonProcessManager } from "./daemonProcess";
-import { readDaemonTokens } from "./platformPaths";
+import { getAppSupportDir, getLegacyStateFilePath, getUserStateDir, readDaemonTokens } from "./platformPaths";
 import { getConnectedTrayIconPath, getTrayIconPath, getWindowsAppIconPath } from "./resourcePaths";
-import { IPC_CHANNELS, type ConnectResult, type ServerInfo } from "../shared/ipc";
+import {
+  IPC_CHANNELS,
+  toPublicServerInfo,
+  type AuthState,
+  type ConnectResult,
+  type DiagnosticsSendResult,
+  type PublicServerInfo,
+  type ServerInfo
+} from "../shared/ipc";
 import * as auth from "./auth";
+import { readSecret, writeSecret } from "./secureStore";
 import {
   PangeaApiClient,
   AuthError,
   ConnectCancelledError,
   SubscriptionExpiredError
 } from "./pangeaApiClient";
+import type { HubRealityCreds } from "../shared/hubRealityCreds";
 import type { HubShadowsocksCreds } from "../shared/hubShadowsocksCreds";
-import { beginAttempt, cancelAttempt, endAttempt, isCancelled } from "./connectAttempt";
-import { setupAutoUpdater, notifyConnectionStateChange } from "./autoUpdater";
+import type { CachedSubscription } from "../shared/cachedSubscription";
+import { beginAttempt, cancelAttempt, commitAttempt, endAttempt, isCancelled } from "./connectAttempt";
+import { LATEST_ROUTE, setupAutoUpdater } from "./autoUpdater";
+import { isSafeExternalUrl } from "./externalUrl";
 import { setLoginItemEnabled, isLoginItemEnabled, isHiddenLaunchArg } from "./loginItem";
 import { startNetworkWatcher, onNetworkChange } from "./networkWatcher";
+import { statusNotificationKind, type StatusSnapshot } from "./statusNotifications";
 import { mt, mtState, setMainLocale, resolveMainLocale } from "./i18n";
 import { sanitizeLog } from "./logSanitize";
-import { classifyHubFailure } from "../shared/entitlement";
+import { isMissingFile, readSettings, writeSettings } from "./settingsFile";
+import { LOG_FILE_NAME, installConsoleFileSink } from "./logFileSink";
+import { collectDiagnostics } from "./diagnosticsReport";
+import { collectWindowsHostSnapshot } from "./hostSnapshot";
+import { uploadDiagnostics } from "./diagnosticsUpload";
+import { classifyLoginError } from "./loginError";
 import { shouldShowTrayHint, trayHintBodyKey } from "./trayHint";
+import { anchorPosition, canAnchorWindow, samePoint, type AnchorRect } from "./windowAnchor";
 import {
   applyHubMethod,
   isHubMethod,
@@ -29,27 +64,53 @@ import {
   persistableHubMethods
 } from "../shared/hubMethods";
 import {
+  normalizeEntryServer,
+  normalizeMultihopPrefs,
+  resolveEntry,
+  type MultihopPrefs
+} from "../shared/multihop";
+import {
   buildServerRetryOrder as buildMainServerRetryOrder,
-  replaceManagedProfile,
   runServerFallback
 } from "./serverFallback";
+import { planAfterServerExhausted, shouldRotateServers } from "./serverRotation";
+import { shouldRecoverFromNetworkChange } from "./networkRecovery";
+import {
+  commitProfileSet,
+  dropExpired,
+  forgetProfile,
+  isLatestProvision,
+  isReusable,
+  parseProfileRecords,
+  profileFingerprint,
+  recordProvision,
+  retainOnly,
+  profileIdFor,
+  serverIdForProfile,
+  type ProfileRecords
+} from "./profileCache";
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let isQuitting = false;
 let trayStatusState: StatusResponse["state"] = "DISCONNECTED";
 let trayStatusDetail = "idle";
+let trayStatusReconnecting = false;
+let trayStatusOffline = false;
+let trayStatusKillSwitch = false;
 let trayActionInProgress = false;
-let trayStatusRefreshInProgress = false;
+let trayStatusRefreshPromise: Promise<void> | null = null;
 let trayStatusTimer: NodeJS.Timeout | null = null;
 let lastConnectedProfileId: string | null = null;
 let trayDefaultImage: NativeImage | null = null;
 let trayConnectedImage: NativeImage | null = null;
 let lastDaemonRestartAttemptAtMs = 0;
 let daemonRecoveryInProgress = false;
+// A native dialog takes focus from the popover; hiding it then would strand the dialog.
+let nativeDialogOpen = false;
 let trayHintShown = false;
-let setWidth = 640;
-let setHeight = 440;
+const setWidth = 640;
+const setHeight = 440;
 const daemonRestartBackoffMs = 5000;
 
 const daemonClient = new DaemonClient("http://127.0.0.1:8787", readDaemonTokens);
@@ -58,50 +119,135 @@ const pangeaApiClient = new PangeaApiClient();
 
 let managedProfileId: string | null = null;
 let lastServerId: string | null = null;
+let lastEntryServerId: string | null = null;
+let multihopPrefs: MultihopPrefs = { enabled: false, entryServerId: null };
+// Hub-registered WireGuard peers still worth reusing, keyed by profile id.
+let provisionedProfiles: ProfileRecords = {};
 let connectionAttemptRunning = false;
 let allowLanEnabled = true;
 let launchAtStartupEnabled = false;
-let alwaysConnectedEnabled = false;
-// "auto" (cloak, then reality, shadowsocks, hysteria2, naive), or one of
+// Lockdown (kill switch while disconnected) and auto-connect (reconnect on
+// launch/drop) shipped as one "alwaysConnected" toggle, migrated on load below.
+let lockdownEnabled = false;
+let autoConnectEnabled = false;
+// OS notifications on connection status changes; on by default, off in Settings.
+let notificationsEnabled = true;
+// "auto" (reality, then cloak, shadowsocks, hysteria2, naive), or one of
 // "cloak"/"naive"/"reality"/"hysteria2"/"shadowsocks"/"snowflake" only.
-let preferredTransport: "auto" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "snowflake" = "auto";
+let preferredTransport: "auto" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "snowflake" | "wireguard" = "auto";
 // Stored language preference: a locale code, or "system" to follow the OS.
 let localePref = "system";
 const hiddenLaunch = process.argv.some(isHiddenLaunchArg);
 
-// Login item on if launch-at-startup or Lockdown is enabled — Lockdown needs the tray app on boot to reconnect.
+// Auto-connect needs the tray app on boot to reconnect; Lockdown needs it so the
+// user has a way to connect (or lift the lock) on a machine that boots blocked.
 async function applyLoginItem(): Promise<void> {
-  await setLoginItemEnabled(launchAtStartupEnabled || alwaysConnectedEnabled);
+  await setLoginItemEnabled(launchAtStartupEnabled || lockdownEnabled || autoConnectEnabled);
+}
+
+function getTrayBounds(): AnchorRect | null {
+  if (!tray) {
+    return null;
+  }
+  try {
+    return tray.getBounds();
+  } catch {
+    return null;
+  }
 }
 
 function getTaskbarPosition(): { x: number; y: number } {
   const { screen } = require("electron") as typeof import("electron");
-  const display = screen.getPrimaryDisplay();
-  const { width: screenW, height: screenH } = display.workAreaSize;
-  const { x: workX, y: workY } = display.workArea;
-  const winW = setWidth;
-  const winH = setHeight;
-
-  if (process.platform === "darwin") {
-    // macOS: menu bar at top, anchor top-right
-    return { x: workX + screenW - winW - 8, y: workY + 8 };
+  let cursor: { x: number; y: number } | null = null;
+  try {
+    cursor = screen.getCursorScreenPoint();
+  } catch {
+    cursor = null;
   }
-  // Windows/Linux: flush to bottom-right of work area
-  return { x: workX + screenW - winW, y: workY + screenH - winH };
+  return anchorPosition({
+    displays: screen.getAllDisplays(),
+    primary: screen.getPrimaryDisplay(),
+    cursor,
+    trayBounds: getTrayBounds(),
+    size: { width: setWidth, height: setHeight },
+    platform: process.platform
+  });
+}
+
+// Wayland refuses to let a client place its own window, so there the popover
+// becomes an ordinary window that closes to the tray instead of a tray anchor.
+const anchoredWindow = canAnchorWindow(process.env, process.platform, process.argv);
+
+// Linux WMs place a frameless window where they like as they map it, and some
+// keep nudging it after, so the anchor has to be re-asserted rather than set once.
+const anchorReassertDelaysMs = [0, 60, 180, 400];
+const anchorFixupBudget = 8;
+let anchorTimers: NodeJS.Timeout[] = [];
+let anchorFixupsLeft = 0;
+
+function clearAnchorTimers(): void {
+  for (const timer of anchorTimers) {
+    clearTimeout(timer);
+  }
+  anchorTimers = [];
+}
+
+function applyAnchor(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return;
+  }
+  const pos = getTaskbarPosition();
+  mainWindow.setPosition(pos.x, pos.y);
+}
+
+function keepAnchored(): void {
+  if (process.platform !== "linux" || !anchoredWindow) {
+    return;
+  }
+  clearAnchorTimers();
+  anchorFixupsLeft = anchorFixupBudget;
+  for (const delay of anchorReassertDelaysMs) {
+    anchorTimers.push(
+      setTimeout(() => {
+        if (mainWindow?.isVisible() && !hiding) {
+          applyAnchor();
+        }
+      }, delay)
+    );
+  }
+}
+
+function watchDisplayChanges(): void {
+  if (!anchoredWindow) {
+    return;
+  }
+  const { screen } = require("electron") as typeof import("electron");
+  const reanchor = (): void => {
+    if (mainWindow?.isVisible() && !hiding) {
+      applyAnchor();
+      keepAnchored();
+    }
+  };
+  screen.on("display-added", reanchor);
+  screen.on("display-removed", reanchor);
+  screen.on("display-metrics-changed", reanchor);
 }
 
 function createWindow(): void {
-  const windowIconPath = getWindowsAppIconPath(__dirname);
-  const pos = getTaskbarPosition();
+  // Without an anchor the window is on its own in the window list, so it needs a
+  // frame to move and close by, a taskbar entry, and an icon to be known by.
+  const windowIconPath = anchoredWindow ? getWindowsAppIconPath(__dirname) : getTrayIconPath(__dirname);
+  const pos = anchoredWindow ? getTaskbarPosition() : null;
   mainWindow = new BrowserWindow({
     width: setWidth,
     height: setHeight,
-    x: pos.x,
-    y: pos.y,
-    frame: false,
+    ...(pos ? { x: pos.x, y: pos.y } : { center: true }),
+    frame: !anchoredWindow,
+    // Without this the titlebar eats into the 640x440 the layout is built for.
+    useContentSize: !anchoredWindow,
     resizable: false,
-    skipTaskbar: true,
-    alwaysOnTop: true,
+    skipTaskbar: anchoredWindow,
+    alwaysOnTop: anchoredWindow,
     show: false,
     ...(windowIconPath ? { icon: windowIconPath } : {}),
     webPreferences: {
@@ -113,7 +259,22 @@ function createWindow(): void {
     }
   });
 
-  mainWindow.loadFile(path.join(__dirname, "../renderer/index.html"));
+  mainWindow.loadFile(path.join(__dirname, "../renderer/index.html")).catch((err) => {
+    console.error("failed to load renderer:", err);
+  });
+
+  mainWindow.webContents.on("render-process-gone", (_event, details) => {
+    console.error("renderer process gone:", details.reason);
+  });
+
+  // The renderer has its own console; without this it never reaches the log
+  // file, so a diagnostic report would carry no UI-side history at all.
+  mainWindow.webContents.on("console-message", (details) => {
+    const line = `[renderer] ${details.message}`;
+    if (details.level === "error") console.error(line);
+    else if (details.level === "warning") console.warn(line);
+    else console.log(line);
+  });
 
   mainWindow.on("close", (event) => {
     if (isQuitting || !tray) {
@@ -124,10 +285,10 @@ function createWindow(): void {
   });
 
   mainWindow.on("blur", () => {
-    if (isQuitting || daemonRecoveryInProgress) return;
+    if (isQuitting || daemonRecoveryInProgress || nativeDialogOpen || !anchoredWindow) return;
     // Wait for any show animation to finish, then hide.
     const checkAndHide = () => {
-      if (!isQuitting && mainWindow?.isVisible() && !hiding) {
+      if (!isQuitting && !nativeDialogOpen && mainWindow?.isVisible() && !hiding) {
         hideMainWindow();
       }
     };
@@ -139,14 +300,47 @@ function createWindow(): void {
           checkAndHide();
         }
       }, 30);
-      setTimeout(() => clearInterval(poll), 500); // safety
+      // Safety: if the show animation never finishes, hide anyway.
+      setTimeout(() => {
+        clearInterval(poll);
+        checkAndHide();
+      }, 500);
     } else {
       setTimeout(checkAndHide, 30);
     }
   });
 
+  mainWindow.webContents.on("before-input-event", (_event, input) => {
+    if (process.platform === "darwin" || input.type !== "keyDown") return;
+    if (!input.control || input.shift || input.alt || input.meta) return;
+    const key = input.key.toLowerCase();
+    if (key === "q") {
+      isQuitting = true;
+      app.quit();
+    } else if (key === "h") {
+      hideMainWindow();
+    }
+  });
+
   mainWindow.webContents.on("preload-error", (_event, preloadPath, error) => {
     console.error(`preload failed (${preloadPath}):`, error);
+  });
+
+  // A WM that drops the window elsewhere gets one correction per move, capped so
+  // a tiling WM can't turn this into a fight.
+  mainWindow.on("move", () => {
+    if (process.platform !== "linux" || !anchoredWindow || hiding || anchorFixupsLeft <= 0) {
+      return;
+    }
+    if (!mainWindow?.isVisible()) {
+      return;
+    }
+    const [x, y] = mainWindow.getPosition();
+    if (samePoint({ x, y }, getTaskbarPosition())) {
+      return;
+    }
+    anchorFixupsLeft--;
+    applyAnchor();
   });
 
   mainWindow.on("show", () => {
@@ -169,19 +363,23 @@ let hiding = false;
 function showMainWindow(): void {
   if (!mainWindow) {
     createWindow();
+    // createWindow leaves the window hidden (show:false); finish the job.
+    showMainWindow();
     return;
   }
   if (showing) return;
   hiding = false;
   showing = true;
 
-  const pos = getTaskbarPosition();
-  const useSlide = process.platform !== "linux";
+  const pos = anchoredWindow ? getTaskbarPosition() : null;
+  const useSlide = anchoredWindow && process.platform !== "linux";
   const slideOffset = process.platform === "darwin" ? -20 : 20;
-  const startY = useSlide ? pos.y + slideOffset : pos.y;
+  const startY = pos && useSlide ? pos.y + slideOffset : pos?.y ?? 0;
 
   mainWindow.setOpacity(0);
-  mainWindow.setBounds({ x: pos.x, y: startY, width: setWidth, height: setHeight });
+  if (pos) {
+    mainWindow.setBounds({ x: pos.x, y: startY, width: setWidth, height: setHeight });
+  }
 
   if (mainWindow.isMinimized()) {
     mainWindow.restore();
@@ -190,6 +388,7 @@ function showMainWindow(): void {
     mainWindow.show();
   }
   mainWindow.focus();
+  keepAnchored();
 
   const duration = 180;
   const steps = 12;
@@ -201,14 +400,16 @@ function showMainWindow(): void {
     const t = step / steps;
     const ease = 1 - Math.pow(1 - t, 3);
     mainWindow?.setOpacity(ease);
-    if (useSlide) {
+    if (useSlide && pos) {
       mainWindow?.setBounds({ x: pos.x, y: Math.round(startY + (pos.y - startY) * ease), width: setWidth, height: setHeight });
     }
 
     if (step >= steps) {
       clearInterval(timer);
       mainWindow?.setOpacity(1);
-      mainWindow?.setBounds({ x: pos.x, y: pos.y, width: setWidth, height: setHeight });
+      if (pos) {
+        mainWindow?.setBounds({ x: pos.x, y: pos.y, width: setWidth, height: setHeight });
+      }
       showing = false;
     }
   }, interval);
@@ -224,7 +425,7 @@ function hideMainWindow(fromTrayClick = false): void {
   showing = false;
 
   const [startX, startY] = mainWindow.getPosition();
-  const useSlide = process.platform !== "linux";
+  const useSlide = anchoredWindow && process.platform !== "linux";
   const slideOffset = process.platform === "darwin" ? -20 : 20;
   const endY = startY + slideOffset;
   const duration = 150;
@@ -245,6 +446,7 @@ function hideMainWindow(fromTrayClick = false): void {
       clearInterval(timer);
       mainWindow?.hide();
       mainWindow?.setOpacity(1);
+      clearAnchorTimers();
       hiding = false;
       updateTrayMenu();
       void maybeShowTrayHint(fromTrayClick);
@@ -275,18 +477,23 @@ async function maybeShowTrayHint(fromTrayClick: boolean): Promise<void> {
   notification.on("click", () => showMainWindow());
   notification.show();
 
-  try {
-    const settings = await readSettingsFile();
+  await updateSettings((settings) => {
     settings.trayHintShown = true;
-    await writeSettingsFile(settings);
-  } catch (err) {
-    console.warn("failed to persist tray hint flag:", sanitizeLog(err));
-  }
+  }, "tray hint flag");
 }
 
 function toggleMainWindowVisibility(): void {
+  if (nativeDialogOpen) {
+    mainWindow?.focus();
+    return;
+  }
   if (!mainWindow || !mainWindow.isVisible()) {
     showMainWindow();
+    return;
+  }
+  if (!anchoredWindow && !mainWindow.isFocused()) {
+    mainWindow.show();
+    mainWindow.focus();
     return;
   }
   hideMainWindow(true);
@@ -371,9 +578,13 @@ function updateTrayMenu(): void {
     return;
   }
 
-  const detailLabel = trayStatusDetail.trim() || "-";
+  // While the kill switch holds traffic, the raw daemon detail can't tell the
+  // user why their internet is down or that Disconnect is the way out.
+  const killSwitchHolding = trayStatusState === "ERROR" && trayStatusKillSwitch;
+  const detailLabel = killSwitchHolding ? mt("tray.blocked") : trayStatusDetail.trim() || "-";
   const canConnect = !trayActionInProgress && (trayStatusState === "DISCONNECTED" || trayStatusState === "ERROR");
-  const canDisconnect = !trayActionInProgress && (trayStatusState === "CONNECTED" || trayStatusState === "CONNECTING");
+  const canDisconnect =
+    !trayActionInProgress && (trayStatusState === "CONNECTED" || trayStatusState === "CONNECTING" || killSwitchHolding);
   const windowVisible = Boolean(mainWindow && mainWindow.isVisible());
   tray.setContextMenu(
     Menu.buildFromTemplate([
@@ -407,6 +618,10 @@ function updateTrayMenu(): void {
         label: windowVisible ? mt("tray.hide") : mt("tray.show"),
         click: () => {
           if (windowVisible) {
+            if (nativeDialogOpen) {
+              mainWindow?.focus();
+              return;
+            }
             hideMainWindow();
             return;
           }
@@ -443,74 +658,181 @@ function stopTrayStatusPolling(): void {
   trayStatusTimer = null;
 }
 
+let lastNotifiedStatus: StatusSnapshot | null = null;
+
+// One notification per transition, decided by the pure table in
+// statusNotifications.ts; silent so a status flap never dings the user.
+function maybeNotifyStatusChange(): void {
+  const next: StatusSnapshot = {
+    state: trayStatusState,
+    reconnecting: trayStatusReconnecting,
+    killSwitchActive: trayStatusKillSwitch
+  };
+  const prev = lastNotifiedStatus;
+  lastNotifiedStatus = next;
+  if (!notificationsEnabled || !Notification.isSupported()) return;
+  // The status is already on screen when the window is open, so don't also toast
+  // it. lastNotifiedStatus is updated above, so nothing fires late on re-hide.
+  if (mainWindow && mainWindow.isVisible() && !mainWindow.isMinimized()) return;
+  const kind = statusNotificationKind(prev, next);
+  if (!kind) return;
+  const iconPath = process.platform === "darwin" ? undefined : getTrayIconPath(__dirname);
+  const notification = new Notification({
+    title: mt(`notify.${kind}Title`),
+    body: mt(`notify.${kind}Body`),
+    // Blocked internet is the one status worth a ding: silence here is how a
+    // user ends up debugging their router instead of pressing Disconnect.
+    silent: kind !== "blocking",
+    ...(iconPath ? { icon: iconPath } : {})
+  });
+  notification.on("click", () => showMainWindow());
+  notification.show();
+}
+
 async function refreshTrayStatus(): Promise<void> {
-  if (!tray || trayStatusRefreshInProgress) {
+  // Dedupe concurrent callers onto the same in-flight refresh instead of one
+  // returning immediately with a stale value while another is still fetching.
+  if (trayStatusRefreshPromise) {
+    return trayStatusRefreshPromise;
+  }
+
+  const run = (async () => {
+    try {
+      const status = await withDaemonRestartOnUnavailable(() => daemonClient.getStatus(), "tray status", { allowRestart: false });
+      trayStatusState = status.state;
+      trayStatusDetail = status.detail;
+      trayStatusReconnecting = status.reconnecting;
+      trayStatusOffline = status.offline;
+      trayStatusKillSwitch = status.killSwitchActive;
+      if (status.transportsExhausted) {
+        void rotateAwayFromBlockedServer();
+      }
+    } catch {
+      trayStatusState = "ERROR";
+      trayStatusDetail = "daemon unavailable";
+      trayStatusReconnecting = false;
+    } finally {
+      maybeNotifyStatusChange();
+      updateTrayMenu();
+    }
+  })();
+  trayStatusRefreshPromise = run.finally(() => {
+    trayStatusRefreshPromise = null;
+  });
+  return trayStatusRefreshPromise;
+}
+
+let serverRotationInFlight = false;
+let lastServerRotationAtMs = 0;
+
+/** Reconnects elsewhere once no transport gets through this server: the daemon
+ *  walks transports, only the app can walk servers. */
+async function rotateAwayFromBlockedServer(): Promise<void> {
+  const blockedServerId = lastServerId;
+  if (
+    !shouldRotateServers({
+      transportsExhausted: true,
+      connectionAttemptRunning,
+      rotationInFlight: serverRotationInFlight,
+      lastRotationAtMs: lastServerRotationAtMs,
+      nowMs: Date.now()
+    })
+  ) {
     return;
   }
 
-  trayStatusRefreshInProgress = true;
+  serverRotationInFlight = true;
+  lastServerRotationAtMs = Date.now();
   try {
-    const status = await withDaemonRestartOnUnavailable(() => daemonClient.getStatus(), "tray status", { allowRestart: false });
-    trayStatusState = status.state;
-    trayStatusDetail = status.detail;
-  } catch {
-    trayStatusState = "ERROR";
-    trayStatusDetail = "daemon unavailable";
+    // The peer this server exhausted on may be one the hub dropped; forget it
+    // so the plan re-provisions a fresh peer here before rotating away.
+    if (blockedServerId) forgetProvisionedProfile(profileIdFor(blockedServerId, lastEntryServerId));
+    const plan = await resolveTrayServerPlan(blockedServerId);
+    if (!plan) {
+      console.warn("rotation: no server to try");
+      return;
+    }
+    console.warn(`rotation: ${blockedServerId ?? "current server"} carries no transport; re-provisioning it, then other servers`);
+    const hop = entryForMain(plan[0]);
+    if (!hop.ok) {
+      console.warn("rotation: multihop is on but no entry server is available");
+      return;
+    }
+    const result = await provisionAndConnect(plan, hop.entry);
+    if (!result.ok) {
+      console.warn("rotation: reconnecting on another server failed", result.error);
+    }
+  } catch (error) {
+    console.warn("rotation: reconnecting on another server failed", sanitizeLog(error));
   } finally {
-    trayStatusRefreshInProgress = false;
-    updateTrayMenu();
-    notifyConnectionStateChange(trayStatusState);
+    serverRotationInFlight = false;
   }
 }
 
 let networkRecoverInProgress = false;
 let lastNetworkRecoverAtMs = 0;
-const NETWORK_RECOVER_COOLDOWN_MS = 10_000;
+// Set by an explicit Disconnect, cleared by any deliberate connect: the
+// renderer honors this intent, so main's own recovery must too.
+let userDisconnected = false;
 
 async function recoverFromNetworkChange(): Promise<void> {
-  if (networkRecoverInProgress || connectionAttemptRunning) return;
-  const now = Date.now();
-  if (now - lastNetworkRecoverAtMs < NETWORK_RECOVER_COOLDOWN_MS) return;
-  if (!alwaysConnectedEnabled) return;
-  if (!lastConnectedProfileId) return;
+  const profileId = lastConnectedProfileId;
+  if (
+    profileId === null ||
+    !shouldRecoverFromNetworkChange({
+      autoConnectEnabled,
+      userDisconnected,
+      lastConnectedProfileId: profileId,
+      connectionAttemptRunning,
+      recoverInProgress: networkRecoverInProgress,
+      lastRecoverAtMs: lastNetworkRecoverAtMs,
+      nowMs: Date.now()
+    })
+  ) {
+    return;
+  }
 
   networkRecoverInProgress = true;
   connectionAttemptRunning = true;
-  lastNetworkRecoverAtMs = now;
+  // Tracked as a cancellable attempt so a user Disconnect (which calls
+  // cancelAttempt) can interrupt this cascade instead of racing past it.
+  const attempt = beginAttempt();
   try {
     // Refresh status first so we don't fire over an already-healthy tunnel.
     await refreshTrayStatus();
-    if (trayStatusState === "CONNECTED" || trayStatusState === "CONNECTING") {
+    if (trayStatusState === "CONNECTED" || trayStatusState === "CONNECTING" || trayStatusState === "DISCONNECTING") {
       return;
     }
+    // The daemon is still rebuilding a session it owns; a connect on top of it
+    // would only cancel that cascade mid-transport.
+    if (trayStatusReconnecting) return;
+    // No physical link: the daemon is holding, so don't churn connect attempts
+    // into a dead network — the daemon resumes on its own when a link returns.
+    if (trayStatusOffline) return;
+    if (isCancelled(attempt)) return;
+    // Stamped only when a reconnect actually runs, so burning the cooldown on
+    // a no-op (daemon still CONNECTED) can't skip the AP-up event that follows.
+    lastNetworkRecoverAtMs = Date.now();
     console.log("network change detected — attempting reconnect");
-    // Tear down stale tunnel/firewall state without clearing the kill switch
-    // (we're in lockdown mode), then bring the tunnel back on the new network.
-    try {
-      await daemonClient.disconnect({ keepKillSwitch: true });
-    } catch (err) {
-      console.warn("network recover: disconnect failed", err);
-    }
-    const result = await connectWithRecovery(lastConnectedProfileId);
+    // No disconnect first: that would lower the kill switch for the whole
+    // reconnect. The daemon's connect re-arms over whatever it left behind.
+    const result = await connectWithRecovery(profileId);
     if (!result.ok) {
-      console.warn("network recover: reconnect failed", (result as { error?: string }).error);
+      console.warn("network recover: reconnect failed", sanitizeLog((result as { error?: string }).error));
     }
+  } catch (err) {
+    console.warn("network recover: unexpected error", sanitizeLog(err));
   } finally {
+    endAttempt(attempt);
     networkRecoverInProgress = false;
     connectionAttemptRunning = false;
     await refreshTrayStatus();
   }
 }
 
-/**
- * Connect the profile the daemon already holds, with no hub contact at all.
- *
- * The profile carries a WireGuard key the hub registered on a previous run, so
- * it is the one way to reach a node while the hub is unreachable — provisioning
- * a new one needs a /api/register round trip, which is exactly what is blocked.
- * Assumes the caller owns connectionAttemptRunning.
- */
-async function connectExistingProfile(): Promise<boolean> {
+// Connects the profile the daemon already holds, with no hub contact — the way
+// to reach a node while the hub (and its /api/register) is unreachable.
+async function connectExistingProfile(attempt: ReturnType<typeof beginAttempt>): Promise<boolean> {
   const profileId = lastConnectedProfileId ?? managedProfileId;
   if (!profileId) return false;
 
@@ -521,7 +843,18 @@ async function connectExistingProfile(): Promise<boolean> {
   );
   if (!config.profiles.some((profile) => profile.id === profileId)) return false;
 
+  if (isCancelled(attempt)) return false;
   const result = await connectWithRecovery(profileId);
+  // Stop can land while the daemon is mid-connect, and this path has no hub
+  // call left to abort — so the tunnel has to be taken back down here.
+  if (isCancelled(attempt)) {
+    if (result.ok) {
+      await daemonClient
+        .disconnect({ keepKillSwitch: lockdownEnabled })
+        .catch((err) => console.warn("cancel: fallback teardown failed", sanitizeLog(err)));
+    }
+    return false;
+  }
   if (!result.ok) return false;
   lastConnectedProfileId = profileId;
   void persistLastConnection();
@@ -532,27 +865,29 @@ async function reconnectExistingProfile(): Promise<boolean> {
   if (connectionAttemptRunning) return false;
 
   connectionAttemptRunning = true;
+  // Tracked as a cancellable attempt, or Stop has nothing to interrupt here.
+  const attempt = beginAttempt();
   try {
-    return await connectExistingProfile();
+    const reconnected = await connectExistingProfile(attempt);
+    if (!reconnected && isCancelled(attempt)) throw new ConnectCancelledError();
+    return reconnected;
+  } catch (err) {
+    // Stop interrupts the daemon mid-connect, which answers 500 "context canceled".
+    throw isCancelled(attempt) ? new ConnectCancelledError() : err;
   } finally {
+    endAttempt(attempt);
     connectionAttemptRunning = false;
   }
 }
 
-/**
- * Is this failure worth retrying against the profile we already have?
- *
- * Only reachability failures are. A hub that answered and said no — the device
- * was removed, the subscription lapsed — will have deprovisioned the peer that
- * profile names, so retrying it wastes a handshake deadline to arrive at the
- * same answer with a worse error message. Cancellation is the user's decision
- * and must not be undone by a fallback.
- */
+// Only hub reachability failures are worth retrying on the existing profile: a hub
+// that answered has already replaced that peer, and a daemon error is not the hub's.
 function isHubReachabilityFailure(err: unknown): boolean {
   return !(
     err instanceof AuthError ||
     err instanceof SubscriptionExpiredError ||
-    err instanceof ConnectCancelledError
+    err instanceof ConnectCancelledError ||
+    err instanceof DaemonHttpError
   );
 }
 
@@ -561,36 +896,64 @@ async function connectFromTray(): Promise<void> {
     return;
   }
 
+  userDisconnected = false;
   trayActionInProgress = true;
   updateTrayMenu();
+  // Tracks whether we set ERROR ourselves, so the finally below doesn't let
+  // a daemon refresh silently overwrite it with a normal idle state.
+  let explicitFailure = false;
   try {
+    if (connectionAttemptRunning) {
+      // A cascade already owns the connect; don't fall through into a
+      // doomed provision attempt and report a failure that never happened.
+      return;
+    }
     let exhaustedServerId: string | null = null;
     try {
       if (await reconnectExistingProfile()) return;
     } catch (error) {
+      // Parked until the network returns, or stopped by the user; the status refresh shows either.
+      if (error instanceof HostOfflineError || error instanceof ConnectCancelledError) return;
       if (!(error instanceof TransportExhaustedError)) throw error;
       exhaustedServerId = lastServerId;
     }
 
+    // Force a fresh peer on the server that exhausted, in case the hub dropped
+    // the cached one; the plan retries it first before other servers.
+    if (exhaustedServerId) forgetProvisionedProfile(profileIdFor(exhaustedServerId, lastEntryServerId));
     const serverPlan = await resolveTrayServerPlan(exhaustedServerId);
     if (!serverPlan) {
       trayStatusState = "ERROR";
       trayStatusDetail = "no server available";
+      explicitFailure = true;
       return;
     }
 
-    const result = await provisionAndConnect(serverPlan);
+    const hop = entryForMain(serverPlan[0]);
+    if (!hop.ok) {
+      trayStatusState = "ERROR";
+      trayStatusDetail = "multihop: no entry server available";
+      explicitFailure = true;
+      return;
+    }
+    const result = await provisionAndConnect(serverPlan, hop.entry);
     if (!result.ok) {
       trayStatusState = "ERROR";
       trayStatusDetail = "connect request failed";
+      explicitFailure = true;
     }
   } catch (error) {
     console.warn("tray connect failed", sanitizeLog(error));
     trayStatusState = "ERROR";
     trayStatusDetail = "connect failed";
+    explicitFailure = true;
   } finally {
     trayActionInProgress = false;
-    await refreshTrayStatus();
+    if (explicitFailure) {
+      updateTrayMenu();
+    } else {
+      await refreshTrayStatus();
+    }
   }
 }
 
@@ -599,36 +962,49 @@ async function disconnectFromTray(): Promise<void> {
     return;
   }
 
+  userDisconnected = true;
+  // Same as the renderer's Disconnect: an in-flight cascade would otherwise
+  // bring the tunnel straight back up after the daemon disconnect.
+  cancelAttempt();
   trayActionInProgress = true;
   updateTrayMenu();
+  let explicitFailure = false;
   try {
     const result = await withDaemonRestartOnUnavailable(
-      () => daemonClient.disconnect({ keepKillSwitch: alwaysConnectedEnabled }),
+      () => daemonClient.disconnect({ keepKillSwitch: lockdownEnabled }),
       "tray disconnect"
     );
     if (!result.ok) {
       trayStatusState = "ERROR";
       trayStatusDetail = "disconnect request failed";
+      explicitFailure = true;
     }
   } catch (error) {
-    console.warn("tray disconnect failed", error);
+    console.warn("tray disconnect failed", sanitizeLog(error));
     trayStatusState = "ERROR";
     trayStatusDetail = "disconnect failed";
+    explicitFailure = true;
   } finally {
     trayActionInProgress = false;
-    await refreshTrayStatus();
+    if (explicitFailure) {
+      updateTrayMenu();
+    } else {
+      await refreshTrayStatus();
+    }
   }
 }
 
-async function resolveTrayServerPlan(excludedServerId: string | null = null): Promise<string[] | null> {
+async function resolveTrayServerPlan(failedServerId: string | null = null): Promise<string[] | null> {
   try {
     const servers = await pangeaApiClient.getServers();
     if (servers.length > 0) {
       const initialServerId = lastServerId && servers.some((server) => server.id === lastServerId)
         ? lastServerId
         : servers[0].id;
-      const plan = buildMainServerRetryOrder(servers, initialServerId)
-        .filter((serverId) => serverId !== excludedServerId);
+      const plan = planAfterServerExhausted(
+        buildMainServerRetryOrder(servers, initialServerId),
+        failedServerId
+      );
       return plan.length > 0 ? plan : null;
     }
   } catch {
@@ -638,21 +1014,70 @@ async function resolveTrayServerPlan(excludedServerId: string | null = null): Pr
   return null;
 }
 
-/** Lockdown's lock blocks the hub we must reach to provision, so open the hub
- *  alone. Best-effort: a failure surfaces as the real network error. */
-async function permitHubThroughLockdown(): Promise<void> {
-  if (!alwaysConnectedEnabled) return;
+/** Opens the hub through a Lockdown lock and, mid-session, routes it around the
+ *  tunnel: a switch must not depend on the tunnel it is leaving. Best-effort. */
+async function permitHubBeforeProvisioning(): Promise<void> {
   const hubIp = pangeaApiClient.getHubIp();
   try {
     await daemonClient.permitHosts(hubIp ? [hubIp] : []);
   } catch (err) {
-    console.warn("lockdown: hub permit failed", sanitizeLog(err));
+    console.warn("hub permit failed", sanitizeLog(err));
   }
 }
 
-async function provisionProfileForServer(serverId: string, signal?: AbortSignal): Promise<Profile> {
-  await permitHubThroughLockdown();
-  const profile = await pangeaApiClient.provision(serverId, signal);
+/** The entry a main-driven connect must use. Not ok: multihop is on and nothing qualifies. */
+function entryForMain(exitServerId: string): { ok: true; entry: string | null } | { ok: false } {
+  if (!multihopPrefs.enabled) return { ok: true, entry: null };
+  const chosen = multihopPrefs.entryServerId ?? lastEntryServerId;
+  const entry = resolveEntry(pangeaApiClient.getCachedServers(), exitServerId, chosen);
+  return entry ? { ok: true, entry: entry.id } : { ok: false };
+}
+
+function fingerprintForServer(serverId: string, entryServerId: string | null): string {
+  const servers = pangeaApiClient.getCachedServers();
+  const exit = servers.find((server) => server.id === serverId) ?? null;
+  return profileFingerprint({
+    wireguardMtu: pangeaApiClient.getWireguardMtu(),
+    customDns: pangeaApiClient.getCustomDns(),
+    hubInTunnel: pangeaApiClient.getHubInTunnel(),
+    server: entryServerId
+      ? { exit, entry: servers.find((server) => server.id === entryServerId) ?? null }
+      : exit
+  });
+}
+
+// The still-fresh peer the hub registered on an earlier run, if any — reusing
+// it turns a reconnect into zero hub round trips; the caller re-provisions on failure.
+async function reusableProfileForServer(serverId: string, entryServerId: string | null): Promise<Profile | null> {
+  const profileId = profileIdFor(serverId, entryServerId);
+  if (!isReusable(provisionedProfiles[profileId], fingerprintForServer(serverId, entryServerId), Date.now())) {
+    return null;
+  }
+  // Registering any other server evicted this peer hub-side; dialling it would
+  // burn the daemon's whole transport cascade on handshakes no node answers.
+  if (!isLatestProvision(provisionedProfiles, profileId)) {
+    return null;
+  }
+  try {
+    const config = await withDaemonRestartOnUnavailable(
+      () => daemonClient.getConfig(),
+      "reuse-config",
+      { allowRestart: false }
+    );
+    return config.profiles.find((profile) => profile.id === profileId) ?? null;
+  } catch (err) {
+    console.warn("reuse: could not read daemon config", sanitizeLog(err));
+    return null;
+  }
+}
+
+async function provisionProfileForServer(
+  serverId: string,
+  signal: AbortSignal | undefined,
+  entryServerId: string | null
+): Promise<Profile> {
+  await permitHubBeforeProvisioning();
+  const profile = await pangeaApiClient.provision(serverId, signal, entryServerId ?? undefined);
 
   const config = await withDaemonRestartOnUnavailable(
     () => daemonClient.getConfig(),
@@ -665,7 +1090,36 @@ async function provisionProfileForServer(serverId: string, signal?: AbortSignal)
   profiles.push(profile);
 
   await withDaemonRestartOnUnavailable(() => daemonClient.setConfig(profiles), "provision-setConfig");
+  rememberProvisionedProfile(profile.id, serverId, entryServerId);
   return profile;
+}
+
+function rememberProvisionedProfile(profileId: string, serverId: string, entryServerId: string | null): void {
+  provisionedProfiles = recordProvision(provisionedProfiles, profileId, {
+    serverId,
+    provisionedAt: Date.now(),
+    fingerprint: fingerprintForServer(serverId, entryServerId)
+  });
+  void persistProvisionedProfiles();
+}
+
+function forgetProvisionedProfile(profileId: string): void {
+  provisionedProfiles = forgetProfile(provisionedProfiles, profileId);
+  void persistProvisionedProfiles();
+}
+
+/** Forgets every cached peer and strips them from the daemon's config. */
+async function discardProvisionedProfiles(): Promise<void> {
+  const cachedIds = Object.keys(provisionedProfiles);
+  provisionedProfiles = {};
+  await persistProvisionedProfiles();
+  if (cachedIds.length === 0) return;
+  try {
+    const config = await daemonClient.getConfig();
+    await daemonClient.setConfig(config.profiles.filter((p) => !cachedIds.includes(p.id)));
+  } catch (err) {
+    console.warn("could not drop cached peers from the daemon config", sanitizeLog(err));
+  }
 }
 
 function normalizeServerPlan(value: unknown): string[] {
@@ -683,13 +1137,74 @@ function normalizeServerPlan(value: unknown): string[] {
   return serverIds;
 }
 
-async function provisionAcrossServers(serverIds: readonly string[], mode: "connect" | "switch"): Promise<ConnectResult> {
+interface DialOutcome {
+  profile: Profile;
+  result: OkResponse;
+}
+
+async function dialServer(
+  profile: Profile,
+  index: number,
+  mode: "connect" | "switch",
+  attempt: ReturnType<typeof beginAttempt>
+): Promise<DialOutcome> {
+  // Provisioning is several round trips; Stop must win before the daemon
+  // receives a connect or switch request.
+  if (isCancelled(attempt)) throw new ConnectCancelledError();
+
+  const result = mode === "switch" && index === 0
+    ? await withDaemonRestartOnUnavailable(
+        () => daemonClient.switch(profile.id, connectionOptions()),
+        "switch"
+      )
+    : await connectWithRecovery(profile.id);
+
+  // Daemon connect can't be un-sent. If Stop landed mid-flight, tear it
+  // back down while preserving Lockdown's kill switch.
+  if (isCancelled(attempt)) {
+    if (result.ok) {
+      await daemonClient
+        .disconnect({ keepKillSwitch: lockdownEnabled })
+        .catch((err) => console.warn("cancel: disconnect failed", sanitizeLog(err)));
+    }
+    throw new ConnectCancelledError();
+  }
+  return { profile, result };
+}
+
+/** Null when the cached peer did not get us connected, having forgotten it. */
+async function dialReusedProfile(
+  profile: Profile,
+  index: number,
+  mode: "connect" | "switch",
+  attempt: ReturnType<typeof beginAttempt>
+): Promise<DialOutcome | null> {
+  let outcome: DialOutcome;
+  try {
+    outcome = await dialServer(profile, index, mode, attempt);
+  } catch (err) {
+    if (err instanceof ConnectCancelledError || err instanceof HostOfflineError || isCancelled(attempt)) throw err;
+    console.warn(`reuse: ${profile.id} failed, re-provisioning`, sanitizeLog(err));
+    forgetProvisionedProfile(profile.id);
+    return null;
+  }
+  if (outcome.result.ok) return outcome;
+  forgetProvisionedProfile(profile.id);
+  return null;
+}
+
+async function provisionAcrossServers(
+  serverIds: readonly string[],
+  mode: "connect" | "switch",
+  entryServerId: string | null
+): Promise<ConnectResult> {
   if (connectionAttemptRunning) {
     return { ok: false, error: "connect-in-progress" };
   }
   connectionAttemptRunning = true;
+  // A user-driven attempt outranks the cooldown from the last failed cascade.
+  pangeaApiClient.retryHubNow();
   const attempt = beginAttempt();
-  const previousManagedProfileId = managedProfileId;
   let initialProfiles: Profile[] | null = null;
   let configChanged = false;
   let committed = false;
@@ -700,62 +1215,64 @@ async function provisionAcrossServers(serverIds: readonly string[], mode: "conne
       { allowRestart: false }
     );
     initialProfiles = initialConfig.profiles;
-    const candidates = preferredTransport === "auto" ? serverIds : serverIds.slice(0, 1);
+    if (entryServerId) {
+      const entry = pangeaApiClient.getCachedServers().find((server) => server.id === entryServerId);
+      if (!entry?.multihop) return { ok: false, error: "entry-unavailable" };
+    }
+    // The hub refuses a hop whose two ends are the same node.
+    const exits = serverIds.filter((serverId) => serverId !== entryServerId);
+    if (exits.length === 0) return { ok: false, error: "no-exit" };
+    const candidates = preferredTransport === "auto" ? exits : exits.slice(0, 1);
     const outcome = await runServerFallback(
       candidates,
       async (serverId, index) => {
-        if (isCancelled(attempt)) throw new ConnectCancelledError();
-        const profile = await provisionProfileForServer(serverId, attempt.controller.signal);
-        configChanged = true;
-
-        // Provisioning is several round trips; Stop must win before the daemon
-        // receives a connect or switch request.
-        if (isCancelled(attempt)) throw new ConnectCancelledError();
-
-        const result = mode === "switch" && index === 0
-          ? await withDaemonRestartOnUnavailable(
-              () => daemonClient.switch(profile.id, connectionOptions()),
-              "switch"
-            )
-          : await connectWithRecovery(profile.id);
-
-        // Daemon connect can't be un-sent. If Stop landed mid-flight, tear it
-        // back down while preserving Lockdown's kill switch.
-        if (isCancelled(attempt)) {
-          if (result.ok) {
-            await daemonClient
-              .disconnect({ keepKillSwitch: alwaysConnectedEnabled })
-              .catch((err) => console.warn("cancel: disconnect failed", sanitizeLog(err)));
-          }
-          throw new ConnectCancelledError();
+        const reused = await reusableProfileForServer(serverId, entryServerId);
+        if (reused) {
+          // The hub may have dropped the peer behind our back, so a failure
+          // here re-provisions the same server rather than cascading away.
+          const outcome = await dialReusedProfile(reused, index, mode, attempt);
+          if (outcome) return outcome;
         }
-        return { profile, result };
+
+        if (isCancelled(attempt)) throw new ConnectCancelledError();
+        const profile = await provisionProfileForServer(serverId, attempt.controller.signal, entryServerId);
+        configChanged = true;
+        return await dialServer(profile, index, mode, attempt);
       },
       (error) => preferredTransport === "auto" && error instanceof TransportExhaustedError
     );
 
     if (outcome.value.result.ok) {
-      const committedProfiles = replaceManagedProfile(
+      provisionedProfiles = dropExpired(provisionedProfiles, Date.now());
+      const committedProfiles = commitProfileSet(
         initialProfiles,
-        previousManagedProfileId,
-        outcome.value.profile
+        outcome.value.profile,
+        Object.keys(provisionedProfiles)
       );
       await daemonClient.setConfig(committedProfiles).catch((error) => {
         console.warn("connect: profile cleanup failed", sanitizeLog(error));
       });
+      provisionedProfiles = retainOnly(provisionedProfiles, committedProfiles.map((p) => p.id));
+      void persistProvisionedProfiles();
       if (isCancelled(attempt)) {
         await daemonClient
-          .disconnect({ keepKillSwitch: alwaysConnectedEnabled })
+          .disconnect({ keepKillSwitch: lockdownEnabled })
           .catch((error) => console.warn("cancel: disconnect after cleanup failed", sanitizeLog(error)));
         throw new ConnectCancelledError();
       }
       committed = true;
+      commitAttempt(attempt);
       managedProfileId = outcome.value.profile.id;
       lastServerId = outcome.serverId;
+      lastEntryServerId = entryServerId;
       lastConnectedProfileId = outcome.value.profile.id;
       void persistLastConnection();
     }
-    return { ...outcome.value.result, serverId: outcome.serverId };
+    return {
+      ...outcome.value.result,
+      serverId: outcome.serverId,
+      ...(entryServerId ? { entryServerId } : {})
+    };
   } catch (err) {
     // A cancelled attempt aborts its in-flight request, which surfaces here.
     // Report it as a non-error so the UI goes idle instead of showing a toast.
@@ -764,6 +1281,11 @@ async function provisionAcrossServers(serverIds: readonly string[], mode: "conne
     }
     if (err instanceof TransportExhaustedError) {
       return { ok: false, error: "all-servers-exhausted" };
+    }
+    // The daemon is holding the session (kill switch armed) and connects
+    // itself once the host has a network; nothing here to unwind or retry.
+    if (err instanceof HostOfflineError) {
+      return { ok: false, error: "offline" };
     }
     throw err;
   } finally {
@@ -781,33 +1303,41 @@ async function provisionAcrossServers(serverIds: readonly string[], mode: "conne
   }
 }
 
-/**
- * Provision and connect, falling back to the profile the daemon already holds
- * when the hub cannot be reached.
- *
- * Runs after provisionAcrossServers has fully unwound — its finally has already
- * restored the config snapshot and released connectionAttemptRunning — so the
- * fallback connects against settled state rather than racing the cleanup.
- *
- * Switching deliberately has no equivalent: a switch that cannot reach the hub
- * unwinds to the connection the user already had, which is a better outcome
- * than replacing it with an older one.
- */
-async function provisionAndConnect(serverIds: readonly string[]): Promise<ConnectResult> {
+// Provisions and connects, falling back to the profile the daemon already
+// holds when the hub is unreachable. Switching has no such fallback.
+async function provisionAndConnect(
+  serverIds: readonly string[],
+  entryServerId: string | null = null
+): Promise<ConnectResult> {
   try {
-    return await provisionAcrossServers(serverIds, "connect");
+    return await provisionAcrossServers(serverIds, "connect", entryServerId);
   } catch (err) {
     if (!isHubReachabilityFailure(err)) throw err;
     console.warn("connect: hub unreachable, trying the last working profile", sanitizeLog(err));
-    if (await reconnectExistingProfile()) {
-      return { ok: true, ...(lastServerId ? { serverId: lastServerId } : {}) };
+    let reconnected: boolean;
+    try {
+      reconnected = await reconnectExistingProfile();
+    } catch (fallbackErr) {
+      if (fallbackErr instanceof HostOfflineError) return { ok: false, error: "offline" };
+      if (fallbackErr instanceof ConnectCancelledError) return { ok: false, error: "cancelled" };
+      throw fallbackErr;
+    }
+    if (reconnected) {
+      return {
+        ok: true,
+        ...(lastServerId ? { serverId: lastServerId } : {}),
+        ...(lastEntryServerId ? { entryServerId: lastEntryServerId } : {})
+      };
     }
     throw err;
   }
 }
 
-async function provisionAndSwitch(serverIds: readonly string[]): Promise<ConnectResult> {
-  return provisionAcrossServers(serverIds, "switch");
+async function provisionAndSwitch(
+  serverIds: readonly string[],
+  entryServerId: string | null = null
+): Promise<ConnectResult> {
+  return provisionAcrossServers(serverIds, "switch", entryServerId);
 }
 
 /** Stop the in-flight connect attempt; never tears down a wanted connection. */
@@ -815,13 +1345,10 @@ async function cancelConnectAttempt(): Promise<void> {
   const cancelled = cancelAttempt();
   if (!cancelled) return;
 
-  // The attempt may already have handed the daemon a connect. Ask it to stand
-  // down; the attempt's own guards handle the rest.
+  // Straight to disconnect, with no status round-trip first: the daemon
+  // interrupts its own in-flight connect, and a redundant one is a no-op there.
   try {
-    const status = await daemonClient.getStatus();
-    if (status.state !== "DISCONNECTED") {
-      await daemonClient.disconnect({ keepKillSwitch: alwaysConnectedEnabled });
-    }
+    await daemonClient.disconnect({ keepKillSwitch: lockdownEnabled });
   } catch (err) {
     console.warn("cancel: daemon teardown failed", sanitizeLog(err));
   }
@@ -831,91 +1358,287 @@ async function cancelConnectAttempt(): Promise<void> {
 function connectionOptions(): {
   allowLAN: boolean;
   lockdown: boolean;
-  preferredTransport?: "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "snowflake";
+  preferredTransport?: "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "snowflake" | "wireguard";
 } {
   return {
     allowLAN: allowLanEnabled,
-    lockdown: alwaysConnectedEnabled,
+    lockdown: lockdownEnabled,
     ...(preferredTransport !== "auto" && { preferredTransport })
   };
 }
 
-async function readSettingsFile(): Promise<Record<string, unknown>> {
+function getSettingsPath(): string {
+  return path.join(getUserStateDir(), "settings.json");
+}
+
+// Reads a desktop state file, falling back to the copy the daemon's directory
+// may still hold from before these moved to the user directory.
+async function readStateFile(fileName: string): Promise<string> {
+  const fs = (await import("node:fs/promises")).default;
   try {
-    const filePath = path.join(
-      (await import("./platformPaths")).getAppSupportDir(),
-      "settings.json"
-    );
-    const fs = (await import("node:fs/promises")).default;
-    return JSON.parse(await fs.readFile(filePath, "utf8")) as Record<string, unknown>;
-  } catch {
-    return {};
+    return await fs.readFile(path.join(getUserStateDir(), fileName), "utf8");
+  } catch (err) {
+    const legacyPath = getLegacyStateFilePath(fileName);
+    if (!legacyPath || !isMissingFile(err)) {
+      throw err;
+    }
+    return await fs.readFile(legacyPath, "utf8");
   }
+}
+
+// Reads the user copy, falling back to one an older build left in the daemon's
+// directory. Read-only: the next write lands in the user directory for good.
+async function readSettingsFile(): Promise<Record<string, unknown>> {
+  return readSettings({ primary: getSettingsPath(), legacy: getLegacyStateFilePath("settings.json") });
 }
 
 async function writeSettingsFile(settings: Record<string, unknown>): Promise<void> {
-  const dir = (await import("./platformPaths")).getAppSupportDir();
-  const fs = (await import("node:fs/promises")).default;
-  // First run can reach here before the daemon has created the directory.
-  await fs.mkdir(dir, { recursive: true });
-  await fs.writeFile(path.join(dir, "settings.json"), JSON.stringify(settings, null, 2));
+  const dir = await (await import("./platformPaths")).ensureUserStateDir();
+  await writeSettings(path.join(dir, "settings.json"), settings);
+}
+
+let settingsWriteChain: Promise<void> = Promise.resolve();
+
+// Serializes every settings.json read-modify-write behind one queue, so two
+// unserialized writers can't interleave and resurrect a key the other deleted.
+function updateSettings(mutate: (settings: Record<string, unknown>) => void, label: string): Promise<void> {
+  const run = settingsWriteChain
+    .catch(() => {})
+    .then(async () => {
+      const settings = await readSettingsFile();
+      mutate(settings);
+      await writeSettingsFile(settings);
+    })
+    .catch((err) => {
+      console.warn(`Failed to persist ${label}:`, sanitizeLog(err));
+    });
+  settingsWriteChain = run;
+  return run;
+}
+
+interface SettingChannels {
+  get: string;
+  set: string;
+}
+
+// Registers a get/set IPC pair for a simple boolean toggle. `apply` performs
+// the side effect and returns the exact value to persist and to hand back on get.
+function registerBoolSetting(
+  channels: SettingChannels,
+  settingsKey: string,
+  label: string,
+  apply: (value: unknown) => boolean,
+  read: () => boolean
+): void {
+  ipcMain.handle(channels.set, async (_event, value: unknown) => {
+    const stored = apply(value);
+    await updateSettings((settings) => {
+      settings[settingsKey] = stored;
+    }, label);
+  });
+  ipcMain.handle(channels.get, async () => read());
+}
+
+// Same as registerBoolSetting, but the set channel returns the stored value —
+// used when the renderer needs to see a request get normalized or rejected.
+function registerStoredSetting<T>(
+  channels: SettingChannels,
+  settingsKey: string,
+  label: string,
+  apply: (value: unknown) => T,
+  read: () => T
+): void {
+  ipcMain.handle(channels.set, async (_event, value: unknown) => {
+    const stored = apply(value);
+    await updateSettings((settings) => {
+      settings[settingsKey] = stored;
+    }, label);
+    return stored;
+  });
+  ipcMain.handle(channels.get, async () => read());
+}
+
+/** Writes both flags together and drops the pre-split `alwaysConnected` key. */
+async function persistStartupSettings(): Promise<void> {
+  await updateSettings((settings) => {
+    settings.lockdown = lockdownEnabled;
+    settings.autoConnect = autoConnectEnabled;
+    settings.notifications = notificationsEnabled;
+    delete settings.alwaysConnected;
+  }, "lockdown/auto-connect settings");
 }
 
 async function persistHubIp(ip: string): Promise<void> {
-  try {
-    const settings = await readSettingsFile();
+  await updateSettings((settings) => {
     settings.hubIp = ip;
-    await writeSettingsFile(settings);
-  } catch (err) {
-    console.warn("Failed to persist hub IP:", err);
-  }
+  }, "hub IP");
 }
 
 async function persistHubShadowsocks(creds: HubShadowsocksCreds[]): Promise<void> {
-  try {
-    const settings = await readSettingsFile();
+  await updateSettings((settings) => {
     settings.hubShadowsocks = creds;
-    await writeSettingsFile(settings);
-  } catch (err) {
-    console.warn("Failed to persist hub Shadowsocks credentials:", err);
-  }
+  }, "hub Shadowsocks credentials");
+}
+
+async function persistHubReality(creds: HubRealityCreds[]): Promise<void> {
+  await updateSettings((settings) => {
+    settings.hubReality = creds;
+  }, "hub REALITY credentials");
 }
 
 async function persistFrontedEndpoints(endpoints: string[]): Promise<void> {
-  try {
-    const settings = await readSettingsFile();
+  await updateSettings((settings) => {
     settings.frontedEndpoints = endpoints;
-    await writeSettingsFile(settings);
-  } catch (err) {
-    console.warn("Failed to persist fronted endpoints:", err);
-  }
+  }, "fronted endpoints");
+}
+
+async function persistDeadDropState(state: { seq: number; lastAttemptMs: number }): Promise<void> {
+  await updateSettings((settings) => {
+    settings.deadDropSeq = state.seq;
+    settings.deadDropLastAttempt = state.lastAttemptMs;
+  }, "dead drop state");
 }
 
 /** The node list, so a client that cannot reach the hub still knows where the
  *  servers are. Cleared on logout, which passes an empty list. */
 async function persistServers(servers: ServerInfo[]): Promise<void> {
-  try {
-    const settings = await readSettingsFile();
+  await updateSettings((settings) => {
     if (servers.length === 0) {
       delete settings.servers;
     } else {
       settings.servers = servers;
     }
-    await writeSettingsFile(settings);
-  } catch (err) {
-    console.warn("Failed to persist server list:", err);
+  }, "server list");
+}
+
+// Reconstructs a clean object from known-safe fields only, so stray properties
+// (e.g. leftover credentials) never survive into the renderer-facing cache.
+const maxSetConfigProfiles = 64;
+
+function sanitizePublicServer(candidate: unknown): PublicServerInfo | null {
+  const s = candidate as Partial<PublicServerInfo> | null;
+  if (!s || typeof s !== "object" || Array.isArray(s)) return null;
+  if (typeof s.id !== "string" || s.id.trim().length === 0) return null;
+  if (typeof s.name !== "string" || s.name.trim().length === 0) return null;
+  if (typeof s.region !== "string" || typeof s.country !== "string") return null;
+  return {
+    id: s.id,
+    name: s.name,
+    region: s.region,
+    country: s.country,
+    load: typeof s.load === "number" ? s.load : null,
+    naive: Boolean(s.naive),
+    reality: Boolean(s.reality),
+    hysteria2: Boolean(s.hysteria2),
+    shadowsocks: Boolean(s.shadowsocks),
+    snowflake: Boolean(s.snowflake)
+  };
+}
+
+/** Validated, deduplicated (by id, order preserved) list for the on-disk
+ *  renderer-facing server cache — never trust a user-writable file blind. */
+function sanitizePublicServers(stored: unknown): PublicServerInfo[] {
+  if (!Array.isArray(stored)) return [];
+  const out: PublicServerInfo[] = [];
+  for (const candidate of stored) {
+    const safe = sanitizePublicServer(candidate);
+    if (!safe) continue;
+    if (out.some((s) => s.id === safe.id)) continue;
+    out.push(safe);
   }
+  return out;
+}
+
+// The renderer is untrusted input to a privileged daemon, so validate the
+// shape here; shared-types is ESM and cannot be required from CommonJS main.
+function asProfilePayload(value: unknown): Profile[] | null {
+  if (!Array.isArray(value) || value.length > maxSetConfigProfiles) {
+    return null;
+  }
+  for (const entry of value) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      return null;
+    }
+    const candidate = entry as { id?: unknown; name?: unknown };
+    if (typeof candidate.id !== "string" || candidate.id.length === 0) {
+      return null;
+    }
+    if (typeof candidate.name !== "string" || candidate.name.length === 0) {
+      return null;
+    }
+  }
+  return value as Profile[];
+}
+
+// Blanks WireGuard keys and per-transport passwords before a daemon config
+// crosses into the renderer, which only ever displays it in diagnostics.
+function redactConfigForRenderer(config: ConfigResponse): ConfigResponse {
+  return {
+    ...config,
+    profiles: config.profiles.map((profile) => ({
+      ...profile,
+      cloak: { ...profile.cloak, uid: "<redacted>", password: "<redacted>" },
+      naive: profile.naive ? { ...profile.naive, password: "<redacted>" } : profile.naive,
+      reality: profile.reality
+        ? { ...profile.reality, uuid: "<redacted>", shortId: "<redacted>" }
+        : profile.reality,
+      hysteria2: profile.hysteria2
+        ? { ...profile.hysteria2, password: "<redacted>", obfsPassword: "<redacted>" }
+        : profile.hysteria2,
+      shadowsocks: profile.shadowsocks
+        ? { ...profile.shadowsocks, password: "<redacted>" }
+        : profile.shadowsocks,
+      wireguard: { ...profile.wireguard, configText: redactWireGuardKeys(profile.wireguard.configText) }
+    }))
+  };
+}
+
+function redactWireGuardKeys(configText: string): string {
+  return configText
+    .split(/\r?\n/)
+    .map((line) => {
+      if (/^\s*PrivateKey\s*=/.test(line) || /^\s*PresharedKey\s*=/.test(line)) {
+        const separator = line.includes("=") ? "=" : " =";
+        return `${line.split("=")[0]?.trim() ?? "Key"} ${separator} <redacted>`;
+      }
+      return line;
+    })
+    .join("\n");
+}
+
+async function persistProvisionedProfiles(): Promise<void> {
+  await updateSettings((settings) => {
+    settings.provisionedProfiles = provisionedProfiles;
+  }, "provisioned profiles");
+}
+
+/** The hub's last word on the plan, so an unreachable hub does not present a
+ *  paying user with "no subscription". Cleared on logout, which passes null. */
+async function persistSubscription(cached: CachedSubscription | null): Promise<void> {
+  await updateSettings((settings) => {
+    if (cached === null) {
+      delete settings.subscription;
+    } else {
+      settings.subscription = cached;
+    }
+  }, "subscription");
+}
+
+/** Refreshes the cached subscription in the background; never throws. Called at
+ *  every point the answer could have changed: launch, sign-in, connect. */
+function refreshSubscriptionCache(reason: string): void {
+  if (!pangeaApiClient.getLicenseKey()) return;
+  void pangeaApiClient.getSubscription().catch((err: unknown) => {
+    console.warn(`subscription refresh (${reason}) failed:`, sanitizeLog(err));
+  });
 }
 
 async function persistLastConnection(): Promise<void> {
-  try {
-    const settings = await readSettingsFile();
+  await updateSettings((settings) => {
     settings.lastServerId = lastServerId;
     settings.lastProfileId = lastConnectedProfileId;
-    await writeSettingsFile(settings);
-  } catch (err) {
-    console.warn("Failed to persist last connection:", err);
-  }
+    settings.lastEntryServerId = lastEntryServerId;
+  }, "last connection");
 }
 
 const FRIENDLY_ADJECTIVES = [
@@ -935,9 +1658,153 @@ function generateFriendlyName(): string {
   return `${adj} ${noun}`;
 }
 
-// Deregister first: auth.logout() clears the keypair, so without this the hub
-// keeps an orphaned device row and one of the four slots is gone for good.
-async function signOutAndReleaseDevice(): Promise<void> {
+async function handleConnectIpc(profileId: unknown): Promise<OkResponse> {
+  if (typeof profileId !== "string" || profileId.trim() === "") {
+    return { ok: false };
+  }
+  if (connectionAttemptRunning) {
+    return { ok: false };
+  }
+  userDisconnected = false;
+  connectionAttemptRunning = true;
+  const attempt = beginAttempt();
+  try {
+    // The daemon is the authority on which profiles exist; refuse to chase
+    // a profileId it doesn't recognize.
+    const config = await withDaemonRestartOnUnavailable(
+      () => daemonClient.getConfig(),
+      "connect-profile-check",
+      { allowRestart: false }
+    );
+    if (!config.profiles.some((profile) => profile.id === profileId)) {
+      return { ok: false };
+    }
+    if (isCancelled(attempt)) {
+      return { ok: false };
+    }
+    const result = await connectWithRecovery(profileId);
+    if (isCancelled(attempt)) {
+      // Stop landed while the daemon was connecting; it can't be un-sent.
+      if (result.ok) {
+        await daemonClient
+          .disconnect({ keepKillSwitch: lockdownEnabled })
+          .catch((err) => console.warn("cancel: connect teardown failed", sanitizeLog(err)));
+      }
+      return { ok: false };
+    }
+    if (result.ok) {
+      lastConnectedProfileId = profileId;
+      void persistLastConnection();
+      // The tunnel is up, so the hub is reachable through it even when it was
+      // not before — the most reliable point to re-cache the renewal date.
+      refreshSubscriptionCache("connect");
+    }
+    return result;
+  } finally {
+    endAttempt(attempt);
+    connectionAttemptRunning = false;
+    void refreshTrayStatus();
+  }
+}
+
+async function handleAuthLoginIpc(vpnToken: string): Promise<AuthState> {
+  if (!vpnToken || typeof vpnToken !== "string" || vpnToken.trim().length === 0) {
+    return { authenticated: false, user: null, error: "INVALID_ACCOUNT_NUMBER" };
+  }
+
+  try {
+    const data = await pangeaApiClient.tokenLogin(vpnToken.trim());
+    await auth.saveLicenseKey(data.vpnAccessToken);
+
+    // Generate identity keypair for device registration
+    const { generateKeyPairSync } = await import("node:crypto");
+    const { publicKey: pubKeyObj, privateKey: privKeyObj } = generateKeyPairSync("x25519");
+    const privDer = privKeyObj.export({ type: "pkcs8", format: "der" }) as Buffer;
+    const pubDer = pubKeyObj.export({ type: "spki", format: "der" }) as Buffer;
+    const identityPrivateKey = privDer.subarray(16).toString("base64");
+    const identityPublicKey = pubDer.subarray(12).toString("base64");
+
+    // Generate a friendly name for this device
+    const friendlyName = generateFriendlyName();
+
+    // Reserves a device slot (max 4 per user). The hub returns the *effective*
+    // name, which differs from ours if this identityPubkey already had one.
+    let effectiveFriendlyName: string | null = friendlyName;
+    try {
+      const regResponse = await pangeaApiClient.registerDevice(identityPublicKey, friendlyName);
+      if (regResponse.friendlyName) {
+        effectiveFriendlyName = regResponse.friendlyName;
+      }
+    } catch (regErr) {
+      console.warn("device registration failed:", sanitizeLog(regErr));
+      const message = regErr instanceof Error ? regErr.message : "Device registration failed";
+
+      // Device limit: keep the key in memory so the renderer can list/remove
+      // devices. The on-disk key is cleared, re-saved on a successful retry.
+      const isDeviceLimit =
+        message.includes("DEVICE_LIMIT_REACHED") || message.includes("Device limit");
+      if (isDeviceLimit) {
+        await auth.clearLicenseKey();
+        // Do NOT call pangeaApiClient.clearCache() — licenseKey must remain for device management
+        return { authenticated: false, user: null, error: "DEVICE_LIMIT_REACHED" };
+      }
+
+      await auth.clearLicenseKey();
+      pangeaApiClient.clearCache();
+      const classified = classifyLoginError(regErr);
+      return {
+        authenticated: false,
+        user: null,
+        error: classified === "UNKNOWN" ? "REGISTRATION_FAILED" : classified
+      };
+    }
+
+    // Registration succeeded — persist identity keypair and set on API client.
+    // A failure past this point must not leave the hub's device slot orphaned.
+    try {
+      await auth.saveIdentityKeyPair({ privateKey: identityPrivateKey, publicKey: identityPublicKey });
+      pangeaApiClient.identityPubkey = identityPublicKey;
+
+      const authState = await auth.loginWithToken(data.vpnAccessToken, data.user);
+      // The hub is demonstrably reachable right now — the cheapest moment this
+      // device will ever get to learn its renewal date.
+      refreshSubscriptionCache("sign-in");
+      return { ...authState, friendlyName: effectiveFriendlyName };
+    } catch (postRegErr) {
+      console.warn("post-registration setup failed:", sanitizeLog(postRegErr));
+      await pangeaApiClient.deregisterDevice(identityPublicKey).catch(() => {});
+      await auth.clearLicenseKey();
+      pangeaApiClient.clearCache();
+      const classified = classifyLoginError(postRegErr);
+      return {
+        authenticated: false,
+        user: null,
+        error: classified === "UNKNOWN" ? "REGISTRATION_FAILED" : classified
+      };
+    }
+  } catch (err) {
+    // The message stays in the log for support; the user gets a code the UI
+    // can phrase in their language.
+    console.warn("token login failed:", sanitizeLog(err));
+    return { authenticated: false, user: null, error: classifyLoginError(err) };
+  }
+}
+
+async function handleAuthLogoutIpc(): Promise<void> {
+  // Stop any in-flight cascade first, or it can resume after we've cleared
+  // the license key and claim a managed profile for the wrong account.
+  cancelAttempt();
+
+  try {
+    const status = await daemonClient.getStatus();
+    if (status.state === "CONNECTED" || status.state === "CONNECTING") {
+      await daemonClient.disconnect({ keepKillSwitch: lockdownEnabled });
+    }
+  } catch {
+    // daemon may be unavailable
+  }
+
+  // Best-effort deregister device from hub before clearing local state
   try {
     const identityKeys = await auth.loadIdentityKeyPair();
     if (identityKeys && pangeaApiClient.getLicenseKey()) {
@@ -947,38 +1814,38 @@ async function signOutAndReleaseDevice(): Promise<void> {
     // best-effort — server may be unreachable
   }
 
+  if (managedProfileId) {
+    try {
+      const config = await daemonClient.getConfig();
+      const profiles = config.profiles.filter((p) => p.id !== managedProfileId);
+      await daemonClient.setConfig(profiles);
+    } catch {
+      // best-effort cleanup
+    }
+    managedProfileId = null;
+  }
+
+  // The cached peers belong to the account that is signing out.
+  await discardProvisionedProfiles();
   pangeaApiClient.clearCache();
   await auth.logout();
+  void refreshTrayStatus();
 }
 
-// Asks what the 403 really meant before anything is cleared — a lapsed account
-// keeps its session and gets the expired screen instead.
-async function handleAuthFailure(err: AuthError): Promise<void> {
-  const subscription = await pangeaApiClient.getSubscription();
-  if (classifyHubFailure({ status: err.status, body: err.body }, subscription) === "expired") {
-    mainWindow?.webContents.send("subscription:expired");
-    return;
-  }
-  await signOutAndReleaseDevice();
-  mainWindow?.webContents.send("auth:invalidated");
-}
-
-function registerIpcHandlers(): void {
-  ipcMain.handle(IPC_CHANNELS.getStatus, async () =>
-    withDaemonRestartOnUnavailable(() => daemonClient.getStatus(), "status", { allowRestart: false })
-  );
-  ipcMain.handle(IPC_CHANNELS.connect, async (_event, profileId: string) => {
-    const result = await connectWithRecovery(profileId);
-    if (result.ok) {
-      lastConnectedProfileId = profileId;
-      void persistLastConnection();
-    }
-    void refreshTrayStatus();
-    return result;
+function registerConnectionHandlers(): void {
+  ipcMain.handle(IPC_CHANNELS.getStatus, async () => {
+    const status = await withDaemonRestartOnUnavailable(() => daemonClient.getStatus(), "status", { allowRestart: false });
+    const serverId = status.profileId ? serverIdForProfile(status.profileId) : null;
+    return serverId ? { ...status, serverId } : status;
   });
+  ipcMain.handle(IPC_CHANNELS.connect, async (_event, profileId: unknown) => handleConnectIpc(profileId));
   ipcMain.handle(IPC_CHANNELS.disconnect, async () => {
+    userDisconnected = true;
+    // Stop any main-process cascade (network recovery, launch auto-connect)
+    // so it can't silently reconnect moments after the user's Disconnect.
+    cancelAttempt();
     const result = await withDaemonRestartOnUnavailable(
-      () => daemonClient.disconnect({ keepKillSwitch: alwaysConnectedEnabled }),
+      () => daemonClient.disconnect({ keepKillSwitch: lockdownEnabled }),
       "disconnect"
     );
     void refreshTrayStatus();
@@ -987,12 +1854,20 @@ function registerIpcHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.getLogs, async (_event, since?: number) =>
     withDaemonRestartOnUnavailable(() => daemonClient.getLogs(since), "logs", { allowRestart: false })
   );
-  ipcMain.handle(IPC_CHANNELS.getConfig, async () =>
-    withDaemonRestartOnUnavailable(() => daemonClient.getConfig(), "config", { allowRestart: false })
-  );
-  ipcMain.handle(IPC_CHANNELS.setConfig, async (_event, profiles: Profile[]) =>
-    withDaemonRestartOnUnavailable(() => daemonClient.setConfig(profiles), "setConfig")
-  );
+  ipcMain.handle(IPC_CHANNELS.getConfig, async () => {
+    const config = await withDaemonRestartOnUnavailable(() => daemonClient.getConfig(), "config", { allowRestart: false });
+    return redactConfigForRenderer(config);
+  });
+  ipcMain.handle(IPC_CHANNELS.setConfig, async (event, profiles: unknown) => {
+    if (!event.senderFrame || !event.senderFrame.url.startsWith("file://")) {
+      throw new Error("setConfig: untrusted sender");
+    }
+    const parsed = asProfilePayload(profiles);
+    if (!parsed) {
+      throw new Error("Invalid profiles payload");
+    }
+    return withDaemonRestartOnUnavailable(() => daemonClient.setConfig(parsed), "setConfig");
+  });
   ipcMain.handle(IPC_CHANNELS.restartDaemon, async () => {
     daemonRecoveryInProgress = true;
     try {
@@ -1011,96 +1886,48 @@ function registerIpcHandlers(): void {
   });
   ipcMain.handle(IPC_CHANNELS.getAppVersion, async () => app.getVersion());
 
-  ipcMain.handle("app:openExternal", async (_event, url: string) => {
+  ipcMain.handle(IPC_CHANNELS.openExternal, async (_event, url: string) => {
     const { shell } = await import("electron");
-    if (typeof url === "string" && (url.startsWith("https://") || url.startsWith("http://"))) {
+    if (isSafeExternalUrl(url)) {
       await shell.openExternal(url);
     }
   });
 
-  ipcMain.handle(IPC_CHANNELS.authLogin, async (_event, vpnToken: string) => {
-    if (!vpnToken || typeof vpnToken !== "string" || vpnToken.trim().length === 0) {
-      return { authenticated: false, user: null };
-    }
+  ipcMain.handle(IPC_CHANNELS.openLogsFolder, async () => {
+    const dir = app.getPath("logs");
+    const failure = await shell.openPath(dir);
+    return failure.length === 0;
+  });
 
+  ipcMain.handle(IPC_CHANNELS.sendDiagnostics, async (_event, note: unknown): Promise<DiagnosticsSendResult> => {
     try {
-      const data = await pangeaApiClient.tokenLogin(vpnToken.trim());
-      await auth.saveLicenseKey(data.vpnAccessToken);
-
-      // Generate identity keypair for device registration
-      const { generateKeyPairSync } = await import("node:crypto");
-      const { publicKey: pubKeyObj, privateKey: privKeyObj } = generateKeyPairSync("x25519");
-      const privDer = privKeyObj.export({ type: "pkcs8", format: "der" }) as Buffer;
-      const pubDer = pubKeyObj.export({ type: "spki", format: "der" }) as Buffer;
-      const identityPrivateKey = privDer.subarray(16).toString("base64");
-      const identityPublicKey = pubDer.subarray(12).toString("base64");
-
-      // Generate a friendly name for this device
-      const friendlyName = generateFriendlyName();
-
-      // Reserves a device slot (max 4 per user). The hub returns the *effective*
-      // name, which differs from ours if this identityPubkey already had one.
-      let effectiveFriendlyName: string | null = friendlyName;
-      try {
-        const regResponse = await pangeaApiClient.registerDevice(identityPublicKey, friendlyName);
-        if (regResponse.friendlyName) {
-          effectiveFriendlyName = regResponse.friendlyName;
-        }
-      } catch (regErr) {
-        console.warn("device registration failed:", sanitizeLog(regErr));
-        const message = regErr instanceof Error ? regErr.message : "Device registration failed";
-
-        // Device limit: keep the key in memory so the renderer can list/remove
-        // devices. The on-disk key is cleared, re-saved on a successful retry.
-        const isDeviceLimit =
-          message.includes("DEVICE_LIMIT_REACHED") || message.includes("Device limit");
-        if (isDeviceLimit) {
-          await auth.clearLicenseKey();
-          // Do NOT call pangeaApiClient.clearCache() — licenseKey must remain for device management
-          return { authenticated: false, user: null, error: "DEVICE_LIMIT_REACHED" };
-        }
-
-        await auth.clearLicenseKey();
-        pangeaApiClient.clearCache();
-        return { authenticated: false, user: null, error: message };
-      }
-
-      // Registration succeeded — persist identity keypair and set on API client
-      await auth.saveIdentityKeyPair({ privateKey: identityPrivateKey, publicKey: identityPublicKey });
-      pangeaApiClient.identityPubkey = identityPublicKey;
-
-      const authState = await auth.loginWithToken(data.vpnAccessToken, data.user);
-      return { ...authState, friendlyName: effectiveFriendlyName };
+      const payload = await collectDiagnostics({
+        appVersion: app.getVersion(),
+        platform: process.platform,
+        arch: process.arch,
+        osRelease: os.release(),
+        logDir: app.getPath("logs"),
+        appSupportDir: getAppSupportDir(),
+        crashDumpsDir: app.getPath("crashDumps"),
+        logFileName: LOG_FILE_NAME,
+        daemonRing: () => daemonClient.getLogs(0),
+        hostSnapshot: process.platform === "win32" ? collectWindowsHostSnapshot : undefined,
+        note: typeof note === "string" ? note : undefined
+      });
+      return await uploadDiagnostics(payload, {
+        send: (route, report, signal) => pangeaApiClient.anonymousRequest("POST", route, report, { timeoutMs: 30000, signal })
+      });
     } catch (err) {
-      console.warn("token login failed:", sanitizeLog(err));
-      return { authenticated: false, user: null };
+      console.warn("sendDiagnostics failed", sanitizeLog(err));
+      return { ok: false, reason: "unreachable" };
     }
   });
+}
 
-  ipcMain.handle(IPC_CHANNELS.authLogout, async () => {
-    try {
-      const status = await daemonClient.getStatus();
-      if (status.state === "CONNECTED" || status.state === "CONNECTING") {
-        await daemonClient.disconnect();
-      }
-    } catch {
-      // daemon may be unavailable
-    }
+function registerAuthHandlers(): void {
+  ipcMain.handle(IPC_CHANNELS.authLogin, async (_event, vpnToken: string) => handleAuthLoginIpc(vpnToken));
 
-    if (managedProfileId) {
-      try {
-        const config = await daemonClient.getConfig();
-        const profiles = config.profiles.filter((p) => p.id !== managedProfileId);
-        await daemonClient.setConfig(profiles);
-      } catch {
-        // best-effort cleanup
-      }
-      managedProfileId = null;
-    }
-
-    await signOutAndReleaseDevice();
-    void refreshTrayStatus();
-  });
+  ipcMain.handle(IPC_CHANNELS.authLogout, async () => handleAuthLogoutIpc());
 
   ipcMain.handle(IPC_CHANNELS.authGetState, async () => {
     const state = await auth.getAuthState();
@@ -1113,33 +1940,23 @@ function registerIpcHandlers(): void {
     }
     return state;
   });
+}
 
-  ipcMain.handle(IPC_CHANNELS.setDoh, async (_event, enabled: boolean) => {
-    pangeaApiClient.setDohEnabled(enabled);
-    try {
-      const filePath = (await import("node:path")).join(
-        (await import("./platformPaths")).getAppSupportDir(),
-        "settings.json"
-      );
-      const fs = (await import("node:fs/promises")).default;
-      let settings: Record<string, unknown> = {};
-      try {
-        settings = JSON.parse(await fs.readFile(filePath, "utf8"));
-      } catch {
-        // no existing file
-      }
-      settings.dohEnabled = enabled;
-      await fs.writeFile(filePath, JSON.stringify(settings, null, 2));
-    } catch {
-      // best-effort persistence
-    }
-  });
+function registerTransportSettingsHandlers(): void {
+  registerBoolSetting(
+    { get: IPC_CHANNELS.getDoh, set: IPC_CHANNELS.setDoh },
+    "dohEnabled",
+    "DoH setting",
+    (enabled) => {
+      const value = enabled as boolean;
+      pangeaApiClient.setDohEnabled(value);
+      return value;
+    },
+    () => pangeaApiClient.isDohEnabled()
+  );
 
-  ipcMain.handle(IPC_CHANNELS.getDoh, async () => pangeaApiClient.isDohEnabled());
-
-  // The renderer disables the last remaining switch, but settings.json is
-  // hand-editable and IPC is callable directly, so the invariant is enforced
-  // here as well — this is the authority, the UI only reflects it.
+  // settings.json is hand-editable and IPC is callable directly, so this is
+  // the authority on the invariant (never zero enabled methods); the UI only reflects it.
   ipcMain.handle(IPC_CHANNELS.setHubMethod, async (_event, method: unknown, enabled: unknown) => {
     const current = pangeaApiClient.getHubMethods();
     if (!isHubMethod(method)) {
@@ -1150,107 +1967,119 @@ function registerIpcHandlers(): void {
       return { methods: current, applied: false };
     }
     pangeaApiClient.setHubMethods(methods);
-    try {
-      const settingsPath = (await import("node:path")).join(
-        (await import("./platformPaths")).getAppSupportDir(),
-        "settings.json"
-      );
-      const fs = (await import("node:fs/promises")).default;
-      const raw = await fs.readFile(settingsPath, "utf8").catch(() => "{}");
-      const settings = JSON.parse(raw) as Record<string, unknown>;
+    await updateSettings((settings) => {
       // Stamped with the rev, so this deliberate choice is not overwritten by
       // the next default change the way a pre-rev file's would be.
       settings.hubMethods = persistableHubMethods(methods);
       // Drop the keys this replaced so a later downgrade cannot resurrect them.
       delete settings.directIpEnabled;
       delete settings.directIpOnly;
-      await fs.writeFile(settingsPath, JSON.stringify(settings, null, 2));
-    } catch (err) {
-      console.warn("Failed to persist hubMethods setting:", err);
-    }
+    }, "hubMethods setting");
     return { methods, applied: true };
   });
 
+  registerBoolSetting(
+    { get: IPC_CHANNELS.getDeadDrop, set: IPC_CHANNELS.setDeadDrop },
+    "deadDrop",
+    "dead drop setting",
+    (enabled) => {
+      const on = enabled === true;
+      pangeaApiClient.setDeadDropEnabled(on);
+      return on;
+    },
+    () => pangeaApiClient.getDeadDropEnabled()
+  );
+
   ipcMain.handle(IPC_CHANNELS.getHubMethods, async () => pangeaApiClient.getHubMethods());
 
-  ipcMain.handle(IPC_CHANNELS.setAllowLan, async (_event, enabled: boolean) => {
-    allowLanEnabled = !!enabled;
-    try {
-      const settingsPath = (await import("node:path")).join(
-        (await import("./platformPaths")).getAppSupportDir(),
-        "settings.json"
-      );
-      const raw = await (await import("node:fs/promises")).default.readFile(settingsPath, "utf8").catch(() => "{}");
-      const settings = JSON.parse(raw) as Record<string, unknown>;
-      settings.allowLan = allowLanEnabled;
-      await (await import("node:fs/promises")).default.writeFile(settingsPath, JSON.stringify(settings, null, 2));
-    } catch (err) {
-      console.warn("Failed to persist allowLan setting:", err);
+  ipcMain.handle(IPC_CHANNELS.getHubStatus, async () => pangeaApiClient.getHubStatus());
+
+  // Probes one method on demand. Rejecting an unknown name rather than
+  // defaulting keeps a stray IPC call from starting the daemon's proxy.
+  ipcMain.handle(IPC_CHANNELS.testHubMethod, async (_event, method: unknown) => {
+    if (!isHubMethod(method)) {
+      throw new Error("Unknown hub method");
     }
+    return pangeaApiClient.testHubMethod(method);
   });
 
-  ipcMain.handle(IPC_CHANNELS.getAllowLan, async () => allowLanEnabled);
+  registerBoolSetting(
+    { get: IPC_CHANNELS.getPostQuantum, set: IPC_CHANNELS.setPostQuantum },
+    "postQuantum",
+    "postQuantum setting",
+    (enabled) => {
+      const value = !!enabled;
+      pangeaApiClient.setPostQuantumEnabled(value);
+      return value;
+    },
+    () => pangeaApiClient.isPostQuantumEnabled()
+  );
 
   // Returns the stored MTU, which differs from the requested one when it was
   // rejected — the renderer uses that mismatch to flag invalid input.
-  ipcMain.handle(IPC_CHANNELS.setWireguardMtu, async (_event, mtu: unknown) => {
-    const stored = pangeaApiClient.setWireguardMtu(mtu);
-    try {
-      const settings = await readSettingsFile();
-      settings.wireguardMtu = stored;
-      await writeSettingsFile(settings);
-    } catch (err) {
-      console.warn("Failed to persist wireguardMtu setting:", err);
-    }
-    return stored;
-  });
+  registerStoredSetting(
+    { get: IPC_CHANNELS.getWireguardMtu, set: IPC_CHANNELS.setWireguardMtu },
+    "wireguardMtu",
+    "wireguardMtu setting",
+    (mtu) => pangeaApiClient.setWireguardMtu(mtu),
+    () => pangeaApiClient.getWireguardMtu()
+  );
 
-  ipcMain.handle(IPC_CHANNELS.getWireguardMtu, async () => pangeaApiClient.getWireguardMtu());
+  registerStoredSetting(
+    { get: IPC_CHANNELS.getCustomDns, set: IPC_CHANNELS.setCustomDns },
+    "customDns",
+    "customDns setting",
+    (value) => pangeaApiClient.setCustomDns(value),
+    () => pangeaApiClient.getCustomDns()
+  );
 
-  ipcMain.handle(IPC_CHANNELS.setCustomDns, async (_event, value: unknown) => {
-    const stored = pangeaApiClient.setCustomDns(value);
-    try {
-      const settings = await readSettingsFile();
-      settings.customDns = stored;
-      await writeSettingsFile(settings);
-    } catch (err) {
-      console.warn("Failed to persist customDns setting:", err);
-    }
-    return stored;
-  });
+  registerBoolSetting(
+    { get: IPC_CHANNELS.getHubInTunnel, set: IPC_CHANNELS.setHubInTunnel },
+    "hubInTunnel",
+    "hubInTunnel setting",
+    (enabled) => {
+      pangeaApiClient.setHubInTunnel(enabled === true);
+      return pangeaApiClient.getHubInTunnel();
+    },
+    () => pangeaApiClient.getHubInTunnel()
+  );
 
-  ipcMain.handle(IPC_CHANNELS.getCustomDns, async () => pangeaApiClient.getCustomDns());
-
-  ipcMain.handle(IPC_CHANNELS.setPreferredTransport, async (_event, value: "auto" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "snowflake") => {
+  ipcMain.handle(IPC_CHANNELS.setPreferredTransport, async (_event, value: "auto" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "snowflake" | "wireguard") => {
     preferredTransport =
       value === "cloak" ||
       value === "naive" ||
       value === "reality" ||
       value === "hysteria2" ||
       value === "shadowsocks" ||
-      value === "snowflake"
+      value === "snowflake" ||
+      value === "wireguard"
         ? value
         : "auto";
-    try {
-      const settings = await readSettingsFile();
+    await updateSettings((settings) => {
       settings.preferredTransport = preferredTransport;
-      await writeSettingsFile(settings);
-    } catch (err) {
-      console.warn("Failed to persist preferredTransport setting:", err);
-    }
+    }, "preferredTransport setting");
   });
 
   ipcMain.handle(IPC_CHANNELS.getPreferredTransport, async () => preferredTransport);
+}
+
+function registerStartupSettingsHandlers(): void {
+  registerBoolSetting(
+    { get: IPC_CHANNELS.getAllowLan, set: IPC_CHANNELS.setAllowLan },
+    "allowLan",
+    "allowLan setting",
+    (enabled) => {
+      allowLanEnabled = !!enabled;
+      return allowLanEnabled;
+    },
+    () => allowLanEnabled
+  );
 
   ipcMain.handle(IPC_CHANNELS.setLaunchAtStartup, async (_event, enabled: boolean) => {
     launchAtStartupEnabled = !!enabled;
-    try {
-      const settings = await readSettingsFile();
+    await updateSettings((settings) => {
       settings.launchAtStartup = launchAtStartupEnabled;
-      await writeSettingsFile(settings);
-    } catch (err) {
-      console.warn("Failed to persist launchAtStartup setting:", err);
-    }
+    }, "launchAtStartup setting");
     try {
       await applyLoginItem();
     } catch (err) {
@@ -1259,36 +2088,37 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.handle(IPC_CHANNELS.getLaunchAtStartup, async () => {
-    // Lockdown forces the login item on, so return the stored preference rather than the OS state.
-    if (alwaysConnectedEnabled) {
+    // Lockdown and auto-connect force the login item on, so return the stored
+    // preference rather than the OS state.
+    if (lockdownEnabled || autoConnectEnabled) {
       return launchAtStartupEnabled;
     }
-    // Self-heal: re-derive from OS in case the user toggled it elsewhere.
+    // Self-heal: re-derive from OS in case the user toggled it elsewhere, and
+    // persist the correction so a relaunch doesn't resurrect the stale value.
     try {
       const live = await isLoginItemEnabled();
-      launchAtStartupEnabled = live;
+      if (live !== launchAtStartupEnabled) {
+        launchAtStartupEnabled = live;
+        await updateSettings((settings) => {
+          settings.launchAtStartup = live;
+        }, "launchAtStartup setting");
+      }
       return live;
     } catch {
       return launchAtStartupEnabled;
     }
   });
 
-  ipcMain.handle(IPC_CHANNELS.setAlwaysConnected, async (_event, enabled: boolean) => {
-    const previouslyEnabled = alwaysConnectedEnabled;
-    alwaysConnectedEnabled = !!enabled;
-    try {
-      const settings = await readSettingsFile();
-      settings.alwaysConnected = alwaysConnectedEnabled;
-      await writeSettingsFile(settings);
-    } catch (err) {
-      console.warn("Failed to persist alwaysConnected setting:", err);
-    }
+  ipcMain.handle(IPC_CHANNELS.setLockdown, async (_event, enabled: boolean) => {
+    const previouslyEnabled = lockdownEnabled;
+    lockdownEnabled = !!enabled;
+    await persistStartupSettings();
     try {
       await applyLoginItem();
     } catch (err) {
       console.warn("Failed to apply login item for lockdown:", err);
     }
-    if (!previouslyEnabled && alwaysConnectedEnabled) {
+    if (!previouslyEnabled && lockdownEnabled) {
       // Sent unconditionally: while connected the daemon only records it as a
       // Lockdown lock, and skipping left Locked:false on disk, cleared as stale.
       try {
@@ -1299,7 +2129,7 @@ function registerIpcHandlers(): void {
       } catch (err) {
         console.warn("Failed to engage kill switch on lockdown on:", err);
       }
-    } else if (previouslyEnabled && !alwaysConnectedEnabled) {
+    } else if (previouslyEnabled && !lockdownEnabled) {
       try {
         const status = await daemonClient.getStatus();
         if (status.state !== "CONNECTED" && status.state !== "CONNECTING") {
@@ -1311,17 +2141,52 @@ function registerIpcHandlers(): void {
     }
   });
 
-  ipcMain.handle(IPC_CHANNELS.getAlwaysConnected, async () => alwaysConnectedEnabled);
+  ipcMain.handle(IPC_CHANNELS.getLockdown, async () => lockdownEnabled);
+
+  ipcMain.handle(IPC_CHANNELS.setAutoConnect, async (_event, enabled: boolean) => {
+    autoConnectEnabled = !!enabled;
+    if (autoConnectEnabled) userDisconnected = false;
+    await persistStartupSettings();
+    try {
+      await applyLoginItem();
+    } catch (err) {
+      console.warn("Failed to apply login item for auto-connect:", err);
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.getAutoConnect, async () => autoConnectEnabled);
+
+  registerBoolSetting(
+    { get: IPC_CHANNELS.getNotifications, set: IPC_CHANNELS.setNotifications },
+    "notifications",
+    "notifications setting",
+    (enabled) => {
+      notificationsEnabled = !!enabled;
+      return notificationsEnabled;
+    },
+    () => notificationsEnabled
+  );
 
   ipcMain.handle(IPC_CHANNELS.getLastServer, async () => ({
     lastServerId,
-    lastProfileId: lastConnectedProfileId
+    lastProfileId: lastConnectedProfileId,
+    lastEntryServerId
   }));
 
   ipcMain.handle(IPC_CHANNELS.clearLastServer, async () => {
     lastServerId = null;
     lastConnectedProfileId = null;
+    lastEntryServerId = null;
     await persistLastConnection();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.getMultihop, async () => multihopPrefs);
+
+  ipcMain.handle(IPC_CHANNELS.setMultihop, async (_event, prefs: unknown) => {
+    multihopPrefs = normalizeMultihopPrefs(prefs);
+    await updateSettings((settings) => {
+      settings.multihop = multihopPrefs;
+    }, "multihop");
   });
 
   ipcMain.handle(IPC_CHANNELS.getLocale, async () => localePref);
@@ -1330,79 +2195,120 @@ function registerIpcHandlers(): void {
     // Persist only — the change is applied on next launch (both the renderer
     // and the tray/menu read the locale once at startup).
     localePref = typeof locale === "string" && locale.length > 0 ? locale : "system";
-    try {
-      const settings = await readSettingsFile();
+    await updateSettings((settings) => {
       settings.locale = localePref;
-      await writeSettingsFile(settings);
-    } catch (err) {
-      console.warn("Failed to persist locale setting:", err);
-    }
+    }, "locale setting");
   });
 
   ipcMain.handle(IPC_CHANNELS.getIsPackaged, async () => app.isPackaged);
+}
 
+function registerServerAndDeviceHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.getCachedServers, async () => {
     try {
-      const cachePath = (await import("node:path")).join(
-        (await import("./platformPaths")).getAppSupportDir(),
-        "server-cache.json"
-      );
-      const raw = await (await import("node:fs/promises")).default.readFile(cachePath, "utf8");
-      return JSON.parse(raw);
+      const raw = await readStateFile("server-cache.json");
+      return sanitizePublicServers(JSON.parse(raw));
     } catch {
       return [];
     }
   });
 
-  ipcMain.handle(IPC_CHANNELS.cacheServers, async (_event, servers: unknown[]) => {
+  ipcMain.handle(IPC_CHANNELS.cacheServers, async (_event, servers: unknown) => {
+    if (!Array.isArray(servers) || servers.length > 4096) {
+      return;
+    }
+    const safe = sanitizePublicServers(servers);
     try {
-      const cachePath = (await import("node:path")).join(
-        (await import("./platformPaths")).getAppSupportDir(),
-        "server-cache.json"
-      );
-      await (await import("node:fs/promises")).default.writeFile(cachePath, JSON.stringify(servers), "utf8");
-    } catch {
-      // best-effort
+      const dir = await (await import("./platformPaths")).ensureUserStateDir();
+      const fs = (await import("node:fs/promises")).default;
+      const finalPath = path.join(dir, "server-cache.json");
+      const tmpPath = `${finalPath}.tmp-${process.pid}-${Date.now()}`;
+      await fs.writeFile(tmpPath, JSON.stringify(safe), "utf8");
+      await fs.rename(tmpPath, finalPath);
+    } catch (err) {
+      console.warn("Failed to persist server cache:", sanitizeLog(err));
     }
   });
 
   ipcMain.handle(IPC_CHANNELS.getServers, async () => {
     try {
-      return await pangeaApiClient.getServers();
+      const servers = await pangeaApiClient.getServers();
+      return servers.map(toPublicServerInfo);
     } catch (err) {
       if (err instanceof AuthError) {
-        await handleAuthFailure(err);
+        pangeaApiClient.clearCache();
+        await auth.logout();
+        mainWindow?.webContents.send(IPC_CHANNELS.authInvalidated);
         return [];
       }
       throw err;
     }
   });
 
+  ipcMain.handle(IPC_CHANNELS.rememberAccountNumber, async (_event, accountNumber: unknown) => {
+    if (typeof accountNumber !== "string" || accountNumber.trim().length === 0) return;
+    const dir = path.join(app.getPath("appData"), "pangeavpn-desktop");
+    await (await import("node:fs/promises")).default.mkdir(dir, { recursive: true, mode: 0o700 });
+    await writeSecret(path.join(dir, "remembered-account.dat"), accountNumber.trim());
+  });
+
+  ipcMain.handle(IPC_CHANNELS.getRememberedAccountNumber, async () => {
+    try {
+      const dir = path.join(app.getPath("appData"), "pangeavpn-desktop");
+      return await readSecret(path.join(dir, "remembered-account.dat"));
+    } catch {
+      return null;
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.getAccountNumber, async () => {
+    if (!(await auth.getAuthState()).authenticated) return null;
+    return auth.loadLicenseKey();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.clearRememberedAccountNumber, async () => {
+    try {
+      const dir = path.join(app.getPath("appData"), "pangeavpn-desktop");
+      await (await import("node:fs/promises")).default.rm(path.join(dir, "remembered-account.dat"), { force: true });
+    } catch {
+      // best-effort
+    }
+  });
+
   ipcMain.handle(IPC_CHANNELS.listDevices, async () => {
-    return pangeaApiClient.listDevices();
+    const devices = await pangeaApiClient.listDevices();
+    // Flag our row by pubkey (rename-proof); strip the pubkey from the renderer.
+    const myPubkey = pangeaApiClient.identityPubkey;
+    return devices.map(({ identityPubkey, ...rest }) => ({
+      ...rest,
+      isCurrentDevice: Boolean(myPubkey && identityPubkey === myPubkey)
+    }));
   });
 
   ipcMain.handle(IPC_CHANNELS.removeDevice, async (_event, deviceId: string) => {
     await pangeaApiClient.removeDevice(deviceId);
   });
 
+  ipcMain.handle(IPC_CHANNELS.renameDevice, async (_event, deviceId: string, friendlyName: string) => {
+    await pangeaApiClient.renameDevice(deviceId, friendlyName);
+  });
+
   ipcMain.handle(IPC_CHANNELS.getSubscription, async () => {
     return pangeaApiClient.getSubscription();
   });
 
-  ipcMain.handle(IPC_CHANNELS.provisionAndConnect, async (_event, serverPlan: unknown) => {
+  ipcMain.handle(IPC_CHANNELS.provisionAndConnect, async (_event, serverPlan: unknown, entryServer: unknown) => {
+    userDisconnected = false;
     try {
-      const result = await provisionAndConnect(normalizeServerPlan(serverPlan));
+      const result = await provisionAndConnect(normalizeServerPlan(serverPlan), normalizeEntryServer(entryServer));
       void refreshTrayStatus();
       return result;
     } catch (err) {
       if (err instanceof AuthError) {
-        await handleAuthFailure(err);
+        pangeaApiClient.clearCache();
+        await auth.logout();
+        mainWindow?.webContents.send(IPC_CHANNELS.authInvalidated);
         return { ok: false };
-      }
-      if (err instanceof SubscriptionExpiredError) {
-        mainWindow?.webContents.send("subscription:expired");
-        return { ok: false, error: "SUBSCRIPTION_EXPIRED" };
       }
       throw err;
     }
@@ -1412,23 +2318,120 @@ function registerIpcHandlers(): void {
     await cancelConnectAttempt();
   });
 
-  ipcMain.handle(IPC_CHANNELS.provisionAndSwitch, async (_event, serverPlan: unknown) => {
+  ipcMain.handle(IPC_CHANNELS.provisionAndSwitch, async (_event, serverPlan: unknown, entryServer: unknown) => {
+    userDisconnected = false;
     try {
-      const result = await provisionAndSwitch(normalizeServerPlan(serverPlan));
+      const result = await provisionAndSwitch(normalizeServerPlan(serverPlan), normalizeEntryServer(entryServer));
       void refreshTrayStatus();
       return result;
     } catch (err) {
       if (err instanceof AuthError) {
-        await handleAuthFailure(err);
+        pangeaApiClient.clearCache();
+        await auth.logout();
+        mainWindow?.webContents.send(IPC_CHANNELS.authInvalidated);
         return { ok: false };
-      }
-      if (err instanceof SubscriptionExpiredError) {
-        mainWindow?.webContents.send("subscription:expired");
-        return { ok: false, error: "SUBSCRIPTION_EXPIRED" };
       }
       throw err;
     }
   });
+}
+
+function assertAppFrame(event: IpcMainInvokeEvent, channel: string): void {
+  if (!event.senderFrame || !event.senderFrame.url.startsWith("file://")) {
+    throw new Error(`${channel}: untrusted sender`);
+  }
+}
+
+function boundedStrings(value: unknown, max: number, channel: string): string[] {
+  if (!Array.isArray(value) || value.length > max || !value.every((item) => typeof item === "string" && item.length <= 4096)) {
+    throw new Error(`${channel}: expected at most ${max} strings`);
+  }
+  return value as string[];
+}
+
+// Electron logs a rejected handler's error to app.log, and daemon bodies or fs errors can quote app paths.
+function withoutPaths<T>(pending: Promise<T>, label: string): Promise<T> {
+  return pending.catch((error: unknown) => {
+    if (error instanceof DaemonHttpError) throw new Error(`${label}: daemon request failed (${error.status})`);
+    const code = (error as NodeJS.ErrnoException | null)?.code;
+    throw typeof code === "string" ? new Error(`${label}: ${code}`) : error;
+  });
+}
+
+function registerSplitTunnelHandlers(): void {
+  const catalog = createAppCatalog();
+  const readConfig = () =>
+    withDaemonRestartOnUnavailable(() => daemonClient.getSplitTunnel(), "split tunnel", { allowRestart: false });
+  const writer = createSplitTunnelWriter(
+    {
+      get: readConfig,
+      set: (body, current) =>
+        withDaemonRestartOnUnavailable(() => daemonClient.setSplitTunnel(body, current), "split tunnel update")
+    },
+    { platform: process.platform, protect: () => protectRulesFor(process.execPath, process.platform) }
+  );
+
+  ipcMain.handle(IPC_CHANNELS.getSplitTunnel, async () => withoutPaths(readConfig(), "getSplitTunnel"));
+
+  ipcMain.handle(IPC_CHANNELS.setSplitTunnelEnabled, async (event, enabled: unknown) => {
+    assertAppFrame(event, "setSplitTunnelEnabled");
+    if (typeof enabled !== "boolean") throw new Error("setSplitTunnelEnabled: expected a boolean");
+    return withoutPaths(writer.setEnabled(enabled), "setSplitTunnelEnabled");
+  });
+
+  ipcMain.handle(IPC_CHANNELS.setSplitTunnelApp, async (event, rule: unknown, excluded: unknown) => {
+    assertAppFrame(event, "setSplitTunnelApp");
+    if (typeof rule !== "string" || rule.length === 0 || rule.length > 4096 || typeof excluded !== "boolean") {
+      throw new Error("setSplitTunnelApp: expected a rule and a boolean");
+    }
+    return withoutPaths(writer.setApp(rule, excluded), "setSplitTunnelApp");
+  });
+
+  ipcMain.handle(IPC_CHANNELS.setSplitTunnelCidrs, async (event, text: unknown) => {
+    assertAppFrame(event, "setSplitTunnelCidrs");
+    if (typeof text !== "string" || text.length > 65536) throw new Error("setSplitTunnelCidrs: expected text");
+    return withoutPaths(writer.setCidrs(text), "setSplitTunnelCidrs");
+  });
+
+  ipcMain.handle(IPC_CHANNELS.splitTunnelListApps, async (event, options: unknown) => {
+    assertAppFrame(event, "listSplitTunnelApps");
+    const refresh = typeof options === "object" && options !== null && (options as { refresh?: unknown }).refresh === true;
+    return withoutPaths(catalog.list(refresh), "listSplitTunnelApps");
+  });
+
+  ipcMain.handle(IPC_CHANNELS.splitTunnelDescribeApps, async (event, rules: unknown) => {
+    assertAppFrame(event, "describeSplitTunnelApps");
+    return withoutPaths(catalog.describe(boundedStrings(rules, 512, "describeSplitTunnelApps")), "describeSplitTunnelApps");
+  });
+
+  ipcMain.handle(IPC_CHANNELS.splitTunnelGetIcons, async (event, keys: unknown) => {
+    assertAppFrame(event, "getSplitTunnelIcons");
+    return withoutPaths(catalog.icons(boundedStrings(keys, 256, "getSplitTunnelIcons")), "getSplitTunnelIcons");
+  });
+
+  ipcMain.handle(IPC_CHANNELS.splitTunnelBrowseApp, async (event) => {
+    assertAppFrame(event, "browseSplitTunnelApp");
+    if (!mainWindow || nativeDialogOpen) return null;
+    nativeDialogOpen = true;
+    let picked: string | undefined;
+    try {
+      const result = await dialog.showOpenDialog(mainWindow, catalog.dialogOptions());
+      picked = result.canceled ? undefined : result.filePaths[0];
+    } finally {
+      nativeDialogOpen = false;
+      if (mainWindow?.isVisible()) mainWindow.focus();
+    }
+    return picked ? withoutPaths(catalog.describePick(picked), "browseSplitTunnelApp") : null;
+  });
+}
+
+function registerIpcHandlers(): void {
+  registerConnectionHandlers();
+  registerAuthHandlers();
+  registerTransportSettingsHandlers();
+  registerStartupSettingsHandlers();
+  registerServerAndDeviceHandlers();
+  registerSplitTunnelHandlers();
 }
 
 type DaemonRetryOptions = {
@@ -1476,7 +2479,8 @@ function isDaemonUnavailableError(error: unknown): boolean {
     message.includes("failed to fetch") ||
     message.includes("econnrefused") ||
     message.includes("socket hang up") ||
-    message.includes("daemon token not found")
+    message.includes("daemon token not found") ||
+    message.includes("daemon unauthorized")
   );
 }
 
@@ -1514,17 +2518,101 @@ async function connectWithRecovery(profileId: string): Promise<OkResponse> {
   }
 }
 
-async function boot(): Promise<void> {
-  await app.whenReady();
+// Applies settings.json (hand-editable, so every field is defensively typed)
+// onto module state at launch. Mirrors the validation each IPC setter applies.
+function applyPersistedSettings(settings: Record<string, unknown>): void {
+  if (settings.dohEnabled === true) {
+    pangeaApiClient.setDohEnabled(true);
+  }
+  // Reads the current shape, and migrates the directIpEnabled/directIpOnly
+  // pair it replaced. Always yields at least one enabled method.
+  pangeaApiClient.setHubMethods(normalizeHubMethods(settings.hubMethods ?? settings));
+  if (settings.allowLan === false) {
+    allowLanEnabled = false;
+  }
+  pangeaApiClient.setPostQuantumEnabled(settings.postQuantum === true);
+  // settings.json is hand-editable, so this goes through the same normalizer
+  // as IPC input — anything unusable falls back to the default.
+  pangeaApiClient.setWireguardMtu(settings.wireguardMtu);
+  if (settings.customDns !== undefined) {
+    try {
+      pangeaApiClient.setCustomDns(settings.customDns);
+    } catch {
+      // Ignore invalid hand-edited settings and use the VPN server default.
+    }
+  }
+  pangeaApiClient.setHubInTunnel(settings.hubInTunnel === true);
+  if (
+    settings.preferredTransport === "cloak" ||
+    settings.preferredTransport === "naive" ||
+    settings.preferredTransport === "reality" ||
+    settings.preferredTransport === "hysteria2" ||
+    settings.preferredTransport === "shadowsocks" ||
+    settings.preferredTransport === "snowflake" ||
+    settings.preferredTransport === "wireguard"
+  ) {
+    preferredTransport = settings.preferredTransport;
+  }
+  if (typeof settings.launchAtStartup === "boolean") {
+    launchAtStartupEnabled = settings.launchAtStartup;
+  }
+  // `alwaysConnected` was both settings at once; installs that predate the
+  // split inherit it for each until the user changes one.
+  const legacyAlwaysConnected =
+    typeof settings.alwaysConnected === "boolean" ? settings.alwaysConnected : null;
+  if (typeof settings.lockdown === "boolean") {
+    lockdownEnabled = settings.lockdown;
+  } else if (legacyAlwaysConnected !== null) {
+    lockdownEnabled = legacyAlwaysConnected;
+  }
+  if (typeof settings.autoConnect === "boolean") {
+    autoConnectEnabled = settings.autoConnect;
+  } else if (legacyAlwaysConnected !== null) {
+    autoConnectEnabled = legacyAlwaysConnected;
+  }
+  if (typeof settings.notifications === "boolean") {
+    notificationsEnabled = settings.notifications;
+  }
+  // Last known good hub IP: the only way to reach the hub once a Lockdown
+  // lock is engaged, since the lock permits that IP but blocks DNS and DoH.
+  pangeaApiClient.setCachedHubIp(settings.hubIp);
+  // Was a single object before every node's credentials were cached, so an
+  // existing install still has one to migrate.
+  pangeaApiClient.setCachedHubShadowsocks(settings.hubShadowsocks);
+  pangeaApiClient.setCachedHubReality(settings.hubReality);
+  // Edge relays, and the last node list the hub gave us. Both are what stands
+  // between a blocked hub and a client with nowhere left to go.
+  pangeaApiClient.setCachedFrontedEndpoints(settings.frontedEndpoints);
+  // The replay guard travels with the switch: without the last accepted seq a
+  // reinstall would accept a stale blob it has already moved past.
+  pangeaApiClient.setDeadDropEnabled(settings.deadDrop !== false);
+  pangeaApiClient.setDeadDropState(settings.deadDropSeq, settings.deadDropLastAttempt);
+  pangeaApiClient.setCachedServers(settings.servers);
+  pangeaApiClient.setCachedSubscription(settings.subscription);
+  if (typeof settings.lastServerId === "string") {
+    lastServerId = settings.lastServerId;
+  }
+  if (typeof settings.lastProfileId === "string") {
+    lastConnectedProfileId = settings.lastProfileId;
+  }
+  if (typeof settings.lastEntryServerId === "string") {
+    lastEntryServerId = settings.lastEntryServerId;
+  }
+  multihopPrefs = normalizeMultihopPrefs(settings.multihop);
+  provisionedProfiles = dropExpired(parseProfileRecords(settings.provisionedProfiles), Date.now());
+  if (typeof settings.locale === "string") {
+    localePref = settings.locale;
+  }
+  if (settings.trayHintShown === true) {
+    trayHintShown = true;
+  }
+}
 
-  // Windows drops toasts whose AUMID doesn't match a Start Menu shortcut's;
-  // NSIS writes ours with build.appId, so the process must claim the same one.
-  app.setAppUserModelId("com.pangea.pangeavpn");
-
-  // Lock down navigation, new windows, embeds, permissions, and TLS.
+// Lock down navigation, new windows, embeds, permissions, and TLS.
+function installSecurityGuards(): void {
   app.on("web-contents-created", (_event, contents) => {
     contents.setWindowOpenHandler(({ url }) => {
-      if (url.startsWith("https://") || url.startsWith("http://")) {
+      if (isSafeExternalUrl(url)) {
         void shell.openExternal(url);
       }
       return { action: "deny" };
@@ -1543,13 +2631,27 @@ async function boot(): Promise<void> {
     event.preventDefault();
     cb(false);
   });
+}
 
+// Wires pangeaApiClient's resolved/changed events to disk persistence and the
+// renderer, and connects it to the daemon for post-quantum keys and the SS proxy.
+function wirePangeaApiClient(): void {
   // Registered before the restore below so a first run with no settings file
   // still persists the hub IP once it is learned.
   pangeaApiClient.onHubIp((ip) => void persistHubIp(ip));
+  pangeaApiClient.onHubStatusChanged((status) => {
+    mainWindow?.webContents.send(IPC_CHANNELS.hubStatusChanged, status);
+  });
   pangeaApiClient.onHubShadowsocksResolved((creds) => void persistHubShadowsocks(creds));
+  pangeaApiClient.onHubRealityResolved((creds) => void persistHubReality(creds));
   pangeaApiClient.onFrontedEndpointsResolved((endpoints) => void persistFrontedEndpoints(endpoints));
+  pangeaApiClient.onDeadDropStateChanged((state) => void persistDeadDropState(state));
   pangeaApiClient.onServersResolved((servers) => void persistServers(servers));
+  pangeaApiClient.onSubscriptionResolved((cached) => void persistSubscription(cached));
+
+  // Same split for post-quantum key material: the daemon holds it, the
+  // client only carries public halves to and from the hub.
+  pangeaApiClient.setPostQuantum(daemonClient);
 
   // The daemon owns the proxy; the client only decides when to ask for it.
   pangeaApiClient.setShadowsocksHubProxy({
@@ -1569,98 +2671,32 @@ async function boot(): Promise<void> {
       }
     }
   });
-
-  // Restore persisted settings
-  try {
-    const settingsPath = (await import("node:path")).join(
-      (await import("./platformPaths")).getAppSupportDir(),
-      "settings.json"
-    );
-    const settingsRaw = await (await import("node:fs/promises")).default.readFile(settingsPath, "utf8");
-    const settings = JSON.parse(settingsRaw) as Record<string, unknown>;
-    if (settings.dohEnabled === true) {
-      pangeaApiClient.setDohEnabled(true);
-    }
-    // Reads the current shape, and migrates the directIpEnabled/directIpOnly
-    // pair it replaced. Always yields at least one enabled method.
-    pangeaApiClient.setHubMethods(normalizeHubMethods(settings.hubMethods ?? settings));
-    if (settings.allowLan === false) {
-      allowLanEnabled = false;
-    }
-    // settings.json is hand-editable, so this goes through the same normalizer
-    // as IPC input — anything unusable falls back to the default.
-    pangeaApiClient.setWireguardMtu(settings.wireguardMtu);
-    if (settings.customDns !== undefined) {
+  pangeaApiClient.setRealityHubProxy({
+    start: async (creds) => {
       try {
-        pangeaApiClient.setCustomDns(settings.customDns);
+        return await daemonClient.startRealityProxy(creds);
+      } catch (err) {
+        console.warn("Failed to start the REALITY hub proxy:", sanitizeLog(err));
+        return null;
+      }
+    },
+    stop: async () => {
+      try {
+        await daemonClient.stopRealityProxy();
       } catch {
-        // Ignore invalid hand-edited settings and use the VPN server default.
+        // best-effort
       }
     }
-    if (
-      settings.preferredTransport === "cloak" ||
-      settings.preferredTransport === "naive" ||
-      settings.preferredTransport === "reality" ||
-      settings.preferredTransport === "hysteria2" ||
-      settings.preferredTransport === "shadowsocks" ||
-      settings.preferredTransport === "snowflake"
-    ) {
-      preferredTransport = settings.preferredTransport;
-    }
-    if (typeof settings.launchAtStartup === "boolean") {
-      launchAtStartupEnabled = settings.launchAtStartup;
-    }
-    if (typeof settings.alwaysConnected === "boolean") {
-      alwaysConnectedEnabled = settings.alwaysConnected;
-    }
-    // Last known good hub IP: the only way to reach the hub once a Lockdown
-    // lock is engaged, since the lock permits that IP but blocks DNS and DoH.
-    pangeaApiClient.setCachedHubIp(settings.hubIp);
-    // Was a single object before every node's credentials were cached, so an
-    // existing install still has one to migrate.
-    pangeaApiClient.setCachedHubShadowsocks(settings.hubShadowsocks);
-    // Edge relays, and the last node list the hub gave us. Both are what stands
-    // between a blocked hub and a client with nowhere left to go.
-    pangeaApiClient.setCachedFrontedEndpoints(settings.frontedEndpoints);
-    pangeaApiClient.setCachedServers(settings.servers);
-    if (typeof settings.lastServerId === "string") {
-      lastServerId = settings.lastServerId;
-    }
-    if (typeof settings.lastProfileId === "string") {
-      lastConnectedProfileId = settings.lastProfileId;
-    }
-    if (typeof settings.locale === "string") {
-      localePref = settings.locale;
-    }
-    if (settings.trayHintShown === true) {
-      trayHintShown = true;
-    }
-  } catch {
-    // no settings file yet
+  });
+}
+
+// Only macOS has a global menu bar; elsewhere this is a strip of chrome
+// inside the window, which a tray popover has no use for.
+function buildApplicationMenu(): void {
+  if (process.platform !== "darwin") {
+    Menu.setApplicationMenu(null);
+    return;
   }
-
-  // Resolve the display locale for the tray/menu (built below). The language
-  // is fixed for this run; changing it applies on the next launch.
-  setMainLocale(resolveMainLocale(localePref, app.getLocale()));
-
-  // Reconcile OS login-item state with our persisted preference (handles reinstalls).
-  try {
-    await applyLoginItem();
-  } catch (err) {
-    console.warn("Failed to reconcile login item:", err);
-  }
-
-  const savedKey = await auth.loadLicenseKey().catch(() => null);
-  if (savedKey) {
-    pangeaApiClient.setLicenseKey(savedKey);
-  }
-
-  // Restore persistent identity keypair (if exists from previous sign-in)
-  const identityKeys = await auth.loadIdentityKeyPair().catch(() => null);
-  if (identityKeys) {
-    pangeaApiClient.identityPubkey = identityKeys.publicKey;
-  }
-
   const appMenu = Menu.buildFromTemplate([
     {
       label: "PangeaVPN",
@@ -1670,7 +2706,9 @@ async function boot(): Promise<void> {
         {
           label: mt("menu.hideWindow"),
           accelerator: "CmdOrCtrl+H",
-          click: () => hideMainWindow()
+          click: () => {
+            if (!nativeDialogOpen) hideMainWindow();
+          }
         },
         { type: "separator" },
         {
@@ -1697,37 +2735,112 @@ async function boot(): Promise<void> {
     }
   ]);
   Menu.setApplicationMenu(appMenu);
+}
+
+// Ensures the daemon is running and, on first launch with no persisted lock
+// state, re-engages Lockdown. Fire-and-forget: boot() does not await this.
+async function runDaemonStartupSequence(): Promise<void> {
+  try {
+    await daemonProcess.ensureRunning();
+    // The daemon outlives the app, so its transport memory has to be dropped
+    // here rather than on quit, which a crash or force-kill never reaches.
+    try {
+      await daemonClient.clearTransportMemory();
+    } catch (err) {
+      console.warn("failed to clear transport memory on startup", sanitizeLog(err));
+    }
+
+    // Covers the case where no lock state was persisted yet; the daemon
+    // re-applies persisted locks itself. No-ops if already up or engaged.
+    if (!lockdownEnabled) return;
+    const status = await daemonClient.getStatus();
+    if (status.state !== "CONNECTED" && status.state !== "CONNECTING") {
+      await daemonClient.engageKillSwitch({
+        profileId: lastConnectedProfileId ?? undefined,
+        allowLAN: allowLanEnabled
+      });
+    }
+  } catch (err) {
+    console.error("failed to ensure daemon / engage lockdown on startup", sanitizeLog(err));
+    // Lockdown could not be confirmed engaged — surface it rather than let
+    // the UI keep reporting the kill switch as active while traffic flows.
+    if (lockdownEnabled) {
+      trayStatusState = "ERROR";
+      trayStatusDetail = "lockdown failed to engage";
+      updateTrayMenu();
+      mainWindow?.webContents.send("lockdown:engage-failed");
+    }
+  }
+}
+
+async function boot(): Promise<void> {
+  await app.whenReady();
+
+  // A packaged app's stdout goes nowhere, so tee it to a file support can ask for.
+  installConsoleFileSink(app.getPath("logs"));
+
+  // Toasts are attributed to the AUMID's Start Menu shortcut, which only an
+  // install has — an unpackaged run must claim electron.exe, not the shipped id.
+  app.setAppUserModelId(app.isPackaged ? "com.pangea.pangeavpn" : process.execPath);
+
+  installSecurityGuards();
+
+  wirePangeaApiClient();
+
+  // Restore persisted settings
+  try {
+    const settings = JSON.parse(await readStateFile("settings.json")) as Record<string, unknown>;
+    applyPersistedSettings(settings);
+  } catch {
+    // no settings file yet
+  }
+
+  // Resolve the display locale for the tray/menu (built below). The language
+  // is fixed for this run; changing it applies on the next launch.
+  setMainLocale(resolveMainLocale(localePref, app.getLocale()));
+
+  // Reconcile OS login-item state with our persisted preference (handles reinstalls).
+  try {
+    await applyLoginItem();
+  } catch (err) {
+    console.warn("Failed to reconcile login item:", err);
+  }
+
+  const savedKey = await auth.loadLicenseKey().catch(() => null);
+  if (savedKey) {
+    pangeaApiClient.setLicenseKey(savedKey);
+  }
+
+  // Restore persistent identity keypair (if exists from previous sign-in)
+  const identityKeys = await auth.loadIdentityKeyPair().catch(() => null);
+  if (identityKeys) {
+    pangeaApiClient.identityPubkey = identityKeys.publicKey;
+  }
+
+  // Off the startup path: the window must not wait on a hub that may be blocked.
+  refreshSubscriptionCache("launch");
+
+  buildApplicationMenu();
 
   registerIpcHandlers();
   createWindow();
-  if (mainWindow) {
-    setupAutoUpdater(mainWindow);
-  }
+  // A resolver, not a snapshot, so this stays correct across window recreates.
+  setupAutoUpdater(() => mainWindow, {
+    ready: () => pangeaApiClient.hubPathReady(),
+    fetchLatest: (timeoutMs) => pangeaApiClient.anonymousRequest("GET", LATEST_ROUTE, undefined, { timeoutMs })
+  });
   createTray();
+  watchDisplayChanges();
   if (!hiddenLaunch) {
     showMainWindow();
   }
-  daemonProcess
-    .ensureRunning()
-    .then(async () => {
-      // Covers the case where no lock state was persisted yet; the daemon
-      // re-applies persisted locks itself. No-ops if already up or engaged.
-      if (!alwaysConnectedEnabled) return;
-      const status = await daemonClient.getStatus();
-      if (status.state !== "CONNECTED" && status.state !== "CONNECTING") {
-        await daemonClient.engageKillSwitch({
-          profileId: lastConnectedProfileId ?? undefined,
-          allowLAN: allowLanEnabled
-        });
-      }
-    })
-    .catch((err) => {
-      console.error("failed to ensure daemon / engage lockdown on startup", err);
-    });
+  void runDaemonStartupSequence();
 
   startNetworkWatcher();
   onNetworkChange(() => {
-    void recoverFromNetworkChange();
+    recoverFromNetworkChange().catch((err) => {
+      console.warn("network recovery failed:", sanitizeLog(err));
+    });
   });
 }
 
@@ -1738,22 +2851,33 @@ app.on("window-all-closed", () => {
 });
 
 app.on("activate", () => {
-  if (BrowserWindow.getAllWindows().length === 0) {
-    createWindow();
-    return;
-  }
   showMainWindow();
 });
 
-app.on("before-quit", () => {
+let quitCleanupDone = false;
+
+app.on("before-quit", (event) => {
+  if (quitCleanupDone) return;
+  event.preventDefault();
   isQuitting = true;
   stopTrayStatusPolling();
   tray?.destroy();
   tray = null;
   trayDefaultImage = null;
   trayConnectedImage = null;
+
+  // Quitting the app is not Disconnect: the daemon keeps the session and its
+  // lock, and a spawned dev daemon leaves both for its next start to resume.
   daemonProcess.stop();
+  quitCleanupDone = true;
+  app.quit();
 });
+
+// Chromium encrypts its cookie store with a keychain key, and an ad-hoc
+// signature cannot hold the ACL, so macOS asks for the password every launch.
+if (process.platform === "darwin") {
+  app.commandLine.appendSwitch("use-mock-keychain");
+}
 
 // Ensure only one instance of the app is running (Windows especially)
 const gotTheLock = app.requestSingleInstanceLock();

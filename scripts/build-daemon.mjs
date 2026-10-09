@@ -70,10 +70,8 @@ try {
   process.exitCode = 1;
 }
 
-// Strips comments so a commented-out <supportedOS> cannot satisfy the check
-// below. Repeats because one pass can splice a fresh <!-- out of the
-// surrounding text, and rejects a leftover opener: that means an unterminated
-// comment, so the rest of the file is not trustworthy to pattern-match.
+// Strips comments (repeatedly, since one pass can splice a fresh <!-- together) so a
+// commented-out <supportedOS> can't pass; a leftover opener means the file is untrustworthy.
 function stripHtmlComments(text) {
   let out = text;
   let previous;
@@ -136,7 +134,8 @@ function assertWindowsVersionInfo() {
     throw new Error(`desktop package version ${desktopVersion} does not match root package version ${packageVersion}`);
   }
   const versionInfo = JSON.parse(fs.readFileSync(path.join(daemonCommandDir, "versioninfo.json"), "utf8"));
-  const expected = `${packageVersion}.0`;
+  // Windows version resources are numeric, so a release candidate (0.8.0-rc.1) stamps its core (0.8.0.0).
+  const expected = `${packageVersion.split(/[-+]/)[0]}.0`;
   const fixedFileVersion = versionInfo.FixedFileInfo?.FileVersion;
   const fixedProductVersion = versionInfo.FixedFileInfo?.ProductVersion;
   const fixedVersion = [fixedFileVersion?.Major, fixedFileVersion?.Minor, fixedFileVersion?.Patch, fixedFileVersion?.Build].join(".");

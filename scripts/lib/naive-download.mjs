@@ -35,9 +35,8 @@ const ASSET_SHA256 = {
 // to HTTPS trust, same as the other platforms.
 const ANDROID_SHA256 = "";
 
-// ensurePangeaNaiveLib returns { libDir, headerDir, libName } for the pinned
-// prebuilt, downloading + caching under .cache on first use, or null if it
-// can't fetch.
+// Returns { libDir, headerDir, libName } for the pinned prebuilt, downloading
+// and caching under .cache on first use, or null if it can't fetch.
 export function ensurePangeaNaiveLib(goArch, rootDir) {
   const assetArch = ASSET_ARCH[goArch];
   const osAsset = OS_ASSET[process.platform];

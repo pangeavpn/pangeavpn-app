@@ -3,7 +3,7 @@ import test from "node:test";
 import net from "node:net";
 import https from "node:https";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { fetchViaConnectProxy, parseConnectStatus } from "./hubTransport.ts";
+import { DOH_TLS_OPTIONS, fetchViaConnectProxy, parseConnectStatus } from "./hubTransport.ts";
 
 test("parseConnectStatus reads the status code", () => {
   assert.equal(parseConnectStatus("HTTP/1.1 200 Connection established"), 200);
@@ -18,9 +18,8 @@ test("parseConnectStatus rejects anything that is not a status line", () => {
   assert.throws(() => parseConnectStatus("220 smtp.example.com ESMTP"), /Malformed/);
 });
 
-// Self-signed localhost cert (CN=localhost, SAN 127.0.0.1), valid to 2036.
-// Passed as `ca` so the tests validate against it, exactly as production
-// validates the hub against the system store.
+// Self-signed localhost cert (CN=localhost, SAN 127.0.0.1), valid to 2036 — passed
+// as `ca` so tests validate against it, exactly as production validates the hub.
 const TEST_CERT = `-----BEGIN CERTIFICATE-----
 MIIDJTCCAg2gAwIBAgIUAQ53rDPhTKZ1zz28ttwM2ShAHWgwDQYJKoZIhvcNAQEL
 BQAwFDESMBAGA1UEAwwJbG9jYWxob3N0MB4XDTI2MDgwNzIyNDMyNFoXDTM2MDgw
@@ -70,13 +69,8 @@ VotJKKB4wRcTvXNS85n50/F77Y11VLxMgvM30wDICByaYXZ7lPZoa2NAMU5dQgOz
 1s3vso2O8p21HDibSEv5GrA=
 -----END PRIVATE KEY-----`;
 
-/**
- * server.close() only calls back once every connection has gone, and a spliced
- * proxy keeps sockets alive past the request — so live sockets are tracked and
- * destroyed explicitly. server.closeAllConnections() is not present on every
- * Node this repo runs on, and optional-calling it hides the hang rather than
- * fixing it.
- */
+/** server.close() only calls back once every connection has gone, and a spliced
+ *  proxy keeps sockets alive past the request — so live sockets are tracked and destroyed. */
 function tracker(server: net.Server | https.Server): {
   add: (socket: net.Socket) => void;
   close: () => Promise<void>;
@@ -103,22 +97,21 @@ interface Started {
   close: () => Promise<void>;
 }
 
-/**
- * CONNECT proxy standing in for the daemon's mixed inbound. `dialPort`
- * overrides where it actually connects, since fetchViaConnectProxy always
- * names :443 for the real hub.
- */
+/** CONNECT proxy standing in for the daemon's mixed inbound. `dialPort`
+ *  overrides where it actually connects, since fetchViaConnectProxy always names :443. */
 async function startProxy(
   opts: { status?: number; dialPort?: number } = {}
-): Promise<Started & { seen: string[] }> {
+): Promise<Started & { seen: string[]; heads: string[] }> {
   const status = opts.status ?? 200;
   const seen: string[] = [];
+  const heads: string[] = [];
   let track: ReturnType<typeof tracker>;
 
   const server = net.createServer((client) => {
     client.once("data", (chunk) => {
       const head = chunk.toString("latin1");
       seen.push(head.split("\r\n")[0]);
+      heads.push(head);
       if (status !== 200) {
         client.end(`HTTP/1.1 ${status} Denied\r\n\r\n`);
         return;
@@ -139,7 +132,7 @@ async function startProxy(
 
   track = tracker(server);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  return { port: (server.address() as net.AddressInfo).port, close: () => track.close(), seen };
+  return { port: (server.address() as net.AddressInfo).port, close: () => track.close(), seen, heads };
 }
 
 async function startTlsOrigin(
@@ -278,6 +271,48 @@ test("rejects a certificate that does not chain to the supplied trust anchor", a
   }
 });
 
+test("sends Proxy-Authorization when credentials are supplied", async () => {
+  const origin = await startTlsOrigin((_req, res) => res.end("ok"));
+  const proxy = await startProxy({ dialPort: origin.port });
+  try {
+    await fetchViaConnectProxy(proxy.port, "203.0.113.9", "localhost", "/v1/secure", {
+      timeoutMs: 8000,
+      ca: TEST_CERT,
+      proxyUsername: "user",
+      proxyPassword: "pass"
+    });
+    const expected = `Basic ${Buffer.from("user:pass").toString("base64")}`;
+    assert.match(proxy.heads[0], new RegExp(`Proxy-Authorization: ${expected}`));
+  } finally {
+    await proxy.close();
+    await origin.close();
+  }
+});
+
+test("aborts the in-flight request via signal", async () => {
+  const server = net.createServer(() => {
+    // accept, say nothing, so the request stays pending until aborted
+  });
+  const track = tracker(server);
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = (server.address() as net.AddressInfo).port;
+  const controller = new AbortController();
+  try {
+    const pending = assert.rejects(
+      fetchViaConnectProxy(port, "203.0.113.9", "localhost", "/v1/secure", {
+        timeoutMs: 8000,
+        ca: TEST_CERT,
+        signal: controller.signal
+      }),
+      /aborted/i
+    );
+    controller.abort();
+    await pending;
+  } finally {
+    await track.close();
+  }
+});
+
 test("rejects a certificate valid for a different host", async () => {
   const origin = await startTlsOrigin((_req, res) => res.end("secret"));
   const proxy = await startProxy({ dialPort: origin.port });
@@ -294,4 +329,11 @@ test("rejects a certificate valid for a different host", async () => {
     await proxy.close();
     await origin.close();
   }
+});
+
+test("the DoH path keeps its empty SNI and skips certificate validation", () => {
+  // Regression: 6299892 set real SNI and restored validation, which put the
+  // hub name on the wire and let any TLS middlebox veto the path.
+  assert.equal(DOH_TLS_OPTIONS.servername, "");
+  assert.equal(DOH_TLS_OPTIONS.rejectUnauthorized, false);
 });

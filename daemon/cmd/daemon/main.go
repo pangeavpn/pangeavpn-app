@@ -11,6 +11,9 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime"
+	"slices"
+	"strings"
 	"syscall"
 	"time"
 
@@ -22,6 +25,9 @@ import (
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/reality"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/shadowsocks"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/snowflake"
+	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/splittunnel"
+	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/splittunnel/egress"
+	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/splittunnel/procmatch"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/state"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/wg"
 )
@@ -29,20 +35,34 @@ import (
 const (
 	daemonAddr            = "127.0.0.1:8787"
 	shutdownTimeout       = 12 * time.Second
+	shutdownGraceTimeout  = 30 * time.Second
 	readHeaderTimeout     = 5 * time.Second
 	requestReadTimeout    = 15 * time.Second
+	writeTimeout          = 30 * time.Second
 	idleConnectionTimeout = 60 * time.Second
 )
 
 type daemonRuntime struct {
-	service  *api.Service
-	server   *http.Server
-	listener net.Listener
-	serveErr <-chan error
-	cancel   context.CancelFunc
+	service     *api.Service
+	splitTunnel *splittunnel.Controller
+	server      *http.Server
+	listener    net.Listener
+	serveErr    <-chan error
+	cancel      context.CancelFunc
 }
 
 func main() {
+	// The macOS egress broker is this binary re-executed by the daemon itself; it must
+	// never start a second daemon.
+	if hasFlag("--split-egress-broker") {
+		os.Exit(egress.RunBroker())
+	}
+	if hasFlag("--clear-killswitch") {
+		os.Exit(clearKillSwitchCommand())
+	}
+	if hasFlag("--arm-boot-lock") {
+		os.Exit(armBootLockCommand())
+	}
 	if shouldRunAsService() {
 		if err := runService(); err != nil {
 			log.Fatalf("run service: %v", err)
@@ -53,6 +73,54 @@ func main() {
 	if err := runInteractive(); err != nil {
 		log.Fatalf("run daemon: %v", err)
 	}
+}
+
+func hasFlag(name string) bool {
+	return slices.ContainsFunc(os.Args[1:], func(arg string) bool {
+		return strings.EqualFold(strings.TrimSpace(arg), name)
+	})
+}
+
+// clearKillSwitchCommand is the uninstaller's way to lower a lock the daemon
+// deliberately leaves behind on every exit that is not a user Disconnect.
+func clearKillSwitchCommand() int {
+	logKillSwitchWarnings()
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	// The settings name the user's apps and never depend on the lock, so they go first.
+	splitErr := forgetSplitTunnel()
+	if splitErr != nil {
+		log.Printf("forget split tunnel settings: %v", splitErr)
+	}
+	// A daemon killed before closing its dialer leaves the macOS scoped default route behind.
+	egress.RemoveOrphanedRoutes(log.Printf)
+	if err := clearKillSwitch(ctx); err != nil {
+		log.Printf("clear kill switch: %v", err)
+		return 1
+	}
+	if err := forgetSession(); err != nil {
+		log.Printf("forget session: %v", err)
+		return 1
+	}
+	if splitErr != nil {
+		return 1
+	}
+	log.Printf("kill switch cleared")
+	return 0
+}
+
+// Indirected for tests.
+var (
+	clearKillSwitch   = func(ctx context.Context) error { return platform.NewKillSwitch().Clear(ctx) }
+	forgetSession     = api.ForgetSession
+	forgetSplitTunnel = api.ForgetSplitTunnel
+)
+
+// logKillSwitchWarnings sends degraded-clear warnings, such as a Windows setting
+// left unrestored, and what the clear gave back to the output the uninstaller logs.
+func logKillSwitchWarnings() {
+	platform.KillSwitchWarnf = log.Printf
+	platform.KillSwitchInfof = log.Printf
 }
 
 func runInteractive() error {
@@ -85,15 +153,32 @@ func stopDaemonRuntime(ctx context.Context, runtime *daemonRuntime) error {
 	go func() {
 		done <- runtime.Stop(ctx)
 	}()
+
 	select {
 	case err := <-done:
 		return err
 	case <-ctx.Done():
-		return ctx.Err()
+	}
+
+	// Teardown (kill switch rules, routes, tun adapter) may still be mid-flight
+	// in the goroutine above; exiting now would abandon it, not just cancel it.
+	log.Printf("daemon shutdown exceeded %s, waiting up to %s more for teardown to finish", shutdownTimeout, shutdownGraceTimeout)
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(shutdownGraceTimeout):
+		return fmt.Errorf("daemon shutdown abandoned after %s: kill switch/routes/tun adapter teardown may be incomplete", shutdownTimeout+shutdownGraceTimeout)
 	}
 }
 
 func startDaemonRuntime() (*daemonRuntime, error) {
+	// Attached before anything that can fail, so the most common startup errors land in
+	// daemon.log and the crash log rather than a --service-mode stderr that doesn't exist.
+	logs := state.NewLogStore(4000)
+	attachLogFile(logs)
+	log.SetOutput(os.Stderr)
+	logs.Add(state.LogInfo, state.SourceDaemon, "daemon booting")
+
 	tokenPath, err := platform.TokenPath()
 	if err != nil {
 		return nil, fmt.Errorf("resolve token path: %w", err)
@@ -109,9 +194,12 @@ func startDaemonRuntime() (*daemonRuntime, error) {
 		return nil, fmt.Errorf("load token: %w", err)
 	}
 
-	logs := state.NewLogStore(4000)
-	attachLogFile(logs)
-	logs.Add(state.LogInfo, state.SourceDaemon, "daemon booting")
+	// A previous daemon process may have died mid-session; restore whatever
+	// network state it left behind before serving any new requests.
+	wg.RestoreOrphanedState()
+	egress.RemoveOrphanedRoutes(func(format string, args ...any) {
+		logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf(format, args...))
+	})
 
 	machine := state.NewMachine()
 	configStore, err := state.NewConfigStore(configPath)
@@ -139,9 +227,14 @@ func startDaemonRuntime() (*daemonRuntime, error) {
 	platform.KillSwitchWarnf = func(format string, args ...any) {
 		logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf(format, args...))
 	}
+	platform.KillSwitchInfof = func(format string, args ...any) {
+		logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf(format, args...))
+	}
 	service := api.NewService(machine, logs, configStore, cloakManager, naiveManager, realityManager, hysteria2Manager, shadowsocksManager, snowflakeManager, wgManager, killSwitch)
 
 	service.SetShadowsocksProxy(shadowsocks.NewProxyManager(logs))
+	service.SetRealityProxy(reality.NewProxyManager(logs))
+	splitTunnel := wireSplitTunnel(service, logs, wgManager, killSwitch)
 
 	// Per-network last-good-transport cache is a best-effort optimization; a
 	// failure to open it just leaves auto-connect walking the full cascade.
@@ -159,12 +252,17 @@ func startDaemonRuntime() (*daemonRuntime, error) {
 		Handler:           handler,
 		ReadHeaderTimeout: readHeaderTimeout,
 		ReadTimeout:       requestReadTimeout,
+		WriteTimeout:      writeTimeout,
 		IdleTimeout:       idleConnectionTimeout,
 		MaxHeaderBytes:    16 << 10,
 	}
 	listener, err := net.Listen("tcp", server.Addr)
 	if err != nil {
-		return nil, fmt.Errorf("listen on %s: %w", server.Addr, err)
+		// Straight to the log store: stderr is the crash log by now, so a
+		// bare return leaves the supervisor's log showing nothing at all.
+		detail := describeListenError(server.Addr, err)
+		logs.Add(state.LogError, state.SourceDaemon, detail)
+		return nil, errors.New(detail)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -186,12 +284,61 @@ func startDaemonRuntime() (*daemonRuntime, error) {
 	}()
 
 	return &daemonRuntime{
-		service:  service,
-		server:   server,
-		listener: listener,
-		serveErr: serveErr,
-		cancel:   cancel,
+		service:     service,
+		splitTunnel: splitTunnel,
+		server:      server,
+		listener:    listener,
+		serveErr:    serveErr,
+		cancel:      cancel,
 	}, nil
+}
+
+// wireSplitTunnel hands the service its stored split-tunnel settings and, where the
+// WireGuard manager can wrap its TUN, the engine that keeps excluded apps off the tunnel.
+func wireSplitTunnel(service *api.Service, logs *state.LogStore, wgManager wg.Manager, killSwitch platform.KillSwitch) *splittunnel.Controller {
+	storePath, err := api.SplitTunnelStorePath()
+	if err != nil {
+		logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("split tunnel settings cannot be saved: %v", err))
+	}
+	hooker, ok := wgManager.(interface{ SetSplitTunnelHook(wg.SplitTunnelHook) })
+	if !ok {
+		service.SetSplitTunnel(nil, storePath)
+		return nil
+	}
+	logf := func(format string, args ...any) {
+		logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf(format, args...))
+	}
+	var never []string
+	if self, err := os.Executable(); err == nil {
+		never = append(never, self)
+	}
+	permit := func(context.Context, bool) error {
+		return errors.New("this kill switch cannot let split-tunnel traffic out")
+	}
+	if permitter, ok := killSwitch.(platform.SplitTunnelPermitter); ok {
+		permit = permitter.SetSplitEgress
+	}
+	controller := splittunnel.NewController(splittunnel.ControllerOptions{
+		NewClassifier: func() (procmatch.Classifier, error) {
+			return procmatch.NewClassifier(procmatch.Options{SelfPID: os.Getpid(), NeverBypass: never, Logf: logf})
+		},
+		NewEgress: func() (egress.Dialer, error) {
+			opts := egress.Options{Logf: logf}
+			if runtime.GOOS == "darwin" {
+				gid, err := platform.SplitEgressGroupID()
+				if err != nil {
+					return nil, err
+				}
+				opts.BrokerGID = gid
+			}
+			return egress.New(opts)
+		},
+		SetEgressPermit: permit,
+		Logf:            logf,
+	})
+	hooker.SetSplitTunnelHook(controller)
+	service.SetSplitTunnel(controller, storePath)
+	return controller
 }
 
 func (r *daemonRuntime) Stop(ctx context.Context) error {
@@ -221,5 +368,31 @@ func (r *daemonRuntime) Stop(ctx context.Context) error {
 			stopErrors = append(stopErrors, fmt.Errorf("disconnect VPN: %w", err))
 		}
 	}
+	// After the tunnel is down: Close withdraws the off-tunnel egress permit, which no
+	// later process would ever re-arm.
+	if r.splitTunnel != nil {
+		closed := make(chan error, 1)
+		go func() { closed <- r.splitTunnel.Close() }()
+		select {
+		case err := <-closed:
+			if err != nil {
+				stopErrors = append(stopErrors, fmt.Errorf("close split tunnel: %w", err))
+			}
+		case <-ctx.Done():
+		}
+	}
 	return errors.Join(stopErrors...)
+}
+
+// armBootLockCommand is what the Linux boot unit runs before the network comes
+// up: re-apply whatever lock the last session left, using only what is on disk.
+func armBootLockCommand() int {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	if err := api.ArmBootLock(ctx, platform.NewKillSwitch()); err != nil {
+		log.Printf("arm boot lock: %v", err)
+		return 1
+	}
+	log.Printf("boot lock reconciled")
+	return 0
 }

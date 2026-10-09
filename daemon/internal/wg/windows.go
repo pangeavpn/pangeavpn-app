@@ -9,10 +9,21 @@ import (
 	"strings"
 
 	"golang.org/x/sys/windows"
+	"golang.zx2c4.com/wireguard/device"
 	"golang.zx2c4.com/wireguard/tun"
 
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/state"
 )
+
+// Seams for the in-place switch tests; production always configures the real interface.
+var (
+	configureWindowsInterfaceFn  = configureWindowsInterface
+	syncWindowsAllowedIPRoutesFn = syncWindowsAllowedIPRoutes
+)
+
+// RestoreOrphanedState is a no-op on Windows: WFP filters and routes don't
+// survive process exit the way darwin/linux network config files do.
+func RestoreOrphanedState() {}
 
 func (m *wireGuardGoManager) Start(ctx context.Context, profile state.WireGuardProfile) error {
 	return m.startWindows(ctx, profile)
@@ -62,7 +73,15 @@ func (m *wireGuardGoManager) startWindows(ctx context.Context, profile state.Wir
 
 	tunnelKey := sanitizeTunnelName(profile.TunnelName)
 	if m.hasActiveDevice(tunnelKey) {
-		return fmt.Errorf("wireguard tunnel %s is already running", profile.TunnelName)
+		if m.trySwitchInPlace(ctx, tunnelKey, parsed, allowedIPs) {
+			return nil
+		}
+		if stopErr := m.stopWindows(ctx, profile); stopErr != nil {
+			m.logs.Add(state.LogWarn, state.SourceWireGuard, fmt.Sprintf("teardown before device rebuild: %v", stopErr))
+		}
+	}
+	if err := m.reserveSession(tunnelKey); err != nil {
+		return err
 	}
 
 	requestedName := strings.TrimSpace(profile.TunnelName)
@@ -74,8 +93,10 @@ func (m *wireGuardGoManager) startWindows(ctx context.Context, profile state.Wir
 		func(interfaceName string, mtu int) (tun.Device, error) {
 			return tun.CreateTUNWithRequestedGUID(interfaceName, requestedGUID, mtu)
 		},
+		tunnelInfoFor(requestedName, parsed),
 	)
 	if err != nil {
+		m.removeSession(tunnelKey)
 		return err
 	}
 
@@ -88,17 +109,32 @@ func (m *wireGuardGoManager) startWindows(ctx context.Context, profile state.Wir
 	tunnelLUID, err := windowsInterfaceLUID(tunDev, interfaceName)
 	if err != nil {
 		closeDevice(dev)
+		m.removeSession(tunnelKey)
 		return err
 	}
+	// Wintun renames the adapter "name 2" when a leftover holds the name and
+	// never says so; wireguard-go echoes the request, so read the live alias.
+	if alias := windowsInterfaceAlias(tunnelLUID); alias != "" && alias != interfaceName {
+		m.logs.Add(state.LogWarn, state.SourceWireGuard, fmt.Sprintf("wintun named the adapter %q, not the requested %q; using the live name", alias, interfaceName))
+		interfaceName = alias
+	}
 
-	endpointRoutes, endpointErr := addWindowsEndpointRoutes(ctx, tunnelLUID, parsed.endpointHosts)
+	// Every tunnel on the box is off limits as a next hop for the bypass, not
+	// just this one: routing WireGuard through any of them is a loop.
+	excludeLUIDs := m.ActiveLUIDs()
+	excludeLUIDs[tunnelLUID] = struct{}{}
+
+	// Best-effort: a partial/failed resolve doesn't abort the connect, since an
+	// unusable path still fails the downstream WireGuard handshake.
+	endpointRoutes, endpointErr := addWindowsEndpointRoutes(ctx, excludeLUIDs, parsed.endpointHosts)
 	if endpointErr != nil {
 		m.logs.Add(state.LogWarn, state.SourceWireGuard, fmt.Sprintf("endpoint bypass route setup warning: %v", endpointErr))
 	}
 
-	if err := configureWindowsInterface(tunnelLUID, parsed.addresses, allowedIPs, parsed.dnsServers, parsed.mtu); err != nil {
+	if err := configureWindowsInterface(tunnelLUID, parsed.addresses, allowedIPs, parsed.dnsServers, clampWireGuardDeviceMTU(parsed.mtu)); err != nil {
 		_ = removeWindowsEndpointRoutes(endpointRoutes)
 		closeDevice(dev)
+		m.removeSession(tunnelKey)
 		return fmt.Errorf("configure windows interface: %w", err)
 	}
 	if len(parsed.dnsServers) > 0 {
@@ -109,6 +145,7 @@ func (m *wireGuardGoManager) startWindows(ctx context.Context, profile state.Wir
 		interfaceName: interfaceName,
 		device:        dev,
 		tunDevice:     tunDev,
+		deviceMTU:     clampWireGuardDeviceMTU(parsed.mtu),
 		windowsLUID:   tunnelLUID,
 		windowsRoutes: endpointRoutes,
 	})
@@ -117,16 +154,162 @@ func (m *wireGuardGoManager) startWindows(ctx context.Context, profile state.Wir
 	return nil
 }
 
+// PinEndpointRoutes installs bypass routes so a switch's new transport can
+// dial out before the device is re-pointed. No-op without a live session.
+func (m *wireGuardGoManager) PinEndpointRoutes(ctx context.Context, profile state.WireGuardProfile) error {
+	parsed, err := parseUserlandConfig(profile.ConfigText)
+	if err != nil {
+		return err
+	}
+	parsed.endpointHosts = mergeEndpointHosts(parsed.endpointHosts, profile.BypassHosts)
+
+	tunnelKey := sanitizeTunnelName(profile.TunnelName)
+	m.guardMu.Lock()
+	defer m.guardMu.Unlock()
+	session, ok := m.session(tunnelKey)
+	if !ok || session == nil || session.windowsLUID == 0 {
+		return nil
+	}
+
+	added, err := addWindowsEndpointRoutes(ctx, m.ActiveLUIDs(), parsed.endpointHosts)
+	// Track what landed even on partial failure, so teardown cleans it up.
+	session.windowsRoutes = mergeSpecSet(session.windowsRoutes, added)
+	return err
+}
+
+// trySwitchInPlace re-points the live device at a new server. Not
+// transactional: a failure after IpcSet is bounded by the caller's rebuild.
+func (m *wireGuardGoManager) trySwitchInPlace(ctx context.Context, tunnelKey string, parsed parsedUserlandConfig, allowedIPs []string) bool {
+	m.guardMu.Lock()
+	defer m.guardMu.Unlock()
+
+	session, ok := m.session(tunnelKey)
+	if !ok || session == nil || session.device == nil || session.windowsLUID == 0 {
+		return false
+	}
+	if tunnelAddrChanged(session.tunDevice, parsed.addresses) {
+		m.logs.Add(state.LogInfo, state.SourceWireGuard, "tunnel address changed; rebuilding the device instead of reconfiguring in place")
+		return false
+	}
+	mtu := clampWireGuardDeviceMTU(parsed.mtu)
+	if !m.matchDeviceMTU(session, mtu) {
+		return false
+	}
+
+	uapi, err := wgConfigToUAPI(stripListenPort(parsed.wgConfig))
+	if err != nil {
+		m.logs.Add(state.LogWarn, state.SourceWireGuard, fmt.Sprintf("in-place reconfigure: uapi translation failed: %v", err))
+		return false
+	}
+	if err := session.device.IpcSet(uapi); err != nil {
+		m.logs.Add(state.LogWarn, state.SourceWireGuard, fmt.Sprintf("in-place reconfigure: uapi apply failed: %v", err))
+		return false
+	}
+	// One WSAECONNRESET from a send to the old transport's closed port kills a
+	// receive routine for good; rebind after IpcSet, when no dead port remains.
+	if err := session.device.BindUpdate(); err != nil {
+		m.logs.Add(state.LogWarn, state.SourceWireGuard, fmt.Sprintf("in-place reconfigure: socket rebind failed: %v", err))
+		return false
+	}
+
+	newRoutes, routeErr := addWindowsEndpointRoutes(ctx, m.ActiveLUIDs(), parsed.endpointHosts)
+	if routeErr != nil {
+		// A failed resolve must not drop tracking of installed routes: the
+		// guard only re-pins what is tracked, so keep the union and no stale removal.
+		m.logs.Add(state.LogWarn, state.SourceWireGuard, fmt.Sprintf("in-place reconfigure: endpoint route warning: %v", routeErr))
+		session.windowsRoutes = mergeSpecSet(session.windowsRoutes, newRoutes)
+	} else {
+		stale := subtractSpecSet(session.windowsRoutes, newRoutes)
+		if err := removeWindowsEndpointRoutes(stale); err != nil {
+			m.logs.Add(state.LogWarn, state.SourceWireGuard, fmt.Sprintf("in-place reconfigure: stale route cleanup warning: %v", err))
+			newRoutes = mergeSpecSet(newRoutes, stale)
+		}
+		session.windowsRoutes = newRoutes
+	}
+
+	if err := configureWindowsInterfaceFn(session.windowsLUID, parsed.addresses, allowedIPs, parsed.dnsServers, mtu); err != nil {
+		m.logs.Add(state.LogWarn, state.SourceWireGuard, fmt.Sprintf("in-place reconfigure: interface config failed: %v", err))
+		return false
+	}
+	updateWrappedTunnelInfo(session, parsed)
+
+	m.logs.Add(state.LogInfo, state.SourceWireGuard, fmt.Sprintf("wireguard re-pointed in place on %s", session.interfaceName))
+	return true
+}
+
+// syncAllowedIPRoutes moves the tunnel's on-link routes to allowedIPs for ApplyAllowedIPs.
+func (m *wireGuardGoManager) syncAllowedIPRoutes(_ context.Context, _ string, session *tunnelSession, parsed parsedUserlandConfig, allowedIPs []string) error {
+	if session.windowsLUID == 0 {
+		return errors.New("tunnel has no interface LUID")
+	}
+	return syncWindowsAllowedIPRoutesFn(session.windowsLUID, parsed.addresses, allowedIPs)
+}
+
+type mtuForcer interface {
+	ForceMTU(mtu int)
+}
+
+// Fails the build if wireguard-go drops ForceMTU, which would silently turn every resize back into a rebuild.
+var _ mtuForcer = (*tun.NativeTun)(nil)
+
+// matchDeviceMTU resizes the live device rather than recreating the adapter, which Windows would
+// re-identify as a new network. The interface NLMTU follows in configureWindowsInterface.
+func (m *wireGuardGoManager) matchDeviceMTU(session *tunnelSession, mtu int) bool {
+	if mtu == session.deviceMTU {
+		return true
+	}
+	forcer, ok := session.tunDevice.(mtuForcer)
+	if !ok || deviceClosed(session.device) {
+		m.logs.Add(state.LogInfo, state.SourceWireGuard, "mtu changed; rebuilding the device instead of reconfiguring in place")
+		return false
+	}
+	if err := forceMTU(forcer, mtu); err != nil {
+		m.logs.Add(state.LogWarn, state.SourceWireGuard, fmt.Sprintf("mtu resize failed, rebuilding the device instead: %v", err))
+		return false
+	}
+	session.deviceMTU = mtu
+	m.logs.Add(state.LogInfo, state.SourceWireGuard, fmt.Sprintf("mtu changed to %d; resized the device in place", mtu))
+	return true
+}
+
+// ForceMTU checks for Close and then sends on the channel Close shuts; wireguard-go closing
+// the tun itself in between panics, and on the health loop that would kill the daemon.
+func forceMTU(forcer mtuForcer, mtu int) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("tun closed mid-resize: %v", r)
+		}
+	}()
+	forcer.ForceMTU(mtu)
+	return nil
+}
+
+func deviceClosed(dev *device.Device) bool {
+	if dev == nil {
+		return true
+	}
+	select {
+	case <-dev.Wait():
+		return true
+	default:
+		return false
+	}
+}
+
 func (m *wireGuardGoManager) stopWindows(_ context.Context, profile state.WireGuardProfile) error {
 	if strings.TrimSpace(profile.TunnelName) == "" {
 		return nil
 	}
 
 	tunnelKey := sanitizeTunnelName(profile.TunnelName)
-	session, hasSession := m.session(tunnelKey)
+	session, hasSession := m.takeSession(tunnelKey)
 	if !hasSession || session == nil {
 		return nil
 	}
+
+	// Wait out any in-flight repair guard before undoing its work.
+	m.guardMu.Lock()
+	defer m.guardMu.Unlock()
 
 	if len(session.windowsRoutes) > 0 {
 		if err := removeWindowsEndpointRoutes(session.windowsRoutes); err != nil {
@@ -141,7 +324,6 @@ func (m *wireGuardGoManager) stopWindows(_ context.Context, profile state.WireGu
 	}
 
 	closeDevice(session.device)
-	m.removeSession(tunnelKey)
 	m.logs.Add(state.LogInfo, state.SourceWireGuard, fmt.Sprintf("wireguard stopped for %s (%s)", profile.TunnelName, session.interfaceName))
 	return nil
 }
@@ -152,12 +334,18 @@ func (m *wireGuardGoManager) statusWindows(_ context.Context, profile state.Wire
 	}
 
 	tunnelKey := sanitizeTunnelName(profile.TunnelName)
-	if m.hasActiveDevice(tunnelKey) {
-		session, _ := m.session(tunnelKey)
-		rxBytes, txBytes, lastHandshake := peerStats(session.device)
+	rxBytes, txBytes, lastHandshake, active, err := m.sessionStats(tunnelKey)
+	if err != nil {
+		return state.WireGuardStatus{}, fmt.Errorf("read wireguard status: %w", err)
+	}
+	if active {
+		interfaceName := profile.TunnelName
+		if session, ok := m.session(tunnelKey); ok && session != nil {
+			interfaceName = session.interfaceName
+		}
 		return state.WireGuardStatus{
 			Running:           true,
-			Detail:            fmt.Sprintf("interface %s running (in-process)", session.interfaceName),
+			Detail:            fmt.Sprintf("interface %s running (in-process)", interfaceName),
 			BytesIn:           rxBytes,
 			BytesOut:          txBytes,
 			LastHandshakeUnix: lastHandshake,

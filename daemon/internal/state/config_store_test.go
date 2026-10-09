@@ -1,24 +1,30 @@
 package state_test
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/state"
 )
 
-// TestFindProfile_ClonesNaiveProfile is the regression test for the
-// cloneProfile aliasing bug: cloneProfile deep-copies WireGuard.DNS and
-// WireGuard.BypassHosts but, before this fix, left the Naive pointer
-// pointing straight at the config store's own internal *state.NaiveProfile.
-// Any caller that mutated the returned profile's Naive field (as
-// api.Service's fallbackToNaive used to, before being patched locally at
-// that one call site) would silently corrupt the store's data without its
-// lock.
-//
-// This test proves the fix by fetching the same profile twice via
-// FindProfile, mutating the first copy's Naive.LocalPort, and asserting the
-// second copy is unaffected — which only holds if each call returns an
-// independent *NaiveProfile.
+func testProfile(id string) state.Profile {
+	return state.Profile{
+		ID:   id,
+		Name: "Test",
+		Cloak: state.CloakProfile{
+			RemoteHost: "example.com",
+			RemotePort: 443,
+			LocalPort:  51820,
+		},
+		WireGuard: state.WireGuardProfile{
+			ConfigText: "[Interface]\nPrivateKey=x\n",
+		},
+	}
+}
+
+// TestFindProfile_ClonesNaiveProfile guards against a Naive pointer aliasing
+// the store's internal state; each FindProfile call must return an independent copy.
 func TestFindProfile_ClonesNaiveProfile(t *testing.T) {
 	dir := t.TempDir()
 	cs, err := state.NewConfigStore(dir + "/config.json")
@@ -33,6 +39,7 @@ func TestFindProfile_ClonesNaiveProfile(t *testing.T) {
 		Cloak: state.CloakProfile{
 			RemoteHost: "example.com",
 			RemotePort: 443,
+			LocalPort:  51820,
 		},
 		Naive: &state.NaiveProfile{
 			RemoteHost: "example.com",
@@ -40,6 +47,9 @@ func TestFindProfile_ClonesNaiveProfile(t *testing.T) {
 			Username:   "u",
 			Password:   "p",
 			LocalPort:  origLocalPort,
+		},
+		WireGuard: state.WireGuardProfile{
+			ConfigText: "[Interface]\nPrivateKey=x\n",
 		},
 	}
 	if err := cs.Set(state.Config{Profiles: []state.Profile{profile}}); err != nil {
@@ -74,13 +84,8 @@ func TestFindProfile_ClonesNaiveProfile(t *testing.T) {
 	}
 }
 
-// TestGet_ClonesTransportProfiles is the regression test for cloneProfile
-// leaving the Reality/Hysteria2/Snowflake pointer fields (and Snowflake's
-// FrontDomains/ICEServers slices) shallow-copied and thus aliased to the
-// config store's internal state — the same aliasing bug cloneNaiveProfile
-// fixed for Naive. It stores a profile carrying all three transports, fetches
-// it via Get(), mutates the returned copy's transport pointers and Snowflake
-// slices, then Get()s again and asserts the store's snapshot is untouched.
+// TestGet_ClonesTransportProfiles guards against Reality/Hysteria2/Snowflake
+// pointers (and Snowflake's slices) aliasing the store's internal state.
 func TestGet_ClonesTransportProfiles(t *testing.T) {
 	dir := t.TempDir()
 	cs, err := state.NewConfigStore(dir + "/config.json")
@@ -100,6 +105,9 @@ func TestGet_ClonesTransportProfiles(t *testing.T) {
 		ID:                   "p1",
 		Name:                 "Test",
 		TransportEndpointIPs: []string{origEndpointIP},
+		WireGuard: state.WireGuardProfile{
+			ConfigText: "[Interface]\nPrivateKey=x\n",
+		},
 		Reality: &state.RealityProfile{
 			RemoteHost: "example.com",
 			RemotePort: 443,
@@ -185,5 +193,125 @@ func TestGet_ClonesTransportProfiles(t *testing.T) {
 	if sp.TransportEndpointIPs[0] != origEndpointIP {
 		t.Errorf("TransportEndpointIPs[0] = %q, want unchanged %q (slice aliased into store) — these drive kill-switch permits",
 			sp.TransportEndpointIPs[0], origEndpointIP)
+	}
+}
+
+// TestNewConfigStore_RecoversFromBackupWhenPrimaryMissing simulates a crash
+// that lost config.json but left config.json.bak; the store must recover it.
+func TestNewConfigStore_RecoversFromBackupWhenPrimaryMissing(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+
+	cs1, err := state.NewConfigStore(path)
+	if err != nil {
+		t.Fatalf("NewConfigStore: %v", err)
+	}
+	if err := cs1.Set(state.Config{Profiles: []state.Profile{testProfile("p1")}}); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+
+	// A second Set produces a config.json.bak holding the first write.
+	second := testProfile("p2")
+	second.Cloak.LocalPort = 51821
+	if err := cs1.Set(state.Config{Profiles: []state.Profile{testProfile("p1"), second}}); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	if _, err := os.Stat(path + ".bak"); err != nil {
+		t.Fatalf("expected backup file to exist: %v", err)
+	}
+
+	if err := os.Remove(path); err != nil {
+		t.Fatalf("simulate crash by removing primary config: %v", err)
+	}
+
+	cs2, err := state.NewConfigStore(path)
+	if err != nil {
+		t.Fatalf("NewConfigStore should recover from backup, got error: %v", err)
+	}
+	cfg := cs2.Get()
+	if len(cfg.Profiles) == 0 {
+		t.Fatal("expected recovered config to carry profiles from the backup, got none")
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("expected recovery to rewrite the primary config: %v", err)
+	}
+}
+
+// TestNewConfigStore_EmptyFileRecoversOrErrors: an empty config.json must
+// never be treated as "no config yet" — recover from backup, or fail loudly.
+func TestNewConfigStore_EmptyFileRecoversOrErrors(t *testing.T) {
+	t.Run("with backup", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "config.json")
+
+		cs1, err := state.NewConfigStore(path)
+		if err != nil {
+			t.Fatalf("NewConfigStore: %v", err)
+		}
+		if err := cs1.Set(state.Config{Profiles: []state.Profile{testProfile("p1")}}); err != nil {
+			t.Fatalf("Set: %v", err)
+		}
+		if err := cs1.Set(state.Config{Profiles: []state.Profile{testProfile("p1")}}); err != nil {
+			t.Fatalf("Set: %v", err)
+		}
+		if _, err := os.Stat(path + ".bak"); err != nil {
+			t.Fatalf("expected backup file to exist: %v", err)
+		}
+
+		if err := os.WriteFile(path, nil, 0o600); err != nil {
+			t.Fatalf("truncate config to simulate a crashed write: %v", err)
+		}
+
+		cs2, err := state.NewConfigStore(path)
+		if err != nil {
+			t.Fatalf("NewConfigStore should recover from backup, got error: %v", err)
+		}
+		if len(cs2.Get().Profiles) == 0 {
+			t.Fatal("expected recovered config to carry profiles from the backup, got none")
+		}
+	})
+
+	t.Run("without backup", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "config.json")
+
+		if err := os.WriteFile(path, nil, 0o600); err != nil {
+			t.Fatalf("write empty config: %v", err)
+		}
+
+		if _, err := state.NewConfigStore(path); err == nil {
+			t.Fatal("expected NewConfigStore to fail on an empty config with no backup, got nil error")
+		}
+	})
+}
+
+// TestNewConfigStore_CleansUpStaleTempFile: a leftover temp file from a
+// crashed persist must not stop startup or be mistaken for the real config.
+func TestNewConfigStore_CleansUpStaleTempFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+
+	cs1, err := state.NewConfigStore(path)
+	if err != nil {
+		t.Fatalf("NewConfigStore: %v", err)
+	}
+	if err := cs1.Set(state.Config{Profiles: []state.Profile{testProfile("p1")}}); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+
+	stalePath := path + ".tmp-stale12345"
+	if err := os.WriteFile(stalePath, []byte("garbage, half-written"), 0o600); err != nil {
+		t.Fatalf("write stale tmp file: %v", err)
+	}
+
+	cs2, err := state.NewConfigStore(path)
+	if err != nil {
+		t.Fatalf("NewConfigStore: %v", err)
+	}
+	if len(cs2.Get().Profiles) != 1 {
+		t.Fatalf("expected the real config to load unaffected, got %d profiles", len(cs2.Get().Profiles))
+	}
+	if _, err := os.Stat(stalePath); !os.IsNotExist(err) {
+		t.Fatalf("expected stale tmp file to be cleaned up, stat err = %v", err)
 	}
 }

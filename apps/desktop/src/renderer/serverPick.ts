@@ -1,6 +1,5 @@
-// Random server selection, used when the user connects without having picked a
-// server. Prefers lightly loaded nodes so a first-time user can't land on a
-// congested one, but stays random so clients don't herd onto a single node.
+// Random server selection for connects with no server picked. Biased toward lightly loaded nodes
+// so a first-timer avoids a congested one, but still random so clients don't herd onto one node.
 
 /** Servers at or below this load are preferred. */
 export const PREFERRED_MAX_LOAD = 75;
@@ -12,11 +11,8 @@ function isLightlyLoaded(server: Loadable): boolean {
   return typeof server.load === "number" && Number.isFinite(server.load) && server.load <= PREFERRED_MAX_LOAD;
 }
 
-/**
- * Uniform pick from the lightly loaded servers, falling back to a uniform pick
- * across all of them when every server is congested or none reports load (older
- * hubs). Not load-proportional weighting. Returns null only for an empty list.
- */
+/** Uniform pick from the lightly loaded servers, falling back to a uniform pick
+ *  across all of them when every server is congested or unreported. */
 export function pickRandomServer<T extends Loadable>(
   servers: readonly T[],
   random: () => number = Math.random
@@ -30,14 +26,8 @@ export function pickRandomServer<T extends Loadable>(
   return pool[index];
 }
 
-/**
- * Which server the picker should show: the in-session pick if it's still listed,
- * else the last connected server if it's still listed, else nothing — so the
- * picker reads "Select server" and Connect rolls a random one.
- *
- * Returning "" is self-healing: it matches no server on the next render, so a
- * lastServerId that hadn't loaded yet gets another chance.
- */
+/** The in-session pick if still listed, else the last connected server if still
+ *  listed, else "" — self-healing, so a not-yet-loaded id gets another chance. */
 export function resolveSelection(
   visible: readonly { id: string }[],
   previousValue: string,

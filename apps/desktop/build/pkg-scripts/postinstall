@@ -9,6 +9,120 @@ SYSTEM_SUPPORT_DIR="/Library/Application Support/PangeaVPN"
 SYSTEM_DAEMON_PATH="${SYSTEM_SUPPORT_DIR}/PangeaDaemon"
 LOG_PATH="/var/log/pangeavpn-daemon.log"
 
+# ── Give the user back their own app files ──────────────────────────────────
+# Up to 0.6.0's daemon took root ownership of these, breaking later app writes.
+USER_LIBRARY_ITEMS="Library/Application Support/pangeavpn-desktop
+Library/Application Support/PangeaVPN
+Library/Caches/PangeaVPN
+Library/Caches/com.pangea.pangeavpn
+Library/Containers/com.pangea.pangeavpn
+Library/HTTPStorages/com.pangea.pangeavpn
+Library/Logs/PangeaVPN
+Library/Preferences/com.pangea.pangeavpn.plist
+Library/Saved Application State/com.pangea.pangeavpn.savedState"
+
+# Those same root mkdir -p calls could have created the parents too. Fixed
+# without -R: the rest of Application Support is nothing to do with us.
+USER_LIBRARY_PARENTS="Library
+Library/Application Support
+Library/Caches"
+
+# Installer.app has no login context, so the console owner is the only clue.
+# install-mac.sh runs us under sudo, where SUDO_USER is the better answer.
+resolve_target_user() {
+  user="$(/usr/bin/stat -f %Su /dev/console 2>/dev/null || true)"
+  case "${user}" in
+    ""|root|loginwindow) user="${SUDO_USER:-}" ;;
+  esac
+  printf "%s" "${user}"
+}
+
+user_home_dir() {
+  home="$(/usr/bin/dscl . -read "/Users/$1" NFSHomeDirectory 2>/dev/null \
+    | /usr/bin/sed -n 's/^NFSHomeDirectory: //p')"
+  printf "%s" "${home:-/Users/$1}"
+}
+
+repair_user_library_ownership() {
+  user="$1"
+  home="$2"
+  group="$(/usr/bin/id -gn "${user}" 2>/dev/null || true)"
+  [ -n "${group}" ] || group="staff"
+
+  # Here-documents, not pipes: a piped while runs in a subshell, and these
+  # paths hold spaces that word splitting would tear apart.
+  while IFS= read -r item; do
+    [ -n "${item}" ] || continue
+    target="${home}/${item}"
+    # A symlink here is tampering, never ours to repair: chown would follow it
+    # and hand the caller whatever system directory it points at.
+    [ ! -L "${target}" ] || continue
+    [ -d "${target}" ] || continue
+    [ "$(/usr/bin/stat -f %Su "${target}" 2>/dev/null)" = "root" ] || continue
+    /usr/sbin/chown "${user}:${group}" "${target}" >/dev/null 2>&1 || true
+  done <<PARENTS
+${USER_LIBRARY_PARENTS}
+PARENTS
+
+  while IFS= read -r item; do
+    [ -n "${item}" ] || continue
+    target="${home}/${item}"
+    [ ! -L "${target}" ] || continue
+    [ -e "${target}" ] || continue
+    stray="$(/usr/bin/find "${target}" ! -user "${user}" -print 2>/dev/null | /usr/bin/head -1 || true)"
+    [ -n "${stray}" ] || continue
+    # -P so a symlink deeper in the tree is changed itself, never followed.
+    /usr/sbin/chown -R -P "${user}:${group}" "${target}" >/dev/null 2>&1 || true
+  done <<ITEMS
+${USER_LIBRARY_ITEMS}
+ITEMS
+}
+
+# Before the app lookup below, which exits early when the bundle is missing.
+target_user="$(resolve_target_user)"
+if [ -n "${target_user}" ] && [ "${target_user}" != "root" ]; then
+  target_home="$(user_home_dir "${target_user}")"
+  # Their own home, or we are being pointed somewhere we have no business in.
+  if [ -d "${target_home}" ] && [ ! -L "${target_home}" ] \
+    && [ "$(/usr/bin/stat -f %Su "${target_home}" 2>/dev/null)" = "${target_user}" ]; then
+    # Never fatal under set -e: a permissions repair must not fail the install.
+    repair_user_library_ownership "${target_user}" "${target_home}" || true
+  fi
+fi
+
+# pf lets this group's sockets leave beside the tunnel, so it stays memberless on a
+# gid nobody holds: 400-499 sits above Apple's system groups and below local users.
+SPLIT_GROUP="_pangeasplit"
+
+ensure_split_group() {
+  if /usr/bin/dscl . -read "/Groups/${SPLIT_GROUP}" PrimaryGroupID >/dev/null 2>&1; then
+    /usr/bin/dscl . -delete "/Groups/${SPLIT_GROUP}" GroupMembership >/dev/null 2>&1 || true
+    /usr/bin/dscl . -delete "/Groups/${SPLIT_GROUP}" GroupMembers >/dev/null 2>&1 || true
+    return 0
+  fi
+  used="$( { /usr/bin/dscl . -list /Groups PrimaryGroupID; /usr/bin/dscl . -list /Users PrimaryGroupID; } 2>/dev/null \
+    | /usr/bin/awk '{ print $2 }')"
+  gid=400
+  while [ "${gid}" -lt 500 ]; do
+    if ! printf '%s\n' "${used}" | /usr/bin/grep -qx "${gid}" \
+      && [ -z "$(/usr/bin/dscacheutil -q group -a gid "${gid}" 2>/dev/null)" ] \
+      && [ -z "$(/usr/bin/dscl /Search -search /Users PrimaryGroupID "${gid}" 2>/dev/null)" ]; then
+      break
+    fi
+    gid=$((gid + 1))
+  done
+  [ "${gid}" -lt 500 ] || return 1
+  if ! /usr/bin/dscl . -create "/Groups/${SPLIT_GROUP}" \
+    || ! /usr/bin/dscl . -create "/Groups/${SPLIT_GROUP}" PrimaryGroupID "${gid}"; then
+    /usr/bin/dscl . -delete "/Groups/${SPLIT_GROUP}" >/dev/null 2>&1 || true
+    return 1
+  fi
+  /usr/bin/dscl . -create "/Groups/${SPLIT_GROUP}" RealName "PangeaVPN split tunnelling" >/dev/null 2>&1 || true
+  /usr/bin/dscl . -create "/Groups/${SPLIT_GROUP}" Password "*" >/dev/null 2>&1 || true
+}
+
+ensure_split_group || echo "Could not create the ${SPLIT_GROUP} group; excluding apps from the VPN stays unavailable"
+
 install_base="${2:-/Applications}"
 volume_root="${3:-/}"
 app_path=""
@@ -16,27 +130,42 @@ candidate_a="${volume_root%/}${install_base%/}/${APP_NAME}"
 candidate_b="${install_base%/}/${APP_NAME}"
 candidate_c="/Applications/${APP_NAME}"
 
+# We are about to stage this binary as a root daemon. An installer lays its
+# payload down root-owned, so anything else was planted rather than installed.
+is_trusted_bundle() {
+  bundle="$1"
+  daemon="${bundle}/Contents/Resources/daemon/daemon"
+  [ ! -L "${bundle}" ] || return 1
+  [ ! -L "${daemon}" ] || return 1
+  [ -x "${daemon}" ] || return 1
+  [ "$(/usr/bin/stat -f %u "${bundle}" 2>/dev/null)" = "0" ] || return 1
+  [ "$(/usr/bin/stat -f %u "${daemon}" 2>/dev/null)" = "0" ] || return 1
+}
+
 for candidate in "$candidate_a" "$candidate_b" "$candidate_c"; do
-  if [ -x "${candidate}/Contents/Resources/daemon/daemon" ]; then
+  if is_trusted_bundle "${candidate}"; then
     app_path="${candidate}"
     break
   fi
 done
 
 if [ -z "${app_path}" ]; then
-  mdfind_output="$(/usr/bin/mdfind 'kMDItemCFBundleIdentifier == "com.pangea.pangeavpn"' 2>/dev/null || true)"
+  # Scoped to the install target: an unscoped Spotlight query returns lookalike
+  # bundles planted anywhere it indexes, every user's home included.
+  search_root="${volume_root%/}${install_base%/}"
+  [ -d "${search_root}" ] || search_root="/Applications"
+  # Read via a here-document rather than a pipe so the assignment survives:
+  # a piped `while` runs in a subshell, and world-writable /tmp is unsafe here.
+  mdfind_output="$(/usr/bin/mdfind -onlyin "${search_root}" 'kMDItemCFBundleIdentifier == "com.pangea.pangeavpn"' 2>/dev/null || true)"
   if [ -n "${mdfind_output}" ]; then
-    echo "${mdfind_output}" | while IFS= read -r candidate; do
-      if [ -n "${candidate}" ] && [ -x "${candidate}/Contents/Resources/daemon/daemon" ]; then
+    while IFS= read -r candidate; do
+      if [ -n "${candidate}" ] && is_trusted_bundle "${candidate}"; then
         app_path="${candidate}"
-        echo "${app_path}" > "/tmp/pangeavpn-app-path.$$"
         break
       fi
-    done
-    if [ -f "/tmp/pangeavpn-app-path.$$" ]; then
-      app_path="$(cat "/tmp/pangeavpn-app-path.$$" 2>/dev/null || true)"
-      rm -f "/tmp/pangeavpn-app-path.$$"
-    fi
+    done <<MDFIND
+${mdfind_output}
+MDFIND
   fi
 fi
 
@@ -46,28 +175,33 @@ if [ -z "${app_path}" ]; then
 fi
 daemon_src="${app_path}/Contents/Resources/daemon/daemon"
 
+# A symlink here would redirect the staged root daemon somewhere else.
+if [ -L "${SYSTEM_SUPPORT_DIR}" ]; then
+  echo "'${SYSTEM_SUPPORT_DIR}' is a symlink; refusing to stage the daemon"
+  exit 1
+fi
+
 /bin/mkdir -p "${SYSTEM_SUPPORT_DIR}"
 
-# Strip quarantine from source daemon before copying — downloaded .pkg files
-# propagate the com.apple.quarantine xattr to all extracted files and macOS
-# Gatekeeper will kill quarantined unsigned binaries on Apple Silicon.
+# A downloaded .pkg propagates com.apple.quarantine to everything it extracts,
+# and Gatekeeper kills quarantined unsigned binaries on Apple Silicon.
 /usr/bin/xattr -dr com.apple.quarantine "${app_path}" >/dev/null 2>&1 || true
 
 # WireGuard and Cloak run in-process inside the daemon, so only the daemon
 # binary itself needs to be staged.
+# rm first: install would otherwise write straight through a planted symlink.
+/bin/rm -f "${SYSTEM_DAEMON_PATH}"
 /usr/bin/install -m 755 -o root -g wheel "${daemon_src}" "${SYSTEM_DAEMON_PATH}"
 /usr/sbin/chown root:wheel "${SYSTEM_SUPPORT_DIR}"
 /bin/chmod 755 "${SYSTEM_SUPPORT_DIR}"
 
-# Strip quarantine from installed daemon and re-sign with ad-hoc signature.
-# Apple Silicon requires all executables to carry a valid signature — copying
-# can invalidate the original ad-hoc signature so we force re-sign here.
+# Copying can invalidate the ad-hoc signature Apple Silicon requires, so the
+# installed daemon is stripped and re-signed here.
 /usr/bin/xattr -dr com.apple.quarantine "${SYSTEM_SUPPORT_DIR}" >/dev/null 2>&1 || true
-/usr/bin/codesign --force --sign - "${SYSTEM_DAEMON_PATH}" >/dev/null 2>&1 || true
+/usr/bin/codesign --force --sign - "${SYSTEM_DAEMON_PATH}" \
+  || echo "codesign failed for ${SYSTEM_DAEMON_PATH}"
 
-# Do NOT start the daemon here. The install-mac.sh script handles token
-# creation, plist registration, and daemon startup. Starting the daemon
-# from postinstall without a token causes a crash loop (KeepAlive=true)
-# and overwrites signed binaries when install-mac.sh copies them again.
+# Do NOT start the daemon here — install-mac.sh owns token creation, plist
+# registration, and startup. Starting it tokenless crash-loops under KeepAlive.
 
 exit 0

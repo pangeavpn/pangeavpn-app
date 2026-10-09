@@ -7,19 +7,18 @@ import (
 	"sync/atomic"
 )
 
-// bridgeUDP relays WireGuard's UDP datagrams between the local loopback
-// socket (WireGuard's peer Endpoint) and the REALITY outbound's packet
-// connection — a single virtual UDP session carried inside the VLESS+TLS
-// stream (see manager.go). WireGuard has exactly one remote peer, so the
-// local side is a single-flow NAT: track the last sender and mirror
-// responses back to it. remoteAddr is the fixed destination (the node's
-// local WireGuard listener) every datagram is addressed to on the wire.
-//
-// Returns nil on a clean shutdown (ctx cancelled or a socket closed as part
-// of Stop), or the first unexpected I/O error otherwise.
-func bridgeUDP(ctx context.Context, local *net.UDPConn, remote net.PacketConn, remoteAddr net.Addr) error {
+// bridgeUDP relays WireGuard's single-peer UDP session between the local
+// loopback socket and the REALITY outbound, closing both on every return path.
+func bridgeUDP(ctx context.Context, local *net.UDPConn, remote net.PacketConn, remoteAddr net.Addr, debugf func(format string, args ...any)) error {
+	defer local.Close()
+	defer remote.Close()
+	if debugf == nil {
+		debugf = func(string, ...any) {}
+	}
+
 	errCh := make(chan error, 2)
 	var peer atomic.Pointer[net.UDPAddr]
+	var sent, received, dropped atomic.Int64
 
 	go func() {
 		buf := make([]byte, 65535)
@@ -29,10 +28,18 @@ func bridgeUDP(ctx context.Context, local *net.UDPConn, remote net.PacketConn, r
 				errCh <- err
 				return
 			}
-			peer.Store(addr)
+			if !acceptFromPeer(&peer, addr, buf[:n]) {
+				if dropped.Add(1) == 1 {
+					debugf("bridge dropped a datagram from unpinned local source %s (%dB)", addr, n)
+				}
+				continue
+			}
 			if _, err := remote.WriteTo(buf[:n], remoteAddr); err != nil {
 				errCh <- err
 				return
+			}
+			if sent.Add(1) == 1 {
+				debugf("bridge forwarded first local→remote datagram (%dB from %s)", n, addr)
 			}
 		}
 	}()
@@ -53,16 +60,48 @@ func bridgeUDP(ctx context.Context, local *net.UDPConn, remote net.PacketConn, r
 				errCh <- err
 				return
 			}
+			if received.Add(1) == 1 {
+				debugf("bridge forwarded first remote→local datagram (%dB to %s)", n, dst)
+			}
 		}
 	}()
 
-	select {
-	case <-ctx.Done():
-		return nil
-	case err := <-errCh:
-		if errors.Is(err, net.ErrClosed) {
-			return nil
-		}
+	finish := func(err error) error {
+		debugf("bridge closed: %d sent, %d received, %d dropped", sent.Load(), received.Load(), dropped.Load())
 		return err
 	}
+	select {
+	case <-ctx.Done():
+		return finish(nil)
+	case err := <-errCh:
+		if errors.Is(err, net.ErrClosed) {
+			return finish(nil)
+		}
+		return finish(err)
+	}
+}
+
+// wireGuardInitiationLen is a WireGuard handshake-initiation datagram: message
+// type 1 plus three zero reserved bytes, 148 bytes total.
+const wireGuardInitiationLen = 148
+
+// acceptFromPeer pins the reply peer to the first sender, rejecting other
+// local sources; a well-formed handshake initiation re-pins after a device rebuild.
+func acceptFromPeer(peer *atomic.Pointer[net.UDPAddr], addr *net.UDPAddr, pkt []byte) bool {
+	if peer.CompareAndSwap(nil, addr) {
+		return true
+	}
+	pinned := peer.Load()
+	if pinned != nil && pinned.IP.Equal(addr.IP) && pinned.Port == addr.Port {
+		return true
+	}
+	if isWireGuardInitiation(pkt) {
+		peer.Store(addr)
+		return true
+	}
+	return false
+}
+
+func isWireGuardInitiation(pkt []byte) bool {
+	return len(pkt) == wireGuardInitiationLen && pkt[0] == 1 && pkt[1] == 0 && pkt[2] == 0 && pkt[3] == 0
 }

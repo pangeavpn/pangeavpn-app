@@ -8,10 +8,7 @@ export const MTU_MAX = 1420;
 /** Conservative default, unchanged from before the setting existed. */
 export const MTU_DEFAULT = 1380;
 
-/**
- * Parse and range-check an MTU from an untrusted source — IPC input or a
- * hand-editable settings.json. Returns null when the value is unusable.
- */
+/** Parse and range-check an MTU from an untrusted source. Returns null when unusable. */
 export function normalizeMtu(value: unknown): number | null {
   let n: number;
   if (typeof value === "number") {

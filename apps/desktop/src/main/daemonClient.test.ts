@@ -1,34 +1,234 @@
 import assert from "node:assert/strict";
+import http from "node:http";
+import type { AddressInfo } from "node:net";
 import test from "node:test";
-import { DaemonClient, TransportExhaustedError } from "./daemonClient.ts";
+import { DaemonClient, DaemonHttpError, HostOfflineError, TransportExhaustedError } from "./daemonClient.ts";
+
+async function serve(
+  t: { after: (fn: () => unknown) => void },
+  handler: http.RequestListener
+): Promise<{ baseUrl: string; server: http.Server }> {
+  const server = http.createServer(handler);
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const { port } = server.address() as AddressInfo;
+  return { baseUrl: `http://127.0.0.1:${port}`, server };
+}
 
 test("DaemonClient exposes transport exhaustion as a typed error", async (t) => {
-  const originalFetch = globalThis.fetch;
-  t.after(() => {
-    globalThis.fetch = originalFetch;
+  const { baseUrl } = await serve(t, (_req, res) => {
+    res.writeHead(500, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: false, error: "transport_exhausted" }));
   });
-  globalThis.fetch = async () => new Response(
-    JSON.stringify({ ok: false, error: "transport_exhausted" }),
-    { status: 500, headers: { "Content-Type": "application/json" } }
-  );
 
-  const client = new DaemonClient("http://127.0.0.1:8787", async () => "token");
+  const client = new DaemonClient(baseUrl, async () => "token");
   await assert.rejects(client.connect("profile"), TransportExhaustedError);
 });
 
-test("DaemonClient leaves unrelated daemon failures non-retryable", async (t) => {
-  const originalFetch = globalThis.fetch;
-  t.after(() => {
-    globalThis.fetch = originalFetch;
+test("DaemonClient exposes an offline hold as a typed error", async (t) => {
+  const { baseUrl } = await serve(t, (_req, res) => {
+    res.writeHead(500, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: false, error: "host_offline" }));
   });
-  globalThis.fetch = async () => new Response(
-    JSON.stringify({ ok: false }),
-    { status: 500, headers: { "Content-Type": "application/json" } }
-  );
 
-  const client = new DaemonClient("http://127.0.0.1:8787", async () => "token");
+  const client = new DaemonClient(baseUrl, async () => "token");
+  await assert.rejects(client.connect("profile"), HostOfflineError);
+});
+
+test("DaemonClient leaves unrelated daemon failures non-retryable", async (t) => {
+  const { baseUrl } = await serve(t, (_req, res) => {
+    res.writeHead(500, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: false }));
+  });
+
+  const client = new DaemonClient(baseUrl, async () => "token");
   await assert.rejects(
     client.connect("profile"),
     (error) => error instanceof Error && !(error instanceof TransportExhaustedError)
+  );
+});
+
+// The field failure this guards: a pooled keep-alive socket that died quietly
+// turned every later poll into a 5s timeout while the daemon sat healthy.
+test("DaemonClient opens a fresh connection per request", async (t) => {
+  const { baseUrl, server } = await serve(t, (_req, res) => {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ state: "disconnected" }));
+  });
+  let connections = 0;
+  server.on("connection", () => {
+    connections += 1;
+  });
+
+  const client = new DaemonClient(baseUrl, async () => "token");
+  await client.getStatus();
+  await client.getStatus();
+  assert.equal(connections, 2, "requests must not share a pooled socket");
+});
+
+test("DaemonClient falls through a stale token to a working one", async (t) => {
+  const { baseUrl } = await serve(t, (req, res) => {
+    if (req.headers.authorization !== "Bearer good") {
+      res.writeHead(401, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "unauthorized" }));
+      return;
+    }
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ state: "disconnected" }));
+  });
+
+  const client = new DaemonClient(baseUrl, async () => ["stale", "good"]);
+  const status = await client.getStatus();
+  assert.equal(status.state, "disconnected");
+});
+
+test("DaemonClient reports a stalled daemon as a timeout", async (t) => {
+  const { baseUrl } = await serve(t, () => {
+    // Never respond; the client's timer must fire.
+  });
+
+  const client = new DaemonClient(baseUrl, async () => "token", { defaultRequestTimeoutMs: 200 });
+  await assert.rejects(client.getStatus(), /daemon request timeout \(GET \/status\)/);
+});
+
+test("DaemonClient reports a missing post-quantum route as no offer", async (t) => {
+  const { baseUrl } = await serve(t, (_req, res) => {
+    res.writeHead(404, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "not found" }));
+  });
+
+  const client = new DaemonClient(baseUrl, async () => "token");
+  assert.equal(await client.pqOffer(), null);
+  assert.equal(await client.pqEncapsulate("ml-kem-768", "AAAA"), null);
+});
+
+test("DaemonClient surfaces a post-quantum failure other than 404", async (t) => {
+  const { baseUrl } = await serve(t, (req, res) => {
+    res.writeHead(req.url === "/pq/offer" ? 500 : 400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "pq: unknown or expired offer" }));
+  });
+
+  const client = new DaemonClient(baseUrl, async () => "token");
+  await assert.rejects(client.pqOffer(), DaemonHttpError);
+  await assert.rejects(client.pqFinish("id", { algorithm: "ml-kem-768", kemCiphertext: "AAAA" }), /expired offer/);
+});
+
+test("DaemonClient hands back the daemon's pre-shared key", async (t) => {
+  const { baseUrl } = await serve(t, (req, res) => {
+    let raw = "";
+    req.on("data", (chunk) => (raw += chunk));
+    req.on("end", () => {
+      assert.deepEqual(JSON.parse(raw), { id: "abc", algorithm: "ml-kem-768", kemCiphertext: "Y3Q=" });
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ presharedKey: "cHNr" }));
+    });
+  });
+
+  const client = new DaemonClient(baseUrl, async () => "token");
+  assert.equal(await client.pqFinish("abc", { algorithm: "ml-kem-768", kemCiphertext: "Y3Q=" }), "cHNr");
+});
+
+test("DaemonClient reads an old daemon's missing split-tunnel route as unsupported", async (t) => {
+  const { baseUrl } = await serve(t, (_req, res) => {
+    res.writeHead(404, { "Content-Type": "text/plain" });
+    res.end("404 page not found\n");
+  });
+
+  const client = new DaemonClient(baseUrl, async () => "token");
+  assert.equal(await client.getSplitTunnel(), null);
+  assert.equal(await client.setSplitTunnel({ enabled: true, apps: [], cidrs: [] }), null);
+});
+
+test("DaemonClient normalises the split-tunnel config and posts only the write fields", async (t) => {
+  const games = "C:\\Games\\";
+  const bodies: unknown[] = [];
+  const { baseUrl } = await serve(t, (req, res) => {
+    let raw = "";
+    req.on("data", (chunk) => (raw += chunk));
+    req.on("end", () => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      if (req.method === "GET") {
+        res.end(JSON.stringify({
+          enabled: true,
+          apps: [games],
+          cidrs: [],
+          appsSupported: true,
+          unavailableReason: "",
+          active: true,
+          pending: false
+        }));
+        return;
+      }
+      bodies.push(JSON.parse(raw));
+      res.end(JSON.stringify({ enabled: false, apps: [games], cidrs: ["10.0.0.0/8"], pending: true, cidrsDropped: true }));
+    });
+  });
+
+  const client = new DaemonClient(baseUrl, async () => "token");
+  const current = await client.getSplitTunnel();
+  assert.ok(current);
+  assert.equal(current.appsSupported, true);
+  assert.equal(current.cidrsDropped, false);
+  const body = { enabled: false, apps: [games], cidrs: ["10.0.0.0/8"], protect: ["C:\\P\\PangeaVPN.exe"] };
+  const result = await client.setSplitTunnel(body, current);
+  assert.deepEqual(bodies, [body]);
+  assert.deepEqual(result, {
+    ok: true,
+    config: {
+      enabled: false,
+      apps: [games],
+      cidrs: ["10.0.0.0/8"],
+      appsSupported: true,
+      unavailableReason: "",
+      active: true,
+      pending: true,
+      cidrsDropped: true
+    }
+  });
+});
+
+test("DaemonClient turns a split-tunnel 400 into per-entry codes", async (t) => {
+  const { baseUrl } = await serve(t, (_req, res) => {
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({
+      ok: false,
+      error: "invalid_split_tunnel",
+      invalid: [{ field: "apps", index: 0, code: "tooBroad" }, { field: "cidrs", index: 2, code: "tooManyRoutes" }]
+    }));
+  });
+
+  const client = new DaemonClient(baseUrl, async () => "token");
+  assert.deepEqual(await client.setSplitTunnel({ enabled: true, apps: ["/usr/"], cidrs: [] }), {
+    ok: false,
+    invalid: [
+      { field: "apps", index: 0, code: "tooBroad" },
+      { field: "cidrs", index: 2, code: "tooManyRoutes" }
+    ]
+  });
+});
+
+test("DaemonClient throws any other split-tunnel 400 with its body attached", async (t) => {
+  const { baseUrl } = await serve(t, (_req, res) => {
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: false, error: "invalid json" }));
+  });
+
+  const client = new DaemonClient(baseUrl, async () => "token");
+  await assert.rejects(
+    client.setSplitTunnel({ enabled: true, apps: [], cidrs: [] }),
+    (error) => error instanceof DaemonHttpError && error.status === 400 && error.body.includes("invalid json")
+  );
+});
+
+test("DaemonClient reports a stalled split-tunnel call as a timeout", async (t) => {
+  const { baseUrl } = await serve(t, () => {
+    // Never respond.
+  });
+
+  const client = new DaemonClient(baseUrl, async () => "token", { defaultRequestTimeoutMs: 200 });
+  await assert.rejects(client.getSplitTunnel(), /daemon request timeout \(GET \/split-tunnel\)/);
+  await assert.rejects(
+    client.setSplitTunnel({ enabled: false, apps: [], cidrs: [] }),
+    /daemon request timeout \(POST \/split-tunnel\)/
   );
 });

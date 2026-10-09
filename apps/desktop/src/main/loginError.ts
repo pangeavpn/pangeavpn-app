@@ -1,0 +1,73 @@
+import type { LoginErrorCode } from "../shared/ipc.ts";
+
+// Matched on `name` and `status` rather than instanceof: keeps this pure and
+// testable without dragging electron in through pangeaApiClient.
+interface ErrorLike {
+  name?: unknown;
+  message?: unknown;
+  status?: unknown;
+  code?: unknown;
+}
+
+const STATUS_CARRIERS = new Set(["LoginRejectedError", "AuthError"]);
+
+// Every way the platform spells "the bytes never got there". A hub that
+// answered has a status, which is checked first.
+const TRANSPORT_FAILURE =
+  /(fetch failed|ENOTFOUND|ECONNREFUSED|ECONNRESET|ETIMEDOUT|ENETUNREACH|EHOSTUNREACH|EAI_AGAIN|certificate|CERT_|SSL|socket hang up|Hub transport unavailable)/i;
+
+// Errnos that mean this computer could not store the credential. Network
+// errnos are deliberately absent: those are reachability, not storage.
+const LOCAL_STORAGE_ERRNOS = new Set([
+  "EACCES",
+  "EPERM",
+  "EROFS",
+  "ENOSPC",
+  "EDQUOT",
+  "EXDEV",
+  "EIO",
+  "EISDIR",
+  "ENOTDIR",
+  "ELOOP",
+  "ENAMETOOLONG",
+  "EMFILE",
+  "ENFILE",
+  "EBUSY"
+]);
+
+function asErrorLike(err: unknown): ErrorLike | null {
+  if (err instanceof Error) return err as ErrorLike;
+  return null;
+}
+
+function statusOf(err: ErrorLike): number | null {
+  if (!STATUS_CARRIERS.has(String(err.name))) return null;
+  return typeof err.status === "number" ? err.status : null;
+}
+
+function fromStatus(status: number): LoginErrorCode {
+  if (status === 429) return "RATE_LIMITED";
+  if (status >= 500) return "SERVER_ERROR";
+  if (status >= 400) return "INVALID_ACCOUNT_NUMBER";
+  return "UNKNOWN";
+}
+
+/** Turns whatever the sign-in path threw into one code the UI can explain.
+ *  Unrecognised failures stay UNKNOWN rather than guess at a cause. */
+export function classifyLoginError(err: unknown): LoginErrorCode {
+  const error = asErrorLike(err);
+  if (!error) return "UNKNOWN";
+
+  const name = String(error.name ?? "");
+  if (name === "SubscriptionExpiredError") return "SUBSCRIPTION_EXPIRED";
+  if (name === "HubUnreachableError") return "HUB_UNREACHABLE";
+
+  const status = statusOf(error);
+  if (status !== null) return fromStatus(status);
+
+  const message = typeof error.message === "string" ? error.message : "";
+  if (name === "AbortError" || /timeout|timed out|aborted/i.test(message)) return "TIMEOUT";
+  if (TRANSPORT_FAILURE.test(message)) return "HUB_UNREACHABLE";
+  if (typeof error.code === "string" && LOCAL_STORAGE_ERRNOS.has(error.code)) return "LOCAL_STORAGE_FAILED";
+  return "UNKNOWN";
+}

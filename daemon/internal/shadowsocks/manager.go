@@ -27,9 +27,14 @@ var (
 // Manager owns a loopback UDP listener WireGuard's peer Endpoint points at,
 // bridged to a single in-process Shadowsocks outbound.
 type Manager struct {
+	// startMu serializes Start/Stop end to end so two callers can't both pass
+	// the running check and race to bind the same local port.
+	startMu sync.Mutex
+
 	mu      sync.RWMutex
 	logs    *state.LogStore
 	running bool
+	profile state.ShadowsocksProfile
 
 	engine    *box.Box
 	localConn *net.UDPConn
@@ -54,21 +59,33 @@ func NewManager(logs *state.LogStore) *Manager {
 // Start builds a single-outbound engine and wires a local UDP listener to it.
 // No SessionWaiter on purpose: ListenPacket succeeds on a wrong password.
 func (m *Manager) Start(ctx context.Context, profile state.ShadowsocksProfile) error {
-	_ = ctx
+	m.startMu.Lock()
+	defer m.startMu.Unlock()
 
-	m.mu.Lock()
-	if m.running {
-		m.mu.Unlock()
-		return nil
+	m.mu.RLock()
+	running, current := m.running, m.profile
+	m.mu.RUnlock()
+
+	if running {
+		if current == profile {
+			return nil
+		}
+		// A different profile while running is a server/credential switch,
+		// not a no-op: tear down the old session before building a new one.
+		if err := m.Stop(ctx); err != nil {
+			return fmt.Errorf("shadowsocks: stop previous session: %w", err)
+		}
 	}
+
 	if err := validateProfile(profile); err != nil {
-		m.mu.Unlock()
 		return err
 	}
 
 	targetHost := targetHostOrDefault(profile.TargetHost)
 	targetPort := targetPortOrDefault(profile.TargetPort)
 
+	// engineCtx is rooted independently of ctx: the engine and bridge outlive
+	// this call, which is typically request-scoped.
 	engineCtx, cancel := context.WithCancel(context.Background())
 
 	engine, err := box.New(box.Options{
@@ -84,12 +101,11 @@ func (m *Manager) Start(ctx context.Context, profile state.ShadowsocksProfile) e
 	})
 	if err != nil {
 		cancel()
-		m.mu.Unlock()
 		return fmt.Errorf("shadowsocks: build engine: %w", err)
 	}
 	if err := engine.Start(); err != nil {
+		engine.Close()
 		cancel()
-		m.mu.Unlock()
 		return fmt.Errorf("shadowsocks: start engine: %w", err)
 	}
 
@@ -97,18 +113,18 @@ func (m *Manager) Start(ctx context.Context, profile state.ShadowsocksProfile) e
 	if !loaded {
 		engine.Close()
 		cancel()
-		m.mu.Unlock()
 		return errors.New("shadowsocks: outbound not registered")
 	}
 
+	// Bound by both the caller's ctx (so an aborted connect attempt gives up
+	// promptly) and a hard cap in case ctx is context.Background().
 	destination := M.ParseSocksaddrHostPort(targetHost, uint16(targetPort))
-	dialCtx, dialCancel := context.WithTimeout(engineCtx, 10*time.Second)
+	dialCtx, dialCancel := context.WithTimeout(ctx, 10*time.Second)
 	remote, err := outbound.ListenPacket(dialCtx, destination)
 	dialCancel()
 	if err != nil {
 		engine.Close()
 		cancel()
-		m.mu.Unlock()
 		return fmt.Errorf("shadowsocks: listen packet: %w", err)
 	}
 
@@ -117,7 +133,6 @@ func (m *Manager) Start(ctx context.Context, profile state.ShadowsocksProfile) e
 		remote.Close()
 		engine.Close()
 		cancel()
-		m.mu.Unlock()
 		return fmt.Errorf("shadowsocks: resolve local addr: %w", err)
 	}
 	localConn, err := net.ListenUDP("udp", localAddr)
@@ -125,7 +140,6 @@ func (m *Manager) Start(ctx context.Context, profile state.ShadowsocksProfile) e
 		remote.Close()
 		engine.Close()
 		cancel()
-		m.mu.Unlock()
 		return fmt.Errorf("shadowsocks: listen local udp: %w", err)
 	}
 
@@ -136,6 +150,7 @@ func (m *Manager) Start(ctx context.Context, profile state.ShadowsocksProfile) e
 
 	done := make(chan struct{})
 
+	m.mu.Lock()
 	m.generation++
 	generation := m.generation
 	m.engine = engine
@@ -144,6 +159,7 @@ func (m *Manager) Start(ctx context.Context, profile state.ShadowsocksProfile) e
 	m.cancel = cancel
 	m.boundLocalPort = boundPort
 	m.running = true
+	m.profile = profile
 	m.done = done
 	m.mu.Unlock()
 
@@ -154,6 +170,9 @@ func (m *Manager) Start(ctx context.Context, profile state.ShadowsocksProfile) e
 	remoteAddr := destinationUDPAddr(targetHost, targetPort)
 	go func() {
 		bridgeErr := bridgeUDP(engineCtx, localConn, remote, remoteAddr)
+		cancel()
+		localConn.Close()
+		remote.Close()
 
 		m.mu.Lock()
 		if m.generation == generation {
@@ -243,15 +262,16 @@ func (m *Manager) Stop(ctx context.Context) error {
 		return nil
 	case <-ctx.Done():
 		m.forceResetState()
-		return nil
+		m.logs.Add(state.LogWarn, state.SourceShadowsocks, "shadowsocks stop cancelled; forced shutdown")
+		return ctx.Err()
 	}
 }
 
-// forceResetState drops shared state to a stopped configuration even if the
-// bridge goroutine has not finished; its generation check keeps it harmless.
+// forceResetState drops shared state to stopped and closes the engine itself,
+// so a subsequent Start does not race a still-live SS session.
 func (m *Manager) forceResetState() {
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	engine := m.engine
 	m.running = false
 	m.engine = nil
 	m.localConn = nil
@@ -259,5 +279,11 @@ func (m *Manager) forceResetState() {
 	m.cancel = nil
 	m.boundLocalPort = 0
 	m.done = nil
+	m.profile = state.ShadowsocksProfile{}
 	m.generation++
+	m.mu.Unlock()
+
+	if engine != nil {
+		engine.Close()
+	}
 }

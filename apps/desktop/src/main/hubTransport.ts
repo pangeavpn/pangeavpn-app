@@ -12,12 +12,32 @@ export function parseConnectStatus(head: string): number {
   return Number(match[1]);
 }
 
+// The DoH direct-IP path carries a sealed /v1/secure envelope, so TLS is
+// carrier only: empty SNI hides the hub, and validation buys nothing.
+export const DOH_TLS_OPTIONS = {
+  servername: "",
+  rejectUnauthorized: false
+} as const;
+
 const MAX_CONNECT_HEAD = 8192;
+const MAX_RESPONSE_BODY = 25 * 1024 * 1024;
+
+// host:port or bare host, no CRLF/whitespace/control characters — an injected
+// value in either the CONNECT target or Host header opens a tunnel to any destination.
+const SAFE_HOST_PATTERN = /^[A-Za-z0-9.:_-]+$/;
+
+function isSafeHost(value: string): boolean {
+  return SAFE_HOST_PATTERN.test(value);
+}
 
 /** Sends CONNECT. Bytes after the head are unshifted back so the TLS handshake
  *  that follows keeps its first record. */
-function performConnect(socket: net.Socket, target: string): Promise<void> {
+function performConnect(socket: net.Socket, target: string, proxyAuthHeader?: string): Promise<void> {
   return new Promise<void>((resolve, reject) => {
+    if (!isSafeHost(target)) {
+      reject(new Error("Invalid CONNECT target"));
+      return;
+    }
     let buf = Buffer.alloc(0);
 
     const cleanup = (): void => {
@@ -69,8 +89,16 @@ function performConnect(socket: net.Socket, target: string): Promise<void> {
     socket.on("error", onError);
     socket.on("end", onEnd);
 
-    socket.write(`CONNECT ${target} HTTP/1.1\r\nHost: ${target}\r\n\r\n`);
+    const authLine = proxyAuthHeader ? `Proxy-Authorization: ${proxyAuthHeader}\r\n` : "";
+    socket.write(`CONNECT ${target} HTTP/1.1\r\nHost: ${target}\r\n${authLine}\r\n`);
   });
+}
+
+function buildProxyAuthHeader(username?: string, password?: string): string | undefined {
+  if (!username || !password) {
+    return undefined;
+  }
+  return `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`;
 }
 
 export interface ConnectProxyOptions {
@@ -81,12 +109,14 @@ export interface ConnectProxyOptions {
   /** Extra trust anchor. Tests supply their self-signed cert; production
    *  passes nothing and validates against the system store. */
   ca?: string;
+  signal?: AbortSignal;
+  /** Basic-auth credentials for the daemon's mixed-inbound CONNECT proxy. */
+  proxyUsername?: string;
+  proxyPassword?: string;
 }
 
 /** HTTPS to `target` (hostname or IP) through a local CONNECT proxy. Unlike
- *  fetchDohResolved this validates the certificate normally: that one dials an
- *  IP with an empty SNI to hide the host from DPI, whereas here the tunnel
- *  already hides it, so there is nothing to trade the check away for. */
+ *  fetchDohResolved this validates the cert normally: the tunnel already hides the host. */
 export function fetchViaConnectProxy(
   proxyPort: number,
   ip: string,
@@ -96,6 +126,7 @@ export function fetchViaConnectProxy(
 ): Promise<Response> {
   const deadline = options.timeoutMs ?? 15000;
   const target = `${ip}:443`;
+  const proxyAuthHeader = buildProxyAuthHeader(options.proxyUsername, options.proxyPassword);
 
   return new Promise<Response>((resolve, reject) => {
     let settled = false;
@@ -106,10 +137,26 @@ export function fetchViaConnectProxy(
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      options.signal?.removeEventListener("abort", onAbort);
       tlsSocket?.destroy();
       socket?.destroy();
       reject(err);
     };
+
+    const onAbort = (): void => fail(new Error("Request aborted"));
+
+    if (!isSafeHost(hostname) || !isSafeHost(target)) {
+      reject(new Error("Invalid host"));
+      return;
+    }
+
+    if (options.signal) {
+      if (options.signal.aborted) {
+        reject(new Error("Request aborted"));
+        return;
+      }
+      options.signal.addEventListener("abort", onAbort, { once: true });
+    }
 
     const timer = setTimeout(() => fail(new Error("Request timeout")), deadline);
 
@@ -117,7 +164,7 @@ export function fetchViaConnectProxy(
     socket.once("error", fail);
 
     socket.once("connect", () => {
-      performConnect(socket as net.Socket, target)
+      performConnect(socket as net.Socket, target, proxyAuthHeader)
         .then(() => {
           if (settled) return;
           tlsSocket = tls.connect({
@@ -129,9 +176,8 @@ export function fetchViaConnectProxy(
 
           const req = https.request(
             {
-              // No `agent` key at all: Node consults createConnection only
-              // when the request has no agent. Passing agent:false makes it
-              // build one, which then dials host:port itself and ignores this.
+              // No `agent` key at all: Node consults createConnection only when the
+              // request has no agent; agent:false would build one and ignore this.
               createConnection: () => tlsSocket as tls.TLSSocket,
               // Ignored because createConnection supplies the socket, but the
               // client still builds a request authority from them.
@@ -143,11 +189,21 @@ export function fetchViaConnectProxy(
             },
             (res) => {
               const chunks: Buffer[] = [];
-              res.on("data", (chunk: Buffer) => chunks.push(chunk));
+              let bodyLength = 0;
+              res.on("data", (chunk: Buffer) => {
+                bodyLength += chunk.length;
+                if (bodyLength > MAX_RESPONSE_BODY) {
+                  fail(new Error("Response body too large"));
+                  res.destroy();
+                  return;
+                }
+                chunks.push(chunk);
+              });
               res.on("end", () => {
                 if (settled) return;
                 settled = true;
                 clearTimeout(timer);
+                options.signal?.removeEventListener("abort", onAbort);
                 const headers = new Headers();
                 for (const [key, value] of Object.entries(res.headers)) {
                   if (value) {

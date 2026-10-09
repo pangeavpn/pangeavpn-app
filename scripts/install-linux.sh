@@ -11,11 +11,36 @@ warn()  { printf "${YELLOW}[!]${NC} %s\n" "$*"; }
 fail()  { printf "${RED}[x]${NC} %s\n" "$*"; exit 1; }
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
+# The account PangeaVPN is being installed for. The privileged steps below
+# call sudo themselves, so this works whether run directly or under sudo.
+RUNTIME_USER="${SUDO_USER:-$(id -un)}"
+if [ "$RUNTIME_USER" = "root" ]; then
+  RUNTIME_USER=""
+fi
+
+# Builds must never run as root: npm would leave root-owned node_modules/,
+# dist/, and .cache/ behind, breaking later unprivileged builds with EACCES.
+if [ "$(id -u)" -eq 0 ] && [ -n "$RUNTIME_USER" ]; then
+  # -H so npm's cache and config resolve under the user's home, not /root's.
+  run_as_user() { sudo -u "$RUNTIME_USER" -H --preserve-env=PATH -- "$@"; }
+else
+  run_as_user() { "$@"; }
+fi
+
+# Whether the *invoking session* already carries the group, recorded before
+# anything below can change it (a session keeps the group list it started with).
+SESSION_HAS_GROUP=0
+if [ "$(id -u)" -ne 0 ] && id -nG 2>/dev/null | tr ' ' '\n' | grep -qx pangeavpn; then
+  SESSION_HAS_GROUP=1
+fi
+
 INSTALL_DIR="/opt/PangeaVPN"
 DAEMON_BIN="/usr/local/bin/pangea-daemon"
 DESKTOP_FILE="/usr/share/applications/pangeavpn.desktop"
 ICON_DIR="/usr/share/icons/hicolor/256x256/apps"
 SERVICE_FILE="/etc/systemd/system/pangea-daemon.service"
+BOOT_LOCK_SERVICE_FILE="/etc/systemd/system/pangea-killswitch-boot.service"
 
 # --- Detect package manager ---
 if command -v apt-get &>/dev/null; then
@@ -72,11 +97,18 @@ esac
 # --- Build ---
 cd "$REPO_ROOT"
 
+# Earlier versions built as root, leaving root-owned trees that would make
+# the now-unprivileged build below fail on EACCES. Hand the checkout back first.
+if [ -n "$RUNTIME_USER" ] && [ -n "$(find "$REPO_ROOT" -user root -print -quit 2>/dev/null)" ]; then
+  info "Repairing root-owned files left in the checkout by an earlier install..."
+  sudo chown -R "$RUNTIME_USER:" "$REPO_ROOT"
+fi
+
 info "Installing npm dependencies..."
-npm install
+run_as_user npm install
 
 info "Building project..."
-npm run build
+run_as_user npm run build
 
 # --- Install app ---
 info "Installing PangeaVPN to $INSTALL_DIR..."
@@ -84,17 +116,30 @@ sudo mkdir -p "$INSTALL_DIR"
 
 # Build the AppImage
 info "Packaging AppImage..."
-npm exec --workspace @pangeavpn/desktop electron-builder -- \
+run_as_user npm exec --workspace @pangeavpn/desktop electron-builder -- \
   --projectDir . --linux AppImage --"$(uname -m | sed 's/x86_64/x64/;s/aarch64/arm64/')" \
-  --publish never --config.electronVersion=34.1.0
+  --publish never --config.electronVersion="$(node -p "require('./node_modules/electron/package.json').version")"
 
 APPIMAGE=$(find "$REPO_ROOT/dist/installers" -name '*.AppImage' -printf '%T@ %p\n' | sort -rn | head -1 | cut -d' ' -f2-)
 if [ -z "$APPIMAGE" ]; then
   fail "AppImage not found after build."
 fi
 
-sudo cp "$APPIMAGE" "$INSTALL_DIR/PangeaVPN.AppImage"
-sudo chmod 755 "$INSTALL_DIR/PangeaVPN.AppImage"
+# --- Quit a running app so we can safely replace the binary ---
+# A running AppImage stays open for execution, so `cp` onto it fails EBUSY.
+APP_MATCH="$INSTALL_DIR/PangeaVPN.AppImage|mount_.*/pangeavpn"
+if pgrep -f "$APP_MATCH" >/dev/null 2>&1; then
+  warn "PangeaVPN is currently running — closing it to install the update. If you're connected, the VPN will disconnect."
+  pkill -TERM -f "$APP_MATCH" 2>/dev/null || true
+  sleep 2
+  pkill -KILL -f "$APP_MATCH" 2>/dev/null || true
+fi
+
+# Install atomically: write alongside the target, then rename into place —
+# rename(2) succeeds even if a process reopens the old inode right after pkill.
+APPIMAGE_TMP="$INSTALL_DIR/.PangeaVPN.AppImage.new"
+sudo install -m 755 "$APPIMAGE" "$APPIMAGE_TMP"
+sudo mv -f "$APPIMAGE_TMP" "$INSTALL_DIR/PangeaVPN.AppImage"
 
 # --- Install daemon ---
 info "Installing daemon..."
@@ -105,20 +150,64 @@ if systemctl is-active --quiet pangea-daemon 2>/dev/null; then
   sudo systemctl stop pangea-daemon
 fi
 
+# The root daemon writes its token file group-readable by "pangeavpn" so the
+# desktop app (running as the ordinary user) can read it without world access.
+if ! getent group pangeavpn &>/dev/null; then
+  info "Creating pangeavpn group..."
+  sudo groupadd --system pangeavpn
+fi
+
+# Tracks whether this run is what granted the group. If they already had it,
+# their session already carries it and no re-login is needed.
+GROUP_ADDED_NOW=0
+if [ -n "$RUNTIME_USER" ]; then
+  if id -nG "$RUNTIME_USER" 2>/dev/null | tr ' ' '\n' | grep -qx pangeavpn; then
+    info "$RUNTIME_USER is already in the pangeavpn group."
+  else
+    info "Adding $RUNTIME_USER to the pangeavpn group..."
+    sudo usermod -aG pangeavpn "$RUNTIME_USER"
+    GROUP_ADDED_NOW=1
+  fi
+else
+  warn "Could not detect the installing user — add them to the pangeavpn group manually, e.g.: sudo usermod -aG pangeavpn <your-username>, then log out and back in."
+fi
+
 DAEMON_SRC="$REPO_ROOT/daemon/bin/daemon"
 if [ ! -f "$DAEMON_SRC" ]; then
   fail "Daemon binary not found at $DAEMON_SRC — build may have failed."
 fi
 sudo mkdir -p /etc/pangeavpn
-sudo cp "$DAEMON_SRC" "$DAEMON_BIN"
-sudo chmod 755 "$DAEMON_BIN"
+DAEMON_BIN_TMP="$(dirname "$DAEMON_BIN")/.$(basename "$DAEMON_BIN").new"
+sudo install -m 755 "$DAEMON_SRC" "$DAEMON_BIN_TMP"
+sudo mv -f "$DAEMON_BIN_TMP" "$DAEMON_BIN"
 
-# --- Install systemd service ---
-info "Setting up systemd service..."
+# --- Install systemd services ---
+info "Setting up systemd services..."
+# A lock the last session left must be back before any interface is configured;
+# the daemon itself starts too late for that, so a oneshot re-applies it first.
+sudo tee "$BOOT_LOCK_SERVICE_FILE" > /dev/null <<EOF
+[Unit]
+Description=PangeaVPN kill switch (boot re-arm)
+DefaultDependencies=no
+After=local-fs.target
+Wants=network-pre.target
+Before=network-pre.target shutdown.target
+Conflicts=shutdown.target
+
+[Service]
+Type=oneshot
+ExecStart=$DAEMON_BIN --arm-boot-lock
+Environment=HOME=/root
+Environment=PANGEA_APP_SUPPORT_DIR=/etc/pangeavpn
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
 sudo tee "$SERVICE_FILE" > /dev/null <<EOF
 [Unit]
 Description=PangeaVPN Daemon
-After=network-online.target
+After=network-online.target pangea-killswitch-boot.service
 Wants=network-online.target
 
 [Service]
@@ -134,6 +223,7 @@ WantedBy=multi-user.target
 EOF
 
 sudo systemctl daemon-reload
+sudo systemctl enable pangea-killswitch-boot
 sudo systemctl enable pangea-daemon
 sudo systemctl restart pangea-daemon
 info "Daemon service installed and started."
@@ -161,3 +251,14 @@ sudo chmod 644 "$DESKTOP_FILE"
 
 info "PangeaVPN installed successfully!"
 info "Launch from your application menu or run: $INSTALL_DIR/PangeaVPN.AppImage"
+if [ "$GROUP_ADDED_NOW" -eq 1 ] || { [ "$(id -u)" -ne 0 ] && [ "$SESSION_HAS_GROUP" -eq 0 ]; }; then
+  echo
+  warn "=============================================================="
+  warn " ONE MORE STEP: log out and back in (or reboot) before"
+  warn " launching PangeaVPN."
+  warn ""
+  warn " $RUNTIME_USER is in the 'pangeavpn' group, but this login"
+  warn " session still carries the group list it was created with,"
+  warn " so the app cannot read the daemon's token yet."
+  warn "=============================================================="
+fi

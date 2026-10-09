@@ -1,11 +1,7 @@
-/**
- * Splits the naive endpoint into the address to dial and the TLS name.
- *
- * The engine builds its `--proxy` URL from `serverName` and, when that differs
- * from `remoteHost`, installs a `MAP <serverName> <remoteHost>` resolver rule,
- * so the dial needs no DNS. Passing the node domain as `remoteHost` collapses
- * both, drops the MAP rule, and forces a lookup the kill switch blocks.
- */
+import { isIpLiteral } from "./ipLiteral.ts";
+
+/** Splits the naive endpoint into the address to dial and the TLS name. The
+ *  engine MAPs serverName to remoteHost, so remoteHost must be an address, not a domain. */
 export interface NaiveEndpointInput {
   remoteHost: string;
   remoteIp?: string;
@@ -27,31 +23,21 @@ function firstNonBlank(...values: (string | undefined)[]): string {
   return "";
 }
 
-const IPV4_LITERAL = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
-
-// Local copy: shared/ must not import from main/.
-function isIPv4Literal(host: string): boolean {
-  const match = IPV4_LITERAL.exec(host);
-  return match !== null && match.slice(1, 5).every((octet) => Number(octet) <= 255);
-}
-
-/**
- * @param naive the hub's naive block for this node
- * @param nodeIp the node address the hub already named (cloak.remoteHost)
- */
+/** nodeIp is the node address the hub already named (cloak.remoteHost). */
 export function resolveNaiveEndpoint(naive: NaiveEndpointInput, nodeIp: string): NaiveEndpoint {
   const host = firstNonBlank(naive.remoteHost);
-  const serverName = firstNonBlank(naive.serverName, host);
+  // nodeIp is the last resort so serverName is never blank even when the hub
+  // names neither a domain nor a per-transport IP.
+  const serverName = firstNonBlank(naive.serverName, host, nodeIp);
   const perTransportIp = firstNonBlank(naive.remoteIp);
 
-  // remoteIp first, the same precedence Reality and Hysteria2 use — the hub
-  // naming an address for naive specifically always wins.
-  if (perTransportIp) {
+  // remoteIp first, same precedence as Reality/Hysteria2, but only if it's an address.
+  if (perTransportIp && isIpLiteral(perTransportIp)) {
     return { remoteHost: perTransportIp, serverName };
   }
 
   // Already an address — dial it as given rather than substituting the node.
-  if (isIPv4Literal(host)) {
+  if (isIpLiteral(host)) {
     return { remoteHost: host, serverName };
   }
 

@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  DEFAULT_FRONTED_ENDPOINTS,
   isFrontedEndpoint,
   mergeFrontedEndpoints,
   normalizeFrontedEndpoint,
   promoteFrontedEndpoint,
-  restoreFrontedEndpoints
+  restoreFrontedEndpoints,
+  seedFrontedEndpoints
 } from "./frontedEndpoints.ts";
 
 test("a plain hostname is accepted and lowercased", () => {
@@ -33,6 +35,12 @@ test("malformed labels are rejected", () => {
   assert.equal(normalizeFrontedEndpoint(`${"a".repeat(64)}.example.com`), null);
   assert.equal(normalizeFrontedEndpoint(""), null);
   assert.equal(normalizeFrontedEndpoint("   "), null);
+});
+
+// Finding 5: a dotted-quad IP splits into four valid labels and must not pass.
+test("an IPv4 literal is rejected even though every octet is a valid label", () => {
+  assert.equal(normalizeFrontedEndpoint("192.168.1.7"), null);
+  assert.equal(normalizeFrontedEndpoint("8.8.8.8"), null);
 });
 
 test("a hostname over the DNS length limit is rejected", () => {
@@ -107,4 +115,20 @@ test("promote moves the winner to the front and reports no-ops as null", () => {
   assert.equal(promoteFrontedEndpoint(list, -1), null);
   assert.equal(promoteFrontedEndpoint(list, 3), null);
   assert.deepEqual(list, ["a.example.com", "b.example.com", "c.example.com"], "input untouched");
+});
+
+test("an install with nothing stored still has the shipped relays", () => {
+  assert.deepEqual(seedFrontedEndpoints(null), [...DEFAULT_FRONTED_ENDPOINTS]);
+  assert.deepEqual(seedFrontedEndpoints([]), [...DEFAULT_FRONTED_ENDPOINTS]);
+  assert.deepEqual(seedFrontedEndpoints(["not a host"]), [...DEFAULT_FRONTED_ENDPOINTS]);
+});
+
+test("every shipped relay is a valid hostname", () => {
+  for (const host of DEFAULT_FRONTED_ENDPOINTS) {
+    assert.equal(normalizeFrontedEndpoint(host), host);
+  }
+});
+
+test("what the hub named wins over the shipped relays", () => {
+  assert.deepEqual(seedFrontedEndpoints(["relay-b.example.com"]), ["relay-b.example.com"]);
 });

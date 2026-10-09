@@ -36,22 +36,49 @@ jobs:
     steps:
       - name: Resolve tag
         id: tag
-        run: echo "tag=${{ github.event.release.tag_name || inputs.tag }}" >> "$GITHUB_OUTPUT"
+        # Through env, not ${{ }} in the script: a tag name may hold shell syntax.
+        env:
+          RAW_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: |
+          set -euo pipefail
+          if ! [[ "$RAW_TAG" =~ ^v[0-9][0-9A-Za-z.+-]*$ ]]; then
+            echo "::error::refusing tag that is not a version: $RAW_TAG"
+            exit 1
+          fi
+          printf 'tag=%s\n' "$RAW_TAG" >> "$GITHUB_OUTPUT"
 
       - name: Checkout (full history + tags)
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           fetch-depth: 0
 
       - name: Gather release context
+        id: ctx
         env:
           TAG: ${{ steps.tag.outputs.tag }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          PREV="$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || true)"
+          IS_PRE="$(gh release view "$TAG" --json isPrerelease -q .isPrerelease 2>/dev/null || true)"
+          if [ -z "$IS_PRE" ]; then
+            case "$TAG" in *-*) IS_PRE=true ;; *) IS_PRE=false ;; esac
+          fi
+          PREV=""
+          if [ "$IS_PRE" = "false" ]; then
+            # Stable releases cover everything since the last stable release, skipping the RCs in between.
+            for t in $(gh release list --exclude-pre-releases --exclude-drafts -L 50 --json tagName -q '.[].tagName'); do
+              if [ "$t" != "$TAG" ] && git merge-base --is-ancestor "$t" "$TAG" 2>/dev/null; then PREV="$t"; break; fi
+            done
+            if [ -z "$PREV" ]; then
+              PREV="$(git describe --tags --abbrev=0 --exclude='*-*' "${TAG}^" 2>/dev/null || true)"
+            fi
+          else
+            PREV="$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || true)"
+          fi
+          echo "is_prerelease=$IS_PRE" >> "$GITHUB_OUTPUT"
+          echo "prev=$PREV" >> "$GITHUB_OUTPUT"
           if [ -n "$PREV" ]; then RANGE="${PREV}..${TAG}"; else RANGE="$TAG"; fi
-          git log --no-merges -n 200 --pretty=format:'- %s' "$RANGE" > commits.txt || true
+          git log --no-merges -n 500 --pretty=format:'- %s' "$RANGE" > commits.txt || true
           git diff --stat "$RANGE" > stat.txt || true
           # Regenerate GitHub's changelog fresh (idempotent on re-runs, unlike reading the live body)
           PREVFLAG=()
@@ -73,10 +100,18 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           TAG: ${{ steps.tag.outputs.tag }}
+          PREV: ${{ steps.ctx.outputs.prev }}
+          IS_PRE: ${{ steps.ctx.outputs.is_prerelease }}
         run: |
           set -euo pipefail
+          if [ "$IS_PRE" = "false" ] && [ -n "$PREV" ]; then
+            SCOPE="This is a stable release: summarise every change since the previous stable release ${PREV}, including work shipped in the release candidates between them."
+          else
+            SCOPE="This is a pre-release: cover only the changes since ${PREV:-the start}."
+          fi
           cat > instructions.txt <<EOF
           You are writing the GitHub release for PangeaVPN ${TAG}, a desktop VPN app.
+          ${SCOPE}
           Using the commits, file change summary, and GitHub changelog below, produce a
           JSON object with two fields:
 
@@ -125,15 +160,43 @@ jobs:
             printf '%s\n' "$TAG" > title.txt
           fi
 
+      - name: Sanitise the generated notes
+        # The model reads commit and PR text, so its output may carry no foreign link, fenced block,
+        # HTML or pipe into a shell onto the page users copy the install command from.
+        run: |
+          set -euo pipefail
+          cat > sanitize.py <<'PY'
+          import re
+          import sys
+
+          path = sys.argv[1]
+          text = open(path, encoding="utf-8").read()
+          allowed = re.compile(r"^https://(?:[a-z0-9-]+\.)*pangeavpn\.org(?:[/?#]|$)|^https://github\.com/pangeavpn/", re.I)
+          text = re.sub(r"```.*?```", "", text, flags=re.S)
+          text = re.sub(r"<[^>\n]+>", "", text)
+          text = re.sub(r"\[([^\]]*)\]\(\s*([^)\s]+)[^)]*\)", lambda m: m.group(0) if allowed.match(m.group(2)) else m.group(1), text)
+          text = re.sub(r"(?<![(\w])https?://[^\s)]+", lambda m: m.group(0) if allowed.match(m.group(0)) else "", text)
+          lines = [l for l in text.splitlines() if not re.search(r"\|\s*(sudo\s+)?(ba|z|da)?sh\b|```", l)]
+          open(path, "w", encoding="utf-8").write("\n".join(lines).strip() + "\n")
+          PY
+          python3 sanitize.py notes.md
+          python3 sanitize.py title.txt
+
       - name: Update release
         env:
           TAG: ${{ steps.tag.outputs.tag }}
+          IS_PRE: ${{ steps.ctx.outputs.is_prerelease }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          # The installer defaults to stable, so a candidate's page must ask for the prerelease channel.
+          RUNNER='bash'
+          if [ "$IS_PRE" = "true" ]; then RUNNER='PANGEA_CHANNEL=prerelease bash'; fi
           {
             printf '## Install (macOS)\n\n'
-            printf '```bash\ncurl -fsSL https://pangeavpn.org/install-mac.sh | bash\n```\n\n'
+            printf '```bash\ncurl -fsSL https://pangeavpn.org/install-mac.sh | %s\n```\n\n' "$RUNNER"
+            printf 'If pangeavpn.org is blocked on your network:\n\n'
+            printf '```bash\ncurl -fsSL https://raw.githubusercontent.com/pangeavpn/pangeavpn-app/master/scripts/install-mac-online.sh | %s\n```\n\n' "$RUNNER"
             printf -- '---\n\n'
             cat notes.md
             if [ -s changelog.md ]; then

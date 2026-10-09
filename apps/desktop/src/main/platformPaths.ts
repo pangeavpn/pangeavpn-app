@@ -1,13 +1,31 @@
-import { randomBytes } from "node:crypto";
 import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { app } from "electron";
+import { daemonTokenCandidatePaths } from "./daemonTokenPaths";
+import { DaemonNotReadyError, ensureRuntimeFiles, tokenPermissionMessage } from "./runtimeFiles";
 
 const APP_FOLDER = "pangeavpn-desktop";
 const WINDOWS_SERVICE_FOLDER = "PangeaVPN";
 const MAC_SYSTEM_FOLDER = "PangeaVPN";
 const MAC_LAUNCH_DAEMON_PLIST = "/Library/LaunchDaemons/com.pangea.pangeavpn.daemon.plist";
+const LINUX_SYSTEM_SUPPORT_DIR = "/etc/pangeavpn";
+
+// install-linux.sh installs pangea-daemon as a root-owned systemd service whose
+// unit pins PANGEA_APP_SUPPORT_DIR=/etc/pangeavpn. Its presence means that
+// service — not this process — owns the daemon's state directory.
+const linuxDaemonServiceUnitPaths = [
+  "/etc/systemd/system/pangea-daemon.service",
+  "/lib/systemd/system/pangea-daemon.service",
+  "/usr/lib/systemd/system/pangea-daemon.service"
+];
+
+export function hasManagedLinuxDaemonService(): boolean {
+  if (process.platform !== "linux") {
+    return false;
+  }
+  return linuxDaemonServiceUnitPaths.some((servicePath) => fsSync.existsSync(servicePath));
+}
 
 export function getAppSupportDir(): string {
   if (process.platform === "win32") {
@@ -16,7 +34,34 @@ export function getAppSupportDir(): string {
   if (process.platform === "darwin" && shouldUseMacSystemSupportDir()) {
     return path.join("/Library/Application Support", MAC_SYSTEM_FOLDER);
   }
+  if (hasManagedLinuxDaemonService()) {
+    return LINUX_SYSTEM_SUPPORT_DIR;
+  }
   return path.join(app.getPath("appData"), APP_FOLDER);
+}
+
+// Desktop-owned state (settings, caches). Never getAppSupportDir(): that one is
+// the daemon's, and it is admin-only on Windows and root-owned on macOS.
+export function getUserStateDir(): string {
+  return path.join(app.getPath("appData"), APP_FOLDER);
+}
+
+export async function ensureUserStateDir(): Promise<string> {
+  const dir = getUserStateDir();
+  await fs.mkdir(dir, { recursive: true, mode: 0o700 });
+  // mkdir's mode is a no-op on a dir that already existed with looser perms.
+  await fs.chmod(dir, 0o700).catch(() => {});
+  return dir;
+}
+
+// Path a desktop state file used to live at, back when it was written into the
+// daemon's directory. Read-only fallback for a one-time migration.
+export function getLegacyStateFilePath(fileName: string): string | null {
+  const legacyDir = getAppSupportDir();
+  if (legacyDir === getUserStateDir()) {
+    return null;
+  }
+  return path.join(legacyDir, fileName);
 }
 
 export function getTokenPath(): string {
@@ -26,6 +71,8 @@ export function getTokenPath(): string {
 export async function readDaemonTokens(): Promise<string[]> {
   const tokens: string[] = [];
   const seen = new Set<string>();
+  const primaryTokenPath = path.normalize(getTokenPath());
+  let primaryDenied = false;
 
   for (const tokenPath of daemonTokenCandidates()) {
     try {
@@ -36,27 +83,47 @@ export async function readDaemonTokens(): Promise<string[]> {
       }
       seen.add(token);
       tokens.push(token);
-    } catch {
-      // ignore missing/unreadable token candidate
+    } catch (error) {
+      if (path.normalize(tokenPath) === primaryTokenPath && isPermissionDenied(error)) {
+        primaryDenied = true;
+      }
+      // otherwise ignore a missing/unreadable token candidate
     }
+  }
+
+  // The daemon's own token is unreadable, so nothing else can authenticate
+  // against it. Any token left over from an earlier install would only earn a
+  // 401 and report itself as a mismatch, burying the real cause.
+  if (primaryDenied && daemonOwnsStateDir()) {
+    throw new DaemonNotReadyError(tokenPermissionMessage());
   }
 
   return tokens;
 }
 
-export async function ensureUserRuntimeFiles(): Promise<void> {
-  const appDir = getAppSupportDir();
-  const tokenPath = path.join(appDir, "daemon-token.txt");
-  const configPath = path.join(appDir, "config.json");
+function isPermissionDenied(error: unknown): boolean {
+  if (typeof error !== "object" || error === null || !("code" in error)) {
+    return false;
+  }
+  const code = (error as { code?: string }).code;
+  return code === "EACCES" || code === "EPERM";
+}
 
-  await fs.mkdir(appDir, { recursive: true });
-  await ensureTokenFile(tokenPath);
-  await ensureConfigFile(configPath);
+export async function ensureUserRuntimeFiles(): Promise<void> {
+  await ensureRuntimeFiles(getAppSupportDir(), { daemonOwnsDir: daemonOwnsStateDir() });
+}
+
+// True where an elevated daemon owns the state directory. It is admin-only, so
+// the desktop reads the token there and writes nothing.
+function daemonOwnsStateDir(): boolean {
+  return process.platform === "win32" || shouldUseMacSystemSupportDir() || hasManagedLinuxDaemonService();
 }
 
 function getWindowsServiceSupportDir(): string {
-  const programData = process.env.ProgramData?.trim() || "C:\\ProgramData";
-  return path.join(programData, WINDOWS_SERVICE_FOLDER);
+  // process.env.ProgramData is user-settable via HKCU\Environment with no
+  // admin rights; SystemDrive plus the fixed folder name is not.
+  const systemDrive = process.env.SystemDrive?.trim() || "C:";
+  return path.join(systemDrive, "ProgramData", WINDOWS_SERVICE_FOLDER);
 }
 
 function shouldUseMacSystemSupportDir(): boolean {
@@ -76,78 +143,5 @@ function shouldUseMacSystemSupportDir(): boolean {
 }
 
 function daemonTokenCandidates(): string[] {
-  const candidates: string[] = [];
-  const seen = new Set<string>();
-  const add = (candidate: string) => {
-    const normalized = path.normalize(candidate);
-    if (seen.has(normalized)) {
-      return;
-    }
-    seen.add(normalized);
-    candidates.push(normalized);
-  };
-
-  add(getTokenPath());
-
-  if (process.platform === "darwin") {
-    add(path.join("/Library/Application Support", MAC_SYSTEM_FOLDER, "daemon-token.txt"));
-    add(path.join(app.getPath("appData"), APP_FOLDER, "daemon-token.txt"));
-  }
-
-  if (process.platform === "linux") {
-    add(path.join("/etc/pangeavpn", "daemon-token.txt"));
-  }
-
-  return candidates;
-}
-
-async function ensureTokenFile(tokenPath: string): Promise<void> {
-  let token = "";
-
-  try {
-    token = (await fs.readFile(tokenPath, "utf8")).trim();
-  } catch (error) {
-    if (!isNotFound(error)) {
-      await tryRemoveFile(tokenPath);
-    }
-  }
-
-  if (!token) {
-    token = randomBytes(32).toString("hex");
-    await fs.writeFile(tokenPath, `${token}\n`, { mode: 0o600 });
-  }
-
-  await fs.chmod(tokenPath, 0o600).catch(() => {});
-}
-
-async function ensureConfigFile(configPath: string): Promise<void> {
-  try {
-    const content = await fs.readFile(configPath, "utf8");
-    if (content.trim()) {
-      return;
-    }
-  } catch (error) {
-    if (!isNotFound(error)) {
-      await tryRemoveFile(configPath);
-    }
-  }
-
-  const defaultConfig = `${JSON.stringify({ profiles: [] }, null, 2)}\n`;
-  await fs.writeFile(configPath, defaultConfig, { mode: 0o600 });
-  await fs.chmod(configPath, 0o600).catch(() => {});
-}
-
-function isNotFound(error: unknown): boolean {
-  return typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    (error as { code?: string }).code === "ENOENT";
-}
-
-async function tryRemoveFile(filePath: string): Promise<void> {
-  try {
-    await fs.rm(filePath, { force: true });
-  } catch {
-    // best-effort cleanup before recreating runtime files.
-  }
+  return daemonTokenCandidatePaths(process.platform, getTokenPath(), app.getPath("appData"));
 }

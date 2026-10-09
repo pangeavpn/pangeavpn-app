@@ -3,7 +3,8 @@ import fsSync from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { spawnSync } from "node:child_process";
-import { npmCmd, relPath, rootDir, runOrThrow, selectArchTargets, sha256File, writeJson } from "./shared.mjs";
+import { setTimeout as delay } from "node:timers/promises";
+import { electronVersion, npmCmd, relPath, rootDir, runOrThrow, selectArchTargets, sha256File, writeJson } from "./shared.mjs";
 import { resolveNaiveCgoConfig } from "../lib/naive-cgo.mjs";
 
 const platformName = "mac";
@@ -23,6 +24,8 @@ const installerDmgMinSizeBytes = 256 * mebibyte;
 const installerDmgPaddingBytes = 128 * mebibyte;
 const installerDmgAlignmentBytes = 32 * mebibyte;
 const installerDmgGrowthFactor = 1.25;
+const installerDmgAttempts = 3;
+const installerDmgRetryDelayMs = 5000;
 
 if (process.platform !== "darwin") {
   console.error("build-bin:mac must run on a macOS host.");
@@ -39,7 +42,9 @@ const archTargets = selectArchTargets(allArchTargets, "macOS");
 await cleanOutput();
 await copyStandaloneMacTools();
 
-runOrThrow(npmCmd, ["install", "--workspace", "@pangeavpn/desktop", "--include=dev"], { cwd: rootDir, shell: true });
+// No audit or fund: a release build must not wait on npm's advisory service,
+// which can 503 or hang for npm's full fetch timeout while the tree is fine.
+runOrThrow(npmCmd, ["install", "--workspace", "@pangeavpn/desktop", "--include=dev", "--no-audit", "--no-fund"], { cwd: rootDir, shell: true });
 runOrThrow(npmCmd, ["run", "build", "--workspace", "@pangeavpn/shared-types"], { cwd: rootDir, shell: true });
 runOrThrow(npmCmd, ["run", "build", "--workspace", "@pangeavpn/desktop"], { cwd: rootDir, shell: true });
 
@@ -68,7 +73,7 @@ for (const target of archTargets) {
       `--${target.arch}`,
       "--publish",
       "never",
-      "--config.electronVersion=34.1.0"
+      `--config.electronVersion=${electronVersion}`
     ],
     {
       cwd: rootDir,
@@ -137,9 +142,8 @@ async function copyStandaloneMacTools() {
 }
 
 function buildDaemon(goArch, outPath) {
-  // with_utls is required by the VLESS+REALITY transport (sing-box compiles
-  // uTLS out by default). naive_cgo is added on top when the pangea_naive
-  // archive + toolchain resolve; otherwise the stub transport builds.
+  // with_utls is required by VLESS+REALITY (sing-box compiles uTLS out by
+  // default); naive_cgo goes on top only when the lib and toolchain resolve.
   const naiveCgo = resolveNaiveCgoConfig(goArch, rootDir);
   if (naiveCgo) {
     console.log(`naive_cgo: enabled for ${goArch} (pangea_naive lib found and toolchain resolved)`);
@@ -248,6 +252,32 @@ function getInstallerDmgSizeArg(payloadBytes) {
   return `${Math.ceil(roundUpToMultiple(estimatedBytes, installerDmgAlignmentBytes) / mebibyte)}m`;
 }
 
+// hdiutil's internal detach races the volume daemons, failing good release
+// builds with "Resource busy".
+async function createDmgWithRetry(volumeName, stagingDir, dmgSizeArg, dmgPath, arch) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      runOrThrow("hdiutil", [
+        "create",
+        "-volname", volumeName,
+        "-srcfolder", stagingDir,
+        "-ov",
+        "-format", "UDZO",
+        "-size", dmgSizeArg,
+        dmgPath
+      ], { cwd: rootDir, shell: false });
+      return;
+    } catch (error) {
+      if (attempt >= installerDmgAttempts) throw error;
+      console.warn(
+        `hdiutil create failed for ${arch} (attempt ${attempt}/${installerDmgAttempts}), retrying in ${installerDmgRetryDelayMs}ms: ${error.message}`
+      );
+      await fs.rm(dmgPath, { force: true }).catch(() => {});
+      await delay(installerDmgRetryDelayMs);
+    }
+  }
+}
+
 async function bundleInstallerDmg(pkgPath, pkgName, installerOut, arch) {
   const installScript = path.join(rootDir, "scripts", "install-mac.sh");
   if (!fsSync.existsSync(installScript)) {
@@ -272,15 +302,7 @@ async function bundleInstallerDmg(pkgPath, pkgName, installerOut, arch) {
   const dmgSizeArg = getInstallerDmgSizeArg(stagingSizeBytes);
 
   try {
-    runOrThrow("hdiutil", [
-      "create",
-      "-volname", volumeName,
-      "-srcfolder", stagingDir,
-      "-ov",
-      "-format", "UDZO",
-      "-size", dmgSizeArg,
-      dmgPath
-    ], { cwd: rootDir, shell: false });
+    await createDmgWithRetry(volumeName, stagingDir, dmgSizeArg, dmgPath, arch);
 
     const stat = await fs.stat(dmgPath);
     return {
@@ -317,6 +339,24 @@ function verifyPackagedMacAppBundle(appBundlePath, arch) {
     if (!fsSync.existsSync(filePath)) {
       throw new Error(`Missing required file in ${arch} app bundle: ${filePath}`);
     }
+  }
+
+  verifyAppBundleSignature(appBundlePath, arch);
+}
+
+function verifyAppBundleSignature(appBundlePath, arch) {
+  // Apple Silicon kills unsigned executables at exec, so an app bundle whose
+  // seal was broken by fuse flipping never opens for the user.
+  const result = spawnSync("codesign", ["--verify", "--deep", "--strict", appBundlePath], {
+    encoding: "utf8",
+    shell: false
+  });
+  if (result.status !== 0) {
+    const detail = (result.stderr || result.stdout || "").trim();
+    throw new Error(
+      `Code signature invalid for the ${arch} app bundle: ${appBundlePath}\n` +
+      `${detail}\nApple Silicon refuses to launch it. Ensure mac.identity is set so electron-builder signs after flipping fuses.`
+    );
   }
 }
 

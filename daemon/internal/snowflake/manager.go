@@ -18,9 +18,8 @@ import (
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/transport"
 )
 
-// Compile-time checks: Manager satisfies transport.Manager plus the two
-// optional capabilities service.go type-asserts for (session readiness,
-// dynamically-bound local port), same as cloak and naive.
+// Manager satisfies transport.Manager plus the two optional capabilities
+// service.go type-asserts for, same as cloak and naive.
 var (
 	_ transport.Manager           = (*Manager)(nil)
 	_ transport.SessionWaiter     = (*Manager)(nil)
@@ -34,11 +33,7 @@ type snowflakeTransport interface {
 }
 
 // Manager runs an in-process loopback UDP listener that WireGuard's peer
-// Endpoint points at, framing each datagram (see framing.go) onto a
-// Snowflake client stream obtained via WebRTC rendezvous. Structurally
-// mirrors cloak.inProcessManager: RWMutex-guarded state, a generation
-// counter so a stale run() goroutine can't clobber a fresher Start, and a
-// done channel Stop waits on.
+// Endpoint points at, framing each datagram (see framing.go) onto a Snowflake stream.
 type Manager struct {
 	mu       sync.RWMutex
 	logs     *state.LogStore
@@ -55,10 +50,20 @@ type Manager struct {
 	boundLocalPort int
 	generation     uint64
 	cancel         context.CancelFunc
+
+	startProfile state.SnowflakeProfile
 }
 
 func NewManager(logs *state.LogStore) *Manager {
 	return &Manager{logs: logs}
+}
+
+// snowflakeProfilesEqual reports whether two profiles would produce the same
+// running session, so a redundant Start can no-op instead of restarting.
+func snowflakeProfilesEqual(a, b state.SnowflakeProfile) bool {
+	return a.BrokerURL == b.BrokerURL &&
+		a.LocalPort == b.LocalPort &&
+		a.BridgeFingerprint == b.BridgeFingerprint
 }
 
 // newSnowflakeClient is overridable in tests so Start can be exercised
@@ -68,12 +73,17 @@ var newSnowflakeClient = func(cfg sf.ClientConfig) (snowflakeTransport, error) {
 }
 
 func (m *Manager) Start(ctx context.Context, profile state.SnowflakeProfile) error {
-	_ = ctx
-
 	m.mu.Lock()
 	if m.running {
+		if snowflakeProfilesEqual(m.startProfile, profile) {
+			m.mu.Unlock()
+			return nil
+		}
 		m.mu.Unlock()
-		return nil
+		if err := m.Stop(ctx); err != nil {
+			return err
+		}
+		return m.Start(ctx, profile)
 	}
 
 	brokerURL := strings.TrimSpace(profile.BrokerURL)
@@ -84,6 +94,10 @@ func (m *Manager) Start(ctx context.Context, profile state.SnowflakeProfile) err
 	if profile.LocalPort < 0 {
 		m.mu.Unlock()
 		return fmt.Errorf("LocalPort must be >= 0, got %d", profile.LocalPort)
+	}
+	if len(profile.ICEServers) == 0 && !profile.KeepLocalAddresses {
+		m.mu.Unlock()
+		return errors.New("snowflake requires at least one ICE (STUN/TURN) server unless keepLocalAddresses is set")
 	}
 
 	localAddr := net.JoinHostPort("127.0.0.1", fmt.Sprintf("%d", profile.LocalPort))
@@ -119,7 +133,7 @@ func (m *Manager) Start(ctx context.Context, profile state.SnowflakeProfile) err
 		return fmt.Errorf("build snowflake client: %w", err)
 	}
 
-	runCtx, cancel := context.WithCancel(context.Background())
+	runCtx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
 	session := make(chan struct{})
 	m.generation++
@@ -132,6 +146,7 @@ func (m *Manager) Start(ctx context.Context, profile state.SnowflakeProfile) err
 	m.hasSession = false
 	m.boundLocalPort = boundPort
 	m.cancel = cancel
+	m.startProfile = profile
 	m.mu.Unlock()
 
 	m.logs.Add(state.LogInfo, state.SourceSnowflake, fmt.Sprintf("snowflake started, listening on 127.0.0.1:%d", boundPort))
@@ -142,10 +157,7 @@ func (m *Manager) Start(ctx context.Context, profile state.SnowflakeProfile) err
 }
 
 // run performs the (potentially long) WebRTC rendezvous, then bridges UDP
-// datagrams over the resulting stream until either side fails or Stop
-// cancels ctx. Always runs to completion on its own goroutine — Start
-// returns as soon as the loopback listener is up, matching cloak/naive's
-// "session comes up async, WaitForSession blocks for it" shape.
+// datagrams over the resulting stream until either side fails or Stop cancels ctx.
 func (m *Manager) run(ctx context.Context, generation uint64, udpConn *net.UDPConn, sfTransport snowflakeTransport) {
 	defer m.cleanup(generation)
 
@@ -154,7 +166,10 @@ func (m *Manager) run(ctx context.Context, generation uint64, udpConn *net.UDPCo
 		m.mu.RLock()
 		stopping := m.stopping
 		m.mu.RUnlock()
-		if !stopping {
+		switch {
+		case errors.Is(err, context.Canceled) && stopping:
+			m.logs.Add(state.LogWarn, state.SourceSnowflake, "snowflake stopped before rendezvous finished; broker/WebRTC session may linger in the background until it resolves")
+		case !stopping:
 			m.logs.Add(state.LogError, state.SourceSnowflake, fmt.Sprintf("snowflake dial failed: %v", err))
 		}
 		udpConn.Close()
@@ -171,7 +186,7 @@ func (m *Manager) run(ctx context.Context, generation uint64, udpConn *net.UDPCo
 	m.stream = stream
 	m.mu.Unlock()
 
-	m.markSessionEstablished()
+	m.markSessionEstablished(generation)
 	m.logs.Add(state.LogInfo, state.SourceSnowflake, "snowflake stream established")
 
 	var peer atomic.Pointer[net.UDPAddr]
@@ -209,11 +224,8 @@ type dialResult struct {
 	err  error
 }
 
-// dialWithCancel races sfTransport.Dial() (which has no cancellation hook
-// of its own, and can block for tens of seconds during WebRTC rendezvous)
-// against ctx. On cancellation it lets Dial finish in the background and
-// closes whatever it eventually returns, so a Stop during rendezvous
-// doesn't leak the WebRTC session.
+// dialWithCancel races sfTransport.Dial() (which has no cancellation hook of
+// its own) against ctx, closing whatever Dial eventually returns on cancellation.
 func dialWithCancel(ctx context.Context, sfTransport snowflakeTransport) (net.Conn, error) {
 	resultCh := make(chan dialResult, 1)
 	go func() {
@@ -235,9 +247,8 @@ func dialWithCancel(ctx context.Context, sfTransport snowflakeTransport) (net.Co
 	}
 }
 
-// pumpUDPToStream reads datagrams from udpConn (WireGuard's outbound
-// packets), remembers the sender's address for the reverse direction, and
-// frames each one onto the snowflake stream.
+// pumpUDPToStream reads datagrams from udpConn, remembers the sender's
+// address for the reverse direction, and frames each one onto the stream.
 func pumpUDPToStream(udpConn *net.UDPConn, stream net.Conn, peer *atomic.Pointer[net.UDPAddr]) error {
 	buf := make([]byte, 65535)
 	for {
@@ -252,10 +263,8 @@ func pumpUDPToStream(udpConn *net.UDPConn, stream net.Conn, peer *atomic.Pointer
 	}
 }
 
-// pumpStreamToUDP reads frames from the snowflake stream and writes each
-// as a UDP datagram back to the last known WireGuard peer address. Frames
-// that arrive before any WireGuard packet has been seen (so peer is still
-// unset) are dropped.
+// pumpStreamToUDP reads frames from the stream and writes each as a UDP
+// datagram to the last known peer address, dropping frames until one is known.
 func pumpStreamToUDP(stream net.Conn, udpConn *net.UDPConn, peer *atomic.Pointer[net.UDPAddr]) error {
 	for {
 		payload, err := ReadFrame(stream)
@@ -272,9 +281,8 @@ func pumpStreamToUDP(stream net.Conn, udpConn *net.UDPConn, peer *atomic.Pointer
 	}
 }
 
-// cleanup drops shared state to a stopped configuration, but only if this
-// call's generation still matches the current one — a stale run()
-// goroutine from a previous Start must not clobber a fresher Start's state.
+// cleanup drops shared state to stopped, but only if this call's generation
+// still matches the current one, so a stale run() can't clobber a fresh Start.
 func (m *Manager) cleanup(generation uint64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -282,6 +290,7 @@ func (m *Manager) cleanup(generation uint64) {
 		return
 	}
 	done := m.done
+	session := m.session
 	m.running = false
 	m.stopping = false
 	m.udpConn = nil
@@ -290,15 +299,18 @@ func (m *Manager) cleanup(generation uint64) {
 	m.session = nil
 	m.boundLocalPort = 0
 	m.cancel = nil
+	if session != nil {
+		close(session)
+	}
 	if done != nil {
 		close(done)
 	}
 }
 
-func (m *Manager) markSessionEstablished() {
+func (m *Manager) markSessionEstablished(generation uint64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.hasSession {
+	if m.generation != generation || m.hasSession {
 		return
 	}
 	m.hasSession = true
@@ -308,10 +320,8 @@ func (m *Manager) markSessionEstablished() {
 	}
 }
 
-// WaitForSession blocks until the WebRTC rendezvous + stream setup
-// completes or timeout elapses. Snowflake rendezvous (broker polling, ICE
-// gathering, DTLS/SCTP handshake) can take noticeably longer than Cloak's
-// TLS handshake — callers should size timeout accordingly.
+// WaitForSession blocks until the WebRTC rendezvous + stream setup completes
+// or timeout elapses. Rendezvous can take noticeably longer than a TLS handshake.
 func (m *Manager) WaitForSession(ctx context.Context, timeout time.Duration) error {
 	m.mu.RLock()
 	if !m.running {
@@ -323,6 +333,7 @@ func (m *Manager) WaitForSession(ctx context.Context, timeout time.Duration) err
 		return nil
 	}
 	session := m.session
+	generation := m.generation
 	m.mu.RUnlock()
 
 	if session == nil {
@@ -338,6 +349,12 @@ func (m *Manager) WaitForSession(ctx context.Context, timeout time.Duration) err
 
 	select {
 	case <-session:
+		m.mu.RLock()
+		established := m.generation == generation && m.hasSession
+		m.mu.RUnlock()
+		if !established {
+			return errors.New("snowflake stopped before a session was established")
+		}
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
@@ -360,9 +377,8 @@ func (m *Manager) Stop(ctx context.Context) error {
 	cancel := m.cancel
 	m.mu.Unlock()
 
-	// Cancel first so a rendezvous still in flight (dialWithCancel) unblocks
-	// immediately, then close the stream and UDP socket to kick the bridge
-	// pumps out of their blocking reads.
+	// Cancel first to unblock any in-flight rendezvous, then close the stream
+	// and UDP socket to kick the bridge pumps out of their blocking reads.
 	if cancel != nil {
 		cancel()
 	}
@@ -393,12 +409,12 @@ func (m *Manager) Stop(ctx context.Context) error {
 	}
 }
 
-// forceReset mirrors cloak's forceResetStateLocked: drops shared state to
-// stopped even if run() hasn't finished, bumping generation so a
-// still-running goroutine's later cleanup call is a no-op.
+// forceReset drops shared state to stopped even if run() hasn't finished,
+// bumping generation so a still-running goroutine's cleanup call is a no-op.
 func (m *Manager) forceReset() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	session := m.session
 	m.running = false
 	m.stopping = false
 	m.udpConn = nil
@@ -408,6 +424,9 @@ func (m *Manager) forceReset() {
 	m.boundLocalPort = 0
 	m.cancel = nil
 	m.generation++
+	if session != nil {
+		close(session)
+	}
 }
 
 func (m *Manager) Status() state.TransportStatus {
@@ -416,9 +435,8 @@ func (m *Manager) Status() state.TransportStatus {
 	return state.TransportStatus{Running: m.running}
 }
 
-// BoundLocalPort reports the loopback UDP port the manager is currently
-// bound to, or 0 when not running. Callers that requested dynamic
-// allocation (LocalPort=0) use this to discover the kernel-assigned port.
+// BoundLocalPort reports the loopback UDP port the manager is bound to, or 0
+// when not running; used to discover a dynamically-allocated (LocalPort=0) port.
 func (m *Manager) BoundLocalPort() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

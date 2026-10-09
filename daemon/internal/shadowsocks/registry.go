@@ -6,6 +6,7 @@ import (
 	"context"
 
 	box "github.com/sagernet/sing-box"
+	"github.com/sagernet/sing-box/adapter/certificate"
 	"github.com/sagernet/sing-box/adapter/endpoint"
 	"github.com/sagernet/sing-box/adapter/inbound"
 	"github.com/sagernet/sing-box/adapter/outbound"
@@ -18,7 +19,7 @@ import (
 // registryContext wires only the Shadowsocks outbound. The "local" DNS
 // transport is mandatory: box.New always wires it as the DNS fallback.
 func registryContext(ctx context.Context) context.Context {
-	return box.Context(ctx, inbound.NewRegistry(), newOutboundRegistry(), endpoint.NewRegistry(), newDNSRegistry(), boxservice.NewRegistry())
+	return box.Context(ctx, inbound.NewRegistry(), newOutboundRegistry(), endpoint.NewRegistry(), newDNSRegistry(), boxservice.NewRegistry(), certificate.NewRegistry())
 }
 
 func newOutboundRegistry() *outbound.Registry {

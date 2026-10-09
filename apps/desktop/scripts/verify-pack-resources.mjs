@@ -1,10 +1,21 @@
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const desktopDir = path.resolve(scriptDir, "..");
 const rootDir = path.resolve(desktopDir, "..", "..");
+
+// electron-builder bundles build.electronVersion, not the installed electron; a stale pin ships an old runtime.
+const desktopRequire = createRequire(path.join(desktopDir, "package.json"));
+const pinnedElectron = desktopRequire("./package.json").build?.electronVersion;
+const installedElectron = desktopRequire("electron/package.json").version;
+if (pinnedElectron !== installedElectron) {
+  throw new Error(
+    `build.electronVersion is ${pinnedElectron} but electron ${installedElectron} is installed; set them to the same version.`
+  );
+}
 
 const isWin = process.platform === "win32";
 const daemonName = isWin ? "PangeaDaemon.exe" : "daemon";
@@ -41,10 +52,8 @@ function assertFile(filePath, errorMessage) {
   }
 }
 
-// Validate a BMP by parsing its header (BITMAPINFOHEADER): "BM" magic at 0,
-// biWidth int32 LE at offset 18, biHeight int32 LE at offset 22. Avoids any
-// image-library dependency. Run `node ./scripts/build-installer-art.mjs` to
-// (re)generate these from build/art-src/*.png.
+// Validates a BMP by parsing its BITMAPINFOHEADER directly (no image-library
+// dependency): "BM" magic at 0, biWidth/biHeight int32 LE at offsets 18/22.
 function assertBmp(filePath, expectedWidth, expectedHeight) {
   assertFile(
     filePath,

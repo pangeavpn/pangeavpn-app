@@ -1,3 +1,5 @@
+import http from "node:http";
+
 import type {
   ConfigResponse,
   LogEntry,
@@ -6,6 +8,20 @@ import type {
   StatusResponse
 } from "@pangeavpn/shared-types";
 
+import type {
+  Encapsulation,
+  PostQuantumAnswer,
+  PostQuantumOffer,
+  PostQuantumProvider
+} from "../shared/postQuantum.ts";
+import {
+  normalizeSplitTunnelConfig,
+  parseSplitTunnelInvalid,
+  type SplitTunnelConfig,
+  type SplitTunnelResult,
+  type SplitTunnelWriteBody
+} from "../shared/splitTunnel.ts";
+
 export class TransportExhaustedError extends Error {
   constructor() {
     super("All configured transports failed");
@@ -13,17 +29,42 @@ export class TransportExhaustedError extends Error {
   }
 }
 
-export class DaemonClient {
+/** The daemon found no route out and is holding the session until one returns. */
+export class HostOfflineError extends Error {
+  constructor() {
+    super("No internet connection");
+    this.name = "HostOfflineError";
+  }
+}
+
+/** Any non-2xx daemon reply; the status tells an old daemon from a broken one. */
+export class DaemonHttpError extends Error {
+  readonly status: number;
+  readonly body: string;
+
+  constructor(status: number, text: string) {
+    super(`daemon request failed (${status}): ${text}`);
+    this.name = "DaemonHttpError";
+    this.status = status;
+    this.body = text;
+  }
+}
+
+export class DaemonClient implements PostQuantumProvider {
   private readonly baseUrl: string;
   private readonly tokenProvider: () => Promise<string | string[]>;
   private readonly defaultRequestTimeoutMs: number;
   private readonly connectTimeoutMs: number;
   private readonly disconnectTimeoutMs: number;
 
-  constructor(baseUrl: string, tokenProvider: () => Promise<string | string[]>) {
+  constructor(
+    baseUrl: string,
+    tokenProvider: () => Promise<string | string[]>,
+    options?: { defaultRequestTimeoutMs?: number }
+  ) {
     this.baseUrl = baseUrl;
     this.tokenProvider = tokenProvider;
-    this.defaultRequestTimeoutMs = 5000;
+    this.defaultRequestTimeoutMs = options?.defaultRequestTimeoutMs ?? 5000;
     // Auto mode can spend 10s proving each configured transport end-to-end.
     this.connectTimeoutMs = 120000;
     this.disconnectTimeoutMs = 45000;
@@ -38,8 +79,9 @@ export class DaemonClient {
     opts?: {
       allowLAN?: boolean;
       lockdown?: boolean;
-      preferredTransport?: "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "snowflake";
-    }
+      preferredTransport?: "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "snowflake" | "wireguard";
+    },
+    signal?: AbortSignal
   ): Promise<OkResponse> {
     const body: Record<string, unknown> = { profileId };
     if (opts?.allowLAN) {
@@ -51,34 +93,123 @@ export class DaemonClient {
     if (opts?.preferredTransport) {
       body.preferredTransport = opts.preferredTransport;
     }
-    return this.request<OkResponse>("POST", "/connect", body, this.connectTimeoutMs);
+    return this.request<OkResponse>("POST", "/connect", body, this.connectTimeoutMs, signal);
   }
 
-  /** Starts the hub Shadowsocks proxy; resolves to its loopback port. */
+  async pqOffer(): Promise<PostQuantumOffer | null> {
+    return this.orNullOnMissingRoute(this.request<PostQuantumOffer>("POST", "/pq/offer"));
+  }
+
+  async pqFinish(id: string, answer: PostQuantumAnswer): Promise<string> {
+    const reply = await this.request<{ presharedKey: string }>("POST", "/pq/finish", { id, ...answer });
+    if (typeof reply.presharedKey !== "string" || reply.presharedKey === "") {
+      throw new Error("daemon returned no pre-shared key");
+    }
+    return reply.presharedKey;
+  }
+
+  async pqEncapsulate(algorithm: string, kemPublicKey: string): Promise<Encapsulation | null> {
+    return this.orNullOnMissingRoute(
+      this.request<Encapsulation>("POST", "/pq/encapsulate", { algorithm, kemPublicKey })
+    );
+  }
+
+  /** Null on a daemon from before split tunnelling. */
+  async getSplitTunnel(): Promise<SplitTunnelConfig | null> {
+    const raw = await this.orNullOnMissingRoute(this.request<unknown>("GET", "/split-tunnel"));
+    return raw === null ? null : normalizeSplitTunnelConfig(raw);
+  }
+
+  /** Rejected entries come back as `ok:false`; any other failure throws. */
+  async setSplitTunnel(
+    body: SplitTunnelWriteBody,
+    current?: SplitTunnelConfig
+  ): Promise<SplitTunnelResult | null> {
+    try {
+      const raw = await this.orNullOnMissingRoute(this.request<unknown>("POST", "/split-tunnel", body));
+      return raw === null ? null : { ok: true, config: normalizeSplitTunnelConfig(raw, current) };
+    } catch (error) {
+      const invalid = error instanceof DaemonHttpError && error.status === 400 ? parseSplitTunnelInvalid(error.body) : null;
+      if (invalid) return { ok: false, invalid };
+      throw error;
+    }
+  }
+
+  /** A daemon from before a route answers 404; callers treat that as "not offered". */
+  private async orNullOnMissingRoute<T>(pending: Promise<T>): Promise<T | null> {
+    try {
+      return await pending;
+    } catch (error) {
+      if (error instanceof DaemonHttpError && error.status === 404) return null;
+      throw error;
+    }
+  }
+
+  /** Starts the hub Shadowsocks proxy; resolves to its loopback port and CONNECT auth. */
   async startSsProxy(profile: {
     remoteHost: string;
     remotePort: number;
     method: string;
     password: string;
-  }): Promise<number> {
-    const res = await this.request<{ ok: boolean; port?: number; error?: string }>(
-      "POST",
-      "/ssproxy/start",
-      profile
-    );
+  }): Promise<{ port: number; proxyUsername: string; proxyPassword: string }> {
+    const res = await this.request<{
+      ok: boolean;
+      port?: number;
+      proxyUsername?: string;
+      proxyPassword?: string;
+      error?: string;
+    }>("POST", "/ssproxy/start", profile);
     if (!res.ok || !res.port) {
       throw new Error(res.error || "shadowsocks proxy failed to start");
     }
-    return res.port;
+    // A daemon older than the proxy credentials answers with the port alone,
+    // and its inbound wants no Proxy-Authorization.
+    return {
+      port: res.port,
+      proxyUsername: res.proxyUsername ?? "",
+      proxyPassword: res.proxyPassword ?? ""
+    };
   }
 
   async stopSsProxy(): Promise<OkResponse> {
     return this.request<OkResponse>("POST", "/ssproxy/stop");
   }
 
-  async disconnect(opts?: { keepKillSwitch?: boolean }): Promise<OkResponse> {
+  /** Starts the hub REALITY proxy; resolves to its loopback port and CONNECT auth. */
+  async startRealityProxy(profile: {
+    remoteHost: string;
+    remotePort: number;
+    uuid: string;
+    publicKey: string;
+    shortId: string;
+    serverName: string;
+  }): Promise<{ port: number; proxyUsername: string; proxyPassword: string }> {
+    const res = await this.request<{
+      ok: boolean;
+      port?: number;
+      proxyUsername?: string;
+      proxyPassword?: string;
+      error?: string;
+    }>("POST", "/realityproxy/start", profile);
+    if (!res.ok || !res.port || !res.proxyUsername || !res.proxyPassword) {
+      throw new Error(res.error || "reality proxy failed to start");
+    }
+    return { port: res.port, proxyUsername: res.proxyUsername, proxyPassword: res.proxyPassword };
+  }
+
+  async stopRealityProxy(): Promise<OkResponse> {
+    return this.request<OkResponse>("POST", "/realityproxy/stop");
+  }
+
+  async disconnect(opts?: { keepKillSwitch?: boolean }, signal?: AbortSignal): Promise<OkResponse> {
     const body = opts?.keepKillSwitch ? { keepKillSwitch: true } : undefined;
-    return this.request<OkResponse>("POST", "/disconnect", body, this.disconnectTimeoutMs);
+    return this.request<OkResponse>("POST", "/disconnect", body, this.disconnectTimeoutMs, signal);
+  }
+
+  // Forgets the daemon's per-network last-good-transport cache. Called at
+  // startup so a new app session never inherits the last one's cascade order.
+  async clearTransportMemory(): Promise<OkResponse> {
+    return this.request<OkResponse>("POST", "/transport-memory/clear");
   }
 
   async clearKillSwitch(): Promise<OkResponse> {
@@ -87,13 +218,8 @@ export class DaemonClient {
     return this.request<OkResponse>("POST", "/killswitch/clear", undefined, 15000);
   }
 
-  /**
-   * Ask the daemon to let these IPs through an engaged kill switch. Used before
-   * provisioning under Lockdown: the lock blocks everything, including the hub
-   * the app must reach to get a profile. IP literals only — the lock blocks DNS
-   * too, so a hostname could never be resolved behind it. An empty list lets
-   * the daemon fall back to the hub IP stored with the last profile.
-   */
+  /** IP literals only: a Lockdown kill switch blocks DNS too, so a hostname
+   *  could never resolve. Empty list falls back to the last profile's hub IP. */
   async permitHosts(hosts: string[]): Promise<OkResponse> {
     return this.request<OkResponse>("POST", "/killswitch/permit", { hosts }, 15000);
   }
@@ -115,8 +241,9 @@ export class DaemonClient {
     opts?: {
       allowLAN?: boolean;
       lockdown?: boolean;
-      preferredTransport?: "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "snowflake";
-    }
+      preferredTransport?: "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "snowflake" | "wireguard";
+    },
+    signal?: AbortSignal
   ): Promise<OkResponse> {
     const body: Record<string, unknown> = { profileId };
     if (opts?.allowLAN) {
@@ -128,7 +255,7 @@ export class DaemonClient {
     if (opts?.preferredTransport) {
       body.preferredTransport = opts.preferredTransport;
     }
-    return this.request<OkResponse>("POST", "/switch", body, this.connectTimeoutMs);
+    return this.request<OkResponse>("POST", "/switch", body, this.connectTimeoutMs, signal);
   }
 
   async getLogs(since?: number): Promise<LogEntry[]> {
@@ -148,11 +275,8 @@ export class DaemonClient {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 1000);
     try {
-      const response = await fetch(`${this.baseUrl}/ping`, {
-        method: "GET",
-        signal: controller.signal
-      });
-      return response.ok;
+      const reply = await this.httpRequest("GET", "/ping", {}, undefined, controller.signal);
+      return reply.status === 200;
     } catch {
       return false;
     } finally {
@@ -160,7 +284,40 @@ export class DaemonClient {
     }
   }
 
-  private async request<T>(method: string, route: string, body?: unknown, timeoutMs?: number): Promise<T> {
+  // One fresh socket per request (agent: false): a pooled keep-alive socket
+  // that dies quietly turns every later poll into a timeout on a live daemon.
+  private httpRequest(
+    method: string,
+    route: string,
+    headers: Record<string, string>,
+    body: string | undefined,
+    signal: AbortSignal
+  ): Promise<{ status: number; text: string }> {
+    return new Promise((resolve, reject) => {
+      const req = http.request(
+        `${this.baseUrl}${route}`,
+        { method, headers, agent: false, signal },
+        (res) => {
+          const chunks: Buffer[] = [];
+          res.on("data", (chunk: Buffer) => chunks.push(chunk));
+          res.on("error", reject);
+          res.on("end", () =>
+            resolve({ status: res.statusCode ?? 0, text: Buffer.concat(chunks).toString("utf8") })
+          );
+        }
+      );
+      req.on("error", reject);
+      req.end(body);
+    });
+  }
+
+  private async request<T>(
+    method: string,
+    route: string,
+    body?: unknown,
+    timeoutMs?: number,
+    signal?: AbortSignal
+  ): Promise<T> {
     const rawTokens = await this.tokenProvider();
     const tokens = (Array.isArray(rawTokens) ? rawTokens : [rawTokens])
       .map((token) => token.trim())
@@ -173,45 +330,55 @@ export class DaemonClient {
     for (const token of tokens) {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs ?? this.defaultRequestTimeoutMs);
+      const forwardAbort = () => controller.abort();
+      signal?.addEventListener("abort", forwardAbort);
 
-      let response: Response;
+      // Timer stays armed through the whole response read, not just the
+      // request itself — a daemon that stalls mid-body must be interruptible.
       try {
-        response = await fetch(`${this.baseUrl}${route}`, {
+        const reply = await this.httpRequest(
           method,
-          headers: {
+          route,
+          {
             "Content-Type": "application/json",
             Authorization: `Bearer ${token}`
           },
-          body: body === undefined ? undefined : JSON.stringify(body),
-          signal: controller.signal
-        });
+          body === undefined ? undefined : JSON.stringify(body),
+          controller.signal
+        );
+
+        if (reply.status === 401) {
+          continue;
+        }
+
+        if (reply.status < 200 || reply.status >= 300) {
+          try {
+            const payload = JSON.parse(reply.text) as { error?: unknown };
+            if (payload.error === "transport_exhausted") {
+              throw new TransportExhaustedError();
+            }
+            if (payload.error === "host_offline") {
+              throw new HostOfflineError();
+            }
+          } catch (error) {
+            if (error instanceof TransportExhaustedError || error instanceof HostOfflineError) throw error;
+          }
+          throw new DaemonHttpError(reply.status, reply.text);
+        }
+
+        return JSON.parse(reply.text) as T;
       } catch (error) {
         if (error instanceof Error && error.name === "AbortError") {
+          if (signal?.aborted) {
+            throw new Error(`daemon request cancelled (${method} ${route})`);
+          }
           throw new Error(`daemon request timeout (${method} ${route})`);
         }
         throw error;
       } finally {
         clearTimeout(timer);
+        signal?.removeEventListener("abort", forwardAbort);
       }
-
-      if (response.status === 401) {
-        continue;
-      }
-
-      if (!response.ok) {
-        const text = await response.text();
-        try {
-          const payload = JSON.parse(text) as { error?: unknown };
-          if (payload.error === "transport_exhausted") {
-            throw new TransportExhaustedError();
-          }
-        } catch (error) {
-          if (error instanceof TransportExhaustedError) throw error;
-        }
-        throw new Error(`daemon request failed (${response.status}): ${text}`);
-      }
-
-      return (await response.json()) as T;
     }
 
     throw new Error("daemon unauthorized (token mismatch)");

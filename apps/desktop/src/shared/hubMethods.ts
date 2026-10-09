@@ -1,9 +1,11 @@
 /** Ways the app may reach the hub. ensureHub tries each enabled one in order. */
-export type HubMethod = "directIp" | "shadowsocks" | "fronted" | "normal";
+export type HubMethod = "directIp" | "reality" | "shadowsocks" | "fronted" | "normal";
 
 export interface HubMethods {
   /** Cached hub IP, and DoH-resolved IP with no SNI. Survives a Lockdown lock. */
   directIp: boolean;
+  /** Hub traffic through the daemon's REALITY proxy, to a user pinned to the hub. */
+  reality: boolean;
   /** Hub traffic through the daemon's Shadowsocks proxy. */
   shadowsocks: boolean;
   /** The envelope relayed by an edge worker on shared CDN address space. */
@@ -12,12 +14,11 @@ export interface HubMethods {
   normal: boolean;
 }
 
-// Attempt order. directIp is first because it needs no lookup; fronted comes
-// after our own paths because it hands a third party the timing of our traffic
-// (never its content — see secureChannel), but before normal, which is the only
-// one that puts the hub's name on the wire in cleartext.
+// Attempt order: directIp needs no lookup, REALITY passes for TLS where SS-2022
+// is flagged as random, fronted only leaks timing, normal names the hub in cleartext.
 export const HUB_METHOD_ORDER: readonly HubMethod[] = [
   "directIp",
+  "reality",
   "shadowsocks",
   "fronted",
   "normal"
@@ -25,23 +26,21 @@ export const HUB_METHOD_ORDER: readonly HubMethod[] = [
 
 export const DEFAULT_HUB_METHODS: HubMethods = {
   directIp: true,
+  reality: true,
   shadowsocks: true,
   fronted: true,
   normal: false
 };
 
-/**
- * Bumped when a method's default changes in a way existing installs should
- * inherit. Everything the old default wrote to disk looks identical to a
- * deliberate choice, so without this an install would stay frozen on a value
- * the user never actually picked. normalizeHubMethods re-applies the changed
- * defaults once for anything stored below this; from then on the stored value
- * wins. Persisted inside the hubMethods object as `rev`.
- */
-export const HUB_METHODS_REV = 1;
+/** Bumped when a method's default changes; normalizeHubMethods re-applies the
+ *  new default once for anything stored below this. Persisted as `rev`. */
+export const HUB_METHODS_REV = 2;
 
-/** Methods whose default flipped on at HUB_METHODS_REV 1. */
-const REV_1_DEFAULTS: readonly HubMethod[] = ["shadowsocks", "fronted"];
+/** Methods whose default flipped on at each rev. */
+const REV_DEFAULTS: ReadonlyArray<{ rev: number; methods: readonly HubMethod[] }> = [
+  { rev: 1, methods: ["shadowsocks", "fronted"] },
+  { rev: 2, methods: ["reality"] }
+];
 
 export function isHubMethod(value: unknown): value is HubMethod {
   return typeof value === "string" && (HUB_METHOD_ORDER as readonly string[]).includes(value);
@@ -76,29 +75,32 @@ export function normalizeHubMethods(raw: unknown): HubMethods {
   if (HUB_METHOD_ORDER.some((method) => typeof source[method] === "boolean")) {
     methods = {
       directIp: source.directIp === true,
+      reality: source.reality === true,
       shadowsocks: source.shadowsocks === true,
       fronted: source.fronted === true,
       normal: source.normal === true
     };
-    if (typeof source.rev !== "number" || source.rev < HUB_METHODS_REV) {
-      for (const method of REV_1_DEFAULTS) {
-        methods[method] = DEFAULT_HUB_METHODS[method];
-      }
+    const storedRev = typeof source.rev === "number" ? source.rev : 0;
+    for (const { rev, methods: flipped } of REV_DEFAULTS) {
+      if (storedRev >= rev) continue;
+      for (const method of flipped) methods[method] = DEFAULT_HUB_METHODS[method];
     }
   } else {
-    // Migration: directIpEnabled defaulted true, and directIpOnly defaulted
-    // true meaning "never touch the domain", so normal is its inverse. A file
-    // this old predates both newer methods, which take their current default.
+    // Migration: directIpOnly defaulted true ("never touch the domain"), so
+    // normal is its inverse; a file this old predates the two newer methods.
     methods = {
       directIp: source.directIpEnabled !== false,
+      reality: DEFAULT_HUB_METHODS.reality,
       shadowsocks: DEFAULT_HUB_METHODS.shadowsocks,
       fronted: DEFAULT_HUB_METHODS.fronted,
       normal: source.directIpOnly === false
     };
   }
 
+  // directIp alone cannot produce a request without a cached hub IP or DoH, so
+  // an all-off rescue restores the full default set rather than just one method.
   if (enabledHubMethods(methods).length === 0) {
-    return { ...methods, directIp: true };
+    return { ...DEFAULT_HUB_METHODS };
   }
   return methods;
 }
@@ -107,4 +109,25 @@ export function normalizeHubMethods(raw: unknown): HubMethods {
  *  which default changes this file has already seen. */
 export function persistableHubMethods(methods: HubMethods): Record<string, unknown> {
   return { ...methods, rev: HUB_METHODS_REV };
+}
+
+/** Why a method could not even be attempted, so the UI can say more than "failed". */
+export type HubMethodUnavailable = "noAddress" | "noCredentials" | "noRelay" | "busy";
+
+export interface HubMethodTestResult {
+  method: HubMethod;
+  ok: boolean;
+  /** The address, relay host, or node the probe reached. */
+  detail?: string;
+  /** Set instead of a failure when the method had nothing to try. */
+  unavailable?: HubMethodUnavailable;
+  /** Round trip of the probe, in milliseconds. */
+  ms: number;
+}
+
+/** Which method is carrying hub traffic right now, alongside the switches. */
+export interface HubStatus {
+  methods: HubMethods;
+  active: HubMethod | null;
+  detail: string | null;
 }

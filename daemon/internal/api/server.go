@@ -1,10 +1,17 @@
 package api
 
 import (
+	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"io"
 	"log"
+	"net"
 	"net/http"
+	"net/netip"
+	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -13,6 +20,14 @@ import (
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/auth"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/state"
 )
+
+// A transport cascade can outlast the server-wide write timeout; the client
+// waits this long for connect/switch/disconnect, so the deadline matches it.
+const sessionOpWriteTimeout = 150 * time.Second
+
+func extendWriteDeadline(w http.ResponseWriter) {
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(sessionOpWriteTimeout))
+}
 
 // sanitizeLog strips CR/LF and other control chars from values that may
 // originate from user-controlled input before they are written to logs.
@@ -62,12 +77,42 @@ func (rl *rateLimiter) allow() bool {
 	return true
 }
 
-// rateLimitMiddleware wraps a handler with rate limiting (~500 req/min).
+// rateLimitMiddleware wraps a handler with rate limiting (~2000 req/min).
 func rateLimitMiddleware(limiter *rateLimiter, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !limiter.allow() {
 			writeError(w, http.StatusTooManyRequests, "rate limit exceeded")
 			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// isLoopbackHost reports whether hostport (a Host header or an Origin's
+// authority, port optional) names the loopback interface.
+func isLoopbackHost(hostport string) bool {
+	h := hostport
+	if hostOnly, _, err := net.SplitHostPort(hostport); err == nil {
+		h = hostOnly
+	}
+	h = strings.Trim(h, "[]")
+	return h == "127.0.0.1" || h == "::1" || h == "localhost"
+}
+
+// hostOriginMiddleware blocks DNS-rebinding pages: a hostname that resolves to
+// 127.0.0.1 still fails this check unless it literally names loopback.
+func hostOriginMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !isLoopbackHost(r.Host) {
+			writeError(w, http.StatusForbidden, "forbidden")
+			return
+		}
+		if origin := r.Header.Get("Origin"); origin != "" {
+			u, err := url.Parse(origin)
+			if err != nil || !isLoopbackHost(u.Host) {
+				writeError(w, http.StatusForbidden, "forbidden")
+				return
+			}
 		}
 		next.ServeHTTP(w, r)
 	})
@@ -80,13 +125,8 @@ type connectRequest struct {
 	ProfileID string `json:"profileId"`
 	AllowLAN  bool   `json:"allowLAN,omitempty"`
 	Lockdown  bool   `json:"lockdown,omitempty"`
-	// PreferredTransport: "cloak", "reality", "hysteria2", "naive",
-	// "shadowsocks", "snowflake", or "" / "auto" (cascade in autoCascadeOrder:
-	// cloak, reality, shadowsocks, hysteria2, then naive; snowflake is gated
-	// off this release -- see snowflakeReleaseGated). Auto mode keeps only the transports this
-	// profile configures, then reorderByMemory may promote whatever last
-	// worked on this network. Service.startTransport dispatches on this value;
-	// unrecognized values fall through to auto.
+	// One of the named transports, "wireguard" (no transport), or "" / "auto"
+	// for the memory-reordered transport.AutoCascadeOrder; see transportCandidates.
 	PreferredTransport string `json:"preferredTransport,omitempty"`
 }
 
@@ -99,21 +139,38 @@ type engageKillSwitchRequest struct {
 	AllowLAN  bool   `json:"allowLAN,omitempty"`
 }
 
-// permitHostsRequest carries control-plane IPs (the Pangea hub) that must stay
-// reachable through an engaged lockdown lock. IP literals only — see
-// Service.PermitHosts.
+// permitHostsRequest carries control-plane IPs that must stay reachable
+// through an engaged lockdown lock. IP literals only — see Service.PermitHosts.
 type permitHostsRequest struct {
 	Hosts []string `json:"hosts,omitempty"`
+}
+
+// splitTunnelRequest is POST /split-tunnel. Pointers tell a missing key from an empty
+// value, so a truncated body cannot wipe the lists; an absent protect keeps the stored one.
+type splitTunnelRequest struct {
+	Enabled *bool     `json:"enabled"`
+	Apps    *[]string `json:"apps"`
+	CIDRs   *[]string `json:"cidrs"`
+	Protect *[]string `json:"protect"`
+}
+
+// splitTunnelInvalidResponse names rejected entries by list and index, never by value.
+type splitTunnelInvalidResponse struct {
+	OK      bool                 `json:"ok"`
+	Error   string               `json:"error"`
+	Invalid []splitTunnelInvalid `json:"invalid"`
 }
 
 type okResponse struct {
 	OK    bool   `json:"ok"`
 	Error string `json:"error,omitempty"`
+	// Error stays a stable machine code to branch on; Detail is the reason
+	// behind it, so a failure reads as more than a bare {"ok":false}.
+	Detail string `json:"detail,omitempty"`
 }
 
-// ssProxyStartRequest carries the control-plane Shadowsocks credentials. This
-// is a separate listener from any tunnel transport: its node-side ACL permits
-// the hub only, so these credentials cannot reach WireGuard.
+// ssProxyStartRequest carries the control-plane Shadowsocks credentials, a
+// separate listener whose node-side ACL permits only the hub, never WireGuard.
 type ssProxyStartRequest struct {
 	RemoteHost string `json:"remoteHost"`
 	RemotePort int    `json:"remotePort"`
@@ -122,44 +179,157 @@ type ssProxyStartRequest struct {
 	UDPOverTCP bool   `json:"udpOverTcp,omitempty"`
 }
 
-type ssProxyStartResponse struct {
-	OK    bool   `json:"ok"`
-	Port  int    `json:"port,omitempty"`
-	Error string `json:"error,omitempty"`
+// hubProxyStartResponse answers both /ssproxy/start and /realityproxy/start.
+type hubProxyStartResponse struct {
+	OK            bool   `json:"ok"`
+	Port          int    `json:"port,omitempty"`
+	ProxyUsername string `json:"proxyUsername,omitempty"`
+	ProxyPassword string `json:"proxyPassword,omitempty"`
+	Error         string `json:"error,omitempty"`
+}
+
+// ssProxySupportedMethods mirrors shadowsocks.supportedMethods: the AEAD and
+// AEAD-2022 cipher families only, no legacy unauthenticated stream ciphers.
+var ssProxySupportedMethods = map[string]bool{
+	"aes-128-gcm":                   true,
+	"aes-192-gcm":                   true,
+	"aes-256-gcm":                   true,
+	"chacha20-ietf-poly1305":        true,
+	"xchacha20-ietf-poly1305":       true,
+	"2022-blake3-aes-128-gcm":       true,
+	"2022-blake3-aes-256-gcm":       true,
+	"2022-blake3-chacha20-poly1305": true,
+}
+
+// validateSSProxyStartRequest enforces the permitHostsRequest contract: only an
+// IP literal may be handed to PermitHosts to punch a lockdown hole for.
+func validateSSProxyStartRequest(req ssProxyStartRequest) error {
+	if net.ParseIP(strings.TrimSpace(req.RemoteHost)) == nil {
+		return errors.New("remoteHost must be an IP literal")
+	}
+	if req.RemotePort < 1 || req.RemotePort > 65535 {
+		return errors.New("remotePort must be between 1 and 65535")
+	}
+	if method := strings.TrimSpace(req.Method); method != "" && !ssProxySupportedMethods[method] {
+		return errors.New("method is not a supported cipher")
+	}
+	return nil
+}
+
+// realityProxyStartRequest carries the node's control-plane REALITY user,
+// whose node-side routes pin all of its TCP to the hub.
+type realityProxyStartRequest struct {
+	RemoteHost string `json:"remoteHost"`
+	RemotePort int    `json:"remotePort"`
+	UUID       string `json:"uuid"`
+	PublicKey  string `json:"publicKey"`
+	ShortID    string `json:"shortId"`
+	ServerName string `json:"serverName"`
+}
+
+var (
+	canonicalUUIDPattern  = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+	realityShortIDPattern = regexp.MustCompile(`^([0-9a-fA-F]{2}){1,8}$`)
+	hostnameLabelPattern  = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$`)
+)
+
+// realityPublicKeyLength is RawURL base64 of a 32-byte X25519 key. The length
+// check matters: the decoder silently skips CR/LF.
+const realityPublicKeyLength = 43
+
+func validateRealityProxyStartRequest(req realityProxyStartRequest) error {
+	if !isIPv4Literal(req.RemoteHost) && !isHostname(req.RemoteHost) {
+		return errors.New("remoteHost must be an IPv4 literal or a hostname")
+	}
+	if req.RemotePort < 1 || req.RemotePort > 65535 {
+		return errors.New("remotePort must be between 1 and 65535")
+	}
+	if !canonicalUUIDPattern.MatchString(req.UUID) {
+		return errors.New("uuid must be a canonical 8-4-4-4-12 hex UUID")
+	}
+	key, err := base64.RawURLEncoding.DecodeString(req.PublicKey)
+	if err != nil || len(req.PublicKey) != realityPublicKeyLength || len(key) != 32 {
+		return errors.New("publicKey must be an unpadded base64url 32-byte key")
+	}
+	if !realityShortIDPattern.MatchString(req.ShortID) {
+		return errors.New("shortId must be 2-16 hex characters, even length")
+	}
+	if !isHostname(req.ServerName) {
+		return errors.New("serverName must be a hostname")
+	}
+	return nil
+}
+
+func isIPv4Literal(s string) bool {
+	addr, err := netip.ParseAddr(s)
+	return err == nil && addr.Is4()
+}
+
+// isHostname accepts an LDH DNS name. An all-digit last label is refused, so
+// a malformed or bare IP like 999.1.1.1 never passes as a name.
+func isHostname(s string) bool {
+	if s == "" || len(s) > 253 {
+		return false
+	}
+	labels := strings.Split(s, ".")
+	for _, label := range labels {
+		if !hostnameLabelPattern.MatchString(label) {
+			return false
+		}
+	}
+	return strings.Trim(labels[len(labels)-1], "0123456789") != ""
 }
 
 func serviceErrorResponse(err error) okResponse {
 	if errors.Is(err, ErrTransportExhausted) {
 		return okResponse{OK: false, Error: "transport_exhausted"}
 	}
-	return okResponse{OK: false}
+	if errors.Is(err, ErrHostOffline) {
+		return okResponse{OK: false, Error: "host_offline"}
+	}
+	if errors.Is(err, ErrDisconnectIncomplete) {
+		return okResponse{OK: false, Error: "disconnect_incomplete", Detail: err.Error()}
+	}
+	return okResponse{OK: false, Detail: err.Error()}
+}
+
+// withAuthAndLimit authenticates first, then rate-limits: an unauthenticated
+// caller never spends a token from the shared bucket the real UI depends on.
+func withAuthAndLimit(token string, limiter *rateLimiter, handler http.HandlerFunc) http.Handler {
+	return auth.RequireBearer(token, rateLimitMiddleware(limiter, handler))
 }
 
 func NewHandler(token string, service *Service) http.Handler {
-	limiter := newRateLimiter(500, 8.33) // 500 burst, refill ~8.33/s (~500/min)
+	// Sized for the peak, not the average: status polls at 4Hz while connecting
+	// and 1Hz idle, plus logs/tray polls and a connect's config/kill-switch calls.
+	limiter := newRateLimiter(3000, 50) // 3000 burst, refill 50/s (~3000/min)
+	// /ping is unauthenticated, so it gets its own small bucket: draining it
+	// never starves the authenticated routes sharing limiter above.
+	pingLimiter := newRateLimiter(20, 1)
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("/ping", func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("/ping", rateLimitMiddleware(pingLimiter, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
-	})
+	})))
 
-	mux.Handle("/status", auth.RequireBearer(token, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("/status", withAuthAndLimit(token, limiter, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 			return
 		}
 		writeJSON(w, http.StatusOK, service.Status(r.Context()))
-	})))
+	}))
 
-	mux.Handle("/connect", auth.RequireBearer(token, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("/connect", withAuthAndLimit(token, limiter, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 			return
 		}
+		extendWriteDeadline(w)
 
 		r.Body = http.MaxBytesReader(w, r.Body, maxBodySize)
 		var req connectRequest
@@ -179,33 +349,32 @@ func NewHandler(token string, service *Service) http.Handler {
 		}
 
 		writeJSON(w, http.StatusOK, okResponse{OK: true})
-	})))
+	}))
 
-	mux.Handle("/disconnect", auth.RequireBearer(token, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("/disconnect", withAuthAndLimit(token, limiter, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 			return
 		}
+		extendWriteDeadline(w)
 
+		r.Body = http.MaxBytesReader(w, r.Body, maxBodySize)
 		var req disconnectRequest
-		if r.ContentLength > 0 {
-			r.Body = http.MaxBytesReader(w, r.Body, maxBodySize)
-			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-				writeError(w, http.StatusBadRequest, "invalid json")
-				return
-			}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err != io.EOF {
+			writeError(w, http.StatusBadRequest, "invalid json")
+			return
 		}
 
 		err := service.Disconnect(r.Context(), req.KeepKillSwitch)
 		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, okResponse{OK: false})
+			writeJSON(w, http.StatusInternalServerError, serviceErrorResponse(err))
 			return
 		}
 
 		writeJSON(w, http.StatusOK, okResponse{OK: true})
-	})))
+	}))
 
-	mux.Handle("/killswitch/clear", auth.RequireBearer(token, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("/killswitch/clear", withAuthAndLimit(token, limiter, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 			return
@@ -217,21 +386,33 @@ func NewHandler(token string, service *Service) http.Handler {
 		}
 
 		writeJSON(w, http.StatusOK, okResponse{OK: true})
-	})))
+	}))
 
-	mux.Handle("/killswitch/engage", auth.RequireBearer(token, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("/transport-memory/clear", withAuthAndLimit(token, limiter, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 			return
 		}
 
+		if err := service.ClearTransportMemory(); err != nil {
+			writeJSON(w, http.StatusInternalServerError, okResponse{OK: false})
+			return
+		}
+
+		writeJSON(w, http.StatusOK, okResponse{OK: true})
+	}))
+
+	mux.Handle("/killswitch/engage", withAuthAndLimit(token, limiter, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+
+		r.Body = http.MaxBytesReader(w, r.Body, maxBodySize)
 		var req engageKillSwitchRequest
-		if r.ContentLength > 0 {
-			r.Body = http.MaxBytesReader(w, r.Body, maxBodySize)
-			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-				writeError(w, http.StatusBadRequest, "invalid json")
-				return
-			}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err != io.EOF {
+			writeError(w, http.StatusBadRequest, "invalid json")
+			return
 		}
 
 		if err := service.EngageKillSwitch(r.Context(), req.ProfileID, req.AllowLAN); err != nil {
@@ -240,21 +421,19 @@ func NewHandler(token string, service *Service) http.Handler {
 		}
 
 		writeJSON(w, http.StatusOK, okResponse{OK: true})
-	})))
+	}))
 
-	mux.Handle("/killswitch/permit", auth.RequireBearer(token, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("/killswitch/permit", withAuthAndLimit(token, limiter, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 			return
 		}
 
+		r.Body = http.MaxBytesReader(w, r.Body, maxBodySize)
 		var req permitHostsRequest
-		if r.ContentLength > 0 {
-			r.Body = http.MaxBytesReader(w, r.Body, maxBodySize)
-			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-				writeError(w, http.StatusBadRequest, "invalid json")
-				return
-			}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err != io.EOF {
+			writeError(w, http.StatusBadRequest, "invalid json")
+			return
 		}
 
 		if err := service.PermitHosts(r.Context(), req.Hosts); err != nil {
@@ -263,11 +442,11 @@ func NewHandler(token string, service *Service) http.Handler {
 		}
 
 		writeJSON(w, http.StatusOK, okResponse{OK: true})
-	})))
+	}))
 
 	// Single unhyphenated segments, matching /killswitch/*. Deliberately not
 	// part of Connect: this must work before a profile exists.
-	mux.Handle("/ssproxy/start", auth.RequireBearer(token, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("/ssproxy/start", withAuthAndLimit(token, limiter, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 			return
@@ -279,6 +458,10 @@ func NewHandler(token string, service *Service) http.Handler {
 			writeError(w, http.StatusBadRequest, "invalid json")
 			return
 		}
+		if err := validateSSProxyStartRequest(req); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 
 		port, err := service.StartShadowsocksProxy(r.Context(), state.ShadowsocksProfile{
 			RemoteHost: req.RemoteHost,
@@ -288,14 +471,17 @@ func NewHandler(token string, service *Service) http.Handler {
 			UDPOverTCP: req.UDPOverTCP,
 		})
 		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, ssProxyStartResponse{OK: false, Error: err.Error()})
+			// The reason travels: without it the settings pane can only say the
+			// hub was unreachable, which sends the next hour after the network.
+			writeJSON(w, http.StatusInternalServerError, hubProxyStartResponse{OK: false, Error: err.Error()})
 			return
 		}
 
-		writeJSON(w, http.StatusOK, ssProxyStartResponse{OK: true, Port: port})
-	})))
+		user, pass := service.ShadowsocksProxyCredentials()
+		writeJSON(w, http.StatusOK, hubProxyStartResponse{OK: true, Port: port, ProxyUsername: user, ProxyPassword: pass})
+	}))
 
-	mux.Handle("/ssproxy/stop", auth.RequireBearer(token, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("/ssproxy/stop", withAuthAndLimit(token, limiter, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 			return
@@ -307,13 +493,62 @@ func NewHandler(token string, service *Service) http.Handler {
 		}
 
 		writeJSON(w, http.StatusOK, okResponse{OK: true})
-	})))
+	}))
 
-	mux.Handle("/switch", auth.RequireBearer(token, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("/realityproxy/start", withAuthAndLimit(token, limiter, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 			return
 		}
+
+		r.Body = http.MaxBytesReader(w, r.Body, maxBodySize)
+		var req realityProxyStartRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid json")
+			return
+		}
+		if err := validateRealityProxyStartRequest(req); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		port, err := service.StartRealityProxy(r.Context(), state.RealityProfile{
+			RemoteHost: req.RemoteHost,
+			RemotePort: req.RemotePort,
+			UUID:       req.UUID,
+			PublicKey:  req.PublicKey,
+			ShortID:    req.ShortID,
+			ServerName: req.ServerName,
+		})
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, hubProxyStartResponse{OK: false, Error: err.Error()})
+			return
+		}
+
+		user, pass := service.RealityProxyCredentials()
+		writeJSON(w, http.StatusOK, hubProxyStartResponse{OK: true, Port: port, ProxyUsername: user, ProxyPassword: pass})
+	}))
+
+	mux.Handle("/realityproxy/stop", withAuthAndLimit(token, limiter, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+
+		if err := service.StopRealityProxy(r.Context()); err != nil {
+			writeJSON(w, http.StatusInternalServerError, okResponse{OK: false})
+			return
+		}
+
+		writeJSON(w, http.StatusOK, okResponse{OK: true})
+	}))
+
+	mux.Handle("/switch", withAuthAndLimit(token, limiter, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		extendWriteDeadline(w)
 
 		r.Body = http.MaxBytesReader(w, r.Body, maxBodySize)
 		var req connectRequest
@@ -333,9 +568,9 @@ func NewHandler(token string, service *Service) http.Handler {
 		}
 
 		writeJSON(w, http.StatusOK, okResponse{OK: true})
-	})))
+	}))
 
-	mux.Handle("/logs", auth.RequireBearer(token, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("/logs", withAuthAndLimit(token, limiter, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 			return
@@ -353,19 +588,77 @@ func NewHandler(token string, service *Service) http.Handler {
 		}
 
 		writeJSON(w, http.StatusOK, service.Logs(since))
-	})))
+	}))
 
-	mux.Handle("/config", auth.RequireBearer(token, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	registerPostQuantumRoutes(mux, token, limiter)
+
+	// Never behind opMu: a POST saves, applies the app rules live and leaves the ranges
+	// to the reconciler, so it answers while a connect is still running.
+	mux.Handle("/split-tunnel", withAuthAndLimit(token, limiter, func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			view, ok := service.SplitTunnel()
+			if !ok {
+				writeError(w, http.StatusNotFound, "split tunnelling is not available")
+				return
+			}
+			writeJSON(w, http.StatusOK, view)
+		case http.MethodPost:
+			r.Body = http.MaxBytesReader(w, r.Body, maxBodySize)
+			var req splitTunnelRequest
+			decoder := json.NewDecoder(r.Body)
+			decoder.DisallowUnknownFields()
+			if err := decoder.Decode(&req); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid json")
+				return
+			}
+			if req.Enabled == nil || req.Apps == nil || req.CIDRs == nil {
+				writeError(w, http.StatusBadRequest, "enabled, apps and cidrs are required")
+				return
+			}
+			view, invalid, err := service.UpdateSplitTunnel(splitTunnelUpdate{
+				Enabled: *req.Enabled,
+				Apps:    *req.Apps,
+				CIDRs:   *req.CIDRs,
+				Protect: req.Protect,
+			})
+			switch {
+			case len(invalid) > 0:
+				writeJSON(w, http.StatusBadRequest, splitTunnelInvalidResponse{OK: false, Error: "invalid_split_tunnel", Invalid: invalid})
+			case errors.Is(err, errSplitTunnelUnavailable):
+				writeError(w, http.StatusNotFound, "split tunnelling is not available")
+			case err != nil:
+				writeJSON(w, http.StatusInternalServerError, okResponse{OK: false, Detail: "could not save the split tunnel settings"})
+			default:
+				writeJSON(w, http.StatusOK, view)
+			}
+		default:
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		}
+	}))
+
+	mux.Handle("/config", withAuthAndLimit(token, limiter, func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
 			writeJSON(w, http.StatusOK, service.Config())
 		case http.MethodPost:
 			r.Body = http.MaxBytesReader(w, r.Body, maxBodySize)
-			var cfg state.Config
-			if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
+			// A pointer field distinguishes an absent "profiles" key (nil, rejected)
+			// from an explicit empty list, so a truncated body can't wipe all profiles.
+			var payload struct {
+				Profiles *[]state.Profile `json:"profiles"`
+			}
+			decoder := json.NewDecoder(r.Body)
+			decoder.DisallowUnknownFields()
+			if err := decoder.Decode(&payload); err != nil {
 				writeError(w, http.StatusBadRequest, "invalid json")
 				return
 			}
+			if payload.Profiles == nil {
+				writeError(w, http.StatusBadRequest, "profiles is required")
+				return
+			}
+			cfg := state.Config{Profiles: *payload.Profiles}
 			if err := service.UpdateConfig(cfg); err != nil {
 				log.Printf("config update rejected: %s", sanitizeLog(err.Error()))
 				writeError(w, http.StatusBadRequest, "invalid config")
@@ -375,15 +668,21 @@ func NewHandler(token string, service *Service) http.Handler {
 		default:
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		}
-	})))
+	}))
 
-	return rateLimitMiddleware(limiter, mux)
+	return slowRequestWatchdog(hostOriginMiddleware(mux))
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(payload); err != nil {
+		log.Printf("writeJSON: encode failed: %s", sanitizeLog(err.Error()))
+		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(payload)
+	_, _ = w.Write(buf.Bytes())
 }
 
 func writeError(w http.ResponseWriter, status int, message string) {

@@ -1,17 +1,26 @@
-import type { OkResponse, StatusResponse } from "@pangeavpn/shared-types";
+import type { StatusResponse } from "@pangeavpn/shared-types";
 
 export type AutoConnectDeps = {
   getEnabled: () => boolean;
   getAuthenticated: () => boolean;
   getDaemonState: () => StatusResponse["state"];
+  /** The daemon is rebuilding a dropped session itself; a Connect fired on top
+   *  of that queues behind its cascade or restarts it from scratch. */
+  getDaemonReconnecting?: () => boolean;
   getUserIntent: () => "connected" | "disconnected";
   getConnectionInFlight: () => boolean;
+  /** Reports the attempt's own busy state, so a manual Disconnect can reach
+   *  `cancelConnect()` and a manual Connect can see an attempt in progress. */
+  setConnectionInFlight?: (inFlight: boolean) => void;
   getLastServerId: () => string | null;
   /** Server to use when nothing has been connected to yet. Re-rolled per attempt. */
   getFallbackServerId: () => string | null;
-  provisionAndSwitch: (serverId: string) => Promise<OkResponse>;
+  /** Servers eligible under the current transport choice; validates a stored
+   *  lastServerId that may have been decommissioned or filtered out. */
+  getVisibleServers?: () => readonly ServerInfo[];
+  provisionAndSwitch: (serverId: string) => Promise<ConnectResult>;
   /** Lets the UI catch up with a server auto-connect chose on the user's behalf. */
-  onConnected?: () => void;
+  onConnected?: (serverId?: string) => void;
 };
 
 // Backoff between retries. Caps at 60s and never gives up — the user asked for "always connected".
@@ -37,6 +46,14 @@ export function notifyUserConnected(): void {
   nextAttemptAtMs = 0;
 }
 
+/** A deliberate Connect: the intent is "connected" from the click, so a Stop
+ *  during the attempt is the only thing that can leave it "disconnected". */
+export function notifyConnectRequested(): void {
+  userIntent = "connected";
+  consecutiveFailures = 0;
+  nextAttemptAtMs = 0;
+}
+
 export function notifyUserDisconnected(): void {
   userIntent = "disconnected";
   consecutiveFailures = 0;
@@ -51,12 +68,16 @@ export function notifyToggleChanged(enabled: boolean): void {
   }
 }
 
-// Last connected server, or a fresh random one when there isn't one yet. Each
-// call re-rolls the fallback, so a fresh install that hits a dead node moves on
-// instead of retrying it forever.
+// Last connected server, else a fresh random one, re-rolled per attempt so a
+// dead or decommissioned target doesn't saturate backoff forever.
 function resolveServerId(): string | null {
   if (!deps) return null;
-  return deps.getLastServerId() ?? deps.getFallbackServerId();
+  const lastId = deps.getLastServerId();
+  if (lastId) {
+    const visible = deps.getVisibleServers?.();
+    if (!visible || visible.some((server) => server.id === lastId)) return lastId;
+  }
+  return deps.getFallbackServerId();
 }
 
 function shouldAttempt(): boolean {
@@ -68,6 +89,7 @@ function shouldAttempt(): boolean {
   if (inFlight) return false;
   const state = deps.getDaemonState();
   if (state !== "DISCONNECTED" && state !== "ERROR") return false;
+  if (deps.getDaemonReconnecting?.()) return false;
   if (!resolveServerId()) return false;
   if (Date.now() < nextAttemptAtMs) return false;
   return true;
@@ -78,19 +100,26 @@ async function runAttempt(): Promise<void> {
   const serverId = resolveServerId();
   if (!serverId) return;
   inFlight = true;
+  deps.setConnectionInFlight?.(true);
   try {
     const result = await deps.provisionAndSwitch(serverId);
+    // The user may have hit Disconnect while this was in flight; don't
+    // override their intent by committing a connected state now.
+    if (userIntent !== "connected") return;
     if (result && result.ok) {
       consecutiveFailures = 0;
-      nextAttemptAtMs = 0;
-      deps.onConnected?.();
-    } else {
+      // A short cooldown even on success, so a tunnel that drops right back
+      // to DISCONNECTED/ERROR doesn't refire on every poll tick.
+      nextAttemptAtMs = Date.now() + BACKOFF_MS[0];
+      deps.onConnected?.(result.serverId);
+    } else if (result?.error !== "cancelled") {
       bumpBackoff();
     }
   } catch {
-    bumpBackoff();
+    if (userIntent === "connected") bumpBackoff();
   } finally {
     inFlight = false;
+    deps.setConnectionInFlight?.(false);
   }
 }
 

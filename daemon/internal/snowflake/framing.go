@@ -7,9 +7,7 @@ import (
 )
 
 // WriteFrame writes payload as a [2-byte big-endian length][payload] frame,
-// the wire contract this package uses to carry WireGuard UDP datagrams over
-// the Snowflake client's stream (see manager.go). Max payload is 65535
-// bytes, well above WireGuard's ~1420-byte typical datagram size.
+// the wire contract this package uses to carry WireGuard datagrams (see manager.go).
 func WriteFrame(w io.Writer, payload []byte) error {
 	if len(payload) > 65535 {
 		return fmt.Errorf("snowflake: frame payload too large: %d bytes (max 65535)", len(payload))

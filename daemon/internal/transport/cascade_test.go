@@ -84,7 +84,7 @@ func TestSelectAutoSkipsUnavailableAndKeepsOrder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Select: %v", err)
 	}
-	want := []string{"cloak", "reality", "shadowsocks", "hysteria2"}
+	want := []string{"reality", "cloak", "shadowsocks", "hysteria2"}
 	if !equal(kinds(got), want) {
 		t.Fatalf("got %v, want %v", kinds(got), want)
 	}

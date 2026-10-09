@@ -21,9 +21,15 @@ import (
 type fakeTransport struct {
 	conn net.Conn
 	err  error
+	// block, when non-nil, is read from before Dial returns, letting tests
+	// hold the rendezvous "in flight" until they choose to unblock it.
+	block chan struct{}
 }
 
 func (f *fakeTransport) Dial() (net.Conn, error) {
+	if f.block != nil {
+		<-f.block
+	}
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -46,6 +52,7 @@ func testProfile() state.SnowflakeProfile {
 		LocalPort:         0,
 		BrokerURL:         "http://broker.invalid",
 		BridgeFingerprint: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+		ICEServers:        []string{"stun:stun.example.invalid:3478"},
 	}
 }
 
@@ -115,6 +122,41 @@ func TestStart_DialFailure_StopsRunning(t *testing.T) {
 
 	if err := m.WaitForSession(context.Background(), 50*time.Millisecond); err == nil {
 		t.Fatal("expected WaitForSession to error once the manager has stopped")
+	}
+}
+
+// TestWaitForSession_WokenWhenStoppedWhileParked proves a caller already
+// blocked in WaitForSession is woken by Stop instead of sitting until its
+// own timeout, even though the rendezvous never finished dialing.
+func TestWaitForSession_WokenWhenStoppedWhileParked(t *testing.T) {
+	block := make(chan struct{})
+	t.Cleanup(func() { close(block) })
+	withFakeTransport(t, &fakeTransport{err: errors.New("broker unreachable"), block: block})
+
+	m := NewManager(state.NewLogStore(10))
+	if err := m.Start(context.Background(), testProfile()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	waitErrCh := make(chan error, 1)
+	go func() { waitErrCh <- m.WaitForSession(context.Background(), 30*time.Second) }()
+	time.Sleep(50 * time.Millisecond) // let WaitForSession park on the session channel
+
+	stopStart := time.Now()
+	if err := m.Stop(context.Background()); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+
+	select {
+	case err := <-waitErrCh:
+		if err == nil {
+			t.Fatal("expected WaitForSession to return an error once the manager stopped")
+		}
+		if elapsed := time.Since(stopStart); elapsed > 2*time.Second {
+			t.Fatalf("WaitForSession took %s to wake after Stop, want well under its 30s timeout", elapsed)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("WaitForSession did not wake within 3s of Stop")
 	}
 }
 

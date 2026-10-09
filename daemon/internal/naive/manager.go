@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -24,24 +25,36 @@ import (
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/transport"
 )
 
-// The node-side bridge's fixed loopback address, reached via the
-// naive-server's SOCKS5 CONNECT once the TLS+HTTP2 tunnel is up.
-const bridgeAddr = "127.0.0.1:9000"
+// bridgeAddrFor is the node-side framed-UDP bridge this tunnel dials through
+// the CONNECT stream: one instance per exit under multihop, the default otherwise.
+func bridgeAddrFor(port int) string {
+	if port <= 0 {
+		port = state.DefaultNaiveBridgePort
+	}
+	return net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
+}
 
 // Manager wraps the cgo-linked NaiveProxy engine behind transport.Manager,
 // owning the loopback UDP listener WireGuard's peer Endpoint points at.
 var _ transport.Manager = (*Manager)(nil)
+var _ transport.SessionWaiter = (*Manager)(nil)
+var _ transport.BoundPortReporter = (*Manager)(nil)
 
 type Manager struct {
 	mu      sync.RWMutex
 	logs    *state.LogStore
 	running bool
 
+	// startMu serializes the blocking cgo Start/Stop calls so they never
+	// run concurrently, without forcing Status/WaitForSession to wait on them.
+	startMu sync.Mutex
+
 	udpConn *net.UDPConn
 	stream  net.Conn
 	wgAddr  *net.UDPAddr
 
 	boundLocalPort int
+	activeProfile  state.NaiveProfile
 
 	done          chan struct{}
 	session       chan struct{}
@@ -72,35 +85,41 @@ type nativeStatus struct {
 	Error     string `json:"error"`
 }
 
-func nativeQueryStatus() nativeStatus {
+func nativeQueryStatus() (nativeStatus, error) {
 	cStr := C.PangeaNaiveStatus()
 	if cStr == nil {
-		return nativeStatus{}
+		return nativeStatus{}, errors.New("naive: status query returned null")
 	}
 	defer C.free(unsafe.Pointer(cStr))
 	var st nativeStatus
-	_ = json.Unmarshal([]byte(C.GoString(cStr)), &st)
-	return st
+	if err := json.Unmarshal([]byte(C.GoString(cStr)), &st); err != nil {
+		return nativeStatus{}, fmt.Errorf("naive: parse status json: %w", err)
+	}
+	return st, nil
 }
 
 // Start binds the engine's SOCKS5 listener and the Go-owned loopback UDP
 // socket; the CONNECT dial happens in the background, see WaitForSession.
 func (m *Manager) Start(ctx context.Context, profile state.NaiveProfile) error {
-	_ = ctx
+	m.mu.RLock()
+	running := m.running
+	current := m.activeProfile
+	m.mu.RUnlock()
 
-	m.mu.Lock()
-	if m.running {
-		m.mu.Unlock()
-		return nil
+	if running {
+		if current == profile {
+			return nil
+		}
+		if err := m.Stop(ctx); err != nil {
+			return fmt.Errorf("naive: stop previous session before switching profile: %w", err)
+		}
 	}
 
 	remoteHost := strings.TrimSpace(profile.RemoteHost)
 	if remoteHost == "" {
-		m.mu.Unlock()
 		return errors.New("naive remote host is required")
 	}
 	if profile.LocalPort < 0 {
-		m.mu.Unlock()
 		return fmt.Errorf("LocalPort must be >= 0, got %d", profile.LocalPort)
 	}
 
@@ -115,8 +134,17 @@ func (m *Manager) Start(ctx context.Context, profile state.NaiveProfile) error {
 	}
 	payload, err := json.Marshal(cfg)
 	if err != nil {
-		m.mu.Unlock()
 		return fmt.Errorf("naive: marshal start config: %w", err)
+	}
+
+	m.startMu.Lock()
+	defer m.startMu.Unlock()
+
+	m.mu.RLock()
+	alreadyRunning := m.running
+	m.mu.RUnlock()
+	if alreadyRunning {
+		return nil
 	}
 
 	// Bracket the cgo call: the engine can die without unwinding to Go, so the
@@ -130,15 +158,21 @@ func (m *Manager) Start(ctx context.Context, profile state.NaiveProfile) error {
 
 	m.logs.Add(state.LogInfo, state.SourceNaive, fmt.Sprintf("naive: engine start returned %d", int(startResult)))
 	if startResult != 0 {
-		st := nativeQueryStatus()
-		m.mu.Unlock()
+		st, statusErr := nativeQueryStatus()
+		C.PangeaNaiveStop()
+		if statusErr != nil {
+			return fmt.Errorf("naive: engine failed to start (status unavailable: %v)", statusErr)
+		}
 		return fmt.Errorf("naive: engine failed to start: %s", st.Error)
 	}
 
-	st := nativeQueryStatus()
+	st, statusErr := nativeQueryStatus()
+	if statusErr != nil {
+		C.PangeaNaiveStop()
+		return fmt.Errorf("naive: engine started but status query failed: %w", statusErr)
+	}
 	if !st.Running || st.SocksPort <= 0 {
 		C.PangeaNaiveStop()
-		m.mu.Unlock()
 		return fmt.Errorf("naive: engine started but reported no socks port (status: %+v)", st)
 	}
 
@@ -146,13 +180,11 @@ func (m *Manager) Start(ctx context.Context, profile state.NaiveProfile) error {
 	udpAddr, err := net.ResolveUDPAddr("udp", localAddr)
 	if err != nil {
 		C.PangeaNaiveStop()
-		m.mu.Unlock()
 		return fmt.Errorf("resolve local UDP addr %s: %w", localAddr, err)
 	}
 	udpConn, err := net.ListenUDP("udp", udpAddr)
 	if err != nil {
 		C.PangeaNaiveStop()
-		m.mu.Unlock()
 		return fmt.Errorf("listen UDP %s: %w", localAddr, err)
 	}
 
@@ -164,6 +196,8 @@ func (m *Manager) Start(ctx context.Context, profile state.NaiveProfile) error {
 	done := make(chan struct{})
 	session := make(chan struct{})
 	sessionCtx, sessionCancel := context.WithCancel(context.Background())
+
+	m.mu.Lock()
 	m.generation++
 	generation := m.generation
 	m.udpConn = udpConn
@@ -176,19 +210,20 @@ func (m *Manager) Start(ctx context.Context, profile state.NaiveProfile) error {
 	m.boundLocalPort = boundPort
 	m.stream = nil
 	m.wgAddr = nil
+	m.activeProfile = profile
 	m.mu.Unlock()
 
 	pid := os.Getpid()
 	m.logs.Add(state.LogInfo, state.SourceNaive, fmt.Sprintf("in-process naive started (pid=%d) listening on 127.0.0.1:%d, engine socks=127.0.0.1:%d", pid, boundPort, st.SocksPort))
 
-	go m.runSession(sessionCtx, generation, udpConn, st.SocksPort, done, session)
+	go m.runSession(sessionCtx, generation, udpConn, st.SocksPort, bridgeAddrFor(profile.BridgePort), done, session)
 
 	return nil
 }
 
 // runSession dials the SOCKS5 CONNECT tunnel, then relays datagrams until
 // either side breaks. Runs for one Start/Stop cycle.
-func (m *Manager) runSession(sessionCtx context.Context, generation uint64, udpConn *net.UDPConn, socksPort int, done, session chan struct{}) {
+func (m *Manager) runSession(sessionCtx context.Context, generation uint64, udpConn *net.UDPConn, socksPort int, bridgeAddr string, done, session chan struct{}) {
 	defer close(done)
 
 	socksAddr := fmt.Sprintf("127.0.0.1:%d", socksPort)
@@ -220,6 +255,15 @@ func (m *Manager) runSession(sessionCtx context.Context, generation uint64, udpC
 		m.teardown(generation)
 		return
 	case <-sessionCtx.Done():
+		// The dial may still land after Stop; drain it so a late-arriving
+		// conn doesn't leak with no owner to close it.
+		go func() {
+			select {
+			case conn := <-streamCh:
+				conn.Close()
+			case <-errCh:
+			}
+		}()
 		m.teardown(generation)
 		return
 	}
@@ -255,8 +299,11 @@ func (m *Manager) runSession(sessionCtx context.Context, generation uint64, udpC
 		abnormal = false
 	}
 	stream.Close()
+	// Also close udpConn: whichever relay hasn't exited yet may be parked in
+	// ReadFromUDP, which only stream.Close() would never wake.
+	udpConn.Close()
 	for len(stats) < 2 {
-		stats = append(stats, <-relayDone) // both relays exit once the stream/socket closes
+		stats = append(stats, <-relayDone)
 	}
 
 	if abnormal {
@@ -341,26 +388,41 @@ func (m *Manager) relayToWG(udpConn *net.UDPConn, stream net.Conn, relayDone cha
 // teardown clears shared state, but only if this call still owns the
 // current generation — see the generation field's doc comment.
 func (m *Manager) teardown(generation uint64) {
+	m.startMu.Lock()
+	defer m.startMu.Unlock()
+
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	if m.generation != generation {
+		m.mu.Unlock()
 		return
 	}
-	if m.udpConn != nil {
-		m.udpConn.Close()
-	}
-	C.PangeaNaiveStop()
+	udpConn := m.udpConn
+	sessionCancel := m.sessionCancel
+	waiter := m.session
 	m.running = false
 	m.udpConn = nil
 	m.stream = nil
 	m.wgAddr = nil
+	m.hasSession = false
 	m.session = nil
 	m.boundLocalPort = 0
-	if m.sessionCancel != nil {
-		m.sessionCancel()
-	}
 	m.sessionCtx = nil
 	m.sessionCancel = nil
+	// Retire the generation here too: Stop's timeout path and runSession's
+	// own exit both tear this down, and PangeaNaiveStop's idempotency isn't guaranteed.
+	m.generation++
+	m.mu.Unlock()
+
+	if sessionCancel != nil {
+		sessionCancel()
+	}
+	if udpConn != nil {
+		udpConn.Close()
+	}
+	if waiter != nil {
+		close(waiter)
+	}
+	C.PangeaNaiveStop()
 }
 
 func (m *Manager) WaitForSession(ctx context.Context, timeout time.Duration) error {
@@ -389,6 +451,14 @@ func (m *Manager) WaitForSession(ctx context.Context, timeout time.Duration) err
 
 	select {
 	case <-session:
+		// teardown also closes this channel to wake us on a failed session;
+		// recheck state instead of assuming the wake means success.
+		m.mu.RLock()
+		ok := m.running && m.hasSession
+		m.mu.RUnlock()
+		if !ok {
+			return errors.New("naive session ended before it was established")
+		}
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
@@ -404,6 +474,7 @@ func (m *Manager) Stop(ctx context.Context) error {
 		return nil
 	}
 
+	generation := m.generation
 	udpConn := m.udpConn
 	stream := m.stream
 	done := m.done
@@ -431,16 +502,10 @@ func (m *Manager) Stop(ctx context.Context) error {
 	case <-done:
 		return nil
 	case <-timer.C:
-		m.mu.Lock()
-		generation := m.generation
-		m.mu.Unlock()
 		m.teardown(generation)
 		m.logs.Add(state.LogWarn, state.SourceNaive, "naive stop timed out; forced shutdown")
 		return nil
 	case <-ctx.Done():
-		m.mu.Lock()
-		generation := m.generation
-		m.mu.Unlock()
 		m.teardown(generation)
 		return nil
 	}
