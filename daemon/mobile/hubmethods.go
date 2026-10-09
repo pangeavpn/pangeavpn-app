@@ -6,6 +6,8 @@ package mobile
 type hubMethods struct {
 	// DirectIP: cached hub IP, then a DoH-resolved IP with no SNI.
 	DirectIP bool `json:"directIp"`
+	// Reality: hub traffic through a local REALITY proxy, to a node user pinned to the hub.
+	Reality bool `json:"reality"`
 	// Shadowsocks: hub traffic through the local Shadowsocks proxy.
 	Shadowsocks bool `json:"shadowsocks"`
 	// Fronted: the envelope relayed by an edge worker on shared CDN space.
@@ -16,22 +18,29 @@ type hubMethods struct {
 	Rev int `json:"rev"`
 }
 
-// hubMethodOrder is the attempt order. DirectIP needs no lookup; Fronted hands
-// a third party our timing (never content) so it sits after our own paths.
-var hubMethodOrder = []string{"directIp", "shadowsocks", "fronted", "normal"}
+// hubMethodOrder: directIp needs no lookup, REALITY passes for TLS where SS-2022
+// is flagged as random, fronted only leaks timing, normal names the hub in clear.
+var hubMethodOrder = []string{"directIp", "reality", "shadowsocks", "fronted", "normal"}
 
 // hubMethodsRev is bumped when a default changes in a way existing installs
 // should inherit, since an old default on disk looks like a deliberate choice.
-const hubMethodsRev = 1
+const hubMethodsRev = 2
 
-// rev1Defaults are the methods whose default flipped on at rev 1.
-var rev1Defaults = []string{"shadowsocks", "fronted"}
+// revDefaults are the methods whose default flipped on at each rev.
+var revDefaults = []struct {
+	rev     int
+	methods []string
+}{
+	{rev: 1, methods: []string{"shadowsocks", "fronted"}},
+	{rev: 2, methods: []string{"reality"}},
+}
 
 // defaultHubMethods leaves Normal off: it is the only method whose SNI names
 // the hub in cleartext.
 func defaultHubMethods() hubMethods {
 	return hubMethods{
 		DirectIP:    true,
+		Reality:     true,
 		Shadowsocks: true,
 		Fronted:     true,
 		Normal:      false,
@@ -43,6 +52,8 @@ func (m hubMethods) get(method string) bool {
 	switch method {
 	case "directIp":
 		return m.DirectIP
+	case "reality":
+		return m.Reality
 	case "shadowsocks":
 		return m.Shadowsocks
 	case "fronted":
@@ -59,6 +70,8 @@ func (m hubMethods) with(method string, enabled bool) hubMethods {
 	switch method {
 	case "directIp":
 		out.DirectIP = enabled
+	case "reality":
+		out.Reality = enabled
 	case "shadowsocks":
 		out.Shadowsocks = enabled
 	case "fronted":
@@ -104,19 +117,24 @@ func isHubMethod(value string) bool {
 	return false
 }
 
-// normalizeHubMethods re-applies changed defaults once for anything stored
-// below the current rev, then guarantees at least one method is on.
+// normalize re-applies each changed default once for anything stored below
+// its rev, then guarantees at least one method is on.
 func (m hubMethods) normalize() hubMethods {
 	out := m
-	if out.Rev < hubMethodsRev {
-		defaults := defaultHubMethods()
-		for _, method := range rev1Defaults {
+	defaults := defaultHubMethods()
+	for _, change := range revDefaults {
+		if out.Rev >= change.rev {
+			continue
+		}
+		for _, method := range change.methods {
 			out = out.with(method, defaults.get(method))
 		}
 	}
 	out.Rev = hubMethodsRev
+	// directIp alone cannot reach the hub without a cached IP or DoH, so an
+	// all-off blob gets the whole default set back.
 	if len(out.enabled()) == 0 {
-		out.DirectIP = true
+		return defaults
 	}
 	return out
 }

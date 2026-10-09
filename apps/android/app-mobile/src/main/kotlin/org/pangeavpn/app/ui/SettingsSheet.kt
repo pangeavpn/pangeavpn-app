@@ -121,6 +121,12 @@ fun SettingsSheet(
                         onCheckedChange = { settingsViewModel.setHubMethod(method, it) },
                     )
                 }
+                SwitchRow(
+                    title = stringResource(R.string.settings_censorship_deaddrop_title),
+                    hint = stringResource(R.string.settings_censorship_deaddrop_hint),
+                    checked = state.settings.deadDrop,
+                    onCheckedChange = settingsViewModel::setDeadDrop,
+                )
             }
 
             Section(

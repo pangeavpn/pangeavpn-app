@@ -20,6 +20,7 @@ func TestNormalizeFrontedEndpoint(t *testing.T) {
 		{"port rejected", "relay.example.com:8443", "", false},
 		{"leading hyphen", "-relay.example.com", "", false},
 		{"underscore", "relay_1.example.com", "", false},
+		{"ip literal is not a relay", "192.168.1.10", "", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -92,5 +93,28 @@ func TestPromoteFrontedEndpoint(t *testing.T) {
 	}
 	if promoteFrontedEndpoint(list, 9) != nil {
 		t.Fatal("an out-of-range index should report no change")
+	}
+}
+
+// Without the shipped relays an install that has never reached the hub has none.
+func TestSeedFrontedEndpointsFallsBackToTheShippedRelays(t *testing.T) {
+	got := seedFrontedEndpoints(nil)
+	if !sameStrings(got, defaultFrontedEndpoints) {
+		t.Fatalf("got %v, want %v", got, defaultFrontedEndpoints)
+	}
+	got[0] = "mutated.example.com"
+	if defaultFrontedEndpoints[0] == "mutated.example.com" {
+		t.Fatal("seeding must hand out a copy")
+	}
+	if kept := seedFrontedEndpoints([]string{"a.example.com"}); !sameStrings(kept, []string{"a.example.com"}) {
+		t.Fatalf("got %v, want the stored list to win", kept)
+	}
+}
+
+// Primary first: the mirror costs a round trip and a second name on the wire.
+func TestNormalHubHostsTriesThePrimaryThenTheMirror(t *testing.T) {
+	want := []string{"api.pangeavpn.org", "api.pangeavpn.it"}
+	if got := normalHubHosts(); !sameStrings(got, want) {
+		t.Fatalf("got %v, want %v", got, want)
 	}
 }

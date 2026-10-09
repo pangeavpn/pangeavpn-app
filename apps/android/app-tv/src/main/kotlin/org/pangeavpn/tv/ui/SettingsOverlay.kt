@@ -98,6 +98,10 @@ fun SettingsOverlay(settingsViewModel: SettingsViewModel, onDismiss: () -> Unit)
                     }
                     Spacer(modifier = Modifier.height(6.dp))
                 }
+                val deadDrop = state.settings.deadDrop
+                Button(onClick = { settingsViewModel.setDeadDrop(!deadDrop) }) {
+                    TvText("${stringResource(R.string.settings_censorship_deaddrop_title)} — ${onOff(deadDrop)}")
+                }
 
                 Spacer(modifier = Modifier.height(16.dp))
                 Button(onClick = { settingsViewModel.showKillswitchGuide() }) {

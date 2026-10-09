@@ -3,7 +3,6 @@ package mobile
 // Ports the profile construction in apps/desktop/src/main/pangeaApiClient.ts.
 
 import (
-	"net"
 	"strings"
 
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/state"
@@ -49,33 +48,36 @@ func buildNaive(info *naiveInfo, nodeIP string) *state.NaiveProfile {
 		return nil
 	}
 	host := strings.TrimSpace(info.RemoteHost)
-	serverName := host
-	if named := strings.TrimSpace(info.ServerName); named != "" {
-		serverName = named
-	}
 	return &state.NaiveProfile{
 		LocalPort:  0,
 		RemoteHost: naiveDialHost(info, host, nodeIP),
 		RemotePort: info.RemotePort,
 		Username:   info.Username,
 		Password:   info.Password,
-		ServerName: serverName,
+		// nodeIP is the last resort, so the SNI is never blank.
+		ServerName: firstNonBlank(info.ServerName, host, nodeIP),
 	}
 }
 
-// naiveDialHost picks the address to dial: a naive-specific one first, then
-// remoteHost when it is already a literal, then the shared node.
+// naiveDialHost picks the address to dial: a naive-specific address first,
+// then remoteHost when it is already one, then the shared node.
 func naiveDialHost(info *naiveInfo, host, nodeIP string) string {
-	if perTransport := strings.TrimSpace(info.RemoteIP); perTransport != "" {
+	if perTransport := strings.TrimSpace(info.RemoteIP); perTransport != "" && isIPLiteral(perTransport) {
 		return perTransport
 	}
-	if ip := net.ParseIP(host); ip != nil && ip.To4() != nil {
+	if isIPLiteral(host) {
 		return host
 	}
-	if trimmed := strings.TrimSpace(nodeIP); trimmed != "" {
-		return trimmed
+	return firstNonBlank(nodeIP, host)
+}
+
+func firstNonBlank(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
 	}
-	return host
+	return ""
 }
 
 func buildReality(info *realityInfo, nodeIP string) *state.RealityProfile {
@@ -112,6 +114,7 @@ func buildHysteria2(info *hysteria2Info, nodeIP string) *state.Hysteria2Profile 
 		ObfsPassword: info.ObfsPassword,
 		ServerName:   serverName,
 		PinSHA256:    info.PinSHA256,
+		RemotePorts:  info.RemotePorts,
 	}
 }
 
@@ -146,4 +149,3 @@ func buildSnowflake(info *snowflakeInfo) *state.SnowflakeProfile {
 		ICEServers:        info.ICEServers,
 	}
 }
-

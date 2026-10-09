@@ -43,6 +43,10 @@ func TestNormalizeCustomDNS(t *testing.T) {
 		{"drops short form", []string{"1.1.1"}, []string{}},
 		{"drops IPv6", []string{"2001:4860:4860::8888"}, []string{}},
 		{"drops hostnames", []string{"dns.example.com"}, []string{}},
+		{"drops resolvers behind the tunnel", []string{"10.0.0.1", "192.168.1.1", "172.20.0.1", "100.64.0.1",
+			"169.254.1.1", "0.1.2.3", "224.0.0.1", "255.255.255.255", "9.9.9.9"}, []string{"9.9.9.9"}},
+		{"keeps loopback for a local proxy", []string{"127.0.0.1"}, []string{"127.0.0.1"}},
+		{"keeps the edges of private ranges", []string{"172.15.255.255", "172.32.0.1"}, []string{"172.15.255.255", "172.32.0.1"}},
 		{"empty", []string{}, []string{}},
 	}
 	for _, tt := range tests {
@@ -114,9 +118,8 @@ func TestDecodeConfigSanitizesStoredValues(t *testing.T) {
 	}
 }
 
-// Neither can run on Android: NaiveProxy needs cgo, and Snowflake's WebRTC
-// sockets cannot be handed to VpnService.protect(). A pin on either — including
-// one an older build already persisted — must fall back to the cascade.
+// NaiveProxy needs cgo and Snowflake cannot be protect()ed, so a pin on either,
+// even one an older build persisted, must fall back to the cascade.
 func TestDecodeConfigRejectsTransportsAndroidCannotRun(t *testing.T) {
 	for _, kind := range []string{"naive", "snowflake"} {
 		got := decodeConfig(`{"preferredTransport":"` + kind + `"}`)
@@ -164,5 +167,30 @@ func TestEncodeConfigRoundTrips(t *testing.T) {
 	var raw map[string]any
 	if err := json.Unmarshal([]byte(encoded), &raw); err != nil {
 		t.Fatalf("encoded blob is not valid JSON: %v", err)
+	}
+}
+
+// Off by default would mean an install upgraded into this build never uses it.
+func TestDecodeConfigDefaultsDeadDropOn(t *testing.T) {
+	if !decodeConfig("").DeadDrop {
+		t.Fatal("dead drop should default on")
+	}
+	if !decodeConfig(`{"mtu":1380}`).DeadDrop {
+		t.Fatal("a blob written before the setting existed should get the default")
+	}
+	if decodeConfig(`{"deadDrop":false}`).DeadDrop {
+		t.Fatal("an explicit off must survive")
+	}
+}
+
+// Kotlin's encoder omits fields equal to their defaults, so a blob it sends
+// must read back with those defaults rather than zero values.
+func TestDecodeConfigFillsWhatKotlinOmits(t *testing.T) {
+	got := decodeConfig(`{"mtu":1400,"hubMethods":{"normal":true}}`)
+	if !got.DeadDrop || !got.HubMethods.Reality || !got.HubMethods.DirectIP || !got.HubMethods.Normal {
+		t.Fatalf("got %+v, want omitted fields at their defaults", got)
+	}
+	if off := decodeConfig(`{"deadDrop":false,"hubMethods":{"reality":false}}`); off.DeadDrop || off.HubMethods.Reality {
+		t.Fatalf("got %+v, want the explicit offs kept", off)
 	}
 }

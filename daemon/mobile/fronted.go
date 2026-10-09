@@ -10,14 +10,25 @@ import (
 
 const maxHostnameLength = 253
 
-var hostLabel = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
+// defaultFrontedEndpoints are shipped so an install that has never reached the
+// hub has a relay at all; the hub's list replaces them once one arrives.
+var defaultFrontedEndpoints = []string{
+	"cdn.pangeavpn.it",
+	"pangea-relay-org.purple-field-fb05.workers.dev",
+	"pangea-relay-alt.purple-field-fb05.workers.dev",
+}
 
-// normalizeFrontedEndpoint keeps only the host: the relay always answers on
-// 443 at /v1/secure, and taking a scheme or path from disk would aim the
-// client somewhere this validation cannot reason about.
+var (
+	hostLabel = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
+	// ipv4Like catches dotted quads, which would otherwise pass as four labels.
+	ipv4Like = regexp.MustCompile(`^\d{1,3}(\.\d{1,3}){3}$`)
+)
+
+// normalizeFrontedEndpoint keeps only the host: the relay answers on 443, and a
+// scheme or path from disk would aim the client somewhere unvalidated.
 func normalizeFrontedEndpoint(value string) (string, bool) {
 	host := strings.ToLower(strings.TrimSpace(value))
-	if host == "" || len(host) > maxHostnameLength {
+	if host == "" || len(host) > maxHostnameLength || ipv4Like.MatchString(host) {
 		return "", false
 	}
 	labels := strings.Split(host, ".")
@@ -46,9 +57,17 @@ func restoreFrontedEndpoints(stored []string) []string {
 	return out
 }
 
-// mergeFrontedEndpoints takes every relay the hub named, returning nil when
-// nothing changed. An empty advertisement leaves the cache alone: a rollback
-// is likelier than an instruction to discard the last working addresses.
+// seedFrontedEndpoints is the stored list, or the shipped relays when nothing
+// usable is stored.
+func seedFrontedEndpoints(stored []string) []string {
+	if restored := restoreFrontedEndpoints(stored); len(restored) > 0 {
+		return restored
+	}
+	return append([]string(nil), defaultFrontedEndpoints...)
+}
+
+// mergeFrontedEndpoints takes every relay the hub named, or nil when nothing
+// changed. An empty advertisement is likelier a rollback, so the cache stays.
 func mergeFrontedEndpoints(current, advertised []string) []string {
 	next := restoreFrontedEndpoints(advertised)
 	if len(next) == 0 {

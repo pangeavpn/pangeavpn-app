@@ -2,27 +2,22 @@
 
 package mobile
 
-// Control-plane transport: DoH-resolved direct-IP HTTPS with no SNI, then the
-// secure-channel envelope from securechannel.go POSTed to /v1/secure. Mirrors
-// apps/desktop/src/main/pangeaApiClient.ts with directIpOnly always on and no
-// system DNS anywhere (Android's pure-Go resolver is unreliable).
+// Control plane: requests sealed by securechannel.go, sent over hubpath.go's
+// route. Mirrors apps/desktop/src/main/pangeaApiClient.ts.
 
 import (
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/shadowsocks"
 )
-
-const hubHost = "api.pangeavpn.org"
 
 // errSubscriptionExpired is distinct so the host shows a top-up prompt rather
 // than treating it as a failed sign-in.
@@ -45,7 +40,7 @@ var (
 	// activeHubPath is the route that last proved itself; nil forces a
 	// rediscovery on the next request.
 	activeHubPath *hubPath
-	hubSSProxy    *shadowsocks.ProxyManager
+	hubTrack      hubTracker
 	dohHTTP       *http.Client
 )
 
@@ -63,14 +58,6 @@ func getDohClient() *http.Client {
 		}
 	}
 	return dohHTTP
-}
-
-type dohAnswer struct {
-	Data string `json:"data"`
-}
-
-type dohResponse struct {
-	Answer []dohAnswer `json:"Answer"`
 }
 
 func tryDoHProvider(ctx context.Context, p dohProvider, hostname string) (string, bool) {
@@ -95,27 +82,22 @@ func tryDoHProvider(ctx context.Context, p dohProvider, hostname string) (string
 	}
 
 	var data dohResponse
-	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxDoHResponseBytes)).Decode(&data); err != nil {
 		return "", false
 	}
-	for _, a := range data.Answer {
-		if a.Data != "" {
-			return a.Data, true
-		}
-	}
-	return "", false
+	return pickDoHAddress(data.Answer)
 }
 
 func resolveViaDoH(hostname string) (string, error) {
-	for _, p := range dohProviders {
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		ip, ok := tryDoHProvider(ctx, p, hostname)
-		cancel()
-		if ok {
-			return ip, nil
-		}
+	ip, ok := raceStaggered(len(dohProviders), dohStagger, func(ctx context.Context, index int) (string, bool) {
+		ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		defer cancel()
+		return tryDoHProvider(ctx, dohProviders[index], hostname)
+	})
+	if !ok {
+		return "", errors.New("DoH resolution failed for all providers")
 	}
-	return "", errors.New("DoH resolution failed for all providers")
+	return ip, nil
 }
 
 // ensureHub finds a working route to the hub across every enabled method.
@@ -126,45 +108,41 @@ func ensureHub() error {
 // hubFetch encrypts one request through the secure channel and returns the
 // decrypted inner response body and status.
 func hubFetch(path, method string, headers map[string]string, body []byte) ([]byte, int, error) {
-	if err := ensureHub(); err != nil {
-		return nil, 0, err
-	}
+	// Twice: a route dropped between ensureHub and the read is not a failure.
+	for attempt := 0; attempt < 2; attempt++ {
+		if err := ensureHub(); err != nil {
+			return nil, 0, err
+		}
+		hubMu.Lock()
+		route := activeHubPath
+		hubMu.Unlock()
+		if route == nil {
+			continue
+		}
 
-	env, aesKey, err := encryptRequest(method, path, headers, body)
-	if err != nil {
-		return nil, 0, fmt.Errorf("encrypt request: %w", err)
+		sealed, err := sealRequest(method, path, headers, body)
+		if err != nil {
+			return nil, 0, fmt.Errorf("seal request: %w", err)
+		}
+		inner, err := sendOnRoute(route, sealed)
+		if err != nil {
+			hubRequestFailed(route)
+			return nil, 0, err
+		}
+		hubRequestSucceeded()
+		return inner.Body, inner.Status, nil
 	}
-	envJSON, err := json.Marshal(env)
-	if err != nil {
-		return nil, 0, err
-	}
+	return nil, 0, errors.New("hub unreachable: no working connection method")
+}
 
-	hubMu.Lock()
-	route := activeHubPath
-	hubMu.Unlock()
-	if route == nil {
-		return nil, 0, errors.New("hub unreachable: no working connection method")
-	}
-
-	respBytes, status, err := route.postEnvelope(envJSON)
+func sendOnRoute(route *hubPath, sealed sealedRequest) (innerResponse, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), hubRequestTimeout)
+	defer cancel()
+	respBytes, status, err := route.postEnvelope(ctx, sealed.route, sealed.envelope)
 	if err != nil {
-		// The route died; drop it so the next call re-walks the methods.
-		resetHubPath()
-		return nil, 0, fmt.Errorf("hub request failed: %w", err)
+		return innerResponse{}, fmt.Errorf("hub request failed: %w", err)
 	}
-	if status < 200 || status >= 300 {
-		return nil, 0, fmt.Errorf("secure channel error (%d): %s", status, string(respBytes))
-	}
-
-	var encResp encryptedResponse
-	if err := json.Unmarshal(respBytes, &encResp); err != nil {
-		return nil, 0, fmt.Errorf("decode secure response: %w", err)
-	}
-	inner, err := decryptResponse(aesKey, encResp)
-	if err != nil {
-		return nil, 0, err
-	}
-	return inner.Body, inner.Status, nil
+	return openHubReply(sealed, respBytes, status)
 }
 
 // hubRequest wraps hubFetch with the X-License-Key header and JSON
@@ -226,19 +204,11 @@ type tokenLoginResponse struct {
 // captureHubDiscovery caches the relays and control-plane credentials a
 // response advertised, so a later start has more than one way back in.
 func captureHubDiscovery(fronted []string, servers []serverInfo) {
-	creds := make([]hubShadowsocksCreds, 0, len(servers))
-	for _, server := range servers {
-		if server.ControlPlaneShadowsocks == nil {
-			continue
-		}
-		creds = append(creds, hubShadowsocksCreds{
-			RemoteHost: server.ControlPlaneShadowsocks.RemoteHost,
-			RemotePort: server.ControlPlaneShadowsocks.RemotePort,
-			Method:     server.ControlPlaneShadowsocks.Method,
-			Password:   server.ControlPlaneShadowsocks.Password,
-		})
+	routes := discoverHubRoutes(servers)
+	if len(fronted) > 0 {
+		routes.fronted = fronted
 	}
-	rememberHubDiscovery(fronted, creds)
+	rememberHubDiscovery(routes)
 }
 
 func tokenLogin(token, identityPub string) (*tokenLoginResponse, error) {

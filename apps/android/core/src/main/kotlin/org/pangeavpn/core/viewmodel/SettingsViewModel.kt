@@ -69,6 +69,8 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setAllowLan(enabled: Boolean) = store { it.copy(allowLan = enabled) }
 
+    fun setDeadDrop(enabled: Boolean) = store { it.copy(deadDrop = enabled) }
+
     /** Goes through the core so the last-method rule is enforced in one place. */
     fun setHubMethod(method: String, enabled: Boolean) {
         viewModelScope.launch {

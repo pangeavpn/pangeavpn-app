@@ -5,6 +5,7 @@ package mobile
 
 import (
 	"encoding/json"
+	"net/netip"
 	"strconv"
 	"strings"
 )
@@ -19,7 +20,7 @@ const (
 )
 
 // config is the mobile equivalent of the desktop settings surface. Hub methods
-// are independent switches, matching desktop's four toggles.
+// are independent switches, matching the desktop toggles.
 type config struct {
 	PreferredTransport string     `json:"preferredTransport"`
 	CustomDNS          []string   `json:"customDns"`
@@ -28,6 +29,9 @@ type config struct {
 	AutoConnect        bool       `json:"autoConnect"`
 	LastServerID       string     `json:"lastServerId"`
 	HubMethods         hubMethods `json:"hubMethods"`
+	// DeadDrop lets the hub search fetch signed replacement addresses once
+	// every method is out of ones that work.
+	DeadDrop bool `json:"deadDrop"`
 }
 
 // defaultConfig mirrors the desktop defaults: cascade on, hub methods all
@@ -37,6 +41,7 @@ func defaultConfig() config {
 		PreferredTransport: "auto",
 		MTU:                mtuDefault,
 		HubMethods:         defaultHubMethods(),
+		DeadDrop:           true,
 	}
 }
 
@@ -59,7 +64,7 @@ func normalizeCustomDNS(values []string) []string {
 			return r == ',' || r == ' ' || r == '\t' || r == '\n'
 		}) {
 			address, ok := parseIPv4(candidate)
-			if !ok {
+			if !ok || unroutableDNS(address) {
 				continue
 			}
 			if _, dup := seen[address]; dup {
@@ -70,6 +75,31 @@ func normalizeCustomDNS(values []string) []string {
 		}
 	}
 	return normalized
+}
+
+// unroutableDNSRanges can never hold a resolver behind the tunnel. Loopback
+// stays allowed: a local proxy works.
+var unroutableDNSRanges = []netip.Prefix{
+	netip.MustParsePrefix("0.0.0.0/8"),
+	netip.MustParsePrefix("10.0.0.0/8"),
+	netip.MustParsePrefix("100.64.0.0/10"),
+	netip.MustParsePrefix("169.254.0.0/16"),
+	netip.MustParsePrefix("172.16.0.0/12"),
+	netip.MustParsePrefix("192.168.0.0/16"),
+	netip.MustParsePrefix("224.0.0.0/3"),
+}
+
+func unroutableDNS(address string) bool {
+	ip, err := netip.ParseAddr(address)
+	if err != nil {
+		return true
+	}
+	for _, prefix := range unroutableDNSRanges {
+		if prefix.Contains(ip) {
+			return true
+		}
+	}
+	return false
 }
 
 // parseIPv4 accepts dotted-quad only, rejecting the shorthand forms net.ParseIP

@@ -18,7 +18,10 @@ func TestHubShadowsocksCredsValidation(t *testing.T) {
 		{"port too high", creds("1.2.3.4", 70000), false},
 		{"negative port", creds("1.2.3.4", -1), false},
 		{"no method", hubShadowsocksCreds{RemoteHost: "1.2.3.4", RemotePort: 8388, Password: "pw"}, false},
-		{"no password", hubShadowsocksCreds{RemoteHost: "1.2.3.4", RemotePort: 8388, Method: "m"}, false},
+		{"no password", hubShadowsocksCreds{RemoteHost: "1.2.3.4", RemotePort: 8388, Method: "aes-128-gcm"}, false},
+		{"blank password", hubShadowsocksCreds{RemoteHost: "1.2.3.4", RemotePort: 8388, Method: "aes-128-gcm", Password: "  "}, false},
+		{"unauthenticated cipher", hubShadowsocksCreds{RemoteHost: "1.2.3.4", RemotePort: 8388, Method: "aes-256-cfb", Password: "pw"}, false},
+		{"padded cipher", hubShadowsocksCreds{RemoteHost: "1.2.3.4", RemotePort: 8388, Method: " aes-256-gcm ", Password: "pw"}, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -84,5 +87,37 @@ func TestPromoteCreds(t *testing.T) {
 	}
 	if promoteCreds(list, 0) != nil || promoteCreds(list, 9) != nil {
 		t.Fatal("leader and out-of-range should report no change")
+	}
+}
+
+// Padding from the hub must never reach the cache or the proxy.
+func TestRestoreCachedCredsTrims(t *testing.T) {
+	got := restoreCachedCreds([]hubShadowsocksCreds{{
+		RemoteHost: " 1.2.3.4 ", RemotePort: 8388, Method: " 2022-blake3-aes-128-gcm\n", Password: " pw ",
+	}})
+	if len(got) != 1 || got[0] != creds("1.2.3.4", 8388) {
+		t.Fatalf("got %+v, want the trimmed entry", got)
+	}
+}
+
+// An install that has never reached the hub still needs a way in.
+func TestSeedHubShadowsocksFallsBackToTheShippedNodes(t *testing.T) {
+	got := seedHubShadowsocks(nil)
+	if len(got) != len(defaultHubShadowsocks) || len(got) == 0 {
+		t.Fatalf("got %d entries, want the %d shipped nodes", len(got), len(defaultHubShadowsocks))
+	}
+	for _, c := range got {
+		if !c.valid() {
+			t.Fatalf("shipped node %+v fails validation", c)
+		}
+	}
+	got[0].Password = "mutated"
+	if defaultHubShadowsocks[0].Password == "mutated" {
+		t.Fatal("seeding must hand out copies, not the shipped list")
+	}
+
+	stored := []hubShadowsocksCreds{creds("5.6.7.8", 8389)}
+	if kept := seedHubShadowsocks(stored); len(kept) != 1 || kept[0].RemoteHost != "5.6.7.8" {
+		t.Fatalf("got %+v, want the stored list to win", kept)
 	}
 }

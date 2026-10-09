@@ -19,6 +19,7 @@ fun transportChoiceLabel(kind: String): String = when (kind) {
 @Composable
 fun hubMethodTitle(method: String): String = when (method) {
     "directIp" -> stringResource(R.string.settings_censorship_directip_title)
+    "reality" -> stringResource(R.string.settings_censorship_reality_title)
     "shadowsocks" -> stringResource(R.string.settings_censorship_shadowsocks_title)
     "fronted" -> stringResource(R.string.settings_censorship_fronted_title)
     "normal" -> stringResource(R.string.settings_censorship_normal_title)
@@ -28,6 +29,7 @@ fun hubMethodTitle(method: String): String = when (method) {
 @Composable
 fun hubMethodHint(method: String): String = when (method) {
     "directIp" -> stringResource(R.string.settings_censorship_directip_hint)
+    "reality" -> stringResource(R.string.settings_censorship_reality_hint)
     "shadowsocks" -> stringResource(R.string.settings_censorship_shadowsocks_hint)
     "fronted" -> stringResource(R.string.settings_censorship_fronted_hint)
     "normal" -> stringResource(R.string.settings_censorship_normal_hint)

@@ -141,8 +141,6 @@ func SetHubMethod(method string, enabled bool) (string, error) {
 	}
 	current.HubMethods = next
 	persistConfig(current)
-	// The route in use may belong to the method just switched off.
-	resetHubPath()
 	return encodeConfig(current)
 }
 
@@ -169,6 +167,7 @@ func persistConfig(c config) {
 	encoded, err := encodeConfig(sanitized)
 
 	mu.Lock()
+	methodsChanged := settings.HubMethods != sanitized.HubMethods
 	settings = sanitized
 	preferredTransport = sanitized.PreferredTransport
 	s := store
@@ -176,6 +175,10 @@ func persistConfig(c config) {
 
 	if err == nil && s != nil {
 		s.Set(keyConfig, encoded)
+	}
+	// The route in use may belong to a method just switched off.
+	if methodsChanged {
+		invalidateHubPath()
 	}
 }
 

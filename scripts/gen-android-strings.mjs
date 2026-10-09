@@ -89,13 +89,12 @@ const KEY_MAP = {
   "settings.provisioning.heading": "settings_censorship_heading",
   "settings.provisioning.description": "settings_censorship_description",
   "settings.provisioning.directIp.title": "settings_censorship_directip_title",
-  "settings.provisioning.directIp.hint": "settings_censorship_directip_hint",
+  "settings.provisioning.hubReality.title": "settings_censorship_reality_title",
   "settings.provisioning.hubShadowsocks.title": "settings_censorship_shadowsocks_title",
-  "settings.provisioning.hubShadowsocks.hint": "settings_censorship_shadowsocks_hint",
   "settings.provisioning.hubFronted.title": "settings_censorship_fronted_title",
-  "settings.provisioning.hubFronted.hint": "settings_censorship_fronted_hint",
   "settings.provisioning.hubNormal.title": "settings_censorship_normal_title",
-  "settings.provisioning.hubNormal.hint": "settings_censorship_normal_hint",
+  "settings.provisioning.deadDrop.title": "settings_censorship_deaddrop_title",
+  "settings.provisioning.deadDrop.hint": "settings_censorship_deaddrop_hint",
   "settings.provisioning.lastMethod": "settings_censorship_last_method",
   "settings.network.heading": "settings_network_heading",
   "settings.network.description": "settings_network_description",
@@ -111,6 +110,16 @@ const KEY_MAP = {
   "devices.remove": "devices_remove",
   "deviceLimit.title": "devicelimit_title",
   "deviceLimit.subtitle": "devicelimit_subtitle"
+};
+
+// Desktop hints whose closing sentence says which methods survive a lockdown.
+// Android's always-on lockdown exempts the VPN app itself, so that sentence is cut.
+const LOCKDOWN_TAIL_KEYS = {
+  "settings.provisioning.directIp.hint": "settings_censorship_directip_hint",
+  "settings.provisioning.hubReality.hint": "settings_censorship_reality_hint",
+  "settings.provisioning.hubShadowsocks.hint": "settings_censorship_shadowsocks_hint",
+  "settings.provisioning.hubFronted.hint": "settings_censorship_fronted_hint",
+  "settings.provisioning.hubNormal.hint": "settings_censorship_normal_hint"
 };
 
 // Mobile-only strings, translated inline for all 8 locales.
@@ -356,6 +365,14 @@ function buildEntries(code, localeData) {
     entries[androidKey] = value;
   }
 
+  for (const [desktopKey, androidKey] of Object.entries(LOCKDOWN_TAIL_KEYS)) {
+    const value = localeData[desktopKey];
+    if (value === undefined) {
+      throw new Error(`Missing desktop key "${desktopKey}" for locale "${code}"`);
+    }
+    entries[androidKey] = dropLockdownSentence(value, code, desktopKey);
+  }
+
   for (const [androidKey, translations] of Object.entries(MOBILE_ONLY)) {
     const value = translations[code];
     if (value === undefined) {
@@ -365,6 +382,20 @@ function buildEntries(code, localeData) {
   }
 
   return entries;
+}
+
+// Fails loudly if desktop rewords a hint so its last sentence is no longer the
+// lockdown one; only English can be checked for that, the rest follow its shape.
+function dropLockdownSentence(value, code, desktopKey) {
+  const body = value.trimEnd().replace(/[.。]$/, "");
+  const cut = Math.max(body.lastIndexOf(". "), body.lastIndexOf("。"));
+  if (cut === -1) {
+    throw new Error(`"${desktopKey}" for locale "${code}" has no sentence to drop`);
+  }
+  if (code === "en" && !/lockdown/i.test(body.slice(cut))) {
+    throw new Error(`"${desktopKey}" no longer ends with its lockdown sentence; update LOCKDOWN_TAIL_KEYS`);
+  }
+  return body.slice(0, cut + 1);
 }
 
 function writeStringsXml(root, code, entries) {

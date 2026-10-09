@@ -40,6 +40,8 @@ type hysteria2Info struct {
 	ObfsPassword string `json:"obfsPassword"`
 	ServerName   string `json:"serverName,omitempty"`
 	PinSHA256    string `json:"pinSha256,omitempty"`
+	// RemotePorts are "start:end" UDP ranges to hop across; absent means no hopping.
+	RemotePorts []string `json:"remotePorts,omitempty"`
 }
 
 type shadowsocksInfo struct {
@@ -59,6 +61,16 @@ type controlPlaneShadowsocksInfo struct {
 	RemotePort int    `json:"remotePort"`
 	Method     string `json:"method"`
 	Password   string `json:"password"`
+}
+
+// controlPlaneRealityInfo is the node's REALITY user that reaches only the hub.
+type controlPlaneRealityInfo struct {
+	RemoteHost string `json:"remoteHost"`
+	RemotePort int    `json:"remotePort"`
+	UUID       string `json:"uuid"`
+	PublicKey  string `json:"publicKey"`
+	ShortID    string `json:"shortId"`
+	ServerName string `json:"serverName"`
 }
 
 type snowflakeInfo struct {
@@ -83,7 +95,11 @@ type serverInfo struct {
 	Hysteria2               *hysteria2Info               `json:"hysteria2,omitempty"`
 	Shadowsocks             *shadowsocksInfo             `json:"shadowsocks,omitempty"`
 	ControlPlaneShadowsocks *controlPlaneShadowsocksInfo `json:"controlPlaneShadowsocks,omitempty"`
+	ControlPlaneReality     *controlPlaneRealityInfo     `json:"controlPlaneReality,omitempty"`
 	Snowflake               *snowflakeInfo               `json:"snowflake,omitempty"`
+	// FrontedEndpoints repeats per region: the regions route answers with a
+	// bare array, so there is nowhere top-level to put it.
+	FrontedEndpoints []string `json:"frontedEndpoints,omitempty"`
 }
 
 type sessionJSON struct {

@@ -149,6 +149,27 @@ func TestBuildNaiveEndpointSplit(t *testing.T) {
 			wantServer: "naive.example.net",
 		},
 		{
+			name:       "a non-address remoteIp is ignored",
+			info:       naiveInfo{RemoteHost: "203.0.113.20", RemoteIP: "naive.example.net"},
+			nodeIP:     "198.51.100.5",
+			wantHost:   "203.0.113.20",
+			wantServer: "203.0.113.20",
+		},
+		{
+			name:       "an IPv6 remoteIp is dialled",
+			info:       naiveInfo{RemoteHost: "naive.example.net", RemoteIP: "2001:db8::5"},
+			nodeIP:     "198.51.100.5",
+			wantHost:   "2001:db8::5",
+			wantServer: "naive.example.net",
+		},
+		{
+			name:       "serverName is never blank",
+			info:       naiveInfo{RemoteHost: "  "},
+			nodeIP:     "198.51.100.5",
+			wantHost:   "198.51.100.5",
+			wantServer: "198.51.100.5",
+		},
+		{
 			name:       "explicit serverName overrides the host",
 			info:       naiveInfo{RemoteHost: "naive.example.net", ServerName: "www.example.com"},
 			nodeIP:     "198.51.100.5",
@@ -204,3 +225,40 @@ func TestBuildProfileHysteria2ServerNameFallback(t *testing.T) {
 	}
 }
 
+// Port hopping beats single-port UDP blocks; dropping the ranges here would
+// quietly pin Android to one port.
+func TestBuildProfileCarriesHysteria2PortRanges(t *testing.T) {
+	raw := `{"id":"a","name":"A","region":"r","country":"C",
+	         "cloak":{"remoteHost":"198.51.100.5","uid":"u","publicKey":"p"},
+	         "hysteria2":{"remoteHost":"node.example","remotePort":8444,"password":"pw","obfsPassword":"ob",
+	                      "remotePorts":["20000:30000","40000:40010"]}}`
+	profile := buildProfile(decodeServer(t, raw))
+	if !sameStrings(profile.Hysteria2.RemotePorts, []string{"20000:30000", "40000:40010"}) {
+		t.Fatalf("remotePorts %v", profile.Hysteria2.RemotePorts)
+	}
+}
+
+func TestDiscoverHubRoutesReadsEveryNode(t *testing.T) {
+	raw := `[{"id":"a","name":"A","region":"r","country":"C","cloak":{"remoteHost":"198.51.100.5","uid":"u","publicKey":"p"},
+	          "controlPlaneShadowsocks":{"remoteHost":"198.51.100.5","remotePort":8489,"method":"2022-blake3-aes-128-gcm","password":"pw"},
+	          "controlPlaneReality":{"remoteHost":"198.51.100.5","remotePort":443,"uuid":"cf550715-b9c8-4a58-a610-dc5cc73e36f4",
+	                                 "publicKey":"8rifnTuJS517L1ysYdVaSvCntor5nkC3dn1XGqWMYlg","shortId":"355adc938875db2a",
+	                                 "serverName":"swdist.apple.com"},
+	          "frontedEndpoints":["relay.example.com"]},
+	         {"id":"b","name":"B","region":"r","country":"C","cloak":{"remoteHost":"198.51.100.6","uid":"u","publicKey":"p"},
+	          "frontedEndpoints":["relay.example.com"]}]`
+	var servers []serverInfo
+	if err := json.Unmarshal([]byte(raw), &servers); err != nil {
+		t.Fatal(err)
+	}
+	got := discoverHubRoutes(servers)
+	if len(got.shadowsocks) != 1 || got.shadowsocks[0].RemotePort != 8489 {
+		t.Fatalf("shadowsocks %+v", got.shadowsocks)
+	}
+	if len(got.reality) != 1 || got.reality[0].ServerName != "swdist.apple.com" {
+		t.Fatalf("reality %+v", got.reality)
+	}
+	if !sameStrings(got.fronted, []string{"relay.example.com"}) {
+		t.Fatalf("fronted %v", got.fronted)
+	}
+}

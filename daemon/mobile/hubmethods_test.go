@@ -4,7 +4,7 @@ import "testing"
 
 func TestDefaultHubMethodsKeepCleartextOff(t *testing.T) {
 	got := defaultHubMethods()
-	if !got.DirectIP || !got.Shadowsocks || !got.Fronted {
+	if !got.DirectIP || !got.Reality || !got.Shadowsocks || !got.Fronted {
 		t.Fatalf("got %+v, want the private paths on", got)
 	}
 	if got.Normal {
@@ -13,9 +13,9 @@ func TestDefaultHubMethodsKeepCleartextOff(t *testing.T) {
 }
 
 func TestEnabledFollowsAttemptOrder(t *testing.T) {
-	methods := hubMethods{DirectIP: true, Shadowsocks: false, Fronted: true, Normal: true}
+	methods := hubMethods{DirectIP: true, Reality: true, Shadowsocks: false, Fronted: true, Normal: true}
 	got := methods.enabled()
-	want := []string{"directIp", "fronted", "normal"}
+	want := []string{"directIp", "reality", "fronted", "normal"}
 	if !sameStrings(got, want) {
 		t.Fatalf("got %v, want %v", got, want)
 	}
@@ -76,12 +76,30 @@ func TestNormalizeReappliesChangedDefaultsOnce(t *testing.T) {
 	}
 }
 
-func TestNormalizeGuaranteesOneEnabledMethod(t *testing.T) {
+// directIp alone cannot reach the hub without a cached IP or DoH, so an
+// all-off blob gets the whole default set back, as on desktop.
+func TestNormalizeRestoresTheDefaultsWhenEverythingIsOff(t *testing.T) {
 	got := hubMethods{Rev: hubMethodsRev}.normalize()
-	if len(got.enabled()) == 0 {
-		t.Fatal("normalize must leave at least one method on")
+	if got != defaultHubMethods() {
+		t.Fatalf("got %+v, want the defaults %+v", got, defaultHubMethods())
 	}
-	if !got.DirectIP {
-		t.Fatalf("directIp is the safe fallback, got %+v", got)
+}
+
+// REALITY arrived at rev 2: an install that saved rev 1 never chose it off.
+func TestNormalizeTurnsRealityOnForARev1Blob(t *testing.T) {
+	stored := hubMethods{DirectIP: true, Shadowsocks: false, Fronted: true, Rev: 1}
+	got := stored.normalize()
+	if !got.Reality {
+		t.Fatalf("rev 2 should switch REALITY on, got %+v", got)
+	}
+	if got.Shadowsocks {
+		t.Fatalf("a rev 1 choice must survive the rev 2 migration, got %+v", got)
+	}
+}
+
+func TestRealityIsASwitchableMethod(t *testing.T) {
+	got, applied := applyHubMethod(defaultHubMethods(), "reality", false)
+	if !applied || got.Reality {
+		t.Fatalf("got %+v applied=%v, want REALITY switched off", got, applied)
 	}
 }
