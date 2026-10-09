@@ -130,9 +130,11 @@ require (
 	go.yaml.in/yaml/v2 v2.4.2 // indirect
 	go4.org/netipx v0.0.0-20260823151212-3075585bcbeb // indirect
 	golang.org/x/exp v0.0.0-20260824195058-e88cd73687aa // indirect
+	golang.org/x/mobile v0.0.0-20260803200217-62cee1672c8e // indirect
 	golang.org/x/mod v0.40.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
+	golang.org/x/tools v0.49.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260819154853-08b0e4226688 // indirect
 	google.golang.org/grpc v1.83.2 // indirect
 	google.golang.org/protobuf v1.36.12 // indirect
@@ -154,3 +156,5 @@ require (
 	golang.org/x/text v0.41.0
 	golang.zx2c4.com/wintun v0.0.0-20230126152724-0fa3db229ce2
 )
+
+tool golang.org/x/mobile/cmd/gobind

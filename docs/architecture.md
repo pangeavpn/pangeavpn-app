@@ -317,8 +317,9 @@ Only transports configured in the selected profile are candidates, and the
 current profile model always includes Cloak. `snowflakeReleaseGated` removes
 Snowflake from release builds, because its WebRTC peer address is only found at
 runtime and the kill switch can't permit it in advance. NaiveProxy is only
-available when the daemon was built with its native CGO engine; otherwise a
-stub reports it unavailable.
+available when the build linked its native CGO engine (desktop when the native
+inputs resolve, Android on arm64-v8a only); otherwise a stub reports it
+unavailable.
 
 Each candidate has to start and complete a real WireGuard handshake within the
 connection deadline. A candidate that fails is torn down before the next one
@@ -367,7 +368,7 @@ Application traffic
 | Cloak | [`daemon/internal/cloak`](../daemon/internal/cloak) using the Pangea Cloak Go module | Enabled; baseline transport |
 | Shadowsocks | [`daemon/internal/shadowsocks`](../daemon/internal/shadowsocks) using embedded sing-box (AEAD / SS-2022) | Enabled when provisioned |
 | Hysteria2 | [`daemon/internal/hysteria2`](../daemon/internal/hysteria2) using embedded sing-box/QUIC | Enabled when provisioned |
-| NaiveProxy | [`daemon/internal/naive`](../daemon/internal/naive) with a CGO-linked native engine and in-process relay | Windows and macOS builds when the native inputs resolve; release CI requires it |
+| NaiveProxy | [`daemon/internal/naive`](../daemon/internal/naive) with a CGO-linked native engine and in-process relay | Windows and macOS builds when the native inputs resolve; release CI requires it. Android arm64-v8a |
 | Snowflake | [`daemon/internal/snowflake`](../daemon/internal/snowflake) using the Tor Snowflake library | Implemented but release-gated |
 | Plain WireGuard | None. The tunnel dials the node directly and skips the loopback listener | Enabled on explicit user selection only |
 
