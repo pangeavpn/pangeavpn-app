@@ -92,7 +92,10 @@ jobs:
           go-version-file: daemon/go.mod
           cache-dependency-path: daemon/go.sum
 
+      # v3 also asks for the retired "tools" package, which sdkmanager no longer has.
       - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+        with:
+          packages: platform-tools
 
       - name: Install the NDK
         run: sdkmanager --install "ndk;${{ env.ANDROID_NDK }}"
