@@ -1982,6 +1982,25 @@ func (s *Service) Shutdown(ctx context.Context) error {
 	return s.disconnect(ctx, teardownShutdown)
 }
 
+// Uninstall restores the network, forgets all session state, then spawns the
+// privileged self-removal. The daemon is already elevated, so nothing prompts.
+func (s *Service) Uninstall(ctx context.Context, appPID int) error {
+	if err := s.disconnect(ctx, teardownUser); err != nil {
+		s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("uninstall disconnect: %v", err))
+	}
+	if err := ForgetSession(); err != nil {
+		s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("uninstall forget session: %v", err))
+	}
+	if err := ForgetSplitTunnel(); err != nil {
+		s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("uninstall forget split tunnel: %v", err))
+	}
+	if err := s.ClearKillSwitch(ctx); err != nil {
+		s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("uninstall clear kill switch: %v", err))
+	}
+	s.logs.Add(state.LogInfo, state.SourceDaemon, "uninstall requested; spawning self-removal")
+	return platform.SpawnSelfUninstall(appPID)
+}
+
 func (s *Service) disconnect(ctx context.Context, mode teardownMode) error {
 	// Interrupt any in-flight Connect first so we don't queue behind a
 	// 10s WaitForSession. The cancelled connect will exit, release opMu, and run its own cleanup.

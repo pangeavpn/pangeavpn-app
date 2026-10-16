@@ -139,6 +139,12 @@ type engageKillSwitchRequest struct {
 	AllowLAN  bool   `json:"allowLAN,omitempty"`
 }
 
+// appPid lets the detached cleanup wait for the GUI to exit before it removes
+// the installed app and the daemon's own binary.
+type uninstallRequest struct {
+	AppPID int `json:"appPid,omitempty"`
+}
+
 // permitHostsRequest carries control-plane IPs that must stay reachable
 // through an engaged lockdown lock. IP literals only — see Service.PermitHosts.
 type permitHostsRequest struct {
@@ -438,6 +444,28 @@ func NewHandler(token string, service *Service) http.Handler {
 
 		if err := service.PermitHosts(r.Context(), req.Hosts); err != nil {
 			writeJSON(w, http.StatusInternalServerError, okResponse{OK: false})
+			return
+		}
+
+		writeJSON(w, http.StatusOK, okResponse{OK: true})
+	}))
+
+	mux.Handle("/uninstall", withAuthAndLimit(token, limiter, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		extendWriteDeadline(w)
+
+		r.Body = http.MaxBytesReader(w, r.Body, maxBodySize)
+		var req uninstallRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err != io.EOF {
+			writeError(w, http.StatusBadRequest, "invalid json")
+			return
+		}
+
+		if err := service.Uninstall(r.Context(), req.AppPID); err != nil {
+			writeJSON(w, http.StatusInternalServerError, okResponse{OK: false, Error: "uninstall_failed", Detail: sanitizeLog(err.Error())})
 			return
 		}
 

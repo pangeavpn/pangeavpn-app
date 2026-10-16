@@ -5,6 +5,7 @@ import {
   app,
   BrowserWindow,
   dialog,
+  globalShortcut,
   ipcMain,
   nativeImage,
   session,
@@ -12,6 +13,8 @@ import {
   type IpcMainInvokeEvent,
   type NativeImage
 } from "electron";
+import { spawn } from "node:child_process";
+import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { ConfigResponse, OkResponse, Profile, StatusResponse } from "@pangeavpn/shared-types";
@@ -89,6 +92,13 @@ import {
   serverIdForProfile,
   type ProfileRecords
 } from "./profileCache";
+import {
+  PANIC_DOUBLE_PRESS_WINDOW_MS,
+  PANIC_WIPE_ACCELERATOR,
+  performPanicWipe,
+  type PanicPhase,
+  type PanicWipeContext
+} from "./panicWipe";
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -2773,6 +2783,91 @@ async function runDaemonStartupSequence(): Promise<void> {
   }
 }
 
+let panicInProgress = false;
+
+function buildPanicContext(): PanicWipeContext {
+  return {
+    platform: process.platform,
+    isPackaged: app.isPackaged,
+    appPid: process.pid,
+    homeDir: os.homedir(),
+    appDataDir: app.getPath("appData"),
+    userDataDir: app.getPath("userData"),
+    logsDir: app.getPath("logs"),
+    userStateDir: getUserStateDir()
+  };
+}
+
+function notifyPanic(phase: PanicPhase): void {
+  if (!Notification.isSupported()) return;
+  const text =
+    phase === "done"
+      ? { title: "PangeaVPN removed", body: "Your network has been restored." }
+      : { title: "Removing PangeaVPN", body: "Disconnecting and restoring your network…" };
+  try {
+    new Notification({ title: text.title, body: text.body, silent: true }).show();
+  } catch {
+    // A failed toast must never block the wipe.
+  }
+}
+
+// Panic removal: disconnect, lower the kill switch, erase local state, and
+// uninstall. Bound to a hardcoded global shortcut; no setting, no IPC.
+async function triggerPanicWipe(): Promise<void> {
+  if (panicInProgress) return;
+  panicInProgress = true;
+  isQuitting = true;
+  cancelAttempt();
+  await performPanicWipe(buildPanicContext(), {
+    lowerLock: async () => {
+      try {
+        await daemonClient.disconnect({ keepKillSwitch: false });
+      } catch (err) {
+        console.warn("panic wipe: disconnect failed", sanitizeLog(err));
+      }
+      try {
+        await daemonClient.clearKillSwitch();
+      } catch (err) {
+        console.warn("panic wipe: clear kill switch failed", sanitizeLog(err));
+      }
+    },
+    requestDaemonUninstall: async (appPid) => {
+      await daemonClient.selfUninstall(appPid);
+    },
+    stopDaemonProcess: () => daemonProcess.stop(),
+    removePath: (target) => fs.rm(target, { recursive: true, force: true }),
+    spawnDetached: (file, args) => {
+      const child = spawn(file, args, { detached: true, stdio: "ignore", windowsHide: true });
+      child.unref();
+    },
+    notify: (phase) => notifyPanic(phase),
+    quit: () => setTimeout(() => app.quit(), 1200),
+    logf: (message) => console.warn(message)
+  });
+}
+
+// Fires only on a second press within the window, so a single stray chord
+// never wipes the device.
+function registerPanicShortcut(): void {
+  let lastPressAtMs = 0;
+  try {
+    const ok = globalShortcut.register(PANIC_WIPE_ACCELERATOR, () => {
+      const now = Date.now();
+      if (now - lastPressAtMs <= PANIC_DOUBLE_PRESS_WINDOW_MS) {
+        lastPressAtMs = 0;
+        void triggerPanicWipe();
+        return;
+      }
+      lastPressAtMs = now;
+    });
+    if (!ok) {
+      console.warn(`could not register panic shortcut ${PANIC_WIPE_ACCELERATOR}`);
+    }
+  } catch (err) {
+    console.warn("failed to register panic shortcut", sanitizeLog(err));
+  }
+}
+
 async function boot(): Promise<void> {
   await app.whenReady();
 
@@ -2830,6 +2925,7 @@ async function boot(): Promise<void> {
     fetchLatest: (timeoutMs) => pangeaApiClient.anonymousRequest("GET", LATEST_ROUTE, undefined, { timeoutMs })
   });
   createTray();
+  registerPanicShortcut();
   watchDisplayChanges();
   if (!hiddenLaunch) {
     showMainWindow();

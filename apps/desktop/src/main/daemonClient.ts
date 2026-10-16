@@ -218,6 +218,12 @@ export class DaemonClient implements PostQuantumProvider {
     return this.request<OkResponse>("POST", "/killswitch/clear", undefined, 15000);
   }
 
+  // Privileged self-removal: the daemon tears down tunnel/lock, then spawns the
+  // detached uninstall under its own token (no OS elevation prompt).
+  async selfUninstall(appPid: number): Promise<OkResponse> {
+    return this.request<OkResponse>("POST", "/uninstall", { appPid }, 30000);
+  }
+
   /** IP literals only: a Lockdown kill switch blocks DNS too, so a hostname
    *  could never resolve. Empty list falls back to the last profile's hub IP. */
   async permitHosts(hosts: string[]): Promise<OkResponse> {
