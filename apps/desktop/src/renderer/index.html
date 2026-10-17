@@ -339,6 +339,13 @@
               <span id="setNotificationsValue" class="set-value"></span>
             </span>
           </button>
+          <button class="settings-nav-item" type="button" data-settings-target="secPanic" aria-controls="secPanic">
+            <span class="set-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg></span>
+            <span class="settings-nav-copy">
+              <span class="set-title" data-i18n="settings.panic.heading">Panic Wipe</span>
+              <span id="setPanicValue" class="set-value"></span>
+            </span>
+          </button>
           <button class="settings-nav-item" type="button" data-settings-target="secLanguage" aria-controls="secLanguage">
             <span class="set-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h10"/><path d="M9 4v2c0 4-2.5 7-5 8"/><path d="M6.5 11c1.5 2.5 3.5 4 6 5"/><path d="m12.5 20 4-9 4 9"/><path d="M14 17h5"/></svg></span>
             <span class="settings-nav-copy">
@@ -596,6 +603,21 @@
                 <span class="toggle-hint" data-i18n="settings.notifications.status.hint">Tells you when the VPN connects, drops, comes back, or disconnects.</span>
               </span>
               <input id="notificationsToggle" class="toggle-switch" type="checkbox" />
+            </label>
+          </div>
+        </section>
+
+        <!-- Panic wipe -->
+        <section id="secPanic" class="settings-section">
+          <h3 class="settings-section-title" data-i18n="settings.panic.heading">Panic Wipe</h3>
+          <p class="settings-description" data-i18n="settings.panic.description">A hidden shortcut that instantly removes PangeaVPN from this device and restores your network.</p>
+          <div class="settings-toggles">
+            <label class="toggle-label">
+              <span class="toggle-copy">
+                <span class="toggle-title" data-i18n="settings.panic.enable.title">Enable panic wipe</span>
+                <span id="panicWipeHint" class="toggle-hint" data-i18n="settings.panic.enable.hint">When on, pressing the hidden shortcut twice within two seconds disconnects, erases all PangeaVPN data, and removes the app from this device. This can't be undone.</span>
+              </span>
+              <input id="panicWipeToggle" class="toggle-switch" type="checkbox" />
             </label>
           </div>
         </section>

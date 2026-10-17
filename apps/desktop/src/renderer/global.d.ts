@@ -235,6 +235,8 @@ declare global {
     getAutoConnect: () => Promise<boolean>;
     setNotifications: (enabled: boolean) => Promise<void>;
     getNotifications: () => Promise<boolean>;
+    setPanicWipe: (enabled: boolean) => Promise<void>;
+    getPanicWipe: () => Promise<boolean>;
     setDeadDrop: (enabled: boolean) => Promise<void>;
     getDeadDrop: () => Promise<boolean>;
     getLastServer: () => Promise<{ lastServerId: string | null; lastProfileId: string | null; lastEntryServerId?: string | null }>;

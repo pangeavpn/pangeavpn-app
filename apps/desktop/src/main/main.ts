@@ -142,6 +142,8 @@ let lockdownEnabled = false;
 let autoConnectEnabled = false;
 // OS notifications on connection status changes; on by default, off in Settings.
 let notificationsEnabled = true;
+// Panic wipe: the global removal shortcut is inert until the user opts in. Off by default.
+let panicWipeEnabled = false;
 // "auto" (reality, then cloak, shadowsocks, hysteria2, naive), or one of
 // "cloak"/"naive"/"reality"/"hysteria2"/"shadowsocks"/"snowflake" only.
 let preferredTransport: "auto" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "snowflake" | "wireguard" = "auto";
@@ -2177,6 +2179,18 @@ function registerStartupSettingsHandlers(): void {
     () => notificationsEnabled
   );
 
+  registerBoolSetting(
+    { get: IPC_CHANNELS.getPanicWipe, set: IPC_CHANNELS.setPanicWipe },
+    "panicWipe",
+    "panic wipe setting",
+    (enabled) => {
+      panicWipeEnabled = !!enabled;
+      applyPanicShortcut();
+      return panicWipeEnabled;
+    },
+    () => panicWipeEnabled
+  );
+
   ipcMain.handle(IPC_CHANNELS.getLastServer, async () => ({
     lastServerId,
     lastProfileId: lastConnectedProfileId,
@@ -2583,6 +2597,7 @@ function applyPersistedSettings(settings: Record<string, unknown>): void {
   if (typeof settings.notifications === "boolean") {
     notificationsEnabled = settings.notifications;
   }
+  panicWipeEnabled = settings.panicWipe === true;
   // Last known good hub IP: the only way to reach the hub once a Lockdown
   // lock is engaged, since the lock permits that IP but blocks DNS and DoH.
   pangeaApiClient.setCachedHubIp(settings.hubIp);
@@ -2812,7 +2827,7 @@ function notifyPanic(phase: PanicPhase): void {
 }
 
 // Panic removal: disconnect, lower the kill switch, erase local state, and
-// uninstall. Bound to a hardcoded global shortcut; no setting, no IPC.
+// uninstall. Bound to a hardcoded global shortcut, inert until opted in.
 async function triggerPanicWipe(): Promise<void> {
   if (panicInProgress) return;
   panicInProgress = true;
@@ -2846,25 +2861,35 @@ async function triggerPanicWipe(): Promise<void> {
   });
 }
 
-// Fires only on a second press within the window, so a single stray chord
-// never wipes the device.
-function registerPanicShortcut(): void {
-  let lastPressAtMs = 0;
+let panicLastPressAtMs = 0;
+
+// Registers the shortcut only while the setting is on; a second press within the
+// window wipes, so a single stray chord never does. Called on boot and on toggle.
+function applyPanicShortcut(): void {
   try {
+    if (!panicWipeEnabled) {
+      if (globalShortcut.isRegistered(PANIC_WIPE_ACCELERATOR)) {
+        globalShortcut.unregister(PANIC_WIPE_ACCELERATOR);
+      }
+      return;
+    }
+    if (globalShortcut.isRegistered(PANIC_WIPE_ACCELERATOR)) {
+      return;
+    }
     const ok = globalShortcut.register(PANIC_WIPE_ACCELERATOR, () => {
       const now = Date.now();
-      if (now - lastPressAtMs <= PANIC_DOUBLE_PRESS_WINDOW_MS) {
-        lastPressAtMs = 0;
+      if (now - panicLastPressAtMs <= PANIC_DOUBLE_PRESS_WINDOW_MS) {
+        panicLastPressAtMs = 0;
         void triggerPanicWipe();
         return;
       }
-      lastPressAtMs = now;
+      panicLastPressAtMs = now;
     });
     if (!ok) {
       console.warn(`could not register panic shortcut ${PANIC_WIPE_ACCELERATOR}`);
     }
   } catch (err) {
-    console.warn("failed to register panic shortcut", sanitizeLog(err));
+    console.warn("failed to apply panic shortcut", sanitizeLog(err));
   }
 }
 
@@ -2925,7 +2950,7 @@ async function boot(): Promise<void> {
     fetchLatest: (timeoutMs) => pangeaApiClient.anonymousRequest("GET", LATEST_ROUTE, undefined, { timeoutMs })
   });
   createTray();
-  registerPanicShortcut();
+  applyPanicShortcut();
   watchDisplayChanges();
   if (!hiddenLaunch) {
     showMainWindow();
