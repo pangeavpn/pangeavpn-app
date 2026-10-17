@@ -26,6 +26,7 @@ export interface PanicWipeActions {
   /** Ask the already-privileged daemon to uninstall itself — no OS prompt. */
   requestDaemonUninstall: (appPid: number) => Promise<void>;
   stopDaemonProcess: () => void;
+  removeLoginItem: () => Promise<void>;
   removePath: (target: string) => Promise<void>;
   spawnDetached: (file: string, args: string[]) => void;
   notify: (phase: PanicPhase, detail?: string) => void;
@@ -98,6 +99,23 @@ export async function performPanicWipe(ctx: PanicWipeContext, actions: PanicWipe
     actions.logf(`panic wipe: lowerLock failed: ${describe(error)}`);
   }
 
+  // Before the user dirs go: without a system service, the daemon token lives in them.
+  let uninstalled = true;
+  if (ctx.isPackaged) {
+    try {
+      await actions.requestDaemonUninstall(ctx.appPid);
+    } catch (error) {
+      uninstalled = false;
+      actions.logf(`panic wipe: daemon uninstall request failed: ${describe(error)}`);
+    }
+  }
+
+  try {
+    await actions.removeLoginItem();
+  } catch (error) {
+    actions.logf(`panic wipe: could not remove the login item: ${describe(error)}`);
+  }
+
   for (const target of userStatePathsToRemove(ctx)) {
     try {
       await actions.removePath(target);
@@ -107,11 +125,6 @@ export async function performPanicWipe(ctx: PanicWipeContext, actions: PanicWipe
   }
 
   if (ctx.isPackaged) {
-    try {
-      await actions.requestDaemonUninstall(ctx.appPid);
-    } catch (error) {
-      actions.logf(`panic wipe: daemon uninstall request failed: ${describe(error)}`);
-    }
     const cleanup = deferredUserCleanupCommand(ctx);
     if (cleanup) {
       try {
@@ -128,7 +141,7 @@ export async function performPanicWipe(ctx: PanicWipeContext, actions: PanicWipe
     actions.logf(`panic wipe: stopDaemonProcess failed: ${describe(error)}`);
   }
 
-  actions.notify("done");
+  actions.notify(uninstalled ? "done" : "error");
   actions.quit();
 }
 

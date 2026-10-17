@@ -16,8 +16,9 @@ func TestBuildWindowsUninstallScript(t *testing.T) {
 		"Wait-Process -Id 1234",
 		"sc.exe stop PangeaDaemon",
 		"sc.exe delete PangeaDaemon",
-		"DisplayName -eq 'PangeaVPN'",
-		"ArgumentList '/S' -Wait",
+		"DisplayName -match '^PangeaVPN( |$)'",
+		`UninstallString -match '^\s*"([^"]+)"\s*(.*)$'`,
+		"-ArgumentList (($rest + ' /S').Trim()) -Wait",
 		"ProgramData\\PangeaVPN",
 		"AppUserModelId\\com.pangea.pangeavpn",
 	} {

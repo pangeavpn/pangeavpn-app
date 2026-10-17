@@ -43,8 +43,9 @@ func buildWindowsUninstallScript(appPID int) string {
 		"for ($i=0; $i -lt 60; $i++) { $q=(& sc.exe query PangeaDaemon 2>$null | Out-String); if (($q -eq '') -or ($q -match 'STOPPED') -or ($q -match '1060')) { break }; Start-Sleep -Milliseconds 500 }",
 		"& sc.exe delete PangeaDaemon | Out-Null",
 		"$keys=@('HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall','HKLM:\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall')",
-		"$u=Get-ChildItem $keys -ErrorAction SilentlyContinue | ForEach-Object { Get-ItemProperty $_.PSPath -ErrorAction SilentlyContinue } | Where-Object { $_.DisplayName -eq 'PangeaVPN' } | Select-Object -First 1",
-		"if ($u -and $u.UninstallString) { $exe=($u.UninstallString -replace '\"','').Trim(); if (Test-Path -LiteralPath $exe) { Start-Process -FilePath $exe -ArgumentList '/S' -Wait } }",
+		// electron-builder registers "PangeaVPN <version>" and `"<exe>" /allusers`.
+		`$u=Get-ChildItem $keys -ErrorAction SilentlyContinue | ForEach-Object { Get-ItemProperty $_.PSPath -ErrorAction SilentlyContinue } | Where-Object { $_.DisplayName -match '^PangeaVPN( |$)' } | Select-Object -First 1`,
+		`if ($u -and $u.UninstallString -match '^\s*"([^"]+)"\s*(.*)$') { $exe=$Matches[1]; $rest=$Matches[2]; if (Test-Path -LiteralPath $exe) { Start-Process -FilePath $exe -ArgumentList (($rest + ' /S').Trim()) -Wait } }`,
 		"Remove-Item -LiteralPath $state -Recurse -Force -ErrorAction SilentlyContinue",
 		"Remove-Item -LiteralPath 'HKLM:\\Software\\Classes\\AppUserModelId\\com.pangea.pangeavpn' -Recurse -Force -ErrorAction SilentlyContinue",
 	}, "\n")

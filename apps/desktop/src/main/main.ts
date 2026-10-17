@@ -2185,10 +2185,13 @@ function registerStartupSettingsHandlers(): void {
     "panic wipe setting",
     (enabled) => {
       panicWipeEnabled = !!enabled;
-      applyPanicShortcut();
+      if (!applyPanicShortcut() && panicWipeEnabled) {
+        panicWipeEnabled = false;
+        throw new Error("the panic wipe shortcut is held by another app");
+      }
       return panicWipeEnabled;
     },
-    () => panicWipeEnabled
+    () => panicWipeEnabled && globalShortcut.isRegistered(PANIC_WIPE_ACCELERATOR)
   );
 
   ipcMain.handle(IPC_CHANNELS.getLastServer, async () => ({
@@ -2815,12 +2818,9 @@ function buildPanicContext(): PanicWipeContext {
 
 function notifyPanic(phase: PanicPhase): void {
   if (!Notification.isSupported()) return;
-  const text =
-    phase === "done"
-      ? { title: "PangeaVPN removed", body: "Your network has been restored." }
-      : { title: "Removing PangeaVPN", body: "Disconnecting and restoring your network…" };
+  const key = phase === "done" ? "panicDone" : phase === "error" ? "panicFailed" : "panicStart";
   try {
-    new Notification({ title: text.title, body: text.body, silent: true }).show();
+    new Notification({ title: mt(`notify.${key}Title`), body: mt(`notify.${key}Body`), silent: true }).show();
   } catch {
     // A failed toast must never block the wipe.
   }
@@ -2850,6 +2850,7 @@ async function triggerPanicWipe(): Promise<void> {
       await daemonClient.selfUninstall(appPid);
     },
     stopDaemonProcess: () => daemonProcess.stop(),
+    removeLoginItem: () => setLoginItemEnabled(false),
     removePath: (target) => fs.rm(target, { recursive: true, force: true }),
     spawnDetached: (file, args) => {
       const child = spawn(file, args, { detached: true, stdio: "ignore", windowsHide: true });
@@ -2864,17 +2865,17 @@ async function triggerPanicWipe(): Promise<void> {
 let panicLastPressAtMs = 0;
 
 // Registers the shortcut only while the setting is on; a second press within the
-// window wipes, so a single stray chord never does. Called on boot and on toggle.
-function applyPanicShortcut(): void {
+// window wipes, so a single stray chord never does. False if the chord could not be taken.
+function applyPanicShortcut(): boolean {
   try {
     if (!panicWipeEnabled) {
       if (globalShortcut.isRegistered(PANIC_WIPE_ACCELERATOR)) {
         globalShortcut.unregister(PANIC_WIPE_ACCELERATOR);
       }
-      return;
+      return true;
     }
     if (globalShortcut.isRegistered(PANIC_WIPE_ACCELERATOR)) {
-      return;
+      return true;
     }
     const ok = globalShortcut.register(PANIC_WIPE_ACCELERATOR, () => {
       const now = Date.now();
@@ -2888,8 +2889,10 @@ function applyPanicShortcut(): void {
     if (!ok) {
       console.warn(`could not register panic shortcut ${PANIC_WIPE_ACCELERATOR}`);
     }
+    return ok;
   } catch (err) {
     console.warn("failed to apply panic shortcut", sanitizeLog(err));
+    return false;
   }
 }
 

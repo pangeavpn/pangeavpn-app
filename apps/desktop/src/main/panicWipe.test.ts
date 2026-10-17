@@ -92,8 +92,12 @@ function recordingActions() {
       stopDaemonProcess: () => {
         calls.push("stopDaemonProcess");
       },
+      removeLoginItem: async () => {
+        calls.push("removeLoginItem");
+      },
       removePath: async (target: string) => {
         removed.push(target);
+        calls.push(`removePath:${target}`);
       },
       spawnDetached: (file: string, args: string[]) => {
         spawned = { file, args };
@@ -120,6 +124,15 @@ test("performPanicWipe lowers the lock, asks the daemon to uninstall, and quits 
   assert.ok(rec.calls.indexOf("requestDaemonUninstall") < rec.calls.indexOf("quit"));
   assert.deepEqual(rec.removed, userStatePathsToRemove(ctx()));
   assert.equal(rec.spawned?.file, "powershell.exe");
+  assert.ok(rec.calls.includes("removeLoginItem"));
+});
+
+test("the daemon is asked to uninstall before the user dirs (and any token in them) are removed", async () => {
+  const rec = recordingActions();
+  await performPanicWipe(ctx(), rec.actions);
+  const firstRemoval = rec.calls.findIndex((call) => call.startsWith("removePath:"));
+  assert.ok(firstRemoval > 0);
+  assert.ok(rec.calls.indexOf("requestDaemonUninstall") < firstRemoval);
 });
 
 test("performPanicWipe stays local when unpackaged (no daemon uninstall, no cleanup spawn)", async () => {
@@ -142,6 +155,7 @@ test("a failed daemon uninstall still finishes the wipe and quits", async () => 
   await performPanicWipe(ctx(), actions);
   assert.ok(rec.calls.includes("spawnDetached"));
   assert.ok(rec.calls.includes("quit"));
+  assert.deepEqual(rec.phases, ["start", "error"], "a failed removal must not be reported as done");
 });
 
 test("a failing removePath does not abort the wipe", async () => {
