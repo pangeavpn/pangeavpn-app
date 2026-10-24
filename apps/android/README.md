@@ -41,10 +41,13 @@ From `daemon/`, the Go module root:
 
 ```bash
 gomobile bind -target=android -androidapi 24 -javapkg=org.pangeavpn \
-  -ldflags=-checklinkname=0 \
+  -tags=with_utls -ldflags=-checklinkname=0 \
   -o ../apps/android/core/libs/pangeacore.aar \
   ./mobile
 ```
+
+`with_utls` is required too: without it sing-box compiles REALITY's client out,
+and AnyTLS falls back to Go's own ClientHello instead of Chrome's.
 
 `-checklinkname=0` is required: sing-box pulls in `wlynxg/anet`, which
 `//go:linkname`s into `net.zoneCache` to read interfaces on Android, and Go
@@ -67,9 +70,9 @@ node scripts/fetch-naive-android.mjs   # from the repo root
 ```
 
 This downloads the pinned `libpangea_naive.a` from the naiveproxy fork's release
-into `daemon/internal/naive/android/arm64-v8a/` (gitignored). Add `-tags
-naive_cgo` to the `gomobile bind` above to link it; without the tag, or on the
-other three ABIs, the cascade simply ends at Hysteria2.
+into `daemon/internal/naive/android/arm64-v8a/` (gitignored). Use
+`-tags=with_utls,naive_cgo` in the `gomobile bind` above to link it; without the
+tag, or on the other three ABIs, the cascade skips NaiveProxy.
 
 It is arm64-v8a only on purpose. Measured on the debug APK, linking it takes
 `lib/arm64-v8a/libgojni.so` from 27.3 MB to 43.9 MB (+16.6 MB); the other three
