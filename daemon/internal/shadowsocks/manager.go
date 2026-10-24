@@ -169,7 +169,7 @@ func (m *Manager) Start(ctx context.Context, profile state.ShadowsocksProfile) e
 
 	remoteAddr := destinationUDPAddr(targetHost, targetPort)
 	go func() {
-		bridgeErr := bridgeUDP(engineCtx, localConn, remote, remoteAddr)
+		bridgeErr := transport.BridgeUDP(engineCtx, localConn, remote, remoteAddr)
 		cancel()
 		localConn.Close()
 		remote.Close()
@@ -198,7 +198,7 @@ func (m *Manager) Start(ctx context.Context, profile state.ShadowsocksProfile) e
 	return nil
 }
 
-// destinationUDPAddr resolves the relay target for bridgeUDP's WriteTo. A
+// destinationUDPAddr resolves the relay target for transport.BridgeUDP's WriteTo. A
 // non-literal host is passed through unresolved as a hostname Socksaddr.
 func destinationUDPAddr(host string, port int) net.Addr {
 	if ip := net.ParseIP(host); ip != nil {

@@ -37,6 +37,7 @@
     reality: running,
     hysteria2: idle,
     shadowsocks: idle,
+    anytls: idle,
     snowflake: idle,
     wireguard: {
       running: live,

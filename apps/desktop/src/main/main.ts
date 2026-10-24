@@ -144,9 +144,9 @@ let autoConnectEnabled = false;
 let notificationsEnabled = true;
 // Panic wipe: the global removal shortcut is inert until the user opts in. Off by default.
 let panicWipeEnabled = false;
-// "auto" (reality, then cloak, shadowsocks, hysteria2, naive), or one of
-// "cloak"/"naive"/"reality"/"hysteria2"/"shadowsocks"/"snowflake" only.
-let preferredTransport: "auto" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "snowflake" | "wireguard" = "auto";
+// "auto" (reality, then cloak, shadowsocks, hysteria2, naive, anytls), or one of
+// "cloak"/"naive"/"reality"/"hysteria2"/"shadowsocks"/"anytls"/"snowflake" only.
+let preferredTransport: "auto" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "anytls" | "snowflake" | "wireguard" = "auto";
 // Stored language preference: a locale code, or "system" to follow the OS.
 let localePref = "system";
 const hiddenLaunch = process.argv.some(isHiddenLaunchArg);
@@ -1370,7 +1370,7 @@ async function cancelConnectAttempt(): Promise<void> {
 function connectionOptions(): {
   allowLAN: boolean;
   lockdown: boolean;
-  preferredTransport?: "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "snowflake" | "wireguard";
+  preferredTransport?: "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "anytls" | "snowflake" | "wireguard";
 } {
   return {
     allowLAN: allowLanEnabled,
@@ -1543,6 +1543,7 @@ function sanitizePublicServer(candidate: unknown): PublicServerInfo | null {
     reality: Boolean(s.reality),
     hysteria2: Boolean(s.hysteria2),
     shadowsocks: Boolean(s.shadowsocks),
+    anytls: Boolean(s.anytls),
     snowflake: Boolean(s.snowflake)
   };
 }
@@ -1600,6 +1601,9 @@ function redactConfigForRenderer(config: ConfigResponse): ConfigResponse {
       shadowsocks: profile.shadowsocks
         ? { ...profile.shadowsocks, password: "<redacted>" }
         : profile.shadowsocks,
+      anytls: profile.anytls
+        ? { ...profile.anytls, password: "<redacted>" }
+        : profile.anytls,
       wireguard: { ...profile.wireguard, configText: redactWireGuardKeys(profile.wireguard.configText) }
     }))
   };
@@ -2056,13 +2060,14 @@ function registerTransportSettingsHandlers(): void {
     () => pangeaApiClient.getHubInTunnel()
   );
 
-  ipcMain.handle(IPC_CHANNELS.setPreferredTransport, async (_event, value: "auto" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "snowflake" | "wireguard") => {
+  ipcMain.handle(IPC_CHANNELS.setPreferredTransport, async (_event, value: "auto" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "anytls" | "snowflake" | "wireguard") => {
     preferredTransport =
       value === "cloak" ||
       value === "naive" ||
       value === "reality" ||
       value === "hysteria2" ||
       value === "shadowsocks" ||
+      value === "anytls" ||
       value === "snowflake" ||
       value === "wireguard"
         ? value
@@ -2575,6 +2580,7 @@ function applyPersistedSettings(settings: Record<string, unknown>): void {
     settings.preferredTransport === "reality" ||
     settings.preferredTransport === "hysteria2" ||
     settings.preferredTransport === "shadowsocks" ||
+    settings.preferredTransport === "anytls" ||
     settings.preferredTransport === "snowflake" ||
     settings.preferredTransport === "wireguard"
   ) {
