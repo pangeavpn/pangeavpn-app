@@ -28,6 +28,7 @@ func buildProfile(server *serverInfo) *state.Profile {
 		Reality:     buildReality(server.Reality, nodeIP),
 		Hysteria2:   buildHysteria2(server.Hysteria2, nodeIP),
 		Shadowsocks: buildShadowsocks(server.Shadowsocks, nodeIP),
+		AnyTLS:      buildAnyTLS(server.AnyTLS, nodeIP),
 		Snowflake:   buildSnowflake(server.Snowflake),
 	}
 }
@@ -133,6 +134,36 @@ func buildShadowsocks(info *shadowsocksInfo, nodeIP string) *state.ShadowsocksPr
 		TargetHost: info.TargetHost,
 		TargetPort: info.TargetPort,
 		UDPOverTCP: info.UDPOverTCP,
+	}
+}
+
+// buildAnyTLS ports apps/desktop/src/shared/anytlsProfile.ts: dial an address,
+// never a domain, and never send an address as the SNI.
+func buildAnyTLS(info *anytlsInfo, nodeIP string) *state.AnyTLSProfile {
+	if info == nil {
+		return nil
+	}
+	host := strings.TrimSpace(info.RemoteHost)
+	dial := nodeIP
+	if remoteIP := strings.TrimSpace(info.RemoteIP); isIPLiteral(remoteIP) {
+		dial = remoteIP
+	} else if isIPLiteral(host) {
+		dial = host
+	}
+	serverName := strings.TrimSpace(info.ServerName)
+	if serverName == "" && !isIPLiteral(host) {
+		serverName = host
+	}
+	return &state.AnyTLSProfile{
+		LocalPort:  0,
+		RemoteHost: dial,
+		RemotePort: info.RemotePort,
+		Password:   info.Password,
+		ServerName: serverName,
+		Insecure:   info.Insecure,
+		PinSHA256:  info.PinSHA256,
+		TargetHost: info.TargetHost,
+		TargetPort: info.TargetPort,
 	}
 }
 

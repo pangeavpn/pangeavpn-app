@@ -73,6 +73,7 @@
     <string name="settings_save">حفظ</string>
     <string name="settings_signout">تسجيل الخروج</string>
     <string name="settings_title">الإعدادات</string>
+    <string name="settings_transport_anytls">AnyTLS</string>
     <string name="settings_transport_auto">تلقائي (موصى به)</string>
     <string name="settings_transport_cloak">Cloak</string>
     <string name="settings_transport_description">كيف يموّه PangeaVPN حركة بياناتك.</string>
@@ -92,6 +93,7 @@
     <string name="subscription_none">لا يوجد اشتراك نشط</string>
     <string name="toggle_off">معطّل</string>
     <string name="toggle_on">مفعّل</string>
+    <string name="transport_status_anytls">التمويه: AnyTLS</string>
     <string name="transport_status_cloak">التمويه: Cloak</string>
     <string name="transport_status_hysteria2">التمويه: Hysteria2</string>
     <string name="transport_status_naive">التمويه: NaiveProxy</string>

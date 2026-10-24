@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/anytls"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/cloak"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/hysteria2"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/reality"
@@ -21,6 +22,8 @@ import (
 // transportSessionTimeout bounds how long a transport is given to form its own
 // session before the cascade abandons it.
 const transportSessionTimeout = 10 * time.Second
+
+func init() { anytls.ClientMetadata = "pangeavpn-android" }
 
 // sessionWaiter and boundPortReporter are the optional transport capabilities
 // declared in daemon/internal/transport, checked by type assertion.
@@ -67,6 +70,11 @@ func (s *starter) StarterFor(profile *state.Profile, kind string) (transport.Sta
 			return nil, transport.NotConfigured
 		}
 		return s.startHysteria2, s.singBoxAvailability()
+	case "anytls":
+		if profile.AnyTLS == nil {
+			return nil, transport.NotConfigured
+		}
+		return s.startAnyTLS, s.singBoxAvailability()
 	case "naive":
 		if !naiveLinked {
 			return nil, transport.Unavailable
@@ -183,5 +191,20 @@ func (s *starter) startHysteria2(ctx context.Context, profile *state.Profile, _ 
 		return fmt.Errorf("hysteria2 session: %w", err)
 	}
 	s.record("hysteria2", mgr, profile.Hysteria2.LocalPort)
+	return nil
+}
+
+func (s *starter) startAnyTLS(ctx context.Context, profile *state.Profile, _ *state.WireGuardProfile) error {
+	mgr := anytls.NewManager(s.logs)
+	start := *profile.AnyTLS
+	start.LocalPort = 0
+	if err := mgr.Start(ctx, start); err != nil {
+		return fmt.Errorf("anytls start: %w", err)
+	}
+	if err := awaitSession(ctx, mgr); err != nil {
+		_ = mgr.Stop(context.Background())
+		return fmt.Errorf("anytls session: %w", err)
+	}
+	s.record("anytls", mgr, profile.AnyTLS.LocalPort)
 	return nil
 }

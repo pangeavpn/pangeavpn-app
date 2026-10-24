@@ -84,6 +84,7 @@ const KEY_MAP = {
   "settings.transport.reality": "settings_transport_reality",
   "settings.transport.shadowsocks": "settings_transport_shadowsocks",
   "settings.transport.hysteria2": "settings_transport_hysteria2",
+  "settings.transport.anytls": "settings_transport_anytls",
   "settings.transport.snowflake": "settings_transport_snowflake",
   "serverPicker.noServersForTransport": "server_picker_none_for_transport",
   "settings.provisioning.heading": "settings_censorship_heading",
@@ -147,6 +148,10 @@ const MOBILE_ONLY = {
   transport_status_hysteria2: {
     en: "Obfuscation: Hysteria2", es: "Ofuscación: Hysteria2", fr: "Obfuscation : Hysteria2", ru: "Обфускация: Hysteria2",
     uk: "Обфускація: Hysteria2", zh: "混淆：Hysteria2", ar: "التمويه: Hysteria2", fa: "مبهم‌سازی: Hysteria2"
+  },
+  transport_status_anytls: {
+    en: "Obfuscation: AnyTLS", es: "Ofuscación: AnyTLS", fr: "Obfuscation : AnyTLS", ru: "Обфускация: AnyTLS",
+    uk: "Обфускація: AnyTLS", zh: "混淆：AnyTLS", ar: "التمويه: AnyTLS", fa: "مبهم‌سازی: AnyTLS"
   },
   transport_status_naive: {
     en: "Obfuscation: NaiveProxy", es: "Ofuscación: NaiveProxy", fr: "Obfuscation : NaiveProxy", ru: "Обфускация: NaiveProxy",
