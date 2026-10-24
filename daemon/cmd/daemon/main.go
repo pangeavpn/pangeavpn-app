@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/anytls"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/api"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/auth"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/cloak"
@@ -214,6 +215,7 @@ func startDaemonRuntime() (*daemonRuntime, error) {
 	realityManager := reality.NewManager(logs)
 	hysteria2Manager := hysteria2.NewManager(logs)
 	shadowsocksManager := shadowsocks.NewManager(logs)
+	anytlsManager := anytls.NewManager(logs)
 	snowflakeManager := snowflake.NewManager(logs)
 	wgManager := wg.NewManager(logs)
 	killSwitch := platform.NewKillSwitch()
@@ -230,7 +232,7 @@ func startDaemonRuntime() (*daemonRuntime, error) {
 	platform.KillSwitchInfof = func(format string, args ...any) {
 		logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf(format, args...))
 	}
-	service := api.NewService(machine, logs, configStore, cloakManager, naiveManager, realityManager, hysteria2Manager, shadowsocksManager, snowflakeManager, wgManager, killSwitch)
+	service := api.NewService(machine, logs, configStore, cloakManager, naiveManager, realityManager, hysteria2Manager, shadowsocksManager, anytlsManager, snowflakeManager, wgManager, killSwitch)
 
 	service.SetShadowsocksProxy(shadowsocks.NewProxyManager(logs))
 	service.SetRealityProxy(reality.NewProxyManager(logs))

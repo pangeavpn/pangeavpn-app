@@ -655,6 +655,7 @@ const TRANSPORT_DESCRIPTIONS: Record<string, MessageKey> = {
   reality: "settings.transport.reality.desc",
   hysteria2: "settings.transport.hysteria2.desc",
   shadowsocks: "settings.transport.shadowsocks.desc",
+  anytls: "settings.transport.anytls.desc",
   wireguard: "settings.transport.wireguard.desc"
 };
 
@@ -3944,6 +3945,7 @@ const TRANSPORT_LABELS: Record<string, string> = {
   reality: "VLESS+REALITY",
   shadowsocks: "Shadowsocks",
   hysteria2: "Hysteria2",
+  anytls: "AnyTLS",
   snowflake: "Snowflake",
   wireguard: "WireGuard",
 };
@@ -4577,6 +4579,7 @@ type TransportChoice =
   | "reality"
   | "hysteria2"
   | "shadowsocks"
+  | "anytls"
   | "snowflake"
   | "wireguard";
 
@@ -4592,6 +4595,8 @@ function serverSupportsTransport(server: ServerInfo, transport: TransportChoice)
       return Boolean(server.hysteria2);
     case "shadowsocks":
       return Boolean(server.shadowsocks);
+    case "anytls":
+      return Boolean(server.anytls);
     case "snowflake":
       return Boolean(server.snowflake);
     default:

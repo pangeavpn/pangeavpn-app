@@ -8,6 +8,7 @@ import { MTU_DEFAULT, normalizeMtu, normalizeMtuOrDefault } from "../shared/mtu"
 import { resolveNaiveEndpoint } from "../shared/naiveEndpoint";
 import { directWireGuardEndpoint } from "../shared/wireguardEndpoint";
 import { buildShadowsocksProfile } from "../shared/shadowsocksProfile";
+import { buildAnyTLSProfile } from "../shared/anytlsProfile";
 import {
   DEFAULT_HUB_METHODS,
   type HubMethod,
@@ -1815,6 +1816,7 @@ export class PangeaApiClient {
     // Under a hop this is the ENTRY's public relay port (nodeIp is the entry);
     // the exit is never dialed directly, keeping it out of the permits.
     const wireguardEndpoint = directWireGuardEndpoint(reg.serverEndpoint, reg.hop, nodeIp);
+    const anytls = server.anytls ? buildAnyTLSProfile(server.anytls, nodeIp) : undefined;
     const excludeIPs = uniqueNonEmpty([
       nodeIp,
       wireguardEndpoint?.host,
@@ -1823,7 +1825,8 @@ export class PangeaApiClient {
       server.naive?.remoteIp ?? server.naive?.remoteHost,
       server.reality?.remoteIp,
       server.hysteria2?.remoteIp,
-      server.shadowsocks?.remoteIp
+      server.shadowsocks?.remoteIp,
+      anytls?.remoteHost
     ]).filter(isIPv4Literal);
     // Snowflake is the exception and is left out: neither its broker nor its
     // per-session volunteer proxy is an address ours to know up front.
@@ -1899,6 +1902,7 @@ export class PangeaApiClient {
       ...(server.shadowsocks ? {
         shadowsocks: buildShadowsocksProfile(server.shadowsocks, nodeIp)
       } : {}),
+      ...(anytls ? { anytls } : {}),
       ...(server.snowflake ? {
         snowflake: {
           localPort: 0,
