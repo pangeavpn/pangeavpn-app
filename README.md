@@ -3,7 +3,7 @@
 <img src="docs/assets/banner.webp" alt="PangeaVPN. One internet. No borders." width="100%" />
 
 An open-source VPN client for networks that block VPNs. It runs WireGuard inside<br/>
-five censorship-resistant transports, so the tunnel looks like ordinary HTTPS.
+six censorship-resistant transports, so the tunnel looks like ordinary HTTPS.
 
 [![Release](https://img.shields.io/github/v/release/pangeavpn/pangeavpn-app?style=flat-square&color=C3562B&label=release)](https://github.com/pangeavpn/pangeavpn-app/releases/latest)
 [![Build](https://img.shields.io/github/actions/workflow/status/pangeavpn/pangeavpn-app/build-desktop.yml?branch=master&style=flat-square&label=build)](https://github.com/pangeavpn/pangeavpn-app/actions/workflows/build-desktop.yml)
@@ -54,6 +54,7 @@ In auto mode the daemon works down this list until one connects. You can also pi
 | 3 | **Shadowsocks** | An encrypted stream on its own port with no TLS shape at all, so a block aimed at the two above doesn't touch it |
 | 4 | **Hysteria2** | QUIC / HTTP-3, hard to tell apart from modern web traffic |
 | 5 | **NaiveProxy** | Traffic carrying a genuine Chrome TLS fingerprint |
+| 6 | **AnyTLS** | A TLS session whose record sizes are padded to blunt the TLS-in-TLS fingerprint |
 
 Cloak is always available. The others switch on when the hub provisions them, so your exact cascade depends on your account and the node you land on.
 
@@ -67,7 +68,7 @@ A Snowflake transport (WebRTC, as used by Tor) is written and wired up but switc
 
 | | |
 |---|---|
-| **Five transports, automatic fallback** | Blocking one doesn't take you offline, and the client remembers what worked on each network |
+| **Six transports, automatic fallback** | Blocking one doesn't take you offline, and the client remembers what worked on each network |
 | **WireGuard core** | Modern crypto, low latency, fully in-process |
 | **Post-quantum tunnel keys** | An ML-KEM-768 exchange sets WireGuard's pre-shared key, so breaking X25519 later isn't enough to decrypt traffic recorded today |
 | **Multihop** | Enter through one server and leave through another. The network you're on only ever sees the entry |

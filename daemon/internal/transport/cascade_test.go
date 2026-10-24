@@ -29,7 +29,8 @@ func allAvailable() fakeStarter {
 	return fakeStarter{
 		"cloak": transport.Available, "reality": transport.Available,
 		"shadowsocks": transport.Available, "hysteria2": transport.Available,
-		"naive": transport.Available, "snowflake": transport.Available,
+		"naive": transport.Available, "anytls": transport.Available,
+		"snowflake": transport.Available,
 	}
 }
 
@@ -63,6 +64,13 @@ func TestSelectAutoFollowsCascadeOrder(t *testing.T) {
 	}
 }
 
+func TestAutoCascadeOrderRunsAnyTLSAfterNaive(t *testing.T) {
+	want := []string{"reality", "cloak", "shadowsocks", "hysteria2", "naive", "anytls", "snowflake"}
+	if !equal(transport.AutoCascadeOrder, want) {
+		t.Fatalf("got %v, want %v", transport.AutoCascadeOrder, want)
+	}
+}
+
 func TestSelectAutoTreatsEmptyStringAsAuto(t *testing.T) {
 	got, err := transport.Select(&state.Profile{}, "", allAvailable())
 	if err != nil {
@@ -78,13 +86,14 @@ func TestSelectAutoSkipsUnavailableAndKeepsOrder(t *testing.T) {
 	starter := fakeStarter{
 		"cloak": transport.Available, "reality": transport.Available,
 		"shadowsocks": transport.Available, "hysteria2": transport.Available,
-		"naive": transport.Unavailable, "snowflake": transport.NotConfigured,
+		"naive": transport.Unavailable, "anytls": transport.Available,
+		"snowflake": transport.NotConfigured,
 	}
 	got, err := transport.Select(&state.Profile{}, "auto", starter)
 	if err != nil {
 		t.Fatalf("Select: %v", err)
 	}
-	want := []string{"reality", "cloak", "shadowsocks", "hysteria2"}
+	want := []string{"reality", "cloak", "shadowsocks", "hysteria2", "anytls"}
 	if !equal(kinds(got), want) {
 		t.Fatalf("got %v, want %v", kinds(got), want)
 	}
@@ -110,6 +119,16 @@ func TestSelectNamedTransport(t *testing.T) {
 	}
 	if got[0].Start == nil {
 		t.Fatal("candidate has no start func")
+	}
+}
+
+func TestSelectNamedAnyTLS(t *testing.T) {
+	got, err := transport.Select(&state.Profile{}, "anytls", allAvailable())
+	if err != nil {
+		t.Fatalf("Select: %v", err)
+	}
+	if !equal(kinds(got), []string{"anytls"}) {
+		t.Fatalf("got %v, want [anytls]", kinds(got))
 	}
 }
 

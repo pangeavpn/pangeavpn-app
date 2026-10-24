@@ -19,7 +19,7 @@ func inPlaceCascadeService(t *testing.T) (*Service, *gatedProbe, *fakeInPlaceWGM
 	wgMgr := &fakeInPlaceWGManager{}
 	config := testConfigStore(t, cascadeProfile())
 	svc := NewService(state.NewMachine(), state.NewLogStore(100), config, cloak, &fakeNaiveManager{}, reality,
-		&fakeHysteria2Manager{}, shadowsocks, &fakeSnowflakeManager{}, wgMgr, &fakeKillSwitch{})
+		&fakeHysteria2Manager{}, shadowsocks, &fakeAnyTLSManager{}, &fakeSnowflakeManager{}, wgMgr, &fakeKillSwitch{})
 	stubSessionRecordStore(t)
 	svc.handshakeTimeout = 200 * time.Millisecond
 	svc.networkRepair = func(context.Context, []string) ([]string, error) { return nil, nil }
