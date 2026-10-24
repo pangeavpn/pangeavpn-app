@@ -55,6 +55,18 @@ type shadowsocksInfo struct {
 	UDPOverTCP bool   `json:"udpOverTcp,omitempty"`
 }
 
+type anytlsInfo struct {
+	RemoteHost string `json:"remoteHost"`
+	RemoteIP   string `json:"remoteIp,omitempty"`
+	RemotePort int    `json:"remotePort"`
+	Password   string `json:"password"`
+	ServerName string `json:"serverName,omitempty"`
+	Insecure   bool   `json:"insecure,omitempty"`
+	PinSHA256  string `json:"pinSha256,omitempty"`
+	TargetHost string `json:"targetHost,omitempty"`
+	TargetPort int    `json:"targetPort,omitempty"`
+}
+
 // controlPlaneShadowsocksInfo reaches the hub rather than WireGuard.
 type controlPlaneShadowsocksInfo struct {
 	RemoteHost string `json:"remoteHost"`
@@ -94,6 +106,7 @@ type serverInfo struct {
 	Reality                 *realityInfo                 `json:"reality,omitempty"`
 	Hysteria2               *hysteria2Info               `json:"hysteria2,omitempty"`
 	Shadowsocks             *shadowsocksInfo             `json:"shadowsocks,omitempty"`
+	AnyTLS                  *anytlsInfo                  `json:"anytls,omitempty"`
 	ControlPlaneShadowsocks *controlPlaneShadowsocksInfo `json:"controlPlaneShadowsocks,omitempty"`
 	ControlPlaneReality     *controlPlaneRealityInfo     `json:"controlPlaneReality,omitempty"`
 	Snowflake               *snowflakeInfo               `json:"snowflake,omitempty"`

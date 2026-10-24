@@ -88,7 +88,7 @@ data class AppSettings(
 
 /** Manual choices. NaiveProxy is reachable through "auto" but is not offered
  *  here: only arm64-v8a links it. Snowflake cannot be protect()ed at all. */
-val TRANSPORT_CHOICES = listOf("auto", "cloak", "reality", "shadowsocks", "hysteria2")
+val TRANSPORT_CHOICES = listOf("auto", "cloak", "reality", "shadowsocks", "hysteria2", "anytls")
 
 val HUB_METHOD_CHOICES = listOf("directIp", "reality", "shadowsocks", "fronted", "normal")
 

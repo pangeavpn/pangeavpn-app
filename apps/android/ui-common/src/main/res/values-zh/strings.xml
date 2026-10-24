@@ -73,6 +73,7 @@
     <string name="settings_save">保存</string>
     <string name="settings_signout">退出登录</string>
     <string name="settings_title">设置</string>
+    <string name="settings_transport_anytls">AnyTLS</string>
     <string name="settings_transport_auto">自动（推荐）</string>
     <string name="settings_transport_cloak">Cloak</string>
     <string name="settings_transport_description">PangeaVPN 如何伪装您的流量。</string>
@@ -92,6 +93,7 @@
     <string name="subscription_none">无有效订阅</string>
     <string name="toggle_off">关闭</string>
     <string name="toggle_on">开启</string>
+    <string name="transport_status_anytls">混淆：AnyTLS</string>
     <string name="transport_status_cloak">混淆：Cloak</string>
     <string name="transport_status_hysteria2">混淆：Hysteria2</string>
     <string name="transport_status_naive">混淆：NaiveProxy</string>

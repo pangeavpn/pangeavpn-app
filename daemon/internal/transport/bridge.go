@@ -1,4 +1,4 @@
-package shadowsocks
+package transport
 
 import (
 	"context"
@@ -9,13 +9,13 @@ import (
 	"sync/atomic"
 )
 
-// maxConsecutiveBridgeErrors bounds a direction that is failing every datagram,
+// MaxConsecutiveBridgeErrors bounds a direction that is failing every datagram,
 // so a genuinely dead socket still exits instead of spinning.
-const maxConsecutiveBridgeErrors = 32
+const MaxConsecutiveBridgeErrors = 32
 
-// bridgeUDP relays datagrams between WireGuard's loopback socket and the SS outbound as a
-// single-flow NAT. A delivery failure is dropped, not fatal: UDP is lossy and WireGuard retries.
-func bridgeUDP(ctx context.Context, local *net.UDPConn, remote net.PacketConn, remoteAddr net.Addr) error {
+// BridgeUDP relays WireGuard's loopback socket to a transport's packet conn as a
+// single-flow NAT; failed deliveries are dropped since WireGuard retries.
+func BridgeUDP(ctx context.Context, local *net.UDPConn, remote net.PacketConn, remoteAddr net.Addr) error {
 	errCh := make(chan error, 2)
 	var peer atomic.Pointer[net.UDPAddr]
 	var wg sync.WaitGroup
@@ -28,12 +28,12 @@ func bridgeUDP(ctx context.Context, local *net.UDPConn, remote net.PacketConn, r
 		for {
 			n, addr, err := local.ReadFromUDP(buf)
 			if err != nil {
-				if isBridgeShutdown(err) {
+				if IsBridgeShutdown(err) {
 					errCh <- err
 					return
 				}
 				fails++
-				if fails > maxConsecutiveBridgeErrors {
+				if fails > MaxConsecutiveBridgeErrors {
 					errCh <- err
 					return
 				}
@@ -50,12 +50,12 @@ func bridgeUDP(ctx context.Context, local *net.UDPConn, remote net.PacketConn, r
 				peer.Store(addr)
 			}
 			if _, err := remote.WriteTo(buf[:n], remoteAddr); err != nil {
-				if isBridgeShutdown(err) {
+				if IsBridgeShutdown(err) {
 					errCh <- err
 					return
 				}
 				fails++
-				if fails > maxConsecutiveBridgeErrors {
+				if fails > MaxConsecutiveBridgeErrors {
 					errCh <- err
 					return
 				}
@@ -72,12 +72,12 @@ func bridgeUDP(ctx context.Context, local *net.UDPConn, remote net.PacketConn, r
 		for {
 			n, _, err := remote.ReadFrom(buf)
 			if err != nil {
-				if isBridgeShutdown(err) {
+				if IsBridgeShutdown(err) {
 					errCh <- err
 					return
 				}
 				fails++
-				if fails > maxConsecutiveBridgeErrors {
+				if fails > MaxConsecutiveBridgeErrors {
 					errCh <- err
 					return
 				}
@@ -88,12 +88,12 @@ func bridgeUDP(ctx context.Context, local *net.UDPConn, remote net.PacketConn, r
 				continue // no local client observed yet, drop
 			}
 			if _, err := local.WriteToUDP(buf[:n], dst); err != nil {
-				if isBridgeShutdown(err) {
+				if IsBridgeShutdown(err) {
 					errCh <- err
 					return
 				}
 				fails++
-				if fails > maxConsecutiveBridgeErrors {
+				if fails > MaxConsecutiveBridgeErrors {
 					errCh <- err
 					return
 				}
@@ -108,7 +108,7 @@ func bridgeUDP(ctx context.Context, local *net.UDPConn, remote net.PacketConn, r
 	case <-ctx.Done():
 		result = nil
 	case err := <-errCh:
-		if !isBridgeShutdown(err) {
+		if !IsBridgeShutdown(err) {
 			result = err
 		}
 	}
@@ -121,9 +121,9 @@ func bridgeUDP(ctx context.Context, local *net.UDPConn, remote net.PacketConn, r
 	return result
 }
 
-// isBridgeShutdown reports the errors that mean Stop happened, as opposed to a
+// IsBridgeShutdown reports the errors that mean Stop happened, as opposed to a
 // per-datagram delivery failure.
-func isBridgeShutdown(err error) bool {
+func IsBridgeShutdown(err error) bool {
 	return errors.Is(err, net.ErrClosed) ||
 		errors.Is(err, os.ErrClosed) ||
 		errors.Is(err, context.Canceled)

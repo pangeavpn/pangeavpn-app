@@ -3,6 +3,8 @@ package mobile
 import (
 	"encoding/json"
 	"testing"
+
+	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/state"
 )
 
 // hubServerJSON is a hub /api/servers entry carrying every transport, in the
@@ -111,8 +113,8 @@ func TestBuildProfileLeavesAbsentTransportsNil(t *testing.T) {
 	         "cloak":{"remoteHost":"198.51.100.5","uid":"u","publicKey":"p"}}`
 	profile := buildProfile(decodeServer(t, raw))
 
-	if profile.Reality != nil || profile.Hysteria2 != nil ||
-		profile.Shadowsocks != nil || profile.Snowflake != nil || profile.Naive != nil {
+	if profile.Reality != nil || profile.Hysteria2 != nil || profile.Shadowsocks != nil ||
+		profile.AnyTLS != nil || profile.Snowflake != nil || profile.Naive != nil {
 		t.Fatalf("absent transports should stay nil, got %+v", profile)
 	}
 }
@@ -222,6 +224,48 @@ func TestBuildProfileHysteria2ServerNameFallback(t *testing.T) {
 	}
 	if profile.Hysteria2.RemoteHost != "198.51.100.9" {
 		t.Fatalf("remoteHost %q, want the IP", profile.Hysteria2.RemoteHost)
+	}
+}
+
+// The hub's AnyTLS block is pin-only: no insecure flag, no relay target.
+func TestBuildProfileMapsAnyTLS(t *testing.T) {
+	raw := `{"id":"a","name":"A","region":"r","country":"C",
+	         "cloak":{"remoteHost":"198.51.100.5","uid":"u","publicKey":"p"},
+	         "anytls":{"remoteHost":"198.51.100.8","remotePort":8446,"password":"at-pass",
+	                   "serverName":"cover.example","pinSha256":"pin=="}}`
+	got := buildProfile(decodeServer(t, raw)).AnyTLS
+	if got == nil {
+		t.Fatal("anytls profile missing")
+	}
+	want := state.AnyTLSProfile{
+		RemoteHost: "198.51.100.8", RemotePort: 8446, Password: "at-pass",
+		ServerName: "cover.example", PinSHA256: "pin==",
+	}
+	if *got != want {
+		t.Fatalf("got %+v, want %+v", *got, want)
+	}
+}
+
+// Same dial-host and SNI rules as apps/desktop/src/shared/anytlsProfile.ts.
+func TestBuildProfileAnyTLSHostAndServerName(t *testing.T) {
+	tests := []struct {
+		name, block, wantHost, wantSNI string
+	}{
+		{"remoteIp wins", `"remoteHost":"node.example","remoteIp":"198.51.100.9"`, "198.51.100.9", "node.example"},
+		{"non-address remoteIp ignored", `"remoteHost":"node.example","remoteIp":"node.example"`, "198.51.100.5", "node.example"},
+		{"literal remoteHost dialed, never the SNI", `"remoteHost":"198.51.100.7"`, "198.51.100.7", ""},
+		{"explicit serverName kept", `"remoteHost":"node.example","serverName":"cover.example"`, "198.51.100.5", "cover.example"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			raw := `{"id":"a","name":"A","region":"r","country":"C",
+			         "cloak":{"remoteHost":"198.51.100.5","uid":"u","publicKey":"p"},
+			         "anytls":{` + tt.block + `,"remotePort":8446,"password":"pw"}}`
+			got := buildProfile(decodeServer(t, raw)).AnyTLS
+			if got.RemoteHost != tt.wantHost || got.ServerName != tt.wantSNI {
+				t.Fatalf("host=%q sni=%q, want host=%q sni=%q", got.RemoteHost, got.ServerName, tt.wantHost, tt.wantSNI)
+			}
+		})
 	}
 }
 

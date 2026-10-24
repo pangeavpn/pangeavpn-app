@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"path/filepath"
 
+	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/anytls"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/hysteria2"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/protect"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/reality"
@@ -37,6 +38,7 @@ func startProtectServer(filesDir string, logs *state.LogStore) error {
 	reality.ProtectPath = srv.Path()
 	shadowsocks.ProtectPath = srv.Path()
 	hysteria2.ProtectPath = srv.Path()
+	anytls.ProtectPath = srv.Path()
 	return nil
 }
 

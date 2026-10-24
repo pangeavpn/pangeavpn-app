@@ -73,6 +73,7 @@
     <string name="settings_save">Save</string>
     <string name="settings_signout">Sign Out</string>
     <string name="settings_title">Settings</string>
+    <string name="settings_transport_anytls">AnyTLS</string>
     <string name="settings_transport_auto">Automatic (recommended)</string>
     <string name="settings_transport_cloak">Cloak</string>
     <string name="settings_transport_description">How PangeaVPN disguises your traffic.</string>
@@ -92,6 +93,7 @@
     <string name="subscription_none">No active subscription</string>
     <string name="toggle_off">Off</string>
     <string name="toggle_on">On</string>
+    <string name="transport_status_anytls">Obfuscation: AnyTLS</string>
     <string name="transport_status_cloak">Obfuscation: Cloak</string>
     <string name="transport_status_hysteria2">Obfuscation: Hysteria2</string>
     <string name="transport_status_naive">Obfuscation: NaiveProxy</string>

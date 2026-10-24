@@ -12,6 +12,7 @@ fun transportStatusLabel(activeTransport: String): String = when (activeTranspor
     "reality" -> stringResource(R.string.transport_status_reality)
     "shadowsocks" -> stringResource(R.string.transport_status_shadowsocks)
     "hysteria2" -> stringResource(R.string.transport_status_hysteria2)
+    "anytls" -> stringResource(R.string.transport_status_anytls)
     "snowflake" -> stringResource(R.string.transport_status_snowflake)
     // Only arm64-v8a links the naive engine; elsewhere it is never reported.
     "naive" -> stringResource(R.string.transport_status_naive)

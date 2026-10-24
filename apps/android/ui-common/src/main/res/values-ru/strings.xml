@@ -73,6 +73,7 @@
     <string name="settings_save">Сохранить</string>
     <string name="settings_signout">Выйти</string>
     <string name="settings_title">Настройки</string>
+    <string name="settings_transport_anytls">AnyTLS</string>
     <string name="settings_transport_auto">Автоматически (рекомендуется)</string>
     <string name="settings_transport_cloak">Cloak</string>
     <string name="settings_transport_description">Как PangeaVPN маскирует ваш трафик.</string>
@@ -92,6 +93,7 @@
     <string name="subscription_none">Нет активной подписки</string>
     <string name="toggle_off">Выкл</string>
     <string name="toggle_on">Вкл</string>
+    <string name="transport_status_anytls">Обфускация: AnyTLS</string>
     <string name="transport_status_cloak">Обфускация: Cloak</string>
     <string name="transport_status_hysteria2">Обфускация: Hysteria2</string>
     <string name="transport_status_naive">Обфускация: NaiveProxy</string>

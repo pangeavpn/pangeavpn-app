@@ -56,7 +56,7 @@ jobs:
         run: |
           for arch in arm64 arm amd64 386; do
             echo "::group::android/$arch"
-            GOOS=android GOARCH=$arch CGO_ENABLED=0 go build ./mobile/
+            GOOS=android GOARCH=$arch CGO_ENABLED=0 go build -tags with_utls ./mobile/
             echo "::endgroup::"
           done
 
@@ -67,13 +67,13 @@ jobs:
         run: |
           for arch in arm amd64 386; do
             echo "::group::android/$arch naive_cgo"
-            GOOS=android GOARCH=$arch CGO_ENABLED=0 go build -tags naive_cgo ./mobile/
+            GOOS=android GOARCH=$arch CGO_ENABLED=0 go build -tags with_utls,naive_cgo ./mobile/
             echo "::endgroup::"
           done
 
       - name: Vet
         working-directory: daemon
-        run: GOOS=android GOARCH=arm64 CGO_ENABLED=0 go vet ./mobile/
+        run: GOOS=android GOARCH=arm64 CGO_ENABLED=0 go vet -tags with_utls ./mobile/
 
   android:
     name: Android apps
@@ -110,8 +110,8 @@ jobs:
         with:
           node-version: '24'
 
-      # arm64-v8a only. A missing asset is not fatal: the tag is dropped and
-      # the cascade ends at Hysteria2 rather than the build failing.
+      # arm64-v8a only. A missing asset is not fatal: naive_cgo is dropped, never
+      # with_utls, which REALITY needs and AnyTLS uses for its ClientHello.
       - name: Stage the naive engine
         id: naive
         env:
@@ -121,9 +121,9 @@ jobs:
         run: |
           node scripts/fetch-naive-android.mjs
           if [ -f daemon/internal/naive/android/arm64-v8a/libpangea_naive.a ]; then
-            echo "tags=naive_cgo" >>$GITHUB_OUTPUT
+            echo "tags=with_utls,naive_cgo" >>$GITHUB_OUTPUT
           else
-            echo "tags=" >>$GITHUB_OUTPUT
+            echo "tags=with_utls" >>$GITHUB_OUTPUT
             echo "::warning::naive engine unavailable; the AAR ships without it"
           fi
 
@@ -135,7 +135,7 @@ jobs:
           mkdir -p ../apps/android/core/libs
           gomobile bind -target=android -androidapi ${{ env.ANDROID_API }} \
             -javapkg=org.pangeavpn \
-            ${{ steps.naive.outputs.tags && format('-tags={0}', steps.naive.outputs.tags) || '' }} \
+            -tags=${{ steps.naive.outputs.tags }} \
             -ldflags=-checklinkname=0 \
             -o ../apps/android/core/libs/pangeacore.aar \
             ./mobile

@@ -152,7 +152,7 @@ func (c config) sanitize() config {
 
 func isKnownTransportChoice(kind string) bool {
 	switch kind {
-	case "auto", "cloak", "reality", "shadowsocks", "hysteria2":
+	case "auto", "cloak", "reality", "shadowsocks", "hysteria2", "anytls":
 		return true
 	default:
 		return false
