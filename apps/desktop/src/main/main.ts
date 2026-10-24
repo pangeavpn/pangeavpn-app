@@ -5,6 +5,7 @@ import {
   app,
   BrowserWindow,
   dialog,
+  globalShortcut,
   ipcMain,
   nativeImage,
   session,
@@ -12,6 +13,8 @@ import {
   type IpcMainInvokeEvent,
   type NativeImage
 } from "electron";
+import { spawn } from "node:child_process";
+import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { ConfigResponse, OkResponse, Profile, StatusResponse } from "@pangeavpn/shared-types";
@@ -89,6 +92,13 @@ import {
   serverIdForProfile,
   type ProfileRecords
 } from "./profileCache";
+import {
+  PANIC_DOUBLE_PRESS_WINDOW_MS,
+  PANIC_WIPE_ACCELERATOR,
+  performPanicWipe,
+  type PanicPhase,
+  type PanicWipeContext
+} from "./panicWipe";
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -132,6 +142,8 @@ let lockdownEnabled = false;
 let autoConnectEnabled = false;
 // OS notifications on connection status changes; on by default, off in Settings.
 let notificationsEnabled = true;
+// Panic wipe: the global removal shortcut is inert until the user opts in. Off by default.
+let panicWipeEnabled = false;
 // "auto" (reality, then cloak, shadowsocks, hysteria2, naive, anytls), or one of
 // "cloak"/"naive"/"reality"/"hysteria2"/"shadowsocks"/"anytls"/"snowflake" only.
 let preferredTransport: "auto" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "anytls" | "snowflake" | "wireguard" = "auto";
@@ -2172,6 +2184,21 @@ function registerStartupSettingsHandlers(): void {
     () => notificationsEnabled
   );
 
+  registerBoolSetting(
+    { get: IPC_CHANNELS.getPanicWipe, set: IPC_CHANNELS.setPanicWipe },
+    "panicWipe",
+    "panic wipe setting",
+    (enabled) => {
+      panicWipeEnabled = !!enabled;
+      if (!applyPanicShortcut() && panicWipeEnabled) {
+        panicWipeEnabled = false;
+        throw new Error("the panic wipe shortcut is held by another app");
+      }
+      return panicWipeEnabled;
+    },
+    () => panicWipeEnabled && globalShortcut.isRegistered(PANIC_WIPE_ACCELERATOR)
+  );
+
   ipcMain.handle(IPC_CHANNELS.getLastServer, async () => ({
     lastServerId,
     lastProfileId: lastConnectedProfileId,
@@ -2579,6 +2606,7 @@ function applyPersistedSettings(settings: Record<string, unknown>): void {
   if (typeof settings.notifications === "boolean") {
     notificationsEnabled = settings.notifications;
   }
+  panicWipeEnabled = settings.panicWipe === true;
   // Last known good hub IP: the only way to reach the hub once a Lockdown
   // lock is engaged, since the lock permits that IP but blocks DNS and DoH.
   pangeaApiClient.setCachedHubIp(settings.hubIp);
@@ -2779,6 +2807,101 @@ async function runDaemonStartupSequence(): Promise<void> {
   }
 }
 
+let panicInProgress = false;
+
+function buildPanicContext(): PanicWipeContext {
+  return {
+    platform: process.platform,
+    isPackaged: app.isPackaged,
+    appPid: process.pid,
+    homeDir: os.homedir(),
+    appDataDir: app.getPath("appData"),
+    userDataDir: app.getPath("userData"),
+    logsDir: app.getPath("logs"),
+    userStateDir: getUserStateDir()
+  };
+}
+
+function notifyPanic(phase: PanicPhase): void {
+  if (!Notification.isSupported()) return;
+  const key = phase === "done" ? "panicDone" : phase === "error" ? "panicFailed" : "panicStart";
+  try {
+    new Notification({ title: mt(`notify.${key}Title`), body: mt(`notify.${key}Body`), silent: true }).show();
+  } catch {
+    // A failed toast must never block the wipe.
+  }
+}
+
+// Panic removal: disconnect, lower the kill switch, erase local state, and
+// uninstall. Bound to a hardcoded global shortcut, inert until opted in.
+async function triggerPanicWipe(): Promise<void> {
+  if (panicInProgress) return;
+  panicInProgress = true;
+  isQuitting = true;
+  cancelAttempt();
+  await performPanicWipe(buildPanicContext(), {
+    lowerLock: async () => {
+      try {
+        await daemonClient.disconnect({ keepKillSwitch: false });
+      } catch (err) {
+        console.warn("panic wipe: disconnect failed", sanitizeLog(err));
+      }
+      try {
+        await daemonClient.clearKillSwitch();
+      } catch (err) {
+        console.warn("panic wipe: clear kill switch failed", sanitizeLog(err));
+      }
+    },
+    requestDaemonUninstall: async (appPid) => {
+      await daemonClient.selfUninstall(appPid);
+    },
+    stopDaemonProcess: () => daemonProcess.stop(),
+    removeLoginItem: () => setLoginItemEnabled(false),
+    removePath: (target) => fs.rm(target, { recursive: true, force: true }),
+    spawnDetached: (file, args) => {
+      const child = spawn(file, args, { detached: true, stdio: "ignore", windowsHide: true });
+      child.unref();
+    },
+    notify: (phase) => notifyPanic(phase),
+    quit: () => setTimeout(() => app.quit(), 1200),
+    logf: (message) => console.warn(message)
+  });
+}
+
+let panicLastPressAtMs = 0;
+
+// Registers the shortcut only while the setting is on; a second press within the
+// window wipes, so a single stray chord never does. False if the chord could not be taken.
+function applyPanicShortcut(): boolean {
+  try {
+    if (!panicWipeEnabled) {
+      if (globalShortcut.isRegistered(PANIC_WIPE_ACCELERATOR)) {
+        globalShortcut.unregister(PANIC_WIPE_ACCELERATOR);
+      }
+      return true;
+    }
+    if (globalShortcut.isRegistered(PANIC_WIPE_ACCELERATOR)) {
+      return true;
+    }
+    const ok = globalShortcut.register(PANIC_WIPE_ACCELERATOR, () => {
+      const now = Date.now();
+      if (now - panicLastPressAtMs <= PANIC_DOUBLE_PRESS_WINDOW_MS) {
+        panicLastPressAtMs = 0;
+        void triggerPanicWipe();
+        return;
+      }
+      panicLastPressAtMs = now;
+    });
+    if (!ok) {
+      console.warn(`could not register panic shortcut ${PANIC_WIPE_ACCELERATOR}`);
+    }
+    return ok;
+  } catch (err) {
+    console.warn("failed to apply panic shortcut", sanitizeLog(err));
+    return false;
+  }
+}
+
 async function boot(): Promise<void> {
   await app.whenReady();
 
@@ -2836,6 +2959,7 @@ async function boot(): Promise<void> {
     fetchLatest: (timeoutMs) => pangeaApiClient.anonymousRequest("GET", LATEST_ROUTE, undefined, { timeoutMs })
   });
   createTray();
+  applyPanicShortcut();
   watchDisplayChanges();
   if (!hiddenLaunch) {
     showMainWindow();

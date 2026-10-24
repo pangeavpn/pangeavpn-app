@@ -89,6 +89,8 @@ export const IPC_CHANNELS = {
   getAutoConnect: "settings:getAutoConnect",
   setNotifications: "settings:setNotifications",
   getNotifications: "settings:getNotifications",
+  setPanicWipe: "settings:setPanicWipe",
+  getPanicWipe: "settings:getPanicWipe",
   getLastServer: "settings:getLastServer",
   clearLastServer: "settings:clearLastServer",
   setMultihop: "settings:setMultihop",

@@ -181,6 +181,8 @@ const autoConnectToggle = document.getElementById("autoConnectToggle") as HTMLIn
 const deadDropToggle = document.getElementById("deadDropToggle") as HTMLInputElement;
 const lockdownToggle = document.getElementById("lockdownToggle") as HTMLInputElement;
 const notificationsToggle = document.getElementById("notificationsToggle") as HTMLInputElement;
+const panicWipeToggle = document.getElementById("panicWipeToggle") as HTMLInputElement;
+const panicWipeHint = document.getElementById("panicWipeHint") as HTMLSpanElement | null;
 const loginScreen = document.getElementById("loginScreen") as HTMLElement;
 const loginSettingsBtn = document.getElementById("loginSettingsBtn") as HTMLButtonElement;
 const loginScreenBtn = document.getElementById("loginScreenBtn") as HTMLButtonElement;
@@ -203,6 +205,7 @@ const setNetworkValue = document.getElementById("setNetworkValue") as HTMLSpanEl
 const setSplitTunnelValue = document.getElementById("setSplitTunnelValue") as HTMLSpanElement;
 const setStartupValue = document.getElementById("setStartupValue") as HTMLSpanElement;
 const setNotificationsValue = document.getElementById("setNotificationsValue") as HTMLSpanElement;
+const setPanicValue = document.getElementById("setPanicValue") as HTMLSpanElement;
 const setDeveloperValue = document.getElementById("setDeveloperValue") as HTMLSpanElement;
 const setLanguageValue = document.getElementById("setLanguageValue") as HTMLSpanElement;
 const checkUpdatesBtn = document.getElementById("checkUpdatesBtn") as HTMLButtonElement;
@@ -348,6 +351,7 @@ function updateSettingsSummaries(): void {
   setStartupValue.textContent = startup.length ? startup.join(" · ") : off;
 
   setNotificationsValue.textContent = notificationsToggle.checked ? t("settings.notifications.status.title") : off;
+  setPanicValue.textContent = panicWipeToggle.checked ? t("settings.panic.enable.title") : off;
   setDeveloperValue.textContent = hubInTunnelToggle.checked ? t("settings.developer.hubInTunnel.title") : off;
 
   const language = languageSelect?.selectedOptions[0];
@@ -2407,6 +2411,28 @@ notificationsToggle.addEventListener("change", async () => {
   showToast(t(requested ? "toggle.notifications.on" : "toggle.notifications.off"), 4000, true);
 });
 
+function panicChordLabel(): string {
+  const isMac = /Mac/i.test(navigator.userAgent);
+  return (isMac ? ["⌘", "⌥", "⇧", "F12"] : ["Ctrl", "Alt", "Shift", "F12"]).join(" + ");
+}
+
+function applyPanicHint(): void {
+  if (panicWipeHint) panicWipeHint.textContent = t("settings.panic.enable.hint", { keys: panicChordLabel() });
+}
+
+panicWipeToggle.addEventListener("change", async () => {
+  if (!pangeaApi) return;
+  const requested = panicWipeToggle.checked;
+  try {
+    await pangeaApi.setPanicWipe(requested);
+  } catch (err) {
+    panicWipeToggle.checked = !requested;
+    showToast(reportError("panicWipe", err, t("toggle.panic.failed")));
+    return;
+  }
+  showToast(t(requested ? "toggle.panic.on" : "toggle.panic.off"), 4000, true);
+});
+
 deadDropToggle.addEventListener("change", async () => {
   if (!pangeaApi) return;
   const requested = deadDropToggle.checked;
@@ -3415,6 +3441,7 @@ async function init(): Promise<void> {
       // default off
     }
 
+    applyPanicHint();
     try {
       const isPackaged = await pangeaApi.getIsPackaged();
       if (!isPackaged) {
@@ -3429,6 +3456,7 @@ async function init(): Promise<void> {
       lockdownToggle.checked = lockdownLocal;
       deadDropToggle.checked = await pangeaApi.getDeadDrop();
       notificationsToggle.checked = await pangeaApi.getNotifications();
+      panicWipeToggle.checked = await pangeaApi.getPanicWipe();
       const last = await pangeaApi.getLastServer();
       lastServerIdLocal = last.lastServerId;
       activeEntryId = last.lastEntryServerId ?? null;
