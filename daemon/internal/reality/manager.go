@@ -90,6 +90,10 @@ type Manager struct {
 	generation uint64
 }
 
+// ProtectPath, when set, is the unix socket sing-box's dialer hands each new
+// outbound fd to. Mobile points it at VpnService.protect(); desktop leaves it "".
+var ProtectPath string
+
 func NewManager(logs *state.LogStore) *Manager {
 	return &Manager{logs: logs}
 }
@@ -286,6 +290,7 @@ func (m *Manager) clearStarting() {
 // registry expects: a pointer matching the type registered for the outbound's Type.
 func buildOutboundOptions(profile state.RealityProfile, remoteHost string, remotePort int, serverName string) *option.VLESSOutboundOptions {
 	return &option.VLESSOutboundOptions{
+		DialerOptions: option.DialerOptions{AbstractDialerOptions: option.AbstractDialerOptions{ProtectPath: ProtectPath}},
 		ServerOptions: option.ServerOptions{Server: remoteHost, ServerPort: uint16(remotePort)},
 		UUID:          profile.UUID,
 		// XTLS flow is TCP-only and breaks the VLESS UDP relay handshake, so

@@ -126,7 +126,7 @@ type connectRequest struct {
 	AllowLAN  bool   `json:"allowLAN,omitempty"`
 	Lockdown  bool   `json:"lockdown,omitempty"`
 	// One of the named transports, "wireguard" (no transport), or "" / "auto"
-	// for the memory-reordered autoCascadeOrder; see transportCandidates.
+	// for the memory-reordered transport.AutoCascadeOrder; see transportCandidates.
 	PreferredTransport string `json:"preferredTransport,omitempty"`
 }
 

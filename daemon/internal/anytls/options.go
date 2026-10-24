@@ -70,6 +70,10 @@ func decodePin(pin string) ([]byte, error) {
 	return raw, nil
 }
 
+// ProtectPath, when set, is the unix socket sing-box's dialer hands each new
+// outbound fd to. Mobile points it at VpnService.protect(); desktop leaves it "".
+var ProtectPath string
+
 // buildOutboundOptions returns the pointer type protocol/anytls registers for
 // C.TypeAnyTLS. TLS is mandatory for the outbound, so it is always enabled.
 func buildOutboundOptions(profile state.AnyTLSProfile) (*option.AnyTLSOutboundOptions, error) {
@@ -89,6 +93,7 @@ func buildOutboundOptions(profile state.AnyTLSProfile) (*option.AnyTLSOutboundOp
 		tlsOptions.UTLS = &option.OutboundUTLSOptions{Enabled: true, Fingerprint: utlsFingerprint}
 	}
 	return &option.AnyTLSOutboundOptions{
+		DialerOptions: option.DialerOptions{AbstractDialerOptions: option.AbstractDialerOptions{ProtectPath: ProtectPath}},
 		ServerOptions: option.ServerOptions{
 			Server:     strings.TrimSpace(profile.RemoteHost),
 			ServerPort: uint16(profile.RemotePort),
