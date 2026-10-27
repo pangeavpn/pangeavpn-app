@@ -285,6 +285,27 @@ against `SHA256SUMS.txt` and Gatekeeper, and runs it. Releases from before the
 See the package's [`preinstall`](../apps/desktop/build/pkg-scripts/preinstall)
 and [`postinstall`](../apps/desktop/build/pkg-scripts/postinstall).
 
+### In-app updates
+
+From 0.8.2 the macOS app installs updates itself, with no password prompt.
+It downloads the release's `.pkg` and `SHA256SUMS.txt`, checks the digest,
+and hands the file to the root daemon (`POST /update/install`). The daemon
+copies it into a root-only directory and installs it only if all of these hold:
+
+- `pkgutil` reports a Developer ID Installer signature from the Team ID the
+  daemon itself is signed with, so ad-hoc builds never self-update;
+- Gatekeeper's verdict is `Notarized Developer ID` from that same team;
+- the package identifier is `com.pangea.pangeavpn`;
+- its version is newer than the root-owned installed app, which rules out
+  downgrades.
+
+`installer` then runs in its own session, because the package's `preinstall`
+stops the daemon. It quits the app, `postinstall` restarts the services, and the
+app reopens for the console user. A failed install re-bootstraps the services.
+Anything that goes wrong in the app falls back to opening the release page.
+Installs older than 0.8.2 update by hand once. A release-candidate install asks
+the hub for newer candidates too.
+
 ## Linux package
 
 ### Build

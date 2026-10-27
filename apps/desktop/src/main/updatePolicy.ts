@@ -53,3 +53,9 @@ export function shouldOfferUpdate(latest: { version: string; prerelease?: boolea
   if ((latest.prerelease === true || isPrerelease(latest.version)) && !isPrerelease(current)) return false;
   return compareVersions(latest.version, current) > 0;
 }
+
+// The hub answers with the latest stable release unless asked for candidates,
+// and a candidate install is offered newer candidates, so it asks.
+export function latestReleaseRoute(baseRoute: string, current: string): string {
+  return isPrerelease(current) ? `${baseRoute}?channel=prerelease` : baseRoute;
+}

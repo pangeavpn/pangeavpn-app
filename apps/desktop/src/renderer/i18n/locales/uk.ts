@@ -401,6 +401,14 @@ export const uk = {
   "update.onLatest": "У вас найновіша версія.",
   "update.checkFailed": "Не вдалося перевірити оновлення. Спробуйте пізніше.",
   "update.unavailable": "Оновлення недоступні в цій збірці.",
+  "update.install": "Встановити оновлення",
+  "update.installingButton": "Встановлення...",
+  "update.downloading": "Завантаження оновлення...",
+  "update.downloadingPercent": "Завантаження оновлення... {percent}%",
+  "update.verifying": "Перевірка та встановлення оновлення...",
+  "update.installingHint": "Триває встановлення. PangeaVPN закриється й відкриється сам.",
+  "update.installFallback": "Не вдалося встановити оновлення тут, тому відкрито сторінку завантаження.",
+  "update.installStalled": "Оновлення не завершилося. Спробуйте ще раз або завантажте його зі сторінки релізу.",
 
   // ── Account / subscription ────────────────────────────
   "sub.none": "Немає активної підписки",

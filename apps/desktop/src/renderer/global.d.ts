@@ -275,11 +275,13 @@ declare global {
 
   interface AutoUpdaterApi {
     checkForUpdates: () => Promise<{ version: string; releaseNotes?: string; available?: boolean } | null>;
-    downloadUpdate: () => Promise<void>;
+    /** "installing": macOS is installing in place and will quit and reopen the app. */
+    downloadUpdate: () => Promise<{ mode: "installing" } | { mode: "opened"; installFailed?: boolean } | undefined>;
     installUpdate: () => void;
     onUpdateAvailable: (callback: (info: { version: string; releaseNotes?: string; macOnly?: boolean }) => void) => () => void;
     onUpdateNotAvailable: (callback: () => void) => () => void;
     onUpdateError: (callback: (message: string) => void) => () => void;
+    onUpdateProgress: (callback: (progress: { phase: "downloading"; percent: number | null } | { phase: "installing" }) => void) => () => void;
   }
 
   interface Window {

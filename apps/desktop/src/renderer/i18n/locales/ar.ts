@@ -401,6 +401,14 @@ export const ar = {
   "update.onLatest": "أنت على أحدث إصدار.",
   "update.checkFailed": "تعذّر التحقق من التحديثات. حاول لاحقًا.",
   "update.unavailable": "التحديثات غير متاحة في هذه النسخة.",
+  "update.install": "تثبيت التحديث",
+  "update.installingButton": "جارٍ التثبيت...",
+  "update.downloading": "جارٍ تنزيل التحديث...",
+  "update.downloadingPercent": "جارٍ تنزيل التحديث... {percent}%",
+  "update.verifying": "جارٍ التحقق من التحديث وتثبيته...",
+  "update.installingHint": "جارٍ التثبيت. سيُغلق PangeaVPN ويُعاد فتحه تلقائيًا.",
+  "update.installFallback": "تعذر تثبيت التحديث هنا، لذا فُتحت صفحة تنزيله.",
+  "update.installStalled": "لم يكتمل التحديث. أعد المحاولة، أو نزّله من صفحة الإصدار.",
 
   // ── Account / subscription ────────────────────────────
   "sub.none": "لا يوجد اشتراك نشط",

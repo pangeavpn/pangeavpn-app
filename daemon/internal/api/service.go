@@ -2063,6 +2063,18 @@ func (s *Service) Uninstall(ctx context.Context, appPID int) error {
 	return platform.SpawnSelfUninstall(appPID)
 }
 
+// InstallUpdate hands a downloaded release package to the platform installer,
+// which verifies it and installs it detached. Nothing is torn down here: the
+// package's preinstall stops this daemon, and the session resumes on restart.
+func (s *Service) InstallUpdate(pkgPath, sha256 string) error {
+	if err := platform.InstallUpdatePackage(pkgPath, sha256); err != nil {
+		s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("update install refused: %v", err))
+		return err
+	}
+	s.logs.Add(state.LogInfo, state.SourceDaemon, "update package verified; installing")
+	return nil
+}
+
 func (s *Service) disconnect(ctx context.Context, mode teardownMode) error {
 	// Interrupt any in-flight Connect first so we don't queue behind a
 	// 10s WaitForSession. The cancelled connect will exit, release opMu, and run its own cleanup.

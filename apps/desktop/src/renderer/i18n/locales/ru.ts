@@ -401,6 +401,14 @@ export const ru = {
   "update.onLatest": "У вас установлена последняя версия.",
   "update.checkFailed": "Не удалось проверить обновления. Повторите позже.",
   "update.unavailable": "Обновления недоступны в этой сборке.",
+  "update.install": "Установить обновление",
+  "update.installingButton": "Установка...",
+  "update.downloading": "Загрузка обновления...",
+  "update.downloadingPercent": "Загрузка обновления... {percent}%",
+  "update.verifying": "Проверка и установка обновления...",
+  "update.installingHint": "Идёт установка. PangeaVPN закроется и откроется сам.",
+  "update.installFallback": "Не удалось установить обновление здесь, поэтому открыта страница загрузки.",
+  "update.installStalled": "Обновление не завершилось. Повторите попытку или скачайте его со страницы релиза.",
 
   // ── Account / subscription ────────────────────────────
   "sub.none": "Нет активной подписки",

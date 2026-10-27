@@ -46,6 +46,7 @@ import type { HubShadowsocksCreds } from "../shared/hubShadowsocksCreds";
 import type { CachedSubscription } from "../shared/cachedSubscription";
 import { beginAttempt, cancelAttempt, commitAttempt, endAttempt, isCancelled } from "./connectAttempt";
 import { LATEST_ROUTE, setupAutoUpdater } from "./autoUpdater";
+import { latestReleaseRoute } from "./updatePolicy";
 import { isSafeExternalUrl } from "./externalUrl";
 import { setLoginItemEnabled, isLoginItemEnabled, isHiddenLaunchArg } from "./loginItem";
 import { startNetworkWatcher, onNetworkChange } from "./networkWatcher";
@@ -3003,10 +3004,15 @@ async function boot(): Promise<void> {
   registerIpcHandlers();
   createWindow();
   // A resolver, not a snapshot, so this stays correct across window recreates.
-  setupAutoUpdater(() => mainWindow, {
-    ready: () => pangeaApiClient.hubPathReady(),
-    fetchLatest: (timeoutMs) => pangeaApiClient.anonymousRequest("GET", LATEST_ROUTE, undefined, { timeoutMs })
-  });
+  setupAutoUpdater(
+    () => mainWindow,
+    {
+      ready: () => pangeaApiClient.hubPathReady(),
+      fetchLatest: (timeoutMs) =>
+        pangeaApiClient.anonymousRequest("GET", latestReleaseRoute(LATEST_ROUTE, app.getVersion()), undefined, { timeoutMs })
+    },
+    (pkgPath, sha256) => daemonClient.installUpdate(pkgPath, sha256)
+  );
   createTray();
   applyPanicShortcut();
   watchDisplayChanges();

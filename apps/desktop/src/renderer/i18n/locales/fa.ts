@@ -401,6 +401,14 @@ export const fa = {
   "update.onLatest": "شما از جدیدترین نسخه استفاده می‌کنید.",
   "update.checkFailed": "بررسی به‌روزرسانی‌ها ممکن نشد. بعداً دوباره تلاش کنید.",
   "update.unavailable": "به‌روزرسانی‌ها در این نسخه در دسترس نیستند.",
+  "update.install": "نصب به‌روزرسانی",
+  "update.installingButton": "در حال نصب...",
+  "update.downloading": "در حال دانلود به‌روزرسانی...",
+  "update.downloadingPercent": "در حال دانلود به‌روزرسانی... {percent}%",
+  "update.verifying": "در حال بررسی و نصب به‌روزرسانی...",
+  "update.installingHint": "در حال نصب. PangeaVPN خودش بسته و دوباره باز می‌شود.",
+  "update.installFallback": "نصب به‌روزرسانی در اینجا ممکن نشد، پس صفحه دانلود آن باز شد.",
+  "update.installStalled": "به‌روزرسانی تمام نشد. دوباره تلاش کنید، یا آن را از صفحه انتشار دانلود کنید.",
 
   // ── Account / subscription ────────────────────────────
   "sub.none": "اشتراک فعالی وجود ندارد",

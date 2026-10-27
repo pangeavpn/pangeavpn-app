@@ -401,6 +401,14 @@ export const fr = {
   "update.onLatest": "Vous disposez de la dernière version.",
   "update.checkFailed": "Impossible de rechercher des mises à jour. Réessayez plus tard.",
   "update.unavailable": "Les mises à jour ne sont pas disponibles dans cette version.",
+  "update.install": "Installer la mise à jour",
+  "update.installingButton": "Installation...",
+  "update.downloading": "Téléchargement de la mise à jour...",
+  "update.downloadingPercent": "Téléchargement de la mise à jour... {percent} %",
+  "update.verifying": "Vérification et installation de la mise à jour...",
+  "update.installingHint": "Installation en cours. PangeaVPN se ferme et se rouvre tout seul.",
+  "update.installFallback": "Impossible d'installer la mise à jour ici, sa page de téléchargement est donc ouverte.",
+  "update.installStalled": "La mise à jour ne s'est pas terminée. Réessayez, ou téléchargez-la depuis la page de la version.",
 
   // ── Account / subscription ────────────────────────────
   "sub.none": "Aucun abonnement actif",

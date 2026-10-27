@@ -401,6 +401,14 @@ export const zh = {
   "update.onLatest": "您已是最新版本。",
   "update.checkFailed": "无法检查更新，请稍后再试。",
   "update.unavailable": "此版本中无法使用更新功能。",
+  "update.install": "安装更新",
+  "update.installingButton": "正在安装...",
+  "update.downloading": "正在下载更新...",
+  "update.downloadingPercent": "正在下载更新... {percent}%",
+  "update.verifying": "正在检查并安装更新...",
+  "update.installingHint": "正在安装。PangeaVPN 会自动关闭并重新打开。",
+  "update.installFallback": "无法在此处安装更新，已为你打开下载页面。",
+  "update.installStalled": "更新未完成。请重试，或从发布页面下载。",
 
   // ── Account / subscription ────────────────────────────
   "sub.none": "无有效订阅",

@@ -401,6 +401,14 @@ export const en = {
   "update.onLatest": "You're on the latest version.",
   "update.checkFailed": "Couldn't check for updates. Try again later.",
   "update.unavailable": "Updates aren't available in this build.",
+  "update.install": "Install Update",
+  "update.installingButton": "Installing...",
+  "update.downloading": "Downloading the update...",
+  "update.downloadingPercent": "Downloading the update... {percent}%",
+  "update.verifying": "Checking and installing the update...",
+  "update.installingHint": "Installing. PangeaVPN closes and reopens by itself.",
+  "update.installFallback": "Couldn't install the update here, so its download page is open.",
+  "update.installStalled": "The update didn't finish. Try again, or download it from the release page.",
 
   // ── Account / subscription ────────────────────────────
   "sub.none": "No active subscription",

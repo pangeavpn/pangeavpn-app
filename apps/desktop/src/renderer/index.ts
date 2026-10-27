@@ -3567,6 +3567,11 @@ let pendingUpdate: { version: string; macOnly?: boolean } | null = null;
 let currentAppVersion = "";
 const UPDATE_DISMISSED_KEY = "pangea-vpn-update-dismissed";
 const updater = window.autoUpdater;
+// macOS installs updates in place through the daemon; elsewhere the button
+// opens the release page.
+const installsInPlace = window.appPlatform === "darwin";
+// A finished install quits this app, so one still open after this has stalled.
+const IN_PLACE_INSTALL_GRACE_MS = 10 * 60_000;
 
 function isUpdateDismissed(version: string): boolean {
   return localStorage.getItem(UPDATE_DISMISSED_KEY) === version;
@@ -3581,7 +3586,7 @@ function showUpdateModal(): void {
   updateCurrentVersionEl.textContent = currentAppVersion || "-";
   updateLatestVersionEl.textContent = pendingUpdate.version;
   updateDownloadBtn.disabled = false;
-  updateDownloadBtn.textContent = t("update.download");
+  updateDownloadBtn.textContent = t(installsInPlace ? "update.install" : "update.download");
   updateMessageEl.textContent = "";
   updateOverlay.classList.add("visible");
 }
@@ -3604,6 +3609,15 @@ if (updater) {
     updateDownloadBtn.disabled = false;
     updateDownloadBtn.textContent = t("update.retryDownload");
     updateMessageEl.textContent = message;
+  });
+
+  updater.onUpdateProgress((progress) => {
+    if (progress.phase === "installing") {
+      updateMessageEl.textContent = t("update.verifying");
+    } else {
+      updateMessageEl.textContent =
+        progress.percent === null ? t("update.downloading") : t("update.downloadingPercent", { percent: progress.percent });
+    }
   });
 }
 
@@ -3658,13 +3672,23 @@ updateDownloadBtn.addEventListener("click", async () => {
   if (!updater) return;
 
   updateDownloadBtn.disabled = true;
-  updateDownloadBtn.textContent = t("update.opening");
+  updateDownloadBtn.textContent = t(installsInPlace ? "update.installingButton" : "update.opening");
   updateMessageEl.textContent = "";
 
   try {
-    await updater.downloadUpdate();
+    const result = await updater.downloadUpdate();
+    if (result?.mode === "installing") {
+      updateMessageEl.textContent = t("update.installingHint");
+      window.setTimeout(() => {
+        updateDownloadBtn.disabled = false;
+        updateDownloadBtn.textContent = t("update.retry");
+        updateMessageEl.textContent = t("update.installStalled");
+      }, IN_PLACE_INSTALL_GRACE_MS);
+      return;
+    }
     updateDownloadBtn.disabled = false;
     updateDownloadBtn.textContent = t("update.viewDownload");
+    if (result?.installFailed) updateMessageEl.textContent = t("update.installFallback");
   } catch (error) {
     updateDownloadBtn.disabled = false;
     updateDownloadBtn.textContent = t("update.retry");

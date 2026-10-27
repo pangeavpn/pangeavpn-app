@@ -145,6 +145,11 @@ type uninstallRequest struct {
 	AppPID int `json:"appPid,omitempty"`
 }
 
+type updateInstallRequest struct {
+	Path   string `json:"path"`
+	SHA256 string `json:"sha256"`
+}
+
 // permitHostsRequest carries control-plane IPs that must stay reachable
 // through an engaged lockdown lock. IP literals only — see Service.PermitHosts.
 type permitHostsRequest struct {
@@ -466,6 +471,29 @@ func NewHandler(token string, service *Service) http.Handler {
 
 		if err := service.Uninstall(r.Context(), req.AppPID); err != nil {
 			writeJSON(w, http.StatusInternalServerError, okResponse{OK: false, Error: "uninstall_failed", Detail: sanitizeLog(err.Error())})
+			return
+		}
+
+		writeJSON(w, http.StatusOK, okResponse{OK: true})
+	}))
+
+	// Verification shells out to pkgutil and spctl, which can take a while.
+	mux.Handle("/update/install", withAuthAndLimit(token, limiter, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		extendWriteDeadline(w)
+
+		r.Body = http.MaxBytesReader(w, r.Body, maxBodySize)
+		var req updateInstallRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid json")
+			return
+		}
+
+		if err := service.InstallUpdate(req.Path, req.SHA256); err != nil {
+			writeJSON(w, http.StatusUnprocessableEntity, okResponse{OK: false, Error: "update_refused", Detail: sanitizeLog(err.Error())})
 			return
 		}
 

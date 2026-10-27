@@ -78,6 +78,7 @@ const CH = {
   updateAvailable: "app:updateAvailable",
   updateNotAvailable: "app:updateNotAvailable",
   updateError: "app:updateError",
+  updateProgress: "app:updateProgress",
   openExternal: "app:openExternal",
   openLogsFolder: "app:openLogsFolder",
   sendDiagnostics: "app:sendDiagnostics",
@@ -198,6 +199,14 @@ const autoUpdaterApi = {
     const listener = (_event: Electron.IpcRendererEvent, message: string) => callback(message);
     ipcRenderer.on(CH.updateError, listener);
     return () => ipcRenderer.removeListener(CH.updateError, listener);
+  },
+  onUpdateProgress: (callback: (progress: { phase: "downloading"; percent: number | null } | { phase: "installing" }) => void) => {
+    const listener = (
+      _event: Electron.IpcRendererEvent,
+      progress: { phase: "downloading"; percent: number | null } | { phase: "installing" }
+    ) => callback(progress);
+    ipcRenderer.on(CH.updateProgress, listener);
+    return () => ipcRenderer.removeListener(CH.updateProgress, listener);
   },
 };
 

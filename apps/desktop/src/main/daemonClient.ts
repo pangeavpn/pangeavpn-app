@@ -224,6 +224,24 @@ export class DaemonClient implements PostQuantumProvider {
     return this.request<OkResponse>("POST", "/uninstall", { appPid }, 30000);
   }
 
+  /** macOS: the root daemon verifies a downloaded release pkg and installs it.
+   *  A refusal throws with the daemon's reason. */
+  async installUpdate(pkgPath: string, sha256: string): Promise<void> {
+    try {
+      await this.request<OkResponse>("POST", "/update/install", { path: pkgPath, sha256 }, 120000);
+    } catch (error) {
+      if (!(error instanceof DaemonHttpError)) throw error;
+      let detail = "";
+      try {
+        const payload = JSON.parse(error.body) as { detail?: unknown };
+        if (typeof payload.detail === "string") detail = payload.detail;
+      } catch {
+        // not a JSON refusal; the status line says enough
+      }
+      throw new Error(detail ? `the daemon refused the update: ${detail}` : error.message);
+    }
+  }
+
   /** IP literals only: a Lockdown kill switch blocks DNS too, so a hostname
    *  could never resolve. Empty list falls back to the last profile's hub IP. */
   async permitHosts(hosts: string[]): Promise<OkResponse> {

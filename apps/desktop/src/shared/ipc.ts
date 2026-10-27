@@ -120,6 +120,7 @@ export const IPC_CHANNELS = {
   updateAvailable: "app:updateAvailable",
   updateNotAvailable: "app:updateNotAvailable",
   updateError: "app:updateError",
+  updateProgress: "app:updateProgress",
   openExternal: "app:openExternal",
   openLogsFolder: "app:openLogsFolder",
   sendDiagnostics: "app:sendDiagnostics",
