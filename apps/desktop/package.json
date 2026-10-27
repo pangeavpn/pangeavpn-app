@@ -178,7 +178,7 @@
       ]
     },
     "pkg": {
-      "scripts": "build/pkg-scripts",
+      "scripts": "pkg-scripts",
       "allowAnywhere": false,
       "allowCurrentUserHome": false,
       "allowRootDirectory": true,

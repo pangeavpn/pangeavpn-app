@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import fsSync from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { spawnSync } from "node:child_process";
@@ -242,6 +243,9 @@ async function collectArchArtifacts(arch, goArch, daemonArchPath, packagingStart
   }
 
   const installerFile = pkgCandidates.length > 0 ? newestByMtime(pkgCandidates) : newestByMtime(dmgCandidates);
+  if (installerFile.name.toLowerCase().endsWith(".pkg")) {
+    verifyPkgScripts(installerFile.fullPath, arch);
+  }
   // Stapling rewrites the pkg, so it happens before the copy records its digest.
   if (notarize) {
     notarizeAndStaple(installerFile.fullPath);
@@ -253,6 +257,30 @@ async function collectArchArtifacts(arch, goArch, daemonArchPath, packagingStart
 
   copied.push(await copyArtifact(daemonArchPath, daemonOutPath, "daemon", arch, goArch));
   return copied;
+}
+
+// electron-builder resolves pkg.scripts against the build resources dir and,
+// when that misses, quietly builds a pkg without scripts: the app installs
+// but nothing stages the daemon or starts the service.
+function verifyPkgScripts(pkgPath, arch) {
+  const expandDir = path.join(os.tmpdir(), `pangeavpn-pkg-check-${arch}-${process.pid}`);
+  fsSync.rmSync(expandDir, { recursive: true, force: true });
+  try {
+    runOrThrow("pkgutil", ["--expand", pkgPath, expandDir], { cwd: rootDir, shell: false });
+    const component = fsSync.readdirSync(expandDir).find((name) => name.endsWith(".pkg"));
+    const packageInfo = component
+      ? fsSync.readFileSync(path.join(expandDir, component, "PackageInfo"), "utf8")
+      : "";
+    const missing = ["preinstall", "postinstall"].filter((name) => !packageInfo.includes(`<${name} file="./${name}"`));
+    if (missing.length > 0) {
+      throw new Error(
+        `${path.basename(pkgPath)} is missing its ${missing.join(" and ")} script. ` +
+        "pkg.scripts in apps/desktop/package.json is relative to the build resources directory."
+      );
+    }
+  } finally {
+    fsSync.rmSync(expandDir, { recursive: true, force: true });
+  }
 }
 
 function newestByMtime(entries) {
