@@ -191,6 +191,13 @@ fi
 # and Gatekeeper kills quarantined unsigned binaries on Apple Silicon.
 /usr/bin/xattr -dr com.apple.quarantine "${app_path}" >/dev/null 2>&1 || true
 
+# electron-builder registers this script for both the bundle and the package,
+# so Installer runs it twice and the second run finds the first run's service
+# up. Overwriting under KeepAlive=true makes launchd restart a half-written
+# binary, so stop it first.
+/bin/launchctl bootout "${SERVICE_NAME}" >/dev/null 2>&1 || true
+/bin/launchctl bootout "${PF_SERVICE_NAME}" >/dev/null 2>&1 || true
+
 # WireGuard and Cloak run in-process inside the daemon, so only the daemon
 # binary itself needs to be staged.
 # rm first: install would otherwise write straight through a planted symlink.
@@ -268,8 +275,8 @@ PLIST
 /bin/chmod 644 "${SERVICE_PLIST}" "${PF_PLIST}"
 
 # ── Start the services ──────────────────────────────────────────────────────
-# preinstall booted out the old ones. enable must precede bootstrap: a service
-# left disabled refuses to bootstrap.
+# Both were booted out above. enable must precede bootstrap: a service left
+# disabled refuses to bootstrap.
 /bin/launchctl enable "${PF_SERVICE_NAME}" >/dev/null 2>&1 || true
 /bin/launchctl bootstrap system "${PF_PLIST}" >/dev/null 2>&1 || true
 /bin/launchctl enable "${SERVICE_NAME}" >/dev/null 2>&1 || true
