@@ -223,11 +223,11 @@ jobs:
           security delete-keychain "$RUNNER_TEMP/signing.keychain-db" 2>/dev/null || true
           rm -f "$RUNNER_TEMP/notary_key.p8"
 
-      - name: Upload macOS installer DMGs
+      - name: Upload macOS installer packages
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: pangeavpn-mac-installers
-          path: dist/bin/mac/installer/**/*-installer.dmg
+          path: dist/bin/mac/installer/**/*.pkg
           if-no-files-found: error
           retention-days: 14
 
@@ -255,18 +255,18 @@ jobs:
         run: |
           mkdir -p release
           find artifacts/windows -type f -name '*.exe' -exec cp {} release/ \;
-          find artifacts/mac -type f -name '*-installer.dmg' -exec cp {} release/ \;
+          find artifacts/mac -type f -name '*.pkg' -exec cp {} release/ \;
           ls -la release/
 
-      # Releases are not code-signed yet, so published checksums are the only
-      # integrity check users have. Generated here, from the same artifacts that
+      # Windows releases are not code-signed yet, so published checksums are the
+      # only integrity check users have. Generated here, from the same artifacts that
       # are uploaded, in a public log.
       - name: Generate SHA-256 checksums
         working-directory: release
         run: |
           set -euo pipefail
           shopt -s nullglob
-          artifacts=(*.exe *.dmg)
+          artifacts=(*.exe *.pkg)
           if [ ${#artifacts[@]} -eq 0 ]; then
             echo "::error::No release artifacts found to checksum"
             exit 1

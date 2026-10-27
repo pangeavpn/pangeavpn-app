@@ -79,7 +79,7 @@ A Snowflake transport (WebRTC, as used by Tor) is written and wired up but switc
 | **Hub access when blocked** | Cached IP, DNS-over-HTTPS, REALITY, Shadowsocks and a CDN relay, then a signed dead drop if every known address has been burned |
 | **8 languages** | Including Persian, Arabic, Chinese, Russian and Ukrainian |
 | **Native desktop** | Compact taskbar popover, dark and light themes, system tray, auto-start at login |
-| **Real installers** | NSIS on Windows, an installer `.dmg` that sets up launchd on macOS, AppImage and `.deb` on Linux |
+| **Real installers** | NSIS on Windows, a signed and notarized `.pkg` that sets up launchd on macOS, AppImage and `.deb` on Linux |
 
 ## Languages
 
@@ -94,21 +94,10 @@ Download from [pangeavpn.org/download](https://pangeavpn.org/download) or the [R
 | Platform | Download | Notes |
 |---|---|---|
 | Windows 10/11 (x64, arm64) | `Setup.exe` (NSIS) | Installs `PangeaDaemon` as a Windows service, so you aren't prompted every time you connect |
-| macOS (Intel, Apple Silicon) | installer `.dmg` | Holds the `.pkg` and `install-mac.sh`. The script installs the app and registers the launchd daemon, so there are no password prompts at runtime |
+| macOS (Intel, Apple Silicon) | `.pkg` | Signed and notarized. Installs the app and registers the launchd daemon, so there are no password prompts at runtime |
 | Linux (x64, arm64) | build from source | `./scripts/install-linux.sh` installs the app and a systemd service |
 
 Release builds cover Windows and macOS. On Linux, `npm run build-bin:linux` also produces an AppImage and a `.deb`, but neither of those sets up the daemon service by itself.
-
-### macOS one-command install
-
-```bash
-curl -fsSL https://pangeavpn.org/install-mac.sh | bash
-```
-
-It asks whether to install the latest stable release or the latest pre-release, and goes with stable after 5 seconds. To skip the question, run it as `... | PANGEA_CHANNEL=prerelease bash` (or `stable`).
-
-> [!CAUTION]
-> This pipes a remote script into a root shell. That's fine for developers, but we'd rather you read [`scripts/install-mac.sh`](scripts/install-mac.sh) first. The installer `.dmg` on the Releases page bundles the same script next to the `.pkg`. Installing the `.pkg` on its own leaves out the background service.
 
 ### Linux from source
 
@@ -254,7 +243,7 @@ npm run dev
 | `npm run build` | Compile `shared-types`, then the desktop app, then the daemon |
 | `npm test` | TypeScript and Go test suites |
 | `npm run build-bin:windows` | NSIS installer (x64 + arm64) |
-| `npm run build-bin:mac` | `.pkg` and installer `.dmg` for Intel and Apple Silicon |
+| `npm run build-bin:mac` | `.pkg` for Intel and Apple Silicon |
 | `npm run build-bin:linux` | AppImage and `.deb` (x64 + arm64) |
 | `npm run build-bin` | All three, in sequence |
 

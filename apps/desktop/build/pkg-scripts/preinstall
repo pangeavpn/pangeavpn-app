@@ -1,0 +1,22 @@
+#!/bin/sh
+set -u
+
+# Runs before the payload lands, so nothing is replaced while it is running.
+
+SERVICE_NAME="system/com.pangea.pangeavpn.daemon"
+PF_SERVICE_NAME="system/com.pangea.pangeavpn.pf"
+APP_EXECUTABLES="/Applications/PangeaVPN.app/Contents/MacOS/"
+
+# The installer runs as root outside the user's session, so it cannot ask the
+# app to quit over Apple Events. SIGTERM makes Electron quit cleanly.
+if /usr/bin/pgrep -f "${APP_EXECUTABLES}" >/dev/null 2>&1; then
+  /usr/bin/pkill -TERM -f "${APP_EXECUTABLES}" >/dev/null 2>&1 || true
+  /bin/sleep 2
+fi
+
+# Overwriting under KeepAlive=true makes launchd restart a half-written binary.
+/bin/launchctl bootout "${SERVICE_NAME}" >/dev/null 2>&1 || true
+/bin/launchctl bootout "${PF_SERVICE_NAME}" >/dev/null 2>&1 || true
+/bin/sleep 1
+
+exit 0

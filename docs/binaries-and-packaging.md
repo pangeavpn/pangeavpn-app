@@ -22,7 +22,7 @@ executables.
 | Platform | Command | Architectures | Installers | Managed service |
 | --- | --- | --- | --- | --- |
 | Windows | `npm run build-bin:windows` | x64, arm64 | NSIS `.exe` | Installed automatically as `PangeaDaemon` |
-| macOS | `npm run build-bin:mac` | x64, arm64 | `.pkg` plus installer `.dmg` | Installed by the DMG's `install-mac.sh`, not by the raw `.pkg` |
+| macOS | `npm run build-bin:mac` | x64, arm64 | `.pkg` | Installed and started by the `.pkg` |
 | Linux | `npm run build-bin:linux` | x64, arm64 | AppImage and `.deb` | Neither package installs it; `install-linux.sh` creates the systemd service |
 
 By default the packaging scripts build both architectures, stage standalone
@@ -59,7 +59,6 @@ desktop app before they package anything.
 ### macOS
 
 - Xcode Command Line Tools, including `clang`, `codesign` and `iconutil`.
-- `hdiutil` for the installer DMG.
 - The NaiveProxy native archive for each architecture you build, if you need
   NaiveProxy.
 
@@ -88,7 +87,7 @@ flowchart LR
 | --- | --- |
 | [`scripts/build-daemon.mjs`](../scripts/build-daemon.mjs) | Builds one daemon for the requested `GOOS` and `GOARCH` |
 | [`scripts/build-bin/windows.mjs`](../scripts/build-bin/windows.mjs) | Builds and packages Windows x64 and arm64, one after the other |
-| [`scripts/build-bin/mac.mjs`](../scripts/build-bin/mac.mjs) | Builds and packages macOS arm64 and x64 one after the other, then creates the installer DMGs |
+| [`scripts/build-bin/mac.mjs`](../scripts/build-bin/mac.mjs) | Builds and packages macOS arm64 and x64 one after the other, notarizing each `.pkg` when signing is configured |
 | [`scripts/build-bin/linux.mjs`](../scripts/build-bin/linux.mjs) | Builds the AppImage and `.deb` for x64 and arm64 |
 | [`apps/desktop/package.json`](../apps/desktop/package.json) | electron-builder resources, targets, names and installer options |
 
@@ -252,11 +251,9 @@ node scripts/build-bin/mac.mjs --arch x64 # Intel only
 dist/bin/mac/
 |-- installer/
 |   |-- arm64/
-|   |   |-- <installer>.pkg
-|   |   `-- <installer>-installer.dmg
+|   |   `-- <installer>.pkg
 |   `-- x64/
-|       |-- <installer>-x64.pkg
-|       `-- <installer>-x64-installer.dmg
+|       `-- <installer>-x64.pkg
 |-- daemon/
 |   |-- daemon-arm64
 |   `-- daemon-x64
@@ -267,33 +264,26 @@ dist/bin/mac/
 `bin/mac/` collects any standalone files from `apps/desktop/resources/bin/mac/`.
 For now that folder only holds repository placeholders.
 
-### PKG versus installer DMG
+### What the package installs
 
-The two artifacts do different things:
+The `.pkg` is the whole install. Its scripts run as root:
 
-| Artifact | What it does |
+| Script | What it does |
 | --- | --- |
-| Raw `.pkg` | Installs `PangeaVPN.app`, copies the daemon to `/Library/Application Support/PangeaVPN/PangeaDaemon`, clears quarantine and ad-hoc signs the copied daemon |
-| Installer `.dmg` | Contains the matching `.pkg` and `install-mac.sh`. The script does the full privileged service setup |
+| `preinstall` | Quits a running app and boots out the old services, so nothing is replaced while it runs |
+| `postinstall` | Copies the daemon to `/Library/Application Support/PangeaVPN/PangeaDaemon`, creates the split tunnelling group, installs `/Library/LaunchDaemons/com.pangea.pangeavpn.daemon.plist` (`RunAtLoad`, `KeepAlive`) and `com.pangea.pangeavpn.pf.plist`, then bootstraps and starts both |
 
-> [!WARNING]
-> The raw `.pkg` deliberately does **not** create a daemon token, install a
-> LaunchDaemon plist or start the daemon. Starting it without a token would
-> crash-loop under `KeepAlive`.
+The pf service enables pf at boot whenever a kill switch anchor is on disk. The
+daemon creates its own token on first start.
 
-The full install script:
+[`scripts/install-mac-online.sh`](../scripts/install-mac-online.sh) stays for the
+`curl -fsSL https://pangeavpn.org/install-mac.sh | bash` command that installed
+apps up to 0.8.x show for updates. It downloads the release's `.pkg`, checks it
+against `SHA256SUMS.txt` and Gatekeeper, and runs it. Releases from before the
+`.pkg` was published only have the old installer DMG, which it falls back to.
 
-1. installs the `.pkg`;
-2. creates the machine-scoped support directory and token;
-3. installs `/Library/LaunchDaemons/com.pangea.pangeavpn.daemon.plist`, plus
-   `com.pangea.pangeavpn.pf.plist`, which enables pf at boot whenever a kill
-   switch anchor is on disk;
-4. sets `RunAtLoad` and `KeepAlive`;
-5. bootstraps and starts the service;
-6. checks `http://127.0.0.1:8787/ping`.
-
-See [`scripts/install-mac.sh`](../scripts/install-mac.sh) and the raw package's
-[`postinstall`](../apps/desktop/build/pkg-scripts/postinstall).
+See the package's [`preinstall`](../apps/desktop/build/pkg-scripts/preinstall)
+and [`postinstall`](../apps/desktop/build/pkg-scripts/postinstall).
 
 ## Linux package
 
@@ -404,7 +394,7 @@ in a keychain on the search list. Without it, the build is ad-hoc signed.
 
 With `APPLE_API_KEY` (path to an App Store Connect `.p8` key), `APPLE_API_KEY_ID`
 and `APPLE_API_ISSUER` also set, each pkg is notarized, stapled and checked
-with `spctl` before it goes into the installer DMG.
+with `spctl`.
 
 CI builds signed installers on every event except pull requests, from these
 repository secrets:
@@ -417,8 +407,9 @@ repository secrets:
 | `APPLE_API_KEY_ID` | The key's ID |
 | `APPLE_API_ISSUER` | The issuer ID shown above the App Store Connect key list |
 
-The installers keep a Developer ID daemon's signature instead of re-signing it
-ad-hoc, since the app only elevates a daemon whose Team ID matches its own.
+The package keeps a Developer ID daemon's signature when it copies it, so the
+root service runs the binary Apple notarized. An ad-hoc daemon is re-signed
+after the copy.
 
 ## CI and releases
 
@@ -427,10 +418,11 @@ ad-hoc, since the app only elevates a daemon whose Team ID matches its own.
 1. runs the desktop tests, `go vet` and the Go tests on Ubuntu, Windows and
    macOS;
 2. builds and verifies the Windows x64/arm64 NSIS installers;
-3. builds the macOS x64/arm64 installer DMGs;
+3. builds the macOS x64/arm64 `.pkg` installers, Developer ID signed and
+   notarized on every event except pull requests;
 4. requires native NaiveProxy support for the Windows and macOS artifacts;
-5. for tagged releases, publishes the Windows `.exe` files, the macOS installer
-   `.dmg` files and `SHA256SUMS.txt`.
+5. for tagged releases, publishes the Windows `.exe` files, the macOS `.pkg`
+   files and `SHA256SUMS.txt`.
 
 Linux packaging works locally, but the release workflow doesn't build or publish
 it yet. The standalone daemons and the per-platform JSON manifests are also
@@ -449,7 +441,8 @@ local build outputs, not GitHub release assets.
 | Aggregate manifest | [`scripts/build-bin/all.mjs`](../scripts/build-bin/all.mjs) |
 | NaiveProxy native resolution | [`scripts/lib/naive-cgo.mjs`](../scripts/lib/naive-cgo.mjs) |
 | Windows service installer | [`apps/desktop/build/installer.nsh`](../apps/desktop/build/installer.nsh) |
-| macOS complete installer | [`scripts/install-mac.sh`](../scripts/install-mac.sh) |
+| macOS package scripts | [`apps/desktop/build/pkg-scripts/`](../apps/desktop/build/pkg-scripts) |
+| macOS online installer | [`scripts/install-mac-online.sh`](../scripts/install-mac-online.sh) |
 | Linux complete installer | [`scripts/install-linux.sh`](../scripts/install-linux.sh) |
 | CI and release assets | [`.github/workflows/build-desktop.yml`](../.github/workflows/build-desktop.yml) |
 | Runtime design | [Architecture](architecture.md) |

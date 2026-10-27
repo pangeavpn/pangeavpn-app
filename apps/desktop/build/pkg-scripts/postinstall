@@ -8,6 +8,10 @@ SERVICE_NAME="system/${SERVICE_LABEL}"
 SYSTEM_SUPPORT_DIR="/Library/Application Support/PangeaVPN"
 SYSTEM_DAEMON_PATH="${SYSTEM_SUPPORT_DIR}/PangeaDaemon"
 LOG_PATH="/var/log/pangeavpn-daemon.log"
+PF_LABEL="com.pangea.pangeavpn.pf"
+PF_PLIST="/Library/LaunchDaemons/${PF_LABEL}.plist"
+PF_SERVICE_NAME="system/${PF_LABEL}"
+PF_ANCHOR_FILE="/etc/pf.anchors/com.pangeavpn.killswitch"
 
 # ── Give the user back their own app files ──────────────────────────────────
 # Up to 0.6.0's daemon took root ownership of these, breaking later app writes.
@@ -28,7 +32,7 @@ Library/Application Support
 Library/Caches"
 
 # Installer.app has no login context, so the console owner is the only clue.
-# install-mac.sh runs us under sudo, where SUDO_USER is the better answer.
+# The online installer runs us under sudo, where SUDO_USER is the better answer.
 resolve_target_user() {
   user="$(/usr/bin/stat -f %Su /dev/console 2>/dev/null || true)"
   case "${user}" in
@@ -207,7 +211,70 @@ else
     || echo "codesign failed for ${SYSTEM_DAEMON_PATH}"
 fi
 
-# Do NOT start the daemon here — install-mac.sh owns token creation, plist
-# registration, and startup. Starting it tokenless crash-loops under KeepAlive.
+# ── Register the service with macOS ─────────────────────────────────────────
+# The daemon mints its own token on first start, so it can start straight away.
+/bin/rm -f "${SERVICE_PLIST}"
+/bin/cat > "${SERVICE_PLIST}" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>Label</key>
+    <string>${SERVICE_LABEL}</string>
+    <key>ProgramArguments</key>
+    <array>
+      <string>${SYSTEM_DAEMON_PATH}</string>
+    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+      <key>PANGEA_APP_SUPPORT_DIR</key>
+      <string>${SYSTEM_SUPPORT_DIR}</string>
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>${LOG_PATH}</string>
+    <key>StandardErrorPath</key>
+    <string>${LOG_PATH}</string>
+  </dict>
+</plist>
+PLIST
+
+# ── Hold a persisted lock from boot ─────────────────────────────────────────
+# pf loads at boot but stays disabled, so a persisted lock needs re-arming here.
+/bin/rm -f "${PF_PLIST}"
+/bin/cat > "${PF_PLIST}" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>Label</key>
+    <string>${PF_LABEL}</string>
+    <key>ProgramArguments</key>
+    <array>
+      <string>/bin/sh</string>
+      <string>-c</string>
+      <string>test -s ${PF_ANCHOR_FILE} &amp;&amp; /sbin/pfctl -f /etc/pf.conf &amp;&amp; /sbin/pfctl -E</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+  </dict>
+</plist>
+PLIST
+
+/usr/sbin/chown root:wheel "${SERVICE_PLIST}" "${PF_PLIST}"
+/bin/chmod 644 "${SERVICE_PLIST}" "${PF_PLIST}"
+
+# ── Start the services ──────────────────────────────────────────────────────
+# preinstall booted out the old ones. enable must precede bootstrap: a service
+# left disabled refuses to bootstrap.
+/bin/launchctl enable "${PF_SERVICE_NAME}" >/dev/null 2>&1 || true
+/bin/launchctl bootstrap system "${PF_PLIST}" >/dev/null 2>&1 || true
+/bin/launchctl enable "${SERVICE_NAME}" >/dev/null 2>&1 || true
+/bin/launchctl bootstrap system "${SERVICE_PLIST}" \
+  || echo "launchctl bootstrap failed for ${SERVICE_PLIST}"
+/bin/launchctl kickstart -k "${SERVICE_NAME}" >/dev/null 2>&1 || true
 
 exit 0
