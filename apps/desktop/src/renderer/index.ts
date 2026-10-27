@@ -181,6 +181,8 @@ const autoConnectToggle = document.getElementById("autoConnectToggle") as HTMLIn
 const deadDropToggle = document.getElementById("deadDropToggle") as HTMLInputElement;
 const lockdownToggle = document.getElementById("lockdownToggle") as HTMLInputElement;
 const notificationsToggle = document.getElementById("notificationsToggle") as HTMLInputElement;
+const showInDockRow = document.getElementById("showInDockRow") as HTMLElement;
+const showInDockToggle = document.getElementById("showInDockToggle") as HTMLInputElement;
 const panicWipeToggle = document.getElementById("panicWipeToggle") as HTMLInputElement;
 const panicWipeHint = document.getElementById("panicWipeHint") as HTMLSpanElement | null;
 const loginScreen = document.getElementById("loginScreen") as HTMLElement;
@@ -2411,6 +2413,19 @@ notificationsToggle.addEventListener("change", async () => {
   showToast(t(requested ? "toggle.notifications.on" : "toggle.notifications.off"), 4000, true);
 });
 
+// Only macOS has a Dock; elsewhere the row stays hidden.
+showInDockRow.hidden = window.appPlatform !== "darwin";
+showInDockToggle.addEventListener("change", async () => {
+  if (!pangeaApi) return;
+  const requested = showInDockToggle.checked;
+  try {
+    await pangeaApi.setShowInDock(requested);
+  } catch (err) {
+    showInDockToggle.checked = !requested;
+    showToast(reportError("showInDock", err, t("toggle.dock.failed")));
+  }
+});
+
 function panicChordLabel(): string {
   const isMac = /Mac/i.test(navigator.userAgent);
   return (isMac ? ["⌘", "⌥", "⇧", "F12"] : ["Ctrl", "Alt", "Shift", "F12"]).join(" + ");
@@ -3456,6 +3471,7 @@ async function init(): Promise<void> {
       lockdownToggle.checked = lockdownLocal;
       deadDropToggle.checked = await pangeaApi.getDeadDrop();
       notificationsToggle.checked = await pangeaApi.getNotifications();
+      if (window.appPlatform === "darwin") showInDockToggle.checked = await pangeaApi.getShowInDock();
       panicWipeToggle.checked = await pangeaApi.getPanicWipe();
       const last = await pangeaApi.getLastServer();
       lastServerIdLocal = last.lastServerId;

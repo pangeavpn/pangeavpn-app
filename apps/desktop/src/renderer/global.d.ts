@@ -236,6 +236,8 @@ declare global {
     getAutoConnect: () => Promise<boolean>;
     setNotifications: (enabled: boolean) => Promise<void>;
     getNotifications: () => Promise<boolean>;
+    setShowInDock: (enabled: boolean) => Promise<void>;
+    getShowInDock: () => Promise<boolean>;
     setPanicWipe: (enabled: boolean) => Promise<void>;
     getPanicWipe: () => Promise<boolean>;
     setDeadDrop: (enabled: boolean) => Promise<void>;

@@ -2789,6 +2789,11 @@ button.ghost:hover:not(:disabled) {
   display: grid;
 }
 
+/* Beats the display:grid above, which would otherwise defeat [hidden]. */
+.settings-toggles[hidden] {
+  display: none;
+}
+
 .accent-swatches {
   display: flex;
   flex-wrap: wrap;
