@@ -390,10 +390,35 @@ Each platform manifest records:
 - the Go architecture, for daemon artifacts.
 
 > [!NOTE]
-> Nothing is code-signed yet. There's no Windows code-signing certificate and no
-> macOS Developer ID or notarization workflow; the macOS install only ad-hoc
-> signs the copied daemon. Release CI publishes `SHA256SUMS.txt` next to the
-> installers so anyone can check a download independently.
+> There's no Windows code-signing certificate yet. Release CI publishes
+> `SHA256SUMS.txt` next to the installers so anyone can check a download
+> independently.
+
+### macOS signing and notarization
+
+`build-bin:mac` signs with Developer ID when `MAC_CODESIGN_IDENTITY` is set to
+the shared part of the certificate names, `Name (TEAMID)`. The app is signed
+with `Developer ID Application: Name (TEAMID)` under the hardened runtime, and
+the pkg with `Developer ID Installer: Name (TEAMID)`. Both certificates must be
+in a keychain on the search list. Without it, the build is ad-hoc signed.
+
+With `APPLE_API_KEY` (path to an App Store Connect `.p8` key), `APPLE_API_KEY_ID`
+and `APPLE_API_ISSUER` also set, each pkg is notarized, stapled and checked
+with `spctl` before it goes into the installer DMG.
+
+CI builds signed installers on every event except pull requests, from these
+repository secrets:
+
+| Secret | Value |
+|---|---|
+| `MAC_CERTS_P12_BASE64` | `base64 -i certs.p12`, one `.p12` holding both Developer ID certificates and their keys |
+| `MAC_CERTS_P12_PASSWORD` | The `.p12` export password |
+| `APPLE_API_KEY_P8_BASE64` | `base64 -i AuthKey_XXXXXXXXXX.p8` |
+| `APPLE_API_KEY_ID` | The key's ID |
+| `APPLE_API_ISSUER` | The issuer ID shown above the App Store Connect key list |
+
+The installers keep a Developer ID daemon's signature instead of re-signing it
+ad-hoc, since the app only elevates a daemon whose Team ID matches its own.
 
 ## CI and releases
 

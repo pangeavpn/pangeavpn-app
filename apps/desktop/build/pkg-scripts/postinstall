@@ -195,11 +195,17 @@ fi
 /usr/sbin/chown root:wheel "${SYSTEM_SUPPORT_DIR}"
 /bin/chmod 755 "${SYSTEM_SUPPORT_DIR}"
 
-# Copying can invalidate the ad-hoc signature Apple Silicon requires, so the
-# installed daemon is stripped and re-signed here.
+# Copying can invalidate the ad-hoc signature Apple Silicon requires, so an
+# ad-hoc daemon is re-signed here. A Developer ID daemon keeps its signature:
+# the app checks that the daemon's Team ID matches its own before elevating.
 /usr/bin/xattr -dr com.apple.quarantine "${SYSTEM_SUPPORT_DIR}" >/dev/null 2>&1 || true
-/usr/bin/codesign --force --sign - "${SYSTEM_DAEMON_PATH}" \
-  || echo "codesign failed for ${SYSTEM_DAEMON_PATH}"
+if /usr/bin/codesign -dv "${SYSTEM_DAEMON_PATH}" 2>&1 | /usr/bin/grep -Eq '^TeamIdentifier=[A-Z0-9]{10}$' \
+  && /usr/bin/codesign --verify --strict "${SYSTEM_DAEMON_PATH}" >/dev/null 2>&1; then
+  :
+else
+  /usr/bin/codesign --force --sign - "${SYSTEM_DAEMON_PATH}" \
+    || echo "codesign failed for ${SYSTEM_DAEMON_PATH}"
+fi
 
 # Do NOT start the daemon here — install-mac.sh owns token creation, plist
 # registration, and startup. Starting it tokenless crash-loops under KeepAlive.

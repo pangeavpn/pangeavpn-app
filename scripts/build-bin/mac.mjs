@@ -26,6 +26,13 @@ const installerDmgAlignmentBytes = 32 * mebibyte;
 const installerDmgGrowthFactor = 1.25;
 const installerDmgAttempts = 3;
 const installerDmgRetryDelayMs = 5000;
+// "Name (TEAMID)": the shared part of the Developer ID Application and Installer
+// certificate names. Unset builds stay ad-hoc signed, as PR and fork builds are.
+const developerIdIdentity = process.env.MAC_CODESIGN_IDENTITY?.trim() || null;
+const notaryKeyPath = process.env.APPLE_API_KEY?.trim() || null;
+const notaryKeyId = process.env.APPLE_API_KEY_ID?.trim() || null;
+const notaryIssuer = process.env.APPLE_API_ISSUER?.trim() || null;
+const notarize = Boolean(notaryKeyPath && notaryKeyId && notaryIssuer);
 
 if (process.platform !== "darwin") {
   console.error("build-bin:mac must run on a macOS host.");
@@ -36,6 +43,16 @@ if (!goCmd) {
   console.error("Install Go 1.22+ or ensure go is available.");
   process.exit(1);
 }
+
+if (notarize && !developerIdIdentity) {
+  console.error("Notarization needs a Developer ID build. Set MAC_CODESIGN_IDENTITY.");
+  process.exit(1);
+}
+console.log(
+  developerIdIdentity
+    ? `Signing with Developer ID "${developerIdIdentity}"${notarize ? " and notarizing" : " (not notarizing)"}.`
+    : "No MAC_CODESIGN_IDENTITY; ad-hoc signing."
+);
 
 const archTargets = selectArchTargets(allArchTargets, "macOS");
 
@@ -73,7 +90,8 @@ for (const target of archTargets) {
       `--${target.arch}`,
       "--publish",
       "never",
-      `--config.electronVersion=${electronVersion}`
+      `--config.electronVersion=${electronVersion}`,
+      ...developerIdSigningArgs()
     ],
     {
       cwd: rootDir,
@@ -89,6 +107,41 @@ for (const target of archTargets) {
 
 const manifestPath = await writeManifest(artifacts);
 console.log(`build-bin:mac completed. Manifest: ${manifestPath}`);
+
+function developerIdSigningArgs() {
+  if (!developerIdIdentity) {
+    return [];
+  }
+  // electron-builder signs the app with "Developer ID Application: <identity>"
+  // and the pkg with "Developer ID Installer: <identity>". The pkg is notarized
+  // here rather than by electron-builder, which would only cover the app.
+  return [
+    `--config.mac.identity="${developerIdIdentity}"`,
+    "--config.mac.hardenedRuntime=true",
+    "--config.mac.entitlements=build/entitlements.mac.plist",
+    "--config.mac.entitlementsInherit=build/entitlements.mac.plist",
+    "--config.mac.notarize=false"
+  ];
+}
+
+function notarizeAndStaple(filePath) {
+  console.log(`Notarizing ${path.basename(filePath)}...`);
+  runOrThrow(
+    "xcrun",
+    [
+      "notarytool", "submit", filePath,
+      "--key", notaryKeyPath,
+      "--key-id", notaryKeyId,
+      "--issuer", notaryIssuer,
+      "--wait",
+      "--timeout", "1h"
+    ],
+    { cwd: rootDir, shell: false }
+  );
+  runOrThrow("xcrun", ["stapler", "staple", filePath], { cwd: rootDir, shell: false });
+  // Gatekeeper's own verdict on the pkg, as a downloading user's Mac gives it.
+  runOrThrow("spctl", ["--assess", "--type", "install", "--verbose=2", filePath], { cwd: rootDir, shell: false });
+}
 
 async function cleanOutput() {
   const macOutputRoot = path.join(rootDir, "dist", "bin", platformName);
@@ -197,6 +250,10 @@ async function collectArchArtifacts(arch, goArch, daemonArchPath, packagingStart
   }
 
   const installerFile = pkgCandidates.length > 0 ? newestByMtime(pkgCandidates) : newestByMtime(dmgCandidates);
+  // Stapling rewrites the pkg, so it happens before the copy records its digest.
+  if (notarize) {
+    notarizeAndStaple(installerFile.fullPath);
+  }
   const copied = [];
   const installerName = arch === "x64" ? addArchSuffix(installerFile.name, "-x64") : installerFile.name;
   const installerDestPath = path.join(installerOut, installerName);
@@ -358,6 +415,21 @@ function verifyAppBundleSignature(appBundlePath, arch) {
       `${detail}\nApple Silicon refuses to launch it. Ensure mac.identity is set so electron-builder signs after flipping fuses.`
     );
   }
+
+  if (developerIdIdentity) {
+    // The app refuses to elevate a daemon whose Team ID differs from its own.
+    const appTeam = codesignTeamIdentifier(appBundlePath);
+    const daemonTeam = codesignTeamIdentifier(path.join(appBundlePath, "Contents", "Resources", "daemon", "daemon"));
+    if (!appTeam || appTeam !== daemonTeam) {
+      throw new Error(`Team ID mismatch in the ${arch} app bundle: app ${appTeam ?? "none"}, daemon ${daemonTeam ?? "none"}`);
+    }
+  }
+}
+
+function codesignTeamIdentifier(target) {
+  const result = spawnSync("codesign", ["-dv", "--verbose=4", target], { encoding: "utf8", shell: false });
+  const match = `${result.stdout}${result.stderr}`.match(/TeamIdentifier=([A-Z0-9]{10})\b/);
+  return match ? match[1] : null;
 }
 
 async function copyArtifact(sourcePath, destinationPath, type, arch, goArch = null) {
