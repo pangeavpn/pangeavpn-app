@@ -2984,11 +2984,10 @@ app.on("activate", () => {
   showMainWindow();
 });
 
-let quitCleanupDone = false;
-
-app.on("before-quit", (event) => {
-  if (quitCleanupDone) return;
-  event.preventDefault();
+// Synchronous and never cancelled: macOS asks the app to quit before a restart
+// or shutdown, and preventDefault() here answers no, so macOS reports that
+// PangeaVPN interrupted the restart.
+app.on("before-quit", () => {
   isQuitting = true;
   stopTrayStatusPolling();
   tray?.destroy();
@@ -2999,8 +2998,6 @@ app.on("before-quit", (event) => {
   // Quitting the app is not Disconnect: the daemon keeps the session and its
   // lock, and a spawned dev daemon leaves both for its next start to resume.
   daemonProcess.stop();
-  quitCleanupDone = true;
-  app.quit();
 });
 
 // Chromium encrypts its cookie store with a keychain key, and an ad-hoc
