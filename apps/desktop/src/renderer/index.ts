@@ -3544,19 +3544,8 @@ const updateCurrentVersionEl = document.getElementById("updateCurrentVersion") a
 const updateLatestVersionEl = document.getElementById("updateLatestVersion") as HTMLSpanElement;
 const updateDownloadBtn = document.getElementById("updateDownloadBtn") as HTMLButtonElement;
 const updateMessageEl = document.getElementById("updateMessage") as HTMLParagraphElement;
-const updateMacInstall = document.getElementById("updateMacInstall") as HTMLElement;
-const updateMacCommand = document.getElementById("updateMacCommand") as HTMLElement;
-const updateMacCommandAlt = document.getElementById("updateMacCommandAlt") as HTMLElement;
-const updateMacCopyBtn = document.getElementById("updateMacCopyBtn") as HTMLButtonElement;
-const updateMacCopyAltBtn = document.getElementById("updateMacCopyAltBtn") as HTMLButtonElement;
 const menuBadge = document.getElementById("menuBadge") as HTMLSpanElement;
 const menuUpdateBtn = document.getElementById("menuUpdateBtn") as HTMLButtonElement;
-
-const MAC_INSTALL_COMMAND = "curl -fsSL https://pangeavpn.org/install-mac.sh | bash";
-// Raw GitHub mirror of the same installer, for networks that block pangeavpn.org.
-const MAC_INSTALL_COMMAND_ALT =
-  "curl -fsSL https://raw.githubusercontent.com/pangeavpn/pangeavpn-app/master/scripts/install-mac-online.sh | bash";
-const isMacPlatform = window.appPlatform === "darwin";
 
 let pendingUpdate: { version: string; macOnly?: boolean } | null = null;
 let currentAppVersion = "";
@@ -3576,19 +3565,8 @@ function showUpdateModal(): void {
   updateCurrentVersionEl.textContent = currentAppVersion || "-";
   updateLatestVersionEl.textContent = pendingUpdate.version;
   updateDownloadBtn.disabled = false;
-  updateDownloadBtn.hidden = isMacPlatform;
-  if (isMacPlatform) {
-    updateMacCommand.textContent = MAC_INSTALL_COMMAND;
-    updateMacCommandAlt.textContent = MAC_INSTALL_COMMAND_ALT;
-    updateMacCopyBtn.textContent = t("update.copy");
-    updateMacCopyAltBtn.textContent = t("update.copy");
-    updateMacInstall.hidden = false;
-    updateMessageEl.textContent = "";
-  } else {
-    updateMacInstall.hidden = true;
-    updateDownloadBtn.textContent = t("update.download");
-    updateMessageEl.textContent = "";
-  }
+  updateDownloadBtn.textContent = t("update.download");
+  updateMessageEl.textContent = "";
   updateOverlay.classList.add("visible");
 }
 
@@ -3658,30 +3636,8 @@ checkUpdatesBtn.addEventListener("click", async () => {
   }
 });
 
-async function copyMacInstallCommand(command: string, btn: HTMLButtonElement): Promise<void> {
-  try {
-    await copyTextToClipboard(command);
-    btn.textContent = t("update.copied");
-    btn.classList.add("copied");
-    updateMessageEl.textContent = t("update.macPasteHint");
-    setTimeout(() => {
-      btn.textContent = t("update.copy");
-      btn.classList.remove("copied");
-    }, 2000);
-  } catch (error) {
-    updateMessageEl.textContent = reportError("updateCopyCommand", error);
-  }
-}
-
-for (const el of [updateMacCommand, updateMacCopyBtn]) {
-  el.addEventListener("click", () => void copyMacInstallCommand(MAC_INSTALL_COMMAND, updateMacCopyBtn));
-}
-for (const el of [updateMacCommandAlt, updateMacCopyAltBtn]) {
-  el.addEventListener("click", () => void copyMacInstallCommand(MAC_INSTALL_COMMAND_ALT, updateMacCopyAltBtn));
-}
-
 updateDownloadBtn.addEventListener("click", async () => {
-  if (!pendingUpdate || isMacPlatform) return;
+  if (!pendingUpdate) return;
 
   if (!updater) return;
 

@@ -1,9 +1,9 @@
 import fs from "node:fs/promises";
 import fsSync from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { spawnSync } from "node:child_process";
-import { setTimeout as delay } from "node:timers/promises";
 import { electronVersion, npmCmd, relPath, rootDir, runOrThrow, selectArchTargets, sha256File, writeJson } from "./shared.mjs";
 import { resolveNaiveCgoConfig } from "../lib/naive-cgo.mjs";
 
@@ -19,13 +19,6 @@ const allArchTargets = [
   { arch: "arm64", goArch: "arm64" },
   { arch: "x64", goArch: "amd64" }
 ];
-const mebibyte = 1024 * 1024;
-const installerDmgMinSizeBytes = 256 * mebibyte;
-const installerDmgPaddingBytes = 128 * mebibyte;
-const installerDmgAlignmentBytes = 32 * mebibyte;
-const installerDmgGrowthFactor = 1.25;
-const installerDmgAttempts = 3;
-const installerDmgRetryDelayMs = 5000;
 // "Name (TEAMID)": the shared part of the Developer ID Application and Installer
 // certificate names. Unset builds stay ad-hoc signed, as PR and fork builds are.
 const developerIdIdentity = process.env.MAC_CODESIGN_IDENTITY?.trim() || null;
@@ -250,6 +243,9 @@ async function collectArchArtifacts(arch, goArch, daemonArchPath, packagingStart
   }
 
   const installerFile = pkgCandidates.length > 0 ? newestByMtime(pkgCandidates) : newestByMtime(dmgCandidates);
+  if (installerFile.name.toLowerCase().endsWith(".pkg")) {
+    verifyPkgScripts(installerFile.fullPath, arch);
+  }
   // Stapling rewrites the pkg, so it happens before the copy records its digest.
   if (notarize) {
     notarizeAndStaple(installerFile.fullPath);
@@ -259,13 +255,32 @@ async function collectArchArtifacts(arch, goArch, daemonArchPath, packagingStart
   const installerDestPath = path.join(installerOut, installerName);
   copied.push(await copyArtifact(installerFile.fullPath, installerDestPath, "installer", arch));
 
-  const installerDmg = await bundleInstallerDmg(installerDestPath, installerName, installerOut, arch);
-  if (installerDmg) {
-    copied.push(installerDmg);
-  }
-
   copied.push(await copyArtifact(daemonArchPath, daemonOutPath, "daemon", arch, goArch));
   return copied;
+}
+
+// electron-builder resolves pkg.scripts against the build resources dir and,
+// when that misses, quietly builds a pkg without scripts: the app installs
+// but nothing stages the daemon or starts the service.
+function verifyPkgScripts(pkgPath, arch) {
+  const expandDir = path.join(os.tmpdir(), `pangeavpn-pkg-check-${arch}-${process.pid}`);
+  fsSync.rmSync(expandDir, { recursive: true, force: true });
+  try {
+    runOrThrow("pkgutil", ["--expand", pkgPath, expandDir], { cwd: rootDir, shell: false });
+    const component = fsSync.readdirSync(expandDir).find((name) => name.endsWith(".pkg"));
+    const packageInfo = component
+      ? fsSync.readFileSync(path.join(expandDir, component, "PackageInfo"), "utf8")
+      : "";
+    const missing = ["preinstall", "postinstall"].filter((name) => !packageInfo.includes(`<${name} file="./${name}"`));
+    if (missing.length > 0) {
+      throw new Error(
+        `${path.basename(pkgPath)} is missing its ${missing.join(" and ")} script. ` +
+        "pkg.scripts in apps/desktop/package.json is relative to the build resources directory."
+      );
+    }
+  } finally {
+    fsSync.rmSync(expandDir, { recursive: true, force: true });
+  }
 }
 
 function newestByMtime(entries) {
@@ -275,108 +290,6 @@ function newestByMtime(entries) {
 function addArchSuffix(fileName, suffix) {
   const ext = path.extname(fileName);
   return `${fileName.slice(0, -ext.length)}${suffix}${ext}`;
-}
-
-async function getDirectorySizeBytes(targetDir) {
-  const entries = await fs.readdir(targetDir, { withFileTypes: true });
-  let total = 0;
-
-  for (const entry of entries) {
-    const entryPath = path.join(targetDir, entry.name);
-    if (entry.isDirectory()) {
-      total += await getDirectorySizeBytes(entryPath);
-      continue;
-    }
-
-    const stat = await fs.lstat(entryPath);
-    total += stat.size;
-  }
-
-  return total;
-}
-
-function roundUpToMultiple(value, multiple) {
-  return Math.ceil(value / multiple) * multiple;
-}
-
-function getInstallerDmgSizeArg(payloadBytes) {
-  const estimatedBytes = Math.max(
-    installerDmgMinSizeBytes,
-    payloadBytes + installerDmgPaddingBytes,
-    Math.ceil(payloadBytes * installerDmgGrowthFactor)
-  );
-
-  return `${Math.ceil(roundUpToMultiple(estimatedBytes, installerDmgAlignmentBytes) / mebibyte)}m`;
-}
-
-// hdiutil's internal detach races the volume daemons, failing good release
-// builds with "Resource busy".
-async function createDmgWithRetry(volumeName, stagingDir, dmgSizeArg, dmgPath, arch) {
-  for (let attempt = 1; ; attempt++) {
-    try {
-      runOrThrow("hdiutil", [
-        "create",
-        "-volname", volumeName,
-        "-srcfolder", stagingDir,
-        "-ov",
-        "-format", "UDZO",
-        "-size", dmgSizeArg,
-        dmgPath
-      ], { cwd: rootDir, shell: false });
-      return;
-    } catch (error) {
-      if (attempt >= installerDmgAttempts) throw error;
-      console.warn(
-        `hdiutil create failed for ${arch} (attempt ${attempt}/${installerDmgAttempts}), retrying in ${installerDmgRetryDelayMs}ms: ${error.message}`
-      );
-      await fs.rm(dmgPath, { force: true }).catch(() => {});
-      await delay(installerDmgRetryDelayMs);
-    }
-  }
-}
-
-async function bundleInstallerDmg(pkgPath, pkgName, installerOut, arch) {
-  const installScript = path.join(rootDir, "scripts", "install-mac.sh");
-  if (!fsSync.existsSync(installScript)) {
-    console.warn("install-mac.sh not found, skipping installer DMG bundle.");
-    return null;
-  }
-
-  const dmgName = `${path.basename(pkgName, path.extname(pkgName))}-installer.dmg`;
-  const dmgPath = path.join(installerOut, dmgName);
-  const volumeName = `PangeaVPN Installer (${arch})`;
-  const stagingDir = path.join(installerOut, ".bundle-staging");
-
-  await fs.rm(stagingDir, { recursive: true, force: true });
-  await fs.mkdir(stagingDir, { recursive: true });
-  await fs.copyFile(pkgPath, path.join(stagingDir, pkgName));
-  await fs.copyFile(installScript, path.join(stagingDir, "install-mac.sh"));
-  await fs.chmod(path.join(stagingDir, "install-mac.sh"), 0o755);
-
-  // Remove stale DMG if present (hdiutil won't overwrite)
-  await fs.rm(dmgPath, { force: true });
-  const stagingSizeBytes = await getDirectorySizeBytes(stagingDir);
-  const dmgSizeArg = getInstallerDmgSizeArg(stagingSizeBytes);
-
-  try {
-    await createDmgWithRetry(volumeName, stagingDir, dmgSizeArg, dmgPath, arch);
-
-    const stat = await fs.stat(dmgPath);
-    return {
-      type: "installer-bundle",
-      arch,
-      fileName: dmgName,
-      sourcePath: relPath(dmgPath),
-      outputPath: relPath(dmgPath),
-      sizeBytes: stat.size,
-      sha256: await sha256File(dmgPath)
-    };
-  } catch (error) {
-    await fs.rm(dmgPath, { force: true }).catch(() => {});
-    throw error;
-  } finally {
-    await fs.rm(stagingDir, { recursive: true, force: true });
-  }
 }
 
 function resolveInstallerAppPath(arch) {
