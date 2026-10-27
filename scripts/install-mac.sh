@@ -269,7 +269,11 @@ sudo chmod 755 "$SUPPORT_DIR"
 sudo xattr -dr com.apple.quarantine "$SUPPORT_DIR" 2>/dev/null || true
 
 # Copying invalidates the ad-hoc signature macOS requires to run the binary.
-if ! sudo codesign --force --sign - "$SUPPORT_DIR/PangeaDaemon"; then
+# A Developer ID daemon keeps its signature, whose Team ID the app checks.
+if codesign -dv "$SUPPORT_DIR/PangeaDaemon" 2>&1 | grep -Eq '^TeamIdentifier=[A-Z0-9]{10}$' \
+    && codesign --verify --strict "$SUPPORT_DIR/PangeaDaemon" >/dev/null 2>&1; then
+    :
+elif ! sudo codesign --force --sign - "$SUPPORT_DIR/PangeaDaemon"; then
     fail "Could not prepare the background service. Please try installing again, or contact ${SUPPORT_URL}"
 fi
 
