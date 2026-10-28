@@ -8,7 +8,6 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    TARGETED_DEVICE_FAMILY: "1"
     # CI overrides both from the root package.json; see README.md.
     MARKETING_VERSION: "0.0.0"
     CURRENT_PROJECT_VERSION: "1"
@@ -49,6 +48,7 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: org.pangeavpn.app
+        TARGETED_DEVICE_FAMILY: "1"
       configs:
         # Hosted tests resolve core symbols through the app binary, so Debug
         # loads and exports all of them even before app code calls them.
@@ -90,6 +90,7 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: org.pangeavpn.app.tunnel
+        TARGETED_DEVICE_FAMILY: "1"
 
   PangeaVPNTests:
     type: bundle.unit-test
@@ -101,6 +102,7 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: org.pangeavpn.app.tests
+        TARGETED_DEVICE_FAMILY: "1"
         GENERATE_INFOPLIST_FILE: YES
         # The core already lives in the host app; a second Go runtime would clash.
         OTHER_SWIFT_FLAGS: "$(inherited) -Xfrontend -disable-autolink-framework -Xfrontend Pangeacore"
