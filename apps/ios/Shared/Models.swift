@@ -136,3 +136,24 @@ struct AppSettings: Codable, Equatable, Sendable {
         deadDrop = try c.decodeIfPresent(Bool.self, forKey: .deadDrop) ?? d.deadDrop
     }
 }
+
+extension Session {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        email = try c.decode(String.self, forKey: .email)
+        name = try c.decode(String.self, forKey: .name)
+        servers = try c.decodeIfPresent([Server].self, forKey: .servers) ?? []
+    }
+}
+
+extension TunnelConfig {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        address = try c.decode(String.self, forKey: .address)
+        prefixLength = try c.decode(Int.self, forKey: .prefixLength)
+        dns = try c.decodeIfPresent([String].self, forKey: .dns) ?? []
+        mtu = try c.decode(Int.self, forKey: .mtu)
+        serverId = try c.decode(String.self, forKey: .serverId)
+        serverName = try c.decode(String.self, forKey: .serverName)
+    }
+}
