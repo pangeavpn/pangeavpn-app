@@ -12,6 +12,11 @@ final class DeviceLimitTests: XCTestCase {
         XCTAssertTrue(DeviceLimit.isDeviceLimit("device_limit"))
     }
 
+    func testUppercaseMessageMatches() {
+        XCTAssertTrue(DeviceLimit.isDeviceLimit("DEVICE LIMIT REACHED"))
+        XCTAssertTrue(DeviceLimit.isDeviceLimit("DEVICE_LIMIT"))
+    }
+
     func testRejectsUnrelatedMessages() {
         XCTAssertFalse(DeviceLimit.isDeviceLimit("Invalid account number"))
         XCTAssertFalse(DeviceLimit.isDeviceLimit(""))
