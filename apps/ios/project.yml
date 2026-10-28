@@ -1,0 +1,104 @@
+name: PangeaVPN
+
+options:
+  deploymentTarget:
+    iOS: "17.0"
+  developmentLanguage: en
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    TARGETED_DEVICE_FAMILY: "1"
+    # CI overrides both from the root package.json; see README.md.
+    MARKETING_VERSION: "0.0.0"
+    CURRENT_PROJECT_VERSION: "1"
+
+targets:
+  PangeaVPN:
+    type: application
+    platform: iOS
+    sources:
+      - path: PangeaVPN
+      # Optional only until the first shared file lands.
+      - path: Shared
+        optional: true
+    dependencies:
+      - target: PacketTunnel
+      - framework: Frameworks/Pangeacore.xcframework
+        embed: false
+      - sdk: libresolv.tbd
+      - sdk: Security.framework
+    info:
+      path: Generated/PangeaVPN-Info.plist
+      properties:
+        CFBundleDisplayName: PangeaVPN
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSRequiresIPhoneOS: true
+        UILaunchScreen: {}
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+    entitlements:
+      path: Generated/PangeaVPN.entitlements
+      properties:
+        com.apple.developer.networking.networkextension:
+          - packet-tunnel-provider
+        com.apple.security.application-groups:
+          - group.org.pangeavpn.app
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.pangeavpn.app
+      configs:
+        # Hosted tests resolve core symbols through the app binary, so Debug
+        # loads and exports all of them even before app code calls them.
+        Debug:
+          OTHER_LDFLAGS: ["$(inherited)", "-ObjC", "-Wl,-export_dynamic"]
+    scheme:
+      testTargets:
+        - PangeaVPNTests
+
+  PacketTunnel:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: PacketTunnel
+      - path: Shared
+        optional: true
+    dependencies:
+      - framework: Frameworks/Pangeacore.xcframework
+        embed: false
+      - sdk: libresolv.tbd
+      - sdk: Security.framework
+    info:
+      path: Generated/PacketTunnel-Info.plist
+      properties:
+        CFBundleDisplayName: PangeaVPN
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.networkextension.packet-tunnel
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).PacketTunnelProvider
+    entitlements:
+      path: Generated/PacketTunnel.entitlements
+      properties:
+        com.apple.developer.networking.networkextension:
+          - packet-tunnel-provider
+        com.apple.security.application-groups:
+          - group.org.pangeavpn.app
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.pangeavpn.app.tunnel
+
+  PangeaVPNTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: PangeaVPNTests
+    dependencies:
+      - target: PangeaVPN
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.pangeavpn.app.tests
+        GENERATE_INFOPLIST_FILE: YES
+        # The core already lives in the host app; a second Go runtime would clash.
+        OTHER_SWIFT_FLAGS: "$(inherited) -Xfrontend -disable-autolink-framework -Xfrontend Pangeacore"

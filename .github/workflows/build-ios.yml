@@ -1,0 +1,137 @@
+name: Build iOS
+
+on:
+  push:
+    branches:
+      - ios
+      - android
+      - master
+  pull_request:
+    branches:
+      - ios
+      - android
+      - master
+  workflow_dispatch:
+
+concurrency:
+  group: build-ios-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  go-ios:
+    name: Go core for iOS
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: daemon/go.mod
+          cache-dependency-path: daemon/go.sum
+
+      # arm64 is the device and Apple-silicon simulators, amd64 the Intel simulator.
+      - name: Compile-check every iOS arch
+        working-directory: daemon
+        run: |
+          for arch in arm64 amd64; do
+            echo "::group::ios/$arch"
+            GOOS=ios GOARCH=$arch CGO_ENABLED=0 go build -tags with_utls ./mobile/
+            echo "::endgroup::"
+          done
+
+  ios:
+    name: iOS app
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: '1'
+      HOMEBREW_NO_INSTALL_CLEANUP: '1'
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: daemon/go.mod
+          cache-dependency-path: daemon/go.sum
+
+      - name: Install gomobile
+        run: |
+          go install golang.org/x/mobile/cmd/gomobile@latest
+          go install golang.org/x/mobile/cmd/gobind@latest
+          gomobile init
+
+      # Same tags and ldflags as the Android AAR; apps/android/README.md says why.
+      - name: Build Pangeacore.xcframework
+        working-directory: daemon
+        run: |
+          mkdir -p ../apps/ios/Frameworks
+          gomobile bind -target=ios,iossimulator -iosversion=17.0 \
+            -tags=with_utls \
+            -ldflags=-checklinkname=0 \
+            -o ../apps/ios/Frameworks/Pangeacore.xcframework \
+            ./mobile
+
+      - name: Fail if the xcframework is missing
+        run: test -d apps/ios/Frameworks/Pangeacore.xcframework
+
+      - name: Generate the Xcode project
+        working-directory: apps/ios
+        run: |
+          brew install xcodegen
+          xcodegen generate
+
+      # Newest iPhone on a runtime this Xcode can run that also meets the
+      # deployment target; images carry runtimes for more than one Xcode.
+      - name: Pick an iPhone simulator
+        id: sim
+        run: |
+          sdk=$(xcrun --sdk iphonesimulator --show-sdk-version)
+          udid=$(xcrun simctl list devices available -j | jq -r \
+            --arg sdk "$sdk" --arg min 17.0 '
+            def ver: split(".") | map(tonumber);
+            [.devices | to_entries[]
+              | select(.key | test("SimRuntime\\.iOS-"))
+              | .v = (.key | sub(".*SimRuntime\\.iOS-"; "") | gsub("-"; ".") | ver)
+              | select(.v >= ($min | ver) and .v <= ($sdk | ver))]
+            | sort_by(.v) | reverse
+            | [.[].value[] | select(.name | startswith("iPhone"))]
+            | .[0].udid // empty')
+          if [ -z "$udid" ]; then
+            echo "::error::no iPhone simulator for SDK $sdk"
+            xcrun simctl list devices available
+            exit 1
+          fi
+          xcrun simctl list devices available | grep "$udid"
+          echo "udid=$udid" >>"$GITHUB_OUTPUT"
+
+      - name: Unit tests
+        working-directory: apps/ios
+        env:
+          SIM_UDID: ${{ steps.sim.outputs.udid }}
+        run: xcodebuild test -scheme PangeaVPN -destination "id=$SIM_UDID"
+
+      # App Store versions are numeric only, so a prerelease suffix is dropped;
+      # the build number is Android's versionCode rule (0.8.1 -> 801).
+      - name: Read the version
+        id: version
+        run: |
+          version=$(jq -r .version package.json)
+          IFS=. read -r major minor patch <<<"${version%%-*}"
+          patch=${patch:-0}
+          echo "marketing=$major.$minor.$patch" >>"$GITHUB_OUTPUT"
+          echo "build=$((major * 10000 + minor * 100 + patch))" >>"$GITHUB_OUTPUT"
+
+      - name: Unsigned device build
+        working-directory: apps/ios
+        env:
+          MARKETING: ${{ steps.version.outputs.marketing }}
+          BUILD_NUMBER: ${{ steps.version.outputs.build }}
+        run: |
+          xcodebuild build -scheme PangeaVPN -destination generic/platform=iOS \
+            CODE_SIGNING_ALLOWED=NO \
+            MARKETING_VERSION="$MARKETING" \
+            CURRENT_PROJECT_VERSION="$BUILD_NUMBER"

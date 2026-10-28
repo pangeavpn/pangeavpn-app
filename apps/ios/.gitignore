@@ -1,0 +1,7 @@
+PangeaVPN.xcodeproj/
+Generated/
+Frameworks/
+DerivedData/
+build/
+xcuserdata/
+*.xcuserstate
