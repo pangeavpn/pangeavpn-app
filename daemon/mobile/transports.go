@@ -1,4 +1,4 @@
-//go:build android
+//go:build android || ios
 
 package mobile
 
@@ -23,7 +23,7 @@ import (
 // session before the cascade abandons it.
 const transportSessionTimeout = 10 * time.Second
 
-func init() { anytls.ClientMetadata = "pangeavpn-android" }
+func init() { anytls.ClientMetadata = anytlsClientMetadata }
 
 // sessionWaiter and boundPortReporter are the optional transport capabilities
 // declared in daemon/internal/transport, checked by type assertion.
@@ -93,7 +93,7 @@ func (s *starter) StarterFor(profile *state.Profile, kind string) (transport.Sta
 // singBoxAvailability fails these transports closed when the protect socket is
 // missing: their dials would otherwise be captured by the TUN they carry.
 func (s *starter) singBoxAvailability() transport.Availability {
-	if protectServer == nil {
+	if !singBoxProtected() {
 		return transport.Unavailable
 	}
 	return transport.Available

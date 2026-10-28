@@ -1,7 +1,7 @@
-//go:build android
+//go:build android || ios
 
-// Package mobile is the gomobile control+data plane for PangeaVPN Android,
-// porting the desktop control plane and reusing the daemon's transports.
+// Package mobile is the gomobile control+data plane for PangeaVPN on Android
+// and iOS, porting the desktop control plane and reusing its transports.
 package mobile
 
 import (
@@ -280,7 +280,7 @@ func Login(token string) (string, error) {
 	licenseKey = resp.VpnAccessToken
 	mu.Unlock()
 
-	if _, err := registerDevice(ident.pubB64, "Android"); err != nil {
+	if _, err := registerDevice(ident.pubB64, platformName); err != nil {
 		st.Set(keyLicense, "")
 		return "", err
 	}

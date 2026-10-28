@@ -1,4 +1,4 @@
-//go:build android
+//go:build android || ios
 
 package mobile
 
@@ -17,7 +17,6 @@ import (
 
 	"golang.zx2c4.com/wireguard/conn"
 	"golang.zx2c4.com/wireguard/device"
-	"golang.zx2c4.com/wireguard/tun"
 
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/state"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/transport"
@@ -56,6 +55,11 @@ func startTunnel(tunFd int) error {
 		return errors.New("mobile: tunnel already running")
 	}
 
+	tunFd, err := adoptTunFD(tunFd)
+	if err != nil {
+		return fmt.Errorf("adopt tun fd: %w", err)
+	}
+
 	st := newStarter(logs)
 	candidates, err := transport.Select(p.profile, preferred, st)
 	if err != nil {
@@ -74,7 +78,7 @@ func startTunnel(tunFd int) error {
 		logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("trying %s first (last worked on this network)", promoted))
 	}
 
-	tunDev, _, err := tun.CreateUnmonitoredTUNFromFD(tunFd)
+	tunDev, err := openTUN(tunFd)
 	if err != nil {
 		_ = syscall.Close(tunFd)
 		pushStatus(string(state.StateError), err.Error(), p.serverID, p.serverName)

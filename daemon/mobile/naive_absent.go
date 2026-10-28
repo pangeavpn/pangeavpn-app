@@ -1,4 +1,4 @@
-//go:build android && (!arm64 || !naive_cgo)
+//go:build ios || (android && (!arm64 || !naive_cgo))
 
 package mobile
 
