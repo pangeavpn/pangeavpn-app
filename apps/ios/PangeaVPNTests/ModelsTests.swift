@@ -58,6 +58,16 @@ final class ModelsTests: XCTestCase {
         XCTAssertEqual(config.dns, ["1.1.1.1"])
     }
 
+    func testSessionNullServersIsEmpty() throws {
+        let session = try decode(Session.self, #"{"email":"e","name":"n","servers":null}"#)
+        XCTAssertEqual(session.servers, [])
+    }
+
+    func testTunnelConfigNullDnsIsEmpty() throws {
+        let json = #"{"address":"10.0.0.2","prefixLength":32,"dns":null,"mtu":1380,"serverId":"s","serverName":"n"}"#
+        XCTAssertEqual(try decode(TunnelConfig.self, json).dns, [])
+    }
+
     func testSettingsEmptyObjectUsesGoDefaults() throws {
         let settings = try decode(AppSettings.self, "{}")
         XCTAssertEqual(settings.preferredTransport, "auto")
