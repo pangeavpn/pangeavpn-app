@@ -53,6 +53,31 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
+      # Newest iPhone on a runtime between the deployment target and this SDK,
+      # booted early so its slow first boot overlaps the core build.
+      - name: Pick an iPhone simulator
+        id: sim
+        run: |
+          sdk=$(xcrun --sdk iphonesimulator --show-sdk-version)
+          udid=$(xcrun simctl list devices available -j | jq -r \
+            --arg sdk "$sdk" --arg min 17.0 '
+            def ver: split(".") | map(tonumber);
+            [.devices | to_entries[]
+              | select(.key | test("SimRuntime\\.iOS-"))
+              | .v = (.key | sub(".*SimRuntime\\.iOS-"; "") | gsub("-"; ".") | ver)
+              | select(.v >= ($min | ver) and .v <= ($sdk | ver))]
+            | sort_by(.v) | reverse
+            | [.[].value[] | select(.name | startswith("iPhone"))]
+            | .[0].udid // empty')
+          if [ -z "$udid" ]; then
+            echo "::error::no iPhone simulator for SDK $sdk"
+            xcrun simctl list devices available
+            exit 1
+          fi
+          xcrun simctl list devices available | grep "$udid"
+          echo "udid=$udid" >>"$GITHUB_OUTPUT"
+          nohup xcrun simctl boot "$udid" >/dev/null 2>&1 &
+
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version-file: daemon/go.mod
@@ -84,35 +109,13 @@ jobs:
           brew install xcodegen
           xcodegen generate
 
-      # Newest iPhone on a runtime this Xcode can run that also meets the
-      # deployment target; images carry runtimes for more than one Xcode.
-      - name: Pick an iPhone simulator
-        id: sim
-        run: |
-          sdk=$(xcrun --sdk iphonesimulator --show-sdk-version)
-          udid=$(xcrun simctl list devices available -j | jq -r \
-            --arg sdk "$sdk" --arg min 17.0 '
-            def ver: split(".") | map(tonumber);
-            [.devices | to_entries[]
-              | select(.key | test("SimRuntime\\.iOS-"))
-              | .v = (.key | sub(".*SimRuntime\\.iOS-"; "") | gsub("-"; ".") | ver)
-              | select(.v >= ($min | ver) and .v <= ($sdk | ver))]
-            | sort_by(.v) | reverse
-            | [.[].value[] | select(.name | startswith("iPhone"))]
-            | .[0].udid // empty')
-          if [ -z "$udid" ]; then
-            echo "::error::no iPhone simulator for SDK $sdk"
-            xcrun simctl list devices available
-            exit 1
-          fi
-          xcrun simctl list devices available | grep "$udid"
-          echo "udid=$udid" >>"$GITHUB_OUTPUT"
-
       - name: Unit tests
         working-directory: apps/ios
         env:
           SIM_UDID: ${{ steps.sim.outputs.udid }}
-        run: xcodebuild test -scheme PangeaVPN -destination "id=$SIM_UDID"
+        run: |
+          xcrun simctl bootstatus "$SIM_UDID" -b
+          xcodebuild test -scheme PangeaVPN -destination "id=$SIM_UDID"
 
       # App Store versions are numeric only, so a prerelease suffix is dropped;
       # the build number is Android's versionCode rule (0.8.1 -> 801).
