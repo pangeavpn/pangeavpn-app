@@ -27,6 +27,7 @@ targets:
       - framework: Frameworks/Pangeacore.xcframework
         embed: false
       - sdk: libresolv.tbd
+      - sdk: Network.framework
       - sdk: Security.framework
     info:
       path: Generated/PangeaVPN-Info.plist
@@ -68,6 +69,7 @@ targets:
       - framework: Frameworks/Pangeacore.xcframework
         embed: false
       - sdk: libresolv.tbd
+      - sdk: Network.framework
       - sdk: Security.framework
     info:
       path: Generated/PacketTunnel-Info.plist
