@@ -79,12 +79,25 @@ final class SessionStoreTests: XCTestCase {
         core.loginResult = .failure(CoreError(message: "device_limit"))
         let store = makeStore(core)
         await store.login("abcd-efgh")
+        XCTAssertTrue(store.showDeviceLimit)
         core.loginResult = .success(signedIn)
         await store.retryLogin()
         let token = AccountNumber.normalize("abcd-efgh")
         XCTAssertEqual(core.calls.filter { $0.hasPrefix("login(") }, ["login(\(token))", "login(\(token))"])
         XCTAssertFalse(store.showDeviceLimit)
         XCTAssertEqual(store.session, signedIn)
+    }
+
+    func testRetryFailingForAnotherReasonStaysOnTheDeviceLimitScreen() async {
+        let core = FakeCore()
+        core.loginResult = .failure(CoreError(message: "device_limit"))
+        let store = makeStore(core)
+        await store.login("ABCD-EFGH")
+        core.loginResult = .failure(CoreError(message: "mobile: hub unreachable"))
+        await store.retryLogin()
+        XCTAssertTrue(store.showDeviceLimit)
+        XCTAssertEqual(store.loginError, "mobile: hub unreachable")
+        XCTAssertNil(store.session)
     }
 
     func testRemoveDeviceRefreshesList() async {

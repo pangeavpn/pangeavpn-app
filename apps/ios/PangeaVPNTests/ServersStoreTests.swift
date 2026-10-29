@@ -22,6 +22,15 @@ final class ServersStoreTests: XCTestCase {
         XCTAssertNil(store.error)
     }
 
+    func testSelectKeepsThePickWhenSavingFails() async {
+        let core = FakeCore()
+        core.setConfigResult = .failure(CoreError(message: "mobile: keychain unavailable"))
+        let store = ServersStore(core: core)
+        await store.select(server("us-1"))
+        XCTAssertEqual(store.selected, server("us-1"))
+        XCTAssertEqual(store.error, "mobile: keychain unavailable")
+    }
+
     func testSelectKeepsTheOtherStoredSettings() async {
         let core = FakeCore()
         var current = AppSettings()

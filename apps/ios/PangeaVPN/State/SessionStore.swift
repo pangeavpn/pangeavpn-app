@@ -130,6 +130,7 @@ final class SessionStore {
         }
     }
 
+    // Other errors leave showDeviceLimit alone: a failed retry stays on that screen, which shows loginError.
     private func showLoginFailure(_ message: String) {
         if DeviceLimit.isDeviceLimit(message) {
             showDeviceLimit = true
