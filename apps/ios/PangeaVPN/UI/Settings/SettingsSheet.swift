@@ -251,6 +251,7 @@ private struct CommittedField: View {
 }
 
 #if DEBUG
+@MainActor
 private func previewSheet(error: String? = nil) -> some View {
     let core = FakeCore()
     let settings = SettingsStore(core: core)
