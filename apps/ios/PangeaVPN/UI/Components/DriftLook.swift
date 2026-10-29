@@ -70,8 +70,31 @@ struct DriftTween {
 
     private static func mix(_ a: Double, _ b: Double, _ t: Double) -> Double { a + (b - a) * t }
 
-    private static func ease(_ raw: Double) -> Double {
-        let t = min(max(raw, 0), 1)
-        return t * t * (3 - 2 * t)
+    static func ease(_ raw: Double) -> Double {
+        let p = min(max(raw, 0), 1)
+        var t = p
+        for _ in 0..<8 {
+            let err = bezier(t, 0.4, 0.2) - p
+            let slope = bezierSlope(t, 0.4, 0.2)
+            if abs(err) < 1e-7 { return bezier(t, 0, 1) }
+            if slope < 1e-6 { break }
+            t = min(max(t - err / slope, 0), 1)
+        }
+        var lo = 0.0, hi = 1.0
+        for _ in 0..<40 {
+            t = (lo + hi) / 2
+            if bezier(t, 0.4, 0.2) < p { lo = t } else { hi = t }
+        }
+        return bezier(t, 0, 1)
+    }
+
+    private static func bezier(_ t: Double, _ a: Double, _ b: Double) -> Double {
+        let u = 1 - t
+        return 3 * u * u * t * a + 3 * u * t * t * b + t * t * t
+    }
+
+    private static func bezierSlope(_ t: Double, _ a: Double, _ b: Double) -> Double {
+        let u = 1 - t
+        return 3 * u * u * a + 6 * u * t * (b - a) + 3 * t * t * (1 - b)
     }
 }

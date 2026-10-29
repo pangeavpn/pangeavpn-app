@@ -17,6 +17,16 @@ private struct Plate {
     let ridge: Path?
     let stipple: [CGPoint]
     let drift: Drift
+    let center: CGPoint
+
+    init(outline: Path, ridge: Path?, stipple: [CGPoint], drift: Drift) {
+        self.outline = outline
+        self.ridge = ridge
+        self.stipple = stipple
+        self.drift = drift
+        let bounds = outline.boundingRect
+        center = CGPoint(x: bounds.midX, y: bounds.midY)
+    }
 }
 
 private func points(_ raw: [Pt]) -> [CGPoint] {
@@ -138,12 +148,11 @@ private func drawOrbit(_ gc: GraphicsContext, tint: Color, alpha: Double, angle:
 }
 
 private func drawPlate(_ gc: GraphicsContext, _ plate: Plate, tint: Color, alpha: Double, spread: Double) {
-    let bounds = plate.outline.boundingRect
     var moved = gc
     moved.translateBy(x: plate.drift.dx * spread, y: plate.drift.dy * spread)
-    moved.translateBy(x: bounds.midX, y: bounds.midY)
+    moved.translateBy(x: plate.center.x, y: plate.center.y)
     moved.rotate(by: .degrees(plate.drift.degrees * spread))
-    moved.translateBy(x: -bounds.midX, y: -bounds.midY)
+    moved.translateBy(x: -plate.center.x, y: -plate.center.y)
 
     moved.fill(plate.outline, with: .color(tint.opacity(0.05 * alpha)))
     moved.stroke(

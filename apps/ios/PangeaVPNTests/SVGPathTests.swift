@@ -26,4 +26,19 @@ final class SVGPathTests: XCTestCase {
             XCTAssertTrue(viewport.contains(bounds))
         }
     }
+
+    func testOddNumberCountDropsTheDanglingValue() {
+        let path = SVGPath.parse("M 0 0 L 10 0 L 10")
+        XCTAssertEqual(path.boundingRect, CGRect(x: 0, y: 0, width: 10, height: 0))
+    }
+
+    func testTrailingCommandAddsNoPoint() {
+        let path = SVGPath.parse("M 0 0 L 10 0 L")
+        XCTAssertEqual(path.boundingRect, CGRect(x: 0, y: 0, width: 10, height: 0))
+    }
+
+    func testNumbersAfterCloseDoNotLeak() {
+        let path = SVGPath.parse("M 0 0 L 10 0 L 10 Z 5 5")
+        XCTAssertEqual(path.boundingRect, CGRect(x: 0, y: 0, width: 10, height: 0))
+    }
 }
