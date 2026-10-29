@@ -23,27 +23,33 @@ type storedIdentity struct {
 	Pub  string `json:"pub"`
 }
 
-// loadIdentity returns the previously persisted identity, or nil if none is
-// stored yet. A corrupt stored value is treated the same as absent: Login
-// will generate and persist a fresh identity.
-func loadIdentity(s SecretStore) *identityKeyPair {
-	raw := s.Get(keyIdentity)
+// parseIdentity decodes a stored identity, nil when none is stored. Callers
+// treat a corrupt one as absent, so Login generates a fresh identity.
+func parseIdentity(raw string) (*identityKeyPair, error) {
 	if raw == "" {
-		return nil
+		return nil, nil
 	}
 	var stored storedIdentity
 	if err := json.Unmarshal([]byte(raw), &stored); err != nil {
-		return nil
+		return nil, fmt.Errorf("decode stored identity: %w", err)
 	}
 	privRaw, err := base64.StdEncoding.DecodeString(stored.Priv)
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("decode stored identity key: %w", err)
 	}
 	priv, err := ecdh.X25519().NewPrivateKey(privRaw)
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("decode stored identity key: %w", err)
 	}
-	return &identityKeyPair{priv: priv, pubB64: stored.Pub}
+	return &identityKeyPair{priv: priv, pubB64: stored.Pub}, nil
+}
+
+// publicKey is "" for a missing identity, so two loads compare without nil checks.
+func (k *identityKeyPair) publicKey() string {
+	if k == nil {
+		return ""
+	}
+	return k.pubB64
 }
 
 func generateIdentity() (*identityKeyPair, error) {

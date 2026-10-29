@@ -45,7 +45,6 @@ func TestNormalizeCustomDNS(t *testing.T) {
 		{"drops hostnames", []string{"dns.example.com"}, []string{}},
 		{"drops resolvers behind the tunnel", []string{"10.0.0.1", "192.168.1.1", "172.20.0.1", "100.64.0.1",
 			"169.254.1.1", "0.1.2.3", "224.0.0.1", "255.255.255.255", "9.9.9.9"}, []string{"9.9.9.9"}},
-		{"keeps loopback for a local proxy", []string{"127.0.0.1"}, []string{"127.0.0.1"}},
 		{"keeps the edges of private ranges", []string{"172.15.255.255", "172.32.0.1"}, []string{"172.15.255.255", "172.32.0.1"}},
 		{"empty", []string{}, []string{}},
 	}
@@ -59,6 +58,25 @@ func TestNormalizeCustomDNS(t *testing.T) {
 				if got[i] != tt.want[i] {
 					t.Fatalf("got %v, want %v", got, tt.want)
 				}
+			}
+		})
+	}
+}
+
+func TestNormalizeCustomDNSForLoopback(t *testing.T) {
+	in := []string{"127.0.0.1", "127.8.9.10", "::1", "9.9.9.9"}
+	tests := []struct {
+		name          string
+		allowLoopback bool
+		want          []string
+	}{
+		{"kept where a local proxy can run", true, []string{"127.0.0.1", "127.8.9.10", "9.9.9.9"}},
+		{"dropped where none can", false, []string{"9.9.9.9"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := normalizeCustomDNSFor(in, tt.allowLoopback); strings.Join(got, ",") != strings.Join(tt.want, ",") {
+				t.Fatalf("got %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -102,6 +120,17 @@ func TestDecodeConfigFallsBackOnGarbage(t *testing.T) {
 	got := decodeConfig("{not json")
 	if got.PreferredTransport != "auto" || got.MTU != mtuDefault {
 		t.Fatalf("got %+v, want defaults", got)
+	}
+}
+
+func TestParseConfigReportsOnlyUnreadableBlobs(t *testing.T) {
+	if got, err := parseConfig("{not json"); err == nil || got.MTU != mtuDefault {
+		t.Fatalf("garbage: got %+v, %v; want defaults and an error", got, err)
+	}
+	for _, raw := range []string{"", "  ", `{"mtu":9000,"preferredTransport":"telepathy"}`} {
+		if _, err := parseConfig(raw); err != nil {
+			t.Errorf("parseConfig(%q) = %v; only a decode failure is an error", raw, err)
+		}
 	}
 }
 

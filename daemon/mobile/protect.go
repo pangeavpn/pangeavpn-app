@@ -2,10 +2,8 @@
 
 package mobile
 
-// Every socket that must leave the device outside the tunnel has to go through
-// VpnService.protect(), or the TUN's default route captures the very traffic
-// the transport exists to carry. Cloak takes a Go callback directly; the
-// sing-box transports take a unix socket path instead, served here.
+// Sockets leaving outside the tunnel need VpnService.protect(). Cloak takes a
+// Go callback; the sing-box transports take the unix socket served here.
 
 import (
 	"fmt"
@@ -23,9 +21,8 @@ const protectSocketName = "protect.sock"
 
 var protectServer *protect.Server
 
-// startProtectServer publishes the protect socket and points every sing-box
-// transport at it. Failing to open it would leave those transports dialing
-// into the tunnel, so the error is surfaced rather than swallowed.
+// startProtectServer points every sing-box transport at the protect socket. A
+// failure is surfaced: those transports would otherwise dial into the tunnel.
 func startProtectServer(filesDir string, logs *state.LogStore) error {
 	srv, err := protect.Listen(filepath.Join(filesDir, protectSocketName), protectFD)
 	if err != nil {

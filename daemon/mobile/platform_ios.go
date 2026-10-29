@@ -16,7 +16,7 @@ const (
 	platformName         = "iOS"
 	anytlsClientMetadata = "pangeavpn-ios"
 
-	// The packet tunnel extension is jetsammed at 50 MiB resident.
+	// Jetsam kills the packet tunnel extension at a 50 MiB phys_footprint.
 	iosMemoryLimit = 32 << 20
 )
 
@@ -35,6 +35,7 @@ func adoptTunFD(fd int) (int, error) {
 	return dup, nil
 }
 
+// CreateTUNFromFile closes the file on every error, so a failure needs no close here.
 func openTUN(fd int) (tun.Device, error) {
 	return tun.CreateTUNFromFile(os.NewFile(uintptr(fd), "/dev/tun"), 0)
 }

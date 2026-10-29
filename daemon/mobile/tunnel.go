@@ -2,8 +2,7 @@
 
 package mobile
 
-// Start/Stop bring up the data plane on the TUN fd handed over by
-// VpnService.Builder.establish(), walking the transport cascade.
+// Start/Stop bring up the data plane on the host's TUN fd, walking the transport cascade.
 
 import (
 	"context"
@@ -49,15 +48,19 @@ func startTunnel(tunFd int) error {
 	mu.Unlock()
 
 	if p == nil {
+		discardTunFD(tunFd)
 		return errors.New("mobile: no prepared tunnel; call Prepare first")
 	}
 	if active != nil {
+		discardTunFD(tunFd)
 		return errors.New("mobile: tunnel already running")
 	}
 
 	tunFd, err := adoptTunFD(tunFd)
 	if err != nil {
-		return fmt.Errorf("adopt tun fd: %w", err)
+		err = fmt.Errorf("adopt tun fd: %w", err)
+		pushStatus(string(state.StateError), err.Error(), p.serverID, p.serverName)
+		return err
 	}
 
 	st := newStarter(logs)
@@ -78,9 +81,9 @@ func startTunnel(tunFd int) error {
 		logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("trying %s first (last worked on this network)", promoted))
 	}
 
+	// openTUN has already closed the fd when it fails.
 	tunDev, err := openTUN(tunFd)
 	if err != nil {
-		_ = syscall.Close(tunFd)
 		pushStatus(string(state.StateError), err.Error(), p.serverID, p.serverName)
 		return fmt.Errorf("create tun: %w", err)
 	}
@@ -123,6 +126,14 @@ func startTunnel(tunFd int) error {
 	detail := "no transport could establish a tunnel: " + strings.Join(failures, "; ")
 	pushStatus(string(state.StateError), detail, p.serverID, p.serverName)
 	return errors.New("mobile: " + detail)
+}
+
+// discardTunFD releases a refused Start's fd: Android hands ownership to Go, so
+// it closes there; on iOS it only closes the dup, leaving the host's fd open.
+func discardTunFD(fd int) {
+	if owned, err := adoptTunFD(fd); err == nil {
+		_ = syscall.Close(owned)
+	}
 }
 
 // bringUpOver starts one transport and proves it carries a real WireGuard

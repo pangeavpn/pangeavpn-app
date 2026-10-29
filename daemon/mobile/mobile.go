@@ -11,7 +11,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -63,6 +62,7 @@ var (
 	// preferredTransport is "" / "auto" for the cascade, or one transport kind.
 	preferredTransport string
 	transportMem       *state.TransportMemoryStore
+	transportMemPath   string
 	settings           = defaultConfig()
 
 	activeTunnel *tunnelRuntime
@@ -79,11 +79,11 @@ type NetworkKeyProvider interface{ NetworkKey() string }
 // license key / device identity. Call once before any other export.
 func Init(s SecretStore, p SocketProtector, sk StatusSink, nk NetworkKeyProvider, filesDir string) {
 	logs := state.NewLogStore(500)
-	memory, err := state.NewTransportMemoryStore(filepath.Join(filesDir, "transport-memory.json"))
+	memoryPath := transportMemoryPath(filesDir)
+	memory := openTransportMemory(memoryPath, logs)
+	loaded, err := readStoredState(s)
 	if err != nil {
-		// Best-effort cache: losing it only forfeits trying the winner first.
-		logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("transport memory unavailable: %v", err))
-		memory = nil
+		logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("ignoring unreadable stored state: %v", err))
 	}
 
 	mu.Lock()
@@ -91,11 +91,12 @@ func Init(s SecretStore, p SocketProtector, sk StatusSink, nk NetworkKeyProvider
 	protector = p
 	sink = sk
 	netKeys = nk
-	licenseKey = strings.TrimSpace(s.Get(keyLicense))
-	identity = loadIdentity(s)
+	licenseKey = loaded.licenseKey
+	identity = loaded.identity
 	wgLogs = logs
 	transportMem = memory
-	settings = decodeConfig(s.Get(keyConfig))
+	transportMemPath = memoryPath
+	settings = loaded.settings
 	preferredTransport = settings.PreferredTransport
 	currentStatus = statusJSON{State: string(state.StateDisconnected)}
 	mu.Unlock()
@@ -327,11 +328,13 @@ func RestoreSession() (string, error) {
 	return string(b), nil
 }
 
-// Logout clears the stored license key and in-memory session state. The
-// device identity is kept so a later Login reuses the same device slot.
+// Logout clears the stored license key, session state and transport history.
+// The device identity is kept so a later Login reuses the same device slot.
 func Logout() {
 	mu.Lock()
 	st := store
+	memory := transportMem
+	logs := wgLogs
 	licenseKey = ""
 	servers = nil
 	prepared = nil
@@ -339,6 +342,12 @@ func Logout() {
 
 	if st != nil {
 		st.Set(keyLicense, "")
+	}
+	// The history records which networks the tunnel got through on.
+	if memory != nil {
+		if err := memory.Clear(); err != nil {
+			logAdd(logs, state.LogWarn, fmt.Sprintf("failed to clear transport memory: %v", err))
+		}
 	}
 }
 
@@ -501,13 +510,14 @@ func Prepare(serverID string) (string, error) {
 	return string(b), nil
 }
 
-// Start brings up cloak + wireguard-go on the TUN fd handed over by
-// VpnService (already detached, i.e. owned by this call).
+// Start brings up the tunnel on the host's TUN fd. Android hands the fd over;
+// iOS keeps it and Go works on a dup.
 func Start(tunFd int) error {
 	return startTunnel(tunFd)
 }
 
-// Stop tears down the running tunnel, if any.
+// Stop tears down the running tunnel, if any. The prepared config survives, so
+// Start can run again without another Prepare.
 func Stop() {
 	stopTunnel()
 }

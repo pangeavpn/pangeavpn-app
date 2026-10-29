@@ -5,7 +5,9 @@ package mobile
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/netip"
+	"runtime"
 	"strconv"
 	"strings"
 )
@@ -54,9 +56,17 @@ func normalizeMTU(value int) int {
 	return value
 }
 
+// loopbackDNSAllowed: Android and desktop can run a local DNS proxy, but no iOS
+// app can keep one listening, so there a loopback resolver fails every lookup.
+const loopbackDNSAllowed = runtime.GOOS != "ios"
+
 // normalizeCustomDNS keeps only well-formed, de-duplicated IPv4 literals. The
 // WireGuard data plane takes IPv4 DNS only.
 func normalizeCustomDNS(values []string) []string {
+	return normalizeCustomDNSFor(values, loopbackDNSAllowed)
+}
+
+func normalizeCustomDNSFor(values []string, allowLoopback bool) []string {
 	normalized := make([]string, 0, len(values))
 	seen := make(map[string]struct{}, len(values))
 	for _, raw := range values {
@@ -64,7 +74,7 @@ func normalizeCustomDNS(values []string) []string {
 			return r == ',' || r == ' ' || r == '\t' || r == '\n'
 		}) {
 			address, ok := parseIPv4(candidate)
-			if !ok || unroutableDNS(address) {
+			if !ok || unroutableDNS(address) || (!allowLoopback && loopbackDNS(address)) {
 				continue
 			}
 			if _, dup := seen[address]; dup {
@@ -77,8 +87,8 @@ func normalizeCustomDNS(values []string) []string {
 	return normalized
 }
 
-// unroutableDNSRanges can never hold a resolver behind the tunnel. Loopback
-// stays allowed: a local proxy works.
+// unroutableDNSRanges can never hold a resolver behind the tunnel. Loopback is
+// judged per platform by loopbackDNSAllowed.
 var unroutableDNSRanges = []netip.Prefix{
 	netip.MustParsePrefix("0.0.0.0/8"),
 	netip.MustParsePrefix("10.0.0.0/8"),
@@ -100,6 +110,12 @@ func unroutableDNS(address string) bool {
 		}
 	}
 	return false
+}
+
+// loopbackDNS covers all of 127.0.0.0/8; ::1 never gets here, since only IPv4 is kept.
+func loopbackDNS(address string) bool {
+	ip, err := netip.ParseAddr(address)
+	return err != nil || ip.IsLoopback()
 }
 
 // parseIPv4 accepts dotted-quad only, rejecting the shorthand forms net.ParseIP
@@ -162,15 +178,21 @@ func isKnownTransportChoice(kind string) bool {
 // decodeConfig reads a stored blob, falling back to defaults on anything
 // unreadable — settings are a convenience, never a reason to fail to connect.
 func decodeConfig(raw string) config {
+	parsed, _ := parseConfig(raw)
+	return parsed
+}
+
+// parseConfig is decodeConfig that also reports a blob it could not read.
+func parseConfig(raw string) (config, error) {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
-		return defaultConfig()
+		return defaultConfig(), nil
 	}
 	parsed := defaultConfig()
 	if err := json.Unmarshal([]byte(trimmed), &parsed); err != nil {
-		return defaultConfig()
+		return defaultConfig(), fmt.Errorf("decode stored config: %w", err)
 	}
-	return parsed.sanitize()
+	return parsed.sanitize(), nil
 }
 
 func encodeConfig(c config) (string, error) {
