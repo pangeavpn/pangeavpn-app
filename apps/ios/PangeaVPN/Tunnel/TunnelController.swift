@@ -37,13 +37,18 @@ final class TunnelController: TunnelControlling {
     }
 
     func connect(serverId: String, killSwitch: Bool, allowLan: Bool) async throws {
-        let manager = try await loadManager()
+        let manager = try await reloadManager()
         Self.configure(manager, killSwitch: killSwitch, allowLan: allowLan)
-        try await manager.saveToPreferences()
-        try await manager.loadFromPreferences()
-        observe(manager.connection)
-        stopRequested = false
-        try manager.connection.startVPNTunnel(options: [TunnelStart.serverIdOption: serverId as NSString])
+        do {
+            try await manager.saveToPreferences()
+            try await manager.loadFromPreferences()
+            observe(manager.connection)
+            stopRequested = false
+            try manager.connection.startVPNTunnel(options: [TunnelStart.serverIdOption: serverId as NSString])
+        } catch {
+            forgetManager()
+            throw error
+        }
     }
 
     func disconnect() async {
@@ -70,12 +75,32 @@ final class TunnelController: TunnelControlling {
 
     private func loadManager() async throws -> NETunnelProviderManager {
         if let manager { return manager }
-        let saved = try await NETunnelProviderManager.loadAllFromPreferences()
+        let found = try await Self.findOrCreateManager()
         // Another caller may have attached a manager while this load was in flight.
         if let manager { return manager }
-        let chosen = saved.first { Self.isOurs($0) } ?? NETunnelProviderManager()
-        attach(chosen)
-        return chosen
+        attach(found)
+        return found
+    }
+
+    // Another VPN app or Settings may have changed the saved copy, and saving a stale one fails.
+    private func reloadManager() async throws -> NETunnelProviderManager {
+        let found = try await Self.findOrCreateManager()
+        attach(found)
+        return found
+    }
+
+    private static func findOrCreateManager() async throws -> NETunnelProviderManager {
+        let saved = try await NETunnelProviderManager.loadAllFromPreferences()
+        return saved.first { isOurs($0) } ?? NETunnelProviderManager()
+    }
+
+    // Reloads in the background so status keeps tracking the saved configuration.
+    private func forgetManager() {
+        if let observer { NotificationCenter.default.removeObserver(observer) }
+        observer = nil
+        stopPolling()
+        manager = nil
+        Task { [weak self] in await self?.loadExisting() }
     }
 
     private static func isOurs(_ manager: NETunnelProviderManager) -> Bool {
