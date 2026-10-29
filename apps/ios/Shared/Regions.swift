@@ -37,7 +37,6 @@ enum Regions {
         return Array(([selected] + regions.filter { $0.key != selectedKey }).prefix(count))
     }
 
-    // The in-session pick if still listed, else the last connected server, else none.
     static func resolveSelection(visible: [Server], previous: String, lastServerId: String?) -> String {
         if visible.contains(where: { $0.id == previous }) { return previous }
         if let lastServerId, visible.contains(where: { $0.id == lastServerId }) { return lastServerId }
