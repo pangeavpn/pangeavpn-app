@@ -49,6 +49,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: org.pangeavpn.app
         TARGETED_DEVICE_FAMILY: "1"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
       configs:
         # Hosted tests resolve core symbols through the app binary, so Debug
         # loads and exports all of them even before app code calls them.
