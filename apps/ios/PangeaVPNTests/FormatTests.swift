@@ -44,13 +44,14 @@ final class FormatTests: XCTestCase {
     }
 
     func testTransportStatus() {
-        XCTAssertEqual(TransportLabels.status("cloak"), "Obfuscation: Cloak")
-        XCTAssertEqual(TransportLabels.status("reality"), "Obfuscation: VLESS+REALITY")
-        XCTAssertEqual(TransportLabels.status("shadowsocks"), "Obfuscation: Shadowsocks")
-        XCTAssertEqual(TransportLabels.status("hysteria2"), "Obfuscation: Hysteria2")
-        XCTAssertEqual(TransportLabels.status("anytls"), "Obfuscation: AnyTLS")
-        XCTAssertEqual(TransportLabels.status("snowflake"), "Obfuscation: Snowflake")
-        XCTAssertEqual(TransportLabels.status("naive"), "Obfuscation: NaiveProxy")
+        XCTAssertEqual(TransportLabels.status("cloak"), "Cloak")
+        XCTAssertEqual(TransportLabels.status("reality"), "VLESS+REALITY")
+        XCTAssertEqual(TransportLabels.status("shadowsocks"), "Shadowsocks")
+        XCTAssertEqual(TransportLabels.status("hysteria2"), "Hysteria2")
+        XCTAssertEqual(TransportLabels.status("anytls"), "AnyTLS")
+        XCTAssertEqual(TransportLabels.status("snowflake"), "Snowflake")
+        XCTAssertEqual(TransportLabels.status("naive"), "NaiveProxy")
+        XCTAssertEqual(TransportLabels.status("wireguard"), "WireGuard")
         XCTAssertEqual(TransportLabels.status(nil), "")
         XCTAssertEqual(TransportLabels.status("bogus"), "")
     }

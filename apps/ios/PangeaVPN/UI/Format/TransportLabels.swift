@@ -1,17 +1,15 @@
 import Foundation
 
 enum TransportLabels {
+    // Product names, so they read the same in every language, as on desktop.
+    private static let names: [String: String] = [
+        "cloak": "Cloak", "reality": "VLESS+REALITY", "shadowsocks": "Shadowsocks",
+        "hysteria2": "Hysteria2", "anytls": "AnyTLS", "snowflake": "Snowflake",
+        "naive": "NaiveProxy", "wireguard": "WireGuard",
+    ]
+
     static func status(_ activeTransport: String?) -> String {
-        switch activeTransport {
-        case "cloak": return String(localized: "transport_status_cloak", defaultValue: "Obfuscation: Cloak")
-        case "reality": return String(localized: "transport_status_reality", defaultValue: "Obfuscation: VLESS+REALITY")
-        case "shadowsocks": return String(localized: "transport_status_shadowsocks", defaultValue: "Obfuscation: Shadowsocks")
-        case "hysteria2": return String(localized: "transport_status_hysteria2", defaultValue: "Obfuscation: Hysteria2")
-        case "anytls": return String(localized: "transport_status_anytls", defaultValue: "Obfuscation: AnyTLS")
-        case "snowflake": return String(localized: "transport_status_snowflake", defaultValue: "Obfuscation: Snowflake")
-        case "naive": return String(localized: "transport_status_naive", defaultValue: "Obfuscation: NaiveProxy")
-        default: return String(localized: "transport_status_none", defaultValue: "")
-        }
+        activeTransport.flatMap { names[$0] } ?? ""
     }
 
     static func choice(_ transport: Transport) -> String {
