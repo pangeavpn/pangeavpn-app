@@ -125,6 +125,7 @@ struct LoginView: View {
 }
 
 #if DEBUG
+@MainActor
 private func previewStores(error: String?) -> (SessionStore, SettingsStore) {
     let core = FakeCore()
     let session = SessionStore(core: core, tunnel: FakeTunnel())
