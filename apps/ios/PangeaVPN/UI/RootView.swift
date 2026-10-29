@@ -57,7 +57,7 @@ struct RootView: View {
     }
 }
 
-private struct SplashView: View {
+struct SplashView: View {
     var body: some View {
         BrandLogo(size: 72)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
