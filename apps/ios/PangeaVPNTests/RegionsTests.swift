@@ -37,4 +37,51 @@ final class RegionsTests: XCTestCase {
     func testEmptyInputGivesNoRegions() {
         XCTAssertTrue(Regions.group([]).isEmpty)
     }
+
+    private var threeRegions: [Region] {
+        Regions.group([server("eu-1"), server("us-1"), server("ap-1")])
+    }
+
+    func testRegionOfServerFindsTheOwningRegion() {
+        let regions = Regions.group([server("eu-1"), server("us-1")])
+        XCTAssertEqual(Regions.region(of: "us-1", in: regions)?.key, "us")
+        XCTAssertNil(Regions.region(of: "nope", in: regions))
+    }
+
+    func testSlotsTakeTheLeadingRegionsWhenNothingIsSelected() {
+        XCTAssertEqual(Regions.slots(threeRegions, selectedKey: nil).map(\.key), ["eu", "us"])
+    }
+
+    func testSlotsLeaveTheLeadingRegionsAloneWhenTheSelectionIsAlreadyThere() {
+        XCTAssertEqual(Regions.slots(threeRegions, selectedKey: "us").map(\.key), ["eu", "us"])
+    }
+
+    func testASelectionOutsideTheLeadingRegionsIsPulledIntoTheFirstSlot() {
+        XCTAssertEqual(Regions.slots(threeRegions, selectedKey: "ap").map(\.key), ["ap", "eu"])
+    }
+
+    func testASelectionThatNoLongerExistsDoesNotDisturbTheSlots() {
+        XCTAssertEqual(Regions.slots(threeRegions, selectedKey: "gone").map(\.key), ["eu", "us"])
+    }
+
+    func testSlotCountIsTwoAndCanBeOverridden() {
+        XCTAssertEqual(Regions.slotCount, 2)
+        XCTAssertEqual(Regions.slots(threeRegions, selectedKey: "ap", count: 1).map(\.key), ["ap"])
+    }
+
+    func testSelectionKeepsTheInSessionPickWhileItIsListed() {
+        let visible = [server("a"), server("b")]
+        XCTAssertEqual(Regions.resolveSelection(visible: visible, previous: "b", lastServerId: "a"), "b")
+    }
+
+    func testSelectionFallsBackToTheLastConnectedServer() {
+        let visible = [server("a"), server("b")]
+        XCTAssertEqual(Regions.resolveSelection(visible: visible, previous: "gone", lastServerId: "a"), "a")
+    }
+
+    func testSelectionEmptiesWhenNeitherIsListed() {
+        let visible = [server("a")]
+        XCTAssertEqual(Regions.resolveSelection(visible: visible, previous: "gone", lastServerId: "also-gone"), "")
+        XCTAssertEqual(Regions.resolveSelection(visible: visible, previous: "", lastServerId: nil), "")
+    }
 }

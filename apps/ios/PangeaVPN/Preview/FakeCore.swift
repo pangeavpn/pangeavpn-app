@@ -1,7 +1,8 @@
 #if DEBUG
 import Foundation
 
-final class FakeCore: CoreBridge {
+// Results are scripted before use; the lock covers the logs, which core worker threads write.
+final class FakeCore: CoreBridge, @unchecked Sendable {
     var restoreResult: Result<Session, CoreError> = .failure(CoreError(message: "not authenticated"))
     var loginResult: Result<Session, CoreError> = .failure(CoreError(message: "not authenticated"))
     var serversResult: Result<[Server], CoreError> = .success([])
@@ -11,13 +12,25 @@ final class FakeCore: CoreBridge {
     var prepareResult: Result<TunnelConfig, CoreError> = .failure(CoreError(message: "no server"))
     var startResult: Result<Void, CoreError> = .success(())
     var configResult: Result<AppSettings, CoreError> = .success(AppSettings())
+    // nil echoes the input back, as Go does for settings that need no correction.
+    var setConfigResult: Result<AppSettings, CoreError>?
     var hubMethodResult: Result<AppSettings, CoreError> = .success(AppSettings())
     var currentState = TunnelStatus.disconnected
 
-    private(set) var calls: [String] = []
+    private let lock = NSLock()
+    private var entries: [String] = []
+    private var saved: [AppSettings] = []
+
+    var calls: [String] { lock.withLock { entries } }
+
+    var savedSettings: [AppSettings] { lock.withLock { saved } }
+
+    func note(_ entry: String) {
+        lock.withLock { entries.append(entry) }
+    }
 
     private func record<T>(_ name: String, _ result: Result<T, CoreError>) throws -> T {
-        calls.append(name)
+        note(name)
         return try result.get()
     }
 
@@ -25,7 +38,7 @@ final class FakeCore: CoreBridge {
 
     func login(token: String) throws -> Session { try record("login(\(token))", loginResult) }
 
-    func logout() { calls.append("logout") }
+    func logout() { note("logout") }
 
     func listServers() throws -> [Server] { try record("listServers", serversResult) }
 
@@ -41,14 +54,15 @@ final class FakeCore: CoreBridge {
 
     func start(tunFd: Int) throws { try record("start(\(tunFd))", startResult) }
 
-    func stop() { calls.append("stop") }
+    func stop() { note("stop") }
 
     func state() -> TunnelStatus { currentState }
 
     func config() throws -> AppSettings { try record("config", configResult) }
 
     func setConfig(_ settings: AppSettings) throws -> AppSettings {
-        try record("setConfig", .success(settings))
+        lock.withLock { saved.append(settings) }
+        return try record("setConfig", setConfigResult ?? .success(settings))
     }
 
     func setHubMethod(_ method: String, enabled: Bool) throws -> AppSettings {
