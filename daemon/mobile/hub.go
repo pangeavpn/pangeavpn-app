@@ -295,26 +295,3 @@ func getSubscriptionHub() (*subscriptionInfo, error) {
 	}
 	return out.Subscription, nil
 }
-
-type registerResponse struct {
-	ServerPubkey string `json:"serverPubkey"`
-	AssignedIP   string `json:"assignedIP"`
-	DNS          string `json:"dns"`
-}
-
-func registerServer(identityPub, wgPub, region string) (*registerResponse, error) {
-	mu.Lock()
-	lk := licenseKey
-	mu.Unlock()
-	body := map[string]string{
-		"licenseKey":     lk,
-		"identityPubkey": identityPub,
-		"wgPubkey":       wgPub,
-		"region":         region,
-	}
-	var out registerResponse
-	if err := hubRequest(http.MethodPost, "/api/register", body, &out); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}

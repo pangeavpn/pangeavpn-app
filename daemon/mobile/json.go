@@ -113,6 +113,8 @@ type serverInfo struct {
 	// FrontedEndpoints repeats per region: the regions route answers with a
 	// bare array, so there is nowhere top-level to put it.
 	FrontedEndpoints []string `json:"frontedEndpoints,omitempty"`
+	// Multihop marks a node that may relay as the entry of a two-hop route.
+	Multihop bool `json:"multihop,omitempty"`
 }
 
 type sessionJSON struct {
@@ -141,6 +143,9 @@ type tunnelConfigJSON struct {
 	MTU          int      `json:"mtu"`
 	ServerID     string   `json:"serverId"`
 	ServerName   string   `json:"serverName"`
+	// Set only for a multihop route; ServerID stays the exit.
+	EntryServerID   string `json:"entryServerId,omitempty"`
+	EntryServerName string `json:"entryServerName,omitempty"`
 }
 
 type statusJSON struct {
@@ -152,4 +157,10 @@ type statusJSON struct {
 	ServerName string `json:"serverName"`
 	// ActiveTransport is which cascade rung carried the live tunnel.
 	ActiveTransport string `json:"activeTransport,omitempty"`
+	// LastHandshake is unix seconds of the newest WireGuard handshake, 0 if none.
+	LastHandshake int64 `json:"lastHandshake"`
+	PostQuantum   bool  `json:"postQuantum"`
+	// Set only for a multihop route; ServerID stays the exit.
+	EntryServerID   string `json:"entryServerId,omitempty"`
+	EntryServerName string `json:"entryServerName,omitempty"`
 }
