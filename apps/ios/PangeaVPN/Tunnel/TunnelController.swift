@@ -4,25 +4,35 @@ import os
 
 @MainActor
 final class TunnelController: TunnelControlling {
-    static let providerBundleIdentifier = "org.pangeavpn.app.tunnel"
-    private static let displayName = "PangeaVPN"
-    private static let pollInterval = Duration.seconds(1)
     private static let stopCheckInterval = Duration.milliseconds(100)
     private static let stopChecks = 50
 
-    private(set) var status = TunnelStatus.disconnected
-    private(set) var connectedDate: Date?
+    var status: TunnelStatus { monitor.status }
+    var connectedDate: Date? { monitor.connectedDate }
+    private(set) var onDemandActive = false
     var onChange: (() -> Void)?
 
     private let log = Logger(subsystem: "org.pangeavpn", category: "controller")
+    private let monitor: TunnelStatusMonitor
     private var manager: NETunnelProviderManager?
-    private var observer: NSObjectProtocol?
-    private var pollTask: Task<Void, Never>?
-    private var neState = TunnelState.disconnected
-    private var stopRequested = false
+    private var configObserver: NSObjectProtocol?
+    private var refreshTask: Task<Void, Never>?
+    private var lastWrite: Task<Void, Error>?
+    private var awaitingFirstConnect = false
+    private var latestProfile: TunnelProfile?
 
     // Loads at launch so a tunnel started earlier, or from Settings, shows its real state.
     init() {
+        monitor = TunnelStatusMonitor()
+        monitor.onChange = { [weak self] in self?.onChange?() }
+        monitor.onTransition = { [weak self] previous, current in
+            self?.transitioned(from: previous, to: current)
+        }
+        configObserver = NotificationCenter.default.addObserver(
+            forName: .NEVPNConfigurationChange, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { () -> Void in self?.scheduleRefresh() }
+        }
         Task { [weak self] in await self?.loadExisting() }
     }
 
@@ -36,33 +46,128 @@ final class TunnelController: TunnelControlling {
         }
     }
 
-    func connect(serverId: String, killSwitch: Bool, allowLan: Bool) async throws {
+    // A stop with nothing to stop, or one that hung, can leave the drop rule up with no tunnel.
+    nonisolated static func mustDisable(includeAllNetworks: Bool, wasRunning: Bool, stopped: Bool) -> Bool {
+        includeAllNetworks && (!wasRunning || !stopped)
+    }
+
+    func connect(serverId: String, candidates: [String], profile: TunnelProfile) async throws {
+        latestProfile = profile
+        let write = enqueue { [weak self] in
+            try await self?.start(serverId: serverId, candidates: candidates, profile: profile)
+        }
+        try await write.value
+    }
+
+    func switchServer(serverId: String, candidates: [String]) async throws {
+        guard let session = await runningSession() else { throw TunnelSwitchError.notRunning }
+        let message = try ProviderMessage.encodeSwitch(SwitchRequest(serverId: serverId, candidates: candidates))
+        let reply = try await ProviderChannel.send(message, on: session)
+        guard ProviderChannel.accepted(reply) else {
+            log.error("the tunnel refused the server switch")
+            throw TunnelSwitchError.rejected
+        }
+    }
+
+    // Also the foreground reconcile. includeAllNetworks applies live; enforceRoutes and LAN from the next connect.
+    func updateProfile(_ profile: TunnelProfile) async {
+        latestProfile = profile
+        let write = enqueue { [weak self] in await self?.reconcile(profile) }
+        _ = await write.result
+    }
+
+    func disconnect() async {
+        awaitingFirstConnect = false
+        let write = enqueue { [weak self] in await self?.stop() }
+        _ = await write.result
+    }
+
+    // Sign-out leaves no profile that Settings could start, only to fail signed out behind the kill switch.
+    func removeConfiguration() async {
+        awaitingFirstConnect = false
+        let write = enqueue { [weak self] in await self?.remove() }
+        _ = await write.result
+    }
+
+    func extensionLogs() async -> String? {
+        guard let session = await runningSession() else { return nil }
+        do {
+            guard let reply = try await ProviderChannel.send(ProviderChannel.logsRequest, on: session) else {
+                log.error("the tunnel sent no logs")
+                return nil
+            }
+            return ProviderChannel.text(reply)
+        } catch {
+            log.error("could not read the tunnel logs (\(error.logCode, privacy: .public)): \(error.localizedDescription, privacy: .private)")
+            return nil
+        }
+    }
+
+    // Configuration writes run one at a time, so a late save can never undo a newer one.
+    private func enqueue(_ body: @escaping @MainActor () async throws -> Void) -> Task<Void, Error> {
+        let previous = lastWrite
+        let task = Task { @MainActor in
+            _ = await previous?.result
+            try await body()
+        }
+        lastWrite = task
+        return task
+    }
+
+    // Saved with on-demand off so a failing first connect shows its error rather than retrying forever.
+    private func start(serverId: String, candidates: [String], profile: TunnelProfile) async throws {
         let manager = try await reloadManager()
-        Self.configure(manager, killSwitch: killSwitch, allowLan: allowLan)
+        TunnelConfigurator.apply(profile, onDemand: false, to: manager)
+        // Also undoes the disable that a kill-switch release may have saved.
+        manager.isEnabled = true
         do {
             try await manager.saveToPreferences()
             try await manager.loadFromPreferences()
-            observe(manager.connection)
-            stopRequested = false
-            try manager.connection.startVPNTunnel(options: [TunnelStart.serverIdOption: serverId as NSString])
+            attach(manager)
+            monitor.stopRequested = false
+            awaitingFirstConnect = true
+            try manager.connection.startVPNTunnel(
+                options: TunnelConfigurator.startOptions(serverId: serverId, candidates: candidates))
         } catch {
+            awaitingFirstConnect = false
             forgetManager()
             throw error
+        }
+        if Self.state(for: manager.connection.status) == .connected { firstConnected() }
+    }
+
+    private func reconcile(_ profile: TunnelProfile) async {
+        let manager: NETunnelProviderManager
+        do {
+            // Nothing saved yet: the first connect creates it, so a foreground never prompts.
+            guard let saved = try await loadSaved() else { return }
+            manager = saved
+        } catch {
+            log.error("could not load the VPN configuration to update it (\(error.logCode, privacy: .public)): \(error.localizedDescription, privacy: .private)")
+            return
+        }
+        let onDemand = OnDemandPolicy.reconciled(
+            profile, state: Self.state(for: manager.connection.status),
+            enabled: manager.isOnDemandEnabled, awaitingFirstConnect: awaitingFirstConnect)
+        guard !TunnelConfigurator.matches(manager, profile: profile, onDemand: onDemand) else { return }
+        TunnelConfigurator.apply(profile, onDemand: onDemand, to: manager)
+        do {
+            try await manager.saveToPreferences()
+            noteSaved(manager)
+        } catch {
+            log.error("could not save the VPN configuration (\(error.logCode, privacy: .public)): \(error.localizedDescription, privacy: .private)")
+            scheduleRefresh()
         }
     }
 
     // Stops even an idle tunnel: an app-side stop is how Apple says to clear a stranded drop rule.
-    func disconnect() async {
-        let manager: NETunnelProviderManager
-        do {
-            manager = try await loadManager()
-        } catch {
-            log.error("disconnect could not load the VPN configuration (\(error.logCode, privacy: .public)): \(error.localizedDescription, privacy: .private)")
-            return
-        }
+    private func stop() async {
+        guard let manager = await managerToStop() else { return }
         let connection = manager.connection
         let wasRunning = Self.state(for: connection.status) != .disconnected
-        stopRequested = true
+        // Set first: turning on-demand off can fall back to a disable, which stops the tunnel itself.
+        monitor.stopRequested = true
+        if manager.isOnDemandEnabled { await turnOffOnDemand(manager) }
         connection.stopVPNTunnel()
         let stopped: Bool
         if wasRunning {
@@ -72,53 +177,113 @@ final class TunnelController: TunnelControlling {
         }
         let blocksAll = manager.protocolConfiguration?.includeAllNetworks == true
         if Self.mustDisable(includeAllNetworks: blocksAll, wasRunning: wasRunning, stopped: stopped) {
-            await disable(manager)
+            await disable(manager, onlyIfBlockingAll: true)
         }
-        if !wasRunning { settleIdleRelease() }
+        if !wasRunning { monitor.settleIdleRelease() }
     }
 
-    // A stop with nothing to stop, or one that hung, can leave the drop rule up with no tunnel.
-    nonisolated static func mustDisable(includeAllNetworks: Bool, wasRunning: Bool, stopped: Bool) -> Bool {
-        includeAllNetworks && (!wasRunning || !stopped)
+    private func managerToStop() async -> NETunnelProviderManager? {
+        do {
+            return try await reloadManager()
+        } catch {
+            log.error("disconnect could not reload the VPN configuration (\(error.logCode, privacy: .public)): \(error.localizedDescription, privacy: .private)")
+            return manager
+        }
     }
 
-    // Sign-out leaves no profile that Settings could start, only to fail signed out behind the kill switch.
-    func removeConfiguration() async {
-        stopRequested = true
+    // Saved before the stop, or iOS would start the tunnel straight back up.
+    private func turnOffOnDemand(_ manager: NETunnelProviderManager) async {
+        manager.isOnDemandEnabled = false
+        do {
+            try await manager.saveToPreferences()
+            noteSaved(manager)
+        } catch {
+            log.error("could not turn off Connect On Demand (\(error.logCode, privacy: .public)): \(error.localizedDescription, privacy: .private)")
+            await disable(manager, onlyIfBlockingAll: false)
+        }
+    }
+
+    // A disabled configuration has no drop rule and no on-demand; the next connect re-enables it.
+    private func disable(_ manager: NETunnelProviderManager, onlyIfBlockingAll: Bool) async {
+        do {
+            try await manager.loadFromPreferences()
+            if onlyIfBlockingAll, manager.protocolConfiguration?.includeAllNetworks != true { return }
+            manager.isOnDemandEnabled = false
+            manager.isEnabled = false
+            try await manager.saveToPreferences()
+            noteSaved(manager)
+        } catch {
+            log.error("could not disable the VPN configuration (\(error.logCode, privacy: .public)): \(error.localizedDescription, privacy: .private)")
+            scheduleRefresh()
+        }
+    }
+
+    private func remove() async {
+        monitor.stopRequested = true
         do {
             let saved = try await NETunnelProviderManager.loadAllFromPreferences()
-            for found in saved where Self.isOurs(found) {
+            for found in saved where TunnelConfigurator.isOurs(found) {
+                if found.isOnDemandEnabled { await turnOffOnDemand(found) }
                 try await found.removeFromPreferences()
             }
         } catch {
             log.error("could not remove the VPN configuration (\(error.logCode, privacy: .public)): \(error.localizedDescription, privacy: .private)")
         }
         forgetManager()
-        neState = .disconnected
-        stopRequested = false
-        connectedDate = nil
-        status = .disconnected
+        monitor.reset()
+        onDemandActive = false
         onChange?()
     }
 
-    // Apple ties the kill switch's drop rule to an enabled configuration; the next connect re-enables it.
-    private func disable(_ manager: NETunnelProviderManager) async {
-        do {
-            try await manager.loadFromPreferences()
-            guard manager.protocolConfiguration?.includeAllNetworks == true else { return }
-            manager.isEnabled = false
-            try await manager.saveToPreferences()
-        } catch {
-            log.error("could not disable the VPN configuration (\(error.logCode, privacy: .public)): \(error.localizedDescription, privacy: .private)")
+    private func transitioned(from previous: TunnelState, to current: TunnelState) {
+        if current == .connected {
+            firstConnected()
+        } else if previous == .connecting, current == .disconnected {
+            awaitingFirstConnect = false
         }
     }
 
-    // Stopping an idle tunnel fires no NE transition, so nothing else would consume the flag.
-    private func settleIdleRelease() {
-        stopRequested = false
-        guard status.state == .error else { return }
-        status = .disconnected
+    // Turned on only after the app's own connect succeeds, so a failed start never loops on demand.
+    private func firstConnected() {
+        guard awaitingFirstConnect else { return }
+        awaitingFirstConnect = false
+        guard let profile = latestProfile, OnDemandPolicy.wanted(profile) else { return }
+        _ = enqueue { [weak self] in await self?.reconcile(profile) }
+    }
+
+    private func runningSession() async -> NETunnelProviderSession? {
+        let found: NETunnelProviderManager
+        do {
+            found = try await loadManager()
+        } catch {
+            log.error("could not load the VPN configuration (\(error.logCode, privacy: .public)): \(error.localizedDescription, privacy: .private)")
+            return nil
+        }
+        guard let session = found.connection as? NETunnelProviderSession,
+              ProviderChannel.canMessage(session.status) else { return nil }
+        return session
+    }
+
+    private func noteSaved(_ manager: NETunnelProviderManager) {
+        onDemandActive = OnDemandPolicy.active(
+            configurationEnabled: manager.isEnabled, onDemandEnabled: manager.isOnDemandEnabled)
         onChange?()
+    }
+
+    // iOS Settings, or another VPN app taking over, can change the saved configuration under us.
+    private func scheduleRefresh() {
+        refreshTask?.cancel()
+        refreshTask = Task { [weak self] in await self?.refreshFromPreferences() }
+    }
+
+    private func refreshFromPreferences() async {
+        do {
+            let found = try await Self.findOrCreateManager()
+            guard !Task.isCancelled else { return }
+            attach(found)
+        } catch {
+            log.error("could not reload the VPN configuration (\(error.logCode, privacy: .public)): \(error.localizedDescription, privacy: .private)")
+        }
     }
 
     private func loadExisting() async {
@@ -145,153 +310,31 @@ final class TunnelController: TunnelControlling {
         return found
     }
 
+    private func loadSaved() async throws -> NETunnelProviderManager? {
+        let saved = try await NETunnelProviderManager.loadAllFromPreferences()
+        guard let ours = saved.first(where: { TunnelConfigurator.isOurs($0) }) else { return nil }
+        attach(ours)
+        return ours
+    }
+
     private static func findOrCreateManager() async throws -> NETunnelProviderManager {
         let saved = try await NETunnelProviderManager.loadAllFromPreferences()
-        return saved.first { isOurs($0) } ?? NETunnelProviderManager()
+        return saved.first { TunnelConfigurator.isOurs($0) } ?? NETunnelProviderManager()
     }
 
     // Reloads in the background so status keeps tracking the saved configuration.
     private func forgetManager() {
-        if let observer { NotificationCenter.default.removeObserver(observer) }
-        observer = nil
-        stopPolling()
+        monitor.forget()
         manager = nil
         Task { [weak self] in await self?.loadExisting() }
     }
 
-    private static func isOurs(_ manager: NETunnelProviderManager) -> Bool {
-        let proto = manager.protocolConfiguration as? NETunnelProviderProtocol
-        return proto?.providerBundleIdentifier == providerBundleIdentifier
-    }
-
-    private static func configure(_ manager: NETunnelProviderManager, killSwitch: Bool, allowLan: Bool) {
-        let proto = NETunnelProviderProtocol()
-        proto.providerBundleIdentifier = providerBundleIdentifier
-        proto.serverAddress = displayName
-        proto.includeAllNetworks = killSwitch
-        proto.excludeLocalNetworks = allowLan
-        manager.protocolConfiguration = proto
-        manager.localizedDescription = displayName
-        // Also undoes the disable that a kill-switch release may have saved.
-        manager.isEnabled = true
-    }
-
+    // The monitor always watches this manager's connection, never a stale copy's.
     private func attach(_ manager: NETunnelProviderManager) {
         self.manager = manager
-        observe(manager.connection)
-        statusChanged()
-    }
-
-    private func observe(_ connection: NEVPNConnection) {
-        if let observer { NotificationCenter.default.removeObserver(observer) }
-        observer = NotificationCenter.default.addObserver(
-            forName: .NEVPNStatusDidChange, object: connection, queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated { () -> Void in self?.statusChanged() }
-        }
-    }
-
-    private func statusChanged() {
-        guard let connection = manager?.connection else { return }
-        let previous = neState
-        neState = Self.state(for: connection.status)
-        connectedDate = neState == .connected ? connection.connectedDate : nil
-        switch neState {
-        case .connecting, .connected:
-            var next = previous == .disconnected ? TunnelStatus.disconnected : status
-            next.state = neState
-            status = next
-            startPolling()
-        case .disconnecting:
-            stopPolling()
-            status.state = .disconnecting
-        case .disconnected, .error:
-            stopPolling()
-            if previous != .disconnected {
-                status = .disconnected
-                reportDisconnect()
-            }
-        }
-        onChange?()
-    }
-
-    private func reportDisconnect() {
-        let requested = stopRequested
-        stopRequested = false
-        Task { [weak self] in
-            guard let connection = self?.manager?.connection else { return }
-            let error = await TunnelController.lastDisconnectError(of: connection)
-            self?.showDisconnectError(error, requested: requested)
-        }
-    }
-
-    private func showDisconnectError(_ error: Error?, requested: Bool) {
-        guard let error, !requested, neState == .disconnected, !TunnelStart.isStopped(error) else { return }
-        var next = TunnelStatus.disconnected
-        next.state = .error
-        next.detail = error.localizedDescription
-        status = next
-        onChange?()
-    }
-
-    private static func lastDisconnectError(of connection: NEVPNConnection) async -> Error? {
-        await withCheckedContinuation { continuation in
-            connection.fetchLastDisconnectError { continuation.resume(returning: $0) }
-        }
-    }
-
-    private func startPolling() {
-        guard pollTask == nil else { return }
-        pollTask = Task { [weak self] in
-            while !Task.isCancelled {
-                guard let self else { return }
-                await self.poll()
-                do {
-                    try await Task.sleep(for: TunnelController.pollInterval)
-                } catch {
-                    return
-                }
-            }
-        }
-    }
-
-    private func stopPolling() {
-        pollTask?.cancel()
-        pollTask = nil
-    }
-
-    private func poll() async {
-        guard let session = manager?.connection as? NETunnelProviderSession else { return }
-        do {
-            let reply = try await Self.send(Data([ProviderMessage.state.rawValue]), on: session)
-            let polled = try JSONDecoder().decode(TunnelStatus.self, from: reply)
-            apply(polled)
-        } catch {
-            log.debug("status poll failed (\(error.logCode, privacy: .public)): \(error.localizedDescription, privacy: .private)")
-        }
-    }
-
-    // NE owns the state; the core's status only fills in detail, bytes, transport and server.
-    private func apply(_ polled: TunnelStatus) {
-        guard neState == .connecting || neState == .connected else { return }
-        var next = polled
-        next.state = neState
-        guard next != status else { return }
-        status = next
-        onChange?()
-    }
-
-    private static func send(_ message: Data, on session: NETunnelProviderSession) async throws -> Data {
-        try await withCheckedThrowingContinuation { continuation in
-            do {
-                try session.sendProviderMessage(message) { reply in
-                    guard let reply else { return continuation.resume(throwing: PollError.noReply) }
-                    continuation.resume(returning: reply)
-                }
-            } catch {
-                continuation.resume(throwing: error)
-            }
-        }
+        onDemandActive = OnDemandPolicy.active(
+            configurationEnabled: manager.isEnabled, onDemandEnabled: manager.isOnDemandEnabled)
+        monitor.watch(manager.connection)
     }
 
     private func waitUntilStopped(_ connection: NEVPNConnection) async -> Bool {
@@ -307,8 +350,4 @@ final class TunnelController: TunnelControlling {
         if !stopped { log.info("tunnel still stopping after the wait") }
         return stopped
     }
-}
-
-private enum PollError: Error {
-    case noReply
 }
