@@ -4,6 +4,7 @@ options:
   deploymentTarget:
     iOS: "17.0"
   developmentLanguage: en
+  knownRegions: [en, es, fr, ru, uk, zh-Hans, ar, fa, Base]
 
 settings:
   base:
@@ -66,6 +67,8 @@ targets:
       - path: PacketTunnel
       - path: Shared
         optional: true
+      - path: PangeaVPN/Resources
+        includes: ["*.lproj/**"]
     dependencies:
       - framework: Frameworks/Pangeacore.xcframework
         embed: false

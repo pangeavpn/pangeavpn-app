@@ -28,6 +28,12 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
+      - name: Localized strings are current
+        run: |
+          node --test scripts/gen-ios-strings.test.mjs
+          node scripts/gen-ios-strings.mjs
+          git diff --exit-code apps/ios/PangeaVPN/Resources
+
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version-file: daemon/go.mod
