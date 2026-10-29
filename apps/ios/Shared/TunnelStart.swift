@@ -12,6 +12,7 @@ enum TunnelStartError: Int, LocalizedError, CaseIterable {
     case connectFailed
     case invalidDNS
     case settingsTimeout
+    case noSubscription
 
     var errorDescription: String? {
         switch self {
@@ -31,6 +32,8 @@ enum TunnelStartError: Int, LocalizedError, CaseIterable {
             return String(localized: "error_device_locked", defaultValue: "Unlock your iPhone to connect.")
         case .subscriptionExpired:
             return String(localized: "error_subscription_expired", defaultValue: "Your subscription has expired.")
+        case .noSubscription:
+            return String(localized: "error_no_subscription", defaultValue: "This account has no active subscription.")
         case .connectFailed:
             return String(
                 localized: "error_connect_failed",
@@ -45,6 +48,8 @@ enum TunnelStartError: Int, LocalizedError, CaseIterable {
 
 enum TunnelStart {
     static let serverIdOption = "serverId"
+    // Comma-joined server ids to fall back through, best first; the chosen server leads.
+    static let candidatesOption = "candidates"
     static let errorDomain = "org.pangeavpn.tunnel"
     static let otherErrorCode = 0
 
@@ -53,6 +58,7 @@ enum TunnelStart {
     // First match wins, so the most specific markers come first.
     private static let coreMarkers: [(marker: String, error: TunnelStartError)] = [
         ("SUBSCRIPTION_EXPIRED", .subscriptionExpired),
+        ("NO_SUBSCRIPTION", .noSubscription),
         ("unknown server", .noServer),
         ("no stored session", .signedOut),
         ("no device identity", .signedOut),
@@ -67,6 +73,18 @@ enum TunnelStart {
         }
         guard !settings.lastServerId.isEmpty else { throw TunnelStartError.noServer }
         return settings.lastServerId
+    }
+
+    // Always starts with the chosen server and never repeats one.
+    static func resolveCandidates(options: [String: NSObject]?, serverId: String) -> [String] {
+        let listed = (options?[candidatesOption] as? String)?
+            .split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) } ?? []
+        var seen: Set<String> = [serverId]
+        return [serverId] + listed.filter { !$0.isEmpty && seen.insert($0).inserted }
+    }
+
+    static func candidatesValue(_ ids: [String]) -> NSString {
+        ids.joined(separator: ",") as NSString
     }
 
     // The app saves excludeLocalNetworks equal to Allow LAN, so routes then match the system flags.

@@ -29,9 +29,25 @@ protocol CoreBridge: AnyObject, Sendable {
     func subscription() throws -> Subscription?
     func listDevices() throws -> [Device]
     func removeDevice(id: String) throws
+    func renameDevice(id: String, name: String) throws -> String
+    func accountNumber() -> String
+    func logs() -> String
+    func sendDiagnostics(note: String, extraLogs: String) throws -> String
+    func testHubMethod(_ method: String) throws -> HubTestResult
+    func hubStatus() -> HubStatus
+    // Frees this install's device slot on the hub; sign-out calls it before logout.
+    func deregister() throws
+    // Forgets the session, identity, settings and transport history; never calls the hub.
+    func wipe() throws
+    func setClientInfo(appVersion: String, osVersion: String)
     func prepare(serverId: String) throws -> TunnelConfig
+    // entryId "" is a plain single-hop prepare.
+    func prepareVia(exitId: String, entryId: String) throws -> TunnelConfig
+    func multihopEntries(exitId: String) -> [String]
     func start(tunFd: Int) throws
     func stop()
+    // Stops for an immediate start on the prepared server, reporting connecting, not disconnected.
+    func stopForSwitch()
     func state() -> TunnelStatus
     func config() throws -> AppSettings
     func setConfig(_ settings: AppSettings) throws -> AppSettings

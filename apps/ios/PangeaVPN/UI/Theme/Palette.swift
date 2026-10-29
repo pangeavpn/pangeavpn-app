@@ -2,8 +2,8 @@ import SwiftUI
 import UIKit
 
 enum Palette {
-    static let accent = Color(hex: 0xC3562B)
-    static let accentHover = Color(hex: 0xA84A25)
+    static var accent: Color { AccentTheme.shared.accent.color }
+    static var accentHover: Color { AccentTheme.shared.accent.hover }
     static let onAccent = Color(hex: 0xFBF9F2)
 
     static let bg = dynamic(dark: 0x141312, light: 0xFBF9F2)

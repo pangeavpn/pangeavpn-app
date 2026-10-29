@@ -9,6 +9,16 @@ final class FakeCore: CoreBridge, @unchecked Sendable {
     var subscriptionResult: Result<Subscription?, CoreError> = .success(nil)
     var devicesResult: Result<[Device], CoreError> = .success([])
     var removeDeviceResult: Result<Void, CoreError> = .success(())
+    // nil echoes the requested name back trimmed, as the hub does.
+    var renameResult: Result<String, CoreError>?
+    var accountNumberValue = ""
+    var logsValue = ""
+    var diagnosticsResult: Result<String, CoreError> = .success("R-TEST1")
+    var hubTestResults: [String: Result<HubTestResult, CoreError>] = [:]
+    var hubStatusValue = HubStatus.none
+    var deregisterResult: Result<Void, CoreError> = .success(())
+    var wipeResult: Result<Void, CoreError> = .success(())
+    var multihopEntriesValue: [String] = []
     var prepareResult: Result<TunnelConfig, CoreError> = .failure(CoreError(message: "no server"))
     var startResult: Result<Void, CoreError> = .success(())
     var reloadResult: Result<Void, CoreError> = .success(())
@@ -56,6 +66,51 @@ final class FakeCore: CoreBridge, @unchecked Sendable {
     func listDevices() throws -> [Device] { try record("listDevices", devicesResult) }
 
     func removeDevice(id: String) throws { try record("removeDevice(\(id))", removeDeviceResult) }
+
+    func renameDevice(id: String, name: String) throws -> String {
+        let echoed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return try record("renameDevice(\(id),\(name))", renameResult ?? .success(echoed))
+    }
+
+    func accountNumber() -> String {
+        note("accountNumber")
+        return accountNumberValue
+    }
+
+    func logs() -> String {
+        note("logs")
+        return logsValue
+    }
+
+    func sendDiagnostics(note text: String, extraLogs: String) throws -> String {
+        try record("sendDiagnostics(\(text))", diagnosticsResult)
+    }
+
+    func testHubMethod(_ method: String) throws -> HubTestResult {
+        let result = hubTestResults[method] ?? .success(HubTestResult(ok: true, ms: 120))
+        return try record("testHubMethod(\(method))", result)
+    }
+
+    func hubStatus() -> HubStatus { hubStatusValue }
+
+    func deregister() throws { try record("deregister", deregisterResult) }
+
+    func wipe() throws { try record("wipe", wipeResult) }
+
+    func setClientInfo(appVersion: String, osVersion: String) {
+        note("setClientInfo(\(appVersion),\(osVersion))")
+    }
+
+    func prepareVia(exitId: String, entryId: String) throws -> TunnelConfig {
+        try record("prepareVia(\(exitId),\(entryId))", prepareResult)
+    }
+
+    func multihopEntries(exitId: String) -> [String] {
+        note("multihopEntries(\(exitId))")
+        return multihopEntriesValue
+    }
+
+    func stopForSwitch() { note("stopForSwitch") }
 
     func prepare(serverId: String) throws -> TunnelConfig {
         try record("prepare(\(serverId))", prepareResult)

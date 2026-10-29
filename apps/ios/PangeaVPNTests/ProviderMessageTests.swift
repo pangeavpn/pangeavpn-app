@@ -57,4 +57,29 @@ final class ProviderMessageTests: XCTestCase {
         XCTAssertNil(try ProviderMessage.reply(to: Data([0]), core: core))
         XCTAssertNil(try ProviderMessage.reply(to: Data([0xFF]), core: core))
     }
+
+    func testSwitchRequestRoundTrips() throws {
+        let request = SwitchRequest(serverId: "uk-lon-2", candidates: ["uk-lon-2", "uk-lon-1"])
+        let message = try ProviderMessage.encodeSwitch(request)
+        XCTAssertEqual(message.first, ProviderMessage.switchServer.rawValue)
+        XCTAssertEqual(ProviderMessage.switchRequest(from: message), request)
+    }
+
+    func testSwitchRequestRejectsOtherKindsAndJunk() {
+        XCTAssertNil(ProviderMessage.switchRequest(from: Data([1])))
+        XCTAssertNil(ProviderMessage.switchRequest(from: Data([2]) + Data("not json".utf8)))
+    }
+
+    // The provider applies a switch itself, so the read-only reply path never answers one.
+    func testSwitchIsNotAnsweredByTheReadOnlyReply() throws {
+        let message = try ProviderMessage.encodeSwitch(SwitchRequest(serverId: "a", candidates: []))
+        XCTAssertNil(try ProviderMessage.reply(to: message, core: FakeCore()))
+    }
+
+    func testLogsReplyIsTheCoreLog() throws {
+        let core = FakeCore()
+        core.logsValue = "line one\nline two"
+        let reply = try XCTUnwrap(ProviderMessage.reply(to: Data([3]), core: core))
+        XCTAssertEqual(String(decoding: reply, as: UTF8.self), "line one\nline two")
+    }
 }

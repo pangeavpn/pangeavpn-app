@@ -68,6 +68,7 @@ final class TunnelStartTests: XCTestCase {
             ("unknown server \"de-1\"", .noServer),
             ("mobile: unknown server \"de-1\"", .noServer),
             ("SUBSCRIPTION_EXPIRED: this account's subscription has expired", .subscriptionExpired),
+            ("NO_SUBSCRIPTION: this account has no active subscription", .noSubscription),
             ("hub auth error (403): forbidden", .signedOut),
             ("hub auth error (401): DEVICE_NOT_REGISTERED", .signedOut),
             ("DEVICE_NOT_REGISTERED", .signedOut),

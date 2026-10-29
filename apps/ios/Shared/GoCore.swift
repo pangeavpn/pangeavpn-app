@@ -61,9 +61,60 @@ final class GoCore: CoreBridge {
         try check(ok, err)
     }
 
+    func renameDevice(id: String, name: String) throws -> String {
+        try call { MobileRenameDevice(id, name, $0) }
+    }
+
+    func accountNumber() -> String { MobileAccountNumber() }
+
+    func logs() -> String { MobileLogs() }
+
+    func sendDiagnostics(note: String, extraLogs: String) throws -> String {
+        try call { MobileSendDiagnostics(note, extraLogs, $0) }
+    }
+
+    func testHubMethod(_ method: String) throws -> HubTestResult {
+        try CoreJSON.decode(call { MobileTestHubMethod(method, $0) })
+    }
+
+    func hubStatus() -> HubStatus {
+        do {
+            return try CoreJSON.decode(MobileHubStatus())
+        } catch {
+            Self.log.error("hub status was unreadable")
+            return .none
+        }
+    }
+
+    func deregister() throws {
+        var err: NSError?
+        let ok = MobileDeregister(&err)
+        try check(ok, err)
+    }
+
+    func wipe() throws {
+        var err: NSError?
+        let ok = MobileWipe(&err)
+        try check(ok, err)
+    }
+
+    func setClientInfo(appVersion: String, osVersion: String) {
+        MobileSetClientInfo(appVersion, osVersion)
+    }
+
     func prepare(serverId: String) throws -> TunnelConfig {
         try CoreJSON.decode(call { MobilePrepare(serverId, $0) })
     }
+
+    func prepareVia(exitId: String, entryId: String) throws -> TunnelConfig {
+        try CoreJSON.decode(call { MobilePrepareVia(exitId, entryId, $0) })
+    }
+
+    func multihopEntries(exitId: String) -> [String] {
+        (try? CoreJSON.decodeList(MobileMultihopEntries(exitId))) ?? []
+    }
+
+    func stopForSwitch() { MobileStopForSwitch() }
 
     func start(tunFd: Int) throws {
         var err: NSError?

@@ -38,7 +38,75 @@ final class ModelsTests: XCTestCase {
     func testServerDecodesAFullGoServer() throws {
         let json = #"{"id":"eu-1","name":"Frankfurt","region":"eu","country":"DE","load":7,"cloak":{"remoteHost":"h","uid":"u","publicKey":"k"},"naive":{"remoteHost":"h","remotePort":443,"username":"u","password":"p"},"reality":{"remoteHost":"h","remotePort":443,"uuid":"x","publicKey":"k","shortId":"s"},"controlPlaneReality":{"remoteHost":"h","remotePort":8443,"uuid":"x","publicKey":"k","shortId":"s","serverName":"n"},"frontedEndpoints":["a.example"]}"#
         let server = try decode(Server.self, json)
-        XCTAssertEqual(server, Server(id: "eu-1", name: "Frankfurt", region: "eu", country: "DE", load: 7))
+        XCTAssertEqual(server, Server(id: "eu-1", name: "Frankfurt", region: "eu", country: "DE", load: 7,
+                                      transports: ["cloak", "wireguard", "naive", "reality"]))
+    }
+
+    // Only a top-level block counts: control-plane credentials don't carry user traffic.
+    func testServerTransportsComeFromTopLevelBlocks() throws {
+        let json = #"{"id":"a","name":"A","region":"eu","country":"GB","load":1,"hysteria2":{"remoteHost":"h"},"anytls":null,"controlPlaneShadowsocks":{"server":"s"}}"#
+        let server = try decode(Server.self, json)
+        XCTAssertEqual(server.transports, ["cloak", "wireguard", "hysteria2"])
+        XCTAssertTrue(server.supports("auto"))
+        XCTAssertTrue(server.supports("cloak"))
+        XCTAssertTrue(server.supports("hysteria2"))
+        XCTAssertFalse(server.supports("anytls"))
+        XCTAssertFalse(server.supports("shadowsocks"))
+    }
+
+    func testDeviceCurrentDefaultsToFalse() throws {
+        let plain = try decode(Device.self, #"{"id":"1","friendlyName":"A","createdAt":"t","status":"active"}"#)
+        XCTAssertFalse(plain.current)
+        let mine = try decode(Device.self, #"{"id":"1","friendlyName":"A","createdAt":"t","status":"active","current":true}"#)
+        XCTAssertTrue(mine.current)
+    }
+
+    func testSubscriptionEntitlement() throws {
+        XCTAssertNil(try decode(Subscription.self, #"{"status":"active","renews":true,"expiresAt":null}"#).entitled)
+        let expired = try decode(Subscription.self, #"{"status":"expired","renews":false,"expiresAt":"2026-01-01","entitled":false}"#)
+        XCTAssertEqual(expired.entitled, false)
+    }
+
+    func testStatusLivenessFields() throws {
+        let status = try decode(TunnelStatus.self, #"{"state":"CONNECTED","lastHandshake":1793312522,"postQuantum":true}"#)
+        XCTAssertEqual(status.lastHandshake, 1_793_312_522)
+        XCTAssertTrue(status.postQuantum)
+        XCTAssertEqual(TunnelStatus.disconnected.lastHandshake, 0)
+        XCTAssertFalse(TunnelStatus.disconnected.postQuantum)
+    }
+
+    func testHubTestResultDefaults() throws {
+        XCTAssertEqual(try decode(HubTestResult.self, #"{"ok":true,"ms":42}"#), HubTestResult(ok: true, ms: 42))
+        let busy = try decode(HubTestResult.self, #"{"method":"reality","ok":false,"ms":0,"unavailable":"busy"}"#)
+        XCTAssertEqual(busy, HubTestResult(method: "reality", ok: false, ms: 0, unavailable: "busy"))
+    }
+
+    func testHubStatusNullActive() throws {
+        let idle = try decode(HubStatus.self, #"{"methods":{"directIp":true},"active":null,"detail":null}"#)
+        XCTAssertEqual(idle, .none)
+        let live = try decode(HubStatus.self, #"{"active":"reality","detail":"node 2"}"#)
+        XCTAssertEqual(live.active, "reality")
+    }
+
+    // The core's public shape: a flag per transport and no credentials.
+    func testServerDecodesThePublicShape() throws {
+        let json = #"{"id":"a","name":"A","region":"eu","country":"GB","load":3,"multihop":true,"cloak":true,"reality":true,"naive":false,"hysteria2":false,"shadowsocks":true,"anytls":false,"snowflake":false}"#
+        let server = try decode(Server.self, json)
+        XCTAssertEqual(server.transports, ["cloak", "wireguard", "reality", "shadowsocks"])
+        XCTAssertTrue(server.multihop)
+        XCTAssertEqual(try decode(Server.self, String(decoding: JSONEncoder().encode(server), as: UTF8.self)), server)
+    }
+
+    func testStatusEntryFields() throws {
+        let status = try decode(TunnelStatus.self, #"{"state":"CONNECTED","serverId":"x","entryServerId":"e","entryServerName":"E"}"#)
+        XCTAssertEqual(status.entryServerId, "e")
+        XCTAssertEqual(status.entryServerName, "E")
+        XCTAssertEqual(TunnelStatus.disconnected.entryServerId, "")
+    }
+
+    func testSubscriptionCachedFlag() throws {
+        XCTAssertTrue(try decode(Subscription.self, #"{"status":"active","renews":true,"expiresAt":null,"cached":true}"#).cached)
+        XCTAssertFalse(try decode(Subscription.self, #"{"status":"active","renews":true,"expiresAt":null}"#).cached)
     }
 
     func testSessionDecodesServers() throws {
@@ -90,6 +158,7 @@ final class ModelsTests: XCTestCase {
         XCTAssertFalse(settings.hubMethods.normal)
         XCTAssertEqual(settings.hubMethods.rev, 2)
         XCTAssertTrue(settings.deadDrop)
+        XCTAssertFalse(settings.postQuantum)
         XCTAssertEqual(settings, AppSettings())
     }
 

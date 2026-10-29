@@ -5,15 +5,26 @@ import os
 @MainActor
 @Observable
 final class SettingsStore {
-    static let killSwitchKey = "killSwitch"
-    static let darkThemeKey = "darkTheme"
+    static let killSwitchKey = SharedPrefs.Key.killSwitch
+    static let darkThemeKey = SharedPrefs.Key.darkTheme
 
     private(set) var settings = AppSettings()
     private(set) var loaded = false
-    // Applied by the app on the next connect, so it lives in defaults rather than the core.
+    // The strict kill switch (includeAllNetworks); the VPN profile carries it, not the core.
     private(set) var killSwitch = false
     // nil follows the system appearance.
     private(set) var darkTheme: Bool?
+    private(set) var autoConnect = true
+    private(set) var lockdown = false
+    private(set) var connectionAlerts = true
+    private(set) var panicWipe = false
+    private(set) var accent = Accent.terra
+    private(set) var developerMode = false
+    private(set) var splitTunnelEnabled = false
+    private(set) var splitTunnelRanges: [String] = []
+    private(set) var multihopEnabled = false
+    // nil picks the lightest entry outside the exit's region.
+    private(set) var multihopEntryId: String?
     var error: String?
 
     private let core: any CoreBridge
@@ -24,8 +35,25 @@ final class SettingsStore {
     init(core: any CoreBridge, defaults: UserDefaults = AppGroup.defaults) {
         self.core = core
         self.defaults = defaults
-        killSwitch = defaults.bool(forKey: Self.killSwitchKey)
-        darkTheme = defaults.object(forKey: Self.darkThemeKey) as? Bool
+        typealias Key = SharedPrefs.Key
+        killSwitch = defaults.bool(forKey: Key.killSwitch)
+        darkTheme = defaults.object(forKey: Key.darkTheme) as? Bool
+        autoConnect = SharedPrefs.bool(Key.autoConnect, default: true, in: defaults)
+        lockdown = SharedPrefs.bool(Key.lockdown, default: false, in: defaults)
+        connectionAlerts = SharedPrefs.connectionAlerts(in: defaults)
+        panicWipe = SharedPrefs.bool(Key.panicWipe, default: false, in: defaults)
+        accent = defaults.string(forKey: Key.accent).flatMap(Accent.init(rawValue:)) ?? .terra
+        developerMode = SharedPrefs.bool(Key.developerMode, default: false, in: defaults)
+        splitTunnelEnabled = SharedPrefs.bool(Key.splitTunnelEnabled, default: false, in: defaults)
+        splitTunnelRanges = SharedPrefs.strings(Key.splitTunnelRanges, in: defaults)
+        multihopEnabled = SharedPrefs.bool(Key.multihopEnabled, default: false, in: defaults)
+        multihopEntryId = defaults.string(forKey: Key.multihopEntryId).flatMap { $0.isEmpty ? nil : $0 }
+        AccentTheme.shared.accent = accent
+    }
+
+    var tunnelProfile: TunnelProfile {
+        TunnelProfile(strictKillSwitch: killSwitch, allowLan: settings.allowLan,
+                      autoConnect: autoConnect, lockdown: lockdown)
     }
 
     // Queued with the edits, so a slow load cannot land after an edit and undo it.
@@ -80,6 +108,86 @@ final class SettingsStore {
             defaults.removeObject(forKey: Self.darkThemeKey)
         }
         darkTheme = dark
+    }
+
+    func setPostQuantum(_ enabled: Bool) async {
+        await edit { $0.postQuantum = enabled }
+    }
+
+    func setAutoConnect(_ enabled: Bool) {
+        defaults.set(enabled, forKey: SharedPrefs.Key.autoConnect)
+        autoConnect = enabled
+    }
+
+    func setLockdown(_ enabled: Bool) {
+        defaults.set(enabled, forKey: SharedPrefs.Key.lockdown)
+        lockdown = enabled
+    }
+
+    func setConnectionAlerts(_ enabled: Bool) {
+        defaults.set(enabled, forKey: SharedPrefs.Key.connectionAlerts)
+        connectionAlerts = enabled
+    }
+
+    func setPanicWipe(_ enabled: Bool) {
+        defaults.set(enabled, forKey: SharedPrefs.Key.panicWipe)
+        panicWipe = enabled
+    }
+
+    func setAccent(_ choice: Accent) {
+        defaults.set(choice.rawValue, forKey: SharedPrefs.Key.accent)
+        accent = choice
+        AccentTheme.shared.accent = choice
+    }
+
+    func setDeveloperMode(_ enabled: Bool) {
+        defaults.set(enabled, forKey: SharedPrefs.Key.developerMode)
+        developerMode = enabled
+    }
+
+    func setSplitTunnelEnabled(_ enabled: Bool) {
+        defaults.set(enabled, forKey: SharedPrefs.Key.splitTunnelEnabled)
+        splitTunnelEnabled = enabled
+    }
+
+    // Callers validate first; this stores exactly what it is given.
+    func setSplitTunnelRanges(_ ranges: [String]) {
+        defaults.set(ranges, forKey: SharedPrefs.Key.splitTunnelRanges)
+        splitTunnelRanges = ranges
+    }
+
+    // After a panic wipe has erased the stored values, so nothing on screen outlives them.
+    func resetToDefaults() {
+        settings = AppSettings()
+        loaded = false
+        killSwitch = false
+        darkTheme = nil
+        autoConnect = true
+        lockdown = false
+        connectionAlerts = true
+        panicWipe = false
+        accent = .terra
+        developerMode = false
+        splitTunnelEnabled = false
+        splitTunnelRanges = []
+        multihopEnabled = false
+        multihopEntryId = nil
+        error = nil
+        AccentTheme.shared.accent = .terra
+    }
+
+    func setMultihopEnabled(_ enabled: Bool) {
+        defaults.set(enabled, forKey: SharedPrefs.Key.multihopEnabled)
+        multihopEnabled = enabled
+    }
+
+    func setMultihopEntry(_ serverId: String?) {
+        if let serverId, !serverId.isEmpty {
+            defaults.set(serverId, forKey: SharedPrefs.Key.multihopEntryId)
+        } else {
+            defaults.removeObject(forKey: SharedPrefs.Key.multihopEntryId)
+        }
+        multihopEntryId = serverId.flatMap { $0.isEmpty ? nil : $0 }
     }
 
     private func edit(_ change: @escaping @Sendable (inout AppSettings) -> Void) async {
