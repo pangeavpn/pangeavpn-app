@@ -50,10 +50,10 @@
 "notification_disconnected" = "ВІДКЛЮЧЕНО";
 "notification_disconnecting" = "ВІДКЛЮЧЕННЯ";
 "notification_error" = "ПОМИЛКА";
-"region_auto_of" = "@plural:one=%1$@ сервер · авто|few=%1$@ сервери · авто|many=%1$@ серверів · авто|other=%1$@ серверів · авто";
 "region_best_of" = "%1$@ · найкращий з %2$@";
 "region_more" = "ще %1$@";
 "region_pinned" = "%1$@ · закріплено";
+"region_refresh" = "Оновити регіони";
 "server_picker_none_for_transport" = "Немає серверів із підтримкою цього транспорту";
 "servers_title" = "Сервери";
 "settings_censorship_deaddrop_hint" = "Завантажує із загальнодоступного хосту підписаний список адрес, який перевіряється на вашому пристрої. Крайній засіб, дані акаунта не передаються.";
@@ -71,6 +71,7 @@
 "settings_censorship_reality_title" = "REALITY";
 "settings_censorship_shadowsocks_hint" = "Веде трафік акаунта через Shadowsocks, тож ніхто не бачить, з яким сервером ви зв'язуєтесь.";
 "settings_censorship_shadowsocks_title" = "Shadowsocks";
+"settings_done" = "Готово";
 "settings_kill_switch" = "Аварійне відключення";
 "settings_kill_switch_hint" = "Блокує весь трафік поза тунелем. Набуває чинності під час наступного підключення.";
 "settings_network_allowlan_hint" = "Пропускає трафік локальної мережі (маршрутизатор, принтери, кептив-портали) повз тунель. Увімкніть, якщо Wi-Fi зривається на \"Немає інтернету\". Діє з наступного підключення.";

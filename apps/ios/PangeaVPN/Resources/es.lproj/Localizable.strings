@@ -50,10 +50,10 @@
 "notification_disconnected" = "DESCONECTADO";
 "notification_disconnecting" = "DESCONECTANDO";
 "notification_error" = "ERROR";
-"region_auto_of" = "%1$@ servidores · auto";
 "region_best_of" = "%1$@ · mejor de %2$@";
 "region_more" = "%1$@ más";
 "region_pinned" = "%1$@ · fijado";
+"region_refresh" = "Actualizar regiones";
 "server_picker_none_for_transport" = "Ningún servidor admite este transporte";
 "servers_title" = "Servidores";
 "settings_censorship_deaddrop_hint" = "Descarga de un servidor público una lista de direcciones firmada, que se verifica en tu dispositivo. Último recurso, y no incluye datos de tu cuenta.";
@@ -71,6 +71,7 @@
 "settings_censorship_reality_title" = "REALITY";
 "settings_censorship_shadowsocks_hint" = "Lleva el tráfico de la cuenta por Shadowsocks, así nadie ve con qué servidor contactas.";
 "settings_censorship_shadowsocks_title" = "Shadowsocks";
+"settings_done" = "Listo";
 "settings_kill_switch" = "Interruptor de seguridad";
 "settings_kill_switch_hint" = "Bloquea todo el tráfico fuera del túnel. Se aplica en la próxima conexión.";
 "settings_network_allowlan_hint" = "Deja que el tráfico local (router, impresoras, portales cautivos) evite el túnel. Actívalo si el Wi-Fi cae a \"Sin conexión\". Se aplica en la próxima conexión.";

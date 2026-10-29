@@ -50,10 +50,10 @@
 "notification_disconnected" = "已断开";
 "notification_disconnecting" = "断开中";
 "notification_error" = "错误";
-"region_auto_of" = "%1$@ 台服务器 · 自动";
 "region_best_of" = "%1$@ · %2$@ 个中最优";
 "region_more" = "还有 %1$@ 个";
 "region_pinned" = "%1$@ · 已固定";
+"region_refresh" = "刷新地区";
 "server_picker_none_for_transport" = "没有服务器支持此传输方式";
 "servers_title" = "服务器";
 "settings_censorship_deaddrop_hint" = "从公开主机获取带签名的地址列表，在你的设备上验证。最后手段，且不含任何账户信息。";
@@ -71,6 +71,7 @@
 "settings_censorship_reality_title" = "REALITY";
 "settings_censorship_shadowsocks_hint" = "把账户流量送进 Shadowsocks，没人看得到您在联系哪台服务器。";
 "settings_censorship_shadowsocks_title" = "Shadowsocks";
+"settings_done" = "完成";
 "settings_kill_switch" = "断网保护";
 "settings_kill_switch_hint" = "阻止隧道之外的所有流量。下次连接时生效。";
 "settings_network_allowlan_hint" = "让本地流量（路由器、打印机、强制门户）绕开隧道。若 Wi-Fi 老是掉到\"无网络连接\"，就开启它。下次连接时生效。";

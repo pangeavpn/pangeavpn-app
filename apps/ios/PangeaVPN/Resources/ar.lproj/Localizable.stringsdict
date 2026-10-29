@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>region_auto_of</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@count@</string>
+		<key>count</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>d</string>
+			<key>zero</key>
+			<string>بدون خوادم · تلقائي</string>
+			<key>one</key>
+			<string>خادم واحد · تلقائي</string>
+			<key>two</key>
+			<string>خادمان · تلقائي</string>
+			<key>few</key>
+			<string>%d خوادم · تلقائي</string>
+			<key>many</key>
+			<string>%d خادمًا · تلقائي</string>
+			<key>other</key>
+			<string>%d خادم · تلقائي</string>
+		</dict>
+	</dict>
+</dict>
+</plist>

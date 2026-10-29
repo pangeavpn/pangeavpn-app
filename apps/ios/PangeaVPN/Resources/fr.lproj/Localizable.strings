@@ -50,10 +50,10 @@
 "notification_disconnected" = "DÉCONNECTÉ";
 "notification_disconnecting" = "DÉCONNEXION";
 "notification_error" = "ERREUR";
-"region_auto_of" = "%1$@ serveurs · auto";
 "region_best_of" = "%1$@ · meilleur sur %2$@";
 "region_more" = "%1$@ de plus";
 "region_pinned" = "%1$@ · épinglé";
+"region_refresh" = "Actualiser les régions";
 "server_picker_none_for_transport" = "Aucun serveur ne prend en charge ce transport";
 "servers_title" = "Serveurs";
 "settings_censorship_deaddrop_hint" = "Télécharge depuis un hôte public une liste d'adresses signée, vérifiée sur votre appareil. Dernier recours, et sans aucune donnée de compte.";
@@ -71,7 +71,8 @@
 "settings_censorship_reality_title" = "REALITY";
 "settings_censorship_shadowsocks_hint" = "Achemine le trafic du compte par Shadowsocks, personne ne voit quel serveur vous contactez.";
 "settings_censorship_shadowsocks_title" = "Shadowsocks";
-"settings_kill_switch" = "Kill switch";
+"settings_done" = "Terminé";
+"settings_kill_switch" = "Coupure de sécurité";
 "settings_kill_switch_hint" = "Bloque tout le trafic hors du tunnel. Prend effet à la prochaine connexion.";
 "settings_network_allowlan_hint" = "Laisse le trafic local (routeur, imprimantes, portails captifs) éviter le tunnel. Activez-le si le Wi-Fi retombe sur \"Pas d'Internet\". Effectif à la prochaine connexion.";
 "settings_network_allowlan_title" = "Autoriser le LAN";

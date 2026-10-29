@@ -50,10 +50,10 @@
 "notification_disconnected" = "قطع شده";
 "notification_disconnecting" = "در حال قطع اتصال";
 "notification_error" = "خطا";
-"region_auto_of" = "%1$@ سرور · خودکار";
 "region_best_of" = "%1$@ · بهترین از %2$@";
 "region_more" = "%1$@ مورد دیگر";
 "region_pinned" = "%1$@ · سنجاق‌شده";
+"region_refresh" = "به‌روزرسانی مناطق";
 "server_picker_none_for_transport" = "هیچ سروری از این انتقال پشتیبانی نمی‌کند";
 "servers_title" = "سرورها";
 "settings_censorship_deaddrop_hint" = "از یک میزبان عمومی فهرست نشانی امضاشده می‌گیرد که روی دستگاه شما بررسی می‌شود. آخرین راه، و هیچ اطلاعات حسابی ندارد.";
@@ -71,7 +71,8 @@
 "settings_censorship_reality_title" = "REALITY";
 "settings_censorship_shadowsocks_hint" = "ترافیک حساب را از Shadowsocks رد می‌کند، پس کسی نمی‌بیند با کدام سرور تماس می‌گیرید.";
 "settings_censorship_shadowsocks_title" = "Shadowsocks";
-"settings_kill_switch" = "قطع‌کن اضطراری";
+"settings_done" = "تمام";
+"settings_kill_switch" = "کلید قطع اضطراری";
 "settings_kill_switch_hint" = "تمام ترافیک خارج از تونل را مسدود می‌کند. در اتصال بعدی اعمال می‌شود.";
 "settings_network_allowlan_hint" = "می‌گذارد ترافیک شبکه محلی (روتر، چاپگرها، درگاه‌های ورود) تونل را دور بزند. اگر Wi-Fi مدام به \"بدون اینترنت\" می‌افتد، روشنش کنید. از اتصال بعدی اعمال می‌شود.";
 "settings_network_allowlan_title" = "اجازه به LAN";

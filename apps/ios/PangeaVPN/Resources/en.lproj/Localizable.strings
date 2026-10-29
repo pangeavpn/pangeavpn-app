@@ -50,10 +50,10 @@
 "notification_disconnected" = "DISCONNECTED";
 "notification_disconnecting" = "DISCONNECTING";
 "notification_error" = "ERROR";
-"region_auto_of" = "%1$@ servers · auto";
 "region_best_of" = "%1$@ · best of %2$@";
 "region_more" = "%1$@ more";
 "region_pinned" = "%1$@ · pinned";
+"region_refresh" = "Refresh regions";
 "server_picker_none_for_transport" = "No servers support this transport";
 "servers_title" = "Servers";
 "settings_censorship_deaddrop_hint" = "Fetches a signed address list from a public host, checked on your device. Last resort, and it carries no account details.";
@@ -71,6 +71,7 @@
 "settings_censorship_reality_title" = "REALITY";
 "settings_censorship_shadowsocks_hint" = "Tunnels account traffic through Shadowsocks, so nobody sees which server you reach.";
 "settings_censorship_shadowsocks_title" = "Shadowsocks";
+"settings_done" = "Done";
 "settings_kill_switch" = "Kill switch";
 "settings_kill_switch_hint" = "Block all traffic outside the tunnel. Takes effect on the next connect.";
 "settings_network_allowlan_hint" = "Lets local traffic (router, printers, captive portals) skip the tunnel. Turn it on if Wi-Fi keeps dropping to \"No internet\". Applies on next connect.";

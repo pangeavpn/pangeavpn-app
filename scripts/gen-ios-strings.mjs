@@ -21,8 +21,8 @@ const LPROJ_DIR = {
 // English must match the defaultValue used in the Swift call sites.
 const IOS_ONLY = {
   settings_kill_switch: {
-    en: "Kill switch", es: "Interruptor de seguridad", fr: "Kill switch", ru: "Аварийное отключение",
-    uk: "Аварійне відключення", zh: "断网保护", ar: "مفتاح الإيقاف", fa: "قطع‌کن اضطراری"
+    en: "Kill switch", es: "Interruptor de seguridad", fr: "Coupure de sécurité", ru: "Аварийное отключение",
+    uk: "Аварійне відключення", zh: "断网保护", ar: "مفتاح الإيقاف", fa: "کلید قطع اضطراری"
   },
   settings_kill_switch_hint: {
     en: "Block all traffic outside the tunnel. Takes effect on the next connect.",
@@ -84,6 +84,14 @@ const IOS_ONLY = {
     ar: "تم إيقاف الاتصال",
     fa: "اتصال متوقف شد"
   },
+  settings_done: {
+    en: "Done", es: "Listo", fr: "Terminé", ru: "Готово",
+    uk: "Готово", zh: "完成", ar: "تم", fa: "تمام"
+  },
+  region_refresh: {
+    en: "Refresh regions", es: "Actualizar regiones", fr: "Actualiser les régions", ru: "Обновить регионы",
+    uk: "Оновити регіони", zh: "刷新地区", ar: "تحديث المناطق", fa: "به‌روزرسانی مناطق"
+  },
   login_empty_account: {
     en: "Enter your account number",
     es: "Introduce tu número de cuenta",
@@ -99,16 +107,40 @@ const IOS_ONLY = {
 const ANDROID_ESCAPES = { n: "\n", t: "\t" };
 const XML_ENTITIES = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" };
 
-function toStringsValue(xmlValue) {
-  const plain = xmlValue
+const PLURAL_PREFIX = "@plural:";
+const PLURAL_CATEGORIES = ["zero", "one", "two", "few", "many", "other"];
+
+function unescapeAndroid(xmlValue) {
+  return xmlValue
     .replace(/&(amp|lt|gt|quot|apos);/g, (_, name) => XML_ENTITIES[name])
-    .replace(/\\(.)/gs, (_, ch) => ANDROID_ESCAPES[ch] ?? ch)
-    .replace(/%(\d+)\$s/g, "%$1$$@");
-  return plain
+    .replace(/\\(.)/gs, (_, ch) => ANDROID_ESCAPES[ch] ?? ch);
+}
+
+function toStringsValue(xmlValue) {
+  return unescapeAndroid(xmlValue)
+    .replace(/%(\d+)\$s/g, "%$1$$@")
     .replace(/\\/g, "\\\\")
     .replace(/"/g, '\\"')
     .replace(/\n/g, "\\n")
     .replace(/\t/g, "\\t");
+}
+
+function isPlural(xmlValue) {
+  return xmlValue.startsWith(PLURAL_PREFIX);
+}
+
+function parsePlural(xmlValue) {
+  const forms = {};
+  for (const part of xmlValue.slice(PLURAL_PREFIX.length).split("|")) {
+    const eq = part.indexOf("=");
+    const category = part.slice(0, eq);
+    if (eq < 0 || !PLURAL_CATEGORIES.includes(category)) {
+      throw new Error(`Bad plural segment "${part}"`);
+    }
+    forms[category] = unescapeAndroid(part.slice(eq + 1)).replace(/%\d+\$[sd]/g, "%d");
+  }
+  if (!("other" in forms)) throw new Error(`Plural without "other": ${xmlValue}`);
+  return forms;
 }
 
 function parseAndroid(xml, file) {
@@ -120,44 +152,109 @@ function parseAndroid(xml, file) {
   return entries;
 }
 
-function buildTables(rootDir) {
-  const tables = {};
+function collectRaw(rootDir, iosOnly) {
+  const raw = {};
   for (const code of LOCALES) {
     const merged = {};
     for (const mod of ANDROID_MODULES) {
       const file = path.join(rootDir, "apps", "android", mod, "src", "main", "res", ANDROID_DIR[code], "strings.xml");
       for (const [key, value] of Object.entries(parseAndroid(fs.readFileSync(file, "utf8"), file))) {
         if (key in merged) throw new Error(`Key "${key}" appears in more than one module for ${code}`);
-        merged[key] = toStringsValue(value);
+        merged[key] = value;
       }
     }
-    for (const [key, translations] of Object.entries(IOS_ONLY)) {
+    for (const [key, translations] of Object.entries(iosOnly)) {
       if (key in merged) throw new Error(`IOS_ONLY key "${key}" collides with an Android key`);
       if (translations[code] === undefined) throw new Error(`Missing iOS-only translation "${key}" for "${code}"`);
-      merged[key] = toStringsValue(translations[code]);
+      merged[key] = translations[code];
     }
-    tables[code] = Object.fromEntries(Object.entries(merged).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
+    raw[code] = merged;
   }
-  return tables;
+  return raw;
+}
+
+function sortKeys(obj) {
+  return Object.fromEntries(Object.entries(obj).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
+}
+
+function buildAll(rootDir, iosOnly = IOS_ONLY) {
+  const raw = collectRaw(rootDir, iosOnly);
+  const pluralKeys = new Set();
+  for (const code of LOCALES) {
+    for (const [key, value] of Object.entries(raw[code])) if (isPlural(value)) pluralKeys.add(key);
+  }
+  const tables = {};
+  const plurals = {};
+  for (const code of LOCALES) {
+    const strings = {};
+    const forms = {};
+    for (const [key, value] of Object.entries(raw[code])) {
+      if (pluralKeys.has(key)) {
+        forms[key] = isPlural(value) ? parsePlural(value) : { other: unescapeAndroid(value).replace(/%\d+\$[sd]/g, "%d") };
+      } else {
+        strings[key] = toStringsValue(value);
+      }
+    }
+    tables[code] = sortKeys(strings);
+    plurals[code] = sortKeys(forms);
+  }
+  return { tables, plurals };
+}
+
+function buildTables(rootDir, iosOnly = IOS_ONLY) {
+  return buildAll(rootDir, iosOnly).tables;
 }
 
 function render(table) {
-  return Object.entries(table).map(([k, v]) => `"${k}" = "${v}";\n`).join("");
+  return Object.entries(table).map(([k, v]) => `"${k}" = "${v}";
+`).join("");
+}
+
+function xmlEscape(text) {
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function renderStringsdict(plurals) {
+  const entries = Object.entries(plurals).map(([key, forms]) => {
+    const cats = PLURAL_CATEGORIES.filter((c) => c in forms)
+      .map((c) => `\t\t\t<key>${c}</key>\n\t\t\t<string>${xmlEscape(forms[c])}</string>\n`).join("");
+    return [
+      `\t<key>${xmlEscape(key)}</key>`,
+      "\t<dict>",
+      "\t\t<key>NSStringLocalizedFormatKey</key>",
+      "\t\t<string>%#@count@</string>",
+      "\t\t<key>count</key>",
+      "\t\t<dict>",
+      "\t\t\t<key>NSStringFormatSpecTypeKey</key>",
+      "\t\t\t<string>NSStringPluralRuleType</string>",
+      "\t\t\t<key>NSStringFormatValueTypeKey</key>",
+      "\t\t\t<string>d</string>",
+      `${cats}\t\t</dict>`,
+      "\t</dict>",
+      ""
+    ].join("\n");
+  }).join("");
+  const header = '<?xml version="1.0" encoding="UTF-8"?>\n' +
+    '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n';
+  return `${header}<plist version="1.0">\n<dict>\n${entries}</dict>\n</plist>\n`;
 }
 
 function main() {
   const rootDir = process.cwd();
   const outDir = path.join(rootDir, "apps", "ios", "PangeaVPN", "Resources");
-  const tables = buildTables(rootDir);
+  const { tables, plurals } = buildAll(rootDir);
   for (const code of LOCALES) {
     const dir = path.join(outDir, `${LPROJ_DIR[code]}.lproj`);
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, "Localizable.strings"), render(tables[code]), "utf8");
-    console.log(`${LPROJ_DIR[code]}: ${Object.keys(tables[code]).length} keys`);
+    const dictPath = path.join(dir, "Localizable.stringsdict");
+    if (Object.keys(plurals[code]).length > 0) fs.writeFileSync(dictPath, renderStringsdict(plurals[code]), "utf8");
+    else fs.rmSync(dictPath, { force: true });
+    console.log(`${LPROJ_DIR[code]}: ${Object.keys(tables[code]).length} keys, ${Object.keys(plurals[code]).length} plurals`);
   }
 }
 
-export { IOS_ONLY, LOCALES, buildTables, toStringsValue };
+export { IOS_ONLY, LOCALES, buildAll, buildTables, parsePlural, renderStringsdict, toStringsValue };
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   main();

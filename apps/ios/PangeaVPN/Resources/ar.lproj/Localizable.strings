@@ -50,10 +50,10 @@
 "notification_disconnected" = "غير متصل";
 "notification_disconnecting" = "جارٍ قطع الاتصال";
 "notification_error" = "خطأ";
-"region_auto_of" = "@plural:zero=بدون خوادم · تلقائي|one=خادم واحد · تلقائي|two=خادمان · تلقائي|few=%1$@ خوادم · تلقائي|many=%1$@ خادمًا · تلقائي|other=%1$@ خادم · تلقائي";
 "region_best_of" = "%1$@ · الأفضل من %2$@";
 "region_more" = "%1$@ أخرى";
 "region_pinned" = "%1$@ · مثبّت";
+"region_refresh" = "تحديث المناطق";
 "server_picker_none_for_transport" = "لا توجد خوادم تدعم هذا النقل";
 "servers_title" = "الخوادم";
 "settings_censorship_deaddrop_hint" = "يجلب من مضيف عام قائمة عناوين موقَّعة، يتم التحقق منها على جهازك. ملاذ أخير، ولا تتضمن أي بيانات حساب.";
@@ -71,6 +71,7 @@
 "settings_censorship_reality_title" = "REALITY";
 "settings_censorship_shadowsocks_hint" = "يمرّر حركة الحساب عبر Shadowsocks، فلا يرى أحد الخادم الذي تتصل به.";
 "settings_censorship_shadowsocks_title" = "Shadowsocks";
+"settings_done" = "تم";
 "settings_kill_switch" = "مفتاح الإيقاف";
 "settings_kill_switch_hint" = "يحظر كل حركة المرور خارج النفق. يسري عند الاتصال التالي.";
 "settings_network_allowlan_hint" = "يدع حركة الشبكة المحلية (الراوتر، الطابعات، البوابات المقيّدة) تتجاوز النفق. فعّله إذا ظلت Wi-Fi تسقط إلى \"لا يوجد إنترنت\". يسري عند الاتصال التالي.";

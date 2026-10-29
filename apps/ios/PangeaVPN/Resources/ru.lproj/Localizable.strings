@@ -50,10 +50,10 @@
 "notification_disconnected" = "ОТКЛЮЧЕНО";
 "notification_disconnecting" = "ОТКЛЮЧЕНИЕ";
 "notification_error" = "ОШИБКА";
-"region_auto_of" = "@plural:one=%1$@ сервер · авто|few=%1$@ сервера · авто|many=%1$@ серверов · авто|other=%1$@ серверов · авто";
 "region_best_of" = "%1$@ · лучший из %2$@";
 "region_more" = "ещё %1$@";
 "region_pinned" = "%1$@ · закреплён";
+"region_refresh" = "Обновить регионы";
 "server_picker_none_for_transport" = "Нет серверов с поддержкой этого транспорта";
 "servers_title" = "Серверы";
 "settings_censorship_deaddrop_hint" = "Загружает с общедоступного хоста подписанный список адресов, который проверяется на вашем устройстве. Крайняя мера, данные аккаунта не передаются.";
@@ -71,6 +71,7 @@
 "settings_censorship_reality_title" = "REALITY";
 "settings_censorship_shadowsocks_hint" = "Ведёт трафик аккаунта через Shadowsocks, поэтому никто не видит, с каким сервером вы связываетесь.";
 "settings_censorship_shadowsocks_title" = "Shadowsocks";
+"settings_done" = "Готово";
 "settings_kill_switch" = "Аварийное отключение";
 "settings_kill_switch_hint" = "Блокирует весь трафик вне туннеля. Вступает в силу при следующем подключении.";
 "settings_network_allowlan_hint" = "Пропускает трафик локальной сети (роутер, принтеры, captive-порталы) мимо туннеля. Включите, если Wi-Fi срывается в \"Нет интернета\". Действует со следующего подключения.";
