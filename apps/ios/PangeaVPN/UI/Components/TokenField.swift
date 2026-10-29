@@ -56,7 +56,7 @@ struct TokenField: View {
 
     private var borderColor: Color {
         if isError { return Palette.error }
-        return focused ? Palette.accent : Palette.border
+        return focused ? Palette.accent : Palette.borderSubtle
     }
 }
 

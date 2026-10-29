@@ -21,6 +21,9 @@ struct RootView: View {
             .onChange(of: session.restoring) { was, now in
                 if was && !now { hasRestored = true }
             }
+            .onChange(of: session.session != nil) { _, signedIn in
+                if signedIn { draftToken = "" }
+            }
             .task {
                 await session.restore()
                 hasRestored = true
