@@ -19,9 +19,10 @@ targets:
     platform: iOS
     sources:
       - path: PangeaVPN
-      # Optional only until the first shared file lands.
+        excludes: ["PrivacyInfo.xcprivacy"]
+      - path: PangeaVPN/PrivacyInfo.xcprivacy
+        buildPhase: resources
       - path: Shared
-        optional: true
     dependencies:
       - target: PacketTunnel
       - framework: Frameworks/Pangeacore.xcframework
@@ -65,8 +66,10 @@ targets:
     platform: iOS
     sources:
       - path: PacketTunnel
+        excludes: ["PrivacyInfo.xcprivacy"]
+      - path: PacketTunnel/PrivacyInfo.xcprivacy
+        buildPhase: resources
       - path: Shared
-        optional: true
       - path: PangeaVPN/Resources
         includes: ["*.lproj/**"]
     dependencies:

@@ -26,13 +26,14 @@ access group.
 ## Prerequisites
 
 - macOS with Xcode 16+ (iOS 17.0 deployment target, Swift 5 language mode)
-- Go 1.26+ and `gomobile`:
+- Go 1.26+ and `gomobile`, installed from `daemon/` so the CLI matches the
+  `golang.org/x/mobile` version pinned in `daemon/go.mod`:
   ```bash
-  go install golang.org/x/mobile/cmd/gomobile@latest
-  go install golang.org/x/mobile/cmd/gobind@latest
-  gomobile init
+  cd daemon
+  go install golang.org/x/mobile/cmd/gomobile golang.org/x/mobile/cmd/gobind
   ```
-- XcodeGen: `brew install xcodegen`
+- XcodeGen 2.44.1 (the version CI pins): `brew install xcodegen`, or the
+  release zip from the XcodeGen GitHub releases page.
 
 ## Build
 
@@ -64,11 +65,13 @@ xcodegen generate
 
 ```bash
 xcodebuild test -scheme PangeaVPN -destination 'platform=iOS Simulator,name=iPhone 16'
-xcodebuild build -scheme PangeaVPN -destination generic/platform=iOS CODE_SIGNING_ALLOWED=NO
+xcodebuild build -scheme PangeaVPN -configuration Release -destination generic/platform=iOS CODE_SIGNING_ALLOWED=NO
 ```
 
 Pick any installed iPhone simulator for the test destination. CI
-(`.github/workflows/build-ios.yml`) runs the same steps on `macos-15`.
+(`.github/workflows/build-ios.yml`) runs the same steps on `macos-15`: the core
+job builds the xcframework (cached on the Go sources, Go, gomobile and Xcode
+versions; arm64 slices only), then the test and device jobs run in parallel.
 
 ## Versioning
 
@@ -81,3 +84,10 @@ follows Android's `versionCode` rule (`0.8.1` → `801`).
 
 Not set up yet. `project.yml` names no team: simulator builds need none, and
 CI's device build runs with `CODE_SIGNING_ALLOWED=NO`.
+
+## Privacy manifests
+
+Both targets ship a `PrivacyInfo.xcprivacy`: UserDefaults (`1C8F.1`, app-group
+suite), file timestamps (`C617.1`, Go core inside the container), no tracking,
+and the account identifier as collected data. Re-check against Xcode's privacy
+report on the first archive.

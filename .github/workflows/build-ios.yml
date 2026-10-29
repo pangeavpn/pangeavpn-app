@@ -15,16 +15,20 @@ on:
 
 concurrency:
   group: build-ios-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
 
 permissions:
   contents: read
+
+env:
+  XCODEGEN_VERSION: '2.44.1'
+  XCODEGEN_SHA256: a2e905fb68446e9bb4008cdfe2e13e3f176d0cbcca828b71770f8e53fca91b73
 
 jobs:
   go-ios:
     name: Go core for iOS
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
@@ -49,18 +53,98 @@ jobs:
             echo "::endgroup::"
           done
 
-  ios:
-    name: iOS app
+      # The ios tag selects the iOS files; GOOS=darwin lets vet load them without cgo.
+      - name: Vet the iOS files
+        working-directory: daemon
+        run: GOOS=darwin CGO_ENABLED=0 go vet -tags ios,with_utls ./mobile/
+
+  core:
+    name: Pangeacore.xcframework
     runs-on: macos-15
-    timeout-minutes: 60
-    env:
-      HOMEBREW_NO_AUTO_UPDATE: '1'
-      HOMEBREW_NO_INSTALL_CLEANUP: '1'
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: daemon/go.mod
+          cache: false
+
+      - name: Work out the cache keys
+        id: keys
+        working-directory: daemon
+        run: |
+          {
+            echo "go=$(go env GOVERSION)"
+            echo "mobile=$(go list -m -f '{{.Version}}' golang.org/x/mobile)"
+            echo "xcode=$(xcodebuild -version | head -n1 | tr -d ' ')"
+            echo "modcache=$(go env GOMODCACHE)"
+            echo "buildcache=$(go env GOCACHE)"
+          } >>"$GITHUB_OUTPUT"
+
+      # The key covers every input of the bind: Go sources, Go and gomobile
+      # versions, SDK, and the "v1" recipe revision below.
+      - name: Restore the xcframework
+        id: framework
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: apps/ios/Frameworks/Pangeacore.xcframework
+          key: xcframework-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.keys.outputs.go }}-${{ steps.keys.outputs.mobile }}-${{ steps.keys.outputs.xcode }}-${{ hashFiles('daemon/**/*.go', 'daemon/go.mod', 'daemon/go.sum') }}
+
+      - name: Restore the Go caches
+        if: steps.framework.outputs.cache-hit != 'true'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ steps.keys.outputs.modcache }}
+            ${{ steps.keys.outputs.buildcache }}
+          key: go-ios-${{ runner.os }}-${{ runner.arch }}-${{ steps.keys.outputs.go }}-${{ hashFiles('daemon/go.sum') }}
+          restore-keys: |
+            go-ios-${{ runner.os }}-${{ runner.arch }}-${{ steps.keys.outputs.go }}-
+
+      # Run inside daemon/ so the CLI is built at the version go.mod pins, the
+      # same one the bind links against.
+      - name: Install gomobile
+        if: steps.framework.outputs.cache-hit != 'true'
+        working-directory: daemon
+        run: go install golang.org/x/mobile/cmd/gomobile golang.org/x/mobile/cmd/gobind
+
+      # Same tags and ldflags as the Android AAR; apps/android/README.md says why.
+      # Apple-silicon runners never use an x86_64 simulator slice.
+      - name: Build Pangeacore.xcframework
+        if: steps.framework.outputs.cache-hit != 'true'
+        working-directory: daemon
+        run: |
+          mkdir -p ../apps/ios/Frameworks
+          gomobile bind -target=ios/arm64,iossimulator/arm64 -iosversion=17.0 \
+            -tags=with_utls \
+            -ldflags=-checklinkname=0 \
+            -o ../apps/ios/Frameworks/Pangeacore.xcframework \
+            ./mobile
+
+      - name: Package the xcframework
+        run: |
+          test -d apps/ios/Frameworks/Pangeacore.xcframework
+          tar -czf "$RUNNER_TEMP/Pangeacore.tgz" -C apps/ios/Frameworks Pangeacore.xcframework
+
+      - name: Share the xcframework
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: pangeacore-xcframework
+          path: ${{ runner.temp }}/Pangeacore.tgz
+          retention-days: 1
+          compression-level: 0
+
+  test:
+    name: Unit tests
+    needs: core
+    runs-on: macos-15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
       # Newest iPhone on a runtime between the deployment target and this SDK,
-      # booted early so its slow first boot overlaps the core build.
+      # booted early so its slow first boot overlaps the downloads below.
       - name: Pick an iPhone simulator
         id: sim
         run: |
@@ -84,44 +168,72 @@ jobs:
           echo "udid=$udid" >>"$GITHUB_OUTPUT"
           nohup xcrun simctl boot "$udid" >/dev/null 2>&1 &
 
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+      - name: Fetch the xcframework
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
-          go-version-file: daemon/go.mod
-          cache-dependency-path: daemon/go.sum
+          name: pangeacore-xcframework
+          path: ${{ runner.temp }}/core
 
-      - name: Install gomobile
+      - name: Unpack the xcframework
         run: |
-          go install golang.org/x/mobile/cmd/gomobile@latest
-          go install golang.org/x/mobile/cmd/gobind@latest
-          gomobile init
+          mkdir -p apps/ios/Frameworks
+          tar -xzf "$RUNNER_TEMP/core/Pangeacore.tgz" -C apps/ios/Frameworks
 
-      # Same tags and ldflags as the Android AAR; apps/android/README.md says why.
-      - name: Build Pangeacore.xcframework
-        working-directory: daemon
+      - name: Install XcodeGen
         run: |
-          mkdir -p ../apps/ios/Frameworks
-          gomobile bind -target=ios,iossimulator -iosversion=17.0 \
-            -tags=with_utls \
-            -ldflags=-checklinkname=0 \
-            -o ../apps/ios/Frameworks/Pangeacore.xcframework \
-            ./mobile
-
-      - name: Fail if the xcframework is missing
-        run: test -d apps/ios/Frameworks/Pangeacore.xcframework
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/xcodegen.zip" \
+            "https://github.com/yonaskolb/XcodeGen/releases/download/${XCODEGEN_VERSION}/xcodegen.zip"
+          echo "${XCODEGEN_SHA256}  $RUNNER_TEMP/xcodegen.zip" | shasum -a 256 -c -
+          unzip -q "$RUNNER_TEMP/xcodegen.zip" -d "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/xcodegen/bin" >>"$GITHUB_PATH"
 
       - name: Generate the Xcode project
         working-directory: apps/ios
-        run: |
-          brew install xcodegen
-          xcodegen generate
+        run: xcodegen generate
+
+      - name: Wait for the simulator
+        timeout-minutes: 5
+        env:
+          SIM_UDID: ${{ steps.sim.outputs.udid }}
+        run: perl -e 'alarm 240; exec @ARGV' xcrun simctl bootstatus "$SIM_UDID" -b
 
       - name: Unit tests
+        timeout-minutes: 10
         working-directory: apps/ios
         env:
           SIM_UDID: ${{ steps.sim.outputs.udid }}
+        run: xcodebuild test -scheme PangeaVPN -destination "id=$SIM_UDID"
+
+  device:
+    name: Unsigned device build
+    needs: core
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Fetch the xcframework
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: pangeacore-xcframework
+          path: ${{ runner.temp }}/core
+
+      - name: Unpack the xcframework
         run: |
-          xcrun simctl bootstatus "$SIM_UDID" -b
-          xcodebuild test -scheme PangeaVPN -destination "id=$SIM_UDID"
+          mkdir -p apps/ios/Frameworks
+          tar -xzf "$RUNNER_TEMP/core/Pangeacore.tgz" -C apps/ios/Frameworks
+
+      - name: Install XcodeGen
+        run: |
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/xcodegen.zip" \
+            "https://github.com/yonaskolb/XcodeGen/releases/download/${XCODEGEN_VERSION}/xcodegen.zip"
+          echo "${XCODEGEN_SHA256}  $RUNNER_TEMP/xcodegen.zip" | shasum -a 256 -c -
+          unzip -q "$RUNNER_TEMP/xcodegen.zip" -d "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/xcodegen/bin" >>"$GITHUB_PATH"
+
+      - name: Generate the Xcode project
+        working-directory: apps/ios
+        run: xcodegen generate
 
       # App Store versions are numeric only, so a prerelease suffix is dropped;
       # the build number is Android's versionCode rule (0.8.1 -> 801).
@@ -134,13 +246,15 @@ jobs:
           echo "marketing=$major.$minor.$patch" >>"$GITHUB_OUTPUT"
           echo "build=$((major * 10000 + minor * 100 + patch))" >>"$GITHUB_OUTPUT"
 
-      - name: Unsigned device build
+      - name: Release build
+        timeout-minutes: 12
         working-directory: apps/ios
         env:
           MARKETING: ${{ steps.version.outputs.marketing }}
           BUILD_NUMBER: ${{ steps.version.outputs.build }}
         run: |
-          xcodebuild build -scheme PangeaVPN -destination generic/platform=iOS \
+          xcodebuild build -scheme PangeaVPN -configuration Release \
+            -destination generic/platform=iOS \
             CODE_SIGNING_ALLOWED=NO \
             MARKETING_VERSION="$MARKETING" \
             CURRENT_PROJECT_VERSION="$BUILD_NUMBER"
