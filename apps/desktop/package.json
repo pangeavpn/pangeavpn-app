@@ -1,6 +1,6 @@
 {
   "name": "@pangeavpn/desktop",
-  "version": "0.8.1-rc.1",
+  "version": "0.8.2-rc.2",
   "private": true,
   "author": {
     "name": "Pangea",
@@ -13,7 +13,7 @@
     "preview": "node ./scripts/preview/serve.mjs --watch",
     "test": "tsc -p tsconfig.test.json && node ./scripts/verify-i18n.mjs && node --test --disable-warning=MODULE_TYPELESS_PACKAGE_JSON \"src/**/*.test.ts\"",
     "build": "tsc -p tsconfig.main.json && tsc -p tsconfig.renderer.json && node ./scripts/copy-static.mjs",
-    "pack": "npm run build && node ./scripts/build-daemon.mjs && node ./scripts/build-installer-art.mjs && node ./scripts/verify-pack-resources.mjs && electron-builder && node ./scripts/stage-mac-installer.mjs"
+    "pack": "npm run build && node ./scripts/build-daemon.mjs && node ./scripts/build-installer-art.mjs && node ./scripts/verify-pack-resources.mjs && electron-builder"
   },
   "dependencies": {
     "@pangeavpn/shared-types": "file:../../packages/shared-types",
@@ -130,6 +130,7 @@
       "icon": "PangeaVPN.icns",
       "identity": "-",
       "hardenedRuntime": false,
+      "minimumSystemVersion": "12.0",
       "target": [
         "pkg"
       ],
@@ -177,7 +178,7 @@
       ]
     },
     "pkg": {
-      "scripts": "build/pkg-scripts",
+      "scripts": "pkg-scripts",
       "allowAnywhere": false,
       "allowCurrentUserHome": false,
       "allowRootDirectory": true,

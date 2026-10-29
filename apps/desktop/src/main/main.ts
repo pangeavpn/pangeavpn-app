@@ -46,6 +46,7 @@ import type { HubShadowsocksCreds } from "../shared/hubShadowsocksCreds";
 import type { CachedSubscription } from "../shared/cachedSubscription";
 import { beginAttempt, cancelAttempt, commitAttempt, endAttempt, isCancelled } from "./connectAttempt";
 import { LATEST_ROUTE, setupAutoUpdater } from "./autoUpdater";
+import { latestReleaseRoute } from "./updatePolicy";
 import { isSafeExternalUrl } from "./externalUrl";
 import { setLoginItemEnabled, isLoginItemEnabled, isHiddenLaunchArg } from "./loginItem";
 import { startNetworkWatcher, onNetworkChange } from "./networkWatcher";
@@ -142,6 +143,11 @@ let lockdownEnabled = false;
 let autoConnectEnabled = false;
 // OS notifications on connection status changes; on by default, off in Settings.
 let notificationsEnabled = true;
+// macOS only: off hides the Dock icon, leaving PangeaVPN in the menu bar alone.
+let showInDockEnabled = true;
+// Switching the Dock icon deactivates the app for a moment, which the popover
+// would otherwise take for the user clicking away.
+let dockSwitching = false;
 // Panic wipe: the global removal shortcut is inert until the user opts in. Off by default.
 let panicWipeEnabled = false;
 // "auto" (reality, then cloak, shadowsocks, hysteria2, naive, anytls), or one of
@@ -297,10 +303,10 @@ function createWindow(): void {
   });
 
   mainWindow.on("blur", () => {
-    if (isQuitting || daemonRecoveryInProgress || nativeDialogOpen || !anchoredWindow) return;
+    if (isQuitting || daemonRecoveryInProgress || nativeDialogOpen || dockSwitching || !anchoredWindow) return;
     // Wait for any show animation to finish, then hide.
     const checkAndHide = () => {
-      if (!isQuitting && !nativeDialogOpen && mainWindow?.isVisible() && !hiding) {
+      if (!isQuitting && !nativeDialogOpen && !dockSwitching && mainWindow?.isVisible() && !hiding) {
         hideMainWindow();
       }
     };
@@ -2185,6 +2191,18 @@ function registerStartupSettingsHandlers(): void {
   );
 
   registerBoolSetting(
+    { get: IPC_CHANNELS.getShowInDock, set: IPC_CHANNELS.setShowInDock },
+    "showInDock",
+    "showInDock setting",
+    (enabled) => {
+      showInDockEnabled = !!enabled;
+      setDockIconVisible(showInDockEnabled);
+      return showInDockEnabled;
+    },
+    () => showInDockEnabled
+  );
+
+  registerBoolSetting(
     { get: IPC_CHANNELS.getPanicWipe, set: IPC_CHANNELS.setPanicWipe },
     "panicWipe",
     "panic wipe setting",
@@ -2606,6 +2624,9 @@ function applyPersistedSettings(settings: Record<string, unknown>): void {
   if (typeof settings.notifications === "boolean") {
     notificationsEnabled = settings.notifications;
   }
+  if (typeof settings.showInDock === "boolean") {
+    showInDockEnabled = settings.showInDock;
+  }
   panicWipeEnabled = settings.panicWipe === true;
   // Last known good hub IP: the only way to reach the hub once a Lockdown
   // lock is engaged, since the lock permits that IP but blocks DNS and DoH.
@@ -2722,6 +2743,31 @@ function wirePangeaApiClient(): void {
       }
     }
   });
+}
+
+// macOS only. Hidden, the Dock icon and the Cmd+Tab entry go and PangeaVPN
+// lives in the menu bar alone; the tray icon is there either way.
+function setDockIconVisible(visible: boolean): void {
+  const dock = app.dock;
+  if (process.platform !== "darwin" || !dock || dock.isVisible() === visible) return;
+  // Keep the popover open across the switch when the toggle was flipped in it.
+  const refocus = mainWindow?.isVisible() === true;
+  dockSwitching = true;
+  const settle = () => {
+    if (refocus) {
+      app.focus({ steal: true });
+      mainWindow?.focus();
+    }
+    setTimeout(() => {
+      dockSwitching = false;
+    }, 500);
+  };
+  if (visible) {
+    dock.show().catch((err) => console.warn("dock show failed:", sanitizeLog(err))).finally(settle);
+  } else {
+    dock.hide();
+    settle();
+  }
 }
 
 // Only macOS has a global menu bar; elsewhere this is a strip of chrome
@@ -2924,6 +2970,10 @@ async function boot(): Promise<void> {
     // no settings file yet
   }
 
+  // Before any window exists. Without LSUIElement the icon still shows while
+  // the app launches, which keeps the Dock-on default free of any flicker.
+  setDockIconVisible(showInDockEnabled);
+
   // Resolve the display locale for the tray/menu (built below). The language
   // is fixed for this run; changing it applies on the next launch.
   setMainLocale(resolveMainLocale(localePref, app.getLocale()));
@@ -2954,10 +3004,15 @@ async function boot(): Promise<void> {
   registerIpcHandlers();
   createWindow();
   // A resolver, not a snapshot, so this stays correct across window recreates.
-  setupAutoUpdater(() => mainWindow, {
-    ready: () => pangeaApiClient.hubPathReady(),
-    fetchLatest: (timeoutMs) => pangeaApiClient.anonymousRequest("GET", LATEST_ROUTE, undefined, { timeoutMs })
-  });
+  setupAutoUpdater(
+    () => mainWindow,
+    {
+      ready: () => pangeaApiClient.hubPathReady(),
+      fetchLatest: (timeoutMs) =>
+        pangeaApiClient.anonymousRequest("GET", latestReleaseRoute(LATEST_ROUTE, app.getVersion()), undefined, { timeoutMs })
+    },
+    (pkgPath, sha256) => daemonClient.installUpdate(pkgPath, sha256)
+  );
   createTray();
   applyPanicShortcut();
   watchDisplayChanges();
@@ -2984,11 +3039,10 @@ app.on("activate", () => {
   showMainWindow();
 });
 
-let quitCleanupDone = false;
-
-app.on("before-quit", (event) => {
-  if (quitCleanupDone) return;
-  event.preventDefault();
+// Synchronous and never cancelled: macOS asks the app to quit before a restart
+// or shutdown, and preventDefault() here answers no, so macOS reports that
+// PangeaVPN interrupted the restart.
+app.on("before-quit", () => {
   isQuitting = true;
   stopTrayStatusPolling();
   tray?.destroy();
@@ -2999,8 +3053,6 @@ app.on("before-quit", (event) => {
   // Quitting the app is not Disconnect: the daemon keeps the session and its
   // lock, and a spawned dev daemon leaves both for its next start to resume.
   daemonProcess.stop();
-  quitCleanupDone = true;
-  app.quit();
 });
 
 // Chromium encrypts its cookie store with a keychain key, and an ad-hoc

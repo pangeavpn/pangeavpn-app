@@ -92,17 +92,12 @@ export function resolveLocale(stored?: string | null): Locale {
   return detected ?? DEFAULT_LOCALE;
 }
 
-// Keys whose markup (e.g. <strong>/<em>) must survive translation, not be
-// flattened to text. Catalogue values for these are trusted static markup.
-const HTML_KEYS: ReadonlySet<MessageKey> = new Set(["update.macStep"] as MessageKey[]);
-
 /** Apply `data-i18n*` annotations under `root` to their translated strings. */
 export function applyStaticText(root: ParentNode = document): void {
   root.querySelectorAll<HTMLElement>("[data-i18n]").forEach((el) => {
     const key = el.dataset.i18n as MessageKey | undefined;
     if (!key) return;
-    if (HTML_KEYS.has(key)) el.innerHTML = t(key);
-    else el.textContent = t(key);
+    el.textContent = t(key);
   });
   applyAttr(root, "data-i18n-placeholder", "placeholder");
   applyAttr(root, "data-i18n-aria-label", "aria-label");

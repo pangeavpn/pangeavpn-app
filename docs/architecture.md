@@ -388,7 +388,7 @@ and `AllowedIPs`, and the kill switch blocks non-loopback IPv6.
 | Platform | Tunnel and network setup | Kill switch | Managed daemon model |
 | --- | --- | --- | --- |
 | Windows | In-process WireGuard TUN; `winipcfg` sets addresses, routes, DNS and endpoint bypasses | Windows Filtering Platform (WFP) | `PangeaDaemon`, an automatic LocalSystem service |
-| macOS | In-process utun; `ifconfig`, `route` and `networksetup` apply address, route and DNS changes | PF anchor through `pfctl` | Root `launchd` daemon, when installed with `install-mac.sh` |
+| macOS | In-process utun; `ifconfig`, `route` and `networksetup` apply address, route and DNS changes | PF anchor through `pfctl` | Root `launchd` daemon, installed by the `.pkg` |
 | Linux | In-process TUN; netlink plus routing table/fwmark `51820`; systemd-resolved over D-Bus or `/etc/resolv.conf` for DNS | nftables, falling back to iptables/ip6tables | Root systemd service, when installed with `install-linux.sh` |
 
 Platform code lives in [`daemon/internal/wg`](../daemon/internal/wg) and
@@ -629,7 +629,7 @@ redialed into a network that hasn't come back yet.
 | Windows development | `scripts/dev.mjs` builds the daemon and requests UAC elevation |
 | Windows installed | NSIS installs and starts `PangeaDaemon`. The packaged app expects that service and has no bundled fallback |
 | macOS development | The daemon runs as root and keeps the user's support directory |
-| macOS complete install | The DMG's `install-mac.sh` installs a root `launchd` service. The raw `.pkg` only stages the daemon |
+| macOS install | The `.pkg` installs and starts a root `launchd` service |
 | Linux development | The daemon runs as root, since TUN and network changes need privilege |
 | Linux source install | `scripts/install-linux.sh` installs and enables `pangea-daemon.service` and `pangea-killswitch-boot.service`, which re-applies a held kill switch before `network-pre.target` |
 | Linux AppImage or `.deb` alone | The package contains a daemon but installs no systemd unit. Elevated recovery may use systemd or PolicyKit |

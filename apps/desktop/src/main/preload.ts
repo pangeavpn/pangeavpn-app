@@ -47,6 +47,8 @@ const CH = {
   getAutoConnect: "settings:getAutoConnect",
   setNotifications: "settings:setNotifications",
   getNotifications: "settings:getNotifications",
+  setShowInDock: "settings:setShowInDock",
+  getShowInDock: "settings:getShowInDock",
   setPanicWipe: "settings:setPanicWipe",
   getPanicWipe: "settings:getPanicWipe",
   getLastServer: "settings:getLastServer",
@@ -76,6 +78,7 @@ const CH = {
   updateAvailable: "app:updateAvailable",
   updateNotAvailable: "app:updateNotAvailable",
   updateError: "app:updateError",
+  updateProgress: "app:updateProgress",
   openExternal: "app:openExternal",
   openLogsFolder: "app:openLogsFolder",
   sendDiagnostics: "app:sendDiagnostics",
@@ -142,6 +145,8 @@ const pangeaApi = {
   getAutoConnect: () => ipcRenderer.invoke(CH.getAutoConnect),
   setNotifications: (enabled: boolean) => ipcRenderer.invoke(CH.setNotifications, enabled),
   getNotifications: () => ipcRenderer.invoke(CH.getNotifications),
+  setShowInDock: (enabled: boolean) => ipcRenderer.invoke(CH.setShowInDock, enabled),
+  getShowInDock: () => ipcRenderer.invoke(CH.getShowInDock),
   setPanicWipe: (enabled: boolean) => ipcRenderer.invoke(CH.setPanicWipe, enabled),
   getPanicWipe: () => ipcRenderer.invoke(CH.getPanicWipe),
   getLastServer: () => ipcRenderer.invoke(CH.getLastServer),
@@ -194,6 +199,14 @@ const autoUpdaterApi = {
     const listener = (_event: Electron.IpcRendererEvent, message: string) => callback(message);
     ipcRenderer.on(CH.updateError, listener);
     return () => ipcRenderer.removeListener(CH.updateError, listener);
+  },
+  onUpdateProgress: (callback: (progress: { phase: "downloading"; percent: number | null } | { phase: "installing" }) => void) => {
+    const listener = (
+      _event: Electron.IpcRendererEvent,
+      progress: { phase: "downloading"; percent: number | null } | { phase: "installing" }
+    ) => callback(progress);
+    ipcRenderer.on(CH.updateProgress, listener);
+    return () => ipcRenderer.removeListener(CH.updateProgress, listener);
   },
 };
 

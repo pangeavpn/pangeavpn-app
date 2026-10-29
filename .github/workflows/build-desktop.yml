@@ -132,7 +132,8 @@ jobs:
     name: macOS (arm64 + x64)
     runs-on: macos-latest
     needs: test
-    timeout-minutes: 60
+    # Notarization waits up to an hour per pkg, and Apple can be that slow.
+    timeout-minutes: 150
     steps:
       - name: Checkout
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -153,21 +154,81 @@ jobs:
       - name: Install workspace dependencies
         run: npm ci
 
+      # PR builds never see the certificates, and fork builds have no secrets;
+      # both stay ad-hoc signed. Everything else ships Developer ID signed and notarized.
+      - name: Import Developer ID certificates
+        if: github.event_name != 'pull_request'
+        env:
+          MAC_CERTS_P12_BASE64: ${{ secrets.MAC_CERTS_P12_BASE64 }}
+          MAC_CERTS_P12_PASSWORD: ${{ secrets.MAC_CERTS_P12_PASSWORD }}
+          APPLE_API_KEY_P8_BASE64: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          if [ -z "$MAC_CERTS_P12_BASE64" ]; then
+            echo "::warning::MAC_CERTS_P12_BASE64 is not set; building ad-hoc signed installers."
+            exit 0
+          fi
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          keychain_password="$(openssl rand -hex 24)"
+          echo "$MAC_CERTS_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/certs.p12"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$RUNNER_TEMP/certs.p12" -k "$keychain" -P "$MAC_CERTS_P12_PASSWORD" \
+            -T /usr/bin/codesign -T /usr/bin/productbuild -T /usr/bin/pkgbuild
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain" >/dev/null
+          # The identities only count as valid with Apple's G2 intermediate present.
+          curl -fsSL https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer -o "$RUNNER_TEMP/DeveloperIDG2CA.cer"
+          security import "$RUNNER_TEMP/DeveloperIDG2CA.cer" -k "$keychain"
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          rm -f "$RUNNER_TEMP/certs.p12"
+
+          identity="$(security find-identity -v -p codesigning "$keychain" \
+            | sed -n 's/.*"Developer ID Application: \(.*\)"$/\1/p' | head -n 1)"
+          if [ -z "$identity" ]; then
+            echo "::error::No Developer ID Application certificate in MAC_CERTS_P12_BASE64."
+            exit 1
+          fi
+          if ! security find-certificate -c "Developer ID Installer: $identity" "$keychain" >/dev/null; then
+            echo "::error::No Developer ID Installer certificate for $identity in MAC_CERTS_P12_BASE64."
+            exit 1
+          fi
+          echo "MAC_CODESIGN_IDENTITY=$identity" >> "$GITHUB_ENV"
+
+          if [ -n "$APPLE_API_KEY_P8_BASE64" ]; then
+            echo "$APPLE_API_KEY_P8_BASE64" | base64 --decode > "$RUNNER_TEMP/notary_key.p8"
+            {
+              echo "APPLE_API_KEY=$RUNNER_TEMP/notary_key.p8"
+              echo "APPLE_API_KEY_ID=$APPLE_API_KEY_ID"
+              echo "APPLE_API_ISSUER=$APPLE_API_ISSUER"
+            } >> "$GITHUB_ENV"
+          else
+            echo "::warning::APPLE_API_KEY_P8_BASE64 is not set; installers are signed but not notarized."
+          fi
+
       - name: Build macOS installers
         run: npm run build-bin:mac
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Identities come from MAC_CODESIGN_IDENTITY (or ad-hoc "-"), never discovery.
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
           # Ad-hoc signing (mac.identity "-") uses no secrets; PR builds skip it otherwise and fail verification.
           CSC_FOR_PULL_REQUEST: 'true'
           # Fail the build rather than quietly shipping the naive stub.
           PANGEA_REQUIRE_NAIVE: '1'
 
-      - name: Upload macOS installer DMGs
+      - name: Remove signing keychain
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/signing.keychain-db" 2>/dev/null || true
+          rm -f "$RUNNER_TEMP/notary_key.p8"
+
+      - name: Upload macOS installer packages
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: pangeavpn-mac-installers
-          path: dist/bin/mac/installer/**/*-installer.dmg
+          path: dist/bin/mac/installer/**/*.pkg
           if-no-files-found: error
           retention-days: 14
 
@@ -195,18 +256,18 @@ jobs:
         run: |
           mkdir -p release
           find artifacts/windows -type f -name '*.exe' -exec cp {} release/ \;
-          find artifacts/mac -type f -name '*-installer.dmg' -exec cp {} release/ \;
+          find artifacts/mac -type f -name '*.pkg' -exec cp {} release/ \;
           ls -la release/
 
-      # Releases are not code-signed yet, so published checksums are the only
-      # integrity check users have. Generated here, from the same artifacts that
+      # Windows releases are not code-signed yet, so published checksums are the
+      # only integrity check users have. Generated here, from the same artifacts that
       # are uploaded, in a public log.
       - name: Generate SHA-256 checksums
         working-directory: release
         run: |
           set -euo pipefail
           shopt -s nullglob
-          artifacts=(*.exe *.dmg)
+          artifacts=(*.exe *.pkg)
           if [ ${#artifacts[@]} -eq 0 ]; then
             echo "::error::No release artifacts found to checksum"
             exit 1

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { compareVersions, isPrerelease, shouldOfferUpdate } from "./updatePolicy.ts";
+import { compareVersions, isPrerelease, latestReleaseRoute, shouldOfferUpdate } from "./updatePolicy.ts";
 
 test("a release candidate sorts below its final release and above the previous one", () => {
   assert.ok(compareVersions("0.8.0", "0.8.0-rc.1") > 0);
@@ -55,4 +55,9 @@ test("a stable install is offered newer stable releases only", () => {
   assert.equal(shouldOfferUpdate({ version: "0.8.0" }, "0.7.5"), true);
   assert.equal(shouldOfferUpdate({ version: "0.7.5" }, "0.7.5"), false);
   assert.equal(shouldOfferUpdate({ version: "0.7.4" }, "0.7.5"), false);
+});
+
+test("a candidate install asks the hub for candidates; a stable one doesn't", () => {
+  assert.equal(latestReleaseRoute("/api/desktop/latest", "0.8.2-rc.1"), "/api/desktop/latest?channel=prerelease");
+  assert.equal(latestReleaseRoute("/api/desktop/latest", "0.8.2"), "/api/desktop/latest");
 });

@@ -181,6 +181,8 @@ const autoConnectToggle = document.getElementById("autoConnectToggle") as HTMLIn
 const deadDropToggle = document.getElementById("deadDropToggle") as HTMLInputElement;
 const lockdownToggle = document.getElementById("lockdownToggle") as HTMLInputElement;
 const notificationsToggle = document.getElementById("notificationsToggle") as HTMLInputElement;
+const showInDockRow = document.getElementById("showInDockRow") as HTMLElement;
+const showInDockToggle = document.getElementById("showInDockToggle") as HTMLInputElement;
 const panicWipeToggle = document.getElementById("panicWipeToggle") as HTMLInputElement;
 const panicWipeHint = document.getElementById("panicWipeHint") as HTMLSpanElement | null;
 const loginScreen = document.getElementById("loginScreen") as HTMLElement;
@@ -2411,6 +2413,19 @@ notificationsToggle.addEventListener("change", async () => {
   showToast(t(requested ? "toggle.notifications.on" : "toggle.notifications.off"), 4000, true);
 });
 
+// Only macOS has a Dock; elsewhere the row stays hidden.
+showInDockRow.hidden = window.appPlatform !== "darwin";
+showInDockToggle.addEventListener("change", async () => {
+  if (!pangeaApi) return;
+  const requested = showInDockToggle.checked;
+  try {
+    await pangeaApi.setShowInDock(requested);
+  } catch (err) {
+    showInDockToggle.checked = !requested;
+    showToast(reportError("showInDock", err, t("toggle.dock.failed")));
+  }
+});
+
 function panicChordLabel(): string {
   const isMac = /Mac/i.test(navigator.userAgent);
   return (isMac ? ["⌘", "⌥", "⇧", "F12"] : ["Ctrl", "Alt", "Shift", "F12"]).join(" + ");
@@ -3456,6 +3471,7 @@ async function init(): Promise<void> {
       lockdownToggle.checked = lockdownLocal;
       deadDropToggle.checked = await pangeaApi.getDeadDrop();
       notificationsToggle.checked = await pangeaApi.getNotifications();
+      if (window.appPlatform === "darwin") showInDockToggle.checked = await pangeaApi.getShowInDock();
       panicWipeToggle.checked = await pangeaApi.getPanicWipe();
       const last = await pangeaApi.getLastServer();
       lastServerIdLocal = last.lastServerId;
@@ -3544,24 +3560,18 @@ const updateCurrentVersionEl = document.getElementById("updateCurrentVersion") a
 const updateLatestVersionEl = document.getElementById("updateLatestVersion") as HTMLSpanElement;
 const updateDownloadBtn = document.getElementById("updateDownloadBtn") as HTMLButtonElement;
 const updateMessageEl = document.getElementById("updateMessage") as HTMLParagraphElement;
-const updateMacInstall = document.getElementById("updateMacInstall") as HTMLElement;
-const updateMacCommand = document.getElementById("updateMacCommand") as HTMLElement;
-const updateMacCommandAlt = document.getElementById("updateMacCommandAlt") as HTMLElement;
-const updateMacCopyBtn = document.getElementById("updateMacCopyBtn") as HTMLButtonElement;
-const updateMacCopyAltBtn = document.getElementById("updateMacCopyAltBtn") as HTMLButtonElement;
 const menuBadge = document.getElementById("menuBadge") as HTMLSpanElement;
 const menuUpdateBtn = document.getElementById("menuUpdateBtn") as HTMLButtonElement;
-
-const MAC_INSTALL_COMMAND = "curl -fsSL https://pangeavpn.org/install-mac.sh | bash";
-// Raw GitHub mirror of the same installer, for networks that block pangeavpn.org.
-const MAC_INSTALL_COMMAND_ALT =
-  "curl -fsSL https://raw.githubusercontent.com/pangeavpn/pangeavpn-app/master/scripts/install-mac-online.sh | bash";
-const isMacPlatform = window.appPlatform === "darwin";
 
 let pendingUpdate: { version: string; macOnly?: boolean } | null = null;
 let currentAppVersion = "";
 const UPDATE_DISMISSED_KEY = "pangea-vpn-update-dismissed";
 const updater = window.autoUpdater;
+// macOS installs updates in place through the daemon; elsewhere the button
+// opens the release page.
+const installsInPlace = window.appPlatform === "darwin";
+// A finished install quits this app, so one still open after this has stalled.
+const IN_PLACE_INSTALL_GRACE_MS = 10 * 60_000;
 
 function isUpdateDismissed(version: string): boolean {
   return localStorage.getItem(UPDATE_DISMISSED_KEY) === version;
@@ -3576,19 +3586,8 @@ function showUpdateModal(): void {
   updateCurrentVersionEl.textContent = currentAppVersion || "-";
   updateLatestVersionEl.textContent = pendingUpdate.version;
   updateDownloadBtn.disabled = false;
-  updateDownloadBtn.hidden = isMacPlatform;
-  if (isMacPlatform) {
-    updateMacCommand.textContent = MAC_INSTALL_COMMAND;
-    updateMacCommandAlt.textContent = MAC_INSTALL_COMMAND_ALT;
-    updateMacCopyBtn.textContent = t("update.copy");
-    updateMacCopyAltBtn.textContent = t("update.copy");
-    updateMacInstall.hidden = false;
-    updateMessageEl.textContent = "";
-  } else {
-    updateMacInstall.hidden = true;
-    updateDownloadBtn.textContent = t("update.download");
-    updateMessageEl.textContent = "";
-  }
+  updateDownloadBtn.textContent = t(installsInPlace ? "update.install" : "update.download");
+  updateMessageEl.textContent = "";
   updateOverlay.classList.add("visible");
 }
 
@@ -3610,6 +3609,15 @@ if (updater) {
     updateDownloadBtn.disabled = false;
     updateDownloadBtn.textContent = t("update.retryDownload");
     updateMessageEl.textContent = message;
+  });
+
+  updater.onUpdateProgress((progress) => {
+    if (progress.phase === "installing") {
+      updateMessageEl.textContent = t("update.verifying");
+    } else {
+      updateMessageEl.textContent =
+        progress.percent === null ? t("update.downloading") : t("update.downloadingPercent", { percent: progress.percent });
+    }
   });
 }
 
@@ -3658,41 +3666,29 @@ checkUpdatesBtn.addEventListener("click", async () => {
   }
 });
 
-async function copyMacInstallCommand(command: string, btn: HTMLButtonElement): Promise<void> {
-  try {
-    await copyTextToClipboard(command);
-    btn.textContent = t("update.copied");
-    btn.classList.add("copied");
-    updateMessageEl.textContent = t("update.macPasteHint");
-    setTimeout(() => {
-      btn.textContent = t("update.copy");
-      btn.classList.remove("copied");
-    }, 2000);
-  } catch (error) {
-    updateMessageEl.textContent = reportError("updateCopyCommand", error);
-  }
-}
-
-for (const el of [updateMacCommand, updateMacCopyBtn]) {
-  el.addEventListener("click", () => void copyMacInstallCommand(MAC_INSTALL_COMMAND, updateMacCopyBtn));
-}
-for (const el of [updateMacCommandAlt, updateMacCopyAltBtn]) {
-  el.addEventListener("click", () => void copyMacInstallCommand(MAC_INSTALL_COMMAND_ALT, updateMacCopyAltBtn));
-}
-
 updateDownloadBtn.addEventListener("click", async () => {
-  if (!pendingUpdate || isMacPlatform) return;
+  if (!pendingUpdate) return;
 
   if (!updater) return;
 
   updateDownloadBtn.disabled = true;
-  updateDownloadBtn.textContent = t("update.opening");
+  updateDownloadBtn.textContent = t(installsInPlace ? "update.installingButton" : "update.opening");
   updateMessageEl.textContent = "";
 
   try {
-    await updater.downloadUpdate();
+    const result = await updater.downloadUpdate();
+    if (result?.mode === "installing") {
+      updateMessageEl.textContent = t("update.installingHint");
+      window.setTimeout(() => {
+        updateDownloadBtn.disabled = false;
+        updateDownloadBtn.textContent = t("update.retry");
+        updateMessageEl.textContent = t("update.installStalled");
+      }, IN_PLACE_INSTALL_GRACE_MS);
+      return;
+    }
     updateDownloadBtn.disabled = false;
     updateDownloadBtn.textContent = t("update.viewDownload");
+    if (result?.installFailed) updateMessageEl.textContent = t("update.installFallback");
   } catch (error) {
     updateDownloadBtn.disabled = false;
     updateDownloadBtn.textContent = t("update.retry");

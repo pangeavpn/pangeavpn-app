@@ -236,6 +236,8 @@ declare global {
     getAutoConnect: () => Promise<boolean>;
     setNotifications: (enabled: boolean) => Promise<void>;
     getNotifications: () => Promise<boolean>;
+    setShowInDock: (enabled: boolean) => Promise<void>;
+    getShowInDock: () => Promise<boolean>;
     setPanicWipe: (enabled: boolean) => Promise<void>;
     getPanicWipe: () => Promise<boolean>;
     setDeadDrop: (enabled: boolean) => Promise<void>;
@@ -273,11 +275,13 @@ declare global {
 
   interface AutoUpdaterApi {
     checkForUpdates: () => Promise<{ version: string; releaseNotes?: string; available?: boolean } | null>;
-    downloadUpdate: () => Promise<void>;
+    /** "installing": macOS is installing in place and will quit and reopen the app. */
+    downloadUpdate: () => Promise<{ mode: "installing" } | { mode: "opened"; installFailed?: boolean } | undefined>;
     installUpdate: () => void;
     onUpdateAvailable: (callback: (info: { version: string; releaseNotes?: string; macOnly?: boolean }) => void) => () => void;
     onUpdateNotAvailable: (callback: () => void) => () => void;
     onUpdateError: (callback: (message: string) => void) => () => void;
+    onUpdateProgress: (callback: (progress: { phase: "downloading"; percent: number | null } | { phase: "installing" }) => void) => () => void;
   }
 
   interface Window {
