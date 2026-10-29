@@ -41,7 +41,14 @@ final class ConnectionStore {
             return
         }
         busy = true
+        defer { busy = false }
         error = nil
+        // The extension reads allowLan from the core, so the NE flag must not use a default.
+        if !preferences.loaded { await preferences.load() }
+        guard preferences.loaded else {
+            error = preferences.error
+            return
+        }
         do {
             try await tunnel.connect(
                 serverId: server.id,
@@ -50,7 +57,6 @@ final class ConnectionStore {
         } catch {
             self.error = error.localizedDescription
         }
-        busy = false
     }
 
     private func sync() {

@@ -28,10 +28,11 @@ final class SettingsStore {
         darkTheme = defaults.object(forKey: Self.darkThemeKey) as? Bool
     }
 
+    // Queued with the edits, so a slow load cannot land after an edit and undo it.
     func load() async {
         let core = self.core
         do {
-            settings = try await CoreQueue.run { try core.config() }
+            settings = try await CoreQueue.run(on: CoreQueue.settings) { try core.config() }
             loaded = true
             error = nil
         } catch {
@@ -86,10 +87,11 @@ final class SettingsStore {
         await store { try core.editConfig(change) }
     }
 
-    // Shows what the core stored, which may correct the edit; a failure keeps the old settings.
+    // The reply is the core's whole stored config, so it also counts as a load.
     private func store(_ write: @escaping @Sendable () throws -> AppSettings) async {
         do {
             settings = try await CoreQueue.run(on: CoreQueue.settings, write)
+            loaded = true
             error = nil
         } catch {
             show(error, doing: "save")
