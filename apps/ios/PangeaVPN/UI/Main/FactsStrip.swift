@@ -29,7 +29,7 @@ struct FactsStrip: View {
                 Fact(key: fact.key, value: fact.value)
                 if index < items.count - 1 {
                     Rectangle()
-                        .fill(Palette.border)
+                        .fill(Palette.borderSubtle)
                         .frame(width: 1, height: 30)
                         .padding(.horizontal, 10)
                         .accessibilityHidden(true)
@@ -38,6 +38,7 @@ struct FactsStrip: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 14)
+        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
     }
 }
 
@@ -48,12 +49,12 @@ private struct Fact: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(key.uppercased())
-                .font(.system(size: 9, weight: .bold))
+                .scaledFont(size: 9, weight: .bold, relativeTo: .caption2)
                 .kerning(1.3)
                 .lineLimit(1)
-                .foregroundStyle(Palette.textSecondary)
+                .foregroundStyle(Palette.textMuted)
             Text(value)
-                .font(.system(size: 15, design: .monospaced))
+                .scaledFont(size: 15, design: .monospaced, relativeTo: .subheadline)
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .foregroundStyle(Palette.text)
@@ -63,7 +64,7 @@ private struct Fact: View {
     }
 }
 
-private let dash = "\u{2014}"
+private let dash = Format.emDash
 
 #Preview("Disconnected") {
     FactsStrip(session: dash, down: dash, up: dash, via: dash)

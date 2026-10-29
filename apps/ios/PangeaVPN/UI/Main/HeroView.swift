@@ -6,7 +6,7 @@ enum HeroText {
         case .connected: return Palette.connected
         case .connecting, .disconnecting: return Palette.connecting
         case .error: return Palette.error
-        case .disconnected: return Palette.textSecondary
+        case .disconnected: return Palette.textMuted
         }
     }
 
@@ -14,7 +14,6 @@ enum HeroText {
         guard let slot = template.range(of: "%1$@") else { return AttributedString(template) }
         var word = AttributedString(emphasis)
         word.inlinePresentationIntent = .stronglyEmphasized
-        word.foregroundColor = Palette.accent
         var result = AttributedString(String(template[..<slot.lowerBound]))
         result.append(word)
         result.append(AttributedString(String(template[slot.upperBound...])))
@@ -73,7 +72,7 @@ struct HeroKicker: View {
                 .opacity(pulsing && dimmed ? 0.4 : 1)
                 .animation(reduceMotion ? nil : .easeInOut(duration: 0.4), value: state)
             Text(HeroText.label(state).uppercased())
-                .font(.system(size: 11, weight: .bold))
+                .scaledFont(size: 11, weight: .bold, relativeTo: .caption2)
                 .kerning(1.8)
                 .foregroundStyle(HeroText.accent(state))
         }
@@ -118,11 +117,11 @@ struct HeroDetail: View {
 
     var body: some View {
         Text(text)
-            .font(.system(size: 13))
+            .scaledFont(size: 13, relativeTo: .footnote)
             .lineSpacing(3)
             .lineLimit(2)
             .truncationMode(.tail)
-            .foregroundStyle(Palette.textSecondary)
+            .foregroundStyle(Palette.textMuted)
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

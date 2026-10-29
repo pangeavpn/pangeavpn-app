@@ -20,11 +20,11 @@ struct SettingsField: View {
         self.onCommit = onCommit
     }
 
-    private var needsDoneKey: Bool { keyboard == .numberPad || keyboard == .decimalPad }
+    private var needsDoneKey: Bool { [.numberPad, .decimalPad, .phonePad, .numbersAndPunctuation].contains(keyboard) }
 
     var body: some View {
         TextField("", text: $text, prompt: Text(placeholder).foregroundStyle(Palette.textMuted))
-            .font(.system(size: 15))
+            .scaledFont(size: 15, relativeTo: .subheadline)
             .foregroundStyle(Palette.text)
             .tint(Palette.accent)
             .keyboardType(keyboard)
@@ -49,12 +49,12 @@ struct SettingsField: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 13)
             .background(Palette.surface)
-            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 14)
-                    .strokeBorder(focused ? Palette.accent : Palette.border, lineWidth: focused ? 2 : 1)
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(focused ? Palette.accent : Palette.borderSubtle, lineWidth: focused ? 2 : 1)
             )
-            .contentShape(RoundedRectangle(cornerRadius: 14))
+            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             .onTapGesture { focused = true }
     }
 }

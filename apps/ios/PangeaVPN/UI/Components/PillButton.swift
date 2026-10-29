@@ -23,7 +23,7 @@ struct PillButton: View {
                         .frame(width: 22, height: 22)
                 } else {
                     Text(label)
-                        .font(.system(size: 17, weight: .semibold))
+                        .scaledFont(size: 17, weight: .semibold, relativeTo: .body)
                         .foregroundStyle(Palette.onAccent)
                 }
             }
@@ -35,6 +35,7 @@ struct PillButton: View {
         .buttonStyle(PressFadeStyle())
         .disabled(!enabled || loading)
         .accessibilityLabel(label)
+        .accessibilityAddTraits(loading ? .updatesFrequently : [])
     }
 }
 

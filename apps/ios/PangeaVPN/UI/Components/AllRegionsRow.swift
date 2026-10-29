@@ -18,8 +18,8 @@ struct AllRegionsRow: View {
             openButton
             Button(action: onRefresh) {
                 Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(Palette.textSecondary)
+                    .scaledFont(size: 17, weight: .semibold, relativeTo: .body)
+                    .foregroundStyle(Palette.textMuted)
                     .frame(width: 44, height: 44)
                     .contentShape(Circle())
             }
@@ -32,18 +32,18 @@ struct AllRegionsRow: View {
         Button(action: onOpen) {
             HStack(spacing: 12) {
                 Image(systemName: "list.bullet")
-                    .font(.system(size: 16, weight: .semibold))
+                    .scaledFont(size: 16, weight: .semibold, relativeTo: .callout)
                     .foregroundStyle(Palette.textSecondary)
                     .frame(width: 18)
                     .accessibilityHidden(true)
                 Text(String(localized: "hero_all_regions", defaultValue: "All regions"))
-                    .font(.system(size: 15, weight: .semibold))
+                    .scaledFont(size: 15, weight: .semibold, relativeTo: .subheadline)
                     .foregroundStyle(Palette.textSecondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 if moreCount > 0 {
                     Text(String(format: String(localized: "region_more", defaultValue: "%1$@ more"), String(moreCount)))
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(Palette.textSecondary)
+                        .scaledFont(size: 11, design: .monospaced, relativeTo: .caption2)
+                        .foregroundStyle(Palette.textMuted)
                 }
             }
             .padding(.horizontal, 14)

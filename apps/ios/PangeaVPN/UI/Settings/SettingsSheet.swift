@@ -3,6 +3,7 @@ import SwiftUI
 struct SettingsSheet: View {
     @Environment(SettingsStore.self) private var settings
     @Environment(SessionStore.self) private var session
+    @State private var signingOut = false
 
     private static let hubMethods = ["directIp", "reality", "shadowsocks", "fronted", "normal"]
 
@@ -12,13 +13,13 @@ struct SettingsSheet: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 Text(String(localized: "settings_title", defaultValue: "Settings"))
-                    .font(.system(size: 26, weight: .light))
+                    .scaledFont(size: 26, weight: .light, relativeTo: .title)
                     .tracking(-0.6)
                     .foregroundStyle(Palette.text)
                     .accessibilityAddTraits(.isHeader)
                 if let message = settings.error {
                     Text(message)
-                        .font(.system(size: 13))
+                        .scaledFont(size: 13, relativeTo: .footnote)
                         .foregroundStyle(Palette.error)
                         .padding(.top, 10)
                 }
@@ -67,22 +68,18 @@ struct SettingsSheet: View {
             )
             VStack(spacing: 9) {
                 ForEach(Self.hubMethods, id: \.self) { method in
-                    SwitchRow(
-                        HubMethodLabels.title(method),
-                        isOn: Binding(
-                            get: { Self.isEnabled(method, in: settings.settings.hubMethods) },
-                            set: { value in Task { await settings.setHubMethod(method, enabled: value) } }
-                        ),
-                        hint: HubMethodLabels.hint(method)
+                    StoreSwitchRow(
+                        title: HubMethodLabels.title(method),
+                        value: Self.isEnabled(method, in: settings.settings.hubMethods),
+                        hint: HubMethodLabels.hint(method),
+                        apply: { value in await settings.setHubMethod(method, enabled: value) }
                     )
                 }
-                SwitchRow(
-                    String(localized: "settings_censorship_deaddrop_title", defaultValue: "Recover addresses"),
-                    isOn: Binding(
-                        get: { settings.settings.deadDrop },
-                        set: { value in Task { await settings.setDeadDrop(value) } }
-                    ),
-                    hint: String(localized: "settings_censorship_deaddrop_hint", defaultValue: "Fetches a signed address list from a public host, checked on your device. Last resort, and it carries no account details.")
+                StoreSwitchRow(
+                    title: String(localized: "settings_censorship_deaddrop_title", defaultValue: "Recover addresses"),
+                    value: settings.settings.deadDrop,
+                    hint: String(localized: "settings_censorship_deaddrop_hint", defaultValue: "Fetches a signed address list from a public host, checked on your device. Last resort, and it carries no account details."),
+                    apply: { value in await settings.setDeadDrop(value) }
                 )
             }
         }
@@ -94,13 +91,11 @@ struct SettingsSheet: View {
                 title: String(localized: "settings_network_heading", defaultValue: "Network"),
                 description: String(localized: "settings_network_description", defaultValue: "Tunnel settings and fixes for restrictive Wi-Fi.")
             )
-            SwitchRow(
-                String(localized: "settings_network_allowlan_title", defaultValue: "Allow LAN"),
-                isOn: Binding(
-                    get: { settings.settings.allowLan },
-                    set: { value in Task { await settings.setAllowLan(value) } }
-                ),
-                hint: String(localized: "settings_network_allowlan_hint", defaultValue: "Lets local traffic (router, printers, captive portals) skip the tunnel. Turn it on if Wi-Fi keeps dropping to \"No internet\". Applies on next connect.")
+            StoreSwitchRow(
+                title: String(localized: "settings_network_allowlan_title", defaultValue: "Allow LAN"),
+                value: settings.settings.allowLan,
+                hint: String(localized: "settings_network_allowlan_hint", defaultValue: "Lets local traffic (router, printers, captive portals) skip the tunnel. Turn it on if Wi-Fi keeps dropping to \"No internet\". Applies on next connect."),
+                apply: { value in await settings.setAllowLan(value) }
             )
             CommittedField(
                 label: String(localized: "settings_network_dns_title", defaultValue: "Custom DNS"),
@@ -117,7 +112,7 @@ struct SettingsSheet: View {
                 placeholder: "",
                 initial: String(settings.settings.mtu),
                 keyboard: .numberPad,
-                transform: { $0.filter(\.isNumber) },
+                transform: SettingsInput.asciiDigits,
                 onCommit: { value in
                     guard let mtu = Int(value) else { return }
                     Task { await settings.setMtu(mtu) }
@@ -147,13 +142,24 @@ struct SettingsSheet: View {
                 String(localized: "settings_signout", defaultValue: "Sign Out"),
                 accent: Palette.error
             ) {
-                Task { await session.signOut() }
+                signOut()
             }
-            Text("v\(Self.versionName)")
-                .font(.system(size: 11))
-                .foregroundStyle(Palette.textSecondary)
+            .disabled(signingOut)
+            .opacity(signingOut ? 0.5 : 1)
+            Text(verbatim: "v\(Self.versionName)")
+                .scaledFont(size: 11, relativeTo: .caption2)
+                .foregroundStyle(Palette.textMuted)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.top, 18)
+        }
+    }
+
+    private func signOut() {
+        guard !signingOut else { return }
+        signingOut = true
+        Task {
+            await session.signOut()
+            signingOut = false
         }
     }
 
@@ -182,8 +188,8 @@ private struct SettingsSection: View {
             Spacer().frame(height: 26)
             SectionLabel(title)
             Text(description)
-                .font(.system(size: 12))
-                .foregroundStyle(Palette.textSecondary)
+                .scaledFont(size: 12, relativeTo: .caption)
+                .foregroundStyle(Palette.textMuted)
                 .padding(.top, 6)
                 .padding(.bottom, 11)
         }
@@ -228,7 +234,7 @@ private struct CommittedField: View {
                 Spacer()
                 if text != initial {
                     Button(String(localized: "settings_save", defaultValue: "Save")) { onCommit(text) }
-                        .font(.system(size: 13, weight: .semibold))
+                        .scaledFont(size: 13, weight: .semibold, relativeTo: .footnote)
                         .foregroundStyle(Palette.accent)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
@@ -237,13 +243,13 @@ private struct CommittedField: View {
             SettingsField(
                 text: Binding(get: { text }, set: { text = transform($0) }),
                 placeholder: placeholder,
-                keyboard: keyboard,
-                onCommit: { onCommit(text) }
+                keyboard: keyboard
             )
+            .onSubmit { if text != initial { onCommit(text) } }
             .padding(.top, 8)
             Text(hint)
-                .font(.system(size: 12))
-                .foregroundStyle(Palette.textSecondary)
+                .scaledFont(size: 12, relativeTo: .caption)
+                .foregroundStyle(Palette.textMuted)
                 .padding(.top, 6)
         }
         .onChange(of: initial) { _, value in text = value }

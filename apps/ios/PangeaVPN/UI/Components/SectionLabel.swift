@@ -9,9 +9,10 @@ struct SectionLabel: View {
 
     var body: some View {
         Text(text.uppercased())
-            .font(.system(size: 10, weight: .bold))
+            .scaledFont(size: 10, weight: .bold, relativeTo: .caption2)
             .tracking(1.6)
             .foregroundStyle(Palette.textMuted)
+            .accessibilityAddTraits(.isHeader)
     }
 }
 

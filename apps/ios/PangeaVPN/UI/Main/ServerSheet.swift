@@ -10,7 +10,7 @@ struct ServerSheet: View {
         ScrollView {
             if servers.regions.isEmpty {
                 Text(String(localized: "hero_no_servers", defaultValue: "No servers available"))
-                    .foregroundStyle(Palette.textSecondary)
+                    .foregroundStyle(Palette.textMuted)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(24)
             } else {
@@ -39,10 +39,9 @@ struct ServerSheet: View {
             selected: region.key == servers.selectedRegionKey,
             subtitle: node.id,
             action: {
-                Task {
-                    await servers.select(node)
-                    dismiss()
-                }
+                let store = servers
+                dismiss()
+                Task { await store.select(node) }
             }
         )
     }

@@ -23,7 +23,7 @@ final class HeroTextTests: XCTestCase {
         let result = pieces(HeroText.emphasised("The %1$@ is here", emphasis: "world"))
         XCTAssertEqual(result, [
             Piece(text: "The ", strong: false, color: nil),
-            Piece(text: "world", strong: true, color: Palette.accent),
+            Piece(text: "world", strong: true, color: nil),
             Piece(text: " is here", strong: false, color: nil),
         ])
     }
@@ -32,14 +32,14 @@ final class HeroTextTests: XCTestCase {
         let result = pieces(HeroText.emphasised("The world is %1$@", emphasis: "whole"))
         XCTAssertEqual(result, [
             Piece(text: "The world is ", strong: false, color: nil),
-            Piece(text: "whole", strong: true, color: Palette.accent),
+            Piece(text: "whole", strong: true, color: nil),
         ])
     }
 
     func testEmphasisAtStart() {
         let result = pieces(HeroText.emphasised("%1$@ again", emphasis: "Once"))
         XCTAssertEqual(result, [
-            Piece(text: "Once", strong: true, color: Palette.accent),
+            Piece(text: "Once", strong: true, color: nil),
             Piece(text: " again", strong: false, color: nil),
         ])
     }
@@ -60,6 +60,11 @@ final class HeroTextTests: XCTestCase {
         XCTAssertEqual(HeroText.accent(.connecting), Palette.connecting)
         XCTAssertEqual(HeroText.accent(.disconnecting), Palette.connecting)
         XCTAssertEqual(HeroText.accent(.error), Palette.error)
-        XCTAssertEqual(HeroText.accent(.disconnected), Palette.textSecondary)
+        XCTAssertEqual(HeroText.accent(.disconnected), Palette.textMuted)
+    }
+
+    func testHeadlineKeepsEmphasisSlot() {
+        let states: [TunnelState] = [.disconnected, .connecting, .connected, .disconnecting, .error]
+        for state in states { XCTAssertTrue(HeroText.headline(state).contains("%1$@")) }
     }
 }

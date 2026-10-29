@@ -37,7 +37,7 @@ struct ServerRow: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 12) {
-                Text(Flag.emoji(country)).font(.system(size: 22))
+                Text(Flag.emoji(country)).scaledFont(size: 22, relativeTo: .title2)
                 titles
                 if let load { LoadIndicator(load: load) }
                 Text("\u{2713}")
@@ -53,20 +53,21 @@ struct ServerRow: View {
             .contentShape(shape)
         }
         .buttonStyle(.plain)
+        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
     private var titles: some View {
         VStack(alignment: .leading, spacing: 1) {
             Text(name)
-                .font(.system(size: 16, weight: .semibold))
+                .scaledFont(size: 16, weight: .semibold, relativeTo: .callout)
                 .foregroundStyle(Palette.text)
                 .lineLimit(1)
                 .truncationMode(.tail)
             if let subtitle {
                 Text(subtitle)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(Palette.textSecondary)
+                    .scaledFont(size: 11, design: .monospaced, relativeTo: .caption2)
+                    .foregroundStyle(Palette.textMuted)
                     .lineLimit(1)
                     .truncationMode(.tail)
             }
@@ -75,16 +76,21 @@ struct ServerRow: View {
     }
 }
 
+enum LoadTone {
+    static func color(forPercent load: Int) -> Color {
+        let pct = min(max(load, 0), 100)
+        if pct < 40 { return Palette.connected }
+        if pct < 75 { return Palette.connecting }
+        return Palette.error
+    }
+}
+
 private struct LoadIndicator: View {
     let load: Int
 
     private var pct: Int { min(max(load, 0), 100) }
 
-    private var fill: Color {
-        if pct < 40 { return Palette.connected }
-        if pct < 75 { return Palette.connecting }
-        return Palette.error
-    }
+    private var fill: Color { LoadTone.color(forPercent: load) }
 
     var body: some View {
         HStack(spacing: 8) {
@@ -95,8 +101,8 @@ private struct LoadIndicator: View {
                     Capsule().fill(fill).frame(width: 42 * CGFloat(pct) / 100, height: 5)
                 }
             Text("\(pct)%")
-                .font(.system(size: 13))
-                .foregroundStyle(Palette.textSecondary)
+                .scaledFont(size: 13, relativeTo: .footnote)
+                .foregroundStyle(Palette.textMuted)
                 .frame(minWidth: 34, alignment: .trailing)
         }
         .accessibilityElement(children: .ignore)

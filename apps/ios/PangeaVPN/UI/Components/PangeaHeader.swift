@@ -15,8 +15,8 @@ struct PangeaHeader: View {
         HStack(spacing: 10) {
             BrandLogo()
             Text(version)
-                .font(.system(size: 11))
-                .foregroundStyle(Palette.textSecondary)
+                .scaledFont(size: 11, relativeTo: .caption2)
+                .foregroundStyle(Palette.textMuted)
             Spacer(minLength: 0)
             IconControl(
                 symbol: "sun.max",
@@ -44,8 +44,8 @@ private struct IconControl: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: symbol)
-                .font(.system(size: 19, weight: .regular))
-                .foregroundStyle(Palette.textSecondary)
+                .scaledFont(size: 19, weight: .regular, relativeTo: .title3)
+                .foregroundStyle(Palette.textMuted)
                 .frame(width: 40, height: 40)
                 .contentShape(Circle())
         }

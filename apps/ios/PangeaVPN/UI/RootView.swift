@@ -4,7 +4,9 @@ struct RootView: View {
     @Environment(SessionStore.self) private var session
     @Environment(ServersStore.self) private var servers
     @Environment(SettingsStore.self) private var settings
+    @Environment(\.scenePhase) private var scenePhase
     @State private var hasRestored = false
+    @State private var draftToken = ""
 
     init() {}
 
@@ -12,6 +14,13 @@ struct RootView: View {
         content
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Palette.bg.ignoresSafeArea())
+            .overlay {
+                if scenePhase != .active { PrivacyCover() }
+            }
+            .preferredColorScheme(settings.darkTheme.map { $0 ? ColorScheme.dark : ColorScheme.light })
+            .onChange(of: session.restoring) { was, now in
+                if was && !now { hasRestored = true }
+            }
             .task {
                 await session.restore()
                 hasRestored = true
@@ -26,14 +35,19 @@ struct RootView: View {
         } else if session.showDeviceLimit {
             DeviceLimitView()
         } else if session.session == nil {
-            LoginView()
+            LoginView(token: $draftToken)
         } else {
             MainView()
         }
     }
 
     private func loadSignedInData() async {
-        guard hasRestored, session.session != nil else { return }
+        guard hasRestored, session.session != nil else {
+            if hasRestored { servers.reset() }
+            return
+        }
+        let settings = self.settings
+        let servers = self.servers
         async let loadedSettings: Void = settings.load()
         async let refreshedServers: Void = servers.refresh()
         _ = await (loadedSettings, refreshedServers)
@@ -46,6 +60,12 @@ private struct SplashView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Palette.bg.ignoresSafeArea())
             .accessibilityHidden(true)
+    }
+}
+
+private struct PrivacyCover: View {
+    var body: some View {
+        SplashView()
     }
 }
 

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct DeviceLimitView: View {
     @Environment(SessionStore.self) private var session
+    @State private var busy = false
 
     init() {}
 
@@ -12,7 +13,7 @@ struct DeviceLimitView: View {
                 localized: "devicelimit_subtitle",
                 defaultValue: "Your account has reached the maximum number of devices. Remove one to continue signing in."
             ))
-            .font(.system(size: 22, weight: .light))
+            .scaledFont(size: 22, weight: .light, relativeTo: .title2)
             .tracking(-0.5)
             .foregroundStyle(Palette.text)
             .padding(.top, 8)
@@ -20,19 +21,19 @@ struct DeviceLimitView: View {
             deviceList
                 .padding(.top, 22)
 
-            ForEach(errors, id: \.self) { message in
-                Text(message)
-                    .font(.system(size: 13))
-                    .foregroundStyle(Palette.error)
-                    .padding(.vertical, 10)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
+            errorText(session.deviceError)
+            errorText(session.loginError)
 
             PillButton(
                 String(localized: "login_signin", defaultValue: "Sign In"),
-                loading: session.loggingIn
+                loading: session.loggingIn || busy
             ) {
-                Task { await session.retryLogin() }
+                guard !busy else { return }
+                busy = true
+                Task {
+                    await session.retryLogin()
+                    busy = false
+                }
             }
             .padding(.top, 6)
             GhostButton(String(localized: "devicelimit_back", defaultValue: "Back")) {
@@ -49,8 +50,24 @@ struct DeviceLimitView: View {
         .task { await session.loadDevices() }
     }
 
-    private var errors: [String] {
-        [session.deviceError, session.loginError].compactMap { $0 }
+    @ViewBuilder
+    private func errorText(_ message: String?) -> some View {
+        if let message {
+            Text(message)
+                .scaledFont(size: 13, relativeTo: .footnote)
+                .foregroundStyle(Palette.error)
+                .padding(.vertical, 10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func remove(_ id: String) {
+        guard !busy else { return }
+        busy = true
+        Task {
+            await session.removeDevice(id)
+            busy = false
+        }
     }
 
     @ViewBuilder
@@ -67,7 +84,7 @@ struct DeviceLimitView: View {
                             name: device.friendlyName ?? device.id,
                             identifier: device.id
                         ) {
-                            Task { await session.removeDevice(device.id) }
+                            remove(device.id)
                         }
                     }
                 }
@@ -86,14 +103,14 @@ private struct DeviceRow: View {
         HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 1) {
                 Text(name)
-                    .font(.system(size: 15, weight: .semibold))
+                    .scaledFont(size: 15, weight: .semibold, relativeTo: .subheadline)
                     .foregroundStyle(Palette.text)
                     .lineLimit(1)
                     .truncationMode(.tail)
                 if identifier != name {
                     Text(identifier)
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(Palette.textSecondary)
+                        .scaledFont(size: 11, design: .monospaced, relativeTo: .caption2)
+                        .foregroundStyle(Palette.textMuted)
                         .lineLimit(1)
                         .truncationMode(.tail)
                 }
@@ -101,7 +118,7 @@ private struct DeviceRow: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             Button(action: onRemove) {
                 Text(String(localized: "devices_remove", defaultValue: "Remove"))
-                    .font(.system(size: 13, weight: .semibold))
+                    .scaledFont(size: 13, weight: .semibold, relativeTo: .footnote)
                     .foregroundStyle(Palette.error)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
@@ -112,7 +129,7 @@ private struct DeviceRow: View {
         .padding(.trailing, 6)
         .padding(.vertical, 10)
         .background(Palette.surface, in: RoundedRectangle(cornerRadius: 14))
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Palette.border, lineWidth: 1))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Palette.borderSubtle, lineWidth: 1))
     }
 }
 

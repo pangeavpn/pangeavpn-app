@@ -4,20 +4,20 @@ struct LoginView: View {
     @Environment(SessionStore.self) private var session
     @Environment(SettingsStore.self) private var settings
     @Environment(\.colorScheme) private var colorScheme
-    @State private var token = ""
+    @Binding private var token: String
+    @State private var submitting = false
 
     private static let accountURL = URL(string: "https://pangeavpn.org/account")!
     private static let maxMapSize: CGFloat = 236
     private static let gutter: CGFloat = 20
 
-    init() {}
-
-    private var tokenBinding: Binding<String> {
-        Binding(get: { token }, set: { token = AccountNumber.format($0) })
+    init(token: Binding<String>) {
+        self._token = token
     }
 
+
     private var canSubmit: Bool {
-        !token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !session.loggingIn
+        !token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !session.loggingIn && !submitting
     }
 
     var body: some View {
@@ -33,6 +33,10 @@ struct LoginView: View {
             footer
         }
         .background(Palette.bg.ignoresSafeArea())
+        .onChange(of: token) { _, value in
+            let formatted = AccountNumber.format(value)
+            if formatted != value { token = formatted }
+        }
     }
 
     private func form(viewport: CGSize) -> some View {
@@ -52,7 +56,7 @@ struct LoginView: View {
                 .padding(.top, 20)
                 .padding(.bottom, 9)
             TokenField(
-                text: tokenBinding,
+                text: $token,
                 placeholder: String(
                     localized: "login_token_placeholder", defaultValue: "ABCD-EFGH-JKMN-PQRS-TVWX-YZ01"),
                 enabled: !session.loggingIn,
@@ -77,14 +81,14 @@ struct LoginView: View {
     private func errorBox(_ message: String) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(message)
-                .font(.system(size: 13))
+                .scaledFont(size: 13, relativeTo: .footnote)
                 .foregroundStyle(Palette.error)
                 .fixedSize(horizontal: false, vertical: true)
             Button {
                 session.showDeviceLimit = true
             } label: {
                 Text(String(localized: "devicelimit_title", defaultValue: "Device Limit Reached"))
-                    .font(.system(size: 13, weight: .semibold))
+                    .scaledFont(size: 13, weight: .semibold, relativeTo: .footnote)
                     .underline()
                     .foregroundStyle(Palette.textSecondary)
             }
@@ -100,8 +104,8 @@ struct LoginView: View {
     private var footer: some View {
         Link(destination: Self.accountURL) {
             Text(String(localized: "login_hint", defaultValue: "Find your account number at pangeavpn.org/account"))
-                .font(.system(size: 12))
-                .foregroundStyle(Palette.textSecondary)
+                .scaledFont(size: 12, relativeTo: .caption)
+                .foregroundStyle(Palette.textMuted)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: .infinity)
                 .padding(.horizontal, Self.gutter)
@@ -112,7 +116,11 @@ struct LoginView: View {
     private func submit() {
         guard canSubmit else { return }
         let raw = token
-        Task { await session.login(raw) }
+        submitting = true
+        Task {
+            await session.login(raw)
+            submitting = false
+        }
     }
 
     private func toggleTheme() {
@@ -133,17 +141,22 @@ private func previewStores(error: String?) -> (SessionStore, SettingsStore) {
     return (session, SettingsStore(core: core))
 }
 
+private struct LoginPreview: View {
+    @State private var token = ""
+    let stores: (SessionStore, SettingsStore)
+
+    var body: some View {
+        LoginView(token: $token)
+            .environment(stores.0)
+            .environment(stores.1)
+    }
+}
+
 #Preview("Empty") {
-    let stores = previewStores(error: nil)
-    return LoginView()
-        .environment(stores.0)
-        .environment(stores.1)
+    LoginPreview(stores: previewStores(error: nil))
 }
 
 #Preview("Error") {
-    let stores = previewStores(error: "Invalid account number")
-    return LoginView()
-        .environment(stores.0)
-        .environment(stores.1)
+    LoginPreview(stores: previewStores(error: "Invalid account number"))
 }
 #endif

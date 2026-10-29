@@ -29,22 +29,23 @@ struct TokenField: View {
         TextField(
             "",
             text: $text,
-            prompt: Text(placeholder).foregroundColor(Palette.textSecondary)
+            prompt: Text(placeholder).foregroundColor(Palette.textMuted)
         )
-        .font(.system(size: 17, design: .monospaced))
+        .scaledFont(size: 17, design: .monospaced, relativeTo: .body)
         .tracking(2.4)
         .foregroundStyle(Palette.text)
         .tint(Palette.accent)
         .focused($focused)
-        .disabled(!enabled)
+        .allowsHitTesting(enabled)
         .textInputAutocapitalization(.never)
         .autocorrectionDisabled(true)
         .keyboardType(.asciiCapable)
+        .privacySensitive()
         .submitLabel(.go)
         .onSubmit(onSubmit)
         .onChange(of: text) { _, newValue in
-            let stripped = newValue.filter { !$0.isWhitespace }
-            if stripped != newValue { text = stripped }
+            let clean = TokenInput.sanitize(newValue)
+            if clean != newValue { text = clean }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 15)

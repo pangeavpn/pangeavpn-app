@@ -14,7 +14,7 @@ struct GhostButton: View {
     var body: some View {
         Button(action: action) {
             Text(label)
-                .font(.system(size: 15, weight: .semibold))
+                .scaledFont(size: 15, weight: .semibold, relativeTo: .subheadline)
                 .foregroundStyle(accent ?? Palette.text)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 14)

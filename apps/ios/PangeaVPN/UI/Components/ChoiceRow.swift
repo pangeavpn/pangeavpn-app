@@ -18,13 +18,13 @@ struct ChoiceRow: View {
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(label)
-                        .font(.system(size: 15, weight: .semibold))
+                        .scaledFont(size: 15, weight: .semibold, relativeTo: .subheadline)
                         .foregroundStyle(Palette.text)
                         .multilineTextAlignment(.leading)
                     if let hint, !hint.isEmpty {
                         Text(hint)
-                            .font(.system(size: 12))
-                            .foregroundStyle(Palette.textSecondary)
+                            .scaledFont(size: 12, relativeTo: .caption)
+                            .foregroundStyle(Palette.textMuted)
                             .multilineTextAlignment(.leading)
                     }
                 }
@@ -38,12 +38,12 @@ struct ChoiceRow: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
             .background(selected ? Palette.accent.opacity(0.15) : Palette.surface)
-            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 14)
-                    .strokeBorder(selected ? Palette.accent : Palette.border, lineWidth: 1)
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(selected ? Palette.accent : Palette.borderSubtle, lineWidth: 1)
             )
-            .contentShape(RoundedRectangle(cornerRadius: 14))
+            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
         .buttonStyle(.plain)
         .accessibilityElement(children: .combine)

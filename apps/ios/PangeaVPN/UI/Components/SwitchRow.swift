@@ -15,13 +15,13 @@ struct SwitchRow: View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(.system(size: 15, weight: .semibold))
+                    .scaledFont(size: 15, weight: .semibold, relativeTo: .subheadline)
                     .foregroundStyle(Palette.text)
                     .multilineTextAlignment(.leading)
                 if let hint, !hint.isEmpty {
                     Text(hint)
-                        .font(.system(size: 12))
-                        .foregroundStyle(Palette.textSecondary)
+                        .scaledFont(size: 12, relativeTo: .caption)
+                        .foregroundStyle(Palette.textMuted)
                         .multilineTextAlignment(.leading)
                 }
             }
@@ -39,8 +39,8 @@ struct SwitchRow: View {
         .padding(.trailing, 10)
         .padding(.vertical, 10)
         .background(Palette.surface)
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Palette.border, lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Palette.borderSubtle, lineWidth: 1))
     }
 }
 

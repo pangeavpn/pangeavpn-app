@@ -1,6 +1,7 @@
 import XCTest
 @testable import PangeaVPN
 
+@MainActor
 final class SubscriptionBannerTests: XCTestCase {
     private func sub(_ status: String) -> Subscription {
         Subscription(status: status, renews: false, expiresAt: nil)

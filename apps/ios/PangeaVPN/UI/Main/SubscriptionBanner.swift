@@ -25,10 +25,10 @@ struct SubscriptionBanner: View {
     var body: some View {
         Text(text)
             .font(.subheadline)
-            .foregroundStyle(Palette.textSecondary)
+            .foregroundStyle(Palette.textMuted)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(14)
-            .background(Palette.surface, in: RoundedRectangle(cornerRadius: 14))
+            .background(Palette.elevated, in: RoundedRectangle(cornerRadius: 14))
     }
 }
 
