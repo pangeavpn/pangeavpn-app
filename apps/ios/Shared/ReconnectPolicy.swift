@@ -167,8 +167,8 @@ final class TunnelLifecycle {
         let started = cycle
         pendingStart = PendingStart(cycle: started, completion: completion)
         host?.watchPath(true)
+        reloadCore()
         do {
-            try core.reload()
             let settings = try restoreSessionAndConfig()
             serverId = try TunnelStart.resolveServerID(options: options, settings: settings)
             allowLan = TunnelStart.resolveAllowLan(excludeLocalNetworks: excludeLocalNetworks, settings: settings)
@@ -295,18 +295,21 @@ final class TunnelLifecycle {
         attemptTimer = nil
         host?.markReasserting(true)
         if latest?.usable == false { return enterWaiting() }
-        if attempt == 1 {
-            core.networkChanged()
-            do {
-                try core.reload()
-            } catch {
-                return attemptFinished(attempt, cycle: current, error: error)
-            }
-            if restartInPlace() { return attemptFinished(attempt, cycle: current, error: nil) }
-        }
+        if attempt == 1 { core.networkChanged() }
+        reloadCore()
+        if attempt == 1, restartInPlace() { return attemptFinished(attempt, cycle: current, error: nil) }
         core.stop()
         establish(cycle: current) { [weak self] error in
             self?.attemptFinished(attempt, cycle: current, error: error)
+        }
+    }
+
+    // A decode failure leaves Go on Init's defaults, and connecting on those beats failing.
+    private func reloadCore() {
+        do {
+            try core.reload()
+        } catch {
+            log.error("reload failed, continuing: \(error.localizedDescription, privacy: .private)")
         }
     }
 
@@ -361,9 +364,17 @@ final class TunnelLifecycle {
             scheduler: scheduler,
             apply: { done in host.applyTunnelSettings(settings, completion: done) },
             completion: { [weak self] error in
-                if let self { self.policy.settingsApplied(at: self.scheduler.now) }
-                completion(error)
+                guard let self else { return completion(error) }
+                self.policy.settingsApplied(at: self.scheduler.now)
+                completion(self.proceedingPastTimeout(error))
             })
+    }
+
+    // As in WireGuardKit, a missing callback is not a failure: the fd probe decides instead.
+    private func proceedingPastTimeout(_ error: Error?) -> Error? {
+        guard let timeout = error as? TunnelStartError, timeout == .settingsTimeout else { return error }
+        log.error("settings apply did not call back, proceeding anyway")
+        return nil
     }
 
     // The utun only exists once the network settings have been applied.

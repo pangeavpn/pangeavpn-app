@@ -161,17 +161,58 @@ final class TunnelLifecycleTests: XCTestCase {
         XCTAssertFalse(rig.host.monitoring)
     }
 
-    func testSettingsApplyThatNeverCallsBackTimesOutOnce() {
+    func testSettingsApplyThatNeverCallsBackProceedsToTheFdProbe() {
         let rig = LifecycleRig()
         rig.host.holdApply = true
         rig.start()
         rig.clock.advance(by: 4.9)
         XCTAssertTrue(rig.outcomes.isEmpty)
+        XCTAssertFalse(rig.core.calls.contains("start(7)"))
         rig.clock.advance(by: 0.2)
-        XCTAssertEqual(rig.outcomes, [TunnelStartError.settingsTimeout.rawValue])
+        XCTAssertEqual(rig.outcomes, [nil])
+        rig.host.releaseApply(NSError(domain: "NEVPNErrorDomain", code: 1))
+        XCTAssertEqual(rig.outcomes, [nil])
+        XCTAssertEqual(rig.core.calls.filter { $0 == "start(7)" }.count, 1)
+    }
+
+    func testSettingsTimeoutWithoutAnInterfaceStillFailsAsNoTun() {
+        let rig = LifecycleRig()
+        rig.host.holdApply = true
+        rig.host.fd = -1
+        rig.start()
+        rig.clock.advance(by: 5.1)
+        XCTAssertEqual(rig.outcomes, [TunnelStartError.noTunnelInterface.rawValue])
         rig.host.releaseApply()
         XCTAssertEqual(rig.outcomes.count, 1)
+    }
+
+    func testSettingsErrorBeforeTheTimeoutFailsTheStep() {
+        let rig = LifecycleRig()
+        rig.host.holdApply = true
+        rig.start()
+        rig.clock.advance(by: 1)
+        rig.host.releaseApply(NSError(domain: "NEVPNErrorDomain", code: 1))
+        rig.clock.advance(by: 10)
+        XCTAssertEqual(rig.outcomes, [TunnelStart.otherErrorCode])
         XCTAssertFalse(rig.core.calls.contains("start(7)"))
+    }
+
+    func testReloadFailureDoesNotFailTheStart() {
+        let rig = LifecycleRig()
+        rig.core.reloadFailures = 1
+        rig.start()
+        XCTAssertEqual(rig.core.calls, ["reload", "restore", "config", "prepare(srv)", "start(7)"])
+        XCTAssertEqual(rig.outcomes, [nil])
+    }
+
+    func testReloadFailureDoesNotBurnTheReconnectAttempt() {
+        let rig = LifecycleRig().running(on: "wifi")
+        rig.core.reloadFailures = 1
+        rig.path("cell")
+        rig.clock.advance(by: 1.5)
+        XCTAssertEqual(rig.core.calls, ["networkChanged", "reload", "stop", "start(7)"])
+        XCTAssertFalse(rig.host.reasserting)
+        XCTAssertNil(rig.note.value)
     }
 
     func testNetworkChangeMidStartReconnectsOnceStarted() {
@@ -227,7 +268,7 @@ final class TunnelLifecycleTests: XCTestCase {
         XCTAssertTrue(rig.host.reasserting)
     }
 
-    func testLaterAttemptsRunTheFullSequenceOnly() {
+    func testLaterAttemptsReloadThenRunTheFullSequence() {
         let rig = LifecycleRig().running(on: "wifi")
         rig.core.startFailures = 2
         rig.path("cell")
@@ -235,8 +276,17 @@ final class TunnelLifecycleTests: XCTestCase {
         XCTAssertEqual(rig.clock.pending, [3])
         rig.core.clearCalls()
         rig.clock.advance(by: 3)
-        XCTAssertEqual(rig.core.calls, ["stop", "prepare(srv)", "start(7)"])
+        XCTAssertEqual(rig.core.calls, ["reload", "stop", "prepare(srv)", "start(7)"])
         XCTAssertFalse(rig.host.reasserting)
+    }
+
+    func testEveryAttemptReloadsButOnlyTheFirstInvalidatesTheNetwork() {
+        let rig = LifecycleRig().running(on: "wifi")
+        rig.core.startFailures = 1_000
+        rig.path("cell")
+        rig.clock.advance(by: 1.5 + 3 + 6 + 9 + 30)
+        XCTAssertEqual(rig.core.calls.filter { $0 == "reload" }.count, 5)
+        XCTAssertEqual(rig.core.calls.filter { $0 == "networkChanged" }.count, 1)
     }
 
     func testReconnectNeverGivesUp() {
@@ -411,9 +461,15 @@ final class LifecycleCoreFake: LifecycleCore {
     var tunnel = LifecycleCoreFake.tunnelConfig(dns: ["10.66.0.1"])
     var restoreError: Error?
     var startFailures = 0
+    var reloadFailures = 0
     private(set) var calls: [String] = []
 
-    func reload() throws { calls.append("reload") }
+    func reload() throws {
+        calls.append("reload")
+        guard reloadFailures > 0 else { return }
+        reloadFailures -= 1
+        throw CoreError(message: "decode stored config: unexpected end of JSON input")
+    }
 
     func networkChanged() { calls.append("networkChanged") }
 
