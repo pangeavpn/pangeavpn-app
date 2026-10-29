@@ -1,49 +1,58 @@
 import Foundation
 import Pangeacore
+import os
 
 final class GoCore: CoreBridge {
     private static let lock = NSLock()
     private static var instance: GoCore?
+    private static let log = Logger(subsystem: "org.pangeavpn", category: "core")
+
+    // The same store Go was given, so a read-back sees exactly what Go persisted.
+    private let secrets: KeychainSecretStore
 
     // First sink wins: later callers get the already-initialised core.
     static func shared(sink: ((TunnelStatus) -> Void)?) -> GoCore {
         lock.lock()
         defer { lock.unlock() }
         if let instance { return instance }
+        let secrets = KeychainSecretStore()
         MobileInit(
-            KeychainSecretStore(),
+            secrets,
             AlwaysProtect(),
             StatusAdapter(handler: sink),
             NetworkKeyAdapter(),
             AppGroup.containerURL.path)
-        let core = GoCore()
+        let core = GoCore(secrets: secrets)
         instance = core
         return core
     }
 
-    private init() {}
+    private init(secrets: KeychainSecretStore) {
+        self.secrets = secrets
+    }
 
     func restoreSession() throws -> Session {
-        try decode(call { MobileRestoreSession($0) })
+        try CoreJSON.decode(call { MobileRestoreSession($0) })
     }
 
     func login(token: String) throws -> Session {
-        try decode(call { MobileLogin(token, $0) })
+        let session: Session = try CoreJSON.decode(call { MobileLogin(token, $0) })
+        let stored = secrets.get(KeychainSecretStore.licenseKey)
+        return try SignInCheck.confirm(session, storedLicense: stored, undo: { MobileLogout() })
     }
 
     func logout() { MobileLogout() }
 
     func listServers() throws -> [Server] {
-        try decodeList(call { MobileListServers($0) })
+        try CoreJSON.decodeList(call { MobileListServers($0) })
     }
 
     func subscription() throws -> Subscription? {
-        let json = try call { MobileGetSubscription($0) }
-        return isNull(json) ? nil : try decode(json)
+        try CoreJSON.decodeOptional(call { MobileGetSubscription($0) })
     }
 
     func listDevices() throws -> [Device] {
-        try decodeList(call { MobileListDevices($0) })
+        try CoreJSON.decodeList(call { MobileListDevices($0) })
     }
 
     func removeDevice(id: String) throws {
@@ -53,7 +62,7 @@ final class GoCore: CoreBridge {
     }
 
     func prepare(serverId: String) throws -> TunnelConfig {
-        try decode(call { MobilePrepare(serverId, $0) })
+        try CoreJSON.decode(call { MobilePrepare(serverId, $0) })
     }
 
     func start(tunFd: Int) throws {
@@ -65,24 +74,36 @@ final class GoCore: CoreBridge {
     func stop() { MobileStop() }
 
     func state() -> TunnelStatus {
-        let decoded: TunnelStatus? = try? decode(MobileState())
-        return decoded ?? .disconnected
+        do {
+            return try CoreJSON.decode(MobileState())
+        } catch {
+            Self.log.error("core status was unreadable")
+            return .disconnected
+        }
     }
 
     func config() throws -> AppSettings {
-        try decode(call { MobileGetConfig($0) })
+        try CoreJSON.decode(call { MobileGetConfig($0) })
     }
 
     func setConfig(_ settings: AppSettings) throws -> AppSettings {
         guard let data = try? JSONEncoder().encode(settings),
               let raw = String(data: data, encoding: .utf8)
         else { throw CoreError.unexpectedResponse }
-        return try decode(call { MobileSetConfig(raw, $0) })
+        return try CoreJSON.decode(call { MobileSetConfig(raw, $0) })
     }
 
     func setHubMethod(_ method: String, enabled: Bool) throws -> AppSettings {
-        try decode(call { MobileSetHubMethod(method, enabled, $0) })
+        try CoreJSON.decode(call { MobileSetHubMethod(method, enabled, $0) })
     }
+
+    func reload() throws {
+        var err: NSError?
+        let ok = MobileReload(&err)
+        try check(ok, err)
+    }
+
+    func networkChanged() { MobileNetworkChanged() }
 
     private func call(_ body: (NSErrorPointer) -> String) throws -> String {
         var err: NSError?
@@ -94,22 +115,6 @@ final class GoCore: CoreBridge {
     private func check(_ ok: Bool, _ err: NSError?) throws {
         if let err { throw CoreError.from(err) }
         if !ok { throw CoreError.from(nil) }
-    }
-
-    private func isNull(_ json: String) -> Bool {
-        json.trimmingCharacters(in: .whitespacesAndNewlines) == "null"
-    }
-
-    private func decode<T: Decodable>(_ json: String) throws -> T {
-        do {
-            return try JSONDecoder().decode(T.self, from: Data(json.utf8))
-        } catch {
-            throw CoreError.unexpectedResponse
-        }
-    }
-
-    private func decodeList<T: Decodable>(_ json: String) throws -> [T] {
-        isNull(json) ? [] : try decode(json)
     }
 }
 

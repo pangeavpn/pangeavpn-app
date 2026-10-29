@@ -11,6 +11,8 @@ final class ServersStore {
     var error: String?
 
     private let core: any CoreBridge
+    // Bumped by reset, so a refresh still in flight for the old account is dropped.
+    @ObservationIgnored private var generation = 0
 
     private static let log = Logger(subsystem: "org.pangeavpn", category: "servers")
 
@@ -26,20 +28,34 @@ final class ServersStore {
         Regions.slots(regions, selectedKey: selectedRegionKey)
     }
 
+    // An overlapping call would clear loading while the first one is still in flight.
     func refresh() async {
+        guard !loading else { return }
         loading = true
+        let started = generation
         let core = self.core
         do {
             let servers = try await CoreQueue.run { try core.listServers() }
             let last = await lastServerId()
+            guard started == generation else { return }
             let id = Regions.resolveSelection(visible: servers, previous: selected?.id ?? "", lastServerId: last)
             regions = Regions.group(servers)
             selected = id.isEmpty ? nil : servers.first(where: { $0.id == id })
             error = nil
         } catch {
-            Self.log.error("server refresh failed: \(error.localizedDescription, privacy: .public)")
+            guard started == generation else { return }
+            Self.log.error("server refresh failed: \(error.localizedDescription, privacy: .private)")
             self.error = error.localizedDescription
         }
+        loading = false
+    }
+
+    // After sign-out, so the next account never sees the previous account's servers.
+    func reset() {
+        generation += 1
+        regions = []
+        selected = nil
+        error = nil
         loading = false
     }
 
@@ -53,7 +69,7 @@ final class ServersStore {
                 try core.editConfig { $0.lastServerId = id }
             }
         } catch {
-            Self.log.error("saving the server failed: \(error.localizedDescription, privacy: .public)")
+            Self.log.error("saving the server failed: \(error.localizedDescription, privacy: .private)")
             self.error = error.localizedDescription
         }
     }
@@ -63,7 +79,7 @@ final class ServersStore {
         do {
             return try await CoreQueue.run { try core.config().lastServerId }
         } catch {
-            Self.log.error("reading the last server failed: \(error.localizedDescription, privacy: .public)")
+            Self.log.error("reading the last server failed: \(error.localizedDescription, privacy: .private)")
             return nil
         }
     }

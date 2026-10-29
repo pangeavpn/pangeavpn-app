@@ -34,6 +34,13 @@ final class ModelsTests: XCTestCase {
         XCTAssertEqual(server.country, "GB")
     }
 
+    // Verbatim json.Marshal of a Go serverInfo, transport blocks included.
+    func testServerDecodesAFullGoServer() throws {
+        let json = #"{"id":"eu-1","name":"Frankfurt","region":"eu","country":"DE","load":7,"cloak":{"remoteHost":"h","uid":"u","publicKey":"k"},"naive":{"remoteHost":"h","remotePort":443,"username":"u","password":"p"},"reality":{"remoteHost":"h","remotePort":443,"uuid":"x","publicKey":"k","shortId":"s"},"controlPlaneReality":{"remoteHost":"h","remotePort":8443,"uuid":"x","publicKey":"k","shortId":"s","serverName":"n"},"frontedEndpoints":["a.example"]}"#
+        let server = try decode(Server.self, json)
+        XCTAssertEqual(server, Server(id: "eu-1", name: "Frankfurt", region: "eu", country: "DE", load: 7))
+    }
+
     func testSessionDecodesServers() throws {
         let json = #"{"email":"e","name":"n","servers":[{"id":"a","name":"A","region":"eu","country":"GB","load":12}]}"#
         let session = try decode(Session.self, json)

@@ -1,7 +1,7 @@
 #if DEBUG
 import Foundation
 
-// Results are scripted before use; the lock covers the logs, which core worker threads write.
+// Results are scripted before use; the lock covers what core worker threads read and write.
 final class FakeCore: CoreBridge, @unchecked Sendable {
     var restoreResult: Result<Session, CoreError> = .failure(CoreError(message: "not authenticated"))
     var loginResult: Result<Session, CoreError> = .failure(CoreError(message: "not authenticated"))
@@ -11,19 +11,28 @@ final class FakeCore: CoreBridge, @unchecked Sendable {
     var removeDeviceResult: Result<Void, CoreError> = .success(())
     var prepareResult: Result<TunnelConfig, CoreError> = .failure(CoreError(message: "no server"))
     var startResult: Result<Void, CoreError> = .success(())
-    var configResult: Result<AppSettings, CoreError> = .success(AppSettings())
+    var reloadResult: Result<Void, CoreError> = .success(())
     // nil echoes the input back, as Go does for settings that need no correction.
     var setConfigResult: Result<AppSettings, CoreError>?
     var hubMethodResult: Result<AppSettings, CoreError> = .success(AppSettings())
     var currentState = TunnelStatus.disconnected
+    // Widens the read-then-write window, so an unserialized edit would lose a change.
+    var configDelay: TimeInterval = 0
 
     private let lock = NSLock()
     private var entries: [String] = []
     private var saved: [AppSettings] = []
+    private var stored: Result<AppSettings, CoreError> = .success(AppSettings())
 
     var calls: [String] { lock.withLock { entries } }
 
     var savedSettings: [AppSettings] { lock.withLock { saved } }
+
+    // As in Go, a successful save is what the next config() returns.
+    var configResult: Result<AppSettings, CoreError> {
+        get { lock.withLock { stored } }
+        set { lock.withLock { stored = newValue } }
+    }
 
     func note(_ entry: String) {
         lock.withLock { entries.append(entry) }
@@ -58,15 +67,25 @@ final class FakeCore: CoreBridge, @unchecked Sendable {
 
     func state() -> TunnelStatus { currentState }
 
-    func config() throws -> AppSettings { try record("config", configResult) }
+    func config() throws -> AppSettings {
+        let result = configResult
+        if configDelay > 0 { Thread.sleep(forTimeInterval: configDelay) }
+        return try record("config", result)
+    }
 
     func setConfig(_ settings: AppSettings) throws -> AppSettings {
         lock.withLock { saved.append(settings) }
-        return try record("setConfig", setConfigResult ?? .success(settings))
+        let result = setConfigResult ?? .success(settings)
+        if case .success = result { configResult = result }
+        return try record("setConfig", result)
     }
 
     func setHubMethod(_ method: String, enabled: Bool) throws -> AppSettings {
         try record("setHubMethod(\(method),\(enabled))", hubMethodResult)
     }
+
+    func reload() throws { try record("reload", reloadResult) }
+
+    func networkChanged() { note("networkChanged") }
 }
 #endif

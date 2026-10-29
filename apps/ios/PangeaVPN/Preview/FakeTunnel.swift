@@ -18,11 +18,14 @@ final class FakeTunnel: TunnelControlling {
 
     private(set) var requests: [Request] = []
     private(set) var disconnects = 0
+    private(set) var removals = 0
     private let onDisconnect: (() -> Void)?
+    private let onRemove: (() -> Void)?
 
-    // onDisconnect lets a test log the disconnect into another fake's call order.
-    init(onDisconnect: (() -> Void)? = nil) {
+    // The hooks let a test log these calls into another fake's call order.
+    init(onDisconnect: (() -> Void)? = nil, onRemove: (() -> Void)? = nil) {
         self.onDisconnect = onDisconnect
+        self.onRemove = onRemove
     }
 
     func connect(serverId: String, killSwitch: Bool, allowLan: Bool) async throws {
@@ -37,6 +40,13 @@ final class FakeTunnel: TunnelControlling {
     func disconnect() async {
         disconnects += 1
         onDisconnect?()
+        connectedDate = nil
+        status = .disconnected
+    }
+
+    func removeConfiguration() async {
+        removals += 1
+        onRemove?()
         connectedDate = nil
         status = .disconnected
     }

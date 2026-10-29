@@ -95,4 +95,49 @@ final class ServersStoreTests: XCTestCase {
         await store.select(server("ap-1"))
         XCTAssertEqual(store.slots.map(\.key), ["ap", "eu"])
     }
+
+    func testOverlappingRefreshesListOnce() async {
+        let core = FakeCore()
+        core.serversResult = .success([server("eu-1")])
+        let store = ServersStore(core: core)
+        async let first: Void = store.refresh()
+        async let second: Void = store.refresh()
+        _ = await (first, second)
+        XCTAssertEqual(core.calls.filter { $0 == "listServers" }.count, 1)
+        XCTAssertEqual(store.regions.map(\.key), ["eu"])
+        XCTAssertFalse(store.loading)
+    }
+
+    func testResetClearsTheListPickAndError() async {
+        let core = FakeCore()
+        core.serversResult = .success([server("eu-1"), server("us-1")])
+        let store = ServersStore(core: core)
+        await store.refresh()
+        await store.select(server("us-1"))
+        store.error = "stale"
+        store.reset()
+        XCTAssertTrue(store.regions.isEmpty)
+        XCTAssertTrue(store.slots.isEmpty)
+        XCTAssertNil(store.selected)
+        XCTAssertNil(store.error)
+    }
+
+    func testResetDropsARefreshStillInFlight() async {
+        let core = FakeCore()
+        core.serversResult = .success([server("eu-1")])
+        core.configDelay = 0.2
+        let store = ServersStore(core: core)
+        async let refreshing: Void = store.refresh()
+        var spins = 0
+        while !store.loading && spins < 1000 {
+            await Task.yield()
+            spins += 1
+        }
+        XCTAssertTrue(store.loading)
+        store.reset()
+        await refreshing
+        XCTAssertTrue(store.regions.isEmpty)
+        XCTAssertNil(store.selected)
+        XCTAssertFalse(store.loading)
+    }
 }

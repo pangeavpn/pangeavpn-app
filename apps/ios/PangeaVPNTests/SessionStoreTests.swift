@@ -123,19 +123,46 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(store.deviceError, "mobile: remove failed")
     }
 
-    func testSignOutDisconnectsBeforeLogout() async {
+    func testSignOutDisconnectsAndRemovesTheProfileBeforeLogout() async {
         let core = FakeCore()
-        let tunnel = FakeTunnel(onDisconnect: { core.note("disconnect") })
+        let tunnel = FakeTunnel(
+            onDisconnect: { core.note("disconnect") },
+            onRemove: { core.note("removeConfiguration") })
         core.loginResult = .success(signedIn)
         core.devicesResult = .success([device("d1")])
         let store = makeStore(core, tunnel: tunnel)
         await store.login("ABCD-EFGH")
         await store.loadDevices()
         await store.signOut()
-        XCTAssertEqual(Array(core.calls.suffix(2)), ["disconnect", "logout"])
+        XCTAssertEqual(Array(core.calls.suffix(3)), ["disconnect", "removeConfiguration", "logout"])
+        XCTAssertEqual(tunnel.disconnects, 1)
+        XCTAssertEqual(tunnel.removals, 1)
         XCTAssertNil(store.session)
         XCTAssertNil(store.subscription)
         XCTAssertTrue(store.devices.isEmpty)
+    }
+
+    func testUnsavedSignInShowsTheErrorAndNoSession() async {
+        let core = FakeCore()
+        core.loginResult = .failure(.signInNotSaved)
+        let store = makeStore(core)
+        await store.login("ABCD-EFGH")
+        XCTAssertNil(store.session)
+        XCTAssertEqual(store.loginError, CoreError.signInNotSaved.message)
+        XCTAssertFalse(store.showDeviceLimit)
+        XCTAssertFalse(core.calls.contains("subscription"))
+    }
+
+    func testOverlappingLoginsReachTheCoreOnce() async {
+        let core = FakeCore()
+        core.loginResult = .success(signedIn)
+        let store = makeStore(core)
+        async let first: Void = store.login("ABCD-EFGH")
+        async let second: Void = store.login("ABCD-EFGH")
+        _ = await (first, second)
+        XCTAssertEqual(core.calls.filter { $0.hasPrefix("login(") }.count, 1)
+        XCTAssertEqual(store.session, signedIn)
+        XCTAssertFalse(store.loggingIn)
     }
 
     func testRestoreSetsSessionAndLoadsSubscription() async {

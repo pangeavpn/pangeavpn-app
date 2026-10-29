@@ -117,4 +117,37 @@ final class SettingsStoreTests: XCTestCase {
         XCTAssertNil(reloaded.darkTheme)
         XCTAssertNil(defaults.object(forKey: "darkTheme"))
     }
+
+    func testConcurrentEditsAllLand() async throws {
+        let (defaults, suite) = try makeTestDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let core = FakeCore()
+        core.configDelay = 0.02
+        let store = SettingsStore(core: core, defaults: defaults)
+        async let mtu: Void = store.setMtu(1300)
+        async let lan: Void = store.setAllowLan(true)
+        async let drop: Void = store.setDeadDrop(false)
+        async let transport: Void = store.setPreferredTransport(.reality)
+        async let dns: Void = store.setCustomDns("1.1.1.1")
+        _ = await (mtu, lan, drop, transport, dns)
+        let final = try core.configResult.get()
+        XCTAssertEqual(final.mtu, 1300)
+        XCTAssertTrue(final.allowLan)
+        XCTAssertFalse(final.deadDrop)
+        XCTAssertEqual(final.preferredTransport, "reality")
+        XCTAssertEqual(final.customDns, ["1.1.1.1"])
+        XCTAssertEqual(core.savedSettings.count, 5)
+        XCTAssertNil(store.error)
+    }
+
+    func testSavedSettingsAreWhatTheNextLoadReads() async throws {
+        let (defaults, suite) = try makeTestDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let core = FakeCore()
+        let store = SettingsStore(core: core, defaults: defaults)
+        await store.setAllowLan(true)
+        let reloaded = SettingsStore(core: core, defaults: defaults)
+        await reloaded.load()
+        XCTAssertTrue(reloaded.settings.allowLan)
+    }
 }

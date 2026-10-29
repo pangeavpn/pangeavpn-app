@@ -109,4 +109,42 @@ final class ConnectionStoreTests: XCTestCase {
         XCTAssertEqual(rig.store.error, "permission denied")
         XCTAssertEqual(rig.store.status.state, .disconnected)
     }
+
+    func testRetryFromAnErrorReleasesTheTunnelBeforeConnecting() async throws {
+        let (defaults, suite) = try makeTestDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let rig = makeRig(defaults: defaults)
+        await rig.servers.select(pick)
+        rig.tunnel.status.state = .error
+        await rig.store.toggle()
+        XCTAssertEqual(rig.tunnel.disconnects, 1)
+        XCTAssertEqual(rig.tunnel.requests.map(\.serverId), ["eu-1"])
+        XCTAssertEqual(rig.store.status.state, .connected)
+        XCTAssertFalse(rig.store.busy)
+    }
+
+    func testConnectFromDisconnectedDoesNotReleaseFirst() async throws {
+        let (defaults, suite) = try makeTestDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let rig = makeRig(defaults: defaults)
+        await rig.servers.select(pick)
+        await rig.store.toggle()
+        XCTAssertEqual(rig.tunnel.disconnects, 0)
+        XCTAssertEqual(rig.tunnel.requests.count, 1)
+    }
+
+    func testConnectErrorClearsOnceTheTunnelGetsGoing() async throws {
+        let (defaults, suite) = try makeTestDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        for state in [TunnelState.connecting, .connected] {
+            let rig = makeRig(defaults: defaults)
+            await rig.servers.select(pick)
+            rig.tunnel.connectResult = .failure(CoreError(message: "permission denied"))
+            await rig.store.toggle()
+            rig.tunnel.status.state = .disconnected
+            XCTAssertEqual(rig.store.error, "permission denied", "\(state)")
+            rig.tunnel.status.state = state
+            XCTAssertNil(rig.store.error, "\(state)")
+        }
+    }
 }

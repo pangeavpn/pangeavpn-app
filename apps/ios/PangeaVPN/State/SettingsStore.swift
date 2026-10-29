@@ -99,7 +99,7 @@ final class SettingsStore {
     }
 
     private func show(_ failure: Error, doing action: String) {
-        Self.log.error("settings \(action, privacy: .public) failed: \(failure.localizedDescription, privacy: .public)")
+        Self.log.error("settings \(action, privacy: .public) failed: \(failure.localizedDescription, privacy: .private)")
         error = failure.localizedDescription
     }
 

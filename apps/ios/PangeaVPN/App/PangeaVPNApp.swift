@@ -8,7 +8,7 @@ struct PangeaVPNApp: App {
     @State private var connection: ConnectionStore
 
     init() {
-        let core = GoCore.shared(sink: nil)
+        let core = GoCore.forApp()
         let tunnel = TunnelController()
         let settings = SettingsStore(core: core)
         let servers = ServersStore(core: core)
@@ -25,7 +25,6 @@ struct PangeaVPNApp: App {
                 .environment(servers)
                 .environment(settings)
                 .environment(connection)
-                .preferredColorScheme(settings.darkTheme.map { $0 ? ColorScheme.dark : ColorScheme.light })
         }
     }
 }

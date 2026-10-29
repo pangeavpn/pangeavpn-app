@@ -35,7 +35,9 @@ final class SessionStore {
         if restored != nil { await loadSubscription() }
     }
 
+    // A second tap while one login is in flight would register the device twice.
     func login(_ raw: String) async {
+        guard !loggingIn else { return }
         let token = AccountNumber.normalize(raw)
         guard !token.isEmpty else {
             loginError = String(localized: "login_empty_account", defaultValue: "Enter your account number")
@@ -46,12 +48,14 @@ final class SessionStore {
     }
 
     func retryLogin() async {
-        guard let token = pendingToken else { return }
+        guard !loggingIn, let token = pendingToken else { return }
         await attemptLogin(token)
     }
 
+    // The profile goes before the license, so nothing can start a tunnel that would fail signed out.
     func signOut() async {
         await tunnel.disconnect()
+        await tunnel.removeConfiguration()
         let core = self.core
         await CoreQueue.perform { core.logout() }
         session = nil
@@ -68,7 +72,7 @@ final class SessionStore {
         do {
             subscription = try await CoreQueue.run { try core.subscription() }
         } catch {
-            Self.log.error("subscription failed: \(error.localizedDescription, privacy: .public)")
+            Self.log.error("subscription failed: \(error.localizedDescription, privacy: .private)")
         }
     }
 
@@ -104,7 +108,7 @@ final class SessionStore {
             Self.log.info("no stored session")
             return nil
         } catch {
-            Self.log.error("restore failed: \(error.localizedDescription, privacy: .public)")
+            Self.log.error("restore failed: \(error.localizedDescription, privacy: .private)")
             return nil
         }
     }

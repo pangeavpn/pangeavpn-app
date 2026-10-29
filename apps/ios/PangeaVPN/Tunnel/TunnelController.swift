@@ -51,25 +51,81 @@ final class TunnelController: TunnelControlling {
         }
     }
 
+    // Stops even an idle tunnel: an app-side stop is how Apple says to clear a stranded drop rule.
     func disconnect() async {
-        let connection: NEVPNConnection
+        let manager: NETunnelProviderManager
         do {
-            connection = try await loadManager().connection
+            manager = try await loadManager()
         } catch {
-            log.error("disconnect could not load the VPN configuration: \(error.localizedDescription, privacy: .public)")
+            log.error("disconnect could not load the VPN configuration (\(error.logCode, privacy: .public)): \(error.localizedDescription, privacy: .private)")
             return
         }
-        guard Self.state(for: connection.status) != .disconnected else { return }
+        let connection = manager.connection
+        let wasRunning = Self.state(for: connection.status) != .disconnected
         stopRequested = true
         connection.stopVPNTunnel()
-        await waitUntilStopped(connection)
+        let stopped: Bool
+        if wasRunning {
+            stopped = await waitUntilStopped(connection)
+        } else {
+            stopped = true
+        }
+        let blocksAll = manager.protocolConfiguration?.includeAllNetworks == true
+        if Self.mustDisable(includeAllNetworks: blocksAll, wasRunning: wasRunning, stopped: stopped) {
+            await disable(manager)
+        }
+        if !wasRunning { settleIdleRelease() }
+    }
+
+    // A stop with nothing to stop, or one that hung, can leave the drop rule up with no tunnel.
+    nonisolated static func mustDisable(includeAllNetworks: Bool, wasRunning: Bool, stopped: Bool) -> Bool {
+        includeAllNetworks && (!wasRunning || !stopped)
+    }
+
+    // Sign-out leaves no profile that Settings could start, only to fail signed out behind the kill switch.
+    func removeConfiguration() async {
+        stopRequested = true
+        do {
+            let saved = try await NETunnelProviderManager.loadAllFromPreferences()
+            for found in saved where Self.isOurs(found) {
+                try await found.removeFromPreferences()
+            }
+        } catch {
+            log.error("could not remove the VPN configuration (\(error.logCode, privacy: .public)): \(error.localizedDescription, privacy: .private)")
+        }
+        forgetManager()
+        neState = .disconnected
+        stopRequested = false
+        connectedDate = nil
+        status = .disconnected
+        onChange?()
+    }
+
+    // Apple ties the kill switch's drop rule to an enabled configuration; the next connect re-enables it.
+    private func disable(_ manager: NETunnelProviderManager) async {
+        do {
+            try await manager.loadFromPreferences()
+            guard manager.protocolConfiguration?.includeAllNetworks == true else { return }
+            manager.isEnabled = false
+            try await manager.saveToPreferences()
+        } catch {
+            log.error("could not disable the VPN configuration (\(error.logCode, privacy: .public)): \(error.localizedDescription, privacy: .private)")
+        }
+    }
+
+    // Stopping an idle tunnel fires no NE transition, so nothing else would consume the flag.
+    private func settleIdleRelease() {
+        stopRequested = false
+        guard status.state == .error else { return }
+        status = .disconnected
+        onChange?()
     }
 
     private func loadExisting() async {
         do {
             _ = try await loadManager()
         } catch {
-            log.error("could not load the VPN configuration: \(error.localizedDescription, privacy: .public)")
+            log.error("could not load the VPN configuration (\(error.logCode, privacy: .public)): \(error.localizedDescription, privacy: .private)")
         }
     }
 
@@ -116,6 +172,7 @@ final class TunnelController: TunnelControlling {
         proto.excludeLocalNetworks = allowLan
         manager.protocolConfiguration = proto
         manager.localizedDescription = displayName
+        // Also undoes the disable that a kill-switch release may have saved.
         manager.isEnabled = true
     }
 
@@ -169,7 +226,7 @@ final class TunnelController: TunnelControlling {
     }
 
     private func showDisconnectError(_ error: Error?, requested: Bool) {
-        guard let error, !requested, neState == .disconnected else { return }
+        guard let error, !requested, neState == .disconnected, !TunnelStart.isStopped(error) else { return }
         var next = TunnelStatus.disconnected
         next.state = .error
         next.detail = error.localizedDescription
@@ -210,7 +267,7 @@ final class TunnelController: TunnelControlling {
             let polled = try JSONDecoder().decode(TunnelStatus.self, from: reply)
             apply(polled)
         } catch {
-            log.debug("status poll failed: \(error.localizedDescription, privacy: .public)")
+            log.debug("status poll failed (\(error.logCode, privacy: .public)): \(error.localizedDescription, privacy: .private)")
         }
     }
 
@@ -237,16 +294,18 @@ final class TunnelController: TunnelControlling {
         }
     }
 
-    private func waitUntilStopped(_ connection: NEVPNConnection) async {
+    private func waitUntilStopped(_ connection: NEVPNConnection) async -> Bool {
         for _ in 0..<Self.stopChecks {
-            if Self.state(for: connection.status) == .disconnected { return }
+            if Self.state(for: connection.status) == .disconnected { return true }
             do {
                 try await Task.sleep(for: Self.stopCheckInterval)
             } catch {
-                return
+                break
             }
         }
-        log.info("tunnel still stopping after the wait")
+        let stopped = Self.state(for: connection.status) == .disconnected
+        if !stopped { log.info("tunnel still stopping after the wait") }
+        return stopped
     }
 }
 

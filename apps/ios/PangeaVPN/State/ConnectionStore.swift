@@ -30,12 +30,14 @@ final class ConnectionStore {
             await tunnel.disconnect()
         case .disconnecting:
             return
-        case .disconnected, .error:
-            await connectSelected()
+        case .disconnected:
+            await connectSelected(releasingFirst: false)
+        case .error:
+            await connectSelected(releasingFirst: true)
         }
     }
 
-    private func connectSelected() async {
+    private func connectSelected(releasingFirst: Bool) async {
         guard let server = servers.selected else {
             showServerSheet = true
             return
@@ -43,6 +45,8 @@ final class ConnectionStore {
         busy = true
         defer { busy = false }
         error = nil
+        // A failed tunnel can leave the kill switch's drop rule up, and that would also sink this start.
+        if releasingFirst { await tunnel.disconnect() }
         // The extension reads allowLan from the core, so the NE flag must not use a default.
         if !preferences.loaded { await preferences.load() }
         guard preferences.loaded else {
@@ -62,5 +66,7 @@ final class ConnectionStore {
     private func sync() {
         status = tunnel.status
         connectedDate = tunnel.connectedDate
+        // A tunnel that got going makes the last connect error stale.
+        if status.state == .connecting || status.state == .connected { error = nil }
     }
 }
