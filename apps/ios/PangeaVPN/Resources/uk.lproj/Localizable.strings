@@ -4,11 +4,16 @@
 "devicelimit_title" = "Досягнуто ліміту пристроїв";
 "devices_remove" = "Видалити";
 "devices_title" = "Пристрої";
+"error_connect_failed" = "Не вдалося підключитися. Перевірте з'єднання або виберіть інший регіон.";
+"error_device_locked" = "Розблокуйте iPhone, щоб підключитися.";
+"error_dns_invalid" = "Немає придатного DNS-сервера. Перевірте власний DNS у налаштуваннях.";
 "error_no_server" = "Відкрийте PangeaVPN і виберіть регіон.";
 "error_no_tun" = "Не вдалося відкрити інтерфейс тунелю";
 "error_reconnect_failed" = "Не вдалося перепідключитися після зміни мережі";
 "error_signed_out" = "Відкрийте PangeaVPN, щоб увійти.";
+"error_signin_not_saved" = "Не вдалося зберегти вхід на цьому пристрої.";
 "error_stopped" = "З'єднання зупинено";
+"error_subscription_expired" = "Термін дії вашої підписки минув.";
 "fact_down" = "Отримано";
 "fact_session" = "Сесія";
 "fact_up" = "Надіслано";

@@ -4,11 +4,16 @@
 "devicelimit_title" = "به سقف تعداد دستگاه‌ها رسیدید";
 "devices_remove" = "حذف";
 "devices_title" = "دستگاه‌ها";
+"error_connect_failed" = "اتصال برقرار نشد. اتصال خود را بررسی کنید یا منطقه دیگری را امتحان کنید.";
+"error_device_locked" = "برای اتصال، قفل iPhone را باز کنید.";
+"error_dns_invalid" = "هیچ سرور DNS قابل استفاده‌ای وجود ندارد. DNS سفارشی را در تنظیمات بررسی کنید.";
 "error_no_server" = "PangeaVPN را باز کنید و یک منطقه انتخاب کنید.";
 "error_no_tun" = "باز کردن رابط تونل ممکن نشد";
 "error_reconnect_failed" = "پس از تغییر شبکه، اتصال دوباره برقرار نشد";
 "error_signed_out" = "برای ورود، PangeaVPN را باز کنید.";
+"error_signin_not_saved" = "ذخیرهٔ ورود شما در این دستگاه ممکن نشد.";
 "error_stopped" = "اتصال متوقف شد";
+"error_subscription_expired" = "اشتراک شما منقضی شده است.";
 "fact_down" = "دریافت";
 "fact_session" = "نشست";
 "fact_up" = "ارسال";

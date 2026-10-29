@@ -4,11 +4,16 @@
 "devicelimit_title" = "Device Limit Reached";
 "devices_remove" = "Remove";
 "devices_title" = "Devices";
+"error_connect_failed" = "Could not connect. Check your connection or try another region.";
+"error_device_locked" = "Unlock your iPhone to connect.";
+"error_dns_invalid" = "No usable DNS server. Check Custom DNS in Settings.";
 "error_no_server" = "Open PangeaVPN and pick a region.";
 "error_no_tun" = "Could not open the tunnel interface";
 "error_reconnect_failed" = "Could not reconnect after the network changed";
 "error_signed_out" = "Open PangeaVPN to sign in.";
+"error_signin_not_saved" = "Could not save your sign-in on this device.";
 "error_stopped" = "The connection was stopped";
+"error_subscription_expired" = "Your subscription has expired.";
 "fact_down" = "Down";
 "fact_session" = "Session";
 "fact_up" = "Up";

@@ -4,11 +4,16 @@
 "devicelimit_title" = "已达设备上限";
 "devices_remove" = "移除";
 "devices_title" = "设备";
+"error_connect_failed" = "无法连接。请检查网络连接或尝试其他地区。";
+"error_device_locked" = "请解锁 iPhone 后再连接。";
+"error_dns_invalid" = "没有可用的 DNS 服务器。请在设置中检查自定义 DNS。";
 "error_no_server" = "请打开 PangeaVPN 并选择一个地区。";
 "error_no_tun" = "无法打开隧道接口";
 "error_reconnect_failed" = "网络变化后无法重新连接";
 "error_signed_out" = "请打开 PangeaVPN 登录。";
+"error_signin_not_saved" = "无法在此设备上保存您的登录信息。";
 "error_stopped" = "连接已停止";
+"error_subscription_expired" = "您的订阅已过期。";
 "fact_down" = "下行";
 "fact_session" = "会话";
 "fact_up" = "上行";

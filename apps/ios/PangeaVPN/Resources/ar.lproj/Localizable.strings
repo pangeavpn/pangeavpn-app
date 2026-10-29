@@ -4,11 +4,16 @@
 "devicelimit_title" = "تم بلوغ حد الأجهزة";
 "devices_remove" = "إزالة";
 "devices_title" = "الأجهزة";
+"error_connect_failed" = "تعذّر الاتصال. تحقق من اتصالك أو جرّب منطقة أخرى.";
+"error_device_locked" = "افتح قفل iPhone للاتصال.";
+"error_dns_invalid" = "لا يوجد خادم DNS صالح. تحقق من DNS المخصص في الإعدادات.";
 "error_no_server" = "افتح PangeaVPN واختر منطقة.";
 "error_no_tun" = "تعذّر فتح واجهة النفق";
 "error_reconnect_failed" = "تعذّرت إعادة الاتصال بعد تغيّر الشبكة";
 "error_signed_out" = "افتح PangeaVPN لتسجيل الدخول.";
+"error_signin_not_saved" = "تعذّر حفظ تسجيل الدخول على هذا الجهاز.";
 "error_stopped" = "تم إيقاف الاتصال";
+"error_subscription_expired" = "انتهت صلاحية اشتراكك.";
 "fact_down" = "التنزيل";
 "fact_session" = "الجلسة";
 "fact_up" = "الرفع";

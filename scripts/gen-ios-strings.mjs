@@ -92,6 +92,56 @@ const IOS_ONLY = {
     en: "Refresh regions", es: "Actualizar regiones", fr: "Actualiser les régions", ru: "Обновить регионы",
     uk: "Оновити регіони", zh: "刷新地区", ar: "تحديث المناطق", fa: "به‌روزرسانی مناطق"
   },
+  error_device_locked: {
+    en: "Unlock your iPhone to connect.",
+    es: "Desbloquea tu iPhone para conectarte.",
+    fr: "Déverrouillez votre iPhone pour vous connecter.",
+    ru: "Разблокируйте iPhone, чтобы подключиться.",
+    uk: "Розблокуйте iPhone, щоб підключитися.",
+    zh: "请解锁 iPhone 后再连接。",
+    ar: "افتح قفل iPhone للاتصال.",
+    fa: "برای اتصال، قفل iPhone را باز کنید."
+  },
+  error_subscription_expired: {
+    en: "Your subscription has expired.",
+    es: "Tu suscripción ha caducado.",
+    fr: "Votre abonnement a expiré.",
+    ru: "Срок действия вашей подписки истёк.",
+    uk: "Термін дії вашої підписки минув.",
+    zh: "您的订阅已过期。",
+    ar: "انتهت صلاحية اشتراكك.",
+    fa: "اشتراک شما منقضی شده است."
+  },
+  error_connect_failed: {
+    en: "Could not connect. Check your connection or try another region.",
+    es: "No se pudo conectar. Comprueba tu conexión o prueba otra región.",
+    fr: "Connexion impossible. Vérifiez votre connexion ou essayez une autre région.",
+    ru: "Не удалось подключиться. Проверьте соединение или выберите другой регион.",
+    uk: "Не вдалося підключитися. Перевірте з'єднання або виберіть інший регіон.",
+    zh: "无法连接。请检查网络连接或尝试其他地区。",
+    ar: "تعذّر الاتصال. تحقق من اتصالك أو جرّب منطقة أخرى.",
+    fa: "اتصال برقرار نشد. اتصال خود را بررسی کنید یا منطقه دیگری را امتحان کنید."
+  },
+  error_dns_invalid: {
+    en: "No usable DNS server. Check Custom DNS in Settings.",
+    es: "No hay ningún servidor DNS utilizable. Revisa el DNS personalizado en Ajustes.",
+    fr: "Aucun serveur DNS utilisable. Vérifiez le DNS personnalisé dans Paramètres.",
+    ru: "Нет доступного DNS-сервера. Проверьте пользовательский DNS в настройках.",
+    uk: "Немає придатного DNS-сервера. Перевірте власний DNS у налаштуваннях.",
+    zh: "没有可用的 DNS 服务器。请在设置中检查自定义 DNS。",
+    ar: "لا يوجد خادم DNS صالح. تحقق من DNS المخصص في الإعدادات.",
+    fa: "هیچ سرور DNS قابل استفاده‌ای وجود ندارد. DNS سفارشی را در تنظیمات بررسی کنید."
+  },
+  error_signin_not_saved: {
+    en: "Could not save your sign-in on this device.",
+    es: "No se pudo guardar tu inicio de sesión en este dispositivo.",
+    fr: "Impossible d'enregistrer votre connexion sur cet appareil.",
+    ru: "Не удалось сохранить вход на этом устройстве.",
+    uk: "Не вдалося зберегти вхід на цьому пристрої.",
+    zh: "无法在此设备上保存您的登录信息。",
+    ar: "تعذّر حفظ تسجيل الدخول على هذا الجهاز.",
+    fa: "ذخیرهٔ ورود شما در این دستگاه ممکن نشد."
+  },
   login_empty_account: {
     en: "Enter your account number",
     es: "Introduce tu número de cuenta",
