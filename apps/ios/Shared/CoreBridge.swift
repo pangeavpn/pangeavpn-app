@@ -13,7 +13,8 @@ struct CoreError: LocalizedError, Equatable {
     }
 }
 
-protocol CoreBridge: AnyObject {
+// Sendable because the app runs core calls on worker threads; Go guards its own state.
+protocol CoreBridge: AnyObject, Sendable {
     func restoreSession() throws -> Session
     func login(token: String) throws -> Session
     func logout()

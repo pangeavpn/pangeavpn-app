@@ -11,6 +11,8 @@ struct Region: Equatable, Sendable {
 }
 
 enum Regions {
+    static let slotCount = 2
+
     static func group(_ servers: [Server]) -> [Region] {
         var order: [String] = []
         var byKey: [String: [Server]] = [:]
@@ -20,6 +22,26 @@ enum Regions {
             byKey[key, default: []].append(server)
         }
         return order.map { Region(key: $0, servers: byKey[$0] ?? []) }
+    }
+
+    static func region(of serverId: String, in regions: [Region]) -> Region? {
+        regions.first { region in region.servers.contains { $0.id == serverId } }
+    }
+
+    // The selection always keeps a slot: a pick that vanished from view would read as lost.
+    static func slots(_ regions: [Region], selectedKey: String?, count: Int = Regions.slotCount) -> [Region] {
+        let head = Array(regions.prefix(count))
+        guard let selectedKey, !head.contains(where: { $0.key == selectedKey }),
+              let selected = regions.first(where: { $0.key == selectedKey })
+        else { return head }
+        return Array(([selected] + regions.filter { $0.key != selectedKey }).prefix(count))
+    }
+
+    // The in-session pick if still listed, else the last connected server, else none.
+    static func resolveSelection(visible: [Server], previous: String, lastServerId: String?) -> String {
+        if visible.contains(where: { $0.id == previous }) { return previous }
+        if let lastServerId, visible.contains(where: { $0.id == lastServerId }) { return lastServerId }
+        return ""
     }
 
     private static func regionKey(of server: Server) -> String {
