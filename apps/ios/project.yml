@@ -52,6 +52,8 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: org.pangeavpn.app
         TARGETED_DEVICE_FAMILY: "1"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        # Empty unless CI's TestFlight job passes the App Store profile's UUID.
+        PROVISIONING_PROFILE_SPECIFIER: $(PANGEA_APP_PROFILE)
       configs:
         # Hosted tests resolve core symbols through the app binary, so Debug
         # loads and exports all of them even before app code calls them.
@@ -98,6 +100,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: org.pangeavpn.app.tunnel
         TARGETED_DEVICE_FAMILY: "1"
+        PROVISIONING_PROFILE_SPECIFIER: $(PANGEA_TUNNEL_PROFILE)
 
   PangeaVPNTests:
     type: bundle.unit-test

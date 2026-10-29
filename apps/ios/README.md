@@ -25,7 +25,8 @@ access group.
 
 ## Prerequisites
 
-- macOS with Xcode 16+ (iOS 17.0 deployment target, Swift 5 language mode)
+- macOS with Xcode 26+ (iOS 17.0 deployment target, Swift 5 language mode).
+  App Store Connect only accepts builds made with the iOS 26 SDK.
 - Go 1.26+ and `gomobile`, installed from `daemon/` so the CLI matches the
   `golang.org/x/mobile` version pinned in `daemon/go.mod`:
   ```bash
@@ -69,21 +70,57 @@ xcodebuild build -scheme PangeaVPN -configuration Release -destination generic/p
 ```
 
 Pick any installed iPhone simulator for the test destination. CI
-(`.github/workflows/build-ios.yml`) runs the same steps on `macos-15`: the core
-job builds the xcframework (cached on the Go sources, Go, gomobile and Xcode
-versions; arm64 slices only), then the test and device jobs run in parallel.
+(`.github/workflows/build-ios.yml`) runs the same steps on `macos-26` with
+Xcode 26.6, pinned through `DEVELOPER_DIR`: the core job builds the
+xcframework (cached on the Go sources, Go, gomobile and Xcode versions; arm64
+slices only), then the test and device jobs run in parallel. On pushes to
+`ios`, the TestFlight job follows the tests; see below.
 
 ## Versioning
 
 `project.yml` holds placeholder versions for local builds. CI reads the root
 `package.json`: `MARKETING_VERSION` is its version without any prerelease
 suffix (App Store versions are numeric only), and `CURRENT_PROJECT_VERSION`
-follows Android's `versionCode` rule (`0.8.1` → `801`).
+follows Android's `versionCode` rule (`0.8.1` → `801`). App Store Connect
+refuses a build number it has already seen, so TestFlight uploads append the
+workflow run number and attempt (`801.57.1`).
 
-## Signing
+## Signing and TestFlight
 
-Not set up yet. `project.yml` names no team: simulator builds need none, and
-CI's device build runs with `CODE_SIGNING_ALLOWED=NO`.
+`project.yml` names no team: simulator builds need none, and CI's device build
+runs with `CODE_SIGNING_ALLOWED=NO`. The `testflight` job archives every push to
+`ios` that passes the tests, signs it manually with an Apple Distribution
+certificate, and uploads it to App Store Connect. Each target's
+`PROVISIONING_PROFILE_SPECIFIER` reads `PANGEA_APP_PROFILE` or
+`PANGEA_TUNNEL_PROFILE`, which only the job sets, so local signing is
+unaffected.
+
+The job reads these repository secrets. The team ID comes from the profiles.
+
+| Secret | What it is |
+|---|---|
+| `IOS_DIST_P12_BASE64`, `IOS_DIST_P12_PASSWORD` | Apple Distribution certificate and private key, as a base64 `.p12` |
+| `IOS_APP_PROFILE_BASE64` | App Store profile for `org.pangeavpn.app`, base64 |
+| `IOS_TUNNEL_PROFILE_BASE64` | App Store profile for `org.pangeavpn.app.tunnel`, base64 |
+| `APPLE_API_KEY_P8_BASE64`, `APPLE_API_KEY_ID`, `APPLE_API_ISSUER` | The App Store Connect team key the desktop build notarizes with. Uploading needs the Developer role or higher. |
+
+One-time setup:
+
+1. Developer portal, Identifiers: register the App Group
+   `group.org.pangeavpn.app`, then the App IDs `org.pangeavpn.app` and
+   `org.pangeavpn.app.tunnel`, each with App Groups (set to that group) and
+   Network Extensions.
+2. Certificates: create an Apple Distribution certificate.
+3. Profiles: create an App Store Connect distribution profile for each App ID
+   with that certificate.
+4. App Store Connect, Apps: create the iOS app for `org.pangeavpn.app`.
+
+The certificate and profiles last a year. Renew them, and regenerate the
+profiles whenever an App ID's capabilities change, then replace the secrets.
+
+The Info.plist leaves `ITSAppUsesNonExemptEncryption` unset, so App Store
+Connect asks the export compliance questions for each build before TestFlight
+releases it to testers.
 
 ## Privacy manifests
 
