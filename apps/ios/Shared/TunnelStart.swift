@@ -4,6 +4,8 @@ enum TunnelStartError: Int, LocalizedError {
     case noServer = 1
     case signedOut
     case noTunnelInterface
+    case reconnectFailed
+    case stopped
 
     var errorDescription: String? {
         switch self {
@@ -13,6 +15,12 @@ enum TunnelStartError: Int, LocalizedError {
             return String(localized: "error_signed_out", defaultValue: "Open PangeaVPN to sign in.")
         case .noTunnelInterface:
             return String(localized: "error_no_tun", defaultValue: "Could not open the tunnel interface")
+        case .reconnectFailed:
+            return String(
+                localized: "error_reconnect_failed",
+                defaultValue: "Could not reconnect after the network changed")
+        case .stopped:
+            return String(localized: "error_stopped", defaultValue: "The connection was stopped")
         }
     }
 }
