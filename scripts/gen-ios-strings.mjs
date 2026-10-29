@@ -3,7 +3,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const ANDROID_MODULES = ["ui-common", "core"];
 
@@ -19,7 +19,7 @@ const LPROJ_DIR = {
 };
 
 // English must match the defaultValue used in the Swift call sites.
-const IOS_ONLY = {
+const INLINE_IOS_ONLY = {
   settings_kill_switch: {
     en: "Kill switch", es: "Interruptor de seguridad", fr: "Coupure de sécurité", ru: "Аварийное отключение",
     uk: "Аварійне відключення", zh: "断网保护", ar: "مفتاح الإيقاف", fa: "کلید قطع اضطراری"
@@ -153,6 +153,26 @@ const IOS_ONLY = {
     fa: "شماره حساب خود را وارد کنید"
   }
 };
+
+// Each feature area keeps its strings in its own file, so parallel edits never collide.
+const AREA_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "ios-strings");
+
+async function loadAreaStrings(dir) {
+  const merged = {};
+  if (!fs.existsSync(dir)) return merged;
+  const files = fs.readdirSync(dir).filter((name) => name.endsWith(".mjs")).sort();
+  for (const name of files) {
+    const { default: entries } = await import(pathToFileURL(path.join(dir, name)).href);
+    for (const [key, translations] of Object.entries(entries)) {
+      if (key in merged || key in INLINE_IOS_ONLY) throw new Error(`Key "${key}" is defined twice (${name})`);
+      merged[key] = translations;
+    }
+  }
+  return merged;
+}
+
+const AREA_STRINGS = await loadAreaStrings(AREA_DIR);
+const IOS_ONLY = { ...INLINE_IOS_ONLY, ...AREA_STRINGS };
 
 const ANDROID_ESCAPES = { n: "\n", t: "\t" };
 const XML_ENTITIES = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" };
@@ -304,7 +324,7 @@ function main() {
   }
 }
 
-export { IOS_ONLY, LOCALES, buildAll, buildTables, parsePlural, renderStringsdict, toStringsValue };
+export { AREA_STRINGS, IOS_ONLY, LOCALES, buildAll, buildTables, parsePlural, renderStringsdict, toStringsValue };
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   main();

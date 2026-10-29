@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import {
-  IOS_ONLY, LOCALES, buildAll, buildTables, parsePlural, renderStringsdict, toStringsValue
+  AREA_STRINGS, IOS_ONLY, LOCALES, buildAll, buildTables, parsePlural, renderStringsdict, toStringsValue
 } from "./gen-ios-strings.mjs";
 
 const root = path.resolve(import.meta.dirname, "..");
@@ -158,5 +158,32 @@ test("every localized key used in Swift exists in the English table", () => {
   assert.ok(used.size > 0);
   for (const key of used) {
     assert.ok(known.has(key), `missing key ${key}`);
+  }
+});
+
+// Only single-line literal pairs are checked; an area key must be written that way in Swift.
+const DEFAULT_PAIR = /localized:\s*"([a-z0-9_]+)",\s*defaultValue:\s*"((?:[^"\\]|\\.)*)"/g;
+
+function unescapeSwift(literal) {
+  return literal.replace(/\\(u\{[0-9a-fA-F]+\}|.)/g, (_, ch) => {
+    if (ch.startsWith("u{")) return String.fromCodePoint(parseInt(ch.slice(2, -1), 16));
+    return { n: "\n", t: "\t", "0": "\0" }[ch] ?? ch;
+  });
+}
+
+test("every area string is used in Swift with its English text as the default", () => {
+  const defaults = new Map();
+  for (const file of swiftFiles(path.join(root, "apps", "ios"))) {
+    for (const m of fs.readFileSync(file, "utf8").matchAll(DEFAULT_PAIR)) {
+      const value = unescapeSwift(m[2]);
+      const seen = defaults.get(m[1]);
+      assert.ok(seen === undefined || seen === value, `key ${m[1]} has two different defaults`);
+      defaults.set(m[1], value);
+    }
+  }
+  for (const [key, translations] of Object.entries(AREA_STRINGS)) {
+    assert.ok(defaults.has(key), `area key ${key} is never used as localized:/defaultValue: in Swift`);
+    assert.equal(translations.en, defaults.get(key), `English for ${key} differs from the Swift default`);
+    for (const code of LOCALES) assert.ok(translations[code]?.length, `area key ${key} lacks ${code}`);
   }
 });
