@@ -35,6 +35,20 @@ final class ReconnectPolicyTests: XCTestCase {
         XCTAssertEqual(policy.pathChanged(key: "a", usable: true), .ignore)
     }
 
+    func testUnusableFirstThenUsableReconnects() {
+        var policy = ReconnectPolicy()
+        XCTAssertEqual(policy.pathChanged(key: "", usable: false), .waitForNetwork)
+        XCTAssertEqual(policy.pathChanged(key: "a", usable: true), .reconnect(after: 1.5))
+    }
+
+    func testRepeatedUnusableThenOneReconnect() {
+        var policy = ReconnectPolicy()
+        _ = policy.pathChanged(key: "a", usable: true)
+        for _ in 0..<3 { XCTAssertEqual(policy.pathChanged(key: "", usable: false), .waitForNetwork) }
+        XCTAssertEqual(policy.pathChanged(key: "a", usable: true), .reconnect(after: 1.5))
+        XCTAssertEqual(policy.pathChanged(key: "a", usable: true), .ignore)
+    }
+
     func testBackoff() {
         let policy = ReconnectPolicy()
         XCTAssertEqual([1, 2, 3].map { policy.backoff(attempt: $0) }, [3, 6, 9])

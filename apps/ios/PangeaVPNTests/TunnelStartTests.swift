@@ -67,4 +67,14 @@ final class TunnelStartTests: XCTestCase {
         }
         XCTAssertEqual(Set(codes + [TunnelStart.otherErrorCode]).count, 4)
     }
+
+    func testReconnectErrorsHaveTextAndDistinctCodes() {
+        let cases: [TunnelStartError] = [.noServer, .signedOut, .noTunnelInterface, .reconnectFailed, .stopped]
+        for item in [TunnelStartError.reconnectFailed, .stopped] {
+            XCTAssertFalse((item.errorDescription ?? "").isEmpty)
+        }
+        let codes = cases.map { TunnelStart.providerError($0).code }
+        XCTAssertEqual(Set(codes).count, cases.count)
+        XCTAssertFalse(codes.contains(TunnelStart.otherErrorCode))
+    }
 }

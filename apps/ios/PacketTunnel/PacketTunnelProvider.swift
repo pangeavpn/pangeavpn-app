@@ -3,6 +3,8 @@ import NetworkExtension
 import os
 import Pangeacore
 
+private struct Superseded: Error {}
+
 final class PacketTunnelProvider: NEPacketTunnelProvider {
     private let queue = DispatchQueue(label: "org.pangeavpn.tunnel.lifecycle")
     private let log = Logger(subsystem: "org.pangeavpn", category: "tunnel")
@@ -26,7 +28,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                 let settings = try self.restoreSessionAndConfig()
                 self.serverId = try TunnelStart.resolveServerID(options: options, settings: settings)
                 self.allowLan = settings.allowLan
-                self.establish { self.finishStart($0, completionHandler) }
+                self.establish(cycle: self.cycle) { self.finishStart($0, completionHandler) }
             } catch {
                 self.finishStart(error, completionHandler)
             }
@@ -68,11 +70,11 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     }
 
     // Shared by the first start and every reconnect; completion runs on queue.
-    private func establish(_ completion: @escaping (Error?) -> Void) {
+    private func establish(cycle: Int, _ completion: @escaping (Error?) -> Void) {
         do {
             let tunnel = try core.prepare(serverId: serverId)
             setTunnelNetworkSettings(TunnelSettingsBuilder.make(tunnel, allowLan: allowLan)) { error in
-                self.queue.async { self.startCore(settingsError: error, completion: completion) }
+                self.queue.async { self.startCore(settingsError: error, cycle: cycle, completion: completion) }
             }
         } catch {
             completion(error)
@@ -80,9 +82,10 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     }
 
     // The utun only exists once the network settings have been applied.
-    private func startCore(settingsError: Error?, completion: @escaping (Error?) -> Void) {
+    private func startCore(settingsError: Error?, cycle: Int, completion: @escaping (Error?) -> Void) {
         if let settingsError { return completion(settingsError) }
         guard !stopRequested else { return completion(TunnelStartError.stopped) }
+        guard cycle == self.cycle else { return completion(Superseded()) }
         let fd = MobileFindTunFD()
         guard fd >= 0 else { return completion(TunnelStartError.noTunnelInterface) }
         do {
@@ -98,12 +101,13 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
             startMonitor()
             return completion(nil)
         }
+        let mapped = TunnelStart.providerError(error)
         if let stopped = error as? TunnelStartError, stopped == .stopped {
             log.info("start abandoned: stop requested")
         } else {
-            log.error("start failed: \(TunnelStart.providerError(error).localizedDescription, privacy: .public)")
+            log.error("start failed: \(mapped.localizedDescription, privacy: .public)")
         }
-        completion(TunnelStart.providerError(error))
+        completion(mapped)
     }
 
     private func startMonitor() {
@@ -142,19 +146,24 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         guard !stopRequested, cycle == self.cycle else { return }
         reasserting = true
         core.stop()
-        establish { error in
+        establish(cycle: cycle) { error in
             guard !self.stopRequested, cycle == self.cycle else { return }
             guard let error else {
                 self.reasserting = false
                 return self.log.info("reconnected on attempt \(attempt, privacy: .public)")
             }
-            self.log.error("reconnect attempt \(attempt, privacy: .public) failed: \(error.localizedDescription, privacy: .public)")
+            self.log.error("reconnect attempt \(attempt, privacy: .public) failed: \(TunnelStart.providerError(error).localizedDescription, privacy: .public)")
             self.retryOrGiveUp(after: attempt, cycle: cycle)
         }
     }
 
     private func retryOrGiveUp(after attempt: Int, cycle: Int) {
         guard attempt < policy.maxAttempts else {
+            stopRequested = true
+            monitor?.cancel()
+            monitor = nil
+            pending?.cancel()
+            pending = nil
             return cancelTunnelWithError(TunnelStart.providerError(TunnelStartError.reconnectFailed))
         }
         schedule(after: policy.backoff(attempt: attempt), attempt: attempt + 1, cycle: cycle)
