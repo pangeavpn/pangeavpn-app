@@ -134,6 +134,7 @@ jobs:
           path: ${{ runner.temp }}/Pangeacore.tgz
           retention-days: 1
           compression-level: 0
+          overwrite: true
 
   test:
     name: Unit tests
