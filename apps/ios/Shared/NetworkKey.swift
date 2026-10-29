@@ -1,9 +1,15 @@
 import Foundation
+import Network
 
 struct InterfaceAddress: Equatable, Sendable {
     let name: String
     let address: String
     let isIPv6: Bool
+}
+
+struct PathInterface: Equatable {
+    let name: String
+    let type: NWInterface.InterfaceType
 }
 
 enum NetworkKey {
@@ -13,9 +19,27 @@ enum NetworkKey {
         addrs.compactMap(token).sorted().joined(separator: "|")
     }
 
+    // Keyed on the monitor's path, so an address lingering on a dropped link cannot hide the change.
+    static func make(_ addrs: [InterfaceAddress], restrictedTo interfaces: [PathInterface]) -> String {
+        let kept = interfaces.filter(isPhysical)
+        guard !kept.isEmpty else { return "" }
+        let names = Set(kept.map(\.name))
+        let route = kept.map { "\(label($0.type))=\($0.name)" }.joined(separator: ",")
+        let tokens = make(addrs.filter { names.contains($0.name) })
+        return tokens.isEmpty ? route : route + "|" + tokens
+    }
+
     static func current() -> String {
+        make(currentAddresses())
+    }
+
+    static func current(restrictedTo interfaces: [PathInterface]) -> String {
+        make(currentAddresses(), restrictedTo: interfaces)
+    }
+
+    static func currentAddresses() -> [InterfaceAddress] {
         var head: UnsafeMutablePointer<ifaddrs>?
-        guard getifaddrs(&head) == 0, let first = head else { return "" }
+        guard getifaddrs(&head) == 0, let first = head else { return [] }
         defer { freeifaddrs(head) }
 
         var found: [InterfaceAddress] = []
@@ -24,7 +48,30 @@ enum NetworkKey {
             if let item = interfaceAddress(entry.pointee) { found.append(item) }
             cursor = entry.pointee.ifa_next
         }
-        return make(found)
+        return found
+    }
+
+    private static func isPhysical(_ interface: PathInterface) -> Bool {
+        if skippedPrefixes.contains(where: { interface.name.hasPrefix($0) }) { return false }
+        switch interface.type {
+        case .wifi, .cellular, .wiredEthernet:
+            return true
+        case .loopback, .other:
+            return false
+        @unknown default:
+            return false
+        }
+    }
+
+    private static func label(_ type: NWInterface.InterfaceType) -> String {
+        switch type {
+        case .wifi: return "wifi"
+        case .cellular: return "cell"
+        case .wiredEthernet: return "wired"
+        case .loopback: return "loopback"
+        case .other: return "other"
+        @unknown default: return "other"
+        }
     }
 
     private static func interfaceAddress(_ entry: ifaddrs) -> InterfaceAddress? {
@@ -55,10 +102,9 @@ enum NetworkKey {
     private static func ipv4Token(_ literal: String) -> String? {
         var addr = in_addr()
         guard inet_pton(AF_INET, literal, &addr) == 1 else { return nil }
-        let first = UInt8(truncatingIfNeeded: addr.s_addr)
-        let second = UInt8(truncatingIfNeeded: addr.s_addr >> 8)
-        if first == 0 || first == 127 || first >= 224 { return nil }
-        if first == 169 && second == 254 { return nil }
+        let bytes = withUnsafeBytes(of: &addr) { Array($0) }
+        if bytes[0] == 0 || bytes[0] == 127 || bytes[0] >= 224 { return nil }
+        if bytes[0] == 169 && bytes[1] == 254 { return nil }
         return literal
     }
 

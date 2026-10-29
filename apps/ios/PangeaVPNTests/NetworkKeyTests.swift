@@ -1,3 +1,4 @@
+import Network
 import XCTest
 @testable import PangeaVPN
 
@@ -57,5 +58,64 @@ final class NetworkKeyTests: XCTestCase {
 
     func testCurrentDoesNotCrash() {
         _ = NetworkKey.current()
+        _ = NetworkKey.current(restrictedTo: [path("en0", .wifi)])
+    }
+
+    func testIPv6ScopeSuffixIsStripped() {
+        XCTAssertEqual(NetworkKey.make([v6("en0", "2001:db8:1:2::5%en0")]), "en0:2001:db8:1:2:0:0:0:0/64")
+        XCTAssertEqual(NetworkKey.make([v6("en0", "fe80::1%en0")]), "")
+    }
+
+    func testUnspecifiedAddressesAreSkipped() {
+        XCTAssertEqual(NetworkKey.make([v6("en0", "::"), v4("en0", "0.0.0.0")]), "")
+    }
+
+    private func path(_ name: String, _ type: NWInterface.InterfaceType) -> PathInterface {
+        PathInterface(name: name, type: type)
+    }
+
+    private let wifiAndCell = [
+        InterfaceAddress(name: "en0", address: "192.168.1.20", isIPv6: false),
+        InterfaceAddress(name: "pdp_ip0", address: "10.20.30.40", isIPv6: false),
+    ]
+
+    func testRestrictedKeyListsPathInterfacesInOrderThenTheirAddresses() {
+        XCTAssertEqual(
+            NetworkKey.make(wifiAndCell, restrictedTo: [path("en0", .wifi), path("pdp_ip0", .cellular)]),
+            "wifi=en0,cell=pdp_ip0|en0:192.168.1.20|pdp_ip0:10.20.30.40")
+    }
+
+    func testWifiDropChangesTheKeyEvenWhileItsAddressLingers() {
+        let both = NetworkKey.make(wifiAndCell, restrictedTo: [path("en0", .wifi), path("pdp_ip0", .cellular)])
+        let cellOnly = NetworkKey.make(wifiAndCell, restrictedTo: [path("pdp_ip0", .cellular)])
+        XCTAssertEqual(cellOnly, "cell=pdp_ip0|pdp_ip0:10.20.30.40")
+        XCTAssertNotEqual(both, cellOnly)
+    }
+
+    func testSecondaryInterfacesOffThePathDoNotChangeTheKey() {
+        let quiet = NetworkKey.make(wifiAndCell, restrictedTo: [path("en0", .wifi)])
+        let noisy = NetworkKey.make(
+            wifiAndCell + [v4("pdp_ip1", "10.9.9.9"), v4("bridge100", "172.20.10.1"), v4("en2", "169.254.3.3")],
+            restrictedTo: [path("en0", .wifi)])
+        XCTAssertEqual(quiet, "wifi=en0|en0:192.168.1.20")
+        XCTAssertEqual(noisy, quiet)
+    }
+
+    func testPreferenceOrderIsPartOfTheKey() {
+        let wifiFirst = NetworkKey.make(wifiAndCell, restrictedTo: [path("en0", .wifi), path("pdp_ip0", .cellular)])
+        let cellFirst = NetworkKey.make(wifiAndCell, restrictedTo: [path("pdp_ip0", .cellular), path("en0", .wifi)])
+        XCTAssertNotEqual(wifiFirst, cellFirst)
+    }
+
+    func testRestrictedKeyDropsVirtualInterfaces() {
+        let addrs = [v4("utun3", "10.0.0.2"), v4("lo0", "127.0.0.1")]
+        XCTAssertEqual(NetworkKey.make(addrs, restrictedTo: [path("utun3", .other), path("lo0", .loopback)]), "")
+        XCTAssertEqual(NetworkKey.make(addrs, restrictedTo: [path("ipsec0", .cellular)]), "")
+        XCTAssertEqual(NetworkKey.make([], restrictedTo: []), "")
+    }
+
+    func testRestrictedKeyWithoutAddressesStillNamesTheInterfaces() {
+        XCTAssertEqual(NetworkKey.make([], restrictedTo: [path("en0", .wifi)]), "wifi=en0")
+        XCTAssertEqual(NetworkKey.make([], restrictedTo: [path("en5", .wiredEthernet)]), "wired=en5")
     }
 }

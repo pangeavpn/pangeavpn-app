@@ -38,8 +38,71 @@ final class TunnelSettingsBuilderTests: XCTestCase {
         ])
         XCTAssertEqual(excludedV6.count, 2)
         XCTAssertEqual(Set(excludedV6), ["fc00::/7", "fe80::/10"])
-        XCTAssertEqual((v4?.includedRoutes ?? []).map(keyV4), [keyV4(NEIPv4Route.default())])
         XCTAssertEqual((v6?.includedRoutes ?? []).map(keyV6), [keyV6(NEIPv6Route.default())])
+    }
+
+    func testAllowLanPinsEachResolverInsideTheTunnel() {
+        let included = (TunnelSettingsBuilder.make(config, allowLan: true).ipv4Settings?.includedRoutes ?? [])
+        XCTAssertEqual(included.map(keyV4), [
+            keyV4(NEIPv4Route.default()), "10.66.0.1/255.255.255.255", "1.1.1.1/255.255.255.255",
+        ])
+    }
+
+    func testDnsDropsLoopbackUnspecifiedMulticastAndNonIPv4() {
+        let messy = TunnelConfig(
+            address: "10.66.0.2", prefixLength: 32,
+            dns: ["127.0.0.1", "0.0.0.0", "224.0.0.251", "2606:4700::1111", "dns.example", " 9.9.9.9 ", "1.1.1.1"],
+            mtu: 1380, serverId: "s", serverName: "n")
+        XCTAssertEqual(TunnelSettingsBuilder.dnsServers(messy), ["9.9.9.9", "1.1.1.1"])
+        XCTAssertEqual(TunnelSettingsBuilder.make(messy, allowLan: false).dnsSettings?.servers, ["9.9.9.9", "1.1.1.1"])
+    }
+
+    func testBuildRejectsConfigWithoutUsableDNS() {
+        for dns in [[], ["127.0.0.1"], [","]] {
+            let bad = TunnelConfig(
+                address: "10.66.0.2", prefixLength: 32, dns: dns, mtu: 1380, serverId: "s", serverName: "n")
+            XCTAssertThrowsError(try TunnelSettingsBuilder.build(bad, allowLan: false)) {
+                XCTAssertEqual($0 as? TunnelStartError, .invalidDNS)
+            }
+        }
+    }
+
+    func testBuildAcceptsUsableConfig() throws {
+        let settings = try TunnelSettingsBuilder.build(config, allowLan: false)
+        XCTAssertEqual(settings.dnsSettings?.servers, ["10.66.0.1", "1.1.1.1"])
+    }
+
+    func testSettingsApplyPassesTheCallbackThroughOnce() {
+        let clock = LifecycleClock()
+        var results: [Error?] = []
+        SettingsApply.run(timeout: 5, scheduler: clock, apply: { done in done(nil) }) { results.append($0) }
+        clock.advance(by: 10)
+        XCTAssertEqual(results.count, 1)
+        XCTAssertNil(results.first ?? nil)
+        XCTAssertEqual(clock.pending, [])
+    }
+
+    func testSettingsApplyPassesErrorsThrough() {
+        let clock = LifecycleClock()
+        var results: [Error?] = []
+        SettingsApply.run(timeout: 5, scheduler: clock, apply: { done in done(CoreError(message: "x")) }) {
+            results.append($0)
+        }
+        XCTAssertEqual(results.compactMap { $0 as? CoreError }, [CoreError(message: "x")])
+    }
+
+    func testSettingsApplyTimesOutAndIgnoresALateCallback() {
+        let clock = LifecycleClock()
+        var held: ((Error?) -> Void)?
+        var results: [Error?] = []
+        SettingsApply.run(timeout: 5, scheduler: clock, apply: { held = $0 }) { results.append($0) }
+        clock.advance(by: 4.9)
+        XCTAssertTrue(results.isEmpty)
+        clock.advance(by: 0.2)
+        XCTAssertEqual(results.compactMap { $0 as? TunnelStartError }, [.settingsTimeout])
+        held?(nil)
+        held?(CoreError(message: "late"))
+        XCTAssertEqual(results.count, 1)
     }
 
     func testPrefixToMask() {
