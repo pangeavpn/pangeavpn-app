@@ -144,11 +144,13 @@ final class ScreenGalleryTests: XCTestCase {
                 stores.stage(SettingsView(path: [route]))
             }
         }
-        // Set on appear, since tearing down the last shot clears a page's error on its way out.
-        let error = "At least one connection method must stay on."
-        try await camera.shoot("13-99-settings-error", ready: { stores.settings.error == error }) {
-            stores.stage(SettingsView(path: [.provisioning]))
-                .onAppear { stores.settings.error = error }
+        // A torn-down page clears its error a moment later, so each look sets it once that has run.
+        for look in ScreenCamera.Look.standard {
+            try await Task.sleep(for: .milliseconds(500))
+            stores.settings.error = "At least one connection method must stay on."
+            try await camera.shoot("13-99-settings-error", looks: [look]) {
+                stores.stage(SettingsView(path: [.provisioning]))
+            }
         }
     }
 

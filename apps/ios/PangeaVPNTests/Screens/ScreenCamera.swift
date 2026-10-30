@@ -12,8 +12,10 @@ enum ScreenGallery {
         return URL(fileURLWithPath: path, isDirectory: true)
     }
 
-    // Cleared after the first unanswered request, so a dead watcher costs one timeout.
+    // Cleared after a few unanswered requests in a row, so a dead watcher stops costing timeouts.
     static var framebuffer = environment["PANGEA_SCREENS_FRAMEBUFFER"] == "1"
+    static var missedCaptures = 0
+    static let missesBeforeGivingUp = 3
 
     static var deviceFolder: String {
         let name = environment["SIMULATOR_DEVICE_NAME"] ?? UIDevice.current.name
@@ -208,10 +210,18 @@ final class ScreenCamera {
         try Data(target.path.utf8).write(to: queue.appendingPathComponent("\(file).want"), options: .atomic)
         for _ in 0..<Self.framebufferTicks {
             try await Task.sleep(for: Self.tick)
-            if files.fileExists(atPath: target.path) { return true }
+            if files.fileExists(atPath: target.path) {
+                ScreenGallery.missedCaptures = 0
+                return true
+            }
         }
-        ScreenGallery.framebuffer = false
-        XCTFail("no framebuffer capture of \(file) arrived; app-window renders are kept from here on")
+        // One slow capture only costs that shot its status bar, so it warns rather than fails.
+        ScreenGallery.missedCaptures += 1
+        print("::warning::no framebuffer capture of \(file) arrived, so its app-window render is kept")
+        if ScreenGallery.missedCaptures >= ScreenGallery.missesBeforeGivingUp {
+            ScreenGallery.framebuffer = false
+            XCTFail("\(ScreenGallery.missedCaptures) framebuffer captures in a row never arrived; the watcher looks dead")
+        }
         return false
     }
 

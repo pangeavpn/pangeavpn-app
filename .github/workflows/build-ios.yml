@@ -368,9 +368,10 @@ jobs:
                 [ -f "$req" ] || continue
                 udid=$(basename "$(dirname "$req")")
                 target=$(cat "$req")
-                xcrun simctl io "$udid" screenshot --type=png --mask=black "$target.part" >/dev/null 2>&1 \
-                  && mv -f "$target.part" "$target"
-                rm -f "$req"
+                # Killed before the test stops waiting (30 s), so a late capture never lands on the next screen.
+                perl -e "alarm 25; exec @ARGV" xcrun simctl io "$udid" screenshot --type=png --mask=black "$target.part" \
+                  >/dev/null 2>&1 && mv -f "$target.part" "$target"
+                rm -f "$req" "$target.part"
               done
               sleep 0.1
             done' _ "$SCREENS" >"$RUNNER_TEMP/framebuffer-watcher.log" 2>&1 &
