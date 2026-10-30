@@ -144,9 +144,11 @@ final class ScreenGalleryTests: XCTestCase {
                 stores.stage(SettingsView(path: [route]))
             }
         }
-        stores.settings.error = "At least one connection method must stay on."
-        try await camera.shoot("13-99-settings-error") {
+        // Set on appear, since tearing down the last shot clears a page's error on its way out.
+        let error = "At least one connection method must stay on."
+        try await camera.shoot("13-99-settings-error", ready: { stores.settings.error == error }) {
             stores.stage(SettingsView(path: [.provisioning]))
+                .onAppear { stores.settings.error = error }
         }
     }
 

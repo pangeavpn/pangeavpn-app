@@ -202,6 +202,8 @@ final class ScreenCamera {
         let files = FileManager.default
         let queue = root.appendingPathComponent(".requests/\(udid)", isDirectory: true)
         if files.fileExists(atPath: target.path) { try files.removeItem(at: target) }
+        // The screen can trail an offscreen render by a frame or two, so it gets a moment to catch up.
+        try await Task.sleep(for: .milliseconds(400))
         try files.createDirectory(at: queue, withIntermediateDirectories: true)
         try Data(target.path.utf8).write(to: queue.appendingPathComponent("\(file).want"), options: .atomic)
         for _ in 0..<Self.framebufferTicks {
