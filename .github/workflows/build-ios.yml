@@ -349,9 +349,11 @@ jobs:
         env:
           MARKETING: ${{ steps.version.outputs.marketing }}
         run: |
+          # The core is built for Apple-silicon simulators only, so the generic build skips x86_64.
           xcodebuild build-for-testing -scheme PangeaVPN \
             -destination 'generic/platform=iOS Simulator' \
             -derivedDataPath "$RUNNER_TEMP/derived" \
+            ARCHS=arm64 ONLY_ACTIVE_ARCH=NO \
             MARKETING_VERSION="$MARKETING"
 
       # Answers each test's request with a real screenshot, status bar included.
