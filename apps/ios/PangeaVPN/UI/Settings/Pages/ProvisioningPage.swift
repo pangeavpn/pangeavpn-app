@@ -177,8 +177,7 @@ private struct HubMethodRow: View {
                 resultLine
             }
         }
-        .padding(.leading, 14)
-        .padding(.trailing, 10)
+        .padding(.horizontal, 14)
         .padding(.top, 10)
         .padding(.bottom, 4)
         .background(Palette.surface)
