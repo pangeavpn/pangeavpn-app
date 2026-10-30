@@ -117,11 +117,12 @@ final class TunnelController: TunnelControlling {
         return task
     }
 
-    // Saved with on-demand off so a failing first connect shows its error rather than retrying forever.
+    // On-demand stays off so a failing first connect shows its error, except under Lockdown,
+    // where a failed start must come back as a system start that holds traffic blocked.
     private func start(serverId: String, candidates: [String], profile: TunnelProfile) async throws {
         let manager = try await reloadManager()
         armedSession = nil
-        TunnelConfigurator.apply(profile, onDemand: false, to: manager)
+        TunnelConfigurator.apply(profile, onDemand: profile.lockdown, to: manager)
         // Also undoes the disable that a kill-switch release may have saved.
         manager.isEnabled = true
         do {

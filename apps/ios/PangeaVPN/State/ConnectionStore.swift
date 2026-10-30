@@ -228,7 +228,14 @@ final class ConnectionStore {
         } catch let refusal as TunnelSwitchError {
             Self.log.info("switch fell back to a start: \(String(describing: refusal), privacy: .public)")
             guard !stopRequested else { return false }
-            if refusal == .rejected { await tunnel.disconnect() }
+            if refusal == .rejected {
+                // A disconnect would switch Lockdown's on-demand off, so the tunnel stays where it is.
+                guard !settings.lockdown else {
+                    report(refusal, doing: "switch")
+                    return false
+                }
+                await tunnel.disconnect()
+            }
             return await start(serverId, candidates: candidates)
         } catch {
             report(error, doing: "switch")

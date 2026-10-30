@@ -141,6 +141,19 @@ final class ConnectionActivateTests: XCTestCase {
         XCTAssertEqual(rig.store.status.serverId, "eu-2")
     }
 
+    // A disconnect would turn Lockdown's Connect On Demand off and let traffic out.
+    func testARefusedSwitchUnderLockdownKeepsTheTunnelUp() async throws {
+        let (defaults, suite) = try makeTestDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(true, forKey: SharedPrefs.Key.lockdown)
+        let rig = try await scriptedRig(defaults, failing: TunnelSwitchError.rejected)
+        try await rig.store.activate(region: XCTUnwrap(rig.servers.regions.first { $0.key == "eu" }))
+        XCTAssertEqual(rig.tunnel.calls, ["switch(eu-2)"])
+        XCTAssertNotNil(rig.store.error)
+        XCTAssertEqual(rig.store.status.serverId, "us-1")
+        XCTAssertEqual(rig.servers.selected?.id, "us-1")
+    }
+
     func testOtherSwitchErrorsAreShown() async throws {
         let (defaults, suite) = try makeTestDefaults()
         defer { defaults.removePersistentDomain(forName: suite) }
