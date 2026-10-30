@@ -53,30 +53,46 @@ enum HeroText {
 
 struct HeroKicker: View {
     let state: TunnelState
+    let postQuantum: Bool
+    let split: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var dimmed = false
 
-    init(state: TunnelState) {
+    init(state: TunnelState, postQuantum: Bool = false, split: Bool = false) {
         self.state = state
+        self.postQuantum = postQuantum
+        self.split = split
     }
 
     private var pulsing: Bool {
         !reduceMotion && (state == .connecting || state == .disconnecting)
     }
 
+    private var dotColor: Color {
+        state == .disconnected ? Palette.off : HeroText.accent(state)
+    }
+
     var body: some View {
-        HStack(spacing: 9) {
-            Circle()
-                .fill(state == .disconnected ? Palette.off : HeroText.accent(state))
-                .frame(width: 8, height: 8)
-                .opacity(pulsing && dimmed ? 0.4 : 1)
-                .animation(reduceMotion ? nil : .easeInOut(duration: 0.4), value: state)
-            Text(HeroText.label(state).uppercased())
-                .scaledFont(size: 11, weight: .bold, relativeTo: .caption2)
-                .kerning(1.8)
-                .foregroundStyle(HeroText.accent(state))
+        HStack(spacing: 8) {
+            HStack(spacing: 9) {
+                Circle()
+                    .fill(dotColor)
+                    .frame(width: 8, height: 8)
+                    .padding(4)
+                    .background(Circle().fill(dotColor.opacity(state == .connected ? 0.2 : 0)))
+                    .opacity(pulsing && dimmed ? 0.4 : 1)
+                    .animation(reduceMotion ? nil : .easeInOut(duration: 0.4), value: state)
+                Text(HeroText.label(state).uppercased())
+                    .kerning(1.8)
+                    .scaledFont(size: 11, weight: .bold, relativeTo: .caption2)
+                    .lineLimit(1)
+                    .foregroundStyle(HeroText.accent(state))
+            }
+            .accessibilityElement(children: .combine)
+            if postQuantum { HeroChip.postQuantum }
+            if split { HeroChip.split }
         }
-        .accessibilityElement(children: .combine)
+        .padding(.leading, -4)
         .onAppear { updatePulse() }
         .onChange(of: pulsing) { _, _ in updatePulse() }
     }
@@ -102,9 +118,11 @@ struct HeroHeadline: View {
         Text(HeroText.emphasised(HeroText.headline(state), emphasis: HeroText.emphasisWord(state)))
             .font(.system(size: size, weight: .light))
             .kerning(-1)
-            .lineSpacing(4)
+            .lineLimit(2)
+            .minimumScaleFactor(0.75)
             .foregroundStyle(Palette.text)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityAddTraits(.isHeader)
     }
 }
 
@@ -115,14 +133,16 @@ struct HeroDetail: View {
         self.text = text
     }
 
+    // An empty line still keeps its height, so the screen does not jump as states change.
     var body: some View {
-        Text(text)
+        Text(text.isEmpty ? " " : text)
             .scaledFont(size: 13, relativeTo: .footnote)
             .lineSpacing(3)
             .lineLimit(2)
             .truncationMode(.tail)
             .foregroundStyle(Palette.textMuted)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityHidden(text.isEmpty)
     }
 }
 
@@ -131,6 +151,7 @@ private let previewStates: [TunnelState] = [.disconnected, .connecting, .connect
 #Preview("Kicker") {
     VStack(alignment: .leading, spacing: 12) {
         ForEach(previewStates, id: \.self) { HeroKicker(state: $0) }
+        HeroKicker(state: .connected, postQuantum: true, split: true)
     }
     .padding()
     .background(Palette.bg)
@@ -149,6 +170,7 @@ private let previewStates: [TunnelState] = [.disconnected, .connecting, .connect
         ForEach(previewStates, id: \.self) { state in
             HeroDetail("\(HeroText.label(state)): a long detail line that wraps onto a second line and then truncates with an ellipsis")
         }
+        HeroDetail(HeroDetailText.pausedLine)
     }
     .padding()
     .background(Palette.bg)

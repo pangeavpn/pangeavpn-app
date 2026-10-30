@@ -32,44 +32,47 @@ struct ServerRow: View {
         self.action = action
     }
 
-    private let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
+    private let shape = RoundedRectangle(cornerRadius: 12, style: .continuous)
 
     var body: some View {
         Button(action: action) {
             HStack(spacing: 12) {
-                Text(Flag.emoji(country)).scaledFont(size: 22, relativeTo: .title2)
+                Text(Flag.emoji(country))
+                    .scaledFont(size: 24, relativeTo: .title2)
+                    .accessibilityHidden(true)
                 titles
                 if let load { LoadIndicator(load: load) }
-                Text("\u{2713}")
-                    .fontWeight(.bold)
-                    .foregroundStyle(selected ? Palette.accent : Color.clear)
-                    .frame(width: 18)
+                Image(systemName: "checkmark")
+                    .scaledFont(size: 13, weight: .bold, relativeTo: .footnote)
+                    .foregroundStyle(Palette.accent)
+                    .opacity(selected ? 1 : 0)
+                    .frame(width: 16)
                     .accessibilityHidden(true)
             }
             .padding(.horizontal, 14)
-            .padding(.vertical, 11)
-            .background(selected ? Palette.accent.opacity(0.15) : Palette.surface, in: shape)
+            .padding(.vertical, 9)
+            .frame(minHeight: 54)
+            .background(selected ? Palette.accent.opacity(0.13) : Palette.surface, in: shape)
             .overlay(shape.strokeBorder(selected ? Palette.accent : Palette.borderSubtle, lineWidth: 1))
             .contentShape(shape)
         }
-        .buttonStyle(.plain)
-        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+        .buttonStyle(PressFadeStyle())
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
     private var titles: some View {
-        VStack(alignment: .leading, spacing: 1) {
+        VStack(alignment: .leading, spacing: 2) {
             Text(name)
                 .scaledFont(size: 16, weight: .semibold, relativeTo: .callout)
                 .foregroundStyle(Palette.text)
                 .lineLimit(1)
                 .truncationMode(.tail)
-            if let subtitle {
+            if let subtitle, !subtitle.isEmpty {
                 Text(subtitle)
-                    .scaledFont(size: 11, design: .monospaced, relativeTo: .caption2)
-                    .foregroundStyle(Palette.textMuted)
+                    .scaledFont(size: 12, design: .monospaced, relativeTo: .caption)
+                    .foregroundStyle(Palette.textSecondary)
                     .lineLimit(1)
-                    .truncationMode(.tail)
+                    .truncationMode(.middle)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -101,10 +104,12 @@ private struct LoadIndicator: View {
                     Capsule().fill(fill).frame(width: 42 * CGFloat(pct) / 100, height: 5)
                 }
             Text("\(pct)%")
-                .scaledFont(size: 13, relativeTo: .footnote)
+                .scaledFont(size: 13, design: .monospaced, relativeTo: .footnote)
                 .foregroundStyle(Palette.textMuted)
-                .frame(minWidth: 34, alignment: .trailing)
+                .lineLimit(1)
+                .frame(minWidth: 36, alignment: .trailing)
         }
+        .fixedSize()
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(pct)%")
     }
@@ -112,8 +117,8 @@ private struct LoadIndicator: View {
 
 #Preview {
     VStack(spacing: 8) {
-        ServerRow(name: "London", country: "GB", load: 22, selected: true, subtitle: "uk-lon-1", action: {})
-        ServerRow(name: "Frankfurt", country: "de", load: 58, selected: false, action: {})
+        ServerRow(name: "London", country: "GB", load: 41, selected: true, subtitle: "uk-lon-1 · best of 2", action: {})
+        ServerRow(name: "Amsterdam", country: "nl", load: 33, selected: false, subtitle: "2 servers · auto", action: {})
         ServerRow(name: "Singapore", country: "SG", load: 91, selected: false, subtitle: "sg-1", action: {})
         ServerRow(name: "Unknown", country: "", load: nil, selected: false, action: {})
     }

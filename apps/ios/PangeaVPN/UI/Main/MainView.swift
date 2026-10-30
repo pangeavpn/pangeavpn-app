@@ -2,94 +2,165 @@ import SwiftUI
 
 struct MainView: View {
     @Environment(SessionStore.self) private var session
+    @Environment(ServersStore.self) private var servers
     @Environment(ConnectionStore.self) private var connection
     @Environment(SettingsStore.self) private var settings
+    @Environment(ToastCenter.self) private var toasts
     @Environment(\.colorScheme) private var colorScheme
     @State private var showSettings = false
+    // Whether this tunnel has been up since it last stopped, so a reassert reads as a reconnect.
+    @State private var sawConnected = false
 
-    private static let maxMapSize: CGFloat = 236
     private static let gutter: CGFloat = 20
+    private static let topInset: CGFloat = 2
+    private static let bottomInset: CGFloat = 12
 
     init() {}
 
-    private var serverSheetShown: Binding<Bool> {
+    private var regionPickerShown: Binding<Bool> {
         Binding(get: { connection.showServerSheet }, set: { connection.showServerSheet = $0 })
+    }
+
+    private var status: TunnelStatus { connection.status }
+
+    private var display: TunnelState {
+        HeroState.display(status.state, busy: connection.busy, switching: connection.switching)
+    }
+
+    private var reconnecting: Bool {
+        HeroState.reconnecting(status.state, busy: connection.busy, sawConnected: sawConnected,
+                               lastHandshake: status.lastHandshake)
+    }
+
+    private var action: MainAction {
+        MainAction.resolve(state: status.state, busy: connection.busy, switching: connection.switching,
+                           reconnecting: reconnecting, lockdownBlocks: connection.lockdownBlocksDisconnect,
+                           entitled: connection.entitled)
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            PangeaHeader(
-                version: "v\(Self.versionName)",
-                onToggleTheme: toggleTheme,
-                onMenu: { showSettings = true }
-            )
-            .sheet(isPresented: $showSettings) { SettingsSheet() }
+            PangeaHeader(version: "v\(Self.versionName)", onToggleTheme: toggleTheme, onMenu: { showSettings = true })
             GeometryReader { proxy in
                 ScrollView {
-                    content(viewport: proxy.size)
+                    content(width: proxy.size.width - Self.gutter * 2, viewport: proxy.size.height)
                 }
                 .scrollBounceBehavior(.basedOnSize)
             }
+            actionBar
         }
+        // Capped here only, so the screens it opens keep the accessibility sizes.
+        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
         .background(Palette.bg.ignoresSafeArea())
-        .sheet(isPresented: serverSheetShown) { ServerSheet() }
+        .fullScreenCover(isPresented: $showSettings) { SettingsView() }
+        .fullScreenCover(isPresented: regionPickerShown) { RegionPickerView() }
+        .onAppear { sawConnected = status.state == .connected }
+        .onChange(of: status.state) { _, state in track(state) }
+        .onChange(of: connection.error) { _, message in toast(message) }
     }
 
-    private func content(viewport: CGSize) -> some View {
-        let status = connection.status
-        return VStack(alignment: .leading, spacing: 0) {
-            map(state: status.state, viewport: viewport)
+    private func content(width: CGFloat, viewport: CGFloat) -> some View {
+        MainLayout(viewportHeight: max(viewport - Self.topInset - Self.bottomInset, 0)) {
+            DriftMap(state: display)
+                .layoutValue(key: MapSlot.self, value: true)
             if SubscriptionBanner.shouldShow(session.subscription) {
                 SubscriptionBanner(subscription: session.subscription)
-                    .padding(.bottom, 16)
+                    .padding(.top, 6)
             }
-            HeroKicker(state: status.state)
-            HeroHeadline(state: status.state)
-                .padding(.top, 6)
-            HeroDetail(detail(for: status))
-                .padding(.top, 6)
-            facts(status)
-            SectionLabel(String(localized: "hero_region", defaultValue: "Region"))
-                .padding(.top, 20)
-                .padding(.bottom, 9)
-            RegionSlots()
-            ConnectButton(state: status.state, action: toggleConnection)
-                .padding(.top, 18)
+            if connection.entitled {
+                hero
+                    .padding(.top, 10)
+                facts(width: width)
+                    .padding(.top, 14)
+                RegionSlots()
+                    .padding(.top, 16)
+            } else {
+                ExpiredPanel()
+                    .padding(.top, 8)
+            }
         }
         .padding(.horizontal, Self.gutter)
-        .padding(.bottom, 24)
+        .padding(.top, Self.topInset)
+        .padding(.bottom, Self.bottomInset)
+    }
+
+    private var hero: some View {
+        let shown = display
+        return VStack(alignment: .leading, spacing: 6) {
+            HeroKicker(
+                state: shown,
+                postQuantum: HeroChips.showsPostQuantum(display: shown, postQuantum: status.postQuantum),
+                split: HeroChips.showsSplit(display: shown, enabled: settings.splitTunnelEnabled,
+                                            ranges: settings.splitTunnelRanges, strictKillSwitch: settings.killSwitch))
+            HeroHeadline(state: shown)
+            HeroDetail(HeroDetailText.resolve(
+                display: shown, statusDetail: status.detail, serverName: status.serverName,
+                error: connection.error, progress: connection.progress, paused: reconnecting))
+            if !status.entryServerId.isEmpty {
+                RoutePath(
+                    entry: RouteNode.resolve(id: status.entryServerId, fallbackName: status.entryServerName,
+                                             in: servers.regions),
+                    exit: RouteNode.resolve(id: status.serverId, fallbackName: status.serverName, in: servers.regions),
+                    live: shown == .connected)
+                    .padding(.top, 4)
+            }
+        }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    // Height caps it too, so a short or landscape screen keeps the connect button in reach.
-    private func map(state: TunnelState, viewport: CGSize) -> some View {
-        let available = viewport.width - Self.gutter * 2
-        let size = max(0, min(available, viewport.height * 0.38, Self.maxMapSize))
-        return DriftMap(state: state)
-            .frame(width: size, height: size)
-            .frame(maxWidth: .infinity)
-    }
-
-    private func facts(_ status: TunnelStatus) -> some View {
-        let connected = status.state == .connected
+    // The NE stays up through an in-place switch, so the clock and counters follow it, not the hero.
+    private func facts(width: CGFloat) -> some View {
+        let current = status
+        let up = current.state == .connected
         let started = connection.connectedDate
-        let via = TransportLabels.status(status.activeTransport)
+        let via = TransportLabels.status(current.activeTransport)
         return TimelineView(.periodic(from: .now, by: 1)) { context in
             FactsStrip(
-                session: Format.sessionClock(state: status.state, connectedDate: started, now: context.date),
-                down: connected ? Format.bytes(status.bytesIn) : Format.emDash,
-                up: connected ? Format.bytes(status.bytesOut) : Format.emDash,
-                via: via.isEmpty ? Format.emDash : via
-            )
+                session: Format.sessionClock(state: current.state, connectedDate: started, now: context.date),
+                down: up ? Format.bytes(current.bytesIn) : Format.emDash,
+                up: up ? Format.bytes(current.bytesOut) : Format.emDash,
+                via: via.isEmpty ? Format.emDash : via,
+                width: width)
         }
     }
 
-    // A connect that throws never changes the tunnel state, so its error borrows the detail line.
-    private func detail(for status: TunnelStatus) -> String {
-        if status.state == .disconnected || status.state == .error, let error = connection.error {
-            return error
+    @ViewBuilder
+    private var actionBar: some View {
+        let kind = action
+        if kind != .hidden {
+            Group {
+                if kind == .lockdown {
+                    LockdownNote { showSettings = true }
+                } else {
+                    ConnectButton(kind: kind, action: toggleConnection)
+                }
+            }
+            .padding(.horizontal, Self.gutter)
+            .padding(.top, 10)
+            .padding(.bottom, 10)
+            .background(Palette.bg)
+            .overlay(alignment: .top) {
+                LinearGradient(colors: [Palette.bg.opacity(0), Palette.bg], startPoint: .top, endPoint: .bottom)
+                    .frame(height: 16)
+                    .offset(y: -16)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
         }
-        return status.detail.isEmpty ? status.serverName : status.detail
+    }
+
+    private func track(_ state: TunnelState) {
+        switch state {
+        case .connected: sawConnected = true
+        case .disconnected, .error: sawConnected = false
+        case .connecting, .disconnecting: break
+        }
+    }
+
+    // The detail line carries an idle failure; one that lands while the tunnel is up needs a toast.
+    private func toast(_ message: String?) {
+        guard let message, !message.isEmpty, !HeroDetailText.carriesError(display) else { return }
+        toasts.show(message, style: .warning)
     }
 
     private func toggleConnection() {
@@ -106,81 +177,49 @@ struct MainView: View {
 }
 
 #if DEBUG
-private let mainPreviewServers: [Server] = [
-    Server(id: "uk-lon-1", name: "London", region: "eu", country: "GB", load: 22),
-    Server(id: "uk-lon-2", name: "London", region: "eu", country: "GB", load: 61),
-    Server(id: "de-fra-1", name: "Frankfurt", region: "eu", country: "DE", load: 48),
-    Server(id: "us-nyc-1", name: "New York", region: "us", country: "US", load: 73),
-    Server(id: "sg-1", name: "Singapore", region: "ap", country: "SG", load: 35),
-]
-
-private let activeSubscription = Subscription(status: "active", renews: true, expiresAt: "2026-12-01")
-
-private struct MainPreviewHost: View {
-    let session: SessionStore
-    let servers: ServersStore
-    let connection: ConnectionStore
-    let settings: SettingsStore
+private struct MainPreview: View {
+    let stores: MainPreviewStores
 
     var body: some View {
-        MainView()
-            .environment(session)
-            .environment(servers)
-            .environment(connection)
-            .environment(settings)
-            .task {
-                await servers.refresh()
-                await session.loadSubscription()
-            }
+        stores.attach(MainView())
     }
 }
 
-private func previewStatus(_ state: TunnelState, detail: String = "", bytesIn: Int64 = 0,
-                           bytesOut: Int64 = 0, transport: String? = nil) -> TunnelStatus {
-    TunnelStatus(
-        state: state, detail: detail, bytesIn: bytesIn, bytesOut: bytesOut,
-        serverId: "us-nyc-1", serverName: "New York", activeTransport: transport)
-}
-
-@MainActor
-private func mainPreview(_ status: TunnelStatus, connectedFor seconds: TimeInterval? = nil,
-                         subscription: Subscription? = nil) -> MainPreviewHost {
-    let core = FakeCore()
-    var config = AppSettings()
-    config.lastServerId = status.serverId
-    core.configResult = .success(config)
-    core.serversResult = .success(mainPreviewServers)
-    core.subscriptionResult = .success(subscription)
-    let tunnel = FakeTunnel()
-    tunnel.connectedDate = seconds.map { Date().addingTimeInterval(-$0) }
-    tunnel.status = status
-    let settings = SettingsStore(core: core)
-    let servers = ServersStore(core: core)
-    return MainPreviewHost(
-        session: SessionStore(core: core, tunnel: tunnel),
-        servers: servers,
-        connection: ConnectionStore(tunnel: tunnel, servers: servers, settings: settings),
-        settings: settings)
-}
-
 #Preview("Disconnected") {
-    mainPreview(.disconnected)
+    MainPreview(stores: MainPreviewStores())
 }
 
 #Preview("Connecting") {
-    mainPreview(previewStatus(.connecting), subscription: activeSubscription)
+    MainPreview(stores: MainPreviewStores(status: MainPreviewData.status(.connecting)))
 }
 
-#Preview("Connected") {
-    mainPreview(
-        previewStatus(.connected, bytesIn: 1_572_864, bytesOut: 327_680, transport: "reality"),
-        connectedFor: 754,
-        subscription: activeSubscription)
+#Preview("Connected, PQ") {
+    MainPreview(stores: MainPreviewStores(
+        status: MainPreviewData.status(.connected, bytesIn: 1_572_864, bytesOut: 327_680,
+                                       transport: "reality", postQuantum: true),
+        connectedFor: 754))
 }
 
-#Preview("Error") {
-    mainPreview(
-        previewStatus(.error, detail: "The server did not answer the handshake."),
-        subscription: Subscription(status: "past_due", renews: false, expiresAt: "2026-10-01"))
+#Preview("Multihop") {
+    MainPreview(stores: MainPreviewStores(
+        status: MainPreviewData.status(.connected, serverId: "us-nyc-1", serverName: "New York",
+                                       bytesIn: 88_431_002, bytesOut: 4_120_000, transport: "hysteria2",
+                                       postQuantum: true, entryId: "nl-ams-1", entryName: "Amsterdam"),
+        connectedFor: 3_725))
+}
+
+#Preview("Error, past due") {
+    MainPreview(stores: MainPreviewStores(
+        status: MainPreviewData.status(.error, detail: "The server did not answer the handshake."),
+        subscription: MainPreviewData.pastDue))
+}
+
+#Preview("Expired") {
+    MainPreview(stores: MainPreviewStores(subscription: MainPreviewData.expired))
+}
+
+#Preview("No servers, dark") {
+    MainPreview(stores: MainPreviewStores(servers: []))
+        .preferredColorScheme(.dark)
 }
 #endif
