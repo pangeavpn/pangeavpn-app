@@ -226,6 +226,8 @@ final class ServersStoreTests: XCTestCase {
         defer { defaults.removePersistentDomain(forName: suite) }
         let core = FakeCore()
         core.serversResult = .success([server("eu-1")])
+        // The held fetch keeps the first refresh in flight, so the two always overlap.
+        core.serversDelay = 0.3
         let store = await makeStore(core, defaults)
         async let first: Void = store.refresh()
         async let second: Void = store.refresh()

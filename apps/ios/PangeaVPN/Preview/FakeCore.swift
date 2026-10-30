@@ -30,6 +30,8 @@ final class FakeCore: CoreBridge, @unchecked Sendable {
     var configDelay: TimeInterval = 0
     // Holds a subscription lookup after it is noted, so a test can act while it is in flight.
     var subscriptionDelay: TimeInterval = 0
+    // Same for a server list fetch.
+    var serversDelay: TimeInterval = 0
 
     private let lock = NSLock()
     private var entries: [String] = []
@@ -64,7 +66,12 @@ final class FakeCore: CoreBridge, @unchecked Sendable {
 
     func logout() { note("logout") }
 
-    func listServers() throws -> [Server] { try record("listServers", serversResult) }
+    func listServers() throws -> [Server] {
+        let result = serversResult
+        note("listServers")
+        if serversDelay > 0 { Thread.sleep(forTimeInterval: serversDelay) }
+        return try result.get()
+    }
 
     func subscription() throws -> Subscription? {
         let result = subscriptionResult
