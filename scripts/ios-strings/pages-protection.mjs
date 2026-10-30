@@ -167,14 +167,14 @@ export default {
     fa: "هنگام روشن شدن iPhone یا بازگشت شبکه وصل می‌شود و اگر تونل قطع شود دوباره وصل می‌شود. قطع اتصال در PangeaVPN آن را تا اتصال بعدی متوقف می‌کند."
   },
   startup_auto_connect_note: {
-    en: "While it's on, the VPN can't be turned off from Control Center or iOS Settings. Disconnect in PangeaVPN instead.",
-    es: "Mientras está activada, la VPN no se puede desactivar desde el Centro de control ni desde Ajustes de iOS. Desconéctate en PangeaVPN.",
-    fr: "Tant qu'elle est activée, le VPN ne peut pas être coupé depuis le Centre de contrôle ni les Réglages d'iOS. Déconnectez-vous plutôt dans PangeaVPN.",
-    ru: "Пока оно включено, VPN нельзя выключить из Пункта управления или Настроек iOS. Отключайтесь в PangeaVPN.",
-    uk: "Поки воно увімкнене, VPN не можна вимкнути з Пункту керування чи Параметрів iOS. Відключайтеся в PangeaVPN.",
-    zh: "开启期间，无法从控制中心或 iOS 设置关闭 VPN。请在 PangeaVPN 中断开连接。",
-    ar: "أثناء تفعيله، لا يمكن إيقاف VPN من مركز التحكم أو إعدادات iOS. اقطع الاتصال من PangeaVPN بدلًا من ذلك.",
-    fa: "تا وقتی روشن است، VPN را نمی‌توان از مرکز کنترل یا تنظیمات iOS خاموش کرد. به جای آن در PangeaVPN قطع اتصال کنید."
+    en: "While it's on, iOS may turn the VPN back on if you switch it off in Control Center or iOS Settings. To stop it, disconnect in PangeaVPN.",
+    es: "Mientras está activada, iOS puede volver a activar la VPN si la desactivas en el Centro de control o en Ajustes de iOS. Para detenerla, desconéctate en PangeaVPN.",
+    fr: "Tant qu'elle est activée, iOS peut rallumer le VPN si vous le coupez depuis le Centre de contrôle ou les Réglages d'iOS. Pour l'arrêter, déconnectez-vous dans PangeaVPN.",
+    ru: "Пока оно включено, iOS может снова включить VPN, если выключить его в Пункте управления или Настройках iOS. Чтобы остановить VPN, отключитесь в PangeaVPN.",
+    uk: "Поки воно увімкнене, iOS може знову ввімкнути VPN, якщо вимкнути його в Пункті керування чи Параметрах iOS. Щоб зупинити VPN, відключіться в PangeaVPN.",
+    zh: "开启期间，如果你在控制中心或 iOS 设置中关闭 VPN，iOS 可能会重新开启它。要停止 VPN，请在 PangeaVPN 中断开连接。",
+    ar: "أثناء تفعيله، قد يعيد iOS تشغيل VPN إذا أوقفته من مركز التحكم أو إعدادات iOS. لإيقافه، اقطع الاتصال من PangeaVPN.",
+    fa: "تا وقتی روشن است، اگر VPN را از مرکز کنترل یا تنظیمات iOS خاموش کنید، ممکن است iOS دوباره روشنش کند. برای توقف، در PangeaVPN قطع اتصال کنید."
   },
   startup_lockdown_title: {
     en: "Lockdown", es: "Modo bloqueo", fr: "Verrouillage", ru: "Lockdown",

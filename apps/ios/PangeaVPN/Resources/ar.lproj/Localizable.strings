@@ -263,6 +263,9 @@
 "regions_same_as_exit" = "هذه منطقة الخروج الخاصة بك";
 "regions_show_servers" = "عرض خوادم %@";
 "regions_title" = "اختيار المنطقة";
+"restore_failed_body" = "ما زلت مسجّل الدخول على هذا الـ iPhone، لكن تعذّر على PangeaVPN الوصول إلى خوادمه. تحقّق من اتصالك ثم حاول مرة أخرى.";
+"restore_failed_retry" = "إعادة المحاولة";
+"restore_failed_title" = "تعذّر الوصول إلى PangeaVPN";
 "root_data_erased" = "تم مسح بيانات PangeaVPN.";
 "server_picker_none_for_transport" = "لا توجد خوادم تدعم هذا النقل";
 "servers_title" = "الخوادم";
@@ -366,7 +369,7 @@
 "split_tunnel_toast_on" = "تم تفعيل الأنفاق المقسّمة. يسري عند الاتصال التالي.";
 "split_tunnel_toast_saved" = "تم حفظ نطاقات IP المستثناة.";
 "startup_auto_connect_hint" = "يتصل عند تشغيل iPhone أو عودة الشبكة، ويعيد الاتصال إذا انقطع النفق. قطع الاتصال من PangeaVPN يوقفه مؤقتًا حتى تتصل مرة أخرى.";
-"startup_auto_connect_note" = "أثناء تفعيله، لا يمكن إيقاف VPN من مركز التحكم أو إعدادات iOS. اقطع الاتصال من PangeaVPN بدلًا من ذلك.";
+"startup_auto_connect_note" = "أثناء تفعيله، قد يعيد iOS تشغيل VPN إذا أوقفته من مركز التحكم أو إعدادات iOS. لإيقافه، اقطع الاتصال من PangeaVPN.";
 "startup_auto_connect_title" = "الاتصال التلقائي";
 "startup_description" = "الاتصال وإعادة الاتصال التلقائيان.";
 "startup_lockdown_hint" = "يبقي VPN مفعّلًا في كل الأوقات. يُخفى زر قطع الاتصال حتى توقف الإغلاق التام.";

@@ -172,6 +172,10 @@ final class SettingsStore {
         return await CoreQueue.perform { core.hubStatus() }
     }
 
+    func clearError() {
+        error = nil
+    }
+
     // After a panic wipe has erased the stored values, so nothing on screen outlives them.
     func resetToDefaults() {
         settings = AppSettings()

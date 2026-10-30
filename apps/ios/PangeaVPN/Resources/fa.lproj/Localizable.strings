@@ -263,6 +263,9 @@
 "regions_same_as_exit" = "این منطقهٔ خروج شماست";
 "regions_show_servers" = "نمایش سرورهای %@";
 "regions_title" = "انتخاب منطقه";
+"restore_failed_body" = "هنوز در این iPhone وارد حساب هستید، اما PangeaVPN نتوانست به سرورهایش دسترسی پیدا کند. اتصال خود را بررسی کنید و دوباره تلاش کنید.";
+"restore_failed_retry" = "تلاش دوباره";
+"restore_failed_title" = "دسترسی به PangeaVPN ممکن نیست";
 "root_data_erased" = "داده‌های PangeaVPN پاک شد.";
 "server_picker_none_for_transport" = "هیچ سروری از این انتقال پشتیبانی نمی‌کند";
 "servers_title" = "سرورها";
@@ -366,7 +369,7 @@
 "split_tunnel_toast_on" = "تونل تفکیک‌شده روشن شد. از اتصال بعدی اعمال می‌شود.";
 "split_tunnel_toast_saved" = "محدوده‌های IP مستثنا ذخیره شد.";
 "startup_auto_connect_hint" = "هنگام روشن شدن iPhone یا بازگشت شبکه وصل می‌شود و اگر تونل قطع شود دوباره وصل می‌شود. قطع اتصال در PangeaVPN آن را تا اتصال بعدی متوقف می‌کند.";
-"startup_auto_connect_note" = "تا وقتی روشن است، VPN را نمی‌توان از مرکز کنترل یا تنظیمات iOS خاموش کرد. به جای آن در PangeaVPN قطع اتصال کنید.";
+"startup_auto_connect_note" = "تا وقتی روشن است، اگر VPN را از مرکز کنترل یا تنظیمات iOS خاموش کنید، ممکن است iOS دوباره روشنش کند. برای توقف، در PangeaVPN قطع اتصال کنید.";
 "startup_auto_connect_title" = "اتصال خودکار";
 "startup_description" = "اتصال و اتصال دوباره خودکار.";
 "startup_lockdown_hint" = "VPN را همیشه روشن نگه می‌دارد. دکمه «قطع اتصال» تا وقتی قفل کامل را خاموش نکنید پنهان است.";

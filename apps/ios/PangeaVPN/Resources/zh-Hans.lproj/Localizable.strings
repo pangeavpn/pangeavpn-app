@@ -263,6 +263,9 @@
 "regions_same_as_exit" = "这是你的出口地区";
 "regions_show_servers" = "显示 %@ 的服务器";
 "regions_title" = "选择区域";
+"restore_failed_body" = "你仍在此 iPhone 上保持登录，但 PangeaVPN 无法连接到其服务器。请检查网络连接，然后重试。";
+"restore_failed_retry" = "重试";
+"restore_failed_title" = "无法连接 PangeaVPN";
 "root_data_erased" = "PangeaVPN 数据已清除。";
 "server_picker_none_for_transport" = "没有服务器支持此传输方式";
 "servers_title" = "服务器";
@@ -366,7 +369,7 @@
 "split_tunnel_toast_on" = "分流已开启。下次连接时生效。";
 "split_tunnel_toast_saved" = "已保存排除的 IP 范围。";
 "startup_auto_connect_hint" = "iPhone 启动或网络恢复时自动连接，隧道断开后自动重连。在 PangeaVPN 中断开连接会暂停此功能，直到您再次连接。";
-"startup_auto_connect_note" = "开启期间，无法从控制中心或 iOS 设置关闭 VPN。请在 PangeaVPN 中断开连接。";
+"startup_auto_connect_note" = "开启期间，如果你在控制中心或 iOS 设置中关闭 VPN，iOS 可能会重新开启它。要停止 VPN，请在 PangeaVPN 中断开连接。";
 "startup_auto_connect_title" = "自动连接";
 "startup_description" = "自动连接与重新连接。";
 "startup_lockdown_hint" = "让 VPN 始终保持开启。在您关闭锁定模式之前，「断开连接」按钮会被隐藏。";

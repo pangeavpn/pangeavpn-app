@@ -263,6 +263,9 @@
 "regions_same_as_exit" = "This is your exit region";
 "regions_show_servers" = "Show servers in %@";
 "regions_title" = "Select region";
+"restore_failed_body" = "You're still signed in on this iPhone, but PangeaVPN couldn't reach its servers. Check your connection, then try again.";
+"restore_failed_retry" = "Try Again";
+"restore_failed_title" = "Can't reach PangeaVPN";
 "root_data_erased" = "PangeaVPN data erased.";
 "server_picker_none_for_transport" = "No servers support this transport";
 "servers_title" = "Servers";
@@ -366,7 +369,7 @@
 "split_tunnel_toast_on" = "Split tunnelling on. Applies on next connect.";
 "split_tunnel_toast_saved" = "Excluded IP ranges saved.";
 "startup_auto_connect_hint" = "Connects when your iPhone starts or the network returns, and reconnects if the tunnel drops. Disconnecting in PangeaVPN pauses it until you connect again.";
-"startup_auto_connect_note" = "While it's on, the VPN can't be turned off from Control Center or iOS Settings. Disconnect in PangeaVPN instead.";
+"startup_auto_connect_note" = "While it's on, iOS may turn the VPN back on if you switch it off in Control Center or iOS Settings. To stop it, disconnect in PangeaVPN.";
 "startup_auto_connect_title" = "Auto-connect";
 "startup_description" = "Automatic connection and reconnection.";
 "startup_lockdown_hint" = "Keeps the VPN on at all times. The Disconnect button is hidden until you turn Lockdown off.";

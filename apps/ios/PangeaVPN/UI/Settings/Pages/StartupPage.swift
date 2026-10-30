@@ -20,7 +20,7 @@ struct StartupPage: View {
                 if settings.lockdown {
                     InfoNote(String(localized: "startup_lockdown_keeps_auto", defaultValue: "Lockdown keeps Auto-connect on."), systemImage: "lock")
                 } else if settings.autoConnect {
-                    InfoNote(String(localized: "startup_auto_connect_note", defaultValue: "While it's on, the VPN can't be turned off from Control Center or iOS Settings. Disconnect in PangeaVPN instead."))
+                    InfoNote(String(localized: "startup_auto_connect_note", defaultValue: "While it's on, iOS may turn the VPN back on if you switch it off in Control Center or iOS Settings. To stop it, disconnect in PangeaVPN."))
                 }
             }
             SettingsCard {

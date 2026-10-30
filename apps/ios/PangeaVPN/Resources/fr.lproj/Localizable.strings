@@ -263,6 +263,9 @@
 "regions_same_as_exit" = "C'est votre région de sortie";
 "regions_show_servers" = "Afficher les serveurs de %@";
 "regions_title" = "Sélectionner une région";
+"restore_failed_body" = "Vous êtes toujours connecté sur cet iPhone, mais PangeaVPN n'a pas pu joindre ses serveurs. Vérifiez votre connexion, puis réessayez.";
+"restore_failed_retry" = "Réessayer";
+"restore_failed_title" = "Impossible de joindre PangeaVPN";
 "root_data_erased" = "Données de PangeaVPN effacées.";
 "server_picker_none_for_transport" = "Aucun serveur ne prend en charge ce transport";
 "servers_title" = "Serveurs";
@@ -366,7 +369,7 @@
 "split_tunnel_toast_on" = "Tunnel divisé activé. Effectif à la prochaine connexion.";
 "split_tunnel_toast_saved" = "Plages IP exclues enregistrées.";
 "startup_auto_connect_hint" = "Se connecte au démarrage de votre iPhone ou au retour du réseau, et se reconnecte si le tunnel tombe. Se déconnecter dans PangeaVPN le met en pause jusqu'à votre prochaine connexion.";
-"startup_auto_connect_note" = "Tant qu'elle est activée, le VPN ne peut pas être coupé depuis le Centre de contrôle ni les Réglages d'iOS. Déconnectez-vous plutôt dans PangeaVPN.";
+"startup_auto_connect_note" = "Tant qu'elle est activée, iOS peut rallumer le VPN si vous le coupez depuis le Centre de contrôle ou les Réglages d'iOS. Pour l'arrêter, déconnectez-vous dans PangeaVPN.";
 "startup_auto_connect_title" = "Connexion automatique";
 "startup_description" = "Connexion et reconnexion automatiques.";
 "startup_lockdown_hint" = "Garde le VPN actif en permanence. Le bouton Se déconnecter est masqué tant que vous ne désactivez pas le verrouillage.";

@@ -263,6 +263,9 @@
 "regions_same_as_exit" = "Это ваш регион выхода";
 "regions_show_servers" = "Показать серверы в регионе %@";
 "regions_title" = "Выбор региона";
+"restore_failed_body" = "Вы по-прежнему вошли в аккаунт на этом iPhone, но PangeaVPN не удалось связаться со своими серверами. Проверьте подключение и повторите попытку.";
+"restore_failed_retry" = "Повторить";
+"restore_failed_title" = "Не удаётся связаться с PangeaVPN";
 "root_data_erased" = "Данные PangeaVPN удалены.";
 "server_picker_none_for_transport" = "Нет серверов с поддержкой этого транспорта";
 "servers_title" = "Серверы";
@@ -366,7 +369,7 @@
 "split_tunnel_toast_on" = "Раздельное туннелирование включено. Действует со следующего подключения.";
 "split_tunnel_toast_saved" = "Исключённые IP-диапазоны сохранены.";
 "startup_auto_connect_hint" = "Подключается при включении iPhone или возвращении сети и переподключается, если туннель обрывается. Если отключиться в PangeaVPN, ждёт, пока вы подключитесь снова.";
-"startup_auto_connect_note" = "Пока оно включено, VPN нельзя выключить из Пункта управления или Настроек iOS. Отключайтесь в PangeaVPN.";
+"startup_auto_connect_note" = "Пока оно включено, iOS может снова включить VPN, если выключить его в Пункте управления или Настройках iOS. Чтобы остановить VPN, отключитесь в PangeaVPN.";
 "startup_auto_connect_title" = "Автоподключение";
 "startup_description" = "Автоматическое подключение и переподключение.";
 "startup_lockdown_hint" = "Держит VPN включённым всегда. Кнопка «Отключить» скрыта, пока вы не выключите Lockdown.";

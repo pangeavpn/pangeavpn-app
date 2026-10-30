@@ -34,6 +34,8 @@ struct SettingsPage<Content: View>: View {
         .navigationTitle(route.title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(Palette.bg, for: .navigationBar)
+        // A failure belongs to the page it happened on, so leaving clears it for the next page.
+        .onDisappear { settings.clearError() }
     }
 }
 
