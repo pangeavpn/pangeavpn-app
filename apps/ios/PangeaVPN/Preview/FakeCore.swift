@@ -30,8 +30,10 @@ final class FakeCore: CoreBridge, @unchecked Sendable {
     var configDelay: TimeInterval = 0
     // Holds a subscription lookup after it is noted, so a test can act while it is in flight.
     var subscriptionDelay: TimeInterval = 0
-    // Same for a server list fetch.
+    // Same for a server list fetch, a login and a logout.
     var serversDelay: TimeInterval = 0
+    var loginDelay: TimeInterval = 0
+    var logoutDelay: TimeInterval = 0
 
     private let lock = NSLock()
     private var entries: [String] = []
@@ -62,9 +64,17 @@ final class FakeCore: CoreBridge, @unchecked Sendable {
 
     func restoreSession() throws -> Session { try record("restoreSession", restoreResult) }
 
-    func login(token: String) throws -> Session { try record("login(\(token))", loginResult) }
+    func login(token: String) throws -> Session {
+        let result = loginResult
+        note("login(\(token))")
+        if loginDelay > 0 { Thread.sleep(forTimeInterval: loginDelay) }
+        return try result.get()
+    }
 
-    func logout() { note("logout") }
+    func logout() {
+        note("logout")
+        if logoutDelay > 0 { Thread.sleep(forTimeInterval: logoutDelay) }
+    }
 
     func listServers() throws -> [Server] {
         let result = serversResult

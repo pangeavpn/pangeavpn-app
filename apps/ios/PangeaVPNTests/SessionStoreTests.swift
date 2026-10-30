@@ -137,6 +137,7 @@ final class SessionStoreTests: XCTestCase {
     func testOverlappingLoginsReachTheCoreOnce() async {
         let core = FakeCore()
         core.loginResult = .success(signedIn)
+        core.loginDelay = 0.3
         let store = makeStore(core)
         async let first: Void = store.login("ABCD-EFGH")
         async let second: Void = store.login("ABCD-EFGH")

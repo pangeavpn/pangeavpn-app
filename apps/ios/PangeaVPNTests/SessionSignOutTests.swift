@@ -81,6 +81,7 @@ final class SessionSignOutTests: XCTestCase {
     func testOverlappingSignOutsLogOutOnce() async {
         let core = FakeCore()
         let store = await signedInStore(core, tunnel: trackedTunnel(core))
+        core.logoutDelay = 0.3
         async let first: Void = store.signOut()
         async let second: Void = store.signOut()
         _ = await (first, second)
