@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 // The core quietly swaps an out-of-range MTU for its default, so the page refuses it first.
 enum TunnelMtu {
@@ -43,10 +44,10 @@ struct NetworkPage: View {
                     apply: { value in await setPostQuantum(value) }
                 )
             }
-            dnsCard
-            SettingsCard {
+            dnsCards
+            SettingsCard(Self.mtuTitle) {
                 CommittedField(
-                    label: String(localized: "settings_network_mtu_title", defaultValue: "Tunnel MTU"),
+                    label: Self.mtuTitle,
                     hint: String(localized: "settings_network_mtu_hint", defaultValue: "Packet size through the tunnel. Lower it if pages hang on a network that otherwise works. Default 1380. Applies on next connect."),
                     placeholder: String(AppSettings().mtu),
                     initial: String(settings.settings.mtu),
@@ -65,7 +66,8 @@ struct NetworkPage: View {
         }
     }
 
-    private var dnsCard: some View {
+    @ViewBuilder
+    private var dnsCards: some View {
         SettingsCard(Self.providerTitle) {
             DnsProviderMenu(title: Self.providerTitle, selection: dnsChoice, choose: choose)
                 .disabled(dnsSaving)
@@ -74,9 +76,11 @@ struct NetworkPage: View {
                 .foregroundStyle(Palette.textMuted)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.horizontal, 4)
-            if dnsChoice == .custom {
+        }
+        if dnsChoice == .custom {
+            SettingsCard(Self.customDnsTitle) {
                 CommittedField(
-                    label: String(localized: "settings_network_dns_title", defaultValue: "Custom DNS"),
+                    label: Self.customDnsTitle,
                     hint: String(localized: "settings_network_dns_hint", defaultValue: "IPv4 addresses, comma-separated. Blank uses the VPN default. Applies on next connect."),
                     placeholder: String(localized: "settings_network_dns_placeholder", defaultValue: "1.1.1.1, 1.0.0.1"),
                     initial: settings.settings.customDns.joined(separator: ", "),
@@ -85,7 +89,6 @@ struct NetworkPage: View {
                     onCommit: commitCustomDns
                 )
                 .id(dnsFieldID)
-                .padding(.top, 6)
                 if let dnsError {
                     InfoNote(dnsError, systemImage: "exclamationmark.circle", tint: Palette.error)
                 }
@@ -95,6 +98,14 @@ struct NetworkPage: View {
 
     private static var providerTitle: String {
         String(localized: "network_dns_provider_title", defaultValue: "DNS Provider")
+    }
+
+    private static var customDnsTitle: String {
+        String(localized: "settings_network_dns_title", defaultValue: "Custom DNS")
+    }
+
+    private static var mtuTitle: String {
+        String(localized: "settings_network_mtu_title", defaultValue: "Tunnel MTU")
     }
 
     // Custom stays picked while its field is empty or matches a preset, as on desktop.

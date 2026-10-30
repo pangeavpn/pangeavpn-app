@@ -91,6 +91,7 @@ struct DeveloperPage: View {
 
 // A fixed-height, selectable, monospaced log that opens scrolled to the newest line.
 private struct LogPanel: View {
+    private static let boxHeight: CGFloat = 240
     let title: String
     let text: String?
     let emptyText: String
@@ -124,6 +125,7 @@ private struct LogPanel: View {
                     .disabled(shown == nil)
                     .opacity(shown == nil ? 0.4 : 1)
             }
+            // Filling the box keeps a short log at the top; only a log that overflows opens at its end.
             ScrollView {
                 Text(shown ?? emptyText)
                     .scaledFont(size: 11, design: .monospaced, relativeTo: .caption2)
@@ -131,9 +133,10 @@ private struct LogPanel: View {
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(12)
+                    .frame(minHeight: Self.boxHeight, alignment: .topLeading)
             }
             .defaultScrollAnchor(.bottom)
-            .frame(height: 240)
+            .frame(height: Self.boxHeight)
             .background(Palette.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Palette.borderSubtle, lineWidth: 1))
         }

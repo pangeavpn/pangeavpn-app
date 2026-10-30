@@ -22,23 +22,27 @@ struct SplitTunnelPage: View {
                     apply: { await setEnabled($0) }
                 )
             }
-            SettingsCard {
+            SettingsCard(Self.rangesTitle) {
                 rangesField
                 if let rangeError {
                     InfoNote(rangeError, systemImage: "exclamationmark.circle", tint: Palette.error)
                 }
             }
             SettingsCard {
-                InfoNote(String(localized: "split_tunnel_note_dns", defaultValue: "Name lookups (DNS) still go through the VPN."))
+                InfoNote(String(localized: "split_tunnel_note_dns", defaultValue: "Name lookups (DNS) still go through the VPN."), systemImage: "info.circle")
                 InfoNote(String(localized: "split_tunnel_note_lan", defaultValue: "For devices on your own network, turn on Allow LAN instead."), systemImage: "wifi")
                 InfoNote(String(localized: "split_tunnel_note_apps", defaultValue: "iPhone can't leave out individual apps: iOS only lets a VPN exclude address ranges."), systemImage: "iphone")
             }
         }
     }
 
+    private static var rangesTitle: String {
+        String(localized: "split_tunnel_ranges_title", defaultValue: "Excluded IP ranges")
+    }
+
     private var rangesField: some View {
         CommittedField(
-            label: String(localized: "split_tunnel_ranges_title", defaultValue: "Excluded IP ranges"),
+            label: Self.rangesTitle,
             hint: String(localized: "split_tunnel_ranges_hint", defaultValue: "IPv4 addresses or ranges, separated by commas. Applies on next connect."),
             placeholder: String(localized: "split_tunnel_ranges_placeholder", defaultValue: "192.0.2.0/24, 198.51.100.7"),
             initial: SplitTunnelRanges.text(settings.splitTunnelRanges),

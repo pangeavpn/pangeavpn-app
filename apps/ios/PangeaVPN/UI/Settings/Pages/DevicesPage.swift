@@ -164,14 +164,16 @@ private struct DeviceCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             details
-            HStack(spacing: 8) {
-                DeviceActionButton(String(localized: "devices_rename", defaultValue: "Rename"), filled: true, action: onRename)
-                DeviceActionButton(String(localized: "devices_remove", defaultValue: "Remove"), filled: false, action: onRemove)
-                    .disabled(device.current)
-                Spacer(minLength: 0)
-                if busy {
-                    ProgressView()
-                        .tint(Palette.textSecondary)
+            // Side by side only while both labels fit whole; large text or long translations stack them.
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) {
+                    actions(stretch: false)
+                    Spacer(minLength: 0)
+                    if busy { progress }
+                }
+                VStack(spacing: 8) {
+                    actions(stretch: true)
+                    if busy { progress }
                 }
             }
             if device.current {
@@ -182,6 +184,18 @@ private struct DeviceCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Palette.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Palette.borderSubtle, lineWidth: 1))
+    }
+
+    @ViewBuilder
+    private func actions(stretch: Bool) -> some View {
+        DeviceActionButton(String(localized: "devices_rename", defaultValue: "Rename"), filled: true, stretch: stretch, action: onRename)
+        DeviceActionButton(String(localized: "devices_remove", defaultValue: "Remove"), filled: false, stretch: stretch, action: onRemove)
+            .disabled(device.current)
+    }
+
+    private var progress: some View {
+        ProgressView()
+            .tint(Palette.textSecondary)
     }
 
     private var details: some View {
@@ -215,11 +229,13 @@ private struct DeviceActionButton: View {
     @Environment(\.isEnabled) private var isEnabled
     let title: String
     let filled: Bool
+    let stretch: Bool
     let action: () -> Void
 
-    init(_ title: String, filled: Bool, action: @escaping () -> Void) {
+    init(_ title: String, filled: Bool, stretch: Bool, action: @escaping () -> Void) {
         self.title = title
         self.filled = filled
+        self.stretch = stretch
         self.action = action
     }
 
@@ -228,8 +244,10 @@ private struct DeviceActionButton: View {
             Text(title)
                 .scaledFont(size: 14, weight: .semibold, relativeTo: .subheadline)
                 .foregroundStyle(filled ? Palette.onAccent : Palette.error)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
                 .padding(.horizontal, 18)
-                .frame(minHeight: 44)
+                .frame(maxWidth: stretch ? .infinity : nil, minHeight: 44)
                 .background(filled ? Palette.accent : Color.clear, in: Capsule())
                 .overlay(Capsule().strokeBorder(filled ? Color.clear : Palette.error.opacity(0.55), lineWidth: 1))
                 .contentShape(Capsule())

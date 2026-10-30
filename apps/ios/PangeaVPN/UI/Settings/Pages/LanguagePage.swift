@@ -104,7 +104,7 @@ private struct LanguageList: View {
         return HStack(spacing: 12) {
             Text(language.name)
                 .scaledFont(size: 15, weight: isCurrent ? .semibold : .regular, relativeTo: .subheadline)
-                .foregroundStyle(isCurrent ? Palette.text : Palette.textSecondary)
+                .foregroundStyle(Palette.text)
                 .frame(maxWidth: .infinity, alignment: .leading)
             Image(systemName: "checkmark")
                 .scaledFont(size: 14, weight: .bold, relativeTo: .subheadline)
