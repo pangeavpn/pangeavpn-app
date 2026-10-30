@@ -96,6 +96,11 @@ func hopProfile(exit, entry *serverInfo, hop *state.HopProfile) (*state.Profile,
 	if err := state.ValidateHop(*profile); err != nil {
 		return nil, fmt.Errorf("mobile: %w", err)
 	}
+	// The hub echoes node ids; a route set up for another pair would egress elsewhere.
+	if hop.EntryRegion != entry.ID || hop.ExitRegion != exit.ID {
+		return nil, fmt.Errorf("mobile: the server's multihop route %s -> %s does not match %s -> %s",
+			hop.EntryRegion, hop.ExitRegion, entry.ID, exit.ID)
+	}
 	applied := state.ApplyHop(*profile)
 	return &applied, nil
 }

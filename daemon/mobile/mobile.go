@@ -49,6 +49,8 @@ type preparedTunnel struct {
 	// Set only for a multihop route; serverID stays the exit.
 	entryServerID   string
 	entryServerName string
+	// starts counts the cascades still reading the keys; guarded by mu.
+	starts int
 }
 
 var (
@@ -62,6 +64,10 @@ var (
 	identity   *identityKeyPair
 	servers    []serverInfo
 	prepared   *preparedTunnel
+	// sessionEpoch moves whenever the signed-in session changes or ends;
+	// wipeEpoch moves on Wipe alone. See epoch.go.
+	sessionEpoch uint64
+	wipeEpoch    uint64
 
 	// preferredTransport is "" / "auto" for the cascade, or one transport kind.
 	preferredTransport string
@@ -171,16 +177,19 @@ func persistConfig(c config) {
 	sanitized := c.sanitize()
 	encoded, err := encodeConfig(sanitized)
 
+	// Under the gate, so a Wipe never leaves memory and the store disagreeing.
+	storeGate.Lock()
 	mu.Lock()
 	methodsChanged := settings.HubMethods != sanitized.HubMethods
 	settings = sanitized
 	preferredTransport = sanitized.PreferredTransport
 	s := store
 	mu.Unlock()
-
 	if err == nil && s != nil {
 		s.Set(keyConfig, encoded)
 	}
+	storeGate.Unlock()
+
 	// The route in use may belong to a method just switched off.
 	if methodsChanged {
 		invalidateHubPath()
@@ -229,80 +238,6 @@ func protectingControl(_, address string, c syscall.RawConn) error {
 	return protectErr
 }
 
-// Login performs a token login through the secure channel, generating and
-// registering a device identity on first use, and returns the Session JSON.
-func Login(token string) (string, error) {
-	mu.Lock()
-	ident := identity
-	st := store
-	mu.Unlock()
-	if st == nil {
-		return "", errors.New("mobile: not initialized")
-	}
-
-	if ident == nil {
-		var err error
-		ident, err = generateIdentity()
-		if err != nil {
-			return "", err
-		}
-		mu.Lock()
-		identity = ident
-		mu.Unlock()
-		st.Set(keyIdentity, ident.marshal())
-	}
-
-	resp, err := tokenLogin(token, ident.pubB64)
-	if err != nil {
-		return "", err
-	}
-
-	mu.Lock()
-	licenseKey = resp.VpnAccessToken
-	mu.Unlock()
-
-	ident, err = registerThisDevice(st, ident)
-	if err != nil {
-		st.Set(keyLicense, "")
-		return "", err
-	}
-
-	// The login answer can carry another device's Cloak UID, so refetch for
-	// this identity; the login list stands in if that fails.
-	srvs, err := fetchServers(ident.pubB64)
-	if err != nil || len(srvs) == 0 {
-		srvs = resp.Servers
-		rememberServers(srvs, ident.pubB64)
-	}
-
-	mu.Lock()
-	servers = srvs
-	lk := licenseKey
-	mu.Unlock()
-	st.Set(keyLicense, lk)
-
-	return marshalSession(sessionJSON{Email: resp.User.Email, Name: resp.User.Name, Servers: publicServers(srvs)})
-}
-
-// registerThisDevice registers ident, rotating it once when it is still
-// registered to another account, as after signing out offline and switching.
-func registerThisDevice(st SecretStore, ident *identityKeyPair) (*identityKeyPair, error) {
-	_, err := registerDevice(ident.pubB64, platformName)
-	if hubErrorCode(err) != "IDENTITY_CONFLICT" {
-		return ident, err
-	}
-	fresh, genErr := generateIdentity()
-	if genErr != nil {
-		return ident, err
-	}
-	st.Set(keyIdentity, fresh.marshal())
-	mu.Lock()
-	identity = fresh
-	mu.Unlock()
-	_, err = registerDevice(fresh.pubB64, platformName)
-	return fresh, err
-}
-
 func marshalSession(session sessionJSON) (string, error) {
 	b, err := json.Marshal(session)
 	if err != nil {
@@ -324,17 +259,16 @@ func publicServers(srvs []serverInfo) []publicServer {
 // JSON. Email/name are not persisted, so they come back empty.
 func RestoreSession() (string, error) {
 	mu.Lock()
-	lk := licenseKey
-	ident := identity
+	scope, ident := scopeLocked(), identity
 	mu.Unlock()
-	if lk == "" {
+	if scope.licenseKey == "" {
 		return "", errors.New("mobile: no stored session")
 	}
 	if ident == nil {
 		return "", errors.New("mobile: no device identity")
 	}
 
-	srvs, cached, err := loadServers(lk, ident.pubB64)
+	srvs, cached, err := loadServers(scope, ident.pubB64)
 	if err != nil {
 		return "", err
 	}
@@ -343,18 +277,18 @@ func RestoreSession() (string, error) {
 
 // loadServers fetches the region list, serving the cache only when the hub
 // was never reached; an answer that ends the session signs out locally.
-func loadServers(lk, identityPub string) ([]serverInfo, bool, error) {
-	srvs, err := fetchServers(identityPub)
+func loadServers(scope callScope, identityPub string) ([]serverInfo, bool, error) {
+	srvs, err := fetchServers(scope, identityPub)
 	cached := false
 	if err != nil {
 		if isSignOutCode(err) {
-			signOutLocally()
+			signOutLocally(scope)
 			return nil, false, err
 		}
-		if hubAnswered(err) {
+		if hubAnswered(err) || errors.Is(err, errSessionEnded) {
 			return nil, false, err
 		}
-		srvs = restoreCachedServers(storedValue(keyServers), cacheOwner(lk, identityPub))
+		srvs = restoreCachedServers(storedValue(keyServers), cacheOwner(scope.licenseKey, identityPub))
 		if len(srvs) == 0 {
 			return nil, false, err
 		}
@@ -362,30 +296,35 @@ func loadServers(lk, identityPub string) ([]serverInfo, bool, error) {
 	}
 
 	mu.Lock()
-	if licenseKey == lk {
-		servers = srvs
+	defer mu.Unlock()
+	// The cache may have been read just before a sign-out or wipe cleared it.
+	if sessionEpoch != scope.session {
+		return nil, false, errSessionEnded
 	}
-	mu.Unlock()
+	servers = srvs
 	return srvs, cached, nil
 }
 
 // Logout clears the stored license key, session state, caches and transport
 // history. The identity is kept; Deregister first to free its device slot.
 func Logout() {
+	storeGate.Lock()
 	mu.Lock()
 	st := store
 	memory := transportMem
 	logs := wgLogs
 	licenseKey = ""
 	servers = nil
-	prepared = nil
+	setPreparedLocked(nil)
+	sessionEpoch++
 	mu.Unlock()
-
 	if st != nil {
 		for _, key := range sessionKeys {
 			st.Set(key, "")
 		}
 	}
+	storeGate.Unlock()
+
 	// The history records which networks the tunnel got through on.
 	if memory != nil {
 		if err := memory.Clear(); err != nil {
@@ -397,14 +336,13 @@ func Logout() {
 // ListServers fetches the current region list from the hub.
 func ListServers() (string, error) {
 	mu.Lock()
-	lk := licenseKey
-	ident := identity
+	scope, ident := scopeLocked(), identity
 	mu.Unlock()
-	if lk == "" {
+	if scope.licenseKey == "" {
 		return "", errors.New("mobile: not authenticated")
 	}
 
-	srvs, _, err := loadServers(lk, ident.publicKey())
+	srvs, _, err := loadServers(scope, ident.publicKey())
 	if err != nil {
 		return "", err
 	}
@@ -419,28 +357,27 @@ func ListServers() (string, error) {
 // string "null" when the account has none.
 func GetSubscription() (string, error) {
 	mu.Lock()
-	lk := licenseKey
-	pub := identity.publicKey()
+	scope, pub := scopeLocked(), identity.publicKey()
 	mu.Unlock()
-	if lk == "" {
+	if scope.licenseKey == "" {
 		return "", errors.New("mobile: not authenticated")
 	}
 
-	owner := cacheOwner(lk, pub)
+	owner := cacheOwner(scope.licenseKey, pub)
 	now := time.Now()
-	sub, err := getSubscriptionHub()
+	sub, err := getSubscriptionHub(scope)
 	var info subscriptionInfo
 	switch {
 	case err == nil && sub == nil:
-		storeForSession(lk, keySubscription, "")
+		storeForSession(scope, keySubscription, "")
 		return "null", nil
 	case err == nil:
-		storeForSession(lk, keySubscription, encodeCachedSubscription(*sub, owner, now))
+		storeForSession(scope, keySubscription, encodeCachedSubscription(*sub, owner, now))
 		info = liveSubscriptionInfo(*sub)
-	case hubAnswered(err):
+	case hubAnswered(err) || errors.Is(err, errSessionEnded):
 		var answer *hubAnswerError
 		if errors.As(err, &answer) && answer.Auth {
-			storeForSession(lk, keySubscription, "")
+			storeForSession(scope, keySubscription, "")
 		}
 		return "", err
 	default:
@@ -448,6 +385,9 @@ func GetSubscription() (string, error) {
 		cached, ok := restoreCachedSubscription(storedValue(keySubscription), owner, now)
 		if !ok {
 			return "", err
+		}
+		if scope.sessionEnded() {
+			return "", errSessionEnded
 		}
 		info = cachedSubscriptionInfo(cached, now)
 	}
@@ -462,14 +402,13 @@ func GetSubscription() (string, error) {
 // ListDevices returns the account's registered devices, flagging this one.
 func ListDevices() (string, error) {
 	mu.Lock()
-	lk := licenseKey
-	pub := identity.publicKey()
+	scope, pub := scopeLocked(), identity.publicKey()
 	mu.Unlock()
-	if lk == "" {
+	if scope.licenseKey == "" {
 		return "", errors.New("mobile: not authenticated")
 	}
 
-	rows, err := listDevicesHub()
+	rows, err := listDevicesHub(scope)
 	if err != nil {
 		return "", err
 	}
@@ -482,22 +421,18 @@ func ListDevices() (string, error) {
 
 // RemoveDevice deregisters a device from the account, freeing its slot.
 func RemoveDevice(deviceID string) error {
-	mu.Lock()
-	lk := licenseKey
-	mu.Unlock()
-	if lk == "" {
+	scope := captureScope()
+	if scope.licenseKey == "" {
 		return errors.New("mobile: not authenticated")
 	}
-	return removeDeviceHub(deviceID)
+	return removeDeviceHub(scope, deviceID)
 }
 
 // RenameDevice renames one of the account's devices and returns the name the
 // hub stored. The name is checked first, so a bad one never costs a request.
 func RenameDevice(deviceID, name string) (string, error) {
-	mu.Lock()
-	lk := licenseKey
-	mu.Unlock()
-	if lk == "" {
+	scope := captureScope()
+	if scope.licenseKey == "" {
 		return "", errors.New("mobile: not authenticated")
 	}
 	if strings.TrimSpace(deviceID) == "" {
@@ -508,7 +443,7 @@ func RenameDevice(deviceID, name string) (string, error) {
 		return "", err
 	}
 
-	stored, err := renameDeviceHub(deviceID, trimmed)
+	stored, err := renameDeviceHub(scope, deviceID, trimmed)
 	if err != nil {
 		return "", err
 	}

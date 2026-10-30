@@ -23,13 +23,13 @@ const (
 
 // reseedFromDeadDrop folds a verified blob into the caches the search reads,
 // reporting whether anything changed. An unreachable drop is a no-op.
-func reseedFromDeadDrop(logs *state.LogStore) bool {
+func reseedFromDeadDrop(wipe uint64, logs *state.LogStore) bool {
 	now := time.Now()
 	if !deadDropDue(storedInt(keyDeadDropAttempt), now.UnixMilli()) {
 		logAdd(logs, state.LogInfo, "dead drop rate limited, skipping")
 		return false
 	}
-	setStoredValue(keyDeadDropAttempt, strconv.FormatInt(now.UnixMilli(), 10))
+	setStoredSince(wipe, keyDeadDropAttempt, strconv.FormatInt(now.UnixMilli(), 10))
 
 	payload, source, ok := fetchDeadDropPayload(storedInt(keyDeadDropSeq), now)
 	if !ok {
@@ -37,16 +37,22 @@ func reseedFromDeadDrop(logs *state.LogStore) bool {
 		return false
 	}
 	logAdd(logs, state.LogInfo, fmt.Sprintf("dead drop seq %d from %s", payload.Seq, source))
-	setStoredValue(keyDeadDropSeq, strconv.FormatInt(payload.Seq, 10))
+	return applyDeadDrop(wipe, payload)
+}
+
+// applyDeadDrop caches a verified payload's addresses, reporting whether that
+// changed anything the search reads.
+func applyDeadDrop(wipe uint64, payload deadDropPayload) bool {
+	setStoredSince(wipe, keyDeadDropSeq, strconv.FormatInt(payload.Seq, 10))
 
 	changed := false
 	if merged := mergeFrontedEndpoints(loadFrontedEndpoints(), payload.FrontedEndpoints); merged != nil {
-		saveFrontedEndpoints(merged)
+		saveFrontedEndpoints(wipe, merged)
 		changed = true
 	}
 	// Only one hub IP is cached at a time, so take the first the blob names.
 	if len(payload.HubIPs) > 0 && payload.HubIPs[0] != storedValue(keyHubIP) {
-		setStoredValue(keyHubIP, payload.HubIPs[0])
+		rememberHubIP(wipe, payload.HubIPs[0])
 		changed = true
 	}
 	return changed

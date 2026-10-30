@@ -97,12 +97,20 @@ func TestTestHubMethodBorrowsTheActiveRoute(t *testing.T) {
 func TestTestHubMethodNeverClosesTheActiveRoute(t *testing.T) {
 	initForTest(t, nil)
 	h := newFakeHub(t)
-	broken := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusBadGateway)
+	h.handle(probeRoute, replyWith(http.StatusOK, []serverInfo{}))
+	// The node fails the test's probe, then recovers, as a flaky route does.
+	var failing atomic.Bool
+	failing.Store(true)
+	flaky := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if failing.Load() {
+			w.WriteHeader(http.StatusBadGateway)
+			return
+		}
+		h.srv.Config.Handler.ServeHTTP(w, r)
 	}))
-	t.Cleanup(broken.Close)
+	t.Cleanup(flaky.Close)
 	proxy := &recordingProxy{}
-	route := &hubPath{kind: "reality", detail: "node", base: broken.URL, client: broken.Client(), proxy: proxy}
+	route := &hubPath{kind: "reality", detail: "node", base: flaky.URL, client: flaky.Client(), proxy: proxy}
 	installRoute(route)
 
 	got := decodeHubTest(t)(TestHubMethod("reality"))
@@ -119,9 +127,13 @@ func TestTestHubMethodNeverClosesTheActiveRoute(t *testing.T) {
 		t.Fatalf("got tracker %+v, want a test to leave it alone", failures)
 	}
 
-	route.base, route.client = h.srv.URL, h.srv.Client()
-	if err := hubRequest(http.MethodGet, probeRoute, nil, nil); err != nil && !strings.Contains(err.Error(), "404") {
-		t.Fatalf("route unusable after the test: %v", err)
+	failing.Store(false)
+	if err := hubRequest(http.MethodGet, probeRoute, nil, nil); err != nil {
+		t.Fatalf("the route the test failed on is unusable afterwards: %v", err)
+	}
+	if currentHubRoute() != route || len(h.requestsTo(probeRoute)) != 1 {
+		t.Fatalf("route %p (want %p), %d requests: the request did not ride the same route",
+			currentHubRoute(), route, len(h.requestsTo(probeRoute)))
 	}
 }
 

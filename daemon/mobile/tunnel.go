@@ -32,6 +32,8 @@ type tunnelRuntime struct {
 	entryServerName string
 	// postQuantum: the live peer carries an ML-KEM-derived pre-shared key.
 	postQuantum bool
+	// cancel ends the context the transports were started under.
+	cancel context.CancelFunc
 }
 
 // label is the runtime's server and entry, for a status about it.
@@ -66,27 +68,25 @@ const handshakePollInterval = 200 * time.Millisecond
 // startTunnel walks the cascade over a single TUN fd. The fd is established
 // once and reused: tearing it down between rungs would flash the VPN key icon.
 func startTunnel(tunFd int) error {
+	attempt, err := claimStart()
+	if err != nil {
+		discardTunFD(tunFd)
+		return err
+	}
+	defer finishStart(attempt)
+
 	mu.Lock()
-	p := prepared
-	active := activeTunnel
 	logs := wgLogs
 	preferred := preferredTransport
 	memory := transportMem
 	netKey := networkKey()
 	mu.Unlock()
 
-	if p == nil {
-		discardTunFD(tunFd)
-		return errors.New("mobile: no prepared tunnel; call Prepare first")
-	}
-	if active != nil {
-		discardTunFD(tunFd)
-		return errors.New("mobile: tunnel already running")
-	}
+	p := attempt.prepared
 	label := tunnelLabel(p)
-	reportError := func(detail string) { pushStatusJSON(label.with(string(state.StateError), detail)) }
+	reportError := func(detail string) { pushAttemptStatus(attempt, label.with(string(state.StateError), detail)) }
 
-	tunFd, err := adoptTunFD(tunFd)
+	tunFd, err = adoptTunFD(tunFd)
 	if err != nil {
 		err = fmt.Errorf("adopt tun fd: %w", err)
 		reportError(err.Error())
@@ -124,55 +124,70 @@ func startTunnel(tunFd int) error {
 		reportError(err.Error())
 		return fmt.Errorf("wg up: %w", err)
 	}
-	return walkCascade(dev, p, st, candidates, logs, netKey)
+	return walkCascade(attempt, dev, st, candidates, logs, netKey)
 }
 
 // walkCascade tries each candidate until one carries a handshake. It owns dev
-// and closes it when every rung fails.
-func walkCascade(dev *device.Device, p *preparedTunnel, st *starter,
+// and closes it when every rung fails or a stop cancels the attempt.
+func walkCascade(attempt *startAttempt, dev *device.Device, st *starter,
 	candidates []transport.Candidate, logs *state.LogStore, netKey string) error {
+	p := attempt.prepared
 	label := tunnelLabel(p)
-	ctx := context.Background()
+	ctx := attempt.ctx
 	var failures []string
 	for i, candidate := range candidates {
-		pushStatusJSON(label.with(string(state.StateConnecting), "starting "+candidate.Kind))
+		if ctx.Err() != nil {
+			break
+		}
+		pushAttemptStatus(attempt, label.with(string(state.StateConnecting), "starting "+candidate.Kind))
 		if err := bringUpOver(ctx, dev, p, p.presharedKeyRaw, st, candidate); err != nil {
 			failures = append(failures, err.Error())
-			logs.Add(state.LogWarn, state.SourceDaemon,
-				fmt.Sprintf("%s transport did not establish a tunnel: %v", candidate.Kind, err))
-			st.stopActive(ctx)
+			logAdd(logs, state.LogWarn, fmt.Sprintf("%s transport did not establish a tunnel: %v", candidate.Kind, err))
+			st.stopActive(context.Background())
 			continue
 		}
 		if i > 0 {
-			logs.Add(state.LogInfo, state.SourceDaemon, "fell back to "+candidate.Kind+" transport")
+			logAdd(logs, state.LogInfo, "fell back to "+candidate.Kind+" transport")
+		}
+		if !goLive(attempt, dev, st, label, len(p.presharedKeyRaw) == pq.PresharedKeySize, candidate.Kind) {
+			break
 		}
 		rememberTransport(netKey, candidate.Kind)
-		goLive(dev, st, label, len(p.presharedKeyRaw) == pq.PresharedKeySize, candidate.Kind)
 		return nil
 	}
 
+	st.stopActive(context.Background())
 	dev.Close()
+	if ctx.Err() != nil {
+		return errStartCancelled
+	}
 	detail := "no transport could establish a tunnel: " + strings.Join(failures, "; ")
-	pushStatusJSON(label.with(string(state.StateError), detail))
+	pushAttemptStatus(attempt, label.with(string(state.StateError), detail))
 	return errors.New("mobile: " + detail)
 }
 
-// goLive publishes the runtime, then a connected status carrying the
-// handshake just proven.
-func goLive(dev *device.Device, st *starter, label statusJSON, postQuantum bool, kind string) {
+// goLive publishes the runtime, then a connected status carrying the handshake
+// just proven. It refuses once a stop has cancelled the attempt.
+func goLive(attempt *startAttempt, dev *device.Device, st *starter, label statusJSON, postQuantum bool, kind string) bool {
 	mu.Lock()
+	if attempt.ctx.Err() != nil {
+		mu.Unlock()
+		return false
+	}
 	activeTunnel = &tunnelRuntime{
 		dev: dev, starter: st, serverID: label.ServerID, serverName: label.ServerName,
 		activeTransport: kind, entryServerID: label.EntryServerID, entryServerName: label.EntryServerName,
-		postQuantum: postQuantum,
+		postQuantum: postQuantum, cancel: attempt.cancel,
 	}
+	attempt.live = true
 	mu.Unlock()
 
 	connected := label.with(string(state.StateConnected), "")
 	connected.ActiveTransport = kind
 	connected.PostQuantum = postQuantum
 	_, _, connected.LastHandshake = tunnelStats(dev)
-	pushStatusJSON(connected)
+	pushAttemptStatus(attempt, connected)
+	return true
 }
 
 // discardTunFD releases a refused Start's fd: Android hands ownership to Go, so
@@ -192,16 +207,18 @@ func bringUpOver(ctx context.Context, dev *device.Device, p *preparedTunnel, psk
 	if err := dev.IpcSet(buildUAPI(p.wgPrivateKeyRaw, p.serverPubKeyRaw, psk, st.boundPort)); err != nil {
 		return fmt.Errorf("%s: wg configure: %w", candidate.Kind, err)
 	}
-	if err := waitForHandshake(dev, handshakeTimeout); err != nil {
+	if err := waitForHandshake(ctx, dev, handshakeTimeout); err != nil {
 		return fmt.Errorf("%s: %w", candidate.Kind, err)
 	}
 	return nil
 }
 
-// waitForHandshake blocks until the peer completes a handshake. A fresh device
-// has none, so any non-zero value belongs to this attempt.
-func waitForHandshake(dev *device.Device, timeout time.Duration) error {
+// waitForHandshake blocks until the peer completes a handshake or ctx ends. A
+// fresh device has none, so any non-zero value belongs to this attempt.
+func waitForHandshake(ctx context.Context, dev *device.Device, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
+	poll := time.NewTicker(handshakePollInterval)
+	defer poll.Stop()
 	for {
 		if lastHandshakeUnix(dev) > 0 {
 			return nil
@@ -209,7 +226,11 @@ func waitForHandshake(dev *device.Device, timeout time.Duration) error {
 		if time.Now().After(deadline) {
 			return errors.New("no wireguard handshake before timeout")
 		}
-		time.Sleep(handshakePollInterval)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-poll.C:
+		}
 	}
 }
 
@@ -230,13 +251,17 @@ func lastHandshakeUnix(dev *device.Device) int64 {
 	return last
 }
 
-// detachTunnel hands the running tunnel to exactly one stopper.
-func detachTunnel() *tunnelRuntime {
+// detachTunnel hands the running tunnel to exactly one stopper and cancels a
+// start still in its cascade, under mu so that start can no longer go live.
+func detachTunnel() (*tunnelRuntime, *startAttempt) {
 	mu.Lock()
 	defer mu.Unlock()
-	t := activeTunnel
-	activeTunnel = nil
-	return t
+	t, pending := activeTunnel, starting
+	activeTunnel, starting = nil, nil
+	if pending != nil {
+		pending.cancel()
+	}
+	return t, pending
 }
 
 func closeTunnel(t *tunnelRuntime) {
@@ -246,11 +271,18 @@ func closeTunnel(t *tunnelRuntime) {
 	if t.starter != nil {
 		t.starter.stopActive(context.Background())
 	}
+	if t.cancel != nil {
+		t.cancel()
+	}
 }
 
 func stopTunnel() {
-	t := detachTunnel()
+	t, pending := detachTunnel()
+	awaitUnwind(pending)
 	if t == nil {
+		if pending != nil {
+			pushStatusJSON(statusJSON{State: string(state.StateDisconnected)})
+		}
 		return
 	}
 	pushStatusJSON(t.label().with(string(state.StateDisconnecting), ""))
@@ -261,18 +293,26 @@ func stopTunnel() {
 // stopTunnelForSwitch reports connecting to the prepared server, so the host
 // never sees a disconnect between two servers.
 func stopTunnelForSwitch() {
-	t := detachTunnel()
-	if t == nil {
+	t, pending := detachTunnel()
+	awaitUnwind(pending)
+	if t == nil && pending == nil {
 		return
 	}
 	mu.Lock()
-	next := t.label()
+	var next statusJSON
+	if t != nil {
+		next = t.label()
+	} else {
+		next = tunnelLabel(pending.prepared)
+	}
 	if p := prepared; p != nil {
 		next = tunnelLabel(p)
 	}
 	mu.Unlock()
 	pushStatusJSON(next.with(string(state.StateConnecting), "switching server"))
-	closeTunnel(t)
+	if t != nil {
+		closeTunnel(t)
+	}
 }
 
 // pushStatusJSON publishes a whole status, so no field is dropped on the way.
@@ -281,7 +321,24 @@ func pushStatusJSON(s statusJSON) {
 	currentStatus = s
 	sk := sink
 	mu.Unlock()
+	emitStatus(sk, s)
+}
 
+// pushAttemptStatus publishes only while the start is live, so the status a
+// stop pushed is never followed by one from the start it cancelled.
+func pushAttemptStatus(attempt *startAttempt, s statusJSON) {
+	mu.Lock()
+	if attempt.ctx.Err() != nil {
+		mu.Unlock()
+		return
+	}
+	currentStatus = s
+	sk := sink
+	mu.Unlock()
+	emitStatus(sk, s)
+}
+
+func emitStatus(sk StatusSink, s statusJSON) {
 	if sk == nil {
 		return
 	}

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"strings"
 
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/state"
 )
@@ -27,16 +28,23 @@ var sessionKeys = []string{keyLicense, keySubscription, keyServers}
 
 // signOutLocally ends a session the hub has definitively refused, so no later
 // start retries a dead key. The identity stays, keeping its device slot.
-func signOutLocally() {
+func signOutLocally(scope callScope) {
+	storeGate.Lock()
+	defer storeGate.Unlock()
 	mu.Lock()
-	st := store
-	logs := wgLogs
-	licenseKey = ""
-	servers = nil
-	prepared = nil
+	// The refusal was for the session scope captured, not whatever came after.
+	if sessionEpoch != scope.session {
+		mu.Unlock()
+		return
+	}
+	st, logs := store, wgLogs
+	licenseKey, servers = "", nil
+	setPreparedLocked(nil)
+	sessionEpoch++
 	mu.Unlock()
 
-	if st != nil {
+	// The store is shared: a session another process stored since is not ours.
+	if st != nil && strings.TrimSpace(st.Get(keyLicense)) == scope.licenseKey {
 		for _, key := range sessionKeys {
 			st.Set(key, "")
 		}
@@ -48,19 +56,19 @@ func signOutLocally() {
 // Logout. It forgets the identity only once the hub no longer holds it.
 func Deregister() error {
 	mu.Lock()
-	lk, ident := licenseKey, identity
+	scope, ident := scopeLocked(), identity
 	mu.Unlock()
-	if lk == "" {
+	if scope.licenseKey == "" {
 		return errors.New("mobile: not authenticated")
 	}
 	if ident == nil {
 		return errors.New("mobile: no device identity")
 	}
 
-	err := deregisterDeviceHub(lk, ident.pubB64)
+	err := deregisterDeviceHub(scope, ident.pubB64)
 	switch code := hubErrorCode(err); {
 	case err == nil, code == "DEVICE_NOT_FOUND", code == "FORBIDDEN":
-		forgetIdentity(ident.pubB64)
+		forgetIdentityIf(scope.session, ident.pubB64)
 		return nil
 	}
 	return err
@@ -71,23 +79,30 @@ func Deregister() error {
 func Wipe() error {
 	Stop()
 
+	// One step under the gate: a write begun before it either lands first and is
+	// cleared here, or sees the new epochs and is dropped.
+	storeGate.Lock()
 	mu.Lock()
 	st, memory, path, logs := store, transportMem, transportMemPath, wgLogs
-	licenseKey, identity, servers, prepared = "", nil, nil, nil
+	licenseKey, identity, servers = "", nil, nil
+	setPreparedLocked(nil)
+	sessionEpoch++
+	wipeEpoch++
 	settings = defaultConfig()
 	preferredTransport = settings.PreferredTransport
 	currentStatus = statusJSON{State: string(state.StateDisconnected)}
 	mu.Unlock()
-
-	// After the reset, so a search still running under the old settings is discarded.
-	invalidateHubPath()
-	dropDoHConnections()
-
 	if st != nil {
 		for _, key := range storedKeys {
 			st.Set(key, "")
 		}
 	}
+	storeGate.Unlock()
+
+	// After the reset, so a search still running under the old settings is discarded.
+	invalidateHubPath()
+	dropDoHConnections()
+
 	var errs []error
 	if memory != nil {
 		if err := memory.Clear(); err != nil {

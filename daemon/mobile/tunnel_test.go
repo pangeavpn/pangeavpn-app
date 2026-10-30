@@ -4,14 +4,18 @@ package mobile
 
 import (
 	"bytes"
+	"context"
 	"crypto/ecdh"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/state"
+	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/transport"
 )
 
 // pushLog records every status push, in order.
@@ -170,6 +174,178 @@ func TestStartAfterStopForSwitchUsesThePreparedServer(t *testing.T) {
 	if last.State != string(state.StateError) || last.ServerID != "B" || last.EntryServerID != "C" {
 		t.Fatalf("last push = %+v, want an error for B via C", last)
 	}
+}
+
+// cascadeInFlight claims a start for a freshly keyed config and walks the
+// cascade on a test device, as Start does once it has a TUN.
+func cascadeInFlight(t *testing.T, candidates ...transport.Candidate) <-chan error {
+	t.Helper()
+	priv, err := ecdh.X25519().GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	peer, err := ecdh.X25519().GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	p := keyedTunnel("A")
+	p.serverName = "Alpha"
+	p.wgPrivateKeyRaw, p.serverPubKeyRaw = priv.Bytes(), peer.PublicKey().Bytes()
+	stagePrepared(p)
+	attempt, err := claimStart()
+	if err != nil {
+		t.Fatalf("claimStart: %v", err)
+	}
+	mu.Lock()
+	logs := wgLogs
+	mu.Unlock()
+	result := make(chan error, 1)
+	go func() {
+		defer finishStart(attempt)
+		result <- walkCascade(attempt, newTestDevice(), newStarter(logs), candidates, logs, "")
+	}()
+	return result
+}
+
+func cascadeResult(t *testing.T, result <-chan error, within time.Duration) error {
+	t.Helper()
+	select {
+	case err := <-result:
+		return err
+	case <-time.After(within):
+		t.Fatalf("the cascade was still running %v after the stop", within)
+		return nil
+	}
+}
+
+func TestAStopCancelsAStartStillInTheCascade(t *testing.T) {
+	for name, stop := range map[string]func(){"Stop": Stop, "StopForSwitch": StopForSwitch, "Wipe": func() { _ = Wipe() }} {
+		t.Run(name, func(t *testing.T) {
+			initForTest(t, nil)
+			log := recordPushes()
+			entered := make(chan struct{})
+			hang := transport.Candidate{Kind: "cloak", Start: func(ctx context.Context, _ *state.Profile, _ *state.WireGuardProfile) error {
+				close(entered)
+				<-ctx.Done()
+				return ctx.Err()
+			}}
+			next := transport.Candidate{Kind: "reality", Start: func(context.Context, *state.Profile, *state.WireGuardProfile) error {
+				t.Error("a cancelled start went on to the next transport")
+				return errors.New("unreachable")
+			}}
+			result := cascadeInFlight(t, hang, next)
+			<-entered
+
+			stop()
+			if err := cascadeResult(t, result, time.Second); !errors.Is(err, errStartCancelled) {
+				t.Fatalf("cascade = %v, want it cancelled", err)
+			}
+			mu.Lock()
+			active, pending := activeTunnel, starting
+			mu.Unlock()
+			if active != nil || pending != nil {
+				t.Fatalf("active=%v starting=%v, want neither after the stop", active, pending)
+			}
+			pushes := log.all()
+			for _, push := range pushes {
+				if push.State == string(state.StateError) || push.State == string(state.StateConnected) {
+					t.Fatalf("a cancelled start pushed %+v", push)
+				}
+			}
+			last := pushes[len(pushes)-1]
+			switch name {
+			case "StopForSwitch":
+				if last.State != string(state.StateConnecting) || last.Detail != "switching server" {
+					t.Fatalf("last push = %+v, want connecting to switch", last)
+				}
+			default:
+				if last.State != string(state.StateDisconnected) {
+					t.Fatalf("last push = %+v, want disconnected", last)
+				}
+			}
+		})
+	}
+}
+
+func TestAStopCancelsAStartWaitingForItsHandshake(t *testing.T) {
+	initForTest(t, nil)
+	recordPushes()
+	started := make(chan struct{})
+	up := transport.Candidate{Kind: "cloak", Start: func(context.Context, *state.Profile, *state.WireGuardProfile) error {
+		close(started)
+		return nil
+	}}
+	result := cascadeInFlight(t, up)
+	<-started
+
+	Stop()
+	if err := cascadeResult(t, result, 3*time.Second); !errors.Is(err, errStartCancelled) {
+		t.Fatalf("cascade = %v, want it cancelled well before the handshake timeout", err)
+	}
+}
+
+func TestACancelledStartNeverGoesLive(t *testing.T) {
+	initForTest(t, nil)
+	log := recordPushes()
+	stagePrepared(keyedTunnel("A"))
+	attempt, err := claimStart()
+	if err != nil {
+		t.Fatalf("claimStart: %v", err)
+	}
+	defer finishStart(attempt)
+	detachTunnel()
+
+	dev := newTestDevice()
+	defer dev.Close()
+	if goLive(attempt, dev, newStarter(nil), statusJSON{ServerID: "A"}, false, "cloak") {
+		t.Fatal("a cancelled start went live")
+	}
+	mu.Lock()
+	active := activeTunnel
+	mu.Unlock()
+	if active != nil || len(log.all()) != 0 {
+		t.Fatalf("active=%v pushes=%+v, want nothing published", active, log.all())
+	}
+}
+
+// Transports were started under the attempt's context, so it must outlive
+// Start for as long as the tunnel runs, and end with it.
+func TestALiveTunnelKeepsItsStartContextUntilStopped(t *testing.T) {
+	initForTest(t, nil)
+	recordPushes()
+	stagePrepared(keyedTunnel("A"))
+	attempt, err := claimStart()
+	if err != nil {
+		t.Fatalf("claimStart: %v", err)
+	}
+	if !goLive(attempt, newTestDevice(), newStarter(nil), statusJSON{ServerID: "A"}, false, "cloak") {
+		t.Fatal("a live attempt did not go live")
+	}
+	finishStart(attempt)
+	if attempt.ctx.Err() != nil {
+		t.Fatal("finishing a successful start cancelled the context its transports run under")
+	}
+
+	Stop()
+	if attempt.ctx.Err() == nil {
+		t.Fatal("stopping the tunnel left its start context running")
+	}
+}
+
+func TestStartRefusesWhileAnotherIsStarting(t *testing.T) {
+	initForTest(t, nil)
+	stagePrepared(keyedTunnel("A"))
+	attempt, err := claimStart()
+	if err != nil {
+		t.Fatalf("claimStart: %v", err)
+	}
+	defer finishStart(attempt)
+
+	fd := pipeFD(t)
+	if err := Start(fd); err == nil || !strings.Contains(err.Error(), "already running") {
+		t.Fatalf("Start = %v, want it refused while another start runs", err)
+	}
+	checkHostFDAfterRefusedStart(t, fd)
 }
 
 func TestStateCarriesLivenessFields(t *testing.T) {

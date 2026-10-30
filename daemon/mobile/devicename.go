@@ -23,7 +23,20 @@ func validateDeviceName(raw string) (string, error) {
 	if strings.IndexFunc(trimmed, unicode.IsControl) >= 0 {
 		return "", errors.New("mobile: device name must not contain control characters")
 	}
+	if strings.IndexFunc(trimmed, isBidiControl) >= 0 {
+		return "", errors.New("mobile: device name must not contain text direction controls")
+	}
 	return trimmed, nil
+}
+
+// isBidiControl spots the marks that can make a name read as something else.
+// Not all of Cf: emoji sequences need U+200D.
+func isBidiControl(r rune) bool {
+	switch {
+	case r >= 0x202A && r <= 0x202E, r >= 0x2066 && r <= 0x2069:
+		return true
+	}
+	return r == 0x200E || r == 0x200F || r == 0x061C
 }
 
 // isJSTrimSpace is what String.prototype.trim removes: unlike Go's TrimSpace

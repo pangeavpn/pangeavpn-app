@@ -35,16 +35,16 @@ func PrepareVia(exitServerID, entryServerID string) (string, error) {
 	defer prepareMu.Unlock()
 
 	mu.Lock()
-	lk, ident, current, logs := licenseKey, identity, settings, wgLogs
+	scope, ident, current, logs := scopeLocked(), identity, settings, wgLogs
 	mu.Unlock()
-	if lk == "" {
+	if scope.licenseKey == "" {
 		return "", errors.New("mobile: not authenticated")
 	}
 	if ident == nil {
 		return "", errors.New("mobile: no device identity")
 	}
 
-	exit, entry, err := lookupRoute(lk, ident.pubB64, exitServerID, entryServerID)
+	exit, entry, err := lookupRoute(scope, ident.pubB64, exitServerID, entryServerID)
 	if err != nil {
 		return "", err
 	}
@@ -53,28 +53,46 @@ func PrepareVia(exitServerID, entryServerID string) (string, error) {
 			return "", err
 		}
 	}
-	got, err := provision(ident.pubB64, exit, entry, current.PostQuantum, logs)
+	got, err := provision(scope, ident.pubB64, exit, entry, current.PostQuantum, logs)
 	if err != nil {
 		if isSignOutCode(err) {
-			signOutLocally()
+			signOutLocally(scope)
 		}
 		return "", err
 	}
 
 	mu.Lock()
 	// A sign-out or account switch mid-call must not get this config back.
-	if licenseKey != lk || identity.publicKey() != ident.pubB64 {
+	if sessionEpoch != scope.session || identity.publicKey() != ident.pubB64 {
 		mu.Unlock()
+		got.tunnel.scrub()
 		return "", errors.New("mobile: the session changed while preparing")
 	}
-	prepared = got.tunnel
+	setPreparedLocked(got.tunnel)
 	mu.Unlock()
 	return tunnelConfig(got, current)
 }
 
+// scrub zeroes the private key material once nothing will configure a peer
+// with it again.
+func (p *preparedTunnel) scrub() {
+	clear(p.wgPrivateKeyRaw)
+	clear(p.presharedKeyRaw)
+}
+
+// setPreparedLocked replaces the prepared config, scrubbing the one it drops
+// unless a start is still reading it. mu must be held.
+func setPreparedLocked(next *preparedTunnel) {
+	previous := prepared
+	prepared = next
+	if previous != nil && previous != next && previous.starts == 0 {
+		previous.scrub()
+	}
+}
+
 // lookupRoute finds both servers, reloading the list once when either is
 // missing: the host may offer a server this process has not seen.
-func lookupRoute(lk, identityPub, exitID, entryID string) (*serverInfo, *serverInfo, error) {
+func lookupRoute(scope callScope, identityPub, exitID, entryID string) (*serverInfo, *serverInfo, error) {
 	mu.Lock()
 	known := servers
 	mu.Unlock()
@@ -82,7 +100,7 @@ func lookupRoute(lk, identityPub, exitID, entryID string) (*serverInfo, *serverI
 		return exit, entry, nil
 	}
 
-	fresh, _, err := loadServers(lk, identityPub)
+	fresh, _, err := loadServers(scope, identityPub)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -101,7 +119,7 @@ type provisioned struct {
 
 // provision registers a fresh key for the route. It changes no global state,
 // so a failure keeps the previous prepared config.
-func provision(identityPub string, exit, entry *serverInfo, postQuantum bool, logs *state.LogStore) (provisioned, error) {
+func provision(scope callScope, identityPub string, exit, entry *serverInfo, postQuantum bool, logs *state.LogStore) (provisioned, error) {
 	wgPriv, err := ecdh.X25519().GenerateKey(rand.Reader)
 	if err != nil {
 		return provisioned{}, fmt.Errorf("generate wireguard key: %w", err)
@@ -113,7 +131,7 @@ func provision(identityPub string, exit, entry *serverInfo, postQuantum bool, lo
 	if entry != nil {
 		entryID, entryName = entry.ID, entry.Name
 	}
-	reg, err := registerServer(identityPub, wgPubB64, exit.ID, entryID, dk)
+	reg, err := registerServer(scope, identityPub, wgPubB64, exit.ID, entryID, dk)
 	if err != nil {
 		return provisioned{}, err
 	}
@@ -244,12 +262,9 @@ type registerResponse struct {
 	Hop *state.HopProfile `json:"hop"`
 }
 
-func registerServer(identityPub, wgPub, region, entryRegion string, dk *mlkem.DecapsulationKey768) (*registerResponse, error) {
-	mu.Lock()
-	lk := licenseKey
-	mu.Unlock()
+func registerServer(scope callScope, identityPub, wgPub, region, entryRegion string, dk *mlkem.DecapsulationKey768) (*registerResponse, error) {
 	body := map[string]any{
-		"licenseKey":     lk,
+		"licenseKey":     scope.licenseKey,
 		"identityPubkey": identityPub,
 		"wgPubkey":       wgPub,
 		"region":         region,
@@ -261,7 +276,7 @@ func registerServer(identityPub, wgPub, region, entryRegion string, dk *mlkem.De
 		body["pq"] = newPQOffer(dk)
 	}
 	var out registerResponse
-	if err := hubRequest(http.MethodPost, "/api/register", body, &out); err != nil {
+	if err := hubRequestAs(scope, http.MethodPost, "/api/register", body, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil

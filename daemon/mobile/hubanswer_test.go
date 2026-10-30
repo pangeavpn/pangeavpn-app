@@ -1,6 +1,7 @@
 package mobile
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -94,6 +95,21 @@ func TestHubAnsweredIgnoresTransportFailures(t *testing.T) {
 	wrapped := fmt.Errorf("list: %w", hubStatusError(404, []byte(`{"code":"DEVICE_NOT_FOUND"}`)))
 	if !hubAnswered(wrapped) || hubErrorCode(wrapped) != "DEVICE_NOT_FOUND" {
 		t.Fatalf("a wrapped answer lost its code: %v", wrapped)
+	}
+}
+
+func TestAnUndecodableAnswerStillCountsAsAnswered(t *testing.T) {
+	var out []string
+	decodeErr := json.Unmarshal([]byte(`{"not":"a list"}`), &out)
+	err := undecodableAnswer(decodeErr)
+	if !hubAnswered(err) {
+		t.Fatal("a 2xx the hub sent must count as answered, so no cache is served over it")
+	}
+	if want := "decode hub response: " + decodeErr.Error(); err.Error() != want {
+		t.Fatalf("got %q, want %q", err.Error(), want)
+	}
+	if hubErrorCode(err) != "" || isSignOutCode(err) {
+		t.Fatalf("%v carries a hub code", err)
 	}
 }
 

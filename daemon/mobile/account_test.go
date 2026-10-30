@@ -155,6 +155,107 @@ func TestDeregisterKeepsAnIdentityALoginReplaced(t *testing.T) {
 	}
 }
 
+// The host gives Deregister 8s, then signs out and may sign straight back in,
+// reusing the identity; the deregistration's late answer must not take it.
+func TestALateDeregisterAnswerLeavesTheIdentityALoginReused(t *testing.T) {
+	s, ident, h := newSignedInHub(t)
+	h.handle("/api/client/token-login", replyWith(http.StatusOK, map[string]any{
+		"vpnAccessToken": "lk2", "user": map[string]string{"email": "b@example.com"}, "servers": []serverInfo{},
+	}))
+	h.handle("/api/device/register", replyWith(http.StatusOK, map[string]string{"deviceId": "d2", "assignedIp": "10.0.0.3"}))
+	h.handle("/api/client/regions", replyWith(http.StatusOK, regionsWith(t, "mine")))
+	loginErr := make(chan error, 1)
+	h.handle("/api/device/deregister", func(fakeRequest) (int, any) {
+		Logout()
+		_, err := Login("token")
+		loginErr <- err
+		return http.StatusOK, map[string]bool{"ok": true}
+	})
+
+	if err := Deregister(); !errors.Is(err, errSessionEnded) {
+		t.Fatalf("Deregister = %v, want the session-ended error", err)
+	}
+	if err := <-loginErr; err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+	if got := bodyFields(t, h.requestsTo("/api/device/register")[0])["identityPubkey"]; got != ident.pubB64 {
+		t.Fatalf("Login registered %q, want the reused identity", got)
+	}
+	if stored, _ := parseIdentity(s.Get(keyIdentity)); stored.publicKey() != ident.pubB64 || s.Get(keyLicense) != "lk2" {
+		t.Fatalf("store = %v, want the new license beside the identity it registered", s.values)
+	}
+	if lk, _, _, kept := sessionState(); lk != "lk2" || kept.publicKey() != ident.pubB64 {
+		t.Fatalf("memory lk=%q identity kept=%v", lk, kept.publicKey() == ident.pubB64)
+	}
+}
+
+func TestForgetIdentityIfIgnoresALaterSession(t *testing.T) {
+	s, ident, _ := newSignedInHub(t)
+	stale := captureScope()
+	Logout()
+
+	forgetIdentityIf(stale.session, ident.pubB64)
+	if _, _, _, kept := sessionState(); kept.publicKey() != ident.pubB64 {
+		t.Fatal("a forget from an ended session dropped the identity in memory")
+	}
+	if stored, _ := parseIdentity(s.Get(keyIdentity)); stored.publicKey() != ident.pubB64 {
+		t.Fatal("a forget from an ended session dropped the stored identity")
+	}
+}
+
+func TestSignOutLocallyLeavesALaterSessionAlone(t *testing.T) {
+	s, _, _ := newSignedInHub(t)
+	stale := captureScope()
+	Logout()
+	s.Set(keyLicense, "lk2")
+	if err := Reload(); err != nil {
+		t.Fatalf("Reload: %v", err)
+	}
+
+	signOutLocally(stale)
+	if lk, _, _, _ := sessionState(); lk != "lk2" || s.Get(keyLicense) != "lk2" {
+		t.Fatalf("memory lk=%q store %q, want the later session kept", lk, s.Get(keyLicense))
+	}
+}
+
+func TestSignOutLocallyKeepsAnotherProcessesLicense(t *testing.T) {
+	s, _, _ := newSignedInHub(t)
+	s.Set(keyLicense, "lk2")
+	s.Set(keyServers, "theirs")
+
+	signOutLocally(captureScope())
+	if lk, _, _, _ := sessionState(); lk != "" {
+		t.Fatalf("memory lk=%q, want this process's refused session gone", lk)
+	}
+	if s.Get(keyLicense) != "lk2" || s.Get(keyServers) != "theirs" {
+		t.Fatalf("store = %v, want the session another process stored kept", s.values)
+	}
+}
+
+func TestStoreForSessionDropsAWriteFromAnEndedSession(t *testing.T) {
+	s, _, _ := newSignedInHub(t)
+	stale := captureScope()
+	Logout()
+	storeForSession(stale, keySubscription, "x")
+	if s.Get(keySubscription) != "" {
+		t.Fatal("an ended session's answer was cached")
+	}
+
+	// Signing back in with the same license is still another session.
+	s.Set(keyLicense, "lk")
+	if err := Reload(); err != nil {
+		t.Fatalf("Reload: %v", err)
+	}
+	storeForSession(stale, keySubscription, "x")
+	if s.Get(keySubscription) != "" {
+		t.Fatal("an ended session's answer was cached into the next one")
+	}
+	storeForSession(captureScope(), keySubscription, "y")
+	if s.Get(keySubscription) != "y" {
+		t.Fatal("the current session could not cache its answer")
+	}
+}
+
 func TestLoginRotatesTheIdentityOnConflict(t *testing.T) {
 	old := mustIdentity(t)
 	s, _ := initForTest(t, map[string]string{keyIdentity: old.marshal()})
@@ -209,40 +310,58 @@ func TestLoginRetriesAConflictOnlyOnce(t *testing.T) {
 	}
 }
 
-// fillEveryStoredKey writes every key the package knows plus what the normal
-// paths write, so a key missing from storedKeys shows up after Wipe.
-func fillEveryStoredKey(t *testing.T, h *fakeHub) {
+// answerALogin answers every request a Login makes, with a server that
+// advertises every hub route.
+func answerALogin(t *testing.T, h *fakeHub) {
 	t.Helper()
-	for _, key := range storedKeys {
-		setStoredValue(key, "x")
-	}
-	ident := mustIdentity(t)
-	setStoredValue(keyIdentity, ident.marshal())
-	setStoredValue(keyLicense, "lk")
-	mu.Lock()
-	licenseKey, identity = "lk", ident
-	mu.Unlock()
-	setStoredValue(keyHubIP, "203.0.113.7")
-	rememberHubDiscovery(discoverHubRoutes([]serverInfo{serverWithEveryTransport(t)}))
-	if _, err := SetConfig(`{"mtu":1300,"preferredTransport":"reality"}`); err != nil {
-		t.Fatalf("SetConfig: %v", err)
-	}
-	h.handle("/api/client/regions", replyWith(http.StatusOK, regionsWith(t, "mine")))
+	server := serverWithEveryTransport(t)
+	server.ControlPlaneReality = &controlPlaneRealityInfo{RemoteHost: "203.0.113.20", RemotePort: 443,
+		UUID: "123e4567-e89b-12d3-a456-426614174000", PublicKey: strings.Repeat("k", 43), ShortID: "abcd",
+		ServerName: "www.example.com"}
+	h.handle("/api/client/token-login", replyWith(http.StatusOK, map[string]any{
+		"vpnAccessToken": "lk", "user": map[string]string{"email": "a@example.com"},
+		"servers": []serverInfo{server}, "frontedEndpoints": []string{"relay.example"},
+	}))
+	h.handle("/api/device/register", replyWith(http.StatusOK, map[string]string{"deviceId": "d1", "assignedIp": "10.0.0.2"}))
+	h.handle("/api/client/regions", replyWith(http.StatusOK, []serverInfo{server}))
 	h.handle("/api/client/subscription", replyWith(http.StatusOK, map[string]any{
 		"subscription": map[string]any{"status": "active", "renews": true, "expiresAt": nil},
 	}))
-	if _, err := RestoreSession(); err != nil {
-		t.Fatalf("RestoreSession: %v", err)
+}
+
+// fillEveryStoredKey runs every writer the package has, so a key one of them
+// writes but storedKeys lacks shows up after Wipe.
+func fillEveryStoredKey(t *testing.T, s *memoryStore, h *fakeHub) {
+	t.Helper()
+	answerALogin(t, h)
+	if _, err := Login("token"); err != nil {
+		t.Fatalf("Login: %v", err)
 	}
 	if _, err := GetSubscription(); err != nil {
 		t.Fatalf("GetSubscription: %v", err)
+	}
+	if _, err := SetConfig(`{"mtu":1300,"preferredTransport":"reality"}`); err != nil {
+		t.Fatalf("SetConfig: %v", err)
+	}
+	wipe := currentWipeEpoch()
+	rememberHubIP(wipe, "203.0.113.7")
+	applyDeadDrop(wipe, deadDropPayload{Seq: 7, HubIPs: []string{"203.0.113.8"}, FrontedEndpoints: []string{"drop.example"}})
+	previous := deadDropURLs
+	deadDropURLs = nil
+	t.Cleanup(func() { deadDropURLs = previous })
+	reseedFromDeadDrop(wipe, nil)
+
+	for _, key := range storedKeys {
+		if s.Get(key) == "" {
+			t.Fatalf("no writer filled %s", key)
+		}
 	}
 }
 
 func TestWipeLeavesNothingInTheStore(t *testing.T) {
 	s, _ := initForTest(t, nil)
 	h := newFakeHub(t)
-	fillEveryStoredKey(t, h)
+	fillEveryStoredKey(t, s, h)
 	before := len(h.requests())
 
 	if err := Wipe(); err != nil {
@@ -272,6 +391,145 @@ func TestWipeLeavesNothingInTheStore(t *testing.T) {
 	if !reset {
 		t.Fatal("Wipe kept the settings")
 	}
+}
+
+func assertWiped(t *testing.T, s *memoryStore) {
+	t.Helper()
+	s.mu.Lock()
+	for key, value := range s.values {
+		if value != "" {
+			t.Errorf("%s was written after Wipe: %q", key, value)
+		}
+	}
+	s.mu.Unlock()
+	if lk, srvs, p, ident := sessionState(); lk != "" || srvs != nil || p != nil || ident != nil {
+		t.Fatalf("memory after Wipe: lk=%q servers=%v prepared=%v identity=%v", lk, srvs, p, ident)
+	}
+}
+
+// A hub answer that lands after a Wipe must write nothing back, in memory or
+// in the store, and no call may report a session from before it.
+func TestWipeDropsAnAnswerStillInFlight(t *testing.T) {
+	wipeThen := func(t *testing.T, h *fakeHub, route string) {
+		h.mu.Lock()
+		answer := h.routes[route]
+		h.mu.Unlock()
+		h.handle(route, func(req fakeRequest) (int, any) {
+			if err := Wipe(); err != nil {
+				t.Errorf("Wipe: %v", err)
+			}
+			return answer(req)
+		})
+	}
+	login := func() (string, error) { return Login("token") }
+	cases := []struct {
+		name     string
+		route    string
+		call     func() (string, error)
+		signedIn bool
+	}{
+		{"Login at token login", "/api/client/token-login", login, false},
+		{"Login at device register", "/api/device/register", login, false},
+		{"Login at the refetch", "/api/client/regions", login, false},
+		{"RestoreSession", "/api/client/regions", RestoreSession, true},
+		{"ListServers", "/api/client/regions", ListServers, true},
+		{"GetSubscription", "/api/client/subscription", GetSubscription, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var s *memoryStore
+			var h *fakeHub
+			if tc.signedIn {
+				s, _, h = newSignedInHub(t)
+			} else {
+				s, _ = initForTest(t, nil)
+				h = newFakeHub(t)
+			}
+			answerALogin(t, h)
+			wipeThen(t, h, tc.route)
+
+			raw, err := tc.call()
+			if !errors.Is(err, errSessionEnded) {
+				t.Fatalf("got %s, %v, want the session-ended error", raw, err)
+			}
+			assertWiped(t, s)
+		})
+	}
+}
+
+func TestAnAnswerThatLandsAfterAWipeIsNotRead(t *testing.T) {
+	initForTest(t, nil)
+	h := newFakeHub(t)
+	h.handle(diagnosticsRoute, func(fakeRequest) (int, any) {
+		if err := Wipe(); err != nil {
+			t.Errorf("Wipe: %v", err)
+		}
+		return http.StatusCreated, map[string]string{"reportCode": "K7M2-9QXD"}
+	})
+	if body, _, err := hubFetch(diagnosticsRoute, http.MethodPost, nil, nil); !errors.Is(err, errSessionEnded) {
+		t.Fatalf("hubFetch = %s, %v, want the session-ended error", body, err)
+	}
+}
+
+func TestARefusalOfAnEndedSessionIsNotReadAsTheNextOnes(t *testing.T) {
+	s, _, h := newSignedInHub(t)
+	h.handle("/api/client/regions", func(fakeRequest) (int, any) {
+		Logout()
+		s.Set(keyLicense, "lk2")
+		if err := Reload(); err != nil {
+			t.Errorf("Reload: %v", err)
+		}
+		return http.StatusUnauthorized, map[string]string{"error": "Invalid license key", "code": "INVALID_LICENSE"}
+	})
+
+	if _, err := RestoreSession(); !errors.Is(err, errSessionEnded) {
+		t.Fatalf("RestoreSession = %v, want the session-ended error, not the old session's refusal", err)
+	}
+	if lk, _, _, _ := sessionState(); lk != "lk2" || s.Get(keyLicense) != "lk2" {
+		t.Fatalf("memory lk=%q store %q, want the next session untouched", lk, s.Get(keyLicense))
+	}
+}
+
+func TestARouteWriteFromBeforeAWipeIsDropped(t *testing.T) {
+	s, _ := initForTest(t, nil)
+	stale := currentWipeEpoch()
+	if err := Wipe(); err != nil {
+		t.Fatalf("Wipe: %v", err)
+	}
+
+	rememberHubIP(stale, "203.0.113.7")
+	saveFrontedEndpoints(stale, []string{"relay.example"})
+	rememberHubDiscovery(stale, discoverHubRoutes([]serverInfo{serverWithEveryTransport(t)}))
+	applyDeadDrop(stale, deadDropPayload{Seq: 7, HubIPs: []string{"203.0.113.8"}})
+	assertWiped(t, s)
+
+	rememberHubIP(currentWipeEpoch(), "203.0.113.7")
+	if s.Get(keyHubIP) != "203.0.113.7" {
+		t.Fatal("a write after the Wipe was dropped too")
+	}
+}
+
+func TestASearchThatSpansAWipeIsNotRunAgain(t *testing.T) {
+	s, _ := initForTest(t, nil)
+	searches := 0
+	previous := hubSearch
+	hubSearch = func(wipe uint64) (*hubPath, error) {
+		searches++
+		if err := Wipe(); err != nil {
+			t.Errorf("Wipe: %v", err)
+		}
+		rememberHubIP(wipe, "203.0.113.9")
+		return &hubPath{kind: "normal", client: &http.Client{}}, nil
+	}
+	t.Cleanup(func() { hubSearch = previous })
+
+	if err := ensureHubPath(currentWipeEpoch()); !errors.Is(err, errSessionEnded) {
+		t.Fatalf("ensureHubPath = %v, want the session-ended error", err)
+	}
+	if searches != 1 || currentHubRoute() != nil {
+		t.Fatalf("searches = %d, route %v: a wipe must end the search, not restart it", searches, currentHubRoute())
+	}
+	assertWiped(t, s)
 }
 
 func TestWipeRemovesTransportHistoryFromDisk(t *testing.T) {
@@ -359,7 +617,7 @@ func TestSignOutLocallyKeepsTheIdentity(t *testing.T) {
 	s.Set(keyServers, "y")
 	s.Set(keyHubIP, "203.0.113.7")
 
-	signOutLocally()
+	signOutLocally(captureScope())
 
 	for _, key := range []string{keyLicense, keySubscription, keyServers} {
 		if s.Get(key) != "" {

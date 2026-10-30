@@ -19,10 +19,72 @@ const (
 )
 
 const (
-	redactedUser = "[redacted:user]"
+	redactedUser    = "[redacted:user]"
+	redactedAccount = "[redacted:accountNumber]"
 	// userMarkerHead is what a user-segment rule sees of its own earlier marker.
 	userMarkerHead = "[redacted"
 )
+
+const (
+	// accountSep is what the hub strips between groups, line breaks aside so a
+	// marker never joins two lines.
+	accountSep          = `[\t\v\f \x{a0}\x{1680}\x{2000}-\x{200a}\x{202f}\x{205f}\x{3000}\x{feff}-]`
+	accountNumberLength = 24
+)
+
+// accountGroups is six or more groups of four in any case, as the hub folds
+// them. RE2 has no look-ahead, so the match carries the rune after it.
+var accountGroups = regexp.MustCompile(
+	`[0-9A-Za-z]{4}(?:` + accountSep + `{0,3}[0-9A-Za-z]{4}){5,}(?:[^0-9A-Za-z]|$)`)
+
+// redactAccountRun takes the whole run, so a four-letter word beside a number
+// can never shift the cut and leave one of its groups readable.
+func redactAccountRun(match string) string {
+	run, tail := match, ""
+	if last, size := utf8.DecodeLastRuneInString(match); !isASCIIAlnum(last) {
+		run, tail = match[:len(match)-size], match[len(match)-size:]
+	}
+	if !isAccountRun(run) {
+		return match
+	}
+	return redactedAccount + tail
+}
+
+// isAccountRun spares prose, often six four-letter words: only the dashed form
+// the app shows counts on shape alone, while a spaced or unbroken run needs a digit.
+func isAccountRun(run string) bool {
+	dashed, unbroken := accountGaps(run)
+	hasDigit := strings.ContainsAny(run, "0123456789")
+	switch {
+	case unbroken:
+		// An unbroken run of another length is some other token, as desktop treats it.
+		return len(run) == accountNumberLength && hasDigit
+	case dashed:
+		return true
+	}
+	return hasDigit
+}
+
+// accountGaps reports whether every gap between the run's groups holds a dash,
+// and whether it has no gaps at all. Groups are four ASCII bytes each.
+func accountGaps(run string) (dashed, unbroken bool) {
+	dashed, unbroken = true, true
+	for at := 4; at < len(run); at += 4 {
+		gap := at
+		for at < len(run) && !isASCIIAlnum(rune(run[at])) {
+			at++
+		}
+		if at == gap {
+			dashed = false
+			continue
+		}
+		unbroken = false
+		if !strings.Contains(run[gap:at], "-") {
+			dashed = false
+		}
+	}
+	return dashed, unbroken
+}
 
 type redactRule func(string) string
 
@@ -179,9 +241,11 @@ var redactRules = []redactRule{
 	templateRule(`(?i)\b[0-9a-f]{64}\b`, "[redacted:token]"),
 	templateRule(`(?i)\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b`, "[redacted:uuid]"),
 	boundedBothSides(`[A-Za-z0-9+/]{24,}={0,2}`, isBase64Rune, keepUnlessKey),
-	boundedBothSides(`[0-9A-Z]{4}(?:-[0-9A-Z]{4}){5}`, isAlnumOrDash, constant("[redacted:accountNumber]")),
-	boundedBothSides(`[0-9A-HJKMNP-TV-Z]{24}`, isASCIIAlnum, constant("[redacted:accountNumber]")),
-	boundedBothSides(`[0-9]{16}`, isASCIIAlnum, constant("[redacted:accountNumber]")),
+	boundedRule{re: accountGroups, blocked: isASCIIAlnum, follows: anyRune, repl: redactAccountRun}.apply,
+	// Desktop's own two rules, so a run spared as prose is never one desktop redacts.
+	boundedBothSides(`[0-9A-Z]{4}(?:-[0-9A-Z]{4}){5}`, isAlnumOrDash, constant(redactedAccount)),
+	boundedBothSides(`[0-9A-HJKMNP-TV-Z]{24}`, isASCIIAlnum, constant(redactedAccount)),
+	boundedBothSides(`[0-9]{16}`, isASCIIAlnum, constant(redactedAccount)),
 	boundedBothSides(`(?:[0-9A-Fa-f]{1,4}:){7}[0-9A-Fa-f]{1,4}`, isAlnumOrColon, keepIPv6),
 	boundedBothSides(`(?:[0-9A-Fa-f]{1,4})?(?::[0-9A-Fa-f]{1,4}){0,6}::(?:[0-9A-Fa-f]{1,4})?(?::[0-9A-Fa-f]{1,4}){0,6}`, isAlnumOrColon, keepIPv6),
 	boundedBothSides(`([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})`, isDigitOrDot, keepIPv4),
@@ -341,6 +405,7 @@ func isASCIIAlnum(r rune) bool {
 
 func isBase64Rune(r rune) bool  { return isASCIIAlnum(r) || r == '+' || r == '/' || r == '=' }
 func isAlnumOrDash(r rune) bool { return isASCIIAlnum(r) || r == '-' }
+func anyRune(rune) bool         { return true }
 func isAlnumOrColon(r rune) bool {
 	return isASCIIAlnum(r) || r == ':'
 }

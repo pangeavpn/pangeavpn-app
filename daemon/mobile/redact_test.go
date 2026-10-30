@@ -361,7 +361,6 @@ func TestRedactBoundaryRetry(t *testing.T) {
 		{"k=" + redactWGKey + " " + redactWGKey, "k=" + redactWGKey + " [redacted:key]"},
 		{redactWGKey + "==", redactWGKey + "=="},
 		{"x" + redactWGKey, "[redacted:key]"},
-		{"id " + redactAccountDisplay + "-X", "id " + redactAccountDisplay + "-X"},
 		{"n " + redactAccountNormalized + "Q", "n " + redactAccountNormalized + "Q"},
 		{"t 49291002883716251", "t 49291002883716251"},
 		{"t 4929100288371625.", "t [redacted:accountNumber]."},
@@ -371,6 +370,67 @@ func TestRedactBoundaryRetry(t *testing.T) {
 	for _, c := range cases {
 		if got := redactDiagnostics(c.in, ""); got != c.want {
 			t.Errorf("redact(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+// The hub folds case, spaces, dashes and I/L/O before matching a number, so
+// every spelling it accepts is redacted; desktop's two rules miss most.
+func TestRedactCatchesEverySpellingTheHubAccepts(t *testing.T) {
+	cases := []struct {
+		line   string
+		groups []string
+	}{
+		{"my account k7m2-q9x4-c8v1-b6n3-r5t0-w2y7 thanks", nil},
+		{"my account K7M2 Q9X4 C8V1 B6N3 R5T0 W2Y7 thanks", nil},
+		{"acct K7M2Q9X4C8V1B6N3R5TOW2Y7", nil},
+		{"acct k7m2q9x4c8v1b6n3r5t0w2y7.", nil},
+		{"lookalikes K7M2-Q9X4-C8VI-B6N3-R5TO-W2Y7 and C8VL too", nil},
+		{"acct K7M2 - Q9X4 - C8V1 - B6N3 - R5T0 - W2Y7", nil},
+		{"acct K7M2Q9X4 C8V1B6N3 R5T0W2Y7 end", nil},
+		{"note abcd K7M2 Q9X4 C8V1 B6N3 R5T0 W2Y7 thanks", nil},
+		{"id K7M2-Q9X4-C8V1-B6N3-R5T0-W2Y7-", nil},
+		{"id K7M2-Q9X4-C8V1-B6N3-R5T0-W2Y7-X", nil},
+		{"{\"n\":\"K7M2\tQ9X4\tC8V1\tB6N3\tR5T0\tW2Y7\"}", nil},
+		{"one digit is enough spaced ABCD EFGH JKMN PQRS TVWX YZA7", []string{"ABCD", "YZA7"}},
+		{"dashed with no digit ABCD-EFGH-JKMN-PQRS-TVWX-YZAB", []string{"ABCD", "YZAB"}},
+		{"lower dashed with no digit abcd-efgh-jkmn-pqrs-tvwx-yzab.", []string{"ABCD", "YZAB"}},
+		{"desktop's unbroken rule ABCDEFGHJKMNPQRSTVWXYZAB", []string{"ABCD", "YZAB"}},
+		{"desktop's dashed rule ABCD-EFGH-JKMN-PQRS-TVWX-YZAB", []string{"ABCD", "YZAB"}},
+	}
+	for _, tc := range cases {
+		groups := tc.groups
+		if groups == nil {
+			groups = []string{"K7M2", "Q9X4", "C8V1", "B6N3", "R5T0", "W2Y7"}
+		}
+		out := strings.ToUpper(redactDiagnostics(tc.line, ""))
+		for _, group := range groups {
+			if strings.Contains(out, group) {
+				t.Errorf("redact(%q) kept %s: %s", tc.line, group, out)
+			}
+		}
+		if !strings.Contains(out, "[REDACTED:ACCOUNTNUMBER]") {
+			t.Errorf("redact(%q) = %s, want an accountNumber marker", tc.line, out)
+		}
+	}
+}
+
+// Prose is often six four-letter words in a row; only the dashed form the app
+// shows is redacted on its shape alone.
+func TestRedactLeavesRunsThatAreNotAccountNumbers(t *testing.T) {
+	for _, line := range []string{
+		"n " + redactAccountNormalized + "Q",
+		"x" + redactAccountNormalized,
+		"md5 d41d8cd98f00b204e9800998ecf8427e ok",
+		"five groups K7M2 Q9X4 C8V1 B6N3 R5T0.",
+		"this does work with wifi only",
+		"This Does Work With Wifi Only, then that fails over mobile data",
+		"this does work with wifi-only mode",
+		"\tthis\tdoes\twork\twith\twifi\tonly",
+		"internationalizationsxyz is long",
+	} {
+		if got := redactDiagnostics(line, ""); got != line {
+			t.Errorf("redact(%q) = %q, want it unchanged", line, got)
 		}
 	}
 }

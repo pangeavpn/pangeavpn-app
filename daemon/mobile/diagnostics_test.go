@@ -110,6 +110,32 @@ func TestNormalizeNoteTrimsCapsAndRedacts(t *testing.T) {
 	}
 }
 
+func TestNormalizeNoteRedactsBeforeItCuts(t *testing.T) {
+	const account = "K7M2-Q9X4-C8V1-B6N3-R5T0-W2Y7"
+	for pad := 470; pad <= 500; pad++ {
+		note := strings.Repeat("a", pad-1) + " " + account + " thanks"
+		got := normalizeNote(note, "")
+		if n := utf8.RuneCountInString(got); n > diagMaxNoteChars {
+			t.Fatalf("pad %d: got %d runes, want at most %d", pad, n, diagMaxNoteChars)
+		}
+		for _, piece := range []string{"K7M2", "Q9X4", "W2Y7", "K7M", "K7"} {
+			if strings.Contains(got, piece) {
+				t.Fatalf("pad %d: the cut note leaked %q: %q", pad, piece, got)
+			}
+		}
+		if open := strings.LastIndex(got, "["); open >= 0 && !strings.Contains(got[open:], "]") {
+			t.Fatalf("pad %d: the note ends in a partial marker: %q", pad, got[open:])
+		}
+	}
+	whole := normalizeNote("my number "+account, "")
+	if whole != "my number [redacted:accountNumber]" {
+		t.Fatalf("got %q, want the whole marker kept", whole)
+	}
+	if got := normalizeNote("see [log] and [redact", ""); got != "see [log] and [redact" {
+		t.Fatalf("got %q, want a short note's own brackets kept", got)
+	}
+}
+
 func TestRingSectionRedactsAndCaps(t *testing.T) {
 	if got := ringSection("tunnel-ring", " \n ", ""); got.Text != "<tunnel-ring empty>" || got.Bytes != len(got.Text) {
 		t.Fatalf("got %+v, want an empty marker", got)

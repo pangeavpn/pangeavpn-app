@@ -96,17 +96,17 @@ func resolveViaDoH(hostname string) (string, error) {
 	return ip, nil
 }
 
-// ensureHub finds a working route to the hub across every enabled method.
-func ensureHub() error {
-	return ensureHubPath()
-}
-
 // hubFetch encrypts one request through the secure channel and returns the
 // decrypted inner response body and status.
 func hubFetch(path, method string, headers map[string]string, body []byte) ([]byte, int, error) {
-	// Twice: a route dropped between ensureHub and the read is not a failure.
+	return hubFetchSince(currentWipeEpoch(), path, method, headers, body)
+}
+
+// hubFetchSince drops the answer, undecoded, once a Wipe has run since wipe.
+func hubFetchSince(wipe uint64, path, method string, headers map[string]string, body []byte) ([]byte, int, error) {
+	// Twice: a route dropped between ensureHubPath and the read is not a failure.
 	for attempt := 0; attempt < 2; attempt++ {
-		if err := ensureHub(); err != nil {
+		if err := ensureHubPath(wipe); err != nil {
 			return nil, 0, err
 		}
 		hubMu.Lock()
@@ -126,6 +126,9 @@ func hubFetch(path, method string, headers map[string]string, body []byte) ([]by
 			return nil, 0, err
 		}
 		hubRequestSucceeded()
+		if currentWipeEpoch() != wipe {
+			return nil, 0, errSessionEnded
+		}
 		return inner.Body, inner.Status, nil
 	}
 	return nil, 0, errors.New("hub unreachable: no working connection method")
@@ -141,9 +144,14 @@ func sendOnRoute(route *hubPath, sealed sealedRequest) (innerResponse, error) {
 	return openHubReply(sealed, respBytes, status)
 }
 
-// hubRequest wraps hubFetch with the X-License-Key header and JSON
-// encode/decode of the request/response bodies.
+// hubRequest is hubRequestAs for the session signed in right now.
 func hubRequest(method, route string, body any, out any) error {
+	return hubRequestAs(captureScope(), method, route, body, out)
+}
+
+// hubRequestAs wraps hubFetch with the scope's X-License-Key header and JSON
+// encode/decode, dropping the answer undecoded once the scope's session ends.
+func hubRequestAs(scope callScope, method, route string, body any, out any) error {
 	var bodyBytes []byte
 	if body != nil {
 		var err error
@@ -154,16 +162,17 @@ func hubRequest(method, route string, body any, out any) error {
 	}
 
 	headers := map[string]string{"Content-Type": "application/json"}
-	mu.Lock()
-	lk := licenseKey
-	mu.Unlock()
-	if lk != "" {
-		headers["X-License-Key"] = lk
+	if scope.licenseKey != "" {
+		headers["X-License-Key"] = scope.licenseKey
 	}
 
-	respBody, status, err := hubFetch(route, method, headers, bodyBytes)
+	respBody, status, err := hubFetchSince(scope.wipe, route, method, headers, bodyBytes)
 	if err != nil {
 		return err
+	}
+	// Before the status: a refusal of an ended session must not sign out its successor.
+	if scope.sessionEnded() {
+		return errSessionEnded
 	}
 	if status < 200 || status >= 300 {
 		return hubStatusError(status, respBody)
@@ -171,7 +180,7 @@ func hubRequest(method, route string, body any, out any) error {
 
 	if out != nil && len(respBody) > 0 {
 		if err := json.Unmarshal(respBody, out); err != nil {
-			return fmt.Errorf("decode hub response: %w", err)
+			return undecodableAnswer(err)
 		}
 	}
 	return nil
@@ -190,15 +199,15 @@ type tokenLoginResponse struct {
 
 // captureHubDiscovery caches the relays and control-plane credentials a
 // response advertised, so a later start has more than one way back in.
-func captureHubDiscovery(fronted []string, servers []serverInfo) {
+func captureHubDiscovery(wipe uint64, fronted []string, servers []serverInfo) {
 	routes := discoverHubRoutes(servers)
 	if len(fronted) > 0 {
 		routes.fronted = fronted
 	}
-	rememberHubDiscovery(routes)
+	rememberHubDiscovery(wipe, routes)
 }
 
-func tokenLogin(token, identityPub string) (*tokenLoginResponse, error) {
+func tokenLogin(wipe uint64, token, identityPub string) (*tokenLoginResponse, error) {
 	reqBody := map[string]string{"vpnAccessToken": strings.TrimSpace(token)}
 	if identityPub != "" {
 		reqBody["identityPubkey"] = identityPub
@@ -208,7 +217,7 @@ func tokenLogin(token, identityPub string) (*tokenLoginResponse, error) {
 		return nil, err
 	}
 
-	respBody, status, err := hubFetch("/api/client/token-login", http.MethodPost,
+	respBody, status, err := hubFetchSince(wipe, "/api/client/token-login", http.MethodPost,
 		map[string]string{"Content-Type": "application/json"}, bodyBytes)
 	if err != nil {
 		return nil, err
@@ -221,7 +230,7 @@ func tokenLogin(token, identityPub string) (*tokenLoginResponse, error) {
 	if err := json.Unmarshal(respBody, &out); err != nil {
 		return nil, fmt.Errorf("decode token-login response: %w", err)
 	}
-	captureHubDiscovery(out.FrontedEndpoints, out.Servers)
+	captureHubDiscovery(wipe, out.FrontedEndpoints, out.Servers)
 	return &out, nil
 }
 
@@ -231,80 +240,63 @@ type deviceRegisterResponse struct {
 	FriendlyName *string `json:"friendlyName"`
 }
 
-func registerDevice(identityPub, friendlyName string) (*deviceRegisterResponse, error) {
-	mu.Lock()
-	lk := licenseKey
-	mu.Unlock()
-	body := map[string]string{"licenseKey": lk, "identityPubkey": identityPub}
+func registerDevice(scope callScope, identityPub, friendlyName string) (*deviceRegisterResponse, error) {
+	body := map[string]string{"licenseKey": scope.licenseKey, "identityPubkey": identityPub}
 	if friendlyName != "" {
 		body["friendlyName"] = friendlyName
 	}
 	var out deviceRegisterResponse
-	if err := hubRequest(http.MethodPost, "/api/device/register", body, &out); err != nil {
+	if err := hubRequestAs(scope, http.MethodPost, "/api/device/register", body, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-func fetchServers(identityPub string) ([]serverInfo, error) {
+func fetchServers(scope callScope, identityPub string) ([]serverInfo, error) {
 	route := "/api/client/regions"
 	if identityPub != "" {
 		route += "?identityPubkey=" + url.QueryEscape(identityPub)
 	}
 	var out []serverInfo
-	if err := hubRequest(http.MethodGet, route, nil, &out); err != nil {
+	if err := hubRequestAs(scope, http.MethodGet, route, nil, &out); err != nil {
 		return nil, err
 	}
-	captureHubDiscovery(nil, out)
-	rememberServers(out, identityPub)
+	captureHubDiscovery(scope.wipe, nil, out)
+	rememberServers(scope, out, identityPub)
 	return out, nil
 }
 
 // rememberServers keeps the last good list for a launch the hub cannot answer.
-func rememberServers(servers []serverInfo, identityPub string) {
-	mu.Lock()
-	lk := licenseKey
-	mu.Unlock()
-	if lk == "" {
+func rememberServers(scope callScope, servers []serverInfo, identityPub string) {
+	if scope.licenseKey == "" {
 		return
 	}
-	if raw, ok := encodeServerCache(servers, cacheOwner(lk, identityPub)); ok {
-		storeForSession(lk, keyServers, raw)
+	if raw, ok := encodeServerCache(servers, cacheOwner(scope.licenseKey, identityPub)); ok {
+		storeForSession(scope, keyServers, raw)
 	}
 }
 
-// storeForSession writes only while lk is still signed in, so an answer that
-// lands after a sign-out cannot bring its cache back.
-func storeForSession(lk, key, value string) {
-	mu.Lock()
-	s, current := store, licenseKey
-	mu.Unlock()
-	if s != nil && current == lk {
-		s.Set(key, value)
-	}
-}
-
-func listDevicesHub() ([]hubDevice, error) {
+func listDevicesHub(scope callScope) ([]hubDevice, error) {
 	var out struct {
 		Devices []hubDevice `json:"devices"`
 	}
-	if err := hubRequest(http.MethodGet, "/api/device/list", nil, &out); err != nil {
+	if err := hubRequestAs(scope, http.MethodGet, "/api/device/list", nil, &out); err != nil {
 		return nil, err
 	}
 	return out.Devices, nil
 }
 
-func removeDeviceHub(deviceID string) error {
-	return hubRequest(http.MethodPost, "/api/device/remove", map[string]string{"deviceId": deviceID}, nil)
+func removeDeviceHub(scope callScope, deviceID string) error {
+	return hubRequestAs(scope, http.MethodPost, "/api/device/remove", map[string]string{"deviceId": deviceID}, nil)
 }
 
 // renameDeviceHub returns the name the hub stored, nil when it did not say.
-func renameDeviceHub(deviceID, name string) (*string, error) {
+func renameDeviceHub(scope callScope, deviceID, name string) (*string, error) {
 	var out struct {
 		FriendlyName *string `json:"friendlyName"`
 	}
 	body := map[string]string{"deviceId": deviceID, "friendlyName": name}
-	if err := hubRequest(http.MethodPost, "/api/device/rename", body, &out); err != nil {
+	if err := hubRequestAs(scope, http.MethodPost, "/api/device/rename", body, &out); err != nil {
 		return nil, err
 	}
 	return out.FriendlyName, nil
@@ -312,16 +304,16 @@ func renameDeviceHub(deviceID, name string) (*string, error) {
 
 // deregisterDeviceHub sends the license in the body: this route never reads
 // the X-License-Key header.
-func deregisterDeviceHub(lk, identityPub string) error {
-	body := map[string]string{"licenseKey": lk, "identityPubkey": identityPub}
-	return hubRequest(http.MethodPost, "/api/device/deregister", body, nil)
+func deregisterDeviceHub(scope callScope, identityPub string) error {
+	body := map[string]string{"licenseKey": scope.licenseKey, "identityPubkey": identityPub}
+	return hubRequestAs(scope, http.MethodPost, "/api/device/deregister", body, nil)
 }
 
-func getSubscriptionHub() (*hubSubscription, error) {
+func getSubscriptionHub(scope callScope) (*hubSubscription, error) {
 	var out struct {
 		Subscription *hubSubscription `json:"subscription"`
 	}
-	if err := hubRequest(http.MethodGet, "/api/client/subscription", nil, &out); err != nil {
+	if err := hubRequestAs(scope, http.MethodGet, "/api/client/subscription", nil, &out); err != nil {
 		return nil, err
 	}
 	return out.Subscription, nil

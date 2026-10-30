@@ -3,11 +3,14 @@
 package mobile
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/state"
 )
 
 // newSignedInHub starts a signed-in install, license "lk", against a fake hub.
@@ -127,6 +130,7 @@ func TestRestoreSessionNeverServesTheCacheOverAHubAnswer(t *testing.T) {
 		{"device not registered", replyCode(404, "DEVICE_NOT_REGISTERED"), true},
 		{"server error", replyCode(500, "INTERNAL_ERROR"), false},
 		{"locked out", replyCode(429, "AUTH_LOCKED"), false},
+		{"an answer that does not decode", replyWith(http.StatusOK, "not a list"), false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -135,15 +139,21 @@ func TestRestoreSessionNeverServesTheCacheOverAHubAnswer(t *testing.T) {
 			if _, err := RestoreSession(); err != nil {
 				t.Fatalf("online RestoreSession: %v", err)
 			}
+			cache := s.Get(keyServers)
 
 			h.handle("/api/client/regions", tc.reply)
 			raw, err := RestoreSession()
 			if err == nil {
 				t.Fatalf("a hub answer was papered over with the cache: %s", raw)
 			}
-			signedOut := s.Get(keyLicense) == "" && s.Get(keyServers) == ""
-			if signedOut != tc.signsOut {
-				t.Fatalf("signed out = %v, want %v (store %v)", signedOut, tc.signsOut, s.values)
+			if tc.signsOut {
+				if s.Get(keyLicense) != "" || s.Get(keyServers) != "" {
+					t.Fatalf("store %v, want the session and its cache gone", s.values)
+				}
+				return
+			}
+			if s.Get(keyLicense) != "lk" || cache == "" || s.Get(keyServers) != cache {
+				t.Fatalf("store %v, want the session and its cache kept", s.values)
 			}
 		})
 	}
@@ -274,7 +284,7 @@ func TestLoginRefetchesServersForThisDevice(t *testing.T) {
 }
 
 func TestLoginKeepsTheLoginListWhenTheRefetchFails(t *testing.T) {
-	initForTest(t, nil)
+	s, _ := initForTest(t, nil)
 	h := newFakeHub(t)
 	h.handle("/api/client/token-login", replyWith(http.StatusOK, map[string]any{
 		"vpnAccessToken": "lk", "user": map[string]string{}, "servers": regionsWith(t, "another-device"),
@@ -287,6 +297,35 @@ func TestLoginKeepsTheLoginListWhenTheRefetchFails(t *testing.T) {
 	}
 	if _, srvs, _, _ := sessionState(); len(srvs) != 1 || srvs[0].Cloak.UID != "another-device" {
 		t.Fatalf("servers = %+v, want the login list", srvs)
+	}
+	if cached := s.Get(keyServers); cached != "" {
+		t.Fatalf("cached %s: the login list may carry another device's Cloak UID", cached)
+	}
+}
+
+// Login re-asserts the identity it registered, so whatever dropped it while
+// the login was in flight cannot leave a license with no identity beside it.
+func TestLoginStoresTheIdentityItRegistered(t *testing.T) {
+	ident := mustIdentity(t)
+	s, _ := initForTest(t, map[string]string{keyIdentity: ident.marshal()})
+	h := newFakeHub(t)
+	answerALogin(t, h)
+	h.handle("/api/device/register", func(fakeRequest) (int, any) {
+		mu.Lock()
+		identity = nil
+		mu.Unlock()
+		s.Set(keyIdentity, "")
+		return http.StatusOK, map[string]string{"deviceId": "d1", "assignedIp": "10.0.0.2"}
+	})
+
+	if _, err := Login("token"); err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+	if stored, _ := parseIdentity(s.Get(keyIdentity)); stored.publicKey() != ident.pubB64 || s.Get(keyLicense) != "lk" {
+		t.Fatalf("store = %v, want the license beside the identity Login registered", s.values)
+	}
+	if _, _, _, kept := sessionState(); kept.publicKey() != ident.pubB64 {
+		t.Fatal("Login left a different identity in memory than the one it registered")
 	}
 }
 
@@ -395,21 +434,37 @@ func TestReloadDropsTheServersOfAnotherSession(t *testing.T) {
 	}
 }
 
+// keyedTunnel carries non-zero key material, so a scrub is visible.
+func keyedTunnel(serverID string) *preparedTunnel {
+	return &preparedTunnel{
+		serverID: serverID, profile: &state.Profile{},
+		wgPrivateKeyRaw: bytes.Repeat([]byte{1}, 32), serverPubKeyRaw: bytes.Repeat([]byte{2}, 32),
+		presharedKeyRaw: bytes.Repeat([]byte{3}, 32),
+	}
+}
+
+func scrubbed(p *preparedTunnel) bool {
+	return bytes.Equal(p.wgPrivateKeyRaw, make([]byte, 32)) && bytes.Equal(p.presharedKeyRaw, make([]byte, 32))
+}
+
 func TestEndingASessionDropsThePreparedKey(t *testing.T) {
-	for name, end := range map[string]func(){
-		"Logout":         Logout,
-		"signOutLocally": signOutLocally,
-		"Wipe":           func() { _ = Wipe() },
+	for name, end := range map[string]func(*memoryStore){
+		"Logout":         func(*memoryStore) { Logout() },
+		"signOutLocally": func(*memoryStore) { signOutLocally(captureScope()) },
+		"Wipe":           func(*memoryStore) { _ = Wipe() },
+		"Reload":         func(s *memoryStore) { s.Set(keyLicense, "lk2"); _ = Reload() },
 	} {
 		t.Run(name, func(t *testing.T) {
-			newSignedInHub(t)
-			mu.Lock()
-			prepared = &preparedTunnel{serverID: "fra", presharedKeyRaw: make([]byte, 32)}
-			mu.Unlock()
+			s, _, _ := newSignedInHub(t)
+			dropped := keyedTunnel("fra")
+			stagePrepared(dropped)
 
-			end()
+			end(s)
 			if _, _, p, _ := sessionState(); p != nil {
 				t.Fatalf("prepared = %+v, want it and its pre-shared key gone", p)
+			}
+			if !scrubbed(dropped) {
+				t.Fatal("the dropped config's private and pre-shared keys were left in memory")
 			}
 		})
 	}

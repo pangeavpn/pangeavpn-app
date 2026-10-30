@@ -18,6 +18,14 @@ var errSubscriptionExpired = errors.New("SUBSCRIPTION_EXPIRED: this account's su
 // NO_SUBSCRIPTION marker, so the text must avoid every sign-out marker.
 var errNoSubscription = errors.New("NO_SUBSCRIPTION: this account has no active subscription")
 
+// errUndecodableAnswer is a 2xx whose body did not decode: the hub was reached,
+// so no cache may stand in for it.
+var errUndecodableAnswer = errors.New("decode hub response")
+
+func undecodableAnswer(err error) error {
+	return fmt.Errorf("%w: %w", errUndecodableAnswer, err)
+}
+
 // hubAnswerError is a status the hub itself sent through the sealed channel.
 type hubAnswerError struct {
 	Status int
@@ -77,7 +85,8 @@ func hubErrorCode(err error) string {
 // being reached; only the latter may fall back to a cache.
 func hubAnswered(err error) bool {
 	var answer *hubAnswerError
-	return errors.As(err, &answer) || errors.Is(err, errSubscriptionExpired) || errors.Is(err, errNoSubscription)
+	return errors.As(err, &answer) || errors.Is(err, errSubscriptionExpired) ||
+		errors.Is(err, errNoSubscription) || errors.Is(err, errUndecodableAnswer)
 }
 
 // signOutCodes are the answers that say the stored session is dead for good.

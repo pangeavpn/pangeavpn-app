@@ -129,6 +129,23 @@ func TestHopProfileRelaysThroughTheEntry(t *testing.T) {
 	}
 }
 
+func TestHopProfileRefusesAHopForAnotherRoute(t *testing.T) {
+	entry := decodeServer(t, hubServerJSON)
+	exit := &serverInfo{ID: "fra-1", Name: "Frankfurt"}
+	wrongEntry, wrongExit, swapped := fullHop(), fullHop(), fullHop()
+	wrongEntry.EntryRegion = "par-1"
+	wrongExit.ExitRegion = "ams-1"
+	swapped.EntryRegion, swapped.ExitRegion = "fra-1", "lon-1"
+	for name, hop := range map[string]*state.HopProfile{"another entry": wrongEntry, "another exit": wrongExit, "swapped": swapped} {
+		t.Run(name, func(t *testing.T) {
+			got, err := hopProfile(exit, entry, hop)
+			if err == nil || !strings.Contains(err.Error(), "does not match") {
+				t.Fatalf("got %+v, %v, want a mismatch refusal", got, err)
+			}
+		})
+	}
+}
+
 func TestHopProfileRefusesAPartialHop(t *testing.T) {
 	partial := fullHop()
 	partial.SingBoxPort = 0

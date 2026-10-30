@@ -57,7 +57,7 @@ func resetGlobals() {
 	licenseKey, identity, servers, prepared = "", nil, nil, nil
 	preferredTransport, transportMem, transportMemPath = "", nil, ""
 	settings = defaultConfig()
-	activeTunnel, wgLogs = nil, nil
+	activeTunnel, starting, wgLogs = nil, nil, nil
 	currentStatus = statusJSON{}
 }
 

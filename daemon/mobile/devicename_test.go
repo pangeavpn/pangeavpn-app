@@ -24,6 +24,17 @@ func TestValidateDeviceNameMatchesTheHub(t *testing.T) {
 		{"C0 control", "a\x00b", "", false},
 		{"C1 control", "a\u0085b", "", false},
 		{"DEL", "a\x7fb", "", false},
+		{"right-to-left override", "Phone‮gpj.exe", "", false},
+		{"left-to-right embedding", "a‪b", "", false},
+		{"pop directional formatting", "a‬b", "", false},
+		{"right-to-left isolate", "a⁧b", "", false},
+		{"pop directional isolate", "a⁩b", "", false},
+		{"left-to-right mark", "a‎b", "", false},
+		{"right-to-left mark", "a‏b", "", false},
+		{"arabic letter mark", "a؜b", "", false},
+		{"ZWJ family emoji", "Family \U0001F468‍\U0001F469‍\U0001F467", "Family \U0001F468‍\U0001F469‍\U0001F467", true},
+		{"zero-width non-joiner", "a‌b", "a‌b", true},
+		{"arabic name", "هاتف", "هاتف", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

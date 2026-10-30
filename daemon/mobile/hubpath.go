@@ -185,14 +185,21 @@ func (p *hubPath) roundTrips() bool {
 	return err == nil
 }
 
+// hubSearch is searchHub; tests replace it to stay off the network.
+var hubSearch = searchHub
+
 // ensureHubPath finds a working way to reach the hub, trying each enabled
 // method in order and caching whatever wins until it stops working.
-func ensureHubPath() error {
+func ensureHubPath(wipe uint64) error {
 	hubResolveMu.Lock()
 	defer hubResolveMu.Unlock()
 
-	// A settings change mid-search discards the result, so allow one rerun.
+	// A settings change mid-search discards the result, so allow one rerun;
+	// a Wipe ends the request instead of searching again under the defaults.
 	for attempt := 0; attempt < 2; attempt++ {
+		if currentWipeEpoch() != wipe {
+			return errSessionEnded
+		}
 		hubMu.Lock()
 		if activeHubPath != nil {
 			hubMu.Unlock()
@@ -205,7 +212,7 @@ func ensureHubPath() error {
 		generation := hubTrack.generation
 		hubMu.Unlock()
 
-		path, err := searchHub()
+		path, err := hubSearch(wipe)
 		hubMu.Lock()
 		if hubTrack.generation != generation {
 			hubMu.Unlock()
@@ -227,8 +234,8 @@ func ensureHubPath() error {
 }
 
 // searchHub walks the enabled methods, spending the dead drop once when every
-// method is out of addresses that work.
-func searchHub() (*hubPath, error) {
+// method is out of addresses that work. Its cache writes stop at a Wipe.
+func searchHub(wipe uint64) (*hubPath, error) {
 	mu.Lock()
 	current := settings
 	logs := wgLogs
@@ -236,12 +243,12 @@ func searchHub() (*hubPath, error) {
 	methods := current.HubMethods.normalize()
 
 	try := func(method string) (*hubPath, bool) {
-		path := tryHubMethod(method, logs)
+		path := tryHubMethod(wipe, method, logs)
 		return path, path != nil
 	}
 	var reseed func() bool
 	if current.DeadDrop {
-		reseed = func() bool { return reseedFromDeadDrop(logs) }
+		reseed = func() bool { return reseedFromDeadDrop(wipe, logs) }
 	}
 	path, ok := searchHubMethods(methods.enabled(), try, reseed)
 	if !ok {
@@ -256,16 +263,16 @@ func searchHub() (*hubPath, error) {
 	return path, nil
 }
 
-func tryHubMethod(method string, logs *state.LogStore) *hubPath {
+func tryHubMethod(wipe uint64, method string, logs *state.LogStore) *hubPath {
 	switch method {
 	case "directIp":
-		return tryDirectIPPaths()
+		return tryDirectIPPaths(wipe)
 	case "reality":
-		return tryRealityPath(logs)
+		return tryRealityPath(wipe, logs)
 	case "shadowsocks":
-		return tryShadowsocksPath(logs)
+		return tryShadowsocksPath(wipe, logs)
 	case "fronted":
-		return tryFrontedPath()
+		return tryFrontedPath(wipe)
 	case "normal":
 		return tryNormalPaths()
 	}
@@ -274,7 +281,7 @@ func tryHubMethod(method string, logs *state.LogStore) *hubPath {
 
 // tryDirectIPPaths tries the last known good IP first, since it needs no
 // lookup at all, then a DoH-resolved one.
-func tryDirectIPPaths() *hubPath {
+func tryDirectIPPaths(wipe uint64) *hubPath {
 	cached := storedValue(keyHubIP)
 	if isIPv4Literal(cached) {
 		if path := newDirectIPPath(cached); path.probe() {
@@ -289,19 +296,22 @@ func tryDirectIPPaths() *hubPath {
 	if !path.probe() {
 		return nil
 	}
-	setStoredValue(keyHubIP, ip)
+	rememberHubIP(wipe, ip)
 	return path
 }
 
+// rememberHubIP caches the one address the direct method tries first.
+func rememberHubIP(wipe uint64, ip string) { setStoredSince(wipe, keyHubIP, ip) }
+
 // tryRealityPath walks every cached node: one whose user has rotated must not
 // end the search.
-func tryRealityPath(logs *state.LogStore) *hubPath {
+func tryRealityPath(wipe uint64, logs *state.LogStore) *hubPath {
 	cached := loadHubReality()
 	for index, creds := range cached {
 		manager, port, err := startRealityHubProxy(creds, logs)
 		if path := adoptProxyPath("reality", creds.RemoteHost, manager, port, err, logs); path != nil {
 			if promoted := promoteEntry(cached, index); promoted != nil {
-				saveHubReality(promoted)
+				saveHubReality(wipe, promoted)
 			}
 			return path
 		}
@@ -309,13 +319,13 @@ func tryRealityPath(logs *state.LogStore) *hubPath {
 	return nil
 }
 
-func tryShadowsocksPath(logs *state.LogStore) *hubPath {
+func tryShadowsocksPath(wipe uint64, logs *state.LogStore) *hubPath {
 	cached := loadHubShadowsocks()
 	for index, creds := range cached {
 		manager, port, err := startShadowsocksHubProxy(creds, logs)
 		if path := adoptProxyPath("shadowsocks", creds.RemoteHost, manager, port, err, logs); path != nil {
 			if promoted := promoteCreds(cached, index); promoted != nil {
-				saveHubShadowsocks(promoted)
+				saveHubShadowsocks(wipe, promoted)
 			}
 			return path
 		}
@@ -371,13 +381,13 @@ func adoptProxyPath(kind, node string, manager hubProxy, port int, startErr erro
 	return path
 }
 
-func tryFrontedPath() *hubPath {
+func tryFrontedPath(wipe uint64) *hubPath {
 	cached := loadFrontedEndpoints()
 	for index, host := range cached {
 		path := newFrontedPath(host)
 		if path.probe() {
 			if promoted := promoteFrontedEndpoint(cached, index); promoted != nil {
-				saveFrontedEndpoints(promoted)
+				saveFrontedEndpoints(wipe, promoted)
 			}
 			return path
 		}
@@ -442,24 +452,15 @@ func storedValue(key string) string {
 	return s.Get(key)
 }
 
-func setStoredValue(key, value string) {
-	mu.Lock()
-	s := store
-	mu.Unlock()
-	if s != nil {
-		s.Set(key, value)
-	}
-}
-
 func loadStoredJSON(key string, out any) {
 	if raw := storedValue(key); raw != "" {
 		_ = json.Unmarshal([]byte(raw), out)
 	}
 }
 
-func saveStoredJSON(key string, value any) {
+func saveStoredJSON(wipe uint64, key string, value any) {
 	if b, err := json.Marshal(value); err == nil {
-		setStoredValue(key, string(b))
+		setStoredSince(wipe, key, string(b))
 	}
 }
 
@@ -469,7 +470,7 @@ func loadFrontedEndpoints() []string {
 	return seedFrontedEndpoints(stored)
 }
 
-func saveFrontedEndpoints(list []string) { saveStoredJSON(keyFronted, list) }
+func saveFrontedEndpoints(wipe uint64, list []string) { saveStoredJSON(wipe, keyFronted, list) }
 
 func loadHubShadowsocks() []hubShadowsocksCreds {
 	var stored []hubShadowsocksCreds
@@ -477,7 +478,9 @@ func loadHubShadowsocks() []hubShadowsocksCreds {
 	return seedHubShadowsocks(stored)
 }
 
-func saveHubShadowsocks(list []hubShadowsocksCreds) { saveStoredJSON(keyHubSS, list) }
+func saveHubShadowsocks(wipe uint64, list []hubShadowsocksCreds) {
+	saveStoredJSON(wipe, keyHubSS, list)
+}
 
 func loadHubReality() []hubRealityCreds {
 	var stored []hubRealityCreds
@@ -485,18 +488,18 @@ func loadHubReality() []hubRealityCreds {
 	return seedHubReality(stored)
 }
 
-func saveHubReality(list []hubRealityCreds) { saveStoredJSON(keyHubReality, list) }
+func saveHubReality(wipe uint64, list []hubRealityCreds) { saveStoredJSON(wipe, keyHubReality, list) }
 
 // rememberHubDiscovery caches what a hub response advertised, so a later start
 // has more than one way back in.
-func rememberHubDiscovery(routes hubRoutes) {
+func rememberHubDiscovery(wipe uint64, routes hubRoutes) {
 	if merged := mergeFrontedEndpoints(loadFrontedEndpoints(), routes.fronted); merged != nil {
-		saveFrontedEndpoints(merged)
+		saveFrontedEndpoints(wipe, merged)
 	}
 	if merged := mergeAdvertisedCreds(loadHubShadowsocks(), routes.shadowsocks); merged != nil {
-		saveHubShadowsocks(merged)
+		saveHubShadowsocks(wipe, merged)
 	}
 	if merged := mergeAdvertisedHubReality(loadHubReality(), routes.reality); merged != nil {
-		saveHubReality(merged)
+		saveHubReality(wipe, merged)
 	}
 }

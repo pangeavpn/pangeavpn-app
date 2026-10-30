@@ -63,9 +63,12 @@ func Reload() error {
 		return nil
 	}
 
-	loaded, decodeErr := readStoredState(s)
 	memory := openTransportMemory(path, logs)
 
+	// Under the gate, so the license and identity read are one pair a Login
+	// in this process stored together, never half of an old one.
+	storeGate.Lock()
+	loaded, decodeErr := readStoredState(s)
 	mu.Lock()
 	sessionChanged := loaded.licenseKey != licenseKey || loaded.identity.publicKey() != identity.publicKey()
 	methodsChanged := loaded.settings.HubMethods != settings.HubMethods
@@ -77,13 +80,15 @@ func Reload() error {
 	// A config provisioned for another account or device must not be started,
 	// and its server list carries that device's Cloak UID.
 	if sessionChanged {
-		prepared = nil
+		setPreparedLocked(nil)
 		servers = nil
+		sessionEpoch++
 	}
 	if licenseKey == "" {
 		servers = nil
 	}
 	mu.Unlock()
+	storeGate.Unlock()
 
 	if methodsChanged {
 		invalidateHubPath()

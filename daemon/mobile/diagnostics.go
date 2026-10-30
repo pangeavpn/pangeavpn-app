@@ -119,16 +119,31 @@ func capSections(sections []diagnosticsSection, budget int) []diagnosticsSection
 	return out
 }
 
-// normalizeNote trims, keeps the first 500 runes and redacts; "" omits the field.
+// normalizeNote redacts the whole note before keeping its first 500 runes, so
+// a cut never leaves part of a secret behind; "" omits the field.
 func normalizeNote(note, home string) string {
 	trimmed := strings.TrimFunc(note, isJSSpace)
 	if trimmed == "" {
 		return ""
 	}
-	if utf8.RuneCountInString(trimmed) > diagMaxNoteChars {
-		trimmed = string([]rune(trimmed)[:diagMaxNoteChars])
+	redacted := redactDiagnostics(trimmed, home)
+	if utf8.RuneCountInString(redacted) <= diagMaxNoteChars {
+		return redacted
 	}
-	return redactDiagnostics(trimmed, home)
+	cut := string([]rune(redacted)[:diagMaxNoteChars])
+	return strings.TrimRightFunc(dropCutMarker(cut), isJSSpace)
+}
+
+// dropCutMarker removes a [redacted:...] marker the cut ran through.
+func dropCutMarker(cut string) string {
+	open := strings.LastIndexByte(cut, '[')
+	if open < 0 || strings.IndexByte(cut[open:], ']') >= 0 {
+		return cut
+	}
+	if tail := cut[open:]; strings.HasPrefix(tail, "[redacted:") || strings.HasPrefix("[redacted:", tail) {
+		return cut[:open]
+	}
+	return cut
 }
 
 // ringSection treats text as untrusted: it is tailed and redacted even when

@@ -88,8 +88,8 @@ func TestPrepareSendsNoOfferWhenPostQuantumIsOff(t *testing.T) {
 	if string(body["region"]) != `"fra-1"` || string(body["licenseKey"]) != `"lk"` {
 		t.Fatalf("register body = %v, want region fra-1 and the license", body)
 	}
-	if p := preparedNow(); p != nil && p.presharedKeyRaw != nil {
-		t.Fatal("an unoffered peer got a pre-shared key")
+	if p := preparedNow(); p == nil || p.presharedKeyRaw != nil {
+		t.Fatalf("prepared %+v, want a config with no pre-shared key", p)
 	}
 }
 
@@ -194,6 +194,56 @@ func TestPrepareFailureKeepsThePreviousConfig(t *testing.T) {
 	}
 	if p := preparedNow(); p != previous || p.entryServerID != "C" {
 		t.Fatalf("prepared = %+v, want the previous config kept", p)
+	}
+}
+
+func TestPrepareScrubsTheConfigItReplaces(t *testing.T) {
+	h := signedInWith(t, serverInfo{ID: "B", Name: "Bravo"})
+	answerRegister(h, nil)
+	previous := keyedTunnel("A")
+	stagePrepared(previous)
+
+	if _, err := Prepare("B"); err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	if !scrubbed(previous) {
+		t.Fatal("the replaced config's keys were left in memory")
+	}
+	if p := preparedNow(); p == previous || bytes.Equal(p.wgPrivateKeyRaw, make([]byte, 32)) {
+		t.Fatal("the new config was scrubbed instead")
+	}
+}
+
+func TestAStartHoldsThePreparedKeysUntilItEnds(t *testing.T) {
+	signedInWith(t)
+	held := keyedTunnel("A")
+	stagePrepared(held)
+	attempt, err := claimStart()
+	if err != nil {
+		t.Fatalf("claimStart: %v", err)
+	}
+
+	Logout()
+	if scrubbed(held) {
+		t.Fatal("the keys were scrubbed while a start was still configuring WireGuard with them")
+	}
+	finishStart(attempt)
+	if !scrubbed(held) {
+		t.Fatal("the keys outlived the start that held them")
+	}
+}
+
+func TestAFinishedStartKeepsTheConfigStillPrepared(t *testing.T) {
+	signedInWith(t)
+	kept := keyedTunnel("A")
+	stagePrepared(kept)
+	attempt, err := claimStart()
+	if err != nil {
+		t.Fatalf("claimStart: %v", err)
+	}
+	finishStart(attempt)
+	if scrubbed(kept) {
+		t.Fatal("a finished start scrubbed the config a later Start reuses")
 	}
 }
 

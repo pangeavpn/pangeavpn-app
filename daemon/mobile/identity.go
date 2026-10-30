@@ -67,13 +67,19 @@ func (k *identityKeyPair) marshal() string {
 	return string(b)
 }
 
-// forgetIdentity drops the identity only while it is still pub, in memory and
-// in the store, so a Login that raced ahead keeps its fresh key.
-func forgetIdentity(pub string) {
+// forgetIdentityIf drops pub, in memory and in the store, only while the session
+// that deregistered it is current: a sign-in since may be reusing it.
+func forgetIdentityIf(session uint64, pub string) {
 	if pub == "" {
 		return
 	}
+	storeGate.Lock()
+	defer storeGate.Unlock()
 	mu.Lock()
+	if sessionEpoch != session {
+		mu.Unlock()
+		return
+	}
 	st := store
 	if identity.publicKey() == pub {
 		identity = nil

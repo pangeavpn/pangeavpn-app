@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"crypto/mlkem"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
+	"os/exec"
 	"strings"
 	"testing"
 
@@ -76,10 +78,43 @@ func TestParsePQAnswer(t *testing.T) {
 	}
 }
 
+// nodePQCiphertext and nodePQKey are what the node agent's responder (Node's
+// ML-KEM and HKDF) answered to the encapsulation key of nodePQSeed.
+var (
+	nodePQCiphertext = "" +
+		"1nmGE13XrshQSgez5sUTLdTBkDdk7+UgyuJxZXfCVfFJTx+Yudi+nxH6EZXUnpESh0KJ63fx0N3MQup5jjbpeIIbvwJyFgge" +
+		"oKkQWXbpDltvjl3emxfWIhpZp0FY2ZNhDcikAfxpjSdmI7vi4prT/Q9jnQ7Cxpjatx0yVhmdQloiZ2vWxkCxrymzdkCPdLOV" +
+		"wjttnWch5SI5t++wZvSVVVcLkItzIYiHQc+ruRuXH3qP31EhzCme53IFSS+T5IoNHlMJ2w9O9sZHhZ+nWD+oBfuvHaGwnQ3E" +
+		"vtltARMvBKri2fEnDLLbsomgRNTH5jYibZXMH/eccRnK9vF4Pxldclk4OOPCeWtXTJcc6Zb4RpjiXfsK13B1fyPsfLdsplBj" +
+		"urpEXCqPl8qRxsV/sMRQTkGqJlnhzhnnZBEGSZEf+tssexQbqjuGNsmv6TDLTszNYperFL2Srpwt+cYTmyys+7Aaqc4CdhHP" +
+		"vRq0hPIYtRZGAXgJpf4l0rTGTxYEBYkyqopRUaWef3zoRw1DRAUiuuy6HC5i0hMvhQfcuRMuTg1Jokj+9+sXb3q7p6WL0WxI" +
+		"1/KHucOAM5jVXmJBs7LpUa55pxRtZsrtcNndNA9P/QiJhOJHDvUAoGCGKx9XRGmGL/9efuxg3NfpqqFIH4xvLGykvYTmO75S" +
+		"yue3sv0XPDXItJ6R/PxuFyLSkIQJAHLSyvuWm7Wt7ymke8eljkzK3ES2e1E85FS8faCgcfkLUmt8DEb2U7Z00PMyFcXHK5Vu" +
+		"2PQJwO60KsinPX/jctdytxJe+GUx+zuJHc9MzU7+/xl2oTQkmP4ou0aJRESAymb3E1d7vq4tzynUsmcvmYEybt4Y7Cax6EuS" +
+		"odCaTEsL/hhWMyCfvQcG2XOm4u+oE72CrYTqTUnlAnYgvu+NC7l8iG9vR0mvtF7SWSa+hZKDxc8Qz66tqIB7MimKkI2q/DE2" +
+		"42WWFe+8kZgggNJGTSzKDzJZ0fkroIDisgMjOcr5SET9TpS2iACcYpSvUftX5KnJzWVJdh28Y+3tdj+XR+e+iOHOyYTer3lW" +
+		"kcrjAoG8fbc3KT+R2W2IW49rvqcluASPivo/ekQkIRSbVkK7nDKWJBleNW6+cL6fyZQInx4bTLIqwrcizp6FmlfZDV1DDrzq" +
+		"TCbewUBo5MVzzPht+K6nmIoyPk+GcDYeZT34zOMteMxo9zCgkQwd0U2ywq9gIud8kaMCldHmJvy/2VQmVayjHNUh4yokhOfv" +
+		"2hriK8b1X7NI79pd4NYVCXTVPvn4+wT8M39cCS9gIUcbnHBsk+D07RJTgXTRtNFmVDfGSxJbxUMEf+0f2WncykHkBYlQ6vzP" +
+		"kuglAYkHvrZcqBVFWDwwZJyEZOYgXVW6hB7LXS35AXJm8opHNdqY4e8eOKTCcUy8WDbVYsICl8eATnpJ/vwqD9OOU9vL1876" +
+		"UP0nUSb/+q0="
+	nodePQKey = "995d6f48d5a4252e05cc74ac9b644ad0a00e84c75cf3ca7bd8169be7485821c4"
+)
+
+func nodePQSeed() []byte {
+	seed := make([]byte, mlkem.SeedSize)
+	for i := range seed {
+		seed[i] = byte(i)
+	}
+	return seed
+}
+
 func TestFinishPQAgreesWithTheNode(t *testing.T) {
-	dk := mustDecapsulationKey(t)
-	raw, nodePSK := nodeAnswer(t, newPQOffer(dk))
-	answer, err := parsePQAnswer(true, raw)
+	dk, err := mlkem.NewDecapsulationKey768(nodePQSeed())
+	if err != nil {
+		t.Fatalf("NewDecapsulationKey768: %v", err)
+	}
+	answer, err := parsePQAnswer(true, json.RawMessage(`{"algorithm":"ml-kem-768","kemCiphertext":"`+nodePQCiphertext+`"}`))
 	if err != nil {
 		t.Fatalf("parsePQAnswer: %v", err)
 	}
@@ -88,8 +123,48 @@ func TestFinishPQAgreesWithTheNode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("finishPQ: %v", err)
 	}
-	if len(got) != pq.PresharedKeySize || !bytes.Equal(got, nodePSK) {
-		t.Fatalf("got %x, want the node's %x", got, nodePSK)
+	if hex.EncodeToString(got) != nodePQKey {
+		t.Fatalf("got %x, want the node's %s", got, nodePQKey)
+	}
+}
+
+// Runs the node agent's responder live when a Node with ML-KEM is on PATH,
+// the same script daemon/internal/pq checks its own half against.
+func TestFinishPQAgreesWithALiveNode(t *testing.T) {
+	const script = `
+const c = require("node:crypto");
+if (typeof c.encapsulate !== "function") { process.stdout.write("unsupported"); process.exit(0); }
+const raw = Buffer.from(process.argv[1], "base64");
+const spki = Buffer.concat([Buffer.from("308204b2300b0609608648016503040402038204a100", "hex"), raw]);
+const key = c.createPublicKey({ key: spki, format: "der", type: "spki" });
+const { sharedKey, ciphertext } = c.encapsulate(key);
+const psk = c.hkdfSync("sha256", sharedKey, "", "pangea wireguard psk v1", 32);
+process.stdout.write(JSON.stringify({ ct: ciphertext.toString("base64"), psk: Buffer.from(psk).toString("hex") }));
+`
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node not on PATH")
+	}
+	dk := mustDecapsulationKey(t)
+	out, err := exec.Command("node", "-e", script, newPQOffer(dk).KEMPublicKey).Output()
+	if err != nil {
+		t.Fatalf("node: %v", err)
+	}
+	if strings.TrimSpace(string(out)) == "unsupported" {
+		t.Skip("node on PATH has no ML-KEM support")
+	}
+	var reply struct {
+		CT  string `json:"ct"`
+		PSK string `json:"psk"`
+	}
+	if err := json.Unmarshal(out, &reply); err != nil {
+		t.Fatalf("node output %q: %v", out, err)
+	}
+	got, err := finishPQ(dk, &pqAnswer{Algorithm: pq.Algorithm, KEMCiphertext: reply.CT})
+	if err != nil {
+		t.Fatalf("finishPQ: %v", err)
+	}
+	if hex.EncodeToString(got) != reply.PSK {
+		t.Fatalf("mobile derived %x, Node derived %s", got, reply.PSK)
 	}
 }
 
