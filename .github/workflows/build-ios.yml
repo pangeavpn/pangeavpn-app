@@ -268,7 +268,7 @@ jobs:
     name: Screen gallery
     needs: core
     runs-on: macos-26
-    timeout-minutes: 35
+    timeout-minutes: 60
     env:
       # One simulator per size; the image ships no SE, so it is created.
       GALLERY_DEVICES: |-
@@ -278,8 +278,7 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
-      # Booted one at a time in the background, so the boots overlap the build.
-      - name: Create and boot the gallery simulators
+      - name: Create the gallery simulators
         id: sims
         run: |
           sdk=$(xcrun --sdk iphonesimulator --show-sdk-version)
@@ -311,7 +310,6 @@ jobs:
             udids+=("$udid")
           done <<<"$GALLERY_DEVICES"
           echo "udids=${udids[*]}" >>"$GITHUB_OUTPUT"
-          nohup bash -c 'for udid in "$@"; do xcrun simctl boot "$udid"; done' _ "${udids[@]}" >/dev/null 2>&1 &
 
       - name: Fetch the xcframework
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
@@ -344,20 +342,17 @@ jobs:
           IFS=. read -r major minor patch <<<"${version%%-*}"
           echo "marketing=$major.$minor.${patch:-0}" >>"$GITHUB_OUTPUT"
 
-      - name: Wait for the simulators and pin their chrome
-        timeout-minutes: 10
+      # Built once, then run per iPhone, so no simulator boots while the compiler holds the CPU.
+      - name: Build the gallery tests
+        timeout-minutes: 15
+        working-directory: apps/ios
         env:
-          UDIDS: ${{ steps.sims.outputs.udids }}
+          MARKETING: ${{ steps.version.outputs.marketing }}
         run: |
-          for udid in $UDIDS; do
-            perl -e 'alarm 300; exec @ARGV' xcrun simctl bootstatus "$udid" -b
-            xcrun simctl status_bar "$udid" override --time 9:41 \
-              --dataNetwork wifi --wifiMode active --wifiBars 3 \
-              --cellularMode active --cellularBars 4 \
-              --batteryState charged --batteryLevel 100
-            # Reduce Motion stops the map orbit and status pulses, so frames hold still.
-            xcrun simctl spawn "$udid" defaults write com.apple.Accessibility ReduceMotionEnabled -bool true
-          done
+          xcodebuild build-for-testing -scheme PangeaVPN \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/derived" \
+            MARKETING_VERSION="$MARKETING"
 
       # Answers each test's request with a real screenshot, status bar included.
       - name: Start the framebuffer watcher
@@ -378,22 +373,40 @@ jobs:
               sleep 0.1
             done' _ "$SCREENS" >"$RUNNER_TEMP/framebuffer-watcher.log" 2>&1 &
 
+      # One iPhone at a time: three booted simulators starve the 3-core runner and stall boots.
       - name: Render the screens
-        timeout-minutes: 20
+        timeout-minutes: 40
         working-directory: apps/ios
         env:
           UDIDS: ${{ steps.sims.outputs.udids }}
-          MARKETING: ${{ steps.version.outputs.marketing }}
           TEST_RUNNER_PANGEA_SCREENS_DIR: ${{ runner.temp }}/screens
           TEST_RUNNER_PANGEA_SCREENS_FRAMEBUFFER: '1'
         run: |
-          destinations=()
-          for udid in $UDIDS; do destinations+=(-destination "id=$udid"); done
-          xcodebuild test -scheme PangeaVPN "${destinations[@]}" \
-            -only-testing:PangeaVPNTests/ScreenGalleryTests \
-            -disable-concurrent-destination-testing \
-            -parallel-testing-enabled NO \
-            MARKETING_VERSION="$MARKETING"
+          failed=0
+          for udid in $UDIDS; do
+            echo "::group::$udid"
+            xcrun simctl boot "$udid" || true
+            if ! perl -e 'alarm 900; exec @ARGV' xcrun simctl bootstatus "$udid" -b; then
+              echo "::error::simulator $udid did not finish booting"
+              failed=1
+              echo "::endgroup::"
+              continue
+            fi
+            xcrun simctl status_bar "$udid" override --time 9:41 \
+              --dataNetwork wifi --wifiMode active --wifiBars 3 \
+              --cellularMode active --cellularBars 4 \
+              --batteryState charged --batteryLevel 100
+            # Reduce Motion stops the map orbit and status pulses, so frames hold still.
+            xcrun simctl spawn "$udid" defaults write com.apple.Accessibility ReduceMotionEnabled -bool true
+            xcodebuild test-without-building -scheme PangeaVPN \
+              -destination "id=$udid" \
+              -derivedDataPath "$RUNNER_TEMP/derived" \
+              -only-testing:PangeaVPNTests/ScreenGalleryTests \
+              -parallel-testing-enabled NO || failed=1
+            xcrun simctl shutdown "$udid" || true
+            echo "::endgroup::"
+          done
+          exit "$failed"
 
       - name: Upload the screen gallery
         if: always()
