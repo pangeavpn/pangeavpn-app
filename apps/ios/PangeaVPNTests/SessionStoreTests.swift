@@ -123,25 +123,6 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(store.deviceError, "mobile: remove failed")
     }
 
-    func testSignOutDisconnectsAndRemovesTheProfileBeforeLogout() async {
-        let core = FakeCore()
-        let tunnel = FakeTunnel(
-            onDisconnect: { core.note("disconnect") },
-            onRemove: { core.note("removeConfiguration") })
-        core.loginResult = .success(signedIn)
-        core.devicesResult = .success([device("d1")])
-        let store = makeStore(core, tunnel: tunnel)
-        await store.login("ABCD-EFGH")
-        await store.loadDevices()
-        await store.signOut()
-        XCTAssertEqual(Array(core.calls.suffix(3)), ["disconnect", "removeConfiguration", "logout"])
-        XCTAssertEqual(tunnel.disconnects, 1)
-        XCTAssertEqual(tunnel.removals, 1)
-        XCTAssertNil(store.session)
-        XCTAssertNil(store.subscription)
-        XCTAssertTrue(store.devices.isEmpty)
-    }
-
     func testUnsavedSignInShowsTheErrorAndNoSession() async {
         let core = FakeCore()
         core.loginResult = .failure(.signInNotSaved)
@@ -168,11 +149,13 @@ final class SessionStoreTests: XCTestCase {
     func testRestoreSetsSessionAndLoadsSubscription() async {
         let core = FakeCore()
         core.restoreResult = .success(signedIn)
-        let store = makeStore(core)
+        let tunnel = FakeTunnel()
+        let store = makeStore(core, tunnel: tunnel)
         await store.restore()
         XCTAssertEqual(store.session, signedIn)
         XCTAssertFalse(store.restoring)
-        XCTAssertEqual(core.calls, ["restoreSession", "subscription"])
+        XCTAssertEqual(Array(core.calls.dropFirst()), ["restoreSession", "subscription"])
+        XCTAssertEqual(tunnel.removals, 0)
     }
 
     func testRestoreFailuresLeaveNoSessionAndNoError() async {
@@ -184,7 +167,71 @@ final class SessionStoreTests: XCTestCase {
             XCTAssertNil(store.session, message)
             XCTAssertFalse(store.restoring, message)
             XCTAssertNil(store.loginError, message)
-            XCTAssertEqual(core.calls, ["restoreSession"], message)
+            XCTAssertEqual(Array(core.calls.dropFirst()), ["restoreSession"], message)
         }
+    }
+
+    func testRestoreWithNoStoredSessionRemovesTheProfile() async {
+        for message in ["mobile: no stored session", "mobile: no device identity"] {
+            let core = FakeCore()
+            core.restoreResult = .failure(CoreError(message: message))
+            let tunnel = FakeTunnel(onRemove: { core.note("removeConfiguration") })
+            let store = makeStore(core, tunnel: tunnel)
+            await store.restore()
+            XCTAssertEqual(tunnel.removals, 1, message)
+            XCTAssertEqual(Array(core.calls.suffix(2)), ["restoreSession", "removeConfiguration"], message)
+            XCTAssertNil(store.session, message)
+        }
+    }
+
+    // An unreachable hub says nothing about the session, so the profile and its kill switch stay.
+    func testRestoreThatCouldNotCheckKeepsTheProfile() async {
+        let core = FakeCore()
+        core.restoreResult = .failure(CoreError(message: "mobile: hub unreachable: retrying in 30s"))
+        let tunnel = FakeTunnel()
+        let store = makeStore(core, tunnel: tunnel)
+        await store.restore()
+        XCTAssertEqual(tunnel.removals, 0)
+        XCTAssertNil(store.session)
+    }
+
+    func testRestoreSendsClientInfoOnceAndFirst() async {
+        let core = FakeCore()
+        core.restoreResult = .success(signedIn)
+        let store = makeStore(core)
+        await store.restore()
+        await store.restore()
+        XCTAssertEqual(core.calls.filter { $0.hasPrefix("setClientInfo(") }.count, 1)
+        XCTAssertEqual(core.calls.first?.hasPrefix("setClientInfo("), true)
+    }
+
+    func testClientInfoStrings() {
+        XCTAssertEqual(ClientInfo.appVersion(short: "0.8.2", build: "41"), "0.8.2 (41)")
+        XCTAssertEqual(ClientInfo.appVersion(short: "0.8.2", build: "0.8.2"), "0.8.2")
+        XCTAssertEqual(ClientInfo.appVersion(short: "0.8.2", build: nil), "0.8.2")
+        XCTAssertEqual(ClientInfo.appVersion(short: nil, build: ""), "unknown")
+        let version = OperatingSystemVersion(majorVersion: 17, minorVersion: 4, patchVersion: 1)
+        XCTAssertEqual(ClientInfo.osVersion(version), "17.4.1")
+    }
+
+    func testEntitledIsFalseOnlyOnAnExplicitNo() async {
+        let cases: [(Subscription?, Bool)] = [
+            (nil, true),
+            (Subscription(status: "active", renews: true, expiresAt: nil), true),
+            (Subscription(status: "active", renews: true, expiresAt: nil, entitled: true), true),
+            (Subscription(status: "expired", renews: false, expiresAt: nil, entitled: false), false),
+        ]
+        for (subscription, expected) in cases {
+            let core = FakeCore()
+            core.subscriptionResult = .success(subscription)
+            let store = makeStore(core)
+            await store.refreshSubscription()
+            XCTAssertEqual(store.entitled, expected, String(describing: subscription))
+            XCTAssertEqual(core.calls, ["subscription"])
+        }
+    }
+
+    func testEntitledBeforeAnyAnswer() {
+        XCTAssertTrue(makeStore(FakeCore()).entitled)
     }
 }

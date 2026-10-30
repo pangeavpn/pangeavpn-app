@@ -2,6 +2,20 @@ import Foundation
 import Observation
 import os
 
+struct SessionTimeouts: Sendable {
+    let deregister: TimeInterval
+    let coreWipe: TimeInterval
+
+    // The hub search alone can outlast 8 s when censored, and sign-out must not hang on it.
+    // A panic wipe must finish even if the core is stuck; the local cleanup runs either way.
+    init(deregister: TimeInterval = 8, coreWipe: TimeInterval = 3) {
+        self.deregister = deregister
+        self.coreWipe = coreWipe
+    }
+
+    static let standard = SessionTimeouts()
+}
+
 @MainActor
 @Observable
 final class SessionStore {
@@ -9,30 +23,56 @@ final class SessionStore {
     private(set) var subscription: Subscription?
     private(set) var restoring = false
     private(set) var loggingIn = false
+    private(set) var signingOut = false
     var loginError: String?
     var showDeviceLimit = false
     private(set) var devices: [Device] = []
     private(set) var loadingDevices = false
     var deviceError: String?
 
+    // Only an explicit "not entitled" blocks connecting; an unknown answer never does.
+    var entitled: Bool { subscription?.entitled != false }
+
     private let core: any CoreBridge
     private let tunnel: any TunnelControlling
+    private let authenticator: any DeviceAuthenticating
+    private let wiper: PanicWiper
+    private let timeouts: SessionTimeouts
     // Memory only, for the device-limit retry; never persisted.
     @ObservationIgnored private var pendingToken: String?
+    @ObservationIgnored private var clientInfoSent = false
 
     private static let log = Logger(subsystem: "org.pangeavpn", category: "session")
 
-    init(core: any CoreBridge, tunnel: any TunnelControlling) {
+    init(
+        core: any CoreBridge,
+        tunnel: any TunnelControlling,
+        authenticator: any DeviceAuthenticating = DeviceOwnerAuthenticator(),
+        wiper: PanicWiper = .live(),
+        timeouts: SessionTimeouts = .standard
+    ) {
         self.core = core
         self.tunnel = tunnel
+        self.authenticator = authenticator
+        self.wiper = wiper
+        self.timeouts = timeouts
     }
 
     func restore() async {
         restoring = true
-        let restored = await restoredSession()
-        session = restored
+        await sendClientInfoOnce()
+        let outcome = await restoreOutcome()
+        session = outcome.session
         restoring = false
-        if restored != nil { await loadSubscription() }
+        switch outcome {
+        case .restored:
+            await loadSubscription()
+        case .signedOut:
+            // A profile left behind would let Connect On Demand start a tunnel that fails signed out.
+            await tunnel.removeConfiguration()
+        case .failed:
+            break
+        }
     }
 
     // A second tap while one login is in flight would register the device twice.
@@ -54,17 +94,26 @@ final class SessionStore {
 
     // The profile goes before the license, so nothing can start a tunnel that would fail signed out.
     func signOut() async {
+        guard !signingOut else { return }
+        signingOut = true
+        await tunnel.disconnect()
+        await tunnel.removeConfiguration()
+        await deregister()
+        let core = self.core
+        await CoreQueue.perform { core.logout() }
+        clearSession()
+        signingOut = false
+    }
+
+    // Panic: local only, because speed and leaving nothing behind matter more than freeing the slot.
+    func wipe() async {
         await tunnel.disconnect()
         await tunnel.removeConfiguration()
         let core = self.core
-        await CoreQueue.perform { core.logout() }
-        session = nil
-        subscription = nil
-        devices = []
-        showDeviceLimit = false
-        loginError = nil
-        deviceError = nil
-        pendingToken = nil
+        let outcome = await BoundedCall.run(timeout: timeouts.coreWipe) { try core.wipe() }
+        report("core wipe", outcome)
+        wiper.run()
+        clearSession()
     }
 
     func loadSubscription() async {
@@ -74,6 +123,10 @@ final class SessionStore {
         } catch {
             Self.log.error("subscription failed: \(error.localizedDescription, privacy: .private)")
         }
+    }
+
+    func refreshSubscription() async {
+        await loadSubscription()
     }
 
     func loadDevices() async {
@@ -100,16 +153,83 @@ final class SessionStore {
         await loadDevices()
     }
 
-    private func restoredSession() async -> Session? {
+    func renameDevice(_ id: String, to name: String) async -> Bool {
+        deviceError = nil
+        guard let trimmed = DeviceRename.validated(name) else {
+            deviceError = DeviceRename.lengthMessage
+            return false
+        }
         let core = self.core
         do {
-            return try await CoreQueue.run { try core.restoreSession() }
+            let stored = try await CoreQueue.run { try core.renameDevice(id: id, name: trimmed) }
+            let shown = stored.isEmpty ? trimmed : stored
+            devices = devices.map { $0.id == id ? $0.renamed(shown) : $0 }
+            return true
+        } catch {
+            Self.log.error("rename failed (\(error.logCode, privacy: .public)): \(error.localizedDescription, privacy: .private)")
+            deviceError = DeviceRename.message(for: error)
+            return false
+        }
+    }
+
+    // The account number is the sign-in credential, so the phone's owner must confirm first.
+    func revealAccountNumber() async -> String? {
+        let reason = String(localized: "session_reveal_reason", defaultValue: "Confirm it's you to see your account number.")
+        let outcome = await authenticator.authenticate(reason: reason)
+        guard outcome != .denied else { return nil }
+        let core = self.core
+        let number = await CoreQueue.perform { core.accountNumber() }
+        let trimmed = number.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private func sendClientInfoOnce() async {
+        guard !clientInfoSent else { return }
+        clientInfoSent = true
+        let info = ClientInfo.current()
+        let core = self.core
+        await CoreQueue.perform { core.setClientInfo(appVersion: info.app, osVersion: info.system) }
+    }
+
+    // Best effort: a failure or timeout keeps the identity, so signing back in reuses the slot.
+    private func deregister() async {
+        let core = self.core
+        let outcome = await BoundedCall.run(timeout: timeouts.deregister) { try core.deregister() }
+        report("deregister", outcome)
+    }
+
+    private func report(_ step: String, _ outcome: BoundedCall.Outcome) {
+        switch outcome {
+        case .finished:
+            return
+        case .timedOut:
+            Self.log.info("\(step, privacy: .public) timed out, carrying on")
+        case .failed(let code, let message):
+            Self.log.error("\(step, privacy: .public) failed (\(code, privacy: .public)): \(message, privacy: .private)")
+        }
+    }
+
+    private func clearSession() {
+        session = nil
+        subscription = nil
+        devices = []
+        showDeviceLimit = false
+        loginError = nil
+        deviceError = nil
+        pendingToken = nil
+    }
+
+    private func restoreOutcome() async -> RestoreOutcome {
+        let core = self.core
+        do {
+            let restored = try await CoreQueue.run { try core.restoreSession() }
+            return .restored(restored)
         } catch let error as CoreError where Self.isSignedOut(error) {
             Self.log.info("no stored session")
-            return nil
+            return .signedOut
         } catch {
             Self.log.error("restore failed: \(error.localizedDescription, privacy: .private)")
-            return nil
+            return .failed
         }
     }
 
@@ -141,5 +261,23 @@ final class SessionStore {
         } else {
             loginError = message
         }
+    }
+}
+
+private enum RestoreOutcome {
+    case restored(Session)
+    // The core holds no session, as opposed to one it could not check just now.
+    case signedOut
+    case failed
+
+    var session: Session? {
+        if case .restored(let session) = self { return session }
+        return nil
+    }
+}
+
+private extension Device {
+    func renamed(_ name: String) -> Device {
+        Device(id: id, friendlyName: name, createdAt: createdAt, status: status, current: current)
     }
 }
