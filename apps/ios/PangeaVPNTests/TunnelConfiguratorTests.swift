@@ -13,12 +13,13 @@ final class TunnelConfiguratorTests: XCTestCase {
         TunnelProfile(strictKillSwitch: strict, allowLan: lan, autoConnect: true, lockdown: false)
     }
 
-    func testStandardProfileEnforcesRoutesWithoutIncludeAllNetworks() {
+    // A default route under enforceRoutes drops every tunnelled packet on iPadOS 26 while showing connected.
+    func testStandardProfileLeavesRoutesUnenforced() {
         let proto = TunnelConfigurator.makeProtocol(.standard)
         XCTAssertEqual(proto.providerBundleIdentifier, "org.pangeavpn.app.tunnel")
         XCTAssertEqual(proto.serverAddress, "PangeaVPN")
         XCTAssertFalse(proto.includeAllNetworks)
-        XCTAssertTrue(proto.enforceRoutes)
+        XCTAssertFalse(proto.enforceRoutes)
         XCTAssertFalse(proto.excludeLocalNetworks)
         XCTAssertFalse(proto.disconnectOnSleep)
     }
@@ -41,7 +42,7 @@ final class TunnelConfiguratorTests: XCTestCase {
         for p in allProfiles {
             let proto = TunnelConfigurator.makeProtocol(p)
             XCTAssertEqual(proto.includeAllNetworks, p.strictKillSwitch, "\(p)")
-            XCTAssertEqual(proto.enforceRoutes, !p.strictKillSwitch, "\(p)")
+            XCTAssertFalse(proto.enforceRoutes, "\(p)")
             XCTAssertEqual(proto.excludeLocalNetworks, p.allowLan, "\(p)")
         }
     }
@@ -107,6 +108,15 @@ final class TunnelConfiguratorTests: XCTestCase {
             proto, rules: rules, onDemandEnabled: false, profile: saved, onDemand: true))
         XCTAssertFalse(TunnelConfigurator.matches(
             proto, rules: nil, onDemandEnabled: false, profile: saved, onDemand: false))
+    }
+
+    // A profile saved by a build that still enforced routes is rewritten at the next reconcile.
+    func testAProfileThatEnforcesRoutesNeedsASave() {
+        let stale = TunnelConfigurator.makeProtocol(.standard)
+        stale.enforceRoutes = true
+        XCTAssertFalse(TunnelConfigurator.matches(
+            stale, rules: TunnelConfigurator.onDemandRules(), onDemandEnabled: false,
+            profile: .standard, onDemand: false))
     }
 
     func testForeignOrMissingProtocolNeedsASave() {

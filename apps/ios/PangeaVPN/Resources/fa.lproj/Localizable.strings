@@ -117,7 +117,7 @@
 "kill_switch_always_held" = "ترافیک هنگام اتصال دوباره یا تعویض سرور، درون VPN نگه داشته می‌شود.";
 "kill_switch_always_on" = "همیشه روشن";
 "kill_switch_always_restart" = "اگر iOS اتصال VPN را متوقف کند، وقتی اتصال خودکار روشن است خودش دوباره راه می‌افتد.";
-"kill_switch_always_routes" = "مسیرها اجباری‌اند، پس برنامه‌ها نمی‌توانند ترافیک را از کنار VPN بفرستند.";
+"kill_switch_always_routes" = "همهٔ ترافیک از راه VPN فرستاده می‌شود و IPv6 مسدود است تا نشت نکند.";
 "kill_switch_caveat_carplay" = "ممکن است CarPlay و هات‌اسپات شخصی کار نکنند.";
 "kill_switch_caveat_lan" = "AirDrop، AirPlay و چاپ به «اجازه به LAN» نیاز دارند.";
 "kill_switch_caveat_system" = "برخی سرویس‌های سیستمی Apple ممکن است همچنان VPN را دور بزنند.";

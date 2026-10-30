@@ -117,7 +117,7 @@
 "kill_switch_always_held" = "Le trafic reste retenu dans le VPN pendant qu'il se reconnecte ou change de serveur.";
 "kill_switch_always_on" = "Toujours actif";
 "kill_switch_always_restart" = "Si iOS arrête le VPN, il redémarre de lui-même quand la connexion automatique est activée.";
-"kill_switch_always_routes" = "Les routes sont imposées : les applications ne peuvent pas faire passer de trafic à côté du VPN.";
+"kill_switch_always_routes" = "Tout le trafic passe par le VPN, et l'IPv6 est bloqué pour qu'il ne fuie pas.";
 "kill_switch_caveat_carplay" = "CarPlay et le Partage de connexion peuvent ne pas fonctionner.";
 "kill_switch_caveat_lan" = "AirDrop, AirPlay et l'impression nécessitent Autoriser le LAN.";
 "kill_switch_caveat_system" = "Certains services système d'Apple peuvent encore contourner le VPN.";

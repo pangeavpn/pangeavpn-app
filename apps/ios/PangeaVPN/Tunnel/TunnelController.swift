@@ -72,7 +72,7 @@ final class TunnelController: TunnelControlling {
         }
     }
 
-    // Also the foreground reconcile. includeAllNetworks applies live; enforceRoutes and LAN from the next connect.
+    // Also the foreground reconcile. includeAllNetworks applies live; LAN from the next connect.
     func updateProfile(_ profile: TunnelProfile) async {
         latestProfile = profile
         let write = enqueue { [weak self] in await self?.reconcile(profile) }

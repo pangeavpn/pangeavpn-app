@@ -25,14 +25,14 @@ export default {
     fa: "ترافیک هنگام اتصال دوباره یا تعویض سرور، درون VPN نگه داشته می‌شود."
   },
   kill_switch_always_routes: {
-    en: "Routes are enforced, so apps can't send traffic around the VPN.",
-    es: "Las rutas son obligatorias, así que las apps no pueden enviar tráfico por fuera de la VPN.",
-    fr: "Les routes sont imposées : les applications ne peuvent pas faire passer de trafic à côté du VPN.",
-    ru: "Маршруты принудительны, поэтому приложения не могут отправлять трафик в обход VPN.",
-    uk: "Маршрути примусові, тож застосунки не можуть надсилати трафік в обхід VPN.",
-    zh: "路由强制生效，应用无法绕过 VPN 发送流量。",
-    ar: "المسارات مفروضة، فلا تستطيع التطبيقات إرسال حركة البيانات متجاوزةً VPN.",
-    fa: "مسیرها اجباری‌اند، پس برنامه‌ها نمی‌توانند ترافیک را از کنار VPN بفرستند."
+    en: "All traffic is routed into the VPN, and IPv6 is blocked so it can't leak.",
+    es: "Todo el tráfico se envía por la VPN, y el IPv6 se bloquea para que no se filtre.",
+    fr: "Tout le trafic passe par le VPN, et l'IPv6 est bloqué pour qu'il ne fuie pas.",
+    ru: "Весь трафик направляется в VPN, а IPv6 блокируется, чтобы он не утекал.",
+    uk: "Увесь трафік спрямовується у VPN, а IPv6 блокується, щоб він не витікав.",
+    zh: "所有流量都经由 VPN 传输，IPv6 会被拦截，防止泄露。",
+    ar: "تُوجَّه كل حركة البيانات عبر VPN، ويُحظر IPv6 حتى لا يتسرّب.",
+    fa: "همهٔ ترافیک از راه VPN فرستاده می‌شود و IPv6 مسدود است تا نشت نکند."
   },
   kill_switch_always_restart: {
     en: "If iOS stops the VPN, it restarts itself when Auto-connect is on.",

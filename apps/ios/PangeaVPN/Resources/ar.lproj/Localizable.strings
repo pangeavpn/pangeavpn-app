@@ -117,7 +117,7 @@
 "kill_switch_always_held" = "تبقى حركة البيانات محتجزة داخل VPN أثناء إعادة الاتصال أو تبديل الخادم.";
 "kill_switch_always_on" = "مفعّل دائمًا";
 "kill_switch_always_restart" = "إذا أوقف iOS شبكة VPN، فإنها تعيد تشغيل نفسها عندما يكون الاتصال التلقائي مفعّلًا.";
-"kill_switch_always_routes" = "المسارات مفروضة، فلا تستطيع التطبيقات إرسال حركة البيانات متجاوزةً VPN.";
+"kill_switch_always_routes" = "تُوجَّه كل حركة البيانات عبر VPN، ويُحظر IPv6 حتى لا يتسرّب.";
 "kill_switch_caveat_carplay" = "قد لا تعمل CarPlay ونقطة الاتصال الشخصية.";
 "kill_switch_caveat_lan" = "تحتاج AirDrop وAirPlay والطباعة إلى «السماح بشبكة LAN».";
 "kill_switch_caveat_system" = "قد تظل بعض خدمات نظام Apple تتجاوز VPN.";

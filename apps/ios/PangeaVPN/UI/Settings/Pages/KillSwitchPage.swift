@@ -73,7 +73,7 @@ private struct AlwaysOnList: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             GuaranteeRow(String(localized: "kill_switch_always_held", defaultValue: "Traffic is held inside the VPN while it reconnects or switches servers."), active: true)
-            GuaranteeRow(String(localized: "kill_switch_always_routes", defaultValue: "Routes are enforced, so apps can't send traffic around the VPN."), active: true)
+            GuaranteeRow(String(localized: "kill_switch_always_routes", defaultValue: "All traffic is routed into the VPN, and IPv6 is blocked so it can't leak."), active: true)
             GuaranteeRow(String(localized: "kill_switch_always_restart", defaultValue: "If iOS stops the VPN, it restarts itself when Auto-connect is on."), active: restarts)
         }
         .padding(14)

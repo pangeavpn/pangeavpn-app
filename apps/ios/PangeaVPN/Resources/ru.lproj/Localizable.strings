@@ -117,7 +117,7 @@
 "kill_switch_always_held" = "Трафик удерживается внутри VPN, пока он переподключается или меняет сервер.";
 "kill_switch_always_on" = "Всегда включено";
 "kill_switch_always_restart" = "Если iOS остановит VPN, он перезапустится сам, когда включено автоподключение.";
-"kill_switch_always_routes" = "Маршруты принудительны, поэтому приложения не могут отправлять трафик в обход VPN.";
+"kill_switch_always_routes" = "Весь трафик направляется в VPN, а IPv6 блокируется, чтобы он не утекал.";
 "kill_switch_caveat_carplay" = "CarPlay и режим модема могут не работать.";
 "kill_switch_caveat_lan" = "Для AirDrop, AirPlay и печати нужно включить «Разрешить LAN».";
 "kill_switch_caveat_system" = "Некоторые системные службы Apple всё равно могут идти в обход VPN.";

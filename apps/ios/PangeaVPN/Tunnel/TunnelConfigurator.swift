@@ -13,8 +13,8 @@ enum TunnelConfigurator {
         proto.serverAddress = displayName
         proto.includeAllNetworks = profile.strictKillSwitch
         proto.excludeLocalNetworks = profile.allowLan
-        // iOS ignores enforceRoutes under includeAllNetworks.
-        proto.enforceRoutes = !profile.strictKillSwitch
+        // Apple says enforceRoutes never covers a default route, and on iPadOS 26 it drops all tunnelled traffic.
+        proto.enforceRoutes = false
         proto.disconnectOnSleep = false
         return proto
     }

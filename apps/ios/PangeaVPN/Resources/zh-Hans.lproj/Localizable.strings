@@ -117,7 +117,7 @@
 "kill_switch_always_held" = "VPN 重新连接或切换服务器时，流量会被留在 VPN 内。";
 "kill_switch_always_on" = "始终开启";
 "kill_switch_always_restart" = "开启自动连接时，即使 iOS 停止了 VPN，它也会自行重新启动。";
-"kill_switch_always_routes" = "路由强制生效，应用无法绕过 VPN 发送流量。";
+"kill_switch_always_routes" = "所有流量都经由 VPN 传输，IPv6 会被拦截，防止泄露。";
 "kill_switch_caveat_carplay" = "CarPlay 和个人热点可能无法使用。";
 "kill_switch_caveat_lan" = "AirDrop、AirPlay 和打印需要开启「允许 LAN」。";
 "kill_switch_caveat_system" = "部分 Apple 系统服务仍可能绕过 VPN。";

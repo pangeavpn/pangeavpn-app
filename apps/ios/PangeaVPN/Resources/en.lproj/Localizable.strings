@@ -117,7 +117,7 @@
 "kill_switch_always_held" = "Traffic is held inside the VPN while it reconnects or switches servers.";
 "kill_switch_always_on" = "Always on";
 "kill_switch_always_restart" = "If iOS stops the VPN, it restarts itself when Auto-connect is on.";
-"kill_switch_always_routes" = "Routes are enforced, so apps can't send traffic around the VPN.";
+"kill_switch_always_routes" = "All traffic is routed into the VPN, and IPv6 is blocked so it can't leak.";
 "kill_switch_caveat_carplay" = "CarPlay and Personal Hotspot may not work.";
 "kill_switch_caveat_lan" = "AirDrop, AirPlay and printing need Allow LAN.";
 "kill_switch_caveat_system" = "Some Apple system services may still bypass the VPN.";
