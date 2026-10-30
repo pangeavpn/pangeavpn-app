@@ -58,28 +58,22 @@ struct RegionPickerView: View {
     @ViewBuilder
     private var content: some View {
         let regions = visible
+        let empty = RegionPickerModel.empty(visible: regions, all: servers.regions)
         VStack(alignment: .leading, spacing: 16) {
-            if let message = servers.error {
+            if empty == nil, let message = servers.error {
                 InfoNote(message, systemImage: "exclamationmark.circle", tint: Palette.error)
             }
-            if let empty = RegionPickerModel.empty(visible: regions, all: servers.regions) {
-                emptyState(empty)
+            if multihopAvailable { multihopPanel(regions) }
+            if let empty {
+                EmptyRegionList(
+                    empty: empty,
+                    error: servers.error,
+                    loading: servers.loading,
+                    onRefresh: refresh)
             } else {
-                if multihopAvailable { multihopPanel(regions) }
                 regionSections(regions)
             }
         }
-    }
-
-    private func emptyState(_ empty: RegionPickerModel.Empty) -> some View {
-        let text = empty == .noServers
-            ? String(localized: "hero_no_servers", defaultValue: "No servers available")
-            : String(localized: "server_picker_none_for_transport", defaultValue: "No servers support this transport")
-        return Text(text)
-            .scaledFont(size: 15, relativeTo: .subheadline)
-            .foregroundStyle(Palette.textMuted)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.vertical, 24)
     }
 
     private func multihopPanel(_ regions: [Region]) -> some View {
@@ -149,6 +143,11 @@ struct RegionPickerView: View {
         }
     }
 
+    private func refresh() {
+        let store = servers
+        Task { await store.refresh() }
+    }
+
     private func activate(_ region: Region) {
         guard !working else { return }
         let store = connection
@@ -185,6 +184,80 @@ struct RegionPickerView: View {
             }
             await store.routeChanged()
         }
+    }
+}
+
+// Stands in for the list when nothing can be shown, with the last refresh error and a retry.
+private struct EmptyRegionList: View {
+    let empty: RegionPickerModel.Empty
+    let error: String?
+    let loading: Bool
+    let onRefresh: () -> Void
+
+    private let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
+
+    var body: some View {
+        VStack(spacing: 10) {
+            Image(systemName: empty == .noServers ? "server.rack" : "line.3.horizontal.decrease.circle")
+                .scaledFont(size: 28, weight: .medium, relativeTo: .title2)
+                .foregroundStyle(Palette.textMuted)
+                .accessibilityHidden(true)
+            Text(message)
+                .scaledFont(size: 15, weight: .semibold, relativeTo: .subheadline)
+                .foregroundStyle(Palette.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if let error, !error.isEmpty {
+                Text(error)
+                    .scaledFont(size: 12, relativeTo: .caption)
+                    .foregroundStyle(Palette.error)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            refreshButton
+                .padding(.top, 6)
+        }
+        .multilineTextAlignment(.center)
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 28)
+        .background(Palette.surface, in: shape)
+        .overlay(shape.strokeBorder(Palette.borderSubtle, lineWidth: 1))
+    }
+
+    private var message: String {
+        empty == .noServers
+            ? String(localized: "hero_no_servers", defaultValue: "No servers available")
+            : String(localized: "server_picker_none_for_transport", defaultValue: "No servers support this transport")
+    }
+
+    // The spinner swaps in over the arrow, so the button keeps its size while a refresh runs.
+    private var refreshButton: some View {
+        let label = String(localized: "region_refresh", defaultValue: "Refresh regions")
+        return Button(action: onRefresh) {
+            HStack(spacing: 8) {
+                ZStack {
+                    Image(systemName: "arrow.clockwise")
+                        .opacity(loading ? 0 : 1)
+                    if loading {
+                        ProgressView()
+                            .controlSize(.small)
+                            .tint(Palette.textSecondary)
+                    }
+                }
+                .accessibilityHidden(true)
+                Text(label)
+            }
+            .scaledFont(size: 15, weight: .semibold, relativeTo: .subheadline)
+            .foregroundStyle(Palette.text)
+            .padding(.horizontal, 18)
+            .padding(.vertical, 8)
+            .frame(minHeight: 44)
+            .overlay(Capsule().strokeBorder(Palette.border, lineWidth: 1))
+            .contentShape(Capsule())
+        }
+        .buttonStyle(PressFadeStyle())
+        .disabled(loading)
+        .accessibilityLabel(label)
+        .accessibilityAddTraits(loading ? .updatesFrequently : [])
     }
 }
 

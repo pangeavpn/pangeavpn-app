@@ -7,6 +7,8 @@ struct MultihopPanel: View {
     let onToggle: (Bool) -> Void
     let onChoose: (String?) -> Void
 
+    @Environment(\.dynamicTypeSize) private var typeSize
+
     private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: 14, style: .continuous) }
 
     private static let title = String(localized: "regions_multihop", defaultValue: "Multihop")
@@ -23,33 +25,43 @@ struct MultihopPanel: View {
         .overlay(shape.strokeBorder(Palette.borderSubtle, lineWidth: 1))
     }
 
+    // At accessibility sizes the hint drops below the switch row, so it gets the card's full width.
     private var head: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "point.3.connected.trianglepath.dotted")
-                .scaledFont(size: 18, weight: .medium, relativeTo: .body)
-                .foregroundStyle(Palette.accent)
-                .frame(width: 36, height: 36)
-                .background(Palette.accent.opacity(0.15), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(Self.title)
-                    .scaledFont(size: 15, weight: .semibold, relativeTo: .subheadline)
-                    .foregroundStyle(Palette.text)
-                Text(Self.hint)
-                    .scaledFont(size: 12, relativeTo: .caption)
-                    .foregroundStyle(Palette.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
+        let stacked = typeSize.isAccessibilitySize
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 12) {
+                MultihopGlyph()
+                    .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+                togglesOnTap(VStack(alignment: .leading, spacing: 2) {
+                    Text(Self.title)
+                        .scaledFont(size: 15, weight: .semibold, relativeTo: .subheadline)
+                        .foregroundStyle(Palette.text)
+                    if !stacked { hintLabel }
+                })
+                Toggle(Self.title, isOn: Binding(get: { enabled }, set: { onToggle($0) }))
+                    .labelsHidden()
+                    .tint(Palette.accent)
+                    .accessibilityLabel(Self.title)
+                    .accessibilityHint(Self.hint)
             }
+            if stacked { togglesOnTap(hintLabel) }
+        }
+    }
+
+    private var hintLabel: some View {
+        Text(Self.hint)
+            .scaledFont(size: 12, relativeTo: .caption)
+            .foregroundStyle(Palette.textSecondary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    // The switch already speaks the title and hint, so the visible copy is only a larger tap target.
+    private func togglesOnTap<Content: View>(_ content: Content) -> some View {
+        content
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
             .onTapGesture { onToggle(!enabled) }
             .accessibilityHidden(true)
-            Toggle(Self.title, isOn: Binding(get: { enabled }, set: { onToggle($0) }))
-                .labelsHidden()
-                .tint(Palette.accent)
-                .accessibilityLabel(Self.title)
-                .accessibilityHint(Self.hint)
-        }
     }
 
     private var entry: some View {
@@ -82,6 +94,20 @@ struct MultihopPanel: View {
         case .noEntries:
             return String(localized: "regions_no_entries", defaultValue: "No entry server is available right now")
         }
+    }
+}
+
+// The tile scales with the glyph; capped by the caller so it never crowds the title off its row.
+private struct MultihopGlyph: View {
+    @ScaledMetric(relativeTo: .body) private var tile: CGFloat = 36
+
+    var body: some View {
+        Image(systemName: "point.3.connected.trianglepath.dotted")
+            .scaledFont(size: 18, weight: .medium, relativeTo: .body)
+            .foregroundStyle(Palette.accent)
+            .frame(width: tile, height: tile)
+            .background(Palette.accent.opacity(0.15), in: RoundedRectangle(cornerRadius: tile * 11 / 36, style: .continuous))
+            .accessibilityHidden(true)
     }
 }
 

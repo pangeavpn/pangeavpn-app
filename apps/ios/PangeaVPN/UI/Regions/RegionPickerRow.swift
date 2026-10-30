@@ -16,6 +16,7 @@ struct RegionPickerRow: View {
     let onSelectNode: (Server) -> Void
 
     private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: 14, style: .continuous) }
+    private static let disclosureWidth: CGFloat = 44
 
     var body: some View {
         VStack(spacing: 0) {
@@ -40,10 +41,10 @@ struct RegionPickerRow: View {
                     .accessibilityHidden(true)
                 titles
                 if let load { PickerLoadMeter(load: load) }
-                trailingMark
             }
             .padding(.leading, 14)
-            .padding(.trailing, nodes.isEmpty ? 14 : 10)
+            // A row without a chevron keeps its slot, so every load meter sits in one column.
+            .padding(.trailing, nodes.isEmpty ? 10 + Self.disclosureWidth : 10)
             .padding(.vertical, 12)
             .frame(minHeight: 56)
             .contentShape(Rectangle())
@@ -56,33 +57,48 @@ struct RegionPickerRow: View {
 
     private var titles: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(name)
-                .scaledFont(size: 16, weight: .semibold, relativeTo: .callout)
-                .foregroundStyle(Palette.text)
-                .lineLimit(1)
-                .truncationMode(.tail)
+            nameLine
             if !subtitle.isEmpty {
                 Text(subtitle)
                     .scaledFont(size: 11, design: .monospaced, relativeTo: .caption2)
                     .foregroundStyle(Palette.textMuted)
-                    .lineLimit(1)
+                    .lineLimit(2)
                     .truncationMode(.tail)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    // The entry tag lives with the name, never after the meter, so the load column stays aligned.
     @ViewBuilder
-    private var trailingMark: some View {
+    private var nameLine: some View {
         if role == .plain {
-            Text("\u{2713}")
-                .fontWeight(.bold)
-                .foregroundStyle(selected ? Palette.accent : Color.clear)
-                .frame(width: 18)
-                .accessibilityHidden(true)
+            nameText
         } else {
-            PickerTag(String(localized: "regions_entry_badge", defaultValue: "Entry"))
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    nameText
+                    entryTag
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    nameText
+                    entryTag
+                }
+            }
         }
+    }
+
+    private var nameText: some View {
+        Text(name)
+            .scaledFont(size: 16, weight: .semibold, relativeTo: .callout)
+            .foregroundStyle(Palette.text)
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
+            .truncationMode(.tail)
+    }
+
+    private var entryTag: some View {
+        PickerTag(String(localized: "regions_entry_badge", defaultValue: "Entry"))
     }
 
     private var disclosureButton: some View {
@@ -91,7 +107,7 @@ struct RegionPickerRow: View {
                 .scaledFont(size: 14, weight: .semibold, relativeTo: .footnote)
                 .foregroundStyle(Palette.textMuted)
                 .rotationEffect(.degrees(expanded ? 180 : 0))
-                .frame(width: 44)
+                .frame(width: Self.disclosureWidth)
                 .frame(minHeight: 44, maxHeight: .infinity)
                 .contentShape(Rectangle())
         }
@@ -130,6 +146,9 @@ struct RegionPickerRow: View {
 struct PickerLoadMeter: View {
     let load: Int
 
+    // Scales with the label so "100%" still fits and every bar keeps one column.
+    @ScaledMetric(relativeTo: .footnote) private var labelWidth: CGFloat = 36
+
     private var pct: Int { min(max(load, 0), 100) }
 
     var body: some View {
@@ -143,8 +162,10 @@ struct PickerLoadMeter: View {
             Text(verbatim: "\(pct)%")
                 .scaledFont(size: 13, relativeTo: .footnote)
                 .foregroundStyle(Palette.textMuted)
-                .frame(minWidth: 34, alignment: .trailing)
+                .lineLimit(1)
+                .frame(minWidth: labelWidth, alignment: .trailing)
         }
+        .fixedSize()
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(String(format: String(localized: "regions_load", defaultValue: "Server load %@"), "\(pct)%"))
     }
