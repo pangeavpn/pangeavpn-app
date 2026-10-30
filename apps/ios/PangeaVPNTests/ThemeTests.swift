@@ -63,6 +63,45 @@ final class ThemeTests: XCTestCase {
         XCTAssertEqual(DriftLook.target(for: .error).alpha, 0.55)
     }
 
+    func testThemeChoiceMapsTheStoredValue() {
+        XCTAssertEqual(ThemeChoice(darkTheme: nil), .system)
+        XCTAssertEqual(ThemeChoice(darkTheme: false), .light)
+        XCTAssertEqual(ThemeChoice(darkTheme: true), .dark)
+        for choice in ThemeChoice.allCases {
+            XCTAssertEqual(ThemeChoice(darkTheme: choice.darkTheme), choice)
+            XCTAssertFalse(choice.title.isEmpty)
+        }
+    }
+
+    @MainActor
+    func testThemeChoiceRoundTripsThroughSettings() throws {
+        let (defaults, suite) = try makeTestDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsStore(core: FakeCore(), defaults: defaults)
+        settings.setDarkTheme(ThemeChoice.dark.darkTheme)
+        XCTAssertEqual(ThemeChoice(darkTheme: SettingsStore(core: FakeCore(), defaults: defaults).darkTheme), .dark)
+        settings.setDarkTheme(ThemeChoice.light.darkTheme)
+        XCTAssertEqual(ThemeChoice(darkTheme: settings.darkTheme), .light)
+        settings.setDarkTheme(ThemeChoice.system.darkTheme)
+        XCTAssertNil(defaults.object(forKey: SettingsStore.darkThemeKey))
+        XCTAssertEqual(ThemeChoice(darkTheme: settings.darkTheme), .system)
+    }
+
+    @MainActor
+    func testAccentChoicePaintsTheAppAndNamesTheSummary() throws {
+        let (defaults, suite) = try makeTestDefaults()
+        defer {
+            defaults.removePersistentDomain(forName: suite)
+            AccentTheme.shared.accent = .terra
+        }
+        let settings = SettingsStore(core: FakeCore(), defaults: defaults)
+        XCTAssertEqual(SettingsSummary.appearance(settings), Accent.terra.title)
+        settings.setAccent(.emerald)
+        XCTAssertEqual(AccentTheme.shared.accent, .emerald)
+        XCTAssertEqual(rgb(Palette.accent, .dark), hex(Accent.emerald.hex))
+        XCTAssertEqual(SettingsSummary.appearance(settings), Accent.emerald.title)
+    }
+
     func testTweenEndsAtTarget() {
         let start = Date()
         let tween = DriftTween(
