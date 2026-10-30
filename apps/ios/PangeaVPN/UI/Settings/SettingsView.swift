@@ -40,8 +40,9 @@ struct SettingsView: View {
         }
         .tint(Palette.accent)
         .preferredColorScheme(settings.darkTheme.map { $0 ? ColorScheme.dark : ColorScheme.light })
-        // A full-screen cover sits above the app-wide toast layer, so this screen carries its own.
+        // A full-screen cover sits above the app-wide toast and privacy layers, so it carries its own.
         .toastOverlay()
+        .privacyCover()
         .task {
             if !settings.loaded { await settings.load() }
         }
@@ -126,13 +127,14 @@ struct SettingsView: View {
             }
             .buttonStyle(.plain)
             Button { confirmingSignOut = true } label: {
-                SettingsNavRow(systemImage: "rectangle.portrait.and.arrow.right", title: Self.signOutTitle, tint: Palette.error)
+                SettingsNavRow(systemImage: "rectangle.portrait.and.arrow.right", title: Self.signOutTitle,
+                               tint: Palette.error, showsChevron: false)
                     .opacity(session.signingOut ? 0.5 : 1)
                     .overlay(alignment: .trailing) {
                         if session.signingOut {
                             ProgressView()
                                 .tint(Palette.error)
-                                .padding(.trailing, 40)
+                                .padding(.trailing, 14)
                         }
                     }
             }

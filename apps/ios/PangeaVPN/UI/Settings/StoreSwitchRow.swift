@@ -6,24 +6,31 @@ struct StoreSwitchRow: View {
     var hint: String?
     let apply: (Bool) async -> Void
 
-    @State private var pending: Bool?
+    @State private var pending: PendingSwitch?
 
     var body: some View {
         SwitchRow(
             title,
             isOn: Binding(
-                get: { pending ?? value },
+                get: { pending?.value ?? value },
                 set: { newValue in
-                    pending = newValue
+                    let tap = PendingSwitch(value: newValue, id: UUID())
+                    pending = tap
                     Task {
                         await apply(newValue)
-                        pending = nil
+                        // Only the newest tap clears, so an older save cannot flip the switch back mid-flight.
+                        if pending?.id == tap.id { pending = nil }
                     }
                 }
             ),
             hint: hint
         )
     }
+}
+
+private struct PendingSwitch: Equatable {
+    let value: Bool
+    let id: UUID
 }
 
 enum SettingsInput {

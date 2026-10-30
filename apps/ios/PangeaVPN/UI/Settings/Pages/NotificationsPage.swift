@@ -5,7 +5,6 @@ import UserNotifications
 struct NotificationsPage: View {
     @Environment(SettingsStore.self) private var settings
     @Environment(ToastCenter.self) private var toasts
-    @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
     @State private var permission = NotificationPermission()
 
@@ -40,7 +39,7 @@ struct NotificationsPage: View {
     private var permissionState: some View {
         switch permission.status {
         case .denied:
-            InfoNote(String(localized: "notifications_denied", defaultValue: "Notifications for PangeaVPN are off in iOS Settings, so alerts can't be shown."), systemImage: "bell.slash", tint: Palette.error)
+            InfoNote(Self.deniedText, systemImage: "bell.slash", tint: Palette.error)
             GhostButton(String(localized: "notifications_open_settings", defaultValue: "Open Settings")) { openSettings() }
         case .notDetermined:
             InfoNote(String(localized: "notifications_not_asked", defaultValue: "PangeaVPN needs your permission to show alerts."), systemImage: "bell.badge")
@@ -62,16 +61,32 @@ struct NotificationsPage: View {
         await askPermission()
     }
 
+    private static var deniedText: String {
+        String(localized: "notifications_denied", defaultValue: "Notifications for PangeaVPN are off in iOS Settings, so alerts can't be shown.")
+    }
+
     // A refusal leaves the preference on; the page then shows how to allow alerts in iOS Settings.
     private func askPermission() async {
         if await permission.request() {
             toasts.show(String(localized: "notifications_toast_on", defaultValue: "Connection alerts on."), style: .success)
+        } else {
+            toasts.show(Self.deniedText, style: .warning)
         }
     }
 
     private func openSettings() {
-        guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
-        openURL(url)
+        guard let url = URL(string: UIApplication.openSettingsURLString) else {
+            showOpenFailed()
+            return
+        }
+        Task {
+            let opened = await UIApplication.shared.open(url)
+            if !opened { showOpenFailed() }
+        }
+    }
+
+    private func showOpenFailed() {
+        toasts.show(String(localized: "language_open_failed", defaultValue: "Couldn't open Settings. Open the Settings app and choose PangeaVPN."), style: .warning)
     }
 }
 

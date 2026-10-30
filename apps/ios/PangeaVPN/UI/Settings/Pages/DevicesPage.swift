@@ -93,7 +93,7 @@ struct DevicesPage: View {
         renaming = device
     }
 
-    // A refusal lands in session.deviceError, which the page shows above the list.
+    // A refusal also stays in session.deviceError, which the page shows above the list.
     private func save(_ device: Device) {
         guard busyId == nil else { return }
         guard let name = DeviceRename.validated(draftName) else {
@@ -106,6 +106,8 @@ struct DevicesPage: View {
             busyId = nil
             if renamed {
                 toasts.show(String(localized: "devices_renamed", defaultValue: "Device renamed."), style: .success)
+            } else {
+                showFailure()
             }
         }
     }
@@ -119,8 +121,15 @@ struct DevicesPage: View {
             busyId = nil
             if session.deviceError == nil {
                 toasts.show(String(localized: "devices_removed", defaultValue: "Device removed."), style: .success)
+            } else {
+                showFailure()
             }
         }
+    }
+
+    private func showFailure() {
+        let fallback = String(localized: "network_update_failed", defaultValue: "Failed to update setting.")
+        toasts.show(session.deviceError ?? fallback, style: .warning)
     }
 }
 
@@ -236,10 +245,10 @@ private func previewDevices(_ result: Result<[Device], CoreError>) -> some View 
     let core = FakeCore()
     core.devicesResult = result
     return NavigationStack { DevicesPage() }
+        .toastOverlay()
         .environment(SessionStore(core: core, tunnel: FakeTunnel()))
         .environment(SettingsStore(core: core))
         .environment(ToastCenter())
-        .toastOverlay()
 }
 
 private let previewList = [

@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 // The address desktop ships as its support contact.
 enum SupportContact {
@@ -8,7 +9,6 @@ enum SupportContact {
 
 struct SupportPage: View {
     @Environment(ToastCenter.self) private var toasts
-    @Environment(\.openURL) private var openURL
     @State private var showReport = false
 
     init() {}
@@ -39,8 +39,9 @@ struct SupportPage: View {
     }
 
     private func contact(_ url: URL) {
-        openURL(url) { accepted in
-            guard !accepted else { return }
+        Task {
+            let opened = await UIApplication.shared.open(url)
+            guard !opened else { return }
             let format = String(localized: "support_no_mail_app", defaultValue: "No mail app is set up. Write to %@ instead.")
             toasts.show(String(format: format, SupportContact.email), style: .warning)
         }

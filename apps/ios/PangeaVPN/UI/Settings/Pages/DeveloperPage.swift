@@ -46,6 +46,7 @@ struct DeveloperPage: View {
             SettingsCard {
                 GhostButton(String(localized: "developer_turn_off", defaultValue: "Turn Off Developer Options")) {
                     settings.setDeveloperMode(false)
+                    toasts.show(String(localized: "settings_home_developer_off", defaultValue: "Developer options off"))
                     dismiss()
                 }
             }

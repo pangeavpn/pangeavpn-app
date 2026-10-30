@@ -38,6 +38,7 @@ struct SendReportSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(Palette.bg, for: .navigationBar)
         }
+        .privacyCover()
         .interactiveDismissDisabled(sending)
         .presentationDragIndicator(sending ? .hidden : .visible)
         .task(id: copied) {

@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 // A text setting that only applies on Save or Return, so half-typed values never reach the core.
 struct CommittedField: View {
@@ -37,14 +38,18 @@ struct CommittedField: View {
                 SectionLabel(label)
                 Spacer()
                 if text != initial {
-                    Button(String(localized: "settings_save", defaultValue: "Save")) { onCommit(text) }
-                        .scaledFont(size: 13, weight: .semibold, relativeTo: .footnote)
-                        .foregroundStyle(Palette.accent)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
+                    Button { onCommit(text) } label: {
+                        Text(String(localized: "settings_save", defaultValue: "Save"))
+                            .scaledFont(size: 13, weight: .semibold, relativeTo: .footnote)
+                            .foregroundStyle(Palette.accent)
+                            .padding(.horizontal, 12)
+                            .frame(minHeight: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(PressFadeStyle())
                 }
             }
-            .frame(minHeight: 32)
+            .frame(minHeight: 44)
             SettingsField(
                 text: Binding(get: { text }, set: { text = transform($0) }),
                 placeholder: placeholder,

@@ -59,18 +59,20 @@ struct SettingsCard<Content: View>: View {
     }
 }
 
-// Icon, title and current value with a chevron; the row a NavigationLink wraps.
+// Icon, title and current value, with a chevron when the row leads to another page.
 struct SettingsNavRow: View {
     private let systemImage: String
     private let title: String
     private let value: String?
     private let tint: Color?
+    private let showsChevron: Bool
 
-    init(systemImage: String, title: String, value: String? = nil, tint: Color? = nil) {
+    init(systemImage: String, title: String, value: String? = nil, tint: Color? = nil, showsChevron: Bool = true) {
         self.systemImage = systemImage
         self.title = title
         self.value = value
         self.tint = tint
+        self.showsChevron = showsChevron
     }
 
     var body: some View {
@@ -94,10 +96,12 @@ struct SettingsNavRow: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            Image(systemName: "chevron.right")
-                .scaledFont(size: 13, weight: .semibold, relativeTo: .footnote)
-                .foregroundStyle(Palette.textMuted)
-                .accessibilityHidden(true)
+            if showsChevron {
+                Image(systemName: "chevron.right")
+                    .scaledFont(size: 13, weight: .semibold, relativeTo: .footnote)
+                    .foregroundStyle(Palette.textMuted)
+                    .accessibilityHidden(true)
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
@@ -160,7 +164,7 @@ struct SettingsCloseButton: View {
         SettingsPage(.network, description: "Tunnel settings and fixes for restrictive Wi-Fi.") {
             SettingsCard("Example") {
                 SettingsNavRow(systemImage: "shield", title: "Censorship Bypass", value: "Automatic (recommended)")
-                SettingsNavRow(systemImage: "rectangle.portrait.and.arrow.right", title: "Sign Out", tint: Palette.error)
+                SettingsNavRow(systemImage: "rectangle.portrait.and.arrow.right", title: "Sign Out", tint: Palette.error, showsChevron: false)
                 InfoNote("Applies on next connect.")
             }
         }

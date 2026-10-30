@@ -15,6 +15,7 @@ enum TunnelMtu {
 
 struct NetworkPage: View {
     @Environment(SettingsStore.self) private var settings
+    @Environment(ConnectionStore.self) private var connection
     @Environment(ToastCenter.self) private var toasts
     @State private var customChosen = false
     @State private var dnsSaving = false
@@ -101,11 +102,14 @@ struct NetworkPage: View {
         customChosen ? .custom : DnsPresets.choice(for: settings.settings.customDns)
     }
 
+    // The saved VPN profile carries Allow LAN too, so it is pushed like the kill switch pages do.
     private func setAllowLan(_ enabled: Bool) async {
         await settings.setAllowLan(enabled)
         report(enabled
             ? String(localized: "network_allowlan_on", defaultValue: "Allow LAN enabled. Reconnect for it to take effect.")
             : String(localized: "network_allowlan_off", defaultValue: "Allow LAN disabled. Reconnect for it to take effect."))
+        guard settings.error == nil else { return }
+        await TunnelProfileSync.push(settings: settings, connection: connection)
     }
 
     private func setPostQuantum(_ enabled: Bool) async {
@@ -233,11 +237,17 @@ private func networkPreview(_ change: (inout AppSettings) -> Void) -> some View 
     var config = AppSettings()
     change(&config)
     core.configResult = .success(config)
+    let defaults = UserDefaults(suiteName: ProtectionPreview.suite) ?? .standard
+    let tunnel = FakeTunnel()
+    let settings = SettingsStore(core: core, defaults: defaults)
+    let servers = ServersStore(core: core, defaults: defaults)
+    let session = SessionStore(core: core, tunnel: tunnel)
     return NavigationStack {
         NetworkPage()
     }
     .toastOverlay()
-    .environment(SettingsStore(core: core))
+    .environment(settings)
+    .environment(ConnectionStore(tunnel: tunnel, servers: servers, settings: settings, session: session))
     .environment(ToastCenter())
 }
 
