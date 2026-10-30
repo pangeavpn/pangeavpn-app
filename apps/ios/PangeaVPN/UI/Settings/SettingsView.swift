@@ -16,20 +16,22 @@ struct SettingsView: View {
 
     var body: some View {
         NavigationStack(path: $path) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    header
-                    AccountCard()
-                        .padding(.top, 8)
-                    routeRows
-                        .padding(.top, 20)
-                    accountActions
-                        .padding(.top, 20)
-                    versionLine
-                        .padding(.top, 12)
+            // The header sits outside the scroll view, so rows never pass under it or the status bar.
+            VStack(spacing: 0) {
+                header
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        AccountCard()
+                        routeRows
+                            .padding(.top, 20)
+                        accountActions
+                            .padding(.top, 20)
+                        versionLine
+                            .padding(.top, 12)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 20)
                 }
-                .padding(.horizontal, 16)
-                .padding(.bottom, 20)
             }
             .background(Palette.bg.ignoresSafeArea())
             .navigationTitle(Self.title)
@@ -58,13 +60,17 @@ struct SettingsView: View {
                 .scaledFont(size: 28, weight: .semibold, relativeTo: .largeTitle)
                 .tracking(-0.4)
                 .foregroundStyle(Palette.text)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
                 .accessibilityAddTraits(.isHeader)
             Spacer(minLength: 8)
             SettingsCloseButton { dismiss() }
                 .background(Palette.surface, in: Circle())
                 .overlay(Circle().strokeBorder(Palette.borderSubtle, lineWidth: 1))
         }
-        .padding(.top, 8)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(Palette.bg)
     }
 
     private var routeRows: some View {

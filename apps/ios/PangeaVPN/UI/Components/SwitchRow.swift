@@ -35,8 +35,7 @@ struct SwitchRow: View {
                 .accessibilityLabel(title)
                 .accessibilityHint(hint ?? "")
         }
-        .padding(.leading, 14)
-        .padding(.trailing, 10)
+        .padding(.horizontal, 14)
         .padding(.vertical, 10)
         .background(Palette.surface)
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))

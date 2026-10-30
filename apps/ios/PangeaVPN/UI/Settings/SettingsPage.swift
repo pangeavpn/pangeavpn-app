@@ -63,6 +63,9 @@ struct SettingsCard<Content: View>: View {
 
 // Icon, title and current value, with a chevron when the row leads to another page.
 struct SettingsNavRow: View {
+    @Environment(\.dynamicTypeSize) private var typeSize
+    // Grows with the glyph, so wide symbols never reach the title at large text sizes.
+    @ScaledMetric(relativeTo: .body) private var iconWidth: CGFloat = 28
     private let systemImage: String
     private let title: String
     private let value: String?
@@ -82,7 +85,7 @@ struct SettingsNavRow: View {
             Image(systemName: systemImage)
                 .scaledFont(size: 17, weight: .regular, relativeTo: .body)
                 .foregroundStyle(tint ?? Palette.textSecondary)
-                .frame(width: 28, height: 28)
+                .frame(width: iconWidth)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
@@ -93,7 +96,8 @@ struct SettingsNavRow: View {
                     Text(value)
                         .scaledFont(size: 12, design: .monospaced, relativeTo: .caption)
                         .foregroundStyle(Palette.textMuted)
-                        .lineLimit(1)
+                        .multilineTextAlignment(.leading)
+                        .lineLimit(typeSize.isAccessibilitySize ? 3 : 2)
                         .truncationMode(.tail)
                 }
             }
@@ -117,6 +121,8 @@ struct SettingsNavRow: View {
 
 // A muted explanatory line with an icon, for consequences and caveats.
 struct InfoNote: View {
+    // A fixed column, so every note's text starts at the same x whatever its glyph's width.
+    @ScaledMetric(relativeTo: .caption) private var iconWidth: CGFloat = 18
     private let text: String
     private let systemImage: String
     private let tint: Color
@@ -132,6 +138,7 @@ struct InfoNote: View {
             Image(systemName: systemImage)
                 .scaledFont(size: 12, relativeTo: .caption)
                 .foregroundStyle(tint)
+                .frame(width: iconWidth)
                 .accessibilityHidden(true)
             Text(text)
                 .scaledFont(size: 12, relativeTo: .caption)
