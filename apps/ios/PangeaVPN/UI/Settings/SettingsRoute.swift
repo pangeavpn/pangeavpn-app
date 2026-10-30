@@ -17,7 +17,7 @@ enum SettingsRoute: Hashable, CaseIterable, Sendable {
         case .provisioning: return String(localized: "settings_censorship_heading", defaultValue: "Provisioning")
         case .network: return String(localized: "settings_network_heading", defaultValue: "Network")
         case .killSwitch: return String(localized: "settings_section_kill_switch", defaultValue: "Kill Switch")
-        case .splitTunnel: return String(localized: "split_tunnel_title", defaultValue: "Split Tunnelling")
+        case .splitTunnel: return String(localized: "settings_section_split_tunnel", defaultValue: "Split Tunnelling")
         case .startup: return String(localized: "settings_section_startup", defaultValue: "Startup")
         case .notifications: return String(localized: "settings_section_notifications", defaultValue: "Notifications")
         case .panic: return String(localized: "settings_section_panic", defaultValue: "Panic Wipe")

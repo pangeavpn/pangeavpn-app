@@ -4,6 +4,11 @@ export default {
     en: "Kill Switch", es: "Interruptor de seguridad", fr: "Coupure de sécurité", ru: "Аварийное отключение",
     uk: "Аварійне відключення", zh: "断网保护", ar: "مفتاح الإيقاف", fa: "کلید قطع اضطراری"
   },
+  // iPhone can only exclude address ranges, so zh avoids desktop's "per-app proxy" wording.
+  settings_section_split_tunnel: {
+    en: "Split Tunnelling", es: "Túnel dividido", fr: "Tunnel divisé", ru: "Раздельное туннелирование",
+    uk: "Роздільне тунелювання", zh: "分流", ar: "الأنفاق المقسّمة", fa: "تونل تفکیک‌شده"
+  },
   settings_section_startup: {
     en: "Startup", es: "Inicio", fr: "Démarrage", ru: "Автозапуск",
     uk: "Автозапуск", zh: "启动", ar: "بدء التشغيل", fa: "راه‌اندازی"
