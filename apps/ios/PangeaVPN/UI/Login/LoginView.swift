@@ -68,6 +68,7 @@ struct LoginView: View {
                 text: $token,
                 placeholder: String(
                     localized: "login_token_placeholder", defaultValue: "ABCD-EFGH-JKMN-PQRS-TVWX-YZ01"),
+                label: String(localized: "login_account_label", defaultValue: "Account number"),
                 enabled: !session.loggingIn,
                 isError: errorMessage != nil,
                 onSubmit: submit)
