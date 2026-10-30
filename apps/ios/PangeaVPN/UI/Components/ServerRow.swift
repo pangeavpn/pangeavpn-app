@@ -42,12 +42,6 @@ struct ServerRow: View {
                     .accessibilityHidden(true)
                 titles
                 if let load { LoadIndicator(load: load) }
-                Image(systemName: "checkmark")
-                    .scaledFont(size: 13, weight: .bold, relativeTo: .footnote)
-                    .foregroundStyle(Palette.accent)
-                    .opacity(selected ? 1 : 0)
-                    .frame(width: 16)
-                    .accessibilityHidden(true)
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 9)
@@ -72,6 +66,7 @@ struct ServerRow: View {
                     .scaledFont(size: 12, design: .monospaced, relativeTo: .caption)
                     .foregroundStyle(Palette.textSecondary)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.85)
                     .truncationMode(.middle)
             }
         }
