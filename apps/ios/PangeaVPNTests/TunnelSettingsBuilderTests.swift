@@ -132,4 +132,83 @@ final class TunnelSettingsBuilderTests: XCTestCase {
         XCTAssertEqual(settings.ipv6Settings?.networkPrefixLengths, [NSNumber(value: 128)])
         XCTAssertEqual(settings.mtu, NSNumber(value: 1380))
     }
+
+    func testBlockingSettingsRouteEverythingIntoTheTunnel() {
+        let settings = TunnelSettingsBuilder.blocking(allowLan: false)
+        XCTAssertEqual(settings.ipv4Settings?.addresses, ["192.0.2.2"])
+        XCTAssertEqual(settings.ipv4Settings?.subnetMasks, ["255.255.255.255"])
+        XCTAssertEqual((settings.ipv4Settings?.includedRoutes ?? []).map(keyV4), [keyV4(NEIPv4Route.default())])
+        XCTAssertTrue((settings.ipv4Settings?.excludedRoutes ?? []).isEmpty)
+        XCTAssertEqual((settings.ipv6Settings?.includedRoutes ?? []).map(keyV6), [keyV6(NEIPv6Route.default())])
+        XCTAssertEqual(settings.dnsSettings?.servers, ["192.0.2.1"])
+        XCTAssertEqual(settings.dnsSettings?.matchDomains, [""])
+    }
+
+    func testBlockingSettingsKeepTheLanAndItsResolverPin() {
+        let v4 = TunnelSettingsBuilder.blocking(allowLan: true).ipv4Settings
+        XCTAssertEqual((v4?.excludedRoutes ?? []).count, 4)
+        XCTAssertTrue((v4?.includedRoutes ?? []).map(keyV4).contains("192.0.2.1/255.255.255.255"))
+    }
+
+    func testExcludedRangesAreCarvedOutAndUnusableOnesSkipped() {
+        let ranges = [
+            "203.0.113.77/24", "198.51.100.7", "garbage", "10.0.0.0/4", "1.2.3.4/33", "2001:db8::/32", " 192.0.2.0/30 ",
+        ]
+        let excluded = (TunnelSettingsBuilder.make(config, allowLan: false, excludedRanges: ranges)
+            .ipv4Settings?.excludedRoutes ?? []).map(keyV4)
+        XCTAssertEqual(excluded, [
+            "203.0.113.0/255.255.255.0", "198.51.100.7/255.255.255.255", "192.0.2.0/255.255.255.252",
+        ])
+    }
+
+    func testResolversStayInsideTheTunnelWhenARangeCoversThem() {
+        let included = (TunnelSettingsBuilder.make(config, allowLan: false, excludedRanges: ["1.1.1.0/24"])
+            .ipv4Settings?.includedRoutes ?? []).map(keyV4)
+        XCTAssertEqual(included, [
+            keyV4(NEIPv4Route.default()), "10.66.0.1/255.255.255.255", "1.1.1.1/255.255.255.255",
+        ])
+    }
+
+    func testExcludedRangesAddToTheLanExclusions() {
+        let excluded = TunnelSettingsBuilder.make(config, allowLan: true, excludedRanges: ["203.0.113.0/24"])
+            .ipv4Settings?.excludedRoutes ?? []
+        XCTAssertEqual(excluded.count, 5)
+        XCTAssertEqual(excluded.last.map(keyV4), "203.0.113.0/255.255.255.0")
+    }
+
+    func testParseRangeAcceptsCidrAndBareAddresses() {
+        XCTAssertEqual(TunnelSettingsBuilder.parseRange("10.1.2.3/8")?.address, "10.0.0.0")
+        XCTAssertEqual(TunnelSettingsBuilder.parseRange("10.1.2.3/8")?.prefix, 8)
+        XCTAssertEqual(TunnelSettingsBuilder.parseRange("8.8.8.8")?.prefix, 32)
+        XCTAssertNil(TunnelSettingsBuilder.parseRange("10.0.0.0/7"))
+        XCTAssertNil(TunnelSettingsBuilder.parseRange("10.0.0.0/"))
+        XCTAssertNil(TunnelSettingsBuilder.parseRange("10.0.0.0/8/1"))
+        XCTAssertNil(TunnelSettingsBuilder.parseRange(""))
+    }
+
+    func testFingerprintChangesWithEveryAppliedInput() {
+        let base = fingerprint(config)
+        XCTAssertEqual(base, fingerprint(config))
+        XCTAssertNotEqual(base, fingerprint(tunnel(address: "10.66.0.3")))
+        XCTAssertNotEqual(base, fingerprint(tunnel(mtu: 1280)))
+        XCTAssertNotEqual(base, fingerprint(tunnel(dns: ["9.9.9.9"])))
+        XCTAssertNotEqual(base, fingerprint(config, allowLan: true))
+        XCTAssertNotEqual(base, fingerprint(config, ranges: ["1.2.3.0/24"]))
+    }
+
+    func testFingerprintIgnoresTheServerIdentity() {
+        XCTAssertEqual(fingerprint(config), fingerprint(tunnel(serverId: "x")))
+    }
+
+    private func fingerprint(
+        _ c: TunnelConfig, allowLan: Bool = false, ranges: [String] = []
+    ) -> TunnelSettingsFingerprint {
+        TunnelSettingsBuilder.fingerprint(c, allowLan: allowLan, excludedRanges: ranges)
+    }
+
+    private func tunnel(
+        address: String = "10.66.0.2", dns: [String] = ["10.66.0.1", "1.1.1.1"], mtu: Int = 1380, serverId: String = "s"
+    ) -> TunnelConfig {
+        TunnelConfig(address: address, prefixLength: 32, dns: dns, mtu: mtu, serverId: serverId, serverName: serverId)
+    }
 }
