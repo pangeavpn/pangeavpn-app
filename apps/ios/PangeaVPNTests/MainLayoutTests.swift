@@ -35,6 +35,39 @@ final class MainLayoutTests: XCTestCase {
         XCTAssertEqual(MapSizing.band(viewport: 600, content: 590, side: 112), 112)
     }
 
+    private let slotMetrics = SlotMetrics(label: 14, row: 56, door: 48)
+
+    func testIdleRowsWaitForMeasurements() {
+        XCTAssertEqual(SlotBudget.idleRows(viewport: 900, fixed: 150, metrics: SlotMetrics()), Regions.slotCount)
+    }
+
+    // Sizes are the stack heights an SE, a 17 Pro and a 17 Pro Max leave below the header.
+    func testIdleRowsGrowWithTheScreen() {
+        XCTAssertEqual(SlotBudget.idleRows(viewport: 505, fixed: 146, metrics: slotMetrics), 3)
+        XCTAssertEqual(SlotBudget.idleRows(viewport: 636, fixed: 146, metrics: slotMetrics), 4)
+        XCTAssertEqual(SlotBudget.idleRows(viewport: 718, fixed: 146, metrics: slotMetrics), 5)
+    }
+
+    func testIdleRowsStopAtTheMaximum() {
+        XCTAssertEqual(SlotBudget.idleRows(viewport: 2000, fixed: 146, metrics: slotMetrics), SlotBudget.idleMaximum)
+    }
+
+    // One extra row is still worth a small map; two slots stay when even that would scroll.
+    func testIdleRowsFallBackToTheMinimumMap() {
+        let tight = 146 + slotMetrics.chrome + 3 * slotMetrics.pitch + MapSizing.minimum
+        XCTAssertEqual(SlotBudget.idleRows(viewport: tight, fixed: 146, metrics: slotMetrics), 3)
+        XCTAssertEqual(SlotBudget.idleRows(viewport: tight - 1, fixed: 146, metrics: slotMetrics), Regions.slotCount)
+    }
+
+    func testIdleRowsKeepTheMapComfortable() {
+        for viewport in stride(from: CGFloat(500), through: 900, by: 7) {
+            let rows = SlotBudget.idleRows(viewport: viewport, fixed: 146, metrics: slotMetrics)
+            guard rows > Regions.slotCount + 1 else { continue }
+            let map = viewport - 146 - slotMetrics.chrome - CGFloat(rows) * slotMetrics.pitch
+            XCTAssertGreaterThanOrEqual(map, SlotBudget.comfortableMap, "\(viewport)")
+        }
+    }
+
     func testPhonesGetTwoByTwoFacts() {
         for width: CGFloat in [295, 335, 362, 400] {
             XCTAssertEqual(FactsLayout.columns(width: width, valueSize: 15), 2, "\(width)")

@@ -52,8 +52,8 @@ final class RegionsTests: XCTestCase {
         XCTAssertEqual(Regions.slots(threeRegions, selectedKey: nil).map(\.key), ["eu", "us"])
     }
 
-    func testSlotsLeaveTheLeadingRegionsAloneWhenTheSelectionIsAlreadyThere() {
-        XCTAssertEqual(Regions.slots(threeRegions, selectedKey: "us").map(\.key), ["eu", "us"])
+    func testASelectionAlreadyInTheLeadingRegionsMovesToTheFirstSlot() {
+        XCTAssertEqual(Regions.slots(threeRegions, selectedKey: "us").map(\.key), ["us", "eu"])
     }
 
     func testASelectionOutsideTheLeadingRegionsIsPulledIntoTheFirstSlot() {

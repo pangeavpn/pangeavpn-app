@@ -35,12 +35,11 @@ enum Regions {
         group(regions.flatMap(\.servers).filter { $0.supports(transport) })
     }
 
-    // The selection always keeps a slot: a pick that vanished from view would read as lost.
+    // The selection always leads, since the top slot and its highlight are what mark it as picked.
     static func slots(_ regions: [Region], selectedKey: String?, count: Int = Regions.slotCount) -> [Region] {
-        let head = Array(regions.prefix(count))
-        guard let selectedKey, !head.contains(where: { $0.key == selectedKey }),
-              let selected = regions.first(where: { $0.key == selectedKey })
-        else { return head }
+        guard let selectedKey, let selected = regions.first(where: { $0.key == selectedKey }) else {
+            return Array(regions.prefix(count))
+        }
         return Array(([selected] + regions.filter { $0.key != selectedKey }).prefix(count))
     }
 

@@ -23,6 +23,32 @@ enum MapSizing {
     }
 }
 
+// The parts of the region section that stay put however many rows it lists.
+struct SlotMetrics: Equatable {
+    var label: CGFloat = 0
+    var row: CGFloat = 0
+    var door: CGFloat = 0
+
+    var measured: Bool { label > 0 && row > 0 && door > 0 }
+    var chrome: CGFloat { label + door + SlotBudget.spacing * 2 }
+    var pitch: CGFloat { row + SlotBudget.spacing }
+}
+
+// With the facts gone, an idle screen lists as many regions as it can while the map stays readable.
+enum SlotBudget {
+    static let spacing: CGFloat = 8
+    static let idleMaximum = 5
+    static let comfortableMap: CGFloat = 120
+
+    static func idleRows(viewport: CGFloat, fixed: CGFloat, metrics: SlotMetrics) -> Int {
+        let base = Regions.slotCount
+        guard metrics.measured else { return base }
+        let map = { (rows: Int) in viewport - fixed - metrics.chrome - CGFloat(rows) * metrics.pitch }
+        if let roomy = (base + 1...idleMaximum).last(where: { map($0) >= comfortableMap }) { return roomy }
+        return map(base + 1) >= MapSizing.minimum ? base + 1 : base
+    }
+}
+
 // Stacks its children top to bottom at their own heights; the MapSlot child gets what is left.
 struct MainLayout: Layout {
     let viewportHeight: CGFloat

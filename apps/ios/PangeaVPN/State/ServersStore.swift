@@ -39,9 +39,9 @@ final class ServersStore {
         slots(for: Transport.auto.rawValue)
     }
 
-    func slots(for transport: String) -> [Region] {
+    func slots(for transport: String, count: Int = Regions.slotCount) -> [Region] {
         let ordered = Regions.orderByRecent(regions(for: transport), recent: recentRegionKeys)
-        return Regions.slots(ordered, selectedKey: selectedRegionKey)
+        return Regions.slots(ordered, selectedKey: selectedRegionKey, count: count)
     }
 
     func regions(for transport: String) -> [Region] {

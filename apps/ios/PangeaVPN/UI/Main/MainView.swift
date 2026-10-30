@@ -7,14 +7,19 @@ struct MainView: View {
     @Environment(SettingsStore.self) private var settings
     @Environment(ToastCenter.self) private var toasts
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showSettings = false
     @State private var settingsPath: [SettingsRoute] = []
     // Whether this tunnel has been up since it last stopped, so a reassert reads as a reconnect.
     @State private var sawConnected = false
+    @State private var bannerHeight: CGFloat = 0
+    @State private var heroHeight: CGFloat = 0
+    @State private var slotMetrics = SlotMetrics()
 
     private static let gutter: CGFloat = 20
     private static let topInset: CGFloat = 2
     private static let bottomInset: CGFloat = 12
+    private static let slotsTop: CGFloat = 16
 
     init() {}
 
@@ -31,6 +36,13 @@ struct MainView: View {
     private var reconnecting: Bool {
         HeroState.reconnecting(status.state, busy: connection.busy, sawConnected: sawConnected,
                                lastHandshake: status.lastHandshake)
+    }
+
+    // Idle has no session to report, so the facts give their room to more regions.
+    private var showsFacts: Bool { display != .disconnected && display != .error }
+
+    private var motion: Animation {
+        reduceMotion ? .easeInOut(duration: 0.2) : .spring(response: 0.5, dampingFraction: 0.86)
     }
 
     private var action: MainAction {
@@ -62,28 +74,51 @@ struct MainView: View {
 
     // Rounded down, so the stack never ends a fraction of a point past the screen and scrolls.
     private func content(width: CGFloat, viewport: CGFloat) -> some View {
-        MainLayout(viewportHeight: max(viewport - Self.topInset - Self.bottomInset, 0).rounded(.down)) {
+        let height = max(viewport - Self.topInset - Self.bottomInset, 0).rounded(.down)
+        let banner = SubscriptionBanner.shouldShow(session.subscription)
+        let rows = slotRows(viewport: height, banner: banner)
+        return MainLayout(viewportHeight: height) {
             DriftMap(state: display)
                 .layoutValue(key: MapSlot.self, value: true)
-            if SubscriptionBanner.shouldShow(session.subscription) {
+            if banner {
                 SubscriptionBanner(subscription: session.subscription)
                     .padding(.top, 6)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { bannerHeight = $0 }
             }
             if connection.entitled {
                 hero
                     .padding(.top, 10)
-                facts(width: width)
-                    .padding(.top, 14)
-                RegionSlots()
-                    .padding(.top, 16)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { heroHeight = $0 }
+                if showsFacts {
+                    facts(width: width)
+                        .padding(.top, 14)
+                        .transition(factsTransition)
+                }
+                RegionSlots(rows: rows, metrics: $slotMetrics)
+                    .padding(.top, Self.slotsTop)
             } else {
                 ExpiredPanel()
                     .padding(.top, 8)
             }
         }
+        .animation(motion, value: showsFacts)
+        .animation(motion, value: rows)
         .padding(.horizontal, Self.gutter)
         .padding(.top, Self.topInset)
         .padding(.bottom, Self.bottomInset)
+    }
+
+    private func slotRows(viewport: CGFloat, banner: Bool) -> Int {
+        guard !showsFacts else { return Regions.slotCount }
+        let fixed = (banner ? bannerHeight : 0) + heroHeight + Self.slotsTop
+        return SlotBudget.idleRows(viewport: viewport, fixed: fixed, metrics: slotMetrics)
+    }
+
+    // The facts leave quickly, so the regions sliding up never pass over a half-faded grid.
+    private var factsTransition: AnyTransition {
+        if reduceMotion { return .opacity }
+        return .asymmetric(insertion: .opacity.combined(with: .offset(y: -10)),
+                           removal: .opacity.animation(.easeOut(duration: 0.14)))
     }
 
     private var hero: some View {

@@ -4,8 +4,14 @@ struct RegionSlots: View {
     @Environment(ServersStore.self) private var servers
     @Environment(ConnectionStore.self) private var connection
     @Environment(SettingsStore.self) private var settings
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let rows: Int
+    @Binding var metrics: SlotMetrics
 
-    init() {}
+    init(rows: Int = Regions.slotCount, metrics: Binding<SlotMetrics> = .constant(SlotMetrics())) {
+        self.rows = rows
+        self._metrics = metrics
+    }
 
     private var transport: String { settings.settings.preferredTransport }
 
@@ -19,16 +25,22 @@ struct RegionSlots: View {
     private var working: Bool { connection.busy || connection.switching }
 
     var body: some View {
-        let slots = servers.slots(for: transport)
+        let slots = servers.slots(for: transport, count: rows)
         let total = servers.regions(for: transport).count
         let selectedKey = servers.selectedRegionKey
-        VStack(alignment: .leading, spacing: 8) {
+        let lead = slots.first?.key
+        VStack(alignment: .leading, spacing: SlotBudget.spacing) {
             SectionLabel(heading)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { metrics.label = $0 }
             if slots.isEmpty {
                 EmptyRegions(loading: servers.loading, error: servers.error, onRefresh: refresh)
             } else {
                 ForEach(slots, id: \.key) { region in
                     row(region, selected: region.key == selectedKey)
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+                            if region.key == lead { metrics.row = height }
+                        }
+                        .transition(rowTransition)
                 }
             }
             AllRegionsRow(
@@ -37,8 +49,13 @@ struct RegionSlots: View {
                 onOpen: { connection.showServerSheet = true },
                 onRotate: rotate
             )
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { metrics.door = $0 }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var rowTransition: AnyTransition {
+        reduceMotion ? .opacity : .opacity.combined(with: .offset(y: 14))
     }
 
     private func row(_ region: Region, selected: Bool) -> some View {
