@@ -82,6 +82,22 @@ final class TunnelControllerTests: XCTestCase {
         XCTAssertFalse(OnDemandPolicy.active(configurationEnabled: false, onDemandEnabled: false))
     }
 
+    func testAutoConnectIsDeclinedOnlyBySwitchingOffUnderTheArmedSession() {
+        let auto = profile(auto: true, lockdown: false)
+        XCTAssertTrue(OnDemandPolicy.declinedOutside(
+            auto, enabled: false, configurationEnabled: true, armedSessionUp: true))
+        XCTAssertFalse(OnDemandPolicy.declinedOutside(
+            auto, enabled: true, configurationEnabled: true, armedSessionUp: true))
+        XCTAssertFalse(OnDemandPolicy.declinedOutside(
+            auto, enabled: false, configurationEnabled: false, armedSessionUp: true))
+        XCTAssertFalse(OnDemandPolicy.declinedOutside(
+            auto, enabled: false, configurationEnabled: true, armedSessionUp: false))
+        for other in [profile(auto: true, lockdown: true), profile(auto: false, lockdown: false)] {
+            XCTAssertFalse(OnDemandPolicy.declinedOutside(
+                other, enabled: false, configurationEnabled: true, armedSessionUp: true), "\(other)")
+        }
+    }
+
     func testOnlyARunningSessionTakesMessages() {
         let cases: [(NEVPNStatus, Bool)] = [
             (.invalid, false),

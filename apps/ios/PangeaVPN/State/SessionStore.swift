@@ -41,6 +41,8 @@ final class SessionStore {
     // Memory only, for the device-limit retry; never persisted.
     @ObservationIgnored private var pendingToken: String?
     @ObservationIgnored private var clientInfoSent = false
+    // Bumped when the session clears, so a lookup still in flight for the old account is dropped.
+    @ObservationIgnored private var generation = 0
 
     private static let log = Logger(subsystem: "org.pangeavpn", category: "session")
 
@@ -96,9 +98,11 @@ final class SessionStore {
     func signOut() async {
         guard !signingOut else { return }
         signingOut = true
+        let holdsSlot = session != nil
         await tunnel.disconnect()
         await tunnel.removeConfiguration()
-        await deregister()
+        // Cancelling on the device-limit screen has no registered slot to free.
+        if holdsSlot { await deregister() }
         let core = self.core
         await CoreQueue.perform { core.logout() }
         clearSession()
@@ -117,26 +121,25 @@ final class SessionStore {
     }
 
     func loadSubscription() async {
-        let core = self.core
-        do {
-            subscription = try await CoreQueue.run { try core.subscription() }
-        } catch {
-            Self.log.error("subscription failed: \(error.localizedDescription, privacy: .private)")
-        }
+        _ = await fetchSubscription()
     }
 
-    func refreshSubscription() async {
-        await loadSubscription()
+    // False when no answer came back: the hub refused, or was unreachable with nothing cached.
+    @discardableResult
+    func refreshSubscription() async -> Bool {
+        await fetchSubscription()
     }
 
     func loadDevices() async {
         loadingDevices = true
         deviceError = nil
+        let started = generation
         let core = self.core
         do {
-            devices = try await CoreQueue.run { try core.listDevices() }
+            let listed = try await CoreQueue.run { try core.listDevices() }
+            if started == generation { devices = listed }
         } catch {
-            deviceError = error.localizedDescription
+            if started == generation { deviceError = error.localizedDescription }
         }
         loadingDevices = false
     }
@@ -191,6 +194,20 @@ final class SessionStore {
         await CoreQueue.perform { core.setClientInfo(appVersion: info.app, osVersion: info.system) }
     }
 
+    private func fetchSubscription() async -> Bool {
+        let started = generation
+        let core = self.core
+        do {
+            let answer = try await CoreQueue.run { try core.subscription() }
+            guard started == generation else { return false }
+            subscription = answer
+            return true
+        } catch {
+            Self.log.error("subscription failed (\(error.logCode, privacy: .public)): \(error.localizedDescription, privacy: .private)")
+            return false
+        }
+    }
+
     // Best effort: a failure or timeout keeps the identity, so signing back in reuses the slot.
     private func deregister() async {
         let core = self.core
@@ -210,6 +227,7 @@ final class SessionStore {
     }
 
     private func clearSession() {
+        generation += 1
         session = nil
         subscription = nil
         devices = []

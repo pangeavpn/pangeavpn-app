@@ -20,6 +20,7 @@ final class FakeTunnel: TunnelControlling {
     var connectedDate: Date?
     var onDemandActive = false
     var onChange: (() -> Void)?
+    var onAutoConnectDeclined: (() -> Void)?
     var connectResult: Result<Void, CoreError> = .success(())
     var switchResult: Result<Void, CoreError> = .success(())
     var logsValue: String?

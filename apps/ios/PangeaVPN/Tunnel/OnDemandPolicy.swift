@@ -19,6 +19,13 @@ enum OnDemandPolicy {
         }
     }
 
+    // Switched off in iOS Settings while the session it armed stayed up: the user's choice, unless Lockdown holds it.
+    static func declinedOutside(
+        _ profile: TunnelProfile, enabled: Bool, configurationEnabled: Bool, armedSessionUp: Bool
+    ) -> Bool {
+        profile.autoConnect && !profile.lockdown && configurationEnabled && !enabled && armedSessionUp
+    }
+
     // Another VPN taking over disables this configuration, which leaves its on-demand flag inert.
     static func active(configurationEnabled: Bool, onDemandEnabled: Bool) -> Bool {
         configurationEnabled && onDemandEnabled

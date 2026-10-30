@@ -234,4 +234,45 @@ final class SessionStoreTests: XCTestCase {
     func testEntitledBeforeAnyAnswer() {
         XCTAssertTrue(makeStore(FakeCore()).entitled)
     }
+
+    func testRefreshSaysWhetherAnAnswerCameBack() async {
+        let core = FakeCore()
+        let active = Subscription(status: "active", renews: true, expiresAt: nil)
+        core.subscriptionResult = .success(active)
+        let store = makeStore(core)
+        let answered = await store.refreshSubscription()
+        XCTAssertTrue(answered)
+        core.subscriptionResult = .failure(CoreError(message: "mobile: hub unreachable"))
+        let unanswered = await store.refreshSubscription()
+        XCTAssertFalse(unanswered)
+        XCTAssertEqual(store.subscription, active)
+    }
+
+    func testACachedAnswerStillCountsAsAnAnswer() async {
+        let core = FakeCore()
+        core.subscriptionResult = .success(Subscription(
+            status: "expired", renews: false, expiresAt: nil, entitled: false, cached: true))
+        let store = makeStore(core)
+        let answered = await store.refreshSubscription()
+        XCTAssertTrue(answered)
+        XCTAssertEqual(store.subscription?.cached, true)
+    }
+
+    func testAnAnswerLandingAfterSignOutIsDropped() async {
+        let core = FakeCore()
+        core.loginResult = .success(signedIn)
+        let store = makeStore(core)
+        await store.login("ABCD-EFGH")
+        core.subscriptionResult = .success(Subscription(
+            status: "expired", renews: false, expiresAt: nil, entitled: false))
+        core.subscriptionDelay = 1
+        let late = Task { await store.refreshSubscription() }
+        let started = await eventually { core.calls.filter { $0 == "subscription" }.count == 2 }
+        XCTAssertTrue(started)
+        await store.signOut()
+        let answered = await late.value
+        XCTAssertFalse(answered)
+        XCTAssertNil(store.subscription)
+        XCTAssertTrue(store.entitled)
+    }
 }

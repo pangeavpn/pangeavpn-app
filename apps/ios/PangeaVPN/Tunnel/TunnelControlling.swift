@@ -17,6 +17,8 @@ protocol TunnelControlling: AnyObject {
     // The saved Connect On Demand flag, which the user can also flip in iOS Settings.
     var onDemandActive: Bool { get }
     var onChange: (() -> Void)? { get set }
+    // Called when iOS Settings switched Connect On Demand off under a tunnel that stayed up.
+    var onAutoConnectDeclined: (() -> Void)? { get set }
 
     func connect(serverId: String, candidates: [String], profile: TunnelProfile) async throws
     // Moves a running tunnel to another server without leaving the VPN session.

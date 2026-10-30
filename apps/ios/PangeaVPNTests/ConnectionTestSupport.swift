@@ -109,6 +109,7 @@ final class ScriptedTunnel: TunnelControlling {
     var connectedDate: Date?
     var onDemandActive = false
     var onChange: (() -> Void)?
+    var onAutoConnectDeclined: (() -> Void)?
     var switchError: Error?
     private(set) var calls: [String] = []
 

@@ -268,4 +268,23 @@ final class ConnectionStoreTests: XCTestCase {
         XCTAssertEqual(rig.tunnel.profiles.first?.lockdown, true)
         XCTAssertEqual(rig.tunnel.profiles.first?.strictKillSwitch, true)
     }
+
+    func testAutoConnectFollowsASwitchOffInIOSSettings() async throws {
+        let (defaults, suite) = try makeTestDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let rig = await makeConnectionRig(defaults)
+        XCTAssertTrue(rig.settings.autoConnect)
+        rig.tunnel.onAutoConnectDeclined?()
+        XCTAssertFalse(rig.settings.autoConnect)
+        XCTAssertFalse(rig.settings.tunnelProfile.autoConnect)
+    }
+
+    func testLockdownKeepsAutoConnectThroughASwitchOff() async throws {
+        let (defaults, suite) = try makeTestDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let rig = await makeConnectionRig(defaults)
+        rig.settings.setLockdown(true)
+        rig.tunnel.onAutoConnectDeclined?()
+        XCTAssertTrue(rig.settings.autoConnect)
+    }
 }

@@ -11,6 +11,7 @@ final class TunnelController: TunnelControlling {
     var connectedDate: Date? { monitor.connectedDate }
     private(set) var onDemandActive = false
     var onChange: (() -> Void)?
+    var onAutoConnectDeclined: (() -> Void)?
 
     private let log = Logger(subsystem: "org.pangeavpn", category: "controller")
     private let monitor: TunnelStatusMonitor
@@ -20,6 +21,8 @@ final class TunnelController: TunnelControlling {
     private var lastWrite: Task<Void, Error>?
     private var awaitingFirstConnect = false
     private var latestProfile: TunnelProfile?
+    // When the tunnel session we last saw running with Connect On Demand on came up.
+    private var armedSession: Date?
 
     // Loads at launch so a tunnel started earlier, or from Settings, shows its real state.
     init() {
@@ -117,6 +120,7 @@ final class TunnelController: TunnelControlling {
     // Saved with on-demand off so a failing first connect shows its error rather than retrying forever.
     private func start(serverId: String, candidates: [String], profile: TunnelProfile) async throws {
         let manager = try await reloadManager()
+        armedSession = nil
         TunnelConfigurator.apply(profile, onDemand: false, to: manager)
         // Also undoes the disable that a kill-switch release may have saved.
         manager.isEnabled = true
@@ -136,7 +140,7 @@ final class TunnelController: TunnelControlling {
         if Self.state(for: manager.connection.status) == .connected { firstConnected() }
     }
 
-    private func reconcile(_ profile: TunnelProfile) async {
+    private func reconcile(_ requested: TunnelProfile) async {
         let manager: NETunnelProviderManager
         do {
             // Nothing saved yet: the first connect creates it, so a foreground never prompts.
@@ -146,10 +150,21 @@ final class TunnelController: TunnelControlling {
             log.error("could not load the VPN configuration to update it (\(error.logCode, privacy: .public)): \(error.localizedDescription, privacy: .private)")
             return
         }
+        let state = Self.state(for: manager.connection.status)
+        var profile = requested
+        if OnDemandPolicy.declinedOutside(
+            requested, enabled: manager.isOnDemandEnabled, configurationEnabled: manager.isEnabled,
+            armedSessionUp: state == .connected && isArmedSession(manager.connection)) {
+            log.info("Connect On Demand was turned off in iOS Settings; auto-connect follows")
+            profile.autoConnect = false
+            onAutoConnectDeclined?()
+        }
         let onDemand = OnDemandPolicy.reconciled(
-            profile, state: Self.state(for: manager.connection.status),
-            enabled: manager.isOnDemandEnabled, awaitingFirstConnect: awaitingFirstConnect)
-        guard !TunnelConfigurator.matches(manager, profile: profile, onDemand: onDemand) else { return }
+            profile, state: state, enabled: manager.isOnDemandEnabled, awaitingFirstConnect: awaitingFirstConnect)
+        guard !TunnelConfigurator.matches(manager, profile: profile, onDemand: onDemand) else {
+            rememberSession(manager)
+            return
+        }
         TunnelConfigurator.apply(profile, onDemand: onDemand, to: manager)
         do {
             try await manager.saveToPreferences()
@@ -232,6 +247,7 @@ final class TunnelController: TunnelControlling {
         forgetManager()
         monitor.reset()
         onDemandActive = false
+        armedSession = nil
         onChange?()
     }
 
@@ -265,9 +281,23 @@ final class TunnelController: TunnelControlling {
     }
 
     private func noteSaved(_ manager: NETunnelProviderManager) {
+        rememberSession(manager)
         onDemandActive = OnDemandPolicy.active(
             configurationEnabled: manager.isEnabled, onDemandEnabled: manager.isOnDemandEnabled)
         onChange?()
+    }
+
+    // Only our own writes and checks set this, never a refresh, so an outside switch-off stays visible.
+    private func rememberSession(_ manager: NETunnelProviderManager) {
+        let connection = manager.connection
+        let armed = manager.isOnDemandEnabled && Self.state(for: connection.status) == .connected
+        armedSession = armed ? connection.connectedDate : nil
+    }
+
+    // Loose, because each loaded copy of the configuration reads the date from the system afresh.
+    private func isArmedSession(_ connection: NEVPNConnection) -> Bool {
+        guard let armedSession, let current = connection.connectedDate else { return false }
+        return abs(current.timeIntervalSince(armedSession)) < 1
     }
 
     // iOS Settings, or another VPN app taking over, can change the saved configuration under us.

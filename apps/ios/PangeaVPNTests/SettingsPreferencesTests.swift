@@ -8,7 +8,9 @@ final class SettingsPreferencesTests: XCTestCase {
     private var suite = ""
 
     override func setUpWithError() throws {
-        (defaults, suite) = try makeTestDefaults()
+        let test = try makeTestDefaults()
+        defaults = test.defaults
+        suite = test.suite
     }
 
     override func tearDown() {

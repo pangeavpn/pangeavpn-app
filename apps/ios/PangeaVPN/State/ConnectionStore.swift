@@ -35,6 +35,7 @@ final class ConnectionStore {
         self.sleeper = sleeper
         sync()
         tunnel.onChange = { [weak self] in self?.sync() }
+        tunnel.onAutoConnectDeclined = { [weak self] in self?.autoConnectDeclined() }
     }
 
     // Unknown counts as entitled; only the hub's explicit no blocks connecting.
@@ -110,6 +111,13 @@ final class ConnectionStore {
 
     func applyProfile() async {
         await tunnel.updateProfile(settings.tunnelProfile)
+    }
+
+    // The user switched Connect On Demand off in iOS Settings while connected; Auto-connect follows.
+    private func autoConnectDeclined() {
+        guard settings.autoConnect, !settings.lockdown else { return }
+        Self.log.info("auto-connect turned off from iOS Settings")
+        settings.setAutoConnect(false)
     }
 
     // Moving to the server it is already on makes the extension prepare the new route.

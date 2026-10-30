@@ -28,6 +28,8 @@ final class FakeCore: CoreBridge, @unchecked Sendable {
     var currentState = TunnelStatus.disconnected
     // Widens the read-then-write window, so an unserialized edit would lose a change.
     var configDelay: TimeInterval = 0
+    // Holds a subscription lookup after it is noted, so a test can act while it is in flight.
+    var subscriptionDelay: TimeInterval = 0
 
     private let lock = NSLock()
     private var entries: [String] = []
@@ -64,7 +66,12 @@ final class FakeCore: CoreBridge, @unchecked Sendable {
 
     func listServers() throws -> [Server] { try record("listServers", serversResult) }
 
-    func subscription() throws -> Subscription? { try record("subscription", subscriptionResult) }
+    func subscription() throws -> Subscription? {
+        let result = subscriptionResult
+        note("subscription")
+        if subscriptionDelay > 0 { Thread.sleep(forTimeInterval: subscriptionDelay) }
+        return try result.get()
+    }
 
     func listDevices() throws -> [Device] { try record("listDevices", devicesResult) }
 

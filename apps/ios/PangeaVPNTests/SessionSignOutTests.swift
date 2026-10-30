@@ -88,6 +88,19 @@ final class SessionSignOutTests: XCTestCase {
         XCTAssertEqual(core.calls.filter { $0 == "deregister" }.count, 1)
     }
 
+    func testCancellingAtTheDeviceLimitSkipsDeregister() async {
+        let core = FakeCore()
+        core.loginResult = .failure(CoreError(message: "mobile: register device: device limit reached"))
+        let store = SessionStore(core: core, tunnel: trackedTunnel(core), authenticator: FakeAuthenticator(.denied))
+        await store.login("ABCD-EFGH")
+        XCTAssertTrue(store.showDeviceLimit)
+        await store.signOut()
+        XCTAssertFalse(core.calls.contains("deregister"))
+        XCTAssertEqual(Array(core.calls.suffix(3)), ["disconnect", "removeConfiguration", "logout"])
+        XCTAssertFalse(store.signingOut)
+        assertCleared(store)
+    }
+
     func testWipeIsLocalAndClearsEverything() async throws {
         let fixture = try WipeFixture()
         defer { fixture.cleanUp() }
