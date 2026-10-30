@@ -298,17 +298,7 @@ func tryDirectIPPaths() *hubPath {
 func tryRealityPath(logs *state.LogStore) *hubPath {
 	cached := loadHubReality()
 	for index, creds := range cached {
-		manager := reality.NewProxyManager(logs)
-		ctx, cancel := context.WithTimeout(context.Background(), hubProxyStartTimeout)
-		port, err := manager.Start(ctx, state.RealityProfile{
-			RemoteHost: creds.RemoteHost,
-			RemotePort: creds.RemotePort,
-			UUID:       creds.UUID,
-			PublicKey:  creds.PublicKey,
-			ShortID:    creds.ShortID,
-			ServerName: creds.ServerName,
-		})
-		cancel()
+		manager, port, err := startRealityHubProxy(creds, logs)
 		if path := adoptProxyPath("reality", creds.RemoteHost, manager, port, err, logs); path != nil {
 			if promoted := promoteEntry(cached, index); promoted != nil {
 				saveHubReality(promoted)
@@ -322,15 +312,7 @@ func tryRealityPath(logs *state.LogStore) *hubPath {
 func tryShadowsocksPath(logs *state.LogStore) *hubPath {
 	cached := loadHubShadowsocks()
 	for index, creds := range cached {
-		manager := shadowsocks.NewProxyManager(logs)
-		ctx, cancel := context.WithTimeout(context.Background(), hubProxyStartTimeout)
-		port, err := manager.Start(ctx, state.ShadowsocksProfile{
-			RemoteHost: creds.RemoteHost,
-			RemotePort: creds.RemotePort,
-			Method:     creds.Method,
-			Password:   creds.Password,
-		})
-		cancel()
+		manager, port, err := startShadowsocksHubProxy(creds, logs)
 		if path := adoptProxyPath("shadowsocks", creds.RemoteHost, manager, port, err, logs); path != nil {
 			if promoted := promoteCreds(cached, index); promoted != nil {
 				saveHubShadowsocks(promoted)
@@ -339,6 +321,36 @@ func tryShadowsocksPath(logs *state.LogStore) *hubPath {
 		}
 	}
 	return nil
+}
+
+// startRealityHubProxy starts a local proxy to one node; the caller owns it,
+// failed or not, and must stop it.
+func startRealityHubProxy(creds hubRealityCreds, logs *state.LogStore) (hubProxy, int, error) {
+	manager := reality.NewProxyManager(logs)
+	ctx, cancel := context.WithTimeout(context.Background(), hubProxyStartTimeout)
+	defer cancel()
+	port, err := manager.Start(ctx, state.RealityProfile{
+		RemoteHost: creds.RemoteHost,
+		RemotePort: creds.RemotePort,
+		UUID:       creds.UUID,
+		PublicKey:  creds.PublicKey,
+		ShortID:    creds.ShortID,
+		ServerName: creds.ServerName,
+	})
+	return manager, port, err
+}
+
+func startShadowsocksHubProxy(creds hubShadowsocksCreds, logs *state.LogStore) (hubProxy, int, error) {
+	manager := shadowsocks.NewProxyManager(logs)
+	ctx, cancel := context.WithTimeout(context.Background(), hubProxyStartTimeout)
+	defer cancel()
+	port, err := manager.Start(ctx, state.ShadowsocksProfile{
+		RemoteHost: creds.RemoteHost,
+		RemotePort: creds.RemotePort,
+		Method:     creds.Method,
+		Password:   creds.Password,
+	})
+	return manager, port, err
 }
 
 // adoptProxyPath probes through a freshly started proxy, keeping it as the

@@ -66,3 +66,23 @@ func (k *identityKeyPair) marshal() string {
 	b, _ := json.Marshal(storedIdentity{Priv: privB64, Pub: k.pubB64})
 	return string(b)
 }
+
+// forgetIdentity drops the identity only while it is still pub, in memory and
+// in the store, so a Login that raced ahead keeps its fresh key.
+func forgetIdentity(pub string) {
+	if pub == "" {
+		return
+	}
+	mu.Lock()
+	st := store
+	if identity.publicKey() == pub {
+		identity = nil
+	}
+	mu.Unlock()
+	if st == nil {
+		return
+	}
+	if stored, _ := parseIdentity(st.Get(keyIdentity)); stored.publicKey() == pub {
+		st.Set(keyIdentity, "")
+	}
+}

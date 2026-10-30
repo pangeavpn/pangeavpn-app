@@ -91,9 +91,12 @@ type sealedRequest struct {
 	open     func(encryptedResponse) (innerResponse, error)
 }
 
+// hubChannelKeys is the hub every request is sealed for; tests swap in a testHub's keys.
+var hubChannelKeys = productionKeys
+
 // sealRequest seals for the production hub: v2 while a KEM key is pinned.
 func sealRequest(method, route string, headers map[string]string, body []byte) (sealedRequest, error) {
-	return sealRequestWith(productionKeys(), method, route, headers, body)
+	return sealRequestWith(hubChannelKeys(), method, route, headers, body)
 }
 
 // sealRequestWith falls back to v1 only when the pinned key is unusable

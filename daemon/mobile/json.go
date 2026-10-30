@@ -117,16 +117,47 @@ type serverInfo struct {
 	Multihop bool `json:"multihop,omitempty"`
 }
 
+// publicServer is all the host sees of a server: credentials never leave Go.
+// Each transport flag means the hub advertised it and this build can run it.
+type publicServer struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Region      string `json:"region"`
+	Country     string `json:"country"`
+	Load        *int   `json:"load"`
+	Multihop    bool   `json:"multihop"`
+	Cloak       bool   `json:"cloak"`
+	Reality     bool   `json:"reality"`
+	Hysteria2   bool   `json:"hysteria2"`
+	Shadowsocks bool   `json:"shadowsocks"`
+	AnyTLS      bool   `json:"anytls"`
+	Naive       bool   `json:"naive"`
+	Snowflake   bool   `json:"snowflake"`
+}
+
 type sessionJSON struct {
-	Email   string       `json:"email"`
-	Name    string       `json:"name"`
-	Servers []serverInfo `json:"servers"`
+	Email   string         `json:"email"`
+	Name    string         `json:"name"`
+	Servers []publicServer `json:"servers"`
+	// Cached marks a list served from the store because the hub was unreachable.
+	Cached bool `json:"cached"`
 }
 
 type subscriptionInfo struct {
 	Status    string  `json:"status"`
 	Renews    bool    `json:"renews"`
 	ExpiresAt *string `json:"expiresAt"`
+	Entitled  bool    `json:"entitled"`
+	Cached    bool    `json:"cached"`
+}
+
+// hubDevice is the hub's row; its identity key is never passed to the host.
+type hubDevice struct {
+	ID             string  `json:"id"`
+	IdentityPubkey *string `json:"identityPubkey"`
+	FriendlyName   *string `json:"friendlyName"`
+	CreatedAt      string  `json:"createdAt"`
+	Status         string  `json:"status"`
 }
 
 type deviceInfo struct {
@@ -134,6 +165,7 @@ type deviceInfo struct {
 	FriendlyName *string `json:"friendlyName"`
 	CreatedAt    string  `json:"createdAt"`
 	Status       string  `json:"status"`
+	Current      bool    `json:"current"`
 }
 
 type tunnelConfigJSON struct {

@@ -6,10 +6,9 @@ package mobile
 
 import (
 	"context"
-	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -17,6 +16,7 @@ import (
 	"golang.zx2c4.com/wireguard/conn"
 	"golang.zx2c4.com/wireguard/device"
 
+	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/pq"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/state"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/transport"
 )
@@ -27,6 +27,34 @@ type tunnelRuntime struct {
 	serverID        string
 	serverName      string
 	activeTransport string
+	// Set only for a multihop route; serverID stays the exit.
+	entryServerID   string
+	entryServerName string
+	// postQuantum: the live peer carries an ML-KEM-derived pre-shared key.
+	postQuantum bool
+}
+
+// label is the runtime's server and entry, for a status about it.
+func (t *tunnelRuntime) label() statusJSON {
+	return statusJSON{
+		ServerID: t.serverID, ServerName: t.serverName,
+		EntryServerID: t.entryServerID, EntryServerName: t.entryServerName,
+	}
+}
+
+// tunnelLabel is the prepared server and entry, for a status about them.
+func tunnelLabel(p *preparedTunnel) statusJSON {
+	return statusJSON{
+		ServerID: p.serverID, ServerName: p.serverName,
+		EntryServerID: p.entryServerID, EntryServerName: p.entryServerName,
+	}
+}
+
+// with returns a copy of s in state st.
+func (s statusJSON) with(st, detail string) statusJSON {
+	s.State = st
+	s.Detail = detail
+	return s
 }
 
 // handshakeTimeout bounds how long one transport is given to carry a first
@@ -55,11 +83,13 @@ func startTunnel(tunFd int) error {
 		discardTunFD(tunFd)
 		return errors.New("mobile: tunnel already running")
 	}
+	label := tunnelLabel(p)
+	reportError := func(detail string) { pushStatusJSON(label.with(string(state.StateError), detail)) }
 
 	tunFd, err := adoptTunFD(tunFd)
 	if err != nil {
 		err = fmt.Errorf("adopt tun fd: %w", err)
-		pushStatus(string(state.StateError), err.Error(), p.serverID, p.serverName)
+		reportError(err.Error())
 		return err
 	}
 
@@ -67,13 +97,13 @@ func startTunnel(tunFd int) error {
 	candidates, err := transport.Select(p.profile, preferred, st)
 	if err != nil {
 		_ = syscall.Close(tunFd)
-		pushStatus(string(state.StateError), err.Error(), p.serverID, p.serverName)
+		reportError(err.Error())
 		return err
 	}
 	if len(candidates) == 0 {
 		_ = syscall.Close(tunFd)
 		detail := "no transport is configured for this server"
-		pushStatus(string(state.StateError), detail, p.serverID, p.serverName)
+		reportError(detail)
 		return errors.New("mobile: " + detail)
 	}
 	candidates, promoted := transport.ReorderByMemory(candidates, preferred, netKey, memory)
@@ -84,22 +114,29 @@ func startTunnel(tunFd int) error {
 	// openTUN has already closed the fd when it fails.
 	tunDev, err := openTUN(tunFd)
 	if err != nil {
-		pushStatus(string(state.StateError), err.Error(), p.serverID, p.serverName)
+		reportError(err.Error())
 		return fmt.Errorf("create tun: %w", err)
 	}
 
 	dev := device.NewDevice(tunDev, conn.NewDefaultBind(), newWGLogger())
 	if err := dev.Up(); err != nil {
 		dev.Close()
-		pushStatus(string(state.StateError), err.Error(), p.serverID, p.serverName)
+		reportError(err.Error())
 		return fmt.Errorf("wg up: %w", err)
 	}
+	return walkCascade(dev, p, st, candidates, logs, netKey)
+}
 
+// walkCascade tries each candidate until one carries a handshake. It owns dev
+// and closes it when every rung fails.
+func walkCascade(dev *device.Device, p *preparedTunnel, st *starter,
+	candidates []transport.Candidate, logs *state.LogStore, netKey string) error {
+	label := tunnelLabel(p)
 	ctx := context.Background()
 	var failures []string
 	for i, candidate := range candidates {
-		pushStatus(string(state.StateConnecting), "starting "+candidate.Kind, p.serverID, p.serverName)
-		if err := bringUpOver(ctx, dev, p, st, candidate); err != nil {
+		pushStatusJSON(label.with(string(state.StateConnecting), "starting "+candidate.Kind))
+		if err := bringUpOver(ctx, dev, p, p.presharedKeyRaw, st, candidate); err != nil {
 			failures = append(failures, err.Error())
 			logs.Add(state.LogWarn, state.SourceDaemon,
 				fmt.Sprintf("%s transport did not establish a tunnel: %v", candidate.Kind, err))
@@ -110,22 +147,32 @@ func startTunnel(tunFd int) error {
 			logs.Add(state.LogInfo, state.SourceDaemon, "fell back to "+candidate.Kind+" transport")
 		}
 		rememberTransport(netKey, candidate.Kind)
-
-		mu.Lock()
-		activeTunnel = &tunnelRuntime{
-			dev: dev, starter: st, serverID: p.serverID,
-			serverName: p.serverName, activeTransport: candidate.Kind,
-		}
-		mu.Unlock()
-
-		pushStatusTransport(string(state.StateConnected), "", p.serverID, p.serverName, candidate.Kind)
+		goLive(dev, st, label, len(p.presharedKeyRaw) == pq.PresharedKeySize, candidate.Kind)
 		return nil
 	}
 
 	dev.Close()
 	detail := "no transport could establish a tunnel: " + strings.Join(failures, "; ")
-	pushStatus(string(state.StateError), detail, p.serverID, p.serverName)
+	pushStatusJSON(label.with(string(state.StateError), detail))
 	return errors.New("mobile: " + detail)
+}
+
+// goLive publishes the runtime, then a connected status carrying the
+// handshake just proven.
+func goLive(dev *device.Device, st *starter, label statusJSON, postQuantum bool, kind string) {
+	mu.Lock()
+	activeTunnel = &tunnelRuntime{
+		dev: dev, starter: st, serverID: label.ServerID, serverName: label.ServerName,
+		activeTransport: kind, entryServerID: label.EntryServerID, entryServerName: label.EntryServerName,
+		postQuantum: postQuantum,
+	}
+	mu.Unlock()
+
+	connected := label.with(string(state.StateConnected), "")
+	connected.ActiveTransport = kind
+	connected.PostQuantum = postQuantum
+	_, _, connected.LastHandshake = tunnelStats(dev)
+	pushStatusJSON(connected)
 }
 
 // discardTunFD releases a refused Start's fd: Android hands ownership to Go, so
@@ -138,11 +185,11 @@ func discardTunFD(fd int) {
 
 // bringUpOver starts one transport and proves it carries a real WireGuard
 // handshake. A started-but-blocked transport must not count as connected.
-func bringUpOver(ctx context.Context, dev *device.Device, p *preparedTunnel, st *starter, candidate transport.Candidate) error {
+func bringUpOver(ctx context.Context, dev *device.Device, p *preparedTunnel, psk []byte, st *starter, candidate transport.Candidate) error {
 	if err := candidate.Start(ctx, p.profile, nil); err != nil {
 		return err
 	}
-	if err := dev.IpcSet(buildUAPI(p.wgPrivateKeyRaw, p.serverPubKeyRaw, st.boundPort)); err != nil {
+	if err := dev.IpcSet(buildUAPI(p.wgPrivateKeyRaw, p.serverPubKeyRaw, psk, st.boundPort)); err != nil {
 		return fmt.Errorf("%s: wg configure: %w", candidate.Kind, err)
 	}
 	if err := waitForHandshake(dev, handshakeTimeout); err != nil {
@@ -166,72 +213,83 @@ func waitForHandshake(dev *device.Device, timeout time.Duration) error {
 	}
 }
 
-func lastHandshakeUnix(dev *device.Device) int64 {
+// tunnelStats reads the byte counters and newest handshake in one UAPI pass.
+func tunnelStats(dev *device.Device) (rx, tx, lastHandshake int64) {
+	if dev == nil {
+		return 0, 0, 0
+	}
 	uapi, err := dev.IpcGet()
 	if err != nil {
-		return 0
+		return 0, 0, 0
 	}
-	var latest int64
-	for _, line := range strings.Split(uapi, "\n") {
-		if !strings.HasPrefix(line, "last_handshake_time_sec=") {
-			continue
-		}
-		v, _ := strconv.ParseInt(strings.TrimPrefix(line, "last_handshake_time_sec="), 10, 64)
-		if v > latest {
-			latest = v
-		}
-	}
-	return latest
+	return parseTunnelStats(uapi)
 }
 
-func stopTunnel() {
+func lastHandshakeUnix(dev *device.Device) int64 {
+	_, _, last := tunnelStats(dev)
+	return last
+}
+
+// detachTunnel hands the running tunnel to exactly one stopper.
+func detachTunnel() *tunnelRuntime {
 	mu.Lock()
+	defer mu.Unlock()
 	t := activeTunnel
 	activeTunnel = nil
-	mu.Unlock()
+	return t
+}
 
-	if t == nil {
-		return
+func closeTunnel(t *tunnelRuntime) {
+	if t.dev != nil {
+		t.dev.Close()
 	}
-
-	pushStatus(string(state.StateDisconnecting), "", t.serverID, t.serverName)
-	t.dev.Close()
 	if t.starter != nil {
 		t.starter.stopActive(context.Background())
 	}
-	pushStatus(string(state.StateDisconnected), "", "", "")
 }
 
-// tunnelBytes sums rx_bytes/tx_bytes across all peers reported by the
-// running WireGuard device's UAPI get operation.
-func tunnelBytes(dev *device.Device) (rx int64, tx int64) {
-	uapi, err := dev.IpcGet()
+func stopTunnel() {
+	t := detachTunnel()
+	if t == nil {
+		return
+	}
+	pushStatusJSON(t.label().with(string(state.StateDisconnecting), ""))
+	closeTunnel(t)
+	pushStatusJSON(statusJSON{State: string(state.StateDisconnected)})
+}
+
+// stopTunnelForSwitch reports connecting to the prepared server, so the host
+// never sees a disconnect between two servers.
+func stopTunnelForSwitch() {
+	t := detachTunnel()
+	if t == nil {
+		return
+	}
+	mu.Lock()
+	next := t.label()
+	if p := prepared; p != nil {
+		next = tunnelLabel(p)
+	}
+	mu.Unlock()
+	pushStatusJSON(next.with(string(state.StateConnecting), "switching server"))
+	closeTunnel(t)
+}
+
+// pushStatusJSON publishes a whole status, so no field is dropped on the way.
+func pushStatusJSON(s statusJSON) {
+	mu.Lock()
+	currentStatus = s
+	sk := sink
+	mu.Unlock()
+
+	if sk == nil {
+		return
+	}
+	b, err := json.Marshal(s)
 	if err != nil {
-		return 0, 0
+		return
 	}
-	for _, line := range strings.Split(uapi, "\n") {
-		switch {
-		case strings.HasPrefix(line, "rx_bytes="):
-			v, _ := strconv.ParseInt(strings.TrimPrefix(line, "rx_bytes="), 10, 64)
-			rx += v
-		case strings.HasPrefix(line, "tx_bytes="):
-			v, _ := strconv.ParseInt(strings.TrimPrefix(line, "tx_bytes="), 10, 64)
-			tx += v
-		}
-	}
-	return rx, tx
-}
-
-// buildUAPI renders the fixed single-peer WireGuard config: UAPI keys are
-// hex, not base64, so the raw (already-decoded) key bytes are hex-encoded.
-func buildUAPI(privRaw, pubRaw []byte, endpointPort int) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "private_key=%s\n", hex.EncodeToString(privRaw))
-	fmt.Fprintf(&b, "public_key=%s\n", hex.EncodeToString(pubRaw))
-	fmt.Fprintf(&b, "endpoint=127.0.0.1:%d\n", endpointPort)
-	fmt.Fprintf(&b, "persistent_keepalive_interval=25\n")
-	fmt.Fprintf(&b, "allowed_ip=0.0.0.0/0\n")
-	return b.String()
+	sk.OnStatus(string(b))
 }
 
 func newWGLogger() *device.Logger {

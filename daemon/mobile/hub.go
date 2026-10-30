@@ -19,10 +19,6 @@ import (
 	"time"
 )
 
-// errSubscriptionExpired is distinct so the host shows a top-up prompt rather
-// than treating it as a failed sign-in.
-var errSubscriptionExpired = errors.New("SUBSCRIPTION_EXPIRED: this account's subscription has expired")
-
 type dohProvider struct {
 	url    string
 	accept string
@@ -170,16 +166,7 @@ func hubRequest(method, route string, body any, out any) error {
 		return err
 	}
 	if status < 200 || status >= 300 {
-		text := string(respBody)
-		// Checked before the auth branch: a lapsed subscription is also a 403,
-		// but signing the user out would discard the token they still need.
-		if strings.Contains(text, "SUBSCRIPTION_EXPIRED") {
-			return errSubscriptionExpired
-		}
-		if status == 401 || status == 403 || strings.Contains(text, "DEVICE_NOT_REGISTERED") {
-			return fmt.Errorf("hub auth error (%d): %s", status, text)
-		}
-		return fmt.Errorf("hub error (%d): %s", status, text)
+		return hubStatusError(status, respBody)
 	}
 
 	if out != nil && len(respBody) > 0 {
@@ -269,12 +256,37 @@ func fetchServers(identityPub string) ([]serverInfo, error) {
 		return nil, err
 	}
 	captureHubDiscovery(nil, out)
+	rememberServers(out, identityPub)
 	return out, nil
 }
 
-func listDevicesHub() ([]deviceInfo, error) {
+// rememberServers keeps the last good list for a launch the hub cannot answer.
+func rememberServers(servers []serverInfo, identityPub string) {
+	mu.Lock()
+	lk := licenseKey
+	mu.Unlock()
+	if lk == "" {
+		return
+	}
+	if raw, ok := encodeServerCache(servers, cacheOwner(lk, identityPub)); ok {
+		storeForSession(lk, keyServers, raw)
+	}
+}
+
+// storeForSession writes only while lk is still signed in, so an answer that
+// lands after a sign-out cannot bring its cache back.
+func storeForSession(lk, key, value string) {
+	mu.Lock()
+	s, current := store, licenseKey
+	mu.Unlock()
+	if s != nil && current == lk {
+		s.Set(key, value)
+	}
+}
+
+func listDevicesHub() ([]hubDevice, error) {
 	var out struct {
-		Devices []deviceInfo `json:"devices"`
+		Devices []hubDevice `json:"devices"`
 	}
 	if err := hubRequest(http.MethodGet, "/api/device/list", nil, &out); err != nil {
 		return nil, err
@@ -286,9 +298,28 @@ func removeDeviceHub(deviceID string) error {
 	return hubRequest(http.MethodPost, "/api/device/remove", map[string]string{"deviceId": deviceID}, nil)
 }
 
-func getSubscriptionHub() (*subscriptionInfo, error) {
+// renameDeviceHub returns the name the hub stored, nil when it did not say.
+func renameDeviceHub(deviceID, name string) (*string, error) {
 	var out struct {
-		Subscription *subscriptionInfo `json:"subscription"`
+		FriendlyName *string `json:"friendlyName"`
+	}
+	body := map[string]string{"deviceId": deviceID, "friendlyName": name}
+	if err := hubRequest(http.MethodPost, "/api/device/rename", body, &out); err != nil {
+		return nil, err
+	}
+	return out.FriendlyName, nil
+}
+
+// deregisterDeviceHub sends the license in the body: this route never reads
+// the X-License-Key header.
+func deregisterDeviceHub(lk, identityPub string) error {
+	body := map[string]string{"licenseKey": lk, "identityPubkey": identityPub}
+	return hubRequest(http.MethodPost, "/api/device/deregister", body, nil)
+}
+
+func getSubscriptionHub() (*hubSubscription, error) {
+	var out struct {
+		Subscription *hubSubscription `json:"subscription"`
 	}
 	if err := hubRequest(http.MethodGet, "/api/client/subscription", nil, &out); err != nil {
 		return nil, err

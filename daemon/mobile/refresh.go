@@ -74,9 +74,11 @@ func Reload() error {
 	settings = loaded.settings
 	preferredTransport = loaded.settings.PreferredTransport
 	transportMem = memory
-	// A config provisioned for another account or device must not be started.
+	// A config provisioned for another account or device must not be started,
+	// and its server list carries that device's Cloak UID.
 	if sessionChanged {
 		prepared = nil
+		servers = nil
 	}
 	if licenseKey == "" {
 		servers = nil

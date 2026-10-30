@@ -34,6 +34,9 @@ type config struct {
 	// DeadDrop lets the hub search fetch signed replacement addresses once
 	// every method is out of ones that work.
 	DeadDrop bool `json:"deadDrop"`
+	// PostQuantum offers an ML-KEM key at the next Prepare; the exit node mixes
+	// the agreed secret into WireGuard as the peer's pre-shared key.
+	PostQuantum bool `json:"postQuantum"`
 }
 
 // defaultConfig mirrors the desktop defaults: cascade on, hub methods all

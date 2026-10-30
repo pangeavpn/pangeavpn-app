@@ -11,9 +11,11 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/cloak"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/state"
+	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/transport"
 )
 
 // SocketProtector routes a raw socket fd through VpnService.protect() so
@@ -39,9 +41,14 @@ const (
 type preparedTunnel struct {
 	wgPrivateKeyRaw []byte
 	serverPubKeyRaw []byte
+	// presharedKeyRaw is nil when the peer is not post-quantum keyed.
+	presharedKeyRaw []byte
 	profile         *state.Profile
 	serverID        string
 	serverName      string
+	// Set only for a multihop route; serverID stays the exit.
+	entryServerID   string
+	entryServerName string
 }
 
 var (
@@ -222,30 +229,6 @@ func protectingControl(_, address string, c syscall.RawConn) error {
 	return protectErr
 }
 
-func pushStatus(st, detail, serverID, serverName string) {
-	pushStatusTransport(st, detail, serverID, serverName, "")
-}
-
-func pushStatusTransport(st, detail, serverID, serverName, activeTransport string) {
-	mu.Lock()
-	currentStatus = statusJSON{
-		State: st, Detail: detail, ServerID: serverID,
-		ServerName: serverName, ActiveTransport: activeTransport,
-	}
-	snapshot := currentStatus
-	sk := sink
-	mu.Unlock()
-
-	if sk == nil {
-		return
-	}
-	b, err := json.Marshal(snapshot)
-	if err != nil {
-		return
-	}
-	sk.OnStatus(string(b))
-}
-
 // Login performs a token login through the secure channel, generating and
 // registering a device identity on first use, and returns the Session JSON.
 func Login(token string) (string, error) {
@@ -278,21 +261,63 @@ func Login(token string) (string, error) {
 	licenseKey = resp.VpnAccessToken
 	mu.Unlock()
 
-	if _, err := registerDevice(ident.pubB64, platformName); err != nil {
+	ident, err = registerThisDevice(st, ident)
+	if err != nil {
 		st.Set(keyLicense, "")
 		return "", err
 	}
 
-	mu.Lock()
-	servers = resp.Servers
-	mu.Unlock()
-	st.Set(keyLicense, licenseKey)
+	// The login answer can carry another device's Cloak UID, so refetch for
+	// this identity; the login list stands in if that fails.
+	srvs, err := fetchServers(ident.pubB64)
+	if err != nil || len(srvs) == 0 {
+		srvs = resp.Servers
+		rememberServers(srvs, ident.pubB64)
+	}
 
-	b, err := json.Marshal(sessionJSON{Email: resp.User.Email, Name: resp.User.Name, Servers: resp.Servers})
+	mu.Lock()
+	servers = srvs
+	lk := licenseKey
+	mu.Unlock()
+	st.Set(keyLicense, lk)
+
+	return marshalSession(sessionJSON{Email: resp.User.Email, Name: resp.User.Name, Servers: publicServers(srvs)})
+}
+
+// registerThisDevice registers ident, rotating it once when it is still
+// registered to another account, as after signing out offline and switching.
+func registerThisDevice(st SecretStore, ident *identityKeyPair) (*identityKeyPair, error) {
+	_, err := registerDevice(ident.pubB64, platformName)
+	if hubErrorCode(err) != "IDENTITY_CONFLICT" {
+		return ident, err
+	}
+	fresh, genErr := generateIdentity()
+	if genErr != nil {
+		return ident, err
+	}
+	st.Set(keyIdentity, fresh.marshal())
+	mu.Lock()
+	identity = fresh
+	mu.Unlock()
+	_, err = registerDevice(fresh.pubB64, platformName)
+	return fresh, err
+}
+
+func marshalSession(session sessionJSON) (string, error) {
+	b, err := json.Marshal(session)
 	if err != nil {
 		return "", fmt.Errorf("marshal session: %w", err)
 	}
 	return string(b), nil
+}
+
+// publicServers is the host's view of servers: what this build can run there.
+func publicServers(srvs []serverInfo) []publicServer {
+	st := &starter{}
+	return toPublicServers(srvs, func(profile *state.Profile, kind string) bool {
+		_, availability := st.StarterFor(profile, kind)
+		return availability == transport.Available
+	})
 }
 
 // RestoreSession validates the stored license key and rebuilds the Session
@@ -309,24 +334,43 @@ func RestoreSession() (string, error) {
 		return "", errors.New("mobile: no device identity")
 	}
 
-	srvs, err := fetchServers(ident.pubB64)
+	srvs, cached, err := loadServers(lk, ident.pubB64)
 	if err != nil {
 		return "", err
 	}
-
-	mu.Lock()
-	servers = srvs
-	mu.Unlock()
-
-	b, err := json.Marshal(sessionJSON{Servers: srvs})
-	if err != nil {
-		return "", fmt.Errorf("marshal session: %w", err)
-	}
-	return string(b), nil
+	return marshalSession(sessionJSON{Servers: publicServers(srvs), Cached: cached})
 }
 
-// Logout clears the stored license key, session state and transport history.
-// The device identity is kept so a later Login reuses the same device slot.
+// loadServers fetches the region list, serving the cache only when the hub
+// was never reached; an answer that ends the session signs out locally.
+func loadServers(lk, identityPub string) ([]serverInfo, bool, error) {
+	srvs, err := fetchServers(identityPub)
+	cached := false
+	if err != nil {
+		if isSignOutCode(err) {
+			signOutLocally()
+			return nil, false, err
+		}
+		if hubAnswered(err) {
+			return nil, false, err
+		}
+		srvs = restoreCachedServers(storedValue(keyServers), cacheOwner(lk, identityPub))
+		if len(srvs) == 0 {
+			return nil, false, err
+		}
+		cached = true
+	}
+
+	mu.Lock()
+	if licenseKey == lk {
+		servers = srvs
+	}
+	mu.Unlock()
+	return srvs, cached, nil
+}
+
+// Logout clears the stored license key, session state, caches and transport
+// history. The identity is kept; Deregister first to free its device slot.
 func Logout() {
 	mu.Lock()
 	st := store
@@ -338,7 +382,9 @@ func Logout() {
 	mu.Unlock()
 
 	if st != nil {
-		st.Set(keyLicense, "")
+		for _, key := range sessionKeys {
+			st.Set(key, "")
+		}
 	}
 	// The history records which networks the tunnel got through on.
 	if memory != nil {
@@ -357,21 +403,12 @@ func ListServers() (string, error) {
 	if lk == "" {
 		return "", errors.New("mobile: not authenticated")
 	}
-	pub := ""
-	if ident != nil {
-		pub = ident.pubB64
-	}
 
-	srvs, err := fetchServers(pub)
+	srvs, _, err := loadServers(lk, ident.publicKey())
 	if err != nil {
 		return "", err
 	}
-
-	mu.Lock()
-	servers = srvs
-	mu.Unlock()
-
-	b, err := json.Marshal(srvs)
+	b, err := json.Marshal(publicServers(srvs))
 	if err != nil {
 		return "", fmt.Errorf("marshal servers: %w", err)
 	}
@@ -383,39 +420,60 @@ func ListServers() (string, error) {
 func GetSubscription() (string, error) {
 	mu.Lock()
 	lk := licenseKey
+	pub := identity.publicKey()
 	mu.Unlock()
 	if lk == "" {
 		return "", errors.New("mobile: not authenticated")
 	}
 
+	owner := cacheOwner(lk, pub)
+	now := time.Now()
 	sub, err := getSubscriptionHub()
-	if err != nil {
-		return "", err
-	}
-	if sub == nil {
+	var info subscriptionInfo
+	switch {
+	case err == nil && sub == nil:
+		storeForSession(lk, keySubscription, "")
 		return "null", nil
+	case err == nil:
+		storeForSession(lk, keySubscription, encodeCachedSubscription(*sub, owner, now))
+		info = liveSubscriptionInfo(*sub)
+	case hubAnswered(err):
+		var answer *hubAnswerError
+		if errors.As(err, &answer) && answer.Auth {
+			storeForSession(lk, keySubscription, "")
+		}
+		return "", err
+	default:
+		// Unreachable: the last answer, with entitlement re-derived for now.
+		cached, ok := restoreCachedSubscription(storedValue(keySubscription), owner, now)
+		if !ok {
+			return "", err
+		}
+		info = cachedSubscriptionInfo(cached, now)
 	}
-	b, err := json.Marshal(sub)
+
+	b, err := json.Marshal(info)
 	if err != nil {
 		return "", fmt.Errorf("marshal subscription: %w", err)
 	}
 	return string(b), nil
 }
 
-// ListDevices returns the account's registered devices.
+// ListDevices returns the account's registered devices, flagging this one.
 func ListDevices() (string, error) {
 	mu.Lock()
 	lk := licenseKey
+	pub := identity.publicKey()
 	mu.Unlock()
 	if lk == "" {
 		return "", errors.New("mobile: not authenticated")
 	}
 
-	devices, err := listDevicesHub()
+	rows, err := listDevicesHub()
 	if err != nil {
 		return "", err
 	}
-	b, err := json.Marshal(devices)
+	b, err := json.Marshal(markCurrentDevices(rows, pub))
 	if err != nil {
 		return "", fmt.Errorf("marshal devices: %w", err)
 	}
@@ -431,4 +489,47 @@ func RemoveDevice(deviceID string) error {
 		return errors.New("mobile: not authenticated")
 	}
 	return removeDeviceHub(deviceID)
+}
+
+// RenameDevice renames one of the account's devices and returns the name the
+// hub stored. The name is checked first, so a bad one never costs a request.
+func RenameDevice(deviceID, name string) (string, error) {
+	mu.Lock()
+	lk := licenseKey
+	mu.Unlock()
+	if lk == "" {
+		return "", errors.New("mobile: not authenticated")
+	}
+	if strings.TrimSpace(deviceID) == "" {
+		return "", errors.New("mobile: missing device id")
+	}
+	trimmed, err := validateDeviceName(name)
+	if err != nil {
+		return "", err
+	}
+
+	stored, err := renameDeviceHub(deviceID, trimmed)
+	if err != nil {
+		return "", err
+	}
+	if stored != nil && *stored != "" {
+		return *stored, nil
+	}
+	return trimmed, nil
+}
+
+// AccountNumber is the stored license key, "" unless fully signed in. It is
+// the bearer credential: never log it or put it in any other JSON.
+func AccountNumber() string {
+	mu.Lock()
+	lk, ident, st := licenseKey, identity, store
+	mu.Unlock()
+	if lk == "" || ident == nil || st == nil {
+		return ""
+	}
+	// Memory keeps the key through a device-limit login the store refused.
+	if strings.TrimSpace(st.Get(keyLicense)) != lk {
+		return ""
+	}
+	return lk
 }
