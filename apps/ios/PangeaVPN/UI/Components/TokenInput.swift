@@ -18,6 +18,12 @@ enum TokenInput {
         return String(out)
     }
 
+    // A wrapping field types Return as a newline; a paste that happens to end in one is not a submit.
+    static func isReturnPress(old: String, new: String) -> Bool {
+        let withoutNewlines = new.filter { !$0.isNewline }
+        return withoutNewlines != new && withoutNewlines == old
+    }
+
     private static func isAllowedSymbol(_ s: Unicode.Scalar) -> Bool {
         ("0"..."9").contains(s) || ("A"..."Z").contains(s) || ("a"..."z").contains(s)
     }

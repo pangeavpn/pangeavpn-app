@@ -31,6 +31,19 @@ final class TokenInputTests: XCTestCase {
         XCTAssertEqual(TokenInput.sanitize(""), "")
     }
 
+    func testReturnKeyIsOnlyANewlineAddedToTheValue() {
+        XCTAssertTrue(TokenInput.isReturnPress(old: "ABCD-EFGH", new: "ABCD-EFGH\n"))
+        XCTAssertTrue(TokenInput.isReturnPress(old: "ABCD-EFGH", new: "ABCD\n-EFGH"))
+        XCTAssertTrue(TokenInput.isReturnPress(old: "", new: "\n"))
+    }
+
+    func testPastesAndOtherEditsAreNotAReturnPress() {
+        XCTAssertFalse(TokenInput.isReturnPress(old: "", new: "ABCD-EFGH\n"))
+        XCTAssertFalse(TokenInput.isReturnPress(old: "ABCD", new: "ABCDE"))
+        XCTAssertFalse(TokenInput.isReturnPress(old: "ABCD\n", new: "ABCD"))
+        XCTAssertFalse(TokenInput.isReturnPress(old: "ABCD", new: "ABCD"))
+    }
+
     // The field sanitises, then the login screen groups; a pasted lowercase code comes out grouped.
     func testPastedCodeIsSanitisedThenGrouped() {
         let typed = TokenInput.sanitize(" abcd efgh!jkmn ")

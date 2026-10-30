@@ -13,6 +13,9 @@ struct PillButton: View {
         self.action = action
     }
 
+    // A faded accent still reads as live in dark mode, so idle disabled goes neutral; busy keeps the accent.
+    private var muted: Bool { !enabled && !loading }
+
     var body: some View {
         Button(action: action) {
             ZStack {
@@ -24,12 +27,13 @@ struct PillButton: View {
                 } else {
                     Text(label)
                         .scaledFont(size: 17, weight: .semibold, relativeTo: .body)
-                        .foregroundStyle(Palette.onAccent)
+                        .foregroundStyle(muted ? Palette.textMuted : Palette.onAccent)
                 }
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 16)
-            .background(Palette.accent.opacity(enabled ? 1 : 0.4), in: Capsule())
+            .background(muted ? Palette.surface : Palette.accent, in: Capsule())
+            .overlay(Capsule().strokeBorder(muted ? Palette.border : .clear, lineWidth: 1))
             .contentShape(Capsule())
         }
         .buttonStyle(PressFadeStyle())

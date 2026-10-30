@@ -77,7 +77,7 @@ struct LoginView: View {
             PillButton(
                 String(localized: "login_signin", defaultValue: "Sign In"),
                 enabled: canSubmit,
-                loading: session.loggingIn,
+                loading: session.loggingIn || submitting,
                 action: submit
             )
             .padding(.top, 14)
@@ -87,19 +87,18 @@ struct LoginView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    // The no-break space keeps the arrow on the last word's line; a link label centres unless told not to.
     private var accountLink: some View {
-        Link(destination: Self.accountURL) {
-            HStack(spacing: 4) {
-                Text(String(localized: "login_find_account", defaultValue: "Find your account number"))
-                    .scaledFont(size: 13, weight: .semibold, relativeTo: .footnote)
-                Image(systemName: "arrow.up.right")
-                    .scaledFont(size: 11, weight: .semibold, relativeTo: .caption2)
-                    .accessibilityHidden(true)
-            }
-            .foregroundStyle(Palette.accent)
-            .frame(minHeight: 44)
-            .contentShape(Rectangle())
+        let label = String(localized: "login_find_account", defaultValue: "Find your account number")
+        return Link(destination: Self.accountURL) {
+            Text("\(label)\u{00A0}\(Image(systemName: "arrow.up.right"))")
+                .scaledFont(size: 13, weight: .semibold, relativeTo: .footnote)
+                .multilineTextAlignment(.leading)
+                .foregroundStyle(Palette.accent)
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
         }
+        .accessibilityLabel(label)
     }
 
     private func errorBox(_ message: String) -> some View {

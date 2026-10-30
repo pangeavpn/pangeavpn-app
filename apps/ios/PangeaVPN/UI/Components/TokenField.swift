@@ -29,8 +29,11 @@ struct TokenField: View {
         TextField(
             "",
             text: $text,
-            prompt: Text(placeholder).foregroundColor(Palette.textMuted)
+            prompt: Text(placeholder).foregroundColor(Palette.textMuted),
+            axis: .vertical
         )
+        // A full account number wraps on every iPhone at default size; reserving two lines stops the field jumping.
+        .lineLimit(2...)
         .scaledFont(size: 17, design: .monospaced, relativeTo: .body)
         .tracking(2.4)
         .foregroundStyle(Palette.text)
@@ -42,16 +45,23 @@ struct TokenField: View {
         .keyboardType(.asciiCapable)
         .privacySensitive()
         .submitLabel(.go)
-        .onSubmit(onSubmit)
-        .onChange(of: text) { _, newValue in
+        .onSubmit(submit)
+        .onChange(of: text) { oldValue, newValue in
             let clean = TokenInput.sanitize(newValue)
             if clean != newValue { text = clean }
+            if TokenInput.isReturnPress(old: oldValue, new: newValue) { submit() }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 15)
         .background(focused ? Palette.accent.opacity(0.1) : Palette.surface, in: Self.shape)
         .overlay(Self.shape.strokeBorder(borderColor, lineWidth: focused ? 2 : 1))
         .clipShape(Self.shape)
+    }
+
+    // Dropping focus matches a single-line field, whose Return also dismisses the keyboard.
+    private func submit() {
+        focused = false
+        onSubmit()
     }
 
     private var borderColor: Color {
@@ -62,7 +72,7 @@ struct TokenField: View {
 
 #if DEBUG
 private struct TokenFieldPreview: View {
-    @State private var filled = "ABCD1234EFGH5678"
+    @State private var filled = "ABCD-EFGH-JKMN-PQRS-TVWX-YZ01"
 
     var body: some View {
         VStack(spacing: 16) {
