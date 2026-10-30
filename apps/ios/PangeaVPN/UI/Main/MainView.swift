@@ -8,6 +8,7 @@ struct MainView: View {
     @Environment(ToastCenter.self) private var toasts
     @Environment(\.colorScheme) private var colorScheme
     @State private var showSettings = false
+    @State private var settingsPath: [SettingsRoute] = []
     // Whether this tunnel has been up since it last stopped, so a reassert reads as a reconnect.
     @State private var sawConnected = false
 
@@ -40,7 +41,7 @@ struct MainView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            PangeaHeader(version: "v\(Self.versionName)", onToggleTheme: toggleTheme, onMenu: { showSettings = true })
+            PangeaHeader(version: "v\(Self.versionName)", onToggleTheme: toggleTheme, onMenu: { openSettings() })
             GeometryReader { proxy in
                 ScrollView {
                     content(width: proxy.size.width - Self.gutter * 2, viewport: proxy.size.height)
@@ -52,15 +53,16 @@ struct MainView: View {
         // Capped here only, so the screens it opens keep the accessibility sizes.
         .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
         .background(Palette.bg.ignoresSafeArea())
-        .fullScreenCover(isPresented: $showSettings) { SettingsView() }
+        .fullScreenCover(isPresented: $showSettings) { SettingsView(path: settingsPath) }
         .fullScreenCover(isPresented: regionPickerShown) { RegionPickerView() }
         .onAppear { sawConnected = status.state == .connected }
         .onChange(of: status.state) { _, state in track(state) }
         .onChange(of: connection.error) { _, message in toast(message) }
     }
 
+    // Rounded down, so the stack never ends a fraction of a point past the screen and scrolls.
     private func content(width: CGFloat, viewport: CGFloat) -> some View {
-        MainLayout(viewportHeight: max(viewport - Self.topInset - Self.bottomInset, 0)) {
+        MainLayout(viewportHeight: max(viewport - Self.topInset - Self.bottomInset, 0).rounded(.down)) {
             DriftMap(state: display)
                 .layoutValue(key: MapSlot.self, value: true)
             if SubscriptionBanner.shouldShow(session.subscription) {
@@ -130,7 +132,7 @@ struct MainView: View {
         if kind != .hidden {
             Group {
                 if kind == .lockdown {
-                    LockdownNote { showSettings = true }
+                    LockdownNote { openSettings(at: [.startup]) }
                 } else {
                     ConnectButton(kind: kind, action: toggleConnection)
                 }
@@ -165,6 +167,12 @@ struct MainView: View {
 
     private func toggleConnection() {
         Task { await connection.toggle() }
+    }
+
+    // The Lockdown switch lives on the Startup page, so the note opens settings already there.
+    private func openSettings(at path: [SettingsRoute] = []) {
+        settingsPath = path
+        showSettings = true
     }
 
     private func toggleTheme() {

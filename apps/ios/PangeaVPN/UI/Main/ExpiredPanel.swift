@@ -89,13 +89,14 @@ struct ExpiredPanel: View {
         Task {
             let clock = ContinuousClock()
             let started = clock.now
-            await session.refreshSubscription()
+            let reached = await session.refreshSubscription()
             let remaining = ExpiredText.checkHold - (clock.now - started)
             if remaining > .zero {
                 try? await Task.sleep(for: remaining)
             }
             checking = false
-            let verdict = ExpiredText.verdict(entitled: session.entitled, cached: session.subscription?.cached ?? false)
+            let verdict = ExpiredText.verdict(
+                reached: reached, entitled: session.entitled, cached: session.subscription?.cached ?? false)
             toasts.show(verdict.message, style: verdict.style)
         }
     }
@@ -138,10 +139,10 @@ enum ExpiredText {
         UIColor(hex: traits.userInterfaceStyle == .dark ? 0xF59E0B : 0xB45309)
     })
 
-    // A cached answer means the hub was not reached, so the old verdict proves nothing.
-    static func verdict(entitled: Bool, cached: Bool) -> ExpiredVerdict {
+    // No answer, or a cached one, means the hub was not reached, so the old verdict proves nothing.
+    static func verdict(reached: Bool, entitled: Bool, cached: Bool) -> ExpiredVerdict {
         if entitled { return .restored }
-        return cached ? .checkFailed : .stillExpired
+        return reached && !cached ? .stillExpired : .checkFailed
     }
 
     static func ranOut(_ expiresAt: String?, locale: Locale = .current, timeZone: TimeZone = .current) -> String? {

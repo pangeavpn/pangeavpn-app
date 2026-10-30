@@ -33,6 +33,7 @@ struct PangeaVPNApp: App {
                 .environment(connection)
                 .environment(diagnostics)
                 .toastOverlay()
+                .privacyCover()
                 .environment(toasts)
         }
     }

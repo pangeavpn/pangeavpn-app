@@ -7,7 +7,8 @@ struct DriftLook: Equatable {
     var green: Double
     var blue: Double
 
-    static let accent = (r: 195.0 / 255, g: 86.0 / 255, b: 43.0 / 255)
+    // Desktop draws a connecting map in the chosen accent, not always terra.
+    static var accent: (r: Double, g: Double, b: Double) { rgb(AccentTheme.shared.accent.hex) }
     static let idle = (r: 132.0 / 255, g: 132.0 / 255, b: 124.0 / 255)
     static let connected = (r: 16.0 / 255, g: 185.0 / 255, b: 129.0 / 255)
     static let error = (r: 244.0 / 255, g: 63.0 / 255, b: 94.0 / 255)
@@ -44,6 +45,10 @@ struct DriftLook: Equatable {
     }
 
     var tint: Color { Color(red: red, green: green, blue: blue) }
+
+    static func rgb(_ hex: UInt32) -> (r: Double, g: Double, b: Double) {
+        (Double((hex >> 16) & 0xFF) / 255, Double((hex >> 8) & 0xFF) / 255, Double(hex & 0xFF) / 255)
+    }
 }
 
 struct DriftTween {

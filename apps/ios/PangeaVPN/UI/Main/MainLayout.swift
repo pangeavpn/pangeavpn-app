@@ -5,7 +5,8 @@ struct MapSlot: LayoutValueKey {
 }
 
 enum MapSizing {
-    static let minimum: CGFloat = 112
+    // Small enough that the fullest state still fits a 17 Pro without scrolling.
+    static let minimum: CGFloat = 80
     static let maximum: CGFloat = 288
 
     // The map gives way first, so the rest fits before the screen has to scroll.

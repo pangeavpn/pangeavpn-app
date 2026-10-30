@@ -34,9 +34,14 @@ struct RegionPickerView: View {
                 }
             }
         }
+        .preferredColorScheme(settings.darkTheme.map { $0 ? ColorScheme.dark : ColorScheme.light })
         .task { await servers.refresh() }
         .toastOverlay()
+        .privacyCover()
     }
+
+    // The store ignores a pick while a start or switch is under way, so the rows say so too.
+    private var working: Bool { connection.busy || connection.switching }
 
     private var visible: [Region] {
         servers.regions(for: settings.settings.preferredTransport)
@@ -130,7 +135,7 @@ struct RegionPickerView: View {
             role: role,
             nodes: RegionPickerModel.nodes(of: region, pinnedId: pinnedId),
             expanded: expanded.contains(region.key),
-            enabled: !connection.switching,
+            enabled: !working,
             onSelect: { activate(region) },
             onToggleNodes: { toggleNodes(region.key) },
             onSelectNode: { activate($0) })
@@ -145,14 +150,14 @@ struct RegionPickerView: View {
     }
 
     private func activate(_ region: Region) {
-        guard !connection.switching else { return }
+        guard !working else { return }
         let store = connection
         dismiss()
         Task { await store.activate(region: region) }
     }
 
     private func activate(_ server: Server) {
-        guard !connection.switching else { return }
+        guard !working else { return }
         let store = connection
         dismiss()
         Task { await store.activate(server: server) }

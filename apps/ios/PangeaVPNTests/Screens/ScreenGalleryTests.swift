@@ -22,10 +22,6 @@ final class ScreenGalleryTests: XCTestCase {
         return (camera, stores)
     }
 
-    override func tearDown() {
-        AccentTheme.shared.accent = .terra
-    }
-
     func testSplash() async throws {
         let (camera, _) = try await gallery()
         try await camera.shoot("01-splash") { SplashView() }
@@ -88,6 +84,8 @@ final class ScreenGalleryTests: XCTestCase {
 
     func testMainWithAnotherAccent() async throws {
         let (camera, stores) = try await gallery(status: GalleryData.status(.disconnected))
+        // Restored here rather than in tearDown, whose override would differ in actor isolation.
+        defer { AccentTheme.shared.accent = .terra }
         stores.settings.setAccent(.ocean)
         try await camera.shoot("06b-main-ocean", ready: { !stores.servers.regions.isEmpty }) {
             stores.stage(MainView())

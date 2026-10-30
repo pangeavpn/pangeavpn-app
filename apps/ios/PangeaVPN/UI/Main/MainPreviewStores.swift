@@ -34,6 +34,7 @@ final class MainPreviewStores {
     let servers: ServersStore
     let settings: SettingsStore
     let connection: ConnectionStore
+    let diagnostics: DiagnosticsStore
     let toasts: ToastCenter
 
     init(status: TunnelStatus = .disconnected, connectedFor: TimeInterval? = nil,
@@ -61,6 +62,7 @@ final class MainPreviewStores {
         settings = settingsStore
         toasts = ToastCenter()
         connection = ConnectionStore(tunnel: fakeTunnel, servers: serversStore, settings: settingsStore, session: sessionStore)
+        diagnostics = DiagnosticsStore(core: fakeCore, tunnel: fakeTunnel)
     }
 
     func attach<V: View>(_ view: V) -> some View {
@@ -69,8 +71,9 @@ final class MainPreviewStores {
             .environment(servers)
             .environment(settings)
             .environment(connection)
-            .environment(toasts)
+            .environment(diagnostics)
             .toastOverlay()
+            .environment(toasts)
             .task { await self.load() }
     }
 

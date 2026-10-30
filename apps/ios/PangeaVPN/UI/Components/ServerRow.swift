@@ -103,7 +103,7 @@ private struct LoadIndicator: View {
                 .overlay(alignment: .leading) {
                     Capsule().fill(fill).frame(width: 42 * CGFloat(pct) / 100, height: 5)
                 }
-            Text("\(pct)%")
+            Text(verbatim: "\(pct)%")
                 .scaledFont(size: 13, design: .monospaced, relativeTo: .footnote)
                 .foregroundStyle(Palette.textMuted)
                 .lineLimit(1)
@@ -111,7 +111,7 @@ private struct LoadIndicator: View {
         }
         .fixedSize()
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(pct)%")
+        .accessibilityLabel(String(format: String(localized: "regions_load", defaultValue: "Server load %@"), "\(pct)%"))
     }
 }
 

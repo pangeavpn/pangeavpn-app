@@ -202,13 +202,17 @@ private struct DeviceLimitRow: View {
     let enabled: Bool
     let onRemove: () -> Void
 
+    private var removeLabel: String {
+        removing
+            ? String(localized: "devicelimit_removing", defaultValue: "Removing...")
+            : String(localized: "devices_remove", defaultValue: "Remove")
+    }
+
     var body: some View {
         HStack(spacing: 10) {
             info
             Button(action: onRemove) {
-                Text(removing
-                    ? String(localized: "devicelimit_removing", defaultValue: "Removing...")
-                    : String(localized: "devices_remove", defaultValue: "Remove"))
+                Text(removeLabel)
                     .scaledFont(size: 13, weight: .semibold, relativeTo: .footnote)
                     .foregroundStyle(Palette.error.opacity(enabled || removing ? 1 : 0.45))
                     .padding(.horizontal, 12)
@@ -217,6 +221,8 @@ private struct DeviceLimitRow: View {
             }
             .buttonStyle(.plain)
             .disabled(!enabled)
+            // Every row has a Remove button, so VoiceOver also hears which device it removes.
+            .accessibilityLabel([removeLabel, DeviceLimitText.name(device)].joined(separator: ", "))
         }
         .padding(.leading, 14)
         .padding(.trailing, 4)

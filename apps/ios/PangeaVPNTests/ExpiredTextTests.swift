@@ -7,16 +7,36 @@ final class ExpiredTextTests: XCTestCase {
     private let english = Locale(identifier: "en_US")
 
     func testEntitledAnswerMeansTimeWasAdded() {
-        XCTAssertEqual(ExpiredText.verdict(entitled: true, cached: false), .restored)
-        XCTAssertEqual(ExpiredText.verdict(entitled: true, cached: true), .restored)
+        XCTAssertEqual(ExpiredText.verdict(reached: true, entitled: true, cached: false), .restored)
+        XCTAssertEqual(ExpiredText.verdict(reached: true, entitled: true, cached: true), .restored)
+        XCTAssertEqual(ExpiredText.verdict(reached: false, entitled: true, cached: false), .restored)
     }
 
     func testCachedAnswerMeansTheCheckDidNotReachTheHub() {
-        XCTAssertEqual(ExpiredText.verdict(entitled: false, cached: true), .checkFailed)
+        XCTAssertEqual(ExpiredText.verdict(reached: true, entitled: false, cached: true), .checkFailed)
+    }
+
+    func testNoAnswerMeansTheCheckFailed() {
+        XCTAssertEqual(ExpiredText.verdict(reached: false, entitled: false, cached: false), .checkFailed)
     }
 
     func testLiveRefusalIsStillExpired() {
-        XCTAssertEqual(ExpiredText.verdict(entitled: false, cached: false), .stillExpired)
+        XCTAssertEqual(ExpiredText.verdict(reached: true, entitled: false, cached: false), .stillExpired)
+    }
+
+    // The old, uncached expired answer stays in the store, so only the refresh result tells a failure apart.
+    @MainActor
+    func testAFailedRefreshReadsAsCheckFailedNotStillExpired() async {
+        let core = FakeCore()
+        core.restoreResult = .success(Session(email: "a@example.org", name: "A", servers: []))
+        core.subscriptionResult = .success(Subscription(status: "expired", renews: false, expiresAt: nil, entitled: false))
+        let session = SessionStore(core: core, tunnel: FakeTunnel())
+        await session.restore()
+        core.subscriptionResult = .failure(CoreError(message: "hub unreachable"))
+        let reached = await session.refreshSubscription()
+        let cached = session.subscription?.cached ?? false
+        XCTAssertFalse(reached)
+        XCTAssertEqual(ExpiredText.verdict(reached: reached, entitled: session.entitled, cached: cached), .checkFailed)
     }
 
     func testVerdictStyles() {

@@ -43,13 +43,14 @@ struct RegionSlots: View {
 
     private func row(_ region: Region, selected: Bool) -> some View {
         let selectedId = servers.selected?.id
-        let node = region.servers.first(where: { $0.id == selectedId }) ?? region.best
+        let pinnedId = servers.pinnedServerId
+        let node = RegionPickerModel.node(for: region, selectedId: selectedId, pinnedId: pinnedId)
         return ServerRow(
-            name: Self.name(of: region),
-            country: node.country,
+            name: RegionPickerModel.name(of: region),
+            country: RegionPickerModel.country(of: region),
             load: node.load,
             selected: selected,
-            subtitle: Regions.subtitle(for: region, selectedId: selectedId, pinnedId: servers.pinnedServerId),
+            subtitle: Regions.subtitle(for: region, selectedId: selectedId, pinnedId: pinnedId),
             action: { activate(region) }
         )
         .disabled(working)
@@ -66,11 +67,6 @@ struct RegionSlots: View {
 
     private func refresh() {
         Task { await servers.refresh() }
-    }
-
-    static func name(of region: Region) -> String {
-        guard let first = region.servers.first, !first.name.isEmpty else { return region.key }
-        return first.name
     }
 }
 

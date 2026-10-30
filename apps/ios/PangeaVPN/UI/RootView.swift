@@ -20,15 +20,17 @@ struct RootView: View {
         content
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Palette.bg.ignoresSafeArea())
-            .overlay {
-                if scenePhase != .active { PrivacyCover() }
-            }
+            .privacyCover()
             .preferredColorScheme(settings.darkTheme.map { $0 ? ColorScheme.dark : ColorScheme.light })
             .onChange(of: session.restoring) { was, now in
                 if was && !now { hasRestored = true }
             }
             .onChange(of: session.session != nil) { _, signedIn in
-                guard signedIn else { return }
+                // A picker left open by a sign-out or wipe would reopen over the next account.
+                guard signedIn else {
+                    connection.showServerSheet = false
+                    return
+                }
                 draftToken = ""
                 lastSubscriptionCheck = Date()
             }
@@ -153,12 +155,6 @@ struct SplashView: View {
     }
 }
 
-private struct PrivacyCover: View {
-    var body: some View {
-        SplashView()
-    }
-}
-
 #if DEBUG
 #Preview("Splash") {
     SplashView()
@@ -177,7 +173,7 @@ private struct PrivacyCover: View {
         .environment(settings)
         .environment(ConnectionStore(tunnel: tunnel, servers: servers, settings: settings, session: session))
         .environment(DiagnosticsStore(core: core, tunnel: tunnel))
-        .environment(toasts)
         .toastOverlay()
+        .environment(toasts)
 }
 #endif

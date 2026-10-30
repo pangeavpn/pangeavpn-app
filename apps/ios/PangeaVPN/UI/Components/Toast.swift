@@ -123,7 +123,7 @@ private struct ToastOverlay: ViewModifier {
 }
 
 extension View {
-    // Needs a ToastCenter in the environment.
+    // Reads the ToastCenter from above, so `.environment(toasts)` must come after this call.
     func toastOverlay() -> some View {
         modifier(ToastOverlay())
     }
@@ -139,7 +139,7 @@ extension View {
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     .background(Palette.bg)
-    .environment(center)
     .toastOverlay()
+    .environment(center)
 }
 #endif

@@ -63,6 +63,14 @@ final class ThemeTests: XCTestCase {
         XCTAssertEqual(DriftLook.target(for: .error).alpha, 0.55)
     }
 
+    func testConnectingMapFollowsTheAccent() {
+        defer { AccentTheme.shared.accent = .terra }
+        AccentTheme.shared.accent = .ocean
+        let look = DriftLook.target(for: .connecting)
+        XCTAssertEqual([look.red, look.green, look.blue].map { ($0 * 255).rounded() }, [0x2B, 0x7B, 0xC3])
+        XCTAssertEqual(DriftLook.target(for: .connected).green, 185.0 / 255, accuracy: 1e-9)
+    }
+
     func testThemeChoiceMapsTheStoredValue() {
         XCTAssertEqual(ThemeChoice(darkTheme: nil), .system)
         XCTAssertEqual(ThemeChoice(darkTheme: false), .light)

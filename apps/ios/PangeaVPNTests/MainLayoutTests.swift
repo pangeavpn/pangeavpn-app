@@ -22,6 +22,14 @@ final class MainLayoutTests: XCTestCase {
         XCTAssertEqual(MapSizing.side(viewport: 1000, content: 100, width: -10), 0)
     }
 
+    // A 17 Pro leaves the stack about 640 pt; banner, two-line hero, facts and slots take about 555.
+    func testTheFullestStateFitsAnIPhone17ProWithoutScrolling() {
+        let viewport: CGFloat = 640
+        let content: CGFloat = 555
+        let side = MapSizing.side(viewport: viewport, content: content, width: 362)
+        XCTAssertLessThanOrEqual(content + MapSizing.band(viewport: viewport, content: content, side: side), viewport)
+    }
+
     func testSpareHeightGoesAroundTheMap() {
         XCTAssertEqual(MapSizing.band(viewport: 1000, content: 500, side: 288), 500)
         XCTAssertEqual(MapSizing.band(viewport: 600, content: 590, side: 112), 112)
