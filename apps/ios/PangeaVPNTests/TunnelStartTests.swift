@@ -113,6 +113,19 @@ final class TunnelStartTests: XCTestCase {
         XCTAssertTrue(TunnelStart.resolveAllowLan(excludeLocalNetworks: nil, settings: settings))
     }
 
+    func testStartCandidatesTakeTheAppsListElseFallBackLikeTheApp() {
+        let servers = ["uk-1", "uk-2", "de-1"].map { Server(id: $0, name: $0, region: "eu", country: "GB", load: nil) }
+        let listed: [String: NSObject] = [TunnelStart.candidatesOption: TunnelStart.candidatesValue(["uk-1", "de-1"])]
+        XCTAssertEqual(TunnelStart.startCandidates(options: listed, serverId: "uk-1", transport: "auto", servers: servers),
+                       ["uk-1", "de-1"])
+        XCTAssertEqual(TunnelStart.startCandidates(options: nil, serverId: "uk-1", transport: "auto", servers: servers),
+                       ["uk-1", "uk-2", "de-1"])
+        XCTAssertEqual(TunnelStart.startCandidates(options: nil, serverId: "uk-1", transport: "reality", servers: servers),
+                       ["uk-1"])
+        XCTAssertEqual(TunnelStart.startCandidates(options: nil, serverId: "gone-1", transport: "auto", servers: []),
+                       ["gone-1"])
+    }
+
     func testLockedKeychainMapsToDeviceLocked() {
         XCTAssertEqual(TunnelStart.keychainError(status: errSecInteractionNotAllowed), .deviceLocked)
         XCTAssertNil(TunnelStart.keychainError(status: errSecSuccess))

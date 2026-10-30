@@ -47,7 +47,6 @@ final class TunnelLifecycle {
     var startBaseline: String?
     var everConnected = false
     var outage = false
-    var blockedReason: TunnelStartError?
 
     var serverId: String { targets.current }
 
@@ -72,7 +71,8 @@ final class TunnelLifecycle {
         resetSession()
         phase = .starting
         startOptions = options
-        systemStart = options == nil
+        // The app always names a server; iOS may pass options of its own on an on-demand start.
+        systemStart = options?[TunnelStart.serverIdOption] == nil
         self.excludeLocalNetworks = excludeLocalNetworks
         allowLan = excludeLocalNetworks ?? false
         pendingStart = PendingStart(cycle: cycle, completion: completion)
@@ -92,7 +92,6 @@ final class TunnelLifecycle {
         abandonPendingStart()
         everConnected = false
         outage = false
-        blockedReason = nil
         if announce { onEvent(.stopped) }
     }
 
@@ -160,15 +159,13 @@ final class TunnelLifecycle {
         }
         everConnected = true
         outage = false
-        blockedReason = nil
     }
 
+    // Every terminal failure is told, so an alert the open app held back can show once it closes.
     func announceTrouble(_ failure: ReconnectPolicy.Failure) {
         switch failure {
         case .terminal(let reason):
             outage = true
-            guard blockedReason != reason else { return }
-            blockedReason = reason
             onEvent(.blocked(reason))
         case .transient:
             guard !outage else { return }
@@ -270,7 +267,6 @@ final class TunnelLifecycle {
         startBaseline = nil
         everConnected = false
         outage = false
-        blockedReason = nil
         note.set(nil)
     }
 

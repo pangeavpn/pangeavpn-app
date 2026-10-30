@@ -120,6 +120,7 @@ final class LifecycleCoreFake: LifecycleCore {
 
     var settings = AppSettings()
     var tunnel = LifecycleCoreFake.tunnelConfig(dns: ["10.66.0.1"])
+    var servers: [Server] = []
     var restoreError: Error?
     var locked: TunnelStartError?
     var prepareErrors: [String: Error] = [:]
@@ -140,9 +141,10 @@ final class LifecycleCoreFake: LifecycleCore {
 
     func keychainLocked() -> TunnelStartError? { locked }
 
-    func restore() throws {
+    func restore() throws -> [Server] {
         calls.append("restore")
         if let restoreError { throw restoreError }
+        return servers
     }
 
     func config() throws -> AppSettings {

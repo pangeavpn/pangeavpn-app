@@ -41,6 +41,15 @@ final class TunnelLifecycleTests: XCTestCase {
         XCTAssertEqual(rig.outcomes, [nil])
     }
 
+    func testStartWithoutTheAppsServerIsASystemStartThatStaysBlocked() {
+        let rig = LifecycleRig()
+        rig.core.prepareErrors["last"] = LifecycleCoreFake.failure
+        rig.start(options: ["is-on-demand": NSNumber(value: true)])
+        XCTAssertEqual(rig.prepares(), ["prepare(last)"])
+        XCTAssertEqual(rig.outcomes, [nil])
+        XCTAssertTrue(rig.host.reasserting)
+    }
+
     func testConfigWithoutUsableDNSFailsAnAppStart() {
         let rig = LifecycleRig()
         rig.core.tunnel = LifecycleCoreFake.tunnelConfig(dns: ["127.0.0.1"])

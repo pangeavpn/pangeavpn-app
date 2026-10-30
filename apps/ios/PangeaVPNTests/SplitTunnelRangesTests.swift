@@ -124,6 +124,22 @@ final class SplitTunnelRangesTests: XCTestCase {
         XCTAssertEqual(ranges(SplitTunnelRanges.text(saved)), saved)
     }
 
+    func testRouteGivesTheNetworkAndPrefixOfAValidRange() {
+        XCTAssertEqual(SplitTunnelRanges.route("10.1.2.3/8")?.address, "10.0.0.0")
+        XCTAssertEqual(SplitTunnelRanges.route("10.1.2.3/8")?.prefix, 8)
+        XCTAssertEqual(SplitTunnelRanges.route("198.51.100.7")?.prefix, 32)
+        XCTAssertEqual(SplitTunnelRanges.route("١٩٢.٠.٢.٠/٢٤")?.address, "192.0.2.0")
+        for refused in ["10.0.0.0/7", "10.0.0.0/", "10.0.0.0/8/1", "", "01.2.3.4", "2001:db8::/32"] {
+            XCTAssertNil(SplitTunnelRanges.route(refused), refused)
+        }
+    }
+
+    func testEverySavedRangeIsARoute() {
+        for saved in ranges("10.1.2.3/8, 192.0.2.7, 172.16.5.200/20") {
+            XCTAssertNotNil(SplitTunnelRanges.route(saved), saved)
+        }
+    }
+
     private func addresses(_ count: Int) -> String {
         (1...count).map { "10.0.0.\($0)" }.joined(separator: ", ")
     }
@@ -131,24 +147,10 @@ final class SplitTunnelRangesTests: XCTestCase {
 
 @MainActor
 final class ProtectionSummaryTests: XCTestCase {
-    private var defaults: UserDefaults!
-    private var suite = ""
-
-    override func setUpWithError() throws {
-        (defaults, suite) = try makeTestDefaults()
-    }
-
-    override func tearDown() {
-        defaults.removePersistentDomain(forName: suite)
-        AccentTheme.shared.accent = .terra
-    }
-
-    private func store() -> SettingsStore {
-        SettingsStore(core: FakeCore(), defaults: defaults)
-    }
-
-    func testSplitTunnelSummary() {
-        let settings = store()
+    func testSplitTunnelSummary() throws {
+        let (defaults, suite) = try makeTestDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsStore(core: FakeCore(), defaults: defaults)
         settings.setSplitTunnelRanges(["10.0.0.0/8"])
         XCTAssertEqual(SettingsSummary.splitTunnel(settings), SettingsSummary.off())
         settings.setSplitTunnelEnabled(true)
@@ -159,15 +161,19 @@ final class ProtectionSummaryTests: XCTestCase {
         XCTAssertEqual(SettingsSummary.splitTunnel(settings), "Nothing excluded")
     }
 
-    func testKillSwitchSummary() {
-        let settings = store()
+    func testKillSwitchSummary() throws {
+        let (defaults, suite) = try makeTestDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsStore(core: FakeCore(), defaults: defaults)
         XCTAssertEqual(SettingsSummary.killSwitch(settings), "Always on")
         settings.setKillSwitch(true)
         XCTAssertEqual(SettingsSummary.killSwitch(settings), "Strict")
     }
 
-    func testStartupSummary() {
-        let settings = store()
+    func testStartupSummary() throws {
+        let (defaults, suite) = try makeTestDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsStore(core: FakeCore(), defaults: defaults)
         XCTAssertEqual(SettingsSummary.startup(settings), "Auto-connect")
         settings.setLockdown(true)
         XCTAssertEqual(SettingsSummary.startup(settings), "Auto-connect" + SettingsSummary.separator + "Lockdown")
@@ -176,8 +182,10 @@ final class ProtectionSummaryTests: XCTestCase {
         XCTAssertEqual(SettingsSummary.startup(settings), SettingsSummary.off())
     }
 
-    func testNotificationsSummary() {
-        let settings = store()
+    func testNotificationsSummary() throws {
+        let (defaults, suite) = try makeTestDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsStore(core: FakeCore(), defaults: defaults)
         XCTAssertEqual(SettingsSummary.notifications(settings), "Connection alerts")
         settings.setConnectionAlerts(false)
         XCTAssertEqual(SettingsSummary.notifications(settings), SettingsSummary.off())

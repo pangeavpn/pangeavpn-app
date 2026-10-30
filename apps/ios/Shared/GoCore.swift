@@ -111,7 +111,12 @@ final class GoCore: CoreBridge {
     }
 
     func multihopEntries(exitId: String) -> [String] {
-        (try? CoreJSON.decodeList(MobileMultihopEntries(exitId))) ?? []
+        do {
+            return try CoreJSON.decodeList(MobileMultihopEntries(exitId))
+        } catch {
+            Self.log.error("multihop entries were unreadable")
+            return []
+        }
     }
 
     func stopForSwitch() { MobileStopForSwitch() }

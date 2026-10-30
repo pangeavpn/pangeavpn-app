@@ -39,8 +39,8 @@ struct Server: Codable, Equatable, Sendable {
         country = try c.decode(String.self, forKey: .country)
         load = try c.decodeIfPresent(Int.self, forKey: .load)
         multihop = (try? c.decodeIfPresent(Bool.self, forKey: .multihop)) ?? false
-        let present = Self.advertised.filter { Self.offers(c, $0) }
-        transports = Self.universalTransports.union(present.map(\.rawValue))
+        let present = Server.advertised.filter { Server.offers(c, $0) }
+        transports = Server.universalTransports.union(present.map(\.rawValue))
     }
 
     // The core sends a flag per transport; a raw hub block (an object) also counts as offered.

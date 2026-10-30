@@ -34,7 +34,8 @@ protocol LifecycleCore {
     func networkChanged()
     // Before the first unlock after a restart the session cannot be read at all.
     func keychainLocked() -> TunnelStartError?
-    func restore() throws
+    // The session's server list, which a start without one from the app falls back through.
+    func restore() throws -> [Server]
     func config() throws -> AppSettings
     func prepare(serverId: String) throws -> TunnelConfig
     func prepareVia(exitId: String, entryId: String) throws -> TunnelConfig

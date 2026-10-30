@@ -17,7 +17,6 @@ enum TunnelSettingsBuilder {
     // Documentation addresses reach nothing, so traffic fails closed until the real config lands.
     static let blockingConfig = TunnelConfig(
         address: "192.0.2.2", prefixLength: 32, dns: ["192.0.2.1"], mtu: 1280, serverId: "", serverName: "")
-    static let minExcludedPrefix = 8
 
     // IPv6 is captured and dropped, so it can never leak around the tunnel.
     private static let blackholeV6 = "fd00::1"
@@ -71,21 +70,9 @@ enum TunnelSettingsBuilder {
         dotted(prefixBits(min(max(prefixLength, 0), 32)))
     }
 
-    // An IPv4 range as "a.b.c.d/n" or a bare address, with the host bits cleared.
-    static func parseRange(_ raw: String) -> (address: String, prefix: Int)? {
-        let parts = raw.trimmingCharacters(in: .whitespaces).split(separator: "/", omittingEmptySubsequences: false)
-        guard parts.count == 1 || parts.count == 2 else { return nil }
-        var addr = in_addr()
-        guard inet_pton(AF_INET, String(parts[0]), &addr) == 1 else { return nil }
-        let parsedPrefix: Int? = parts.count == 2 ? Int(parts[1]) : 32
-        guard let prefix = parsedPrefix, (minExcludedPrefix...32).contains(prefix) else { return nil }
-        let network = UInt32(bigEndian: addr.s_addr) & prefixBits(prefix)
-        return (dotted(network), prefix)
-    }
-
     static func excludedRoutes(_ ranges: [String]) -> [NEIPv4Route] {
         ranges.compactMap { raw -> NEIPv4Route? in
-            guard let range = parseRange(raw) else {
+            guard let range = SplitTunnelRanges.route(raw.trimmingCharacters(in: .whitespaces)) else {
                 log.error("skipping an unusable excluded range: \(raw, privacy: .private)")
                 return nil
             }

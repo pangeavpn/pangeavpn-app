@@ -176,14 +176,11 @@ final class TunnelSettingsBuilderTests: XCTestCase {
         XCTAssertEqual(excluded.last.map(keyV4), "203.0.113.0/255.255.255.0")
     }
 
-    func testParseRangeAcceptsCidrAndBareAddresses() {
-        XCTAssertEqual(TunnelSettingsBuilder.parseRange("10.1.2.3/8")?.address, "10.0.0.0")
-        XCTAssertEqual(TunnelSettingsBuilder.parseRange("10.1.2.3/8")?.prefix, 8)
-        XCTAssertEqual(TunnelSettingsBuilder.parseRange("8.8.8.8")?.prefix, 32)
-        XCTAssertNil(TunnelSettingsBuilder.parseRange("10.0.0.0/7"))
-        XCTAssertNil(TunnelSettingsBuilder.parseRange("10.0.0.0/"))
-        XCTAssertNil(TunnelSettingsBuilder.parseRange("10.0.0.0/8/1"))
-        XCTAssertNil(TunnelSettingsBuilder.parseRange(""))
+    // The page's rules decide what the tunnel carves out, so a range it refuses never becomes a route.
+    func testExcludedRoutesFollowTheSplitTunnelRules() {
+        let ranges = ["10.1.2.3/8", "8.8.8.8", "10.0.0.0/7", "10.0.0.0/", "10.0.0.0/8/1", "", "1.2.3.4/08", "۱۰.۰.۰.۰/۸"]
+        let excluded = TunnelSettingsBuilder.excludedRoutes(ranges).map(keyV4)
+        XCTAssertEqual(excluded, ["10.0.0.0/255.0.0.0", "8.8.8.8/255.255.255.255", "10.0.0.0/255.0.0.0"])
     }
 
     func testFingerprintChangesWithEveryAppliedInput() {

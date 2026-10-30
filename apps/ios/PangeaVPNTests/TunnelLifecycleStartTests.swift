@@ -77,8 +77,38 @@ final class TunnelLifecycleStartTests: XCTestCase {
         rig.core.clearCalls()
         rig.clock.advance(by: 300)
         XCTAssertEqual(rig.core.calls, ["reload", "stop", "restore", "config", "prepare(last)"])
-        XCTAssertEqual(rig.events, [.blocked(.subscriptionExpired)])
+        XCTAssertEqual(rig.events, [.blocked(.subscriptionExpired), .blocked(.subscriptionExpired)])
         XCTAssertEqual(rig.clock.pending, [300])
+    }
+
+    func testSystemStartFallsBackThroughTheRestoredServers() {
+        let rig = LifecycleRig()
+        rig.core.settings.lastServerId = "uk-1"
+        rig.core.servers = ["uk-1", "uk-2", "de-1"].map { Server(id: $0, name: $0, region: "eu", country: "GB", load: nil) }
+        rig.core.prepareErrors["uk-1"] = LifecycleCoreFake.failure
+        rig.start(options: nil)
+        XCTAssertEqual(rig.prepares(), ["prepare(uk-1)", "prepare(uk-2)"])
+        XCTAssertEqual(rig.outcomes, [nil])
+        XCTAssertEqual(rig.events, [.connected])
+    }
+
+    func testSystemStartOnAChosenTransportKeepsToTheLastServer() {
+        let rig = LifecycleRig()
+        rig.core.settings.preferredTransport = "reality"
+        rig.core.servers = [Server(id: "uk-2", name: "B", region: "eu", country: "GB", load: nil)]
+        rig.core.prepareErrors["last"] = LifecycleCoreFake.failure
+        rig.start(options: nil)
+        XCTAssertEqual(rig.prepares(), ["prepare(last)"])
+        XCTAssertEqual(rig.outcomes, [nil])
+        XCTAssertEqual(rig.clock.pending, [3])
+    }
+
+    func testStrictKillSwitchKeepsTheSplitRangesOut() {
+        let rig = LifecycleRig()
+        rig.useSplitTunnel(["203.0.113.0/24"])
+        rig.prefs.set(true, forKey: SharedPrefs.Key.killSwitch)
+        rig.start()
+        XCTAssertTrue(rig.host.applied.allSatisfy { ($0.ipv4Settings?.excludedRoutes ?? []).isEmpty })
     }
 
     func testSignedOutSystemStartStaysBlocked() {

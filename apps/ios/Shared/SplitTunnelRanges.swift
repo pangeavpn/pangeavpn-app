@@ -30,6 +30,11 @@ enum SplitTunnelRanges {
         let entry: Entry
     }
 
+    private enum Parsed {
+        case network(UInt32, Int)
+        case refused(Entry)
+    }
+
     // Empty text clears the list; a range typed twice counts once toward the limit.
     static func parse(_ text: String) -> Result<[String], SplitTunnelRangesError> {
         let checked = tokens(in: text).map { Checked(token: $0, entry: normalize($0)) }
@@ -44,12 +49,16 @@ enum SplitTunnelRanges {
 
     // A bare address becomes a /32 and host bits are cleared, so equal ranges compare equal.
     static func normalize(_ token: String) -> Entry {
-        let parts = foldDigits(token).split(separator: "/", omittingEmptySubsequences: false)
-        guard parts.count <= 2, let base = address(parts[0]) else { return .notIPv4 }
-        let prefix = parts.count == 2 ? number(parts[1], maxDigits: 2) : 32
-        guard let bits = prefix, bits <= 32 else { return .notIPv4 }
-        guard bits >= minPrefix else { return .prefixTooShort }
-        return .range("\(dotted(base & mask(bits)))/\(bits)")
+        switch parsed(token) {
+        case .network(let base, let bits): return .range("\(dotted(base))/\(bits)")
+        case .refused(let entry): return entry
+        }
+    }
+
+    // The tunnel builds its excluded routes with this, so it holds a range to the same rules.
+    static func route(_ token: String) -> (address: String, prefix: Int)? {
+        guard case .network(let base, let bits) = parsed(token) else { return nil }
+        return (dotted(base), bits)
     }
 
     static func text(_ ranges: [String]) -> String {
@@ -75,6 +84,15 @@ enum SplitTunnelRanges {
 
     private static func isSeparator(_ char: Character) -> Bool {
         char.isWhitespace || separators.contains(char)
+    }
+
+    private static func parsed(_ token: String) -> Parsed {
+        let parts = foldDigits(token).split(separator: "/", omittingEmptySubsequences: false)
+        guard parts.count <= 2, let base = address(parts[0]) else { return .refused(.notIPv4) }
+        let prefix = parts.count == 2 ? number(parts[1], maxDigits: 2) : 32
+        guard let bits = prefix, bits <= 32 else { return .refused(.notIPv4) }
+        guard bits >= minPrefix else { return .refused(.prefixTooShort) }
+        return .network(base & mask(bits), bits)
     }
 
     private static func address(_ text: Substring) -> UInt32? {

@@ -30,11 +30,13 @@ extension TunnelLifecycle {
     func ensureSession() throws {
         guard !sessionReady else { return }
         if let locked = core.keychainLocked() { throw locked }
-        let settings = try restoreSessionAndConfig()
+        let servers = try restoreSession()
+        let settings = try core.config()
         allowLan = TunnelStart.resolveAllowLan(excludeLocalNetworks: excludeLocalNetworks, settings: settings)
         if targets.isEmpty {
             let chosen = try TunnelStart.resolveServerID(options: startOptions, settings: settings)
-            targets = CandidateList(TunnelStart.resolveCandidates(options: startOptions, serverId: chosen))
+            targets = CandidateList(TunnelStart.startCandidates(
+                options: startOptions, serverId: chosen, transport: settings.preferredTransport, servers: servers))
         }
         sessionReady = true
     }
@@ -79,13 +81,12 @@ extension TunnelLifecycle {
         return tunnel
     }
 
-    private func restoreSessionAndConfig() throws -> AppSettings {
+    private func restoreSession() throws -> [Server] {
         do {
-            try core.restore()
+            return try core.restore()
         } catch let error as CoreError {
             throw TunnelStart.mapRestoreError(error)
         }
-        return try core.config()
     }
 
     // A failed or unanswered apply leaves the state unknown, so the next one is never skipped.

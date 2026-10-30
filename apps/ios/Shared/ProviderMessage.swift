@@ -28,7 +28,8 @@ enum ProviderMessage: UInt8 {
     }
 
     static func encodeSwitch(_ request: SwitchRequest) throws -> Data {
-        Data([switchServer.rawValue]) + (try JSONEncoder().encode(request))
+        let body = try JSONEncoder().encode(request)
+        return Data([switchServer.rawValue]) + body
     }
 
     static func switchRequest(from message: Data) -> SwitchRequest? {

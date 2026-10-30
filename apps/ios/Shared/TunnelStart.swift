@@ -83,6 +83,16 @@ enum TunnelStart {
         return [serverId] + listed.filter { !$0.isEmpty && seen.insert($0).inserted }
     }
 
+    // On-demand and Settings starts bring no list, so they fall back the way the app's own connect would.
+    static func startCandidates(
+        options: [String: NSObject]?, serverId: String, transport: String, servers: [Server]
+    ) -> [String] {
+        guard options?[candidatesOption] == nil, transport == Transport.auto.rawValue else {
+            return resolveCandidates(options: options, serverId: serverId)
+        }
+        return Regions.candidates(from: serverId, in: servers)
+    }
+
     static func candidatesValue(_ ids: [String]) -> NSString {
         ids.joined(separator: ",") as NSString
     }

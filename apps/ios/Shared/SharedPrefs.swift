@@ -35,9 +35,10 @@ enum SharedPrefs {
         bool(Key.connectionAlerts, default: true, in: defaults)
     }
 
-    // The ranges the tunnel should leave out, or none while split tunnelling is off.
+    // None while split tunnelling is off, or while the strict kill switch voids the split as the app says.
     static func excludedRanges(in defaults: UserDefaults) -> [String] {
-        guard bool(Key.splitTunnelEnabled, default: false, in: defaults) else { return [] }
+        guard bool(Key.splitTunnelEnabled, default: false, in: defaults),
+              !bool(Key.killSwitch, default: false, in: defaults) else { return [] }
         return strings(Key.splitTunnelRanges, in: defaults)
     }
 

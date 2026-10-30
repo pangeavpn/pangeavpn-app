@@ -9,7 +9,7 @@ struct BridgedLifecycleCore: LifecycleCore {
 
     func keychainLocked() -> TunnelStartError? { KeychainProbe.lockedError() }
 
-    func restore() throws { _ = try bridge.restoreSession() }
+    func restore() throws -> [Server] { try bridge.restoreSession().servers }
 
     func config() throws -> AppSettings { try bridge.config() }
 
