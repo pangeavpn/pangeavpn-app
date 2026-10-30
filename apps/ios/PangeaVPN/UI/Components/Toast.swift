@@ -16,11 +16,26 @@ struct Toast: Equatable, Identifiable, Sendable {
 @Observable
 final class ToastCenter {
     private(set) var current: Toast?
+    // Overlays stack under full-screen covers; only the newest one draws, so a toast shows once.
+    private(set) var hosts: [UUID] = []
     @ObservationIgnored private var dismissal: Task<Void, Never>?
 
     static let visibleFor = Duration.seconds(4)
 
     init() {}
+
+    func attach(_ host: UUID) {
+        hosts.removeAll { $0 == host }
+        hosts.append(host)
+    }
+
+    func detach(_ host: UUID) {
+        hosts.removeAll { $0 == host }
+    }
+
+    func isTopHost(_ host: UUID) -> Bool {
+        hosts.last == host
+    }
 
     func show(_ text: String, style: ToastStyle = .info) {
         let toast = Toast(id: UUID(), text: text, style: style)
@@ -85,19 +100,23 @@ private struct ToastBanner: View {
 
 private struct ToastOverlay: ViewModifier {
     @Environment(ToastCenter.self) private var toasts
+    @State private var host = UUID()
 
     func body(content: Content) -> some View {
+        let shown = toasts.isTopHost(host) ? toasts.current : nil
         content.overlay(alignment: .bottom) {
-            if let toast = toasts.current {
+            if let toast = shown {
                 ToastBanner(toast: toast) { toasts.dismiss(toast.id) }
                     .padding(.bottom, 12)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
                     .id(toast.id)
             }
         }
-        .animation(.easeOut(duration: 0.2), value: toasts.current)
+        .animation(.easeOut(duration: 0.2), value: shown)
+        .onAppear { toasts.attach(host) }
+        .onDisappear { toasts.detach(host) }
         .onChange(of: toasts.current) { _, toast in
-            guard let toast else { return }
+            guard let toast, toasts.isTopHost(host) else { return }
             UIAccessibility.post(notification: .announcement, argument: toast.text)
         }
     }

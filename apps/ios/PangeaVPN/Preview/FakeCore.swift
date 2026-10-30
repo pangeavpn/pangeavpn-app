@@ -31,6 +31,9 @@ final class FakeCore: CoreBridge, @unchecked Sendable {
 
     private let lock = NSLock()
     private var entries: [String] = []
+    private var sentExtraLogs: String?
+
+    var lastExtraLogs: String? { lock.withLock { sentExtraLogs } }
     private var saved: [AppSettings] = []
     private var stored: Result<AppSettings, CoreError> = .success(AppSettings())
 
@@ -83,7 +86,8 @@ final class FakeCore: CoreBridge, @unchecked Sendable {
     }
 
     func sendDiagnostics(note text: String, extraLogs: String) throws -> String {
-        try record("sendDiagnostics(\(text))", diagnosticsResult)
+        lock.withLock { sentExtraLogs = extraLogs }
+        return try record("sendDiagnostics(\(text))", diagnosticsResult)
     }
 
     func testHubMethod(_ method: String) throws -> HubTestResult {

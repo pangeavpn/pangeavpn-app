@@ -156,6 +156,22 @@ final class SettingsStore {
         splitTunnelRanges = ranges
     }
 
+    // A failure to run the probe at all reads as a failed probe, with the reason as its detail.
+    func testHubMethod(_ method: String) async -> HubTestResult {
+        let core = self.core
+        do {
+            return try await CoreQueue.run { try core.testHubMethod(method) }
+        } catch {
+            Self.log.error("hub test failed to run: \(error.localizedDescription, privacy: .private)")
+            return HubTestResult(method: method, ok: false, ms: 0, detail: error.localizedDescription)
+        }
+    }
+
+    func hubStatus() async -> HubStatus {
+        let core = self.core
+        return await CoreQueue.perform { core.hubStatus() }
+    }
+
     // After a panic wipe has erased the stored values, so nothing on screen outlives them.
     func resetToDefaults() {
         settings = AppSettings()

@@ -22,6 +22,10 @@ final class ScreenGalleryTests: XCTestCase {
         return (camera, stores)
     }
 
+    override func tearDown() {
+        AccentTheme.shared.accent = .terra
+    }
+
     func testSplash() async throws {
         let (camera, _) = try await gallery()
         try await camera.shoot("01-splash") { SplashView() }
@@ -52,13 +56,19 @@ final class ScreenGalleryTests: XCTestCase {
     }
 
     func testMain() async throws {
-        let connected = GalleryData.status(.connected, bytesIn: 1_572_864, bytesOut: 327_680, transport: "reality")
+        let connected = GalleryData.status(.connected, bytesIn: 1_572_864, bytesOut: 327_680,
+                                           transport: "reality", postQuantum: true)
+        let multihop = GalleryData.status(.connected, bytesIn: 88_431_002, bytesOut: 4_120_000,
+                                          transport: "hysteria2", postQuantum: true,
+                                          entry: ("nl-ams-1", "Amsterdam"))
         let failed = GalleryData.status(.error, detail: "The server did not answer the handshake.")
         let states: [(name: String, status: TunnelStatus, seconds: TimeInterval?, plan: Subscription?)] = [
-            ("06-main-disconnected", .disconnected, nil, nil),
+            ("06-main-disconnected", .disconnected, nil, GalleryData.active),
             ("07-main-connecting", GalleryData.status(.connecting), nil, GalleryData.active),
             ("08-main-connected", connected, 754, GalleryData.active),
+            ("08b-main-multihop", multihop, 3_725, GalleryData.active),
             ("09-main-error", failed, nil, GalleryData.pastDue),
+            ("09b-main-expired", .disconnected, nil, GalleryData.expired),
         ]
         for state in states {
             let (camera, stores) = try await gallery(
@@ -76,37 +86,78 @@ final class ScreenGalleryTests: XCTestCase {
         }
     }
 
-    // Dismissing a sheet writes false back through its binding, so each look opens it again.
-    func testServerSheet() async throws {
-        let (camera, stores) = try await gallery()
-        try await camera.shoot("10-servers", presents: true,
-                               before: { stores.connection.showServerSheet = true },
+    func testMainWithAnotherAccent() async throws {
+        let (camera, stores) = try await gallery(status: GalleryData.status(.disconnected))
+        stores.settings.setAccent(.ocean)
+        try await camera.shoot("06b-main-ocean", ready: { !stores.servers.regions.isEmpty }) {
+            stores.stage(MainView())
+        }
+    }
+
+    func testRegionPicker() async throws {
+        let (camera, stores) = try await gallery(status: GalleryData.status(.connected, transport: "reality"))
+        try await camera.shoot("10-regions", looks: ScreenCamera.Look.all, ready: { !stores.servers.regions.isEmpty }) {
+            stores.stage(RegionPickerView())
+        }
+        try await camera.shoot("10-regions-end", looks: [.light], scrollToEnd: true,
                                ready: { !stores.servers.regions.isEmpty }) {
-            stores.stage(MainView())
+            stores.stage(RegionPickerView())
+        }
+        stores.settings.setMultihopEnabled(true)
+        try await camera.shoot("10b-regions-multihop", ready: { !stores.servers.regions.isEmpty }) {
+            stores.stage(RegionPickerView())
         }
     }
 
-    func testServerSheetEmpty() async throws {
+    func testRegionPickerEmpty() async throws {
         let (camera, stores) = try await gallery(servers: [])
-        try await camera.shoot("11-servers-empty", presents: true,
-                               before: { stores.connection.showServerSheet = true },
-                               ready: { !stores.servers.loading }) {
-            stores.stage(MainView())
+        try await camera.shoot("11-regions-empty", ready: { !stores.servers.loading }) {
+            stores.stage(RegionPickerView())
         }
     }
 
-    // MainView keeps its settings flag private, so the sheet is presented from outside it.
-    func testSettings() async throws {
+    func testSettingsHome() async throws {
         let (camera, stores) = try await gallery()
-        try await camera.shoot("12-settings", looks: ScreenCamera.Look.all, presents: true) {
-            stores.stage(MainView().sheet(isPresented: .constant(true)) { SettingsSheet() })
+        try await camera.shoot("12-settings", looks: ScreenCamera.Look.all) {
+            stores.stage(SettingsView())
         }
-        try await camera.shoot("12-settings-end", presents: true, scrollToEnd: true) {
-            stores.stage(MainView().sheet(isPresented: .constant(true)) { SettingsSheet() })
+        try await camera.shoot("12-settings-end", looks: [.light, .dark], scrollToEnd: true) {
+            stores.stage(SettingsView())
+        }
+        stores.settings.setDeveloperMode(true)
+        try await camera.shoot("12b-settings-developer", scrollToEnd: true) {
+            stores.stage(SettingsView())
+        }
+    }
+
+    // Every page opens already pushed, so each one is its own shot.
+    func testSettingsPages() async throws {
+        let (camera, stores) = try await gallery(status: GalleryData.status(.connected, transport: "reality"))
+        stores.settings.setDeveloperMode(true)
+        await stores.session.loadDevices()
+        let pages: [SettingsRoute] = [
+            .transport, .provisioning, .network, .killSwitch, .splitTunnel, .startup,
+            .notifications, .panic, .language, .appearance, .support, .update, .developer, .devices,
+        ]
+        for (index, route) in pages.enumerated() {
+            let name = String(format: "13-%02d-%@", index + 1, String(describing: route))
+            try await camera.shoot(name, looks: [.light, .dark],
+                                   ready: { !stores.session.loadingDevices }) {
+                stores.stage(SettingsView(path: [route]))
+            }
         }
         stores.settings.error = "At least one connection method must stay on."
-        try await camera.shoot("13-settings-error", presents: true) {
-            stores.stage(MainView().sheet(isPresented: .constant(true)) { SettingsSheet() })
+        try await camera.shoot("13-99-settings-error") {
+            stores.stage(SettingsView(path: [.provisioning]))
+        }
+    }
+
+    func testSettingsPagesAtLargeText() async throws {
+        let (camera, stores) = try await gallery()
+        for route in [SettingsRoute.network, .killSwitch, .devices] {
+            try await camera.shoot("14-large-\(route)", looks: [.largeText], scrollToEnd: true) {
+                stores.stage(SettingsView(path: [route]))
+            }
         }
     }
 }

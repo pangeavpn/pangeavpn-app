@@ -2,10 +2,12 @@ import SwiftUI
 
 @main
 struct PangeaVPNApp: App {
+    @UIApplicationDelegateAdaptor(PanicAppDelegate.self) private var appDelegate
     @State private var session: SessionStore
     @State private var servers: ServersStore
     @State private var settings: SettingsStore
     @State private var connection: ConnectionStore
+    @State private var diagnostics: DiagnosticsStore
     @State private var toasts = ToastCenter()
 
     init() {
@@ -19,6 +21,7 @@ struct PangeaVPNApp: App {
         _settings = State(initialValue: settings)
         _connection = State(initialValue: ConnectionStore(
             tunnel: tunnel, servers: servers, settings: settings, session: session))
+        _diagnostics = State(initialValue: DiagnosticsStore(core: core, tunnel: tunnel))
     }
 
     var body: some Scene {
@@ -28,8 +31,9 @@ struct PangeaVPNApp: App {
                 .environment(servers)
                 .environment(settings)
                 .environment(connection)
-                .environment(toasts)
+                .environment(diagnostics)
                 .toastOverlay()
+                .environment(toasts)
         }
     }
 }
