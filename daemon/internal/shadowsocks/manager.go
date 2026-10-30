@@ -164,8 +164,9 @@ func (m *Manager) Start(ctx context.Context, profile state.ShadowsocksProfile) e
 	m.mu.Unlock()
 
 	m.logs.Add(state.LogInfo, state.SourceShadowsocks, fmt.Sprintf(
-		"shadowsocks started, listening on 127.0.0.1:%d, relaying to %s:%d (target %s:%d)",
-		boundPort, profile.RemoteHost, profile.RemotePort, targetHost, targetPort))
+		"shadowsocks started, listening on 127.0.0.1:%d, relaying to %s (target %s)", boundPort,
+		net.JoinHostPort(profile.RemoteHost, strconv.Itoa(profile.RemotePort)),
+		net.JoinHostPort(targetHost, strconv.Itoa(targetPort))))
 
 	remoteAddr := destinationUDPAddr(targetHost, targetPort)
 	go func() {

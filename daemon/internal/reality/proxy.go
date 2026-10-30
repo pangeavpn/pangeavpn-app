@@ -171,7 +171,8 @@ func (p *ProxyManager) Start(ctx context.Context, profile state.RealityProfile) 
 	go p.watchHealth(engineCtx, generation, port)
 
 	p.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf(
-		"reality hub proxy listening on 127.0.0.1:%d via %s:%d", port, profile.RemoteHost, profile.RemotePort))
+		"reality hub proxy listening on 127.0.0.1:%d via %s", port,
+		net.JoinHostPort(profile.RemoteHost, strconv.Itoa(profile.RemotePort))))
 	return port, nil
 }
 

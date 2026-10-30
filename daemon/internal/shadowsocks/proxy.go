@@ -144,7 +144,8 @@ func (p *ProxyManager) Start(ctx context.Context, profile state.ShadowsocksProfi
 	go p.watchHealth(engineCtx, generation, port)
 
 	p.logs.Add(state.LogInfo, state.SourceShadowsocks, fmt.Sprintf(
-		"shadowsocks hub proxy listening on 127.0.0.1:%d via %s:%d", port, profile.RemoteHost, profile.RemotePort))
+		"shadowsocks hub proxy listening on 127.0.0.1:%d via %s", port,
+		net.JoinHostPort(profile.RemoteHost, strconv.Itoa(profile.RemotePort))))
 	return port, nil
 }
 

@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -75,12 +76,12 @@ func newDirectIPPath(ip string) *hubPath {
 	return &hubPath{
 		kind:   "directIp",
 		detail: ip,
-		base:   "https://" + ip,
+		base:   "https://" + urlHost(ip),
 		host:   hubHost,
 		client: &http.Client{
 			Timeout: hubRequestTimeout,
 			Transport: &http.Transport{
-				DialContext:     protectedDialer(hubProbeTimout).DialContext,
+				DialContext:     nat64Dial(protectedDialer(hubProbeTimout).DialContext, nat64Synthesize),
 				TLSClientConfig: &tls.Config{ServerName: "", InsecureSkipVerify: true},
 			},
 		},
@@ -102,7 +103,7 @@ func newValidatedPath(kind, host string) *hubPath {
 	return &hubPath{
 		kind:   kind,
 		detail: host,
-		base:   "https://" + host,
+		base:   "https://" + urlHost(host),
 		host:   host,
 		client: &http.Client{
 			Timeout:   hubRequestTimeout,
@@ -116,7 +117,7 @@ func newValidatedPath(kind, host string) *hubPath {
 func newProxyPath(kind, node string, port int, username, password string) *hubPath {
 	proxyURL := &url.URL{
 		Scheme: "http",
-		Host:   "127.0.0.1:" + strconv.Itoa(port),
+		Host:   net.JoinHostPort("127.0.0.1", strconv.Itoa(port)),
 		User:   url.UserPassword(username, password),
 	}
 	return &hubPath{
@@ -339,14 +340,7 @@ func startRealityHubProxy(creds hubRealityCreds, logs *state.LogStore) (hubProxy
 	manager := reality.NewProxyManager(logs)
 	ctx, cancel := context.WithTimeout(context.Background(), hubProxyStartTimeout)
 	defer cancel()
-	port, err := manager.Start(ctx, state.RealityProfile{
-		RemoteHost: creds.RemoteHost,
-		RemotePort: creds.RemotePort,
-		UUID:       creds.UUID,
-		PublicKey:  creds.PublicKey,
-		ShortID:    creds.ShortID,
-		ServerName: creds.ServerName,
-	})
+	port, err := manager.Start(ctx, creds.dialProfile(nat64Synthesize))
 	return manager, port, err
 }
 
@@ -354,12 +348,7 @@ func startShadowsocksHubProxy(creds hubShadowsocksCreds, logs *state.LogStore) (
 	manager := shadowsocks.NewProxyManager(logs)
 	ctx, cancel := context.WithTimeout(context.Background(), hubProxyStartTimeout)
 	defer cancel()
-	port, err := manager.Start(ctx, state.ShadowsocksProfile{
-		RemoteHost: creds.RemoteHost,
-		RemotePort: creds.RemotePort,
-		Method:     creds.Method,
-		Password:   creds.Password,
-	})
+	port, err := manager.Start(ctx, creds.dialProfile(nat64Synthesize))
 	return manager, port, err
 }
 

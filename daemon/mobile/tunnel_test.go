@@ -202,9 +202,40 @@ func cascadeInFlight(t *testing.T, candidates ...transport.Candidate) <-chan err
 	result := make(chan error, 1)
 	go func() {
 		defer finishStart(attempt)
-		result <- walkCascade(attempt, newTestDevice(), newStarter(logs), candidates, logs, "")
+		result <- walkCascade(attempt, p.profile, newTestDevice(), newStarter(logs), candidates, logs, "")
 	}()
 	return result
+}
+
+// The cascade dials the per-start profile, which carries NAT64 synthesis, never
+// the prepared one, which must stay as the hub described it.
+func TestTheCascadeStartsTransportsOnTheProfileItWasGiven(t *testing.T) {
+	initForTest(t, nil)
+	recordPushes()
+	p := keyedTunnel("A")
+	stagePrepared(p)
+	attempt, err := claimStart()
+	if err != nil {
+		t.Fatalf("claimStart: %v", err)
+	}
+	defer finishStart(attempt)
+	dialed := &state.Profile{ID: "synthesized"}
+	var started []*state.Profile
+	refuse := func(_ context.Context, profile *state.Profile, _ *state.WireGuardProfile) error {
+		started = append(started, profile)
+		return errors.New("refused")
+	}
+	candidates := []transport.Candidate{{Kind: "reality", Start: refuse}, {Kind: "cloak", Start: refuse}}
+	mu.Lock()
+	logs := wgLogs
+	mu.Unlock()
+
+	if err := walkCascade(attempt, dialed, newTestDevice(), newStarter(logs), candidates, logs, ""); err == nil {
+		t.Fatal("a cascade of refusing transports succeeded")
+	}
+	if len(started) != 2 || started[0] != dialed || started[1] != dialed {
+		t.Fatalf("transports started on %v, want both on the given profile %p", started, dialed)
+	}
 }
 
 func cascadeResult(t *testing.T, result <-chan error, within time.Duration) error {

@@ -93,8 +93,14 @@ func startTunnel(tunFd int) error {
 		return err
 	}
 
+	// Synthesized per start from the prepared profile, so a new network gets its own answer.
+	profile, synthesized := synthesizedProfile(p.profile, nat64Synthesize)
+	if synthesized {
+		logs.Add(state.LogInfo, state.SourceDaemon, "this network reaches the server over NAT64; dialing its synthesized IPv6 address")
+	}
+
 	st := newStarter(logs)
-	candidates, err := transport.Select(p.profile, preferred, st)
+	candidates, err := transport.Select(profile, preferred, st)
 	if err != nil {
 		_ = syscall.Close(tunFd)
 		reportError(err.Error())
@@ -124,12 +130,12 @@ func startTunnel(tunFd int) error {
 		reportError(err.Error())
 		return fmt.Errorf("wg up: %w", err)
 	}
-	return walkCascade(attempt, dev, st, candidates, logs, netKey)
+	return walkCascade(attempt, profile, dev, st, candidates, logs, netKey)
 }
 
-// walkCascade tries each candidate until one carries a handshake. It owns dev
-// and closes it when every rung fails or a stop cancels the attempt.
-func walkCascade(attempt *startAttempt, dev *device.Device, st *starter,
+// walkCascade tries each candidate on profile until one carries a handshake. It
+// owns dev and closes it when every rung fails or a stop cancels the attempt.
+func walkCascade(attempt *startAttempt, profile *state.Profile, dev *device.Device, st *starter,
 	candidates []transport.Candidate, logs *state.LogStore, netKey string) error {
 	p := attempt.prepared
 	label := tunnelLabel(p)
@@ -140,7 +146,7 @@ func walkCascade(attempt *startAttempt, dev *device.Device, st *starter,
 			break
 		}
 		pushAttemptStatus(attempt, label.with(string(state.StateConnecting), "starting "+candidate.Kind))
-		if err := bringUpOver(ctx, dev, p, p.presharedKeyRaw, st, candidate); err != nil {
+		if err := bringUpOver(ctx, dev, p, profile, st, candidate); err != nil {
 			failures = append(failures, err.Error())
 			logAdd(logs, state.LogWarn, fmt.Sprintf("%s transport did not establish a tunnel: %v", candidate.Kind, err))
 			st.stopActive(context.Background())
@@ -200,11 +206,11 @@ func discardTunFD(fd int) {
 
 // bringUpOver starts one transport and proves it carries a real WireGuard
 // handshake. A started-but-blocked transport must not count as connected.
-func bringUpOver(ctx context.Context, dev *device.Device, p *preparedTunnel, psk []byte, st *starter, candidate transport.Candidate) error {
-	if err := candidate.Start(ctx, p.profile, nil); err != nil {
+func bringUpOver(ctx context.Context, dev *device.Device, p *preparedTunnel, profile *state.Profile, st *starter, candidate transport.Candidate) error {
+	if err := candidate.Start(ctx, profile, nil); err != nil {
 		return err
 	}
-	if err := dev.IpcSet(buildUAPI(p.wgPrivateKeyRaw, p.serverPubKeyRaw, psk, st.boundPort)); err != nil {
+	if err := dev.IpcSet(buildUAPI(p.wgPrivateKeyRaw, p.serverPubKeyRaw, p.presharedKeyRaw, st.boundPort)); err != nil {
 		return fmt.Errorf("%s: wg configure: %w", candidate.Kind, err)
 	}
 	if err := waitForHandshake(ctx, dev, handshakeTimeout); err != nil {

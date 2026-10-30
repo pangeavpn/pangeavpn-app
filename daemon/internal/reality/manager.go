@@ -242,8 +242,8 @@ func (m *Manager) Start(ctx context.Context, profile state.RealityProfile) error
 	m.mu.Unlock()
 
 	m.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf(
-		"reality started, listening on 127.0.0.1:%d, relaying to %s:%d (target 127.0.0.1:%d)",
-		boundPort, remoteHost, remotePort, targetPort))
+		"reality started, listening on 127.0.0.1:%d, relaying to %s (target 127.0.0.1:%d)",
+		boundPort, net.JoinHostPort(remoteHost, strconv.Itoa(remotePort)), targetPort))
 
 	remoteAddr := &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: targetPort}
 	go func() {

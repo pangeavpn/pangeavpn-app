@@ -50,7 +50,7 @@ func getDohClient() *http.Client {
 	if dohHTTP == nil {
 		dohHTTP = &http.Client{
 			Timeout:   5 * time.Second,
-			Transport: &http.Transport{DialContext: protectedDialer(5 * time.Second).DialContext},
+			Transport: &http.Transport{DialContext: nat64Dial(protectedDialer(5*time.Second).DialContext, nat64Synthesize)},
 		}
 	}
 	return dohHTTP

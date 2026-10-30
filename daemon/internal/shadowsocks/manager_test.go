@@ -3,6 +3,7 @@ package shadowsocks
 import (
 	"context"
 	"net"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -204,4 +205,30 @@ func TestDestinationUDPAddr(t *testing.T) {
 	if socksaddr.Fqdn != "wg.internal" || socksaddr.Port != 51820 {
 		t.Fatalf("destinationUDPAddr() = %+v, want wg.internal:51820", socksaddr)
 	}
+}
+
+// A NAT64-synthesized remote is an IPv6 literal; the log must keep it apart from its port.
+func TestManager_StartLogsAnIPv6RemoteBracketed(t *testing.T) {
+	logs := state.NewLogStore(100)
+	mgr := NewManager(logs)
+	profile := startableProfile(t)
+	profile.RemoteHost = "::1"
+	if err := mgr.Start(context.Background(), profile); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() { mgr.Stop(context.Background()) })
+
+	want := "relaying to " + net.JoinHostPort("::1", strconv.Itoa(profile.RemotePort)) + " (target 127.0.0.1:51820)"
+	if !loggedContaining(logs, want) {
+		t.Fatalf("no log line contains %q: %+v", want, logs.Since(0))
+	}
+}
+
+func loggedContaining(logs *state.LogStore, fragment string) bool {
+	for _, entry := range logs.Since(0) {
+		if strings.Contains(entry.Msg, fragment) {
+			return true
+		}
+	}
+	return false
 }

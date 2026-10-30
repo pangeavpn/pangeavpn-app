@@ -6,6 +6,8 @@ package mobile
 import (
 	"regexp"
 	"strings"
+
+	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/state"
 )
 
 type hubRealityCreds struct {
@@ -57,6 +59,19 @@ func (c hubRealityCreds) normalized() hubRealityCreds {
 		PublicKey:  strings.TrimSpace(c.PublicKey),
 		ShortID:    strings.ToLower(strings.TrimSpace(c.ShortID)),
 		ServerName: serverName,
+	}
+}
+
+// dialProfile is what the hub proxy dials. Its SNI is always ServerName, never
+// the node address, so synthesizing that address changes nothing on the wire.
+func (c hubRealityCreds) dialProfile(synth func(string) string) state.RealityProfile {
+	return state.RealityProfile{
+		RemoteHost: synthesizeHost(synth, c.RemoteHost),
+		RemotePort: c.RemotePort,
+		UUID:       c.UUID,
+		PublicKey:  c.PublicKey,
+		ShortID:    c.ShortID,
+		ServerName: c.ServerName,
 	}
 }
 

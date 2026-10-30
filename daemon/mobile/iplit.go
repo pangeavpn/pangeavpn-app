@@ -65,3 +65,11 @@ func isIPv6Literal(host string) bool {
 func isIPLiteral(host string) bool {
 	return isIPv4Literal(host) || isIPv6Literal(host)
 }
+
+// urlHost brackets an IPv6 literal, which a URL needs to tell it from a port.
+func urlHost(host string) string {
+	if !strings.HasPrefix(host, "[") && isIPv6Literal(host) {
+		return "[" + host + "]"
+	}
+	return host
+}

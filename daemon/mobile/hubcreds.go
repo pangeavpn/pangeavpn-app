@@ -3,7 +3,11 @@ package mobile
 // Control-plane Shadowsocks credentials. Ports
 // apps/desktop/src/shared/hubShadowsocksCreds.ts.
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/state"
+)
 
 type hubShadowsocksCreds struct {
 	RemoteHost string `json:"remoteHost"`
@@ -49,6 +53,16 @@ func (c hubShadowsocksCreds) normalized() hubShadowsocksCreds {
 		RemotePort: c.RemotePort,
 		Method:     strings.TrimSpace(c.Method),
 		Password:   strings.TrimSpace(c.Password),
+	}
+}
+
+// dialProfile is what the hub proxy dials, reaching the node through synth.
+func (c hubShadowsocksCreds) dialProfile(synth func(string) string) state.ShadowsocksProfile {
+	return state.ShadowsocksProfile{
+		RemoteHost: synthesizeHost(synth, c.RemoteHost),
+		RemotePort: c.RemotePort,
+		Method:     c.Method,
+		Password:   c.Password,
 	}
 }
 
