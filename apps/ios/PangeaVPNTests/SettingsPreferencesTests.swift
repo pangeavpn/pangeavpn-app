@@ -7,15 +7,20 @@ final class SettingsPreferencesTests: XCTestCase {
     private var defaults: UserDefaults!
     private var suite = ""
 
+    // XCTest declares setUp and tearDown nonisolated, but calls them on the main thread.
     override func setUpWithError() throws {
         let test = try makeTestDefaults()
-        defaults = test.defaults
-        suite = test.suite
+        MainActor.assumeIsolated {
+            defaults = test.defaults
+            suite = test.suite
+        }
     }
 
     override func tearDown() {
-        defaults.removePersistentDomain(forName: suite)
-        AccentTheme.shared.accent = .terra
+        MainActor.assumeIsolated {
+            defaults.removePersistentDomain(forName: suite)
+            AccentTheme.shared.accent = .terra
+        }
     }
 
     func testFreshInstallDefaults() {

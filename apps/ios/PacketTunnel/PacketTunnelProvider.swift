@@ -17,6 +17,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, LifecycleHost {
         completionHandler: @escaping (Error?) -> Void
     ) {
         activity.set(true)
+        // NE hands over immutable NSString values and never touches them again, so the hop is safe.
+        nonisolated(unsafe) let options = options
         queue.async {
             let lifecycle = self.lifecycle ?? self.makeLifecycle()
             self.lifecycle = lifecycle
