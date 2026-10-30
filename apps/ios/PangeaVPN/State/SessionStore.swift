@@ -24,6 +24,8 @@ final class SessionStore {
     private(set) var restoring = false
     private(set) var loggingIn = false
     private(set) var signingOut = false
+    // A stored sign-in the hub could not confirm; the app offers a retry rather than sign-in.
+    private(set) var restoreFailed = false
     var loginError: String?
     var showDeviceLimit = false
     private(set) var devices: [Device] = []
@@ -68,12 +70,14 @@ final class SessionStore {
         restoring = false
         switch outcome {
         case .restored:
+            restoreFailed = false
             await loadSubscription()
         case .signedOut:
+            restoreFailed = false
             // A profile left behind would let Connect On Demand start a tunnel that fails signed out.
             await tunnel.removeConfiguration()
         case .failed:
-            break
+            restoreFailed = true
         }
     }
 
@@ -229,6 +233,7 @@ final class SessionStore {
     private func clearSession() {
         generation += 1
         session = nil
+        restoreFailed = false
         subscription = nil
         devices = []
         showDeviceLimit = false
@@ -264,6 +269,7 @@ final class SessionStore {
             loggingIn = false
             pendingToken = nil
             showDeviceLimit = false
+            restoreFailed = false
             session = signedIn
             await loadSubscription()
         } catch {

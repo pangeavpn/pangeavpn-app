@@ -51,6 +51,8 @@ struct RootView: View {
             SplashView()
         } else if session.showDeviceLimit {
             DeviceLimitView()
+        } else if session.session == nil && session.restoreFailed {
+            RestoreFailedView()
         } else if session.session == nil {
             LoginView(token: $draftToken)
         } else {
