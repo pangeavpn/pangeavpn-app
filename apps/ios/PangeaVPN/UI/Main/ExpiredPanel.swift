@@ -35,7 +35,6 @@ struct ExpiredPanel: View {
         }
         .multilineTextAlignment(.center)
         .fixedSize(horizontal: false, vertical: true)
-        .frame(maxWidth: 360)
         .frame(maxWidth: .infinity)
         .padding(.vertical, 12)
     }
