@@ -118,5 +118,7 @@ final class GalleryStores {
             .environment(diagnostics)
             .toastOverlay()
             .environment(toasts)
+            // A bare hosting controller has no active scene, so the privacy cover would hide the screen.
+            .environment(\.scenePhase, .active)
     }
 }
