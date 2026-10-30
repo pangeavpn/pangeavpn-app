@@ -400,6 +400,8 @@ jobs:
               --batteryState charged --batteryLevel 100
             # Reduce Motion stops the map orbit and status pulses, so frames hold still.
             xcrun simctl spawn "$udid" defaults write com.apple.Accessibility ReduceMotionEnabled -bool true
+            # The first screenshot after a boot is the slow one, so it is taken before any test waits on it.
+            xcrun simctl io "$udid" screenshot --type=png "$RUNNER_TEMP/warmup.png" >/dev/null 2>&1 || true
             xcodebuild test-without-building -scheme PangeaVPN \
               -destination "id=$udid" \
               -derivedDataPath "$RUNNER_TEMP/derived" \

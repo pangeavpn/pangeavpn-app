@@ -63,7 +63,8 @@ final class ScreenCamera {
     private static let tick = Duration.milliseconds(100)
     private static let readyTicks = 100
     private static let stillTicks = 30
-    private static let framebufferTicks = 80
+    // A busy 3-core runner can take well over 10 s to answer one screenshot.
+    private static let framebufferTicks = 300
 
     private let folder: URL
 
