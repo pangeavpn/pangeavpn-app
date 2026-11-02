@@ -23,6 +23,26 @@ final class MotionTourTests: XCTestCase {
     private func step(_ name: String, hold seconds: Double) async throws {
         stepLog.append(String(format: "%.3f %@", Date().timeIntervalSince1970, name))
         try await Task.sleep(for: .seconds(seconds))
+        try snapshot(name)
+    }
+
+    private var lastSnapshot: Data?
+    private var snapshotDirectory: URL?
+
+    // A screen that stops answering state changes fails here rather than hiding in a video.
+    private func snapshot(_ name: String) throws {
+        guard let window, let snapshotDirectory else { return }
+        let format = UIGraphicsImageRendererFormat(for: window.traitCollection)
+        format.opaque = true
+        let png = UIGraphicsImageRenderer(bounds: window.bounds, format: format).image { _ in
+            _ = window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+        }.pngData()
+        guard let png else { return }
+        try png.write(to: snapshotDirectory.appendingPathComponent("tour-\(name).png"), options: .atomic)
+        if name != "launch", png == lastSnapshot {
+            XCTFail("the screen did not change at step \(name)")
+        }
+        lastSnapshot = png
     }
 
     private func show<V: View>(_ view: V) throws {
@@ -40,6 +60,10 @@ final class MotionTourTests: XCTestCase {
 
     func testTour() async throws {
         let root = try directory()
+        snapshotDirectory = root.appendingPathComponent(ScreenGallery.deviceFolder, isDirectory: true)
+        if let snapshotDirectory {
+            try FileManager.default.createDirectory(at: snapshotDirectory, withIntermediateDirectories: true)
+        }
         defer {
             window?.isHidden = true
             let device = ScreenGallery.deviceFolder

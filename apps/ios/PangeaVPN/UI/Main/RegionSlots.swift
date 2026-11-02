@@ -35,12 +35,14 @@ struct RegionSlots: View {
             if slots.isEmpty {
                 EmptyRegions(loading: servers.loading, error: servers.error, onRefresh: refresh)
             } else {
-                ForEach(slots, id: \.key) { region in
+                // Earlier rows draw on top, so rows sliding to a new spot pass over arrivals, not through them.
+                ForEach(Array(slots.enumerated()), id: \.element.key) { index, region in
                     row(region, selected: region.key == selectedKey)
                         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
                             if region.key == lead { metrics.row = height }
                         }
                         .transition(rowTransition)
+                        .zIndex(Double(slots.count - index))
                 }
             }
             AllRegionsRow(
@@ -55,7 +57,7 @@ struct RegionSlots: View {
     }
 
     private var rowTransition: AnyTransition {
-        Motion.settle(reduceMotion)
+        Motion.rise(reduceMotion, by: 14)
     }
 
     private func row(_ region: Region, selected: Bool) -> some View {

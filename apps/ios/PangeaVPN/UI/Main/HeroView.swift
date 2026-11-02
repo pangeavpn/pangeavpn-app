@@ -87,8 +87,6 @@ struct HeroKicker: View {
                     .scaledFont(size: 11, weight: .bold, relativeTo: .caption2)
                     .lineLimit(1)
                     .foregroundStyle(HeroText.accent(state))
-                    .id(state)
-                    .transition(Motion.fadeThrough(reduceMotion))
             }
             .accessibilityElement(children: .combine)
             if postQuantum { HeroChip.postQuantum }

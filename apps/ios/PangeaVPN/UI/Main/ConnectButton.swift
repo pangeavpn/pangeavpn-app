@@ -48,8 +48,6 @@ struct ConnectButton: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
                 .foregroundStyle(primary ? Palette.onAccent : Palette.textSecondary)
-                .id(label)
-                .transition(Motion.fadeThrough(reduceMotion))
                 .frame(maxWidth: .infinity, minHeight: 52)
                 .background(primary ? Palette.accent : Color.clear, in: Capsule())
                 .overlay(Capsule().strokeBorder(primary ? Color.clear : Palette.border, lineWidth: 1))
