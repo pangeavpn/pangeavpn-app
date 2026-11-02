@@ -7,6 +7,7 @@ struct AccountCard: View {
     @Environment(SessionStore.self) private var session
     @Environment(ToastCenter.self) private var toasts
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.dynamicTypeSize) private var typeSize
     @State private var revealed: String?
     @State private var revealing = false
     @State private var refreshing = false
@@ -66,6 +67,9 @@ struct AccountCard: View {
         Text(verbatim: revealed ?? Self.mask)
             .scaledFont(size: 15, weight: revealed == nil ? .regular : .medium, design: .monospaced, relativeTo: .subheadline)
             .foregroundStyle(revealed == nil ? Palette.textMuted : Palette.text)
+            // One line in a narrow card such as the iPad rail; large text may still wrap it.
+            .lineLimit(typeSize.isAccessibilitySize ? nil : 1)
+            .minimumScaleFactor(0.75)
             .fixedSize(horizontal: false, vertical: true)
             .accessibilityLabel(numberLabel)
     }
