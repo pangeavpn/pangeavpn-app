@@ -43,10 +43,11 @@ test("fastestWorking never starts a staggered attempt once an earlier one answer
       started.push(name);
       return after(5, name);
     },
-    50
+    // Wide enough that a busy test runner can't push the 5 ms answer past it.
+    400
   );
   assert.deepEqual(won, { value: "first", index: 0 });
-  await after(120, null);
+  await after(450, null);
   assert.deepEqual(started, ["first"]);
 });
 
