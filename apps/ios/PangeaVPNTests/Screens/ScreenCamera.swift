@@ -108,9 +108,13 @@ final class ScreenCamera {
         let outcome: Result<Void, Error>
         do {
             try await settle(host, shot: shot, ready: ready)
-            if shot.scrollToEnd { try await scrollToEnd(host) }
-            let png = try await stillFrame(of: window, file: shot.file)
-            try await save(png, as: shot.file)
+            // A screen that fits has no end to show, and its top shot already covers it.
+            var worthSaving = true
+            if shot.scrollToEnd { worthSaving = try await scrollToEnd(host) }
+            if worthSaving {
+                let png = try await stillFrame(of: window, file: shot.file)
+                try await save(png, as: shot.file)
+            }
             outcome = .success(())
         } catch {
             outcome = .failure(error)
@@ -141,9 +145,9 @@ final class ScreenCamera {
         return true
     }
 
-    private func scrollToEnd(_ host: UIViewController) async throws {
+    private func scrollToEnd(_ host: UIViewController) async throws -> Bool {
         let top = host.presentedViewController ?? host
-        guard let scroll = Self.tallestScrollView(in: top.view) else { return }
+        guard let scroll = Self.tallestScrollView(in: top.view) else { return false }
         // Lazy stacks grow as rows appear, so the end is measured again after each jump.
         for _ in 0..<3 {
             let end = scroll.contentSize.height - scroll.bounds.height + scroll.adjustedContentInset.bottom
@@ -151,6 +155,7 @@ final class ScreenCamera {
             scroll.setContentOffset(offset, animated: false)
             try await Task.sleep(for: Self.tick)
         }
+        return true
     }
 
     private static func tallestScrollView(in root: UIView) -> UIScrollView? {
@@ -205,7 +210,7 @@ final class ScreenCamera {
         let queue = root.appendingPathComponent(".requests/\(udid)", isDirectory: true)
         if files.fileExists(atPath: target.path) { try files.removeItem(at: target) }
         // The screen can trail an offscreen render by a frame or two, so it gets a moment to catch up.
-        try await Task.sleep(for: .milliseconds(400))
+        try await Task.sleep(for: .milliseconds(200))
         try files.createDirectory(at: queue, withIntermediateDirectories: true)
         try Data(target.path.utf8).write(to: queue.appendingPathComponent("\(file).want"), options: .atomic)
         for _ in 0..<Self.framebufferTicks {

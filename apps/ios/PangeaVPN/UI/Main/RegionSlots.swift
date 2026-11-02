@@ -55,7 +55,7 @@ struct RegionSlots: View {
     }
 
     private var rowTransition: AnyTransition {
-        Motion.rise(reduceMotion, by: 14)
+        Motion.settle(reduceMotion)
     }
 
     private func row(_ region: Region, selected: Bool) -> some View {

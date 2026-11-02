@@ -89,7 +89,7 @@ struct MainView: View {
                 if showsFacts {
                     facts(width: width)
                         .padding(.top, 14)
-                        .transition(factsTransition)
+                        .transition(Motion.settle(reduceMotion, after: 0.18))
                 }
                 RegionSlots(rows: rows, metrics: $slotMetrics)
                     .padding(.top, Self.slotsTop)
@@ -112,14 +112,11 @@ struct MainView: View {
         return SlotBudget.idleRows(viewport: viewport, fixed: fixed, metrics: slotMetrics)
     }
 
-    // The facts leave quickly, so the regions sliding up never pass over a half-faded grid.
-    private var factsTransition: AnyTransition {
-        if reduceMotion { return .opacity }
-        return .asymmetric(insertion: Motion.rise(false, by: -10), removal: .opacity.animation(Motion.quick))
-    }
-
     private var hero: some View {
         let shown = display
+        let detail = HeroDetailText.resolve(
+            display: shown, statusDetail: status.detail, serverName: status.serverName,
+            error: connection.error, progress: connection.progress, paused: reconnecting)
         return VStack(alignment: .leading, spacing: 6) {
             HeroKicker(
                 state: shown,
@@ -127,9 +124,11 @@ struct MainView: View {
                 split: HeroChips.showsSplit(display: shown, enabled: settings.splitTunnelEnabled,
                                             ranges: settings.splitTunnelRanges, strictKillSwitch: settings.killSwitch))
             HeroHeadline(state: shown)
-            HeroDetail(HeroDetailText.resolve(
-                display: shown, statusDetail: status.detail, serverName: status.serverName,
-                error: connection.error, progress: connection.progress, paused: reconnecting))
+                .id(shown)
+                .transition(Motion.fadeThrough(reduceMotion))
+            HeroDetail(detail)
+                .id(detail)
+                .transition(Motion.fadeThrough(reduceMotion))
             if !status.entryServerId.isEmpty {
                 RoutePath(
                     entry: RouteNode.resolve(id: status.entryServerId, fallbackName: status.entryServerName,
