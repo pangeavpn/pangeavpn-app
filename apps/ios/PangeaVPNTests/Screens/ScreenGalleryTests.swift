@@ -64,7 +64,7 @@ final class ScreenGalleryTests: XCTestCase {
                                            transport: "reality", postQuantum: true)
         let multihop = GalleryData.status(.connected, bytesIn: 88_431_002, bytesOut: 4_120_000,
                                           transport: "hysteria2", postQuantum: true,
-                                          entry: ("nl-ams-1", "Amsterdam"))
+                                          entry: ("eu-central-2", "Amsterdam"))
         let failed = GalleryData.status(.error, detail: "The server did not answer the handshake.")
         let states: [(name: String, status: TunnelStatus, seconds: TimeInterval?, plan: Subscription?)] = [
             ("06-main-disconnected", .disconnected, nil, GalleryData.active),

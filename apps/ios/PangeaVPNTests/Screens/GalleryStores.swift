@@ -6,16 +6,14 @@ enum GalleryData {
         "cloak", "wireguard", "reality", "hysteria2", "shadowsocks", "anytls",
     ]
 
+    // The live regions, so every screenshot shows what the service really offers.
     static let servers: [Server] = [
-        Server(id: "uk-lon-1", name: "London", region: "eu", country: "GB", load: 22, transports: everyTransport, multihop: true),
-        Server(id: "uk-lon-2", name: "London", region: "eu", country: "GB", load: 61, transports: everyTransport, multihop: true),
-        Server(id: "de-fra-1", name: "Frankfurt", region: "eu", country: "DE", load: 48, transports: everyTransport, multihop: true),
-        Server(id: "nl-ams-1", name: "Amsterdam", region: "eu", country: "NL", load: 15, transports: everyTransport, multihop: true),
-        Server(id: "us-nyc-1", name: "New York", region: "us", country: "US", load: 73, transports: everyTransport, multihop: true),
-        Server(id: "us-lax-1", name: "Los Angeles", region: "us", country: "US", load: nil),
-        Server(id: "ca-tor-1", name: "Toronto", region: "us", country: "CA", load: 30, transports: everyTransport),
-        Server(id: "sg-1", name: "Singapore", region: "ap", country: "SG", load: 35, transports: everyTransport),
-        Server(id: "jp-tyo-1", name: "Tokyo", region: "ap", country: "JP", load: 88),
+        Server(id: "eu-london-1", name: "London", region: "London", country: "GB", load: 22, transports: everyTransport, multihop: true),
+        Server(id: "eu-london-2", name: "London", region: "London", country: "GB", load: 61, transports: everyTransport, multihop: true),
+        Server(id: "eu-central-2", name: "Amsterdam", region: "Amsterdam", country: "NL", load: 15, transports: everyTransport, multihop: true),
+        Server(id: "eu-spain-1", name: "Madrid", region: "Madrid", country: "ES", load: 41, transports: everyTransport, multihop: true),
+        Server(id: "us-east-1", name: "New York", region: "New York", country: "US", load: 73, transports: everyTransport, multihop: true),
+        Server(id: "as-singapore-1", name: "Singapore", region: "Singapore", country: "SG", load: 35, transports: everyTransport),
     ]
     static let session = Session(email: "demo@example.org", name: "Demo", servers: [])
     static let active = Subscription(status: "active", renews: true, expiresAt: "2026-12-01T00:00:00Z", entitled: true)
@@ -31,7 +29,7 @@ enum GalleryData {
                        bytesOut: Int64 = 0, transport: String? = nil, postQuantum: Bool = false,
                        entry: (id: String, name: String)? = nil) -> TunnelStatus {
         TunnelStatus(state: state, detail: detail, bytesIn: bytesIn, bytesOut: bytesOut,
-                     serverId: "us-nyc-1", serverName: "New York", activeTransport: transport,
+                     serverId: "us-east-1", serverName: "New York", activeTransport: transport,
                      lastHandshake: Int64(Date().timeIntervalSince1970) - 30, postQuantum: postQuantum,
                      entryServerId: entry?.id ?? "", entryServerName: entry?.name ?? "")
     }
