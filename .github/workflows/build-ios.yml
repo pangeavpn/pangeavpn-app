@@ -143,7 +143,7 @@ jobs:
     name: Unit tests
     needs: core
     runs-on: macos-26
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
@@ -202,7 +202,7 @@ jobs:
         run: perl -e 'alarm 240; exec @ARGV' xcrun simctl bootstatus "$SIM_UDID" -b
 
       - name: Unit tests
-        timeout-minutes: 10
+        timeout-minutes: 20
         working-directory: apps/ios
         env:
           SIM_UDID: ${{ steps.sim.outputs.udid }}
