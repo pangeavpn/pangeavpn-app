@@ -272,6 +272,8 @@ struct MainView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        // The hero slides as one block, so text re-laid out by a swap never trails the rest of it.
+        .geometryGroup()
         // Colour and wording cross-fade on every state change, not only the idle ones.
         .animation(Motion.state(reduceMotion), value: shown)
     }

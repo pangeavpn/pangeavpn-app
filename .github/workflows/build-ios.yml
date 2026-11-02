@@ -41,6 +41,9 @@ jobs:
           node scripts/gen-ios-strings.mjs
           git diff --exit-code apps/ios/PangeaVPN/Resources
 
+      - name: Motion check tests
+        run: node --test scripts/ios-motion-sync.test.mjs
+
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version-file: daemon/go.mod
@@ -451,6 +454,30 @@ jobs:
             echo "gh run download $GITHUB_RUN_ID --repo $GITHUB_REPOSITORY -p 'ios-screens-*' -D ios-screens-$GITHUB_RUN_ID"
             echo '```'
           } >>"$GITHUB_STEP_SUMMARY"
+
+  # Measures the recorded tour frame by frame, so a status dot drifting from its label fails the run.
+  motion:
+    name: Status row moves as one
+    needs: screens
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Fetch the motion tour
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: ios-screens-17-pro
+          path: ${{ runner.temp }}/screens
+
+      - name: Install ffmpeg
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends ffmpeg
+
+      - name: Status dot slides with its label
+        run: node scripts/ios-motion-sync.mjs "$RUNNER_TEMP/screens/motion/tour.mp4"
 
   # Pushes to ios that pass the tests go to TestFlight. apps/ios/README.md lists
   # the secrets and the one-time portal setup.

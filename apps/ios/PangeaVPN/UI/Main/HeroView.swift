@@ -75,8 +75,8 @@ struct HeroKicker: View {
     }
 
     var body: some View {
-        // Dot, label and chips swap as one view, so they always move together; the hidden
-        // chip keeps the row's height, so a chip arriving never pushes the headline down.
+        // Dot, label and chips swap as one face; the hidden chip keeps the row's height,
+        // so a chip arriving never pushes the headline down.
         ZStack(alignment: .leading) {
             HeroChip.postQuantum.hidden().accessibilityHidden(true)
             FadeSwap(KickerFace(state: state, postQuantum: postQuantum, split: split)) { face in
@@ -94,6 +94,8 @@ struct HeroKicker: View {
                 }
             }
         }
+        // Moved as one frame: otherwise a label resized mid-slide is re-timed apart from the dot.
+        .geometryGroup()
         .accessibilityElement(children: .combine)
         .padding(.leading, -4)
         .onAppear { updatePulse() }
