@@ -29,7 +29,7 @@ enum TunnelStartError: Int, LocalizedError, CaseIterable {
         case .stopped:
             return String(localized: "error_stopped", defaultValue: "The connection was stopped")
         case .deviceLocked:
-            return String(localized: "error_device_locked", defaultValue: "Unlock your iPhone to connect.")
+            return String(localized: "error_device_locked", defaultValue: "Unlock your device to connect.")
         case .subscriptionExpired:
             return String(localized: "error_subscription_expired", defaultValue: "Your subscription has expired.")
         case .noSubscription:

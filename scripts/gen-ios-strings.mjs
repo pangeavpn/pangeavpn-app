@@ -93,14 +93,14 @@ const INLINE_IOS_ONLY = {
     uk: "Оновити регіони", zh: "刷新地区", ar: "تحديث المناطق", fa: "به‌روزرسانی مناطق"
   },
   error_device_locked: {
-    en: "Unlock your iPhone to connect.",
-    es: "Desbloquea tu iPhone para conectarte.",
-    fr: "Déverrouillez votre iPhone pour vous connecter.",
-    ru: "Разблокируйте iPhone, чтобы подключиться.",
-    uk: "Розблокуйте iPhone, щоб підключитися.",
-    zh: "请解锁 iPhone 后再连接。",
-    ar: "افتح قفل iPhone للاتصال.",
-    fa: "برای اتصال، قفل iPhone را باز کنید."
+    en: "Unlock your device to connect.",
+    es: "Desbloquea tu dispositivo para conectarte.",
+    fr: "Déverrouillez votre appareil pour vous connecter.",
+    ru: "Разблокируйте устройство, чтобы подключиться.",
+    uk: "Розблокуйте пристрій, щоб підключитися.",
+    zh: "请解锁设备后再连接。",
+    ar: "افتح قفل الجهاز للاتصال.",
+    fa: "برای اتصال، قفل دستگاه را باز کنید."
   },
   error_subscription_expired: {
     en: "Your subscription has expired.",

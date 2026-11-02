@@ -78,14 +78,14 @@ export default {
     uk: "Скасувати", zh: "取消", ar: "إلغاء", fa: "لغو"
   },
   kill_switch_caveat_update: {
-    en: "Updating PangeaVPN while connected can leave your iPhone offline until it restarts.",
-    es: "Actualizar PangeaVPN mientras está conectada puede dejar tu iPhone sin conexión hasta que se reinicie.",
-    fr: "Mettre à jour PangeaVPN pendant qu'il est connecté peut laisser votre iPhone hors ligne jusqu'à son redémarrage.",
-    ru: "Обновление PangeaVPN во время подключения может оставить iPhone без сети до его перезагрузки.",
-    uk: "Оновлення PangeaVPN під час підключення може залишити iPhone без мережі до його перезавантаження.",
-    zh: "在连接状态下更新 PangeaVPN，可能导致 iPhone 断网，直到重新启动。",
-    ar: "قد يؤدي تحديث PangeaVPN أثناء الاتصال إلى بقاء iPhone بلا إنترنت حتى تعيد تشغيله.",
-    fa: "به‌روزرسانی PangeaVPN در حالت متصل ممکن است iPhone را تا راه‌اندازی دوباره بدون اینترنت بگذارد."
+    en: "Updating PangeaVPN while connected can leave your device offline until it restarts.",
+    es: "Actualizar PangeaVPN mientras está conectada puede dejar tu dispositivo sin conexión hasta que se reinicie.",
+    fr: "Mettre à jour PangeaVPN pendant qu'il est connecté peut laisser votre appareil hors ligne jusqu'à son redémarrage.",
+    ru: "Обновление PangeaVPN во время подключения может оставить устройство без сети до его перезагрузки.",
+    uk: "Оновлення PangeaVPN під час підключення може залишити пристрій без мережі до його перезавантаження.",
+    zh: "在连接状态下更新 PangeaVPN，可能导致设备断网，直到重新启动。",
+    ar: "قد يؤدي تحديث PangeaVPN أثناء الاتصال إلى بقاء الجهاز بلا إنترنت حتى تعيد تشغيله.",
+    fa: "به‌روزرسانی PangeaVPN در حالت متصل ممکن است دستگاه را تا راه‌اندازی دوباره بدون اینترنت بگذارد."
   },
   kill_switch_caveat_lan: {
     en: "AirDrop, AirPlay and printing need Allow LAN.",
@@ -157,14 +157,14 @@ export default {
     uk: "Автопідключення", zh: "自动连接", ar: "الاتصال التلقائي", fa: "اتصال خودکار"
   },
   startup_auto_connect_hint: {
-    en: "Connects when your iPhone starts or the network returns, and reconnects if the tunnel drops. Disconnecting in PangeaVPN pauses it until you connect again.",
-    es: "Se conecta cuando tu iPhone se enciende o vuelve la red, y vuelve a conectar si el túnel se cae. Si te desconectas en PangeaVPN, se pausa hasta que vuelvas a conectar.",
-    fr: "Se connecte au démarrage de votre iPhone ou au retour du réseau, et se reconnecte si le tunnel tombe. Se déconnecter dans PangeaVPN le met en pause jusqu'à votre prochaine connexion.",
-    ru: "Подключается при включении iPhone или возвращении сети и переподключается, если туннель обрывается. Если отключиться в PangeaVPN, ждёт, пока вы подключитесь снова.",
-    uk: "Підключається під час увімкнення iPhone або повернення мережі й перепідключається, якщо тунель обірветься. Якщо відключитися в PangeaVPN, чекає, поки ви підключитеся знову.",
-    zh: "iPhone 启动或网络恢复时自动连接，隧道断开后自动重连。在 PangeaVPN 中断开连接会暂停此功能，直到您再次连接。",
-    ar: "يتصل عند تشغيل iPhone أو عودة الشبكة، ويعيد الاتصال إذا انقطع النفق. قطع الاتصال من PangeaVPN يوقفه مؤقتًا حتى تتصل مرة أخرى.",
-    fa: "هنگام روشن شدن iPhone یا بازگشت شبکه وصل می‌شود و اگر تونل قطع شود دوباره وصل می‌شود. قطع اتصال در PangeaVPN آن را تا اتصال بعدی متوقف می‌کند."
+    en: "Connects when your device starts or the network returns, and reconnects if the tunnel drops. Disconnecting in PangeaVPN pauses it until you connect again.",
+    es: "Se conecta cuando tu dispositivo se enciende o vuelve la red, y vuelve a conectar si el túnel se cae. Si te desconectas en PangeaVPN, se pausa hasta que vuelvas a conectar.",
+    fr: "Se connecte au démarrage de votre appareil ou au retour du réseau, et se reconnecte si le tunnel tombe. Se déconnecter dans PangeaVPN le met en pause jusqu'à votre prochaine connexion.",
+    ru: "Подключается при включении устройства или возвращении сети и переподключается, если туннель обрывается. Если отключиться в PangeaVPN, ждёт, пока вы подключитесь снова.",
+    uk: "Підключається під час увімкнення пристрою або повернення мережі й перепідключається, якщо тунель обірветься. Якщо відключитися в PangeaVPN, чекає, поки ви підключитеся знову.",
+    zh: "设备启动或网络恢复时自动连接，隧道断开后自动重连。在 PangeaVPN 中断开连接会暂停此功能，直到您再次连接。",
+    ar: "يتصل عند تشغيل الجهاز أو عودة الشبكة، ويعيد الاتصال إذا انقطع النفق. قطع الاتصال من PangeaVPN يوقفه مؤقتًا حتى تتصل مرة أخرى.",
+    fa: "هنگام روشن شدن دستگاه یا بازگشت شبکه وصل می‌شود و اگر تونل قطع شود دوباره وصل می‌شود. قطع اتصال در PangeaVPN آن را تا اتصال بعدی متوقف می‌کند."
   },
   startup_auto_connect_note: {
     en: "While it's on, iOS may turn the VPN back on if you switch it off in Control Center or iOS Settings. To stop it, disconnect in PangeaVPN.",
@@ -311,14 +311,14 @@ export default {
     fa: "برای دستگاه‌های شبکه خودتان، به جای این «اجازه به LAN» را روشن کنید."
   },
   split_tunnel_note_apps: {
-    en: "iPhone can't leave out individual apps: iOS only lets a VPN exclude address ranges.",
-    es: "El iPhone no puede excluir apps concretas: iOS solo permite que una VPN excluya rangos de direcciones.",
-    fr: "L'iPhone ne peut pas exclure des applications précises : iOS ne permet à un VPN d'exclure que des plages d'adresses.",
-    ru: "iPhone не умеет исключать отдельные приложения: iOS позволяет VPN исключать только диапазоны адресов.",
-    uk: "iPhone не може виключати окремі застосунки: iOS дозволяє VPN виключати лише діапазони адрес.",
-    zh: "iPhone 无法单独排除某个应用：iOS 只允许 VPN 排除地址范围。",
-    ar: "لا يستطيع iPhone استثناء تطبيقات بعينها: يسمح iOS لشبكة VPN باستثناء نطاقات العناوين فقط.",
-    fa: "iPhone نمی‌تواند برنامه‌های جداگانه را مستثنا کند: iOS فقط اجازه می‌دهد VPN محدوده‌های نشانی را مستثنا کند."
+    en: "Individual apps can't be left out: iOS only lets a VPN exclude address ranges.",
+    es: "No se pueden excluir apps concretas: iOS solo permite que una VPN excluya rangos de direcciones.",
+    fr: "Impossible d'exclure des applications précises : iOS ne permet à un VPN d'exclure que des plages d'adresses.",
+    ru: "Исключить отдельные приложения нельзя: iOS позволяет VPN исключать только диапазоны адресов.",
+    uk: "Виключити окремі застосунки неможливо: iOS дозволяє VPN виключати лише діапазони адрес.",
+    zh: "无法单独排除某个应用：iOS 只允许 VPN 排除地址范围。",
+    ar: "لا يمكن استثناء تطبيقات بعينها: يسمح iOS لشبكة VPN باستثناء نطاقات العناوين فقط.",
+    fa: "نمی‌توان برنامه‌های جداگانه را مستثنا کرد: iOS فقط اجازه می‌دهد VPN محدوده‌های نشانی را مستثنا کند."
   },
   split_tunnel_toast_on: {
     en: "Split tunnelling on. Applies on next connect.",

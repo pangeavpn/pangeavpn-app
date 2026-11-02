@@ -72,7 +72,7 @@
 "devices_title" = "Devices";
 "devices_unnamed" = "Unnamed device";
 "error_connect_failed" = "Could not connect. Check your connection or try another region.";
-"error_device_locked" = "Unlock your iPhone to connect.";
+"error_device_locked" = "Unlock your device to connect.";
 "error_dns_invalid" = "No usable DNS server. Check Custom DNS in Settings.";
 "error_no_server" = "Open PangeaVPN and pick a region.";
 "error_no_subscription" = "This account has no active subscription.";
@@ -121,7 +121,7 @@
 "kill_switch_caveat_carplay" = "CarPlay and Personal Hotspot may not work.";
 "kill_switch_caveat_lan" = "AirDrop, AirPlay and printing need Allow LAN.";
 "kill_switch_caveat_system" = "Some Apple system services may still bypass the VPN.";
-"kill_switch_caveat_update" = "Updating PangeaVPN while connected can leave your iPhone offline until it restarts.";
+"kill_switch_caveat_update" = "Updating PangeaVPN while connected can leave your device offline until it restarts.";
 "kill_switch_description" = "How PangeaVPN keeps your traffic from leaking outside the VPN.";
 "kill_switch_strict_confirm_cancel" = "Cancel";
 "kill_switch_strict_confirm_on" = "Turn On";
@@ -207,11 +207,11 @@
 "notifications_toast_off" = "Connection alerts off.";
 "notifications_toast_on" = "Connection alerts on.";
 "panic_confirm_cancel" = "Cancel";
-"panic_confirm_message" = "This disconnects, erases all PangeaVPN data and the VPN profile from this iPhone, and returns to sign-in. It can't be undone.";
+"panic_confirm_message" = "This disconnects, erases all PangeaVPN data and the VPN profile from this device, and returns to sign-in. It can't be undone.";
 "panic_confirm_title" = "Wipe PangeaVPN now?";
 "panic_confirm_wipe" = "Wipe";
-"panic_description" = "A quick way to erase PangeaVPN from this iPhone and restore your network.";
-"panic_enable_hint" = "Adds a “Wipe data” action to the PangeaVPN icon's long-press menu. Choosing it disconnects, erases all PangeaVPN data and the VPN profile from this iPhone, and returns to sign-in. Delete the app afterwards to remove it entirely. This can't be undone.";
+"panic_description" = "A quick way to erase PangeaVPN from this device and restore your network.";
+"panic_enable_hint" = "Adds a “Wipe data” action to the PangeaVPN icon's long-press menu. Choosing it disconnects, erases all PangeaVPN data and the VPN profile from this device, and returns to sign-in. Delete the app afterwards to remove it entirely. This can't be undone.";
 "panic_enable_title" = "Enable panic wipe";
 "panic_now_button" = "Wipe Now";
 "panic_now_note" = "Runs the same wipe straight away, whether or not panic wipe is on.";
@@ -263,7 +263,7 @@
 "regions_same_as_exit" = "This is your exit region";
 "regions_show_servers" = "Show servers in %@";
 "regions_title" = "Select region";
-"restore_failed_body" = "You're still signed in on this iPhone, but PangeaVPN couldn't reach its servers. Check your connection, then try again.";
+"restore_failed_body" = "You're still signed in on this device, but PangeaVPN couldn't reach its servers. Check your connection, then try again.";
 "restore_failed_retry" = "Try Again";
 "restore_failed_title" = "Can't reach PangeaVPN";
 "root_data_erased" = "PangeaVPN data erased.";
@@ -353,7 +353,7 @@
 "split_tunnel_error_too_broad" = "Too broad, use /8 or narrower: %@.";
 "split_tunnel_error_too_many" = "Too many ranges. Remove some first.";
 "split_tunnel_hint" = "Apps switched on here bypass the VPN and use your normal connection.";
-"split_tunnel_note_apps" = "iPhone can't leave out individual apps: iOS only lets a VPN exclude address ranges.";
+"split_tunnel_note_apps" = "Individual apps can't be left out: iOS only lets a VPN exclude address ranges.";
 "split_tunnel_note_dns" = "Name lookups (DNS) still go through the VPN.";
 "split_tunnel_note_lan" = "For devices on your own network, turn on Allow LAN instead.";
 "split_tunnel_note_strict" = "Strict kill switch is on, so iOS sends everything through the VPN and these ranges are ignored.";
@@ -368,7 +368,7 @@
 "split_tunnel_toast_off" = "Split tunnelling off. Applies on next connect.";
 "split_tunnel_toast_on" = "Split tunnelling on. Applies on next connect.";
 "split_tunnel_toast_saved" = "Excluded IP ranges saved.";
-"startup_auto_connect_hint" = "Connects when your iPhone starts or the network returns, and reconnects if the tunnel drops. Disconnecting in PangeaVPN pauses it until you connect again.";
+"startup_auto_connect_hint" = "Connects when your device starts or the network returns, and reconnects if the tunnel drops. Disconnecting in PangeaVPN pauses it until you connect again.";
 "startup_auto_connect_note" = "While it's on, iOS may turn the VPN back on if you switch it off in Control Center or iOS Settings. To stop it, disconnect in PangeaVPN.";
 "startup_auto_connect_title" = "Auto-connect";
 "startup_description" = "Automatic connection and reconnection.";

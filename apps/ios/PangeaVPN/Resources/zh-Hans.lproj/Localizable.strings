@@ -72,7 +72,7 @@
 "devices_title" = "设备";
 "devices_unnamed" = "未命名设备";
 "error_connect_failed" = "无法连接。请检查网络连接或尝试其他地区。";
-"error_device_locked" = "请解锁 iPhone 后再连接。";
+"error_device_locked" = "请解锁设备后再连接。";
 "error_dns_invalid" = "没有可用的 DNS 服务器。请在设置中检查自定义 DNS。";
 "error_no_server" = "请打开 PangeaVPN 并选择一个地区。";
 "error_no_subscription" = "此账户没有有效订阅。";
@@ -121,7 +121,7 @@
 "kill_switch_caveat_carplay" = "CarPlay 和个人热点可能无法使用。";
 "kill_switch_caveat_lan" = "AirDrop、AirPlay 和打印需要开启「允许 LAN」。";
 "kill_switch_caveat_system" = "部分 Apple 系统服务仍可能绕过 VPN。";
-"kill_switch_caveat_update" = "在连接状态下更新 PangeaVPN，可能导致 iPhone 断网，直到重新启动。";
+"kill_switch_caveat_update" = "在连接状态下更新 PangeaVPN，可能导致设备断网，直到重新启动。";
 "kill_switch_description" = "PangeaVPN 如何防止您的流量泄漏到 VPN 之外。";
 "kill_switch_strict_confirm_cancel" = "取消";
 "kill_switch_strict_confirm_on" = "开启";
@@ -207,11 +207,11 @@
 "notifications_toast_off" = "连接提醒已关闭。";
 "notifications_toast_on" = "连接提醒已开启。";
 "panic_confirm_cancel" = "取消";
-"panic_confirm_message" = "这将断开连接，清除此 iPhone 上的所有 PangeaVPN 数据和 VPN 配置，并返回登录界面。此操作无法撤销。";
+"panic_confirm_message" = "这将断开连接，清除此设备上的所有 PangeaVPN 数据和 VPN 配置，并返回登录界面。此操作无法撤销。";
 "panic_confirm_title" = "立即清除 PangeaVPN？";
 "panic_confirm_wipe" = "清除";
-"panic_description" = "一种从此 iPhone 快速清除 PangeaVPN 并恢复网络的方式。";
-"panic_enable_hint" = "在长按 PangeaVPN 图标弹出的菜单中添加“清除数据”操作。选择后会断开连接，清除此 iPhone 上的所有 PangeaVPN 数据和 VPN 配置，并返回登录界面。之后删除应用即可将其彻底移除。此操作无法撤销。";
+"panic_description" = "一种从此设备快速清除 PangeaVPN 并恢复网络的方式。";
+"panic_enable_hint" = "在长按 PangeaVPN 图标弹出的菜单中添加“清除数据”操作。选择后会断开连接，清除此设备上的所有 PangeaVPN 数据和 VPN 配置，并返回登录界面。之后删除应用即可将其彻底移除。此操作无法撤销。";
 "panic_enable_title" = "启用紧急清除";
 "panic_now_button" = "立即清除";
 "panic_now_note" = "立即执行相同的清除操作，无论是否已启用紧急清除。";
@@ -263,7 +263,7 @@
 "regions_same_as_exit" = "这是你的出口地区";
 "regions_show_servers" = "显示 %@ 的服务器";
 "regions_title" = "选择区域";
-"restore_failed_body" = "你仍在此 iPhone 上保持登录，但 PangeaVPN 无法连接到其服务器。请检查网络连接，然后重试。";
+"restore_failed_body" = "你仍在此设备上保持登录，但 PangeaVPN 无法连接到其服务器。请检查网络连接，然后重试。";
 "restore_failed_retry" = "重试";
 "restore_failed_title" = "无法连接 PangeaVPN";
 "root_data_erased" = "PangeaVPN 数据已清除。";
@@ -353,7 +353,7 @@
 "split_tunnel_error_too_broad" = "范围太大，请使用 /8 或更小的范围：%@。";
 "split_tunnel_error_too_many" = "范围太多。请先移除一些。";
 "split_tunnel_hint" = "在此开启的应用将绕过 VPN，使用您的普通网络连接。";
-"split_tunnel_note_apps" = "iPhone 无法单独排除某个应用：iOS 只允许 VPN 排除地址范围。";
+"split_tunnel_note_apps" = "无法单独排除某个应用：iOS 只允许 VPN 排除地址范围。";
 "split_tunnel_note_dns" = "域名解析（DNS）仍通过 VPN。";
 "split_tunnel_note_lan" = "若是您自己网络中的设备，请改为开启「允许 LAN」。";
 "split_tunnel_note_strict" = "严格断网保护已开启，iOS 会让所有流量都经过 VPN，这些范围将被忽略。";
@@ -368,7 +368,7 @@
 "split_tunnel_toast_off" = "分流已关闭。下次连接时生效。";
 "split_tunnel_toast_on" = "分流已开启。下次连接时生效。";
 "split_tunnel_toast_saved" = "已保存排除的 IP 范围。";
-"startup_auto_connect_hint" = "iPhone 启动或网络恢复时自动连接，隧道断开后自动重连。在 PangeaVPN 中断开连接会暂停此功能，直到您再次连接。";
+"startup_auto_connect_hint" = "设备启动或网络恢复时自动连接，隧道断开后自动重连。在 PangeaVPN 中断开连接会暂停此功能，直到您再次连接。";
 "startup_auto_connect_note" = "开启期间，如果你在控制中心或 iOS 设置中关闭 VPN，iOS 可能会重新开启它。要停止 VPN，请在 PangeaVPN 中断开连接。";
 "startup_auto_connect_title" = "自动连接";
 "startup_description" = "自动连接与重新连接。";

@@ -32,7 +32,7 @@ struct SplitTunnelPage: View {
             SettingsCard {
                 InfoNote(String(localized: "split_tunnel_note_dns", defaultValue: "Name lookups (DNS) still go through the VPN."), systemImage: "info.circle")
                 InfoNote(String(localized: "split_tunnel_note_lan", defaultValue: "For devices on your own network, turn on Allow LAN instead."), systemImage: "wifi")
-                InfoNote(String(localized: "split_tunnel_note_apps", defaultValue: "iPhone can't leave out individual apps: iOS only lets a VPN exclude address ranges."), systemImage: "iphone")
+                InfoNote(String(localized: "split_tunnel_note_apps", defaultValue: "Individual apps can't be left out: iOS only lets a VPN exclude address ranges."), systemImage: "square.grid.2x2")
             }
         }
         .animation(Motion.quick, value: rangeError)

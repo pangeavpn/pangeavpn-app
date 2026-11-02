@@ -1,14 +1,14 @@
 // Panic wipe, language, appearance and software update pages; wording follows desktop where it exists.
 export default {
   panic_description: {
-    en: "A quick way to erase PangeaVPN from this iPhone and restore your network.",
-    es: "Una forma rápida de borrar PangeaVPN de este iPhone y restaurar tu red.",
-    fr: "Un moyen rapide d'effacer PangeaVPN de cet iPhone et de rétablir votre réseau.",
-    ru: "Быстрый способ стереть PangeaVPN с этого iPhone и восстановить сеть.",
-    uk: "Швидкий спосіб стерти PangeaVPN з цього iPhone і відновити мережу.",
-    zh: "一种从此 iPhone 快速清除 PangeaVPN 并恢复网络的方式。",
-    ar: "طريقة سريعة لمسح PangeaVPN من جهاز iPhone هذا واستعادة شبكتك.",
-    fa: "راهی سریع برای پاک کردن PangeaVPN از این iPhone و بازگرداندن شبکه‌ی شما."
+    en: "A quick way to erase PangeaVPN from this device and restore your network.",
+    es: "Una forma rápida de borrar PangeaVPN de este dispositivo y restaurar tu red.",
+    fr: "Un moyen rapide d'effacer PangeaVPN de cet appareil et de rétablir votre réseau.",
+    ru: "Быстрый способ стереть PangeaVPN с этого устройства и восстановить сеть.",
+    uk: "Швидкий спосіб стерти PangeaVPN з цього пристрою і відновити мережу.",
+    zh: "一种从此设备快速清除 PangeaVPN 并恢复网络的方式。",
+    ar: "طريقة سريعة لمسح PangeaVPN من هذا الجهاز واستعادة شبكتك.",
+    fa: "راهی سریع برای پاک کردن PangeaVPN از این دستگاه و بازگرداندن شبکه‌ی شما."
   },
   panic_enable_title: {
     en: "Enable panic wipe", es: "Activar borrado de emergencia", fr: "Activer l'effacement d'urgence",
@@ -16,14 +16,14 @@ export default {
     ar: "تفعيل المسح الطارئ", fa: "فعال‌سازی پاک‌سازی اضطراری"
   },
   panic_enable_hint: {
-    en: "Adds a “Wipe data” action to the PangeaVPN icon's long-press menu. Choosing it disconnects, erases all PangeaVPN data and the VPN profile from this iPhone, and returns to sign-in. Delete the app afterwards to remove it entirely. This can't be undone.",
-    es: "Añade la acción «Borrar datos» al menú que aparece al mantener pulsado el icono de PangeaVPN. Al elegirla, se desconecta, se borran todos los datos de PangeaVPN y el perfil VPN de este iPhone, y vuelves al inicio de sesión. Después, elimina la app para quitarla por completo. No se puede deshacer.",
-    fr: "Ajoute l'action « Effacer les données » au menu qui s'affiche en maintenant l'icône de PangeaVPN. La choisir déconnecte, efface toutes les données de PangeaVPN et le profil VPN de cet iPhone, puis revient à l'écran de connexion. Supprimez ensuite l'application pour l'enlever complètement. Cette action est irréversible.",
-    ru: "Добавляет действие «Стереть данные» в меню, которое открывается долгим нажатием на значок PangeaVPN. Оно отключает VPN, стирает все данные PangeaVPN и VPN-профиль с этого iPhone и возвращает к экрану входа. Затем удалите приложение, чтобы убрать его полностью. Отменить нельзя.",
-    uk: "Додає дію «Стерти дані» до меню, що відкривається довгим натисканням на значок PangeaVPN. Вона від'єднує VPN, стирає всі дані PangeaVPN і VPN-профіль з цього iPhone та повертає до екрана входу. Потім видаліть застосунок, щоб прибрати його повністю. Скасувати неможливо.",
-    zh: "在长按 PangeaVPN 图标弹出的菜单中添加“清除数据”操作。选择后会断开连接，清除此 iPhone 上的所有 PangeaVPN 数据和 VPN 配置，并返回登录界面。之后删除应用即可将其彻底移除。此操作无法撤销。",
-    ar: "يضيف إجراء «مسح البيانات» إلى القائمة التي تظهر عند الضغط مطولًا على أيقونة PangeaVPN. يؤدي اختياره إلى قطع الاتصال ومسح كل بيانات PangeaVPN وملف تعريف VPN من جهاز iPhone هذا، ثم العودة إلى شاشة تسجيل الدخول. احذف التطبيق بعد ذلك لإزالته بالكامل. لا يمكن التراجع عن ذلك.",
-    fa: "عملکرد «پاک کردن داده‌ها» را به منویی اضافه می‌کند که با نگه داشتن انگشت روی نماد PangeaVPN باز می‌شود. انتخاب آن اتصال را قطع می‌کند، همه‌ی داده‌های PangeaVPN و نمایه‌ی VPN را از این iPhone پاک می‌کند و به صفحه‌ی ورود برمی‌گرداند. پس از آن برنامه را حذف کنید تا کاملاً پاک شود. این کار قابل بازگشت نیست."
+    en: "Adds a “Wipe data” action to the PangeaVPN icon's long-press menu. Choosing it disconnects, erases all PangeaVPN data and the VPN profile from this device, and returns to sign-in. Delete the app afterwards to remove it entirely. This can't be undone.",
+    es: "Añade la acción «Borrar datos» al menú que aparece al mantener pulsado el icono de PangeaVPN. Al elegirla, se desconecta, se borran todos los datos de PangeaVPN y el perfil VPN de este dispositivo, y vuelves al inicio de sesión. Después, elimina la app para quitarla por completo. No se puede deshacer.",
+    fr: "Ajoute l'action « Effacer les données » au menu qui s'affiche en maintenant l'icône de PangeaVPN. La choisir déconnecte, efface toutes les données de PangeaVPN et le profil VPN de cet appareil, puis revient à l'écran de connexion. Supprimez ensuite l'application pour l'enlever complètement. Cette action est irréversible.",
+    ru: "Добавляет действие «Стереть данные» в меню, которое открывается долгим нажатием на значок PangeaVPN. Оно отключает VPN, стирает все данные PangeaVPN и VPN-профиль с этого устройства и возвращает к экрану входа. Затем удалите приложение, чтобы убрать его полностью. Отменить нельзя.",
+    uk: "Додає дію «Стерти дані» до меню, що відкривається довгим натисканням на значок PangeaVPN. Вона від'єднує VPN, стирає всі дані PangeaVPN і VPN-профіль з цього пристрою та повертає до екрана входу. Потім видаліть застосунок, щоб прибрати його повністю. Скасувати неможливо.",
+    zh: "在长按 PangeaVPN 图标弹出的菜单中添加“清除数据”操作。选择后会断开连接，清除此设备上的所有 PangeaVPN 数据和 VPN 配置，并返回登录界面。之后删除应用即可将其彻底移除。此操作无法撤销。",
+    ar: "يضيف إجراء «مسح البيانات» إلى القائمة التي تظهر عند الضغط مطولًا على أيقونة PangeaVPN. يؤدي اختياره إلى قطع الاتصال ومسح كل بيانات PangeaVPN وملف تعريف VPN من هذا الجهاز، ثم العودة إلى شاشة تسجيل الدخول. احذف التطبيق بعد ذلك لإزالته بالكامل. لا يمكن التراجع عن ذلك.",
+    fa: "عملکرد «پاک کردن داده‌ها» را به منویی اضافه می‌کند که با نگه داشتن انگشت روی نماد PangeaVPN باز می‌شود. انتخاب آن اتصال را قطع می‌کند، همه‌ی داده‌های PangeaVPN و نمایه‌ی VPN را از این دستگاه پاک می‌کند و به صفحه‌ی ورود برمی‌گرداند. پس از آن برنامه را حذف کنید تا کاملاً پاک شود. این کار قابل بازگشت نیست."
   },
   panic_shortcut_title: {
     en: "Wipe data", es: "Borrar datos", fr: "Effacer les données", ru: "Стереть данные",
@@ -49,14 +49,14 @@ export default {
     ar: "هل تريد مسح PangeaVPN الآن؟", fa: "PangeaVPN همین حالا پاک شود؟"
   },
   panic_confirm_message: {
-    en: "This disconnects, erases all PangeaVPN data and the VPN profile from this iPhone, and returns to sign-in. It can't be undone.",
-    es: "Se desconectará, se borrarán todos los datos de PangeaVPN y el perfil VPN de este iPhone, y volverás al inicio de sesión. No se puede deshacer.",
-    fr: "Cela déconnecte, efface toutes les données de PangeaVPN et le profil VPN de cet iPhone, puis revient à l'écran de connexion. Cette action est irréversible.",
-    ru: "VPN отключится, все данные PangeaVPN и VPN-профиль будут стёрты с этого iPhone, и откроется экран входа. Отменить нельзя.",
-    uk: "VPN від'єднається, усі дані PangeaVPN і VPN-профіль буде стерто з цього iPhone, і відкриється екран входу. Скасувати неможливо.",
-    zh: "这将断开连接，清除此 iPhone 上的所有 PangeaVPN 数据和 VPN 配置，并返回登录界面。此操作无法撤销。",
-    ar: "سيؤدي ذلك إلى قطع الاتصال ومسح كل بيانات PangeaVPN وملف تعريف VPN من جهاز iPhone هذا، ثم العودة إلى شاشة تسجيل الدخول. لا يمكن التراجع عن ذلك.",
-    fa: "این کار اتصال را قطع می‌کند، همه‌ی داده‌های PangeaVPN و نمایه‌ی VPN را از این iPhone پاک می‌کند و به صفحه‌ی ورود برمی‌گرداند. این کار قابل بازگشت نیست."
+    en: "This disconnects, erases all PangeaVPN data and the VPN profile from this device, and returns to sign-in. It can't be undone.",
+    es: "Se desconectará, se borrarán todos los datos de PangeaVPN y el perfil VPN de este dispositivo, y volverás al inicio de sesión. No se puede deshacer.",
+    fr: "Cela déconnecte, efface toutes les données de PangeaVPN et le profil VPN de cet appareil, puis revient à l'écran de connexion. Cette action est irréversible.",
+    ru: "VPN отключится, все данные PangeaVPN и VPN-профиль будут стёрты с этого устройства, и откроется экран входа. Отменить нельзя.",
+    uk: "VPN від'єднається, усі дані PangeaVPN і VPN-профіль буде стерто з цього пристрою, і відкриється екран входу. Скасувати неможливо.",
+    zh: "这将断开连接，清除此设备上的所有 PangeaVPN 数据和 VPN 配置，并返回登录界面。此操作无法撤销。",
+    ar: "سيؤدي ذلك إلى قطع الاتصال ومسح كل بيانات PangeaVPN وملف تعريف VPN من هذا الجهاز، ثم العودة إلى شاشة تسجيل الدخول. لا يمكن التراجع عن ذلك.",
+    fa: "این کار اتصال را قطع می‌کند، همه‌ی داده‌های PangeaVPN و نمایه‌ی VPN را از این دستگاه پاک می‌کند و به صفحه‌ی ورود برمی‌گرداند. این کار قابل بازگشت نیست."
   },
   panic_confirm_wipe: {
     en: "Wipe", es: "Borrar", fr: "Effacer", ru: "Стереть",

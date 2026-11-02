@@ -13,7 +13,7 @@ struct StartupPage: View {
                 StoreSwitchRow(
                     title: Self.autoConnectTitle,
                     value: settings.autoConnect || settings.lockdown,
-                    hint: String(localized: "startup_auto_connect_hint", defaultValue: "Connects when your iPhone starts or the network returns, and reconnects if the tunnel drops. Disconnecting in PangeaVPN pauses it until you connect again."),
+                    hint: String(localized: "startup_auto_connect_hint", defaultValue: "Connects when your device starts or the network returns, and reconnects if the tunnel drops. Disconnecting in PangeaVPN pauses it until you connect again."),
                     apply: { await setAutoConnect($0) }
                 )
                 .disabled(settings.lockdown)

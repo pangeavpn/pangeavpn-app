@@ -19,7 +19,7 @@ struct RestoreFailedView: View {
                 .foregroundStyle(Palette.text)
                 .accessibilityAddTraits(.isHeader)
                 .padding(.top, 8)
-            Text(String(localized: "restore_failed_body", defaultValue: "You're still signed in on this iPhone, but PangeaVPN couldn't reach its servers. Check your connection, then try again."))
+            Text(String(localized: "restore_failed_body", defaultValue: "You're still signed in on this device, but PangeaVPN couldn't reach its servers. Check your connection, then try again."))
                 .scaledFont(size: 14, relativeTo: .subheadline)
                 .lineSpacing(3)
                 .foregroundStyle(Palette.textSecondary)

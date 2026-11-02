@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct RouteNode: Equatable {
     let name: String
@@ -43,7 +44,7 @@ struct RoutePath: View {
 
     private func strip(named: Bool) -> some View {
         HStack(spacing: 0) {
-            Image(systemName: "iphone")
+            Image(systemName: UIDevice.current.userInterfaceIdiom == .pad ? "ipad" : "iphone")
                 .scaledFont(size: 11, weight: .semibold, relativeTo: .caption)
                 .foregroundStyle(Palette.textSecondary)
                 .padding(.horizontal, 7)

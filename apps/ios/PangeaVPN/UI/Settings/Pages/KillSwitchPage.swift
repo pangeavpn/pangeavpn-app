@@ -38,7 +38,7 @@ struct KillSwitchPage: View {
 
     static var caveats: [String] {
         [
-            String(localized: "kill_switch_caveat_update", defaultValue: "Updating PangeaVPN while connected can leave your iPhone offline until it restarts."),
+            String(localized: "kill_switch_caveat_update", defaultValue: "Updating PangeaVPN while connected can leave your device offline until it restarts."),
             String(localized: "kill_switch_caveat_lan", defaultValue: "AirDrop, AirPlay and printing need Allow LAN."),
             String(localized: "kill_switch_caveat_carplay", defaultValue: "CarPlay and Personal Hotspot may not work."),
             String(localized: "kill_switch_caveat_system", defaultValue: "Some Apple system services may still bypass the VPN."),

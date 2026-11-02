@@ -8,12 +8,12 @@ struct PanicPage: View {
     init() {}
 
     var body: some View {
-        SettingsPage(.panic, description: String(localized: "panic_description", defaultValue: "A quick way to erase PangeaVPN from this iPhone and restore your network.")) {
+        SettingsPage(.panic, description: String(localized: "panic_description", defaultValue: "A quick way to erase PangeaVPN from this device and restore your network.")) {
             SettingsCard {
                 SwitchRow(
                     String(localized: "panic_enable_title", defaultValue: "Enable panic wipe"),
                     isOn: Binding(get: { settings.panicWipe }, set: { setEnabled($0) }),
-                    hint: String(localized: "panic_enable_hint", defaultValue: "Adds a “Wipe data” action to the PangeaVPN icon's long-press menu. Choosing it disconnects, erases all PangeaVPN data and the VPN profile from this iPhone, and returns to sign-in. Delete the app afterwards to remove it entirely. This can't be undone.")
+                    hint: String(localized: "panic_enable_hint", defaultValue: "Adds a “Wipe data” action to the PangeaVPN icon's long-press menu. Choosing it disconnects, erases all PangeaVPN data and the VPN profile from this device, and returns to sign-in. Delete the app afterwards to remove it entirely. This can't be undone.")
                 )
             }
             SettingsCard {
@@ -37,7 +37,7 @@ struct PanicPage: View {
             }
             Button(String(localized: "panic_confirm_cancel", defaultValue: "Cancel"), role: .cancel) {}
         } message: {
-            Text(String(localized: "panic_confirm_message", defaultValue: "This disconnects, erases all PangeaVPN data and the VPN profile from this iPhone, and returns to sign-in. It can't be undone."))
+            Text(String(localized: "panic_confirm_message", defaultValue: "This disconnects, erases all PangeaVPN data and the VPN profile from this device, and returns to sign-in. It can't be undone."))
         }
     }
 

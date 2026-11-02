@@ -133,7 +133,7 @@ final class TunnelStartTests: XCTestCase {
     }
 
     func testNewErrorsUseEnglishDefaults() {
-        XCTAssertEqual(TunnelStartError.deviceLocked.errorDescription, "Unlock your iPhone to connect.")
+        XCTAssertEqual(TunnelStartError.deviceLocked.errorDescription, "Unlock your device to connect.")
         XCTAssertEqual(TunnelStartError.subscriptionExpired.errorDescription, "Your subscription has expired.")
         XCTAssertEqual(TunnelStartError.connectFailed.errorDescription,
                        "Could not connect. Check your connection or try another region.")

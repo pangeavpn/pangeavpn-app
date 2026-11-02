@@ -72,7 +72,7 @@
 "devices_title" = "الأجهزة";
 "devices_unnamed" = "جهاز بلا اسم";
 "error_connect_failed" = "تعذّر الاتصال. تحقق من اتصالك أو جرّب منطقة أخرى.";
-"error_device_locked" = "افتح قفل iPhone للاتصال.";
+"error_device_locked" = "افتح قفل الجهاز للاتصال.";
 "error_dns_invalid" = "لا يوجد خادم DNS صالح. تحقق من DNS المخصص في الإعدادات.";
 "error_no_server" = "افتح PangeaVPN واختر منطقة.";
 "error_no_subscription" = "لا يوجد اشتراك نشط لهذا الحساب.";
@@ -121,7 +121,7 @@
 "kill_switch_caveat_carplay" = "قد لا تعمل CarPlay ونقطة الاتصال الشخصية.";
 "kill_switch_caveat_lan" = "تحتاج AirDrop وAirPlay والطباعة إلى «السماح بشبكة LAN».";
 "kill_switch_caveat_system" = "قد تظل بعض خدمات نظام Apple تتجاوز VPN.";
-"kill_switch_caveat_update" = "قد يؤدي تحديث PangeaVPN أثناء الاتصال إلى بقاء iPhone بلا إنترنت حتى تعيد تشغيله.";
+"kill_switch_caveat_update" = "قد يؤدي تحديث PangeaVPN أثناء الاتصال إلى بقاء الجهاز بلا إنترنت حتى تعيد تشغيله.";
 "kill_switch_description" = "كيف يمنع PangeaVPN تسرّب حركة بياناتك خارج VPN.";
 "kill_switch_strict_confirm_cancel" = "إلغاء";
 "kill_switch_strict_confirm_on" = "تفعيل";
@@ -207,11 +207,11 @@
 "notifications_toast_off" = "تنبيهات الاتصال متوقفة.";
 "notifications_toast_on" = "تنبيهات الاتصال مفعّلة.";
 "panic_confirm_cancel" = "إلغاء";
-"panic_confirm_message" = "سيؤدي ذلك إلى قطع الاتصال ومسح كل بيانات PangeaVPN وملف تعريف VPN من جهاز iPhone هذا، ثم العودة إلى شاشة تسجيل الدخول. لا يمكن التراجع عن ذلك.";
+"panic_confirm_message" = "سيؤدي ذلك إلى قطع الاتصال ومسح كل بيانات PangeaVPN وملف تعريف VPN من هذا الجهاز، ثم العودة إلى شاشة تسجيل الدخول. لا يمكن التراجع عن ذلك.";
 "panic_confirm_title" = "هل تريد مسح PangeaVPN الآن؟";
 "panic_confirm_wipe" = "مسح";
-"panic_description" = "طريقة سريعة لمسح PangeaVPN من جهاز iPhone هذا واستعادة شبكتك.";
-"panic_enable_hint" = "يضيف إجراء «مسح البيانات» إلى القائمة التي تظهر عند الضغط مطولًا على أيقونة PangeaVPN. يؤدي اختياره إلى قطع الاتصال ومسح كل بيانات PangeaVPN وملف تعريف VPN من جهاز iPhone هذا، ثم العودة إلى شاشة تسجيل الدخول. احذف التطبيق بعد ذلك لإزالته بالكامل. لا يمكن التراجع عن ذلك.";
+"panic_description" = "طريقة سريعة لمسح PangeaVPN من هذا الجهاز واستعادة شبكتك.";
+"panic_enable_hint" = "يضيف إجراء «مسح البيانات» إلى القائمة التي تظهر عند الضغط مطولًا على أيقونة PangeaVPN. يؤدي اختياره إلى قطع الاتصال ومسح كل بيانات PangeaVPN وملف تعريف VPN من هذا الجهاز، ثم العودة إلى شاشة تسجيل الدخول. احذف التطبيق بعد ذلك لإزالته بالكامل. لا يمكن التراجع عن ذلك.";
 "panic_enable_title" = "تفعيل المسح الطارئ";
 "panic_now_button" = "امسح الآن";
 "panic_now_note" = "ينفّذ المسح نفسه فورًا، سواء كان المسح الطارئ مفعّلًا أم لا.";
@@ -263,7 +263,7 @@
 "regions_same_as_exit" = "هذه منطقة الخروج الخاصة بك";
 "regions_show_servers" = "عرض خوادم %@";
 "regions_title" = "اختيار المنطقة";
-"restore_failed_body" = "ما زلت مسجّل الدخول على هذا الـ iPhone، لكن تعذّر على PangeaVPN الوصول إلى خوادمه. تحقّق من اتصالك ثم حاول مرة أخرى.";
+"restore_failed_body" = "ما زلت مسجّل الدخول على هذا الجهاز، لكن تعذّر على PangeaVPN الوصول إلى خوادمه. تحقّق من اتصالك ثم حاول مرة أخرى.";
 "restore_failed_retry" = "إعادة المحاولة";
 "restore_failed_title" = "تعذّر الوصول إلى PangeaVPN";
 "root_data_erased" = "تم مسح بيانات PangeaVPN.";
@@ -353,7 +353,7 @@
 "split_tunnel_error_too_broad" = "واسع جدًا، استخدم /8 أو أضيق: %@.";
 "split_tunnel_error_too_many" = "نطاقات كثيرة جدًا. أزل بعضها أولًا.";
 "split_tunnel_hint" = "التطبيقات المفعّلة هنا تتجاوز الشبكة الافتراضية وتستخدم اتصالك العادي.";
-"split_tunnel_note_apps" = "لا يستطيع iPhone استثناء تطبيقات بعينها: يسمح iOS لشبكة VPN باستثناء نطاقات العناوين فقط.";
+"split_tunnel_note_apps" = "لا يمكن استثناء تطبيقات بعينها: يسمح iOS لشبكة VPN باستثناء نطاقات العناوين فقط.";
 "split_tunnel_note_dns" = "استعلامات الأسماء (DNS) تظل تمر عبر VPN.";
 "split_tunnel_note_lan" = "للأجهزة على شبكتك المحلية، فعّل «السماح بشبكة LAN» بدلًا من ذلك.";
 "split_tunnel_note_strict" = "مفتاح الإيقاف الصارم مفعّل، لذا يمرّر iOS كل شيء عبر VPN وتُتجاهل هذه النطاقات.";
@@ -368,7 +368,7 @@
 "split_tunnel_toast_off" = "تم إيقاف الأنفاق المقسّمة. يسري عند الاتصال التالي.";
 "split_tunnel_toast_on" = "تم تفعيل الأنفاق المقسّمة. يسري عند الاتصال التالي.";
 "split_tunnel_toast_saved" = "تم حفظ نطاقات IP المستثناة.";
-"startup_auto_connect_hint" = "يتصل عند تشغيل iPhone أو عودة الشبكة، ويعيد الاتصال إذا انقطع النفق. قطع الاتصال من PangeaVPN يوقفه مؤقتًا حتى تتصل مرة أخرى.";
+"startup_auto_connect_hint" = "يتصل عند تشغيل الجهاز أو عودة الشبكة، ويعيد الاتصال إذا انقطع النفق. قطع الاتصال من PangeaVPN يوقفه مؤقتًا حتى تتصل مرة أخرى.";
 "startup_auto_connect_note" = "أثناء تفعيله، قد يعيد iOS تشغيل VPN إذا أوقفته من مركز التحكم أو إعدادات iOS. لإيقافه، اقطع الاتصال من PangeaVPN.";
 "startup_auto_connect_title" = "الاتصال التلقائي";
 "startup_description" = "الاتصال وإعادة الاتصال التلقائيان.";
