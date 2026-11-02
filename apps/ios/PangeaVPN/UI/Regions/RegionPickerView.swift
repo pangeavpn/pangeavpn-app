@@ -6,6 +6,7 @@ struct RegionPickerView: View {
     @Environment(SettingsStore.self) private var settings
     @Environment(ConnectionStore.self) private var connection
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var expanded: Set<String> = []
     @State private var pendingRoute: Task<Void, Never>?
 
@@ -136,10 +137,8 @@ struct RegionPickerView: View {
     }
 
     private func toggleNodes(_ key: String) {
-        if expanded.contains(key) {
-            expanded = expanded.subtracting([key])
-        } else {
-            expanded = expanded.union([key])
+        withAnimation(Motion.layout(reduceMotion)) {
+            expanded = expanded.contains(key) ? expanded.subtracting([key]) : expanded.union([key])
         }
     }
 

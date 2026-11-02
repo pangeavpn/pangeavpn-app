@@ -16,8 +16,18 @@ struct RootView: View {
 
     private var erasing: Bool { wipe != nil || PanicTrigger.shared.requested }
 
+    private enum Screen { case splash, deviceLimit, restoreFailed, login, main }
+
+    private var screen: Screen {
+        if !hasRestored || erasing { return .splash }
+        if session.showDeviceLimit { return .deviceLimit }
+        if session.session == nil { return session.restoreFailed ? .restoreFailed : .login }
+        return .main
+    }
+
     var body: some View {
         content
+            .animation(Motion.screen, value: screen)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Palette.bg.ignoresSafeArea())
             .privacyCover()
@@ -45,18 +55,15 @@ struct RootView: View {
             .task(id: hasRestored && session.session != nil) { await loadSignedInData() }
     }
 
+    // Each screen cross-fades into the next rather than cutting.
     @ViewBuilder
     private var content: some View {
-        if !hasRestored || erasing {
-            SplashView()
-        } else if session.showDeviceLimit {
-            DeviceLimitView()
-        } else if session.session == nil && session.restoreFailed {
-            RestoreFailedView()
-        } else if session.session == nil {
-            LoginView(token: $draftToken)
-        } else {
-            MainView()
+        switch screen {
+        case .splash: SplashView().transition(.opacity)
+        case .deviceLimit: DeviceLimitView().transition(.opacity)
+        case .restoreFailed: RestoreFailedView().transition(.opacity)
+        case .login: LoginView(token: $draftToken).transition(.opacity)
+        case .main: MainView().transition(.opacity)
         }
     }
 

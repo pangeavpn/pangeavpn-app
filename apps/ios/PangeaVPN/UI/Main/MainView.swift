@@ -41,10 +41,6 @@ struct MainView: View {
     // Idle has no session to report, so the facts give their room to more regions.
     private var showsFacts: Bool { display != .disconnected && display != .error }
 
-    private var motion: Animation {
-        reduceMotion ? .easeInOut(duration: 0.2) : .spring(response: 0.5, dampingFraction: 0.86)
-    }
-
     private var action: MainAction {
         MainAction.resolve(state: status.state, busy: connection.busy, switching: connection.switching,
                            reconnecting: reconnecting, lockdownBlocks: connection.lockdownBlocksDisconnect,
@@ -83,6 +79,7 @@ struct MainView: View {
             if banner {
                 SubscriptionBanner(subscription: session.subscription)
                     .padding(.top, 6)
+                    .transition(Motion.rise(reduceMotion, by: -8))
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { bannerHeight = $0 }
             }
             if connection.entitled {
@@ -101,8 +98,9 @@ struct MainView: View {
                     .padding(.top, 8)
             }
         }
-        .animation(motion, value: showsFacts)
-        .animation(motion, value: rows)
+        .animation(Motion.layout(reduceMotion), value: showsFacts)
+        .animation(Motion.layout(reduceMotion), value: rows)
+        .animation(Motion.layout(reduceMotion), value: banner)
         .padding(.horizontal, Self.gutter)
         .padding(.top, Self.topInset)
         .padding(.bottom, Self.bottomInset)
@@ -117,8 +115,7 @@ struct MainView: View {
     // The facts leave quickly, so the regions sliding up never pass over a half-faded grid.
     private var factsTransition: AnyTransition {
         if reduceMotion { return .opacity }
-        return .asymmetric(insertion: .opacity.combined(with: .offset(y: -10)),
-                           removal: .opacity.animation(.easeOut(duration: 0.14)))
+        return .asymmetric(insertion: Motion.rise(false, by: -10), removal: .opacity.animation(Motion.quick))
     }
 
     private var hero: some View {
@@ -143,6 +140,8 @@ struct MainView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        // Colour and wording cross-fade on every state change, not only the idle ones.
+        .animation(Motion.state(reduceMotion), value: shown)
     }
 
     // The NE stays up through an in-place switch, so the clock and counters follow it, not the hero.

@@ -26,6 +26,7 @@ struct SplitTunnelPage: View {
                 rangesField
                 if let rangeError {
                     InfoNote(rangeError, systemImage: "exclamationmark.circle", tint: Palette.error)
+                        .transition(.opacity)
                 }
             }
             SettingsCard {
@@ -34,6 +35,7 @@ struct SplitTunnelPage: View {
                 InfoNote(String(localized: "split_tunnel_note_apps", defaultValue: "iPhone can't leave out individual apps: iOS only lets a VPN exclude address ranges."), systemImage: "iphone")
             }
         }
+        .animation(Motion.quick, value: rangeError)
     }
 
     private static var rangesTitle: String {

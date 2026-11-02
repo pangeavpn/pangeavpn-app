@@ -22,9 +22,11 @@ struct SettingsPage<Content: View>: View {
                     .fixedSize(horizontal: false, vertical: true)
                 if let message = settings.error {
                     InfoNote(message, systemImage: "exclamationmark.circle", tint: Palette.error)
+                        .transition(.opacity)
                 }
                 content
             }
+            .animation(Motion.quick, value: settings.error)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 16)
             .padding(.top, 8)

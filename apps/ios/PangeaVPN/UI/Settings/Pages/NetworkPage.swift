@@ -58,9 +58,13 @@ struct NetworkPage: View {
                 .id(mtuFieldID)
                 if let mtuError {
                     InfoNote(mtuError, systemImage: "exclamationmark.circle", tint: Palette.error)
+                        .transition(.opacity)
                 }
             }
         }
+        .animation(Motion.quick, value: mtuError)
+        .animation(Motion.quick, value: dnsError)
+        .animation(Motion.quick, value: dnsChoice)
         .task {
             if !settings.loaded { await settings.load() }
         }
@@ -91,8 +95,10 @@ struct NetworkPage: View {
                 .id(dnsFieldID)
                 if let dnsError {
                     InfoNote(dnsError, systemImage: "exclamationmark.circle", tint: Palette.error)
+                        .transition(.opacity)
                 }
             }
+            .transition(.opacity)
         }
     }
 

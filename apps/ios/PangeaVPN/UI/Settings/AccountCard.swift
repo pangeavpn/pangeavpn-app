@@ -50,11 +50,12 @@ struct AccountCard: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityAddTraits(.isHeader)
                 Spacer(minLength: 6)
-                if let revealed { copyButton(revealed) }
+                if let revealed { copyButton(revealed).transition(.opacity) }
                 showButton
             }
             numberText
         }
+        .animation(Motion.quick, value: revealed)
     }
 
     private var numberText: some View {

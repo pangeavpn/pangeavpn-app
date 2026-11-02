@@ -384,8 +384,12 @@ jobs:
           UDIDS: ${{ steps.sims.outputs.udids }}
           TEST_RUNNER_PANGEA_SCREENS_DIR: ${{ runner.temp }}/screens
           TEST_RUNNER_PANGEA_SCREENS_FRAMEBUFFER: '1'
+          MOTION_DIR: ${{ runner.temp }}/screens/motion
         run: |
           failed=0
+          # The motion tour runs on the 17 Pro only, before Reduce Motion goes on for the stills.
+          set -- $UDIDS
+          motion_udid=$2
           for udid in $UDIDS; do
             echo "::group::$udid"
             xcrun simctl boot "$udid" || true
@@ -399,6 +403,19 @@ jobs:
               --dataNetwork wifi --wifiMode active --wifiBars 3 \
               --cellularMode active --cellularBars 4 \
               --batteryState charged --batteryLevel 100
+            if [ "$udid" = "$motion_udid" ]; then
+              mkdir -p "$MOTION_DIR"
+              xcrun simctl io "$udid" recordVideo --codec=h264 --force "$MOTION_DIR/tour.mp4" >/dev/null 2>&1 &
+              recorder=$!
+              perl -MTime::HiRes=time -e 'printf "%.3f\n", time' >"$MOTION_DIR/record-start.txt"
+              TEST_RUNNER_PANGEA_MOTION_DIR="$MOTION_DIR" xcodebuild test-without-building -scheme PangeaVPN \
+                -destination "id=$udid" \
+                -derivedDataPath "$RUNNER_TEMP/derived" \
+                -only-testing:PangeaVPNTests/MotionTourTests \
+                -parallel-testing-enabled NO || failed=1
+              kill -INT "$recorder" 2>/dev/null || true
+              wait "$recorder" || true
+            fi
             # Reduce Motion stops the map orbit and status pulses, so frames hold still.
             xcrun simctl spawn "$udid" defaults write com.apple.Accessibility ReduceMotionEnabled -bool true
             # The first screenshot after a boot is the slow one, so it is taken before any test waits on it.

@@ -112,7 +112,7 @@ private struct ToastOverlay: ViewModifier {
                     .id(toast.id)
             }
         }
-        .animation(.easeOut(duration: 0.2), value: shown)
+        .animation(Motion.quick, value: shown)
         .onAppear { toasts.attach(host) }
         .onDisappear { toasts.detach(host) }
         .onChange(of: toasts.current) { _, toast in

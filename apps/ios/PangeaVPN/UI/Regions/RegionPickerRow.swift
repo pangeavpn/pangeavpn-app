@@ -25,7 +25,7 @@ struct RegionPickerRow: View {
                 if !nodes.isEmpty { disclosureButton }
             }
             .fixedSize(horizontal: false, vertical: true)
-            if expanded && !nodes.isEmpty { nodeList }
+            if expanded && !nodes.isEmpty { nodeList.transition(.opacity) }
         }
         .background(selected ? Palette.accent.opacity(0.15) : Palette.surface, in: shape)
         .overlay(shape.strokeBorder(selected ? Palette.accent : Palette.borderSubtle, lineWidth: 1))

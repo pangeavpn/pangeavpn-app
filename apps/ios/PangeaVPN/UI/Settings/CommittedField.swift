@@ -39,11 +39,11 @@ struct CommittedField: View {
         VStack(alignment: .leading, spacing: 9) {
             if typeSize.isAccessibilitySize {
                 field
-                if dirty { saveButton(leadingInset: 4) }
+                if dirty { saveButton(leadingInset: 4).transition(.opacity) }
             } else {
                 HStack(spacing: 4) {
                     field
-                    if dirty { saveButton(leadingInset: 12) }
+                    if dirty { saveButton(leadingInset: 12).transition(.opacity) }
                 }
             }
             if !hint.isEmpty {
@@ -54,6 +54,7 @@ struct CommittedField: View {
                     .padding(.horizontal, 4)
             }
         }
+        .animation(Motion.quick, value: dirty)
         .onChange(of: initial) { _, value in text = value }
     }
 

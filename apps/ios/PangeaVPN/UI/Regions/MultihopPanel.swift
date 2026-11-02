@@ -8,6 +8,7 @@ struct MultihopPanel: View {
     let onChoose: (String?) -> Void
 
     @Environment(\.dynamicTypeSize) private var typeSize
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: 14, style: .continuous) }
 
@@ -17,8 +18,9 @@ struct MultihopPanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             head
-            if enabled { entry }
+            if enabled { entry.transition(Motion.rise(reduceMotion, by: -6)) }
         }
+        .animation(Motion.layout(reduceMotion), value: enabled)
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
         .background(Palette.surface, in: shape)

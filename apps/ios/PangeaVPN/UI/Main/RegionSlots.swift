@@ -55,7 +55,7 @@ struct RegionSlots: View {
     }
 
     private var rowTransition: AnyTransition {
-        reduceMotion ? .opacity : .opacity.combined(with: .offset(y: 14))
+        Motion.rise(reduceMotion, by: 14)
     }
 
     private func row(_ region: Region, selected: Bool) -> some View {

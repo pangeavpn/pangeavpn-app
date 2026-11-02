@@ -58,6 +58,8 @@ struct ConnectButton: View {
         .opacity(opacity)
         .sensoryFeedback(.impact(weight: .light), trigger: taps)
         .accessibilityAddTraits(pulsing ? .updatesFrequently : [])
+        // Fill, outline and label cross-fade, as the hero above them does.
+        .animation(Motion.state(reduceMotion), value: kind)
         .onAppear { updatePulse() }
         .onChange(of: pulsing) { _, _ in updatePulse() }
         .onChange(of: reduceMotion) { _, _ in updatePulse() }
@@ -70,7 +72,7 @@ struct ConnectButton: View {
                 dimmed = true
             }
         } else {
-            withAnimation(.easeOut(duration: 0.15)) { dimmed = false }
+            withAnimation(Motion.quick) { dimmed = false }
         }
     }
 }

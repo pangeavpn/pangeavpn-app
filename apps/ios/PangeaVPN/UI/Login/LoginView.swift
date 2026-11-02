@@ -73,7 +73,7 @@ struct LoginView: View {
                 isError: errorMessage != nil,
                 onSubmit: submit)
             if let errorMessage {
-                errorBox(errorMessage).padding(.top, 14)
+                errorBox(errorMessage).padding(.top, 14).transition(.opacity)
             }
             PillButton(
                 String(localized: "login_signin", defaultValue: "Sign In"),
@@ -86,6 +86,7 @@ struct LoginView: View {
         }
         .padding(.horizontal, Self.gutter)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .animation(Motion.quick, value: errorMessage)
     }
 
     // The no-break space keeps the arrow on the last word's line; a link label centres unless told not to.

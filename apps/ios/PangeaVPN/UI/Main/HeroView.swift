@@ -81,7 +81,7 @@ struct HeroKicker: View {
                     .padding(4)
                     .background(Circle().fill(dotColor.opacity(state == .connected ? 0.2 : 0)))
                     .opacity(pulsing && dimmed ? 0.4 : 1)
-                    .animation(reduceMotion ? nil : .easeInOut(duration: 0.4), value: state)
+                    .animation(Motion.state(reduceMotion), value: state)
                 Text(HeroText.label(state).uppercased())
                     .kerning(1.8)
                     .scaledFont(size: 11, weight: .bold, relativeTo: .caption2)
@@ -101,7 +101,7 @@ struct HeroKicker: View {
         if pulsing {
             withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) { dimmed = true }
         } else {
-            withAnimation(.easeOut(duration: 0.2)) { dimmed = false }
+            withAnimation(Motion.quick) { dimmed = false }
         }
     }
 }
