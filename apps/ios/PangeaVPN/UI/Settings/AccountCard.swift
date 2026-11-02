@@ -17,8 +17,12 @@ struct AccountCard: View {
 
     static let mask = "••••-••••-••••-••••-••••-••••"
     private static let clipboardLifetime: TimeInterval = 120
+    // A wide window's rail is already a surface, so the card sits in it as a recessed well.
+    private let fill: Color
 
-    init() {}
+    init(fill: Color = Palette.surface) {
+        self.fill = fill
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -31,7 +35,7 @@ struct AccountCard: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Palette.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(fill, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Palette.borderSubtle, lineWidth: 1))
         .task { await refreshSubscription() }
         .onDisappear { hide() }

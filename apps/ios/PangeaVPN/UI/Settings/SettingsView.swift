@@ -1,24 +1,53 @@
 import SwiftUI
 
-// Desktop's settings rail as a phone home screen: every rail item pushes its own page.
+// Desktop's settings rail: a phone pushes each item's page, a wide window shows it beside the rail.
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(SettingsStore.self) private var settings
     @Environment(SessionStore.self) private var session
     @Environment(ToastCenter.self) private var toasts
+    // Both layouts read it, so a resize across the threshold keeps the open page.
     @State private var path: [SettingsRoute]
     @State private var confirmingSignOut = false
     @State private var versionTaps = VersionTapUnlock()
+
+    // Fits the account number on one line at the default text size.
+    private static let railWidth: CGFloat = 320
+    private static let signOutImage = "rectangle.portrait.and.arrow.right"
 
     init(path: [SettingsRoute] = []) {
         _path = State(initialValue: path)
     }
 
     var body: some View {
+        AdaptiveLayout {
+            wideBody
+        } compact: {
+            compactBody
+        }
+        .tint(Palette.accent)
+        .preferredColorScheme(settings.darkTheme.map { $0 ? ColorScheme.dark : ColorScheme.light })
+        // A full-screen cover sits above the app-wide toast and privacy layers, so it carries its own.
+        .toastOverlay()
+        .privacyCover()
+        .task {
+            if !settings.loaded { await settings.load() }
+        }
+        // Either layout may be showing the developer page when its row goes away.
+        .onChange(of: settings.developerMode) { _, enabled in
+            if !enabled, path.contains(.developer) { path = SettingsRoute.withoutDeveloper(path) }
+        }
+    }
+
+    private static var title: String {
+        String(localized: "settings_title", defaultValue: "Settings")
+    }
+
+    private var compactBody: some View {
         NavigationStack(path: $path) {
             // The header sits outside the scroll view, so rows never pass under it or the status bar.
             VStack(spacing: 0) {
-                header
+                header(inset: 16, background: Palette.bg)
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
                         AccountCard()
@@ -40,21 +69,40 @@ struct SettingsView: View {
                 destination(route)
             }
         }
-        .tint(Palette.accent)
-        .preferredColorScheme(settings.darkTheme.map { $0 ? ColorScheme.dark : ColorScheme.light })
-        // A full-screen cover sits above the app-wide toast and privacy layers, so it carries its own.
-        .toastOverlay()
-        .privacyCover()
-        .task {
-            if !settings.loaded { await settings.load() }
+    }
+
+    // The rail selects a section and the pane beside it shows that page in place, with no push.
+    private var wideBody: some View {
+        HStack(spacing: 0) {
+            rail
+                .frame(width: Self.railWidth)
+            Rectangle()
+                .fill(Palette.borderSubtle)
+                .frame(width: 1)
+                .ignoresSafeArea()
+                .accessibilityHidden(true)
+            NavigationStack(path: pushedPath) {
+                destination(selectedRoute)
+                    .navigationDestination(for: SettingsRoute.self) { route in
+                        destination(route)
+                    }
+            }
+            .frame(maxWidth: .infinity)
         }
     }
 
-    private static var title: String {
-        String(localized: "settings_title", defaultValue: "Settings")
+    private var selectedRoute: SettingsRoute {
+        SettingsRoute.selected(in: path)
     }
 
-    private var header: some View {
+    private var pushedPath: Binding<[SettingsRoute]> {
+        Binding(
+            get: { SettingsRoute.pushed(in: path) },
+            set: { path = [selectedRoute] + $0 }
+        )
+    }
+
+    private func header(inset: CGFloat, background: Color) -> some View {
         HStack(spacing: 8) {
             Text(Self.title)
                 .scaledFont(size: 28, weight: .semibold, relativeTo: .largeTitle)
@@ -68,9 +116,30 @@ struct SettingsView: View {
                 .background(Palette.surface, in: Circle())
                 .overlay(Circle().strokeBorder(Palette.borderSubtle, lineWidth: 1))
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, inset)
         .padding(.vertical, 8)
-        .background(Palette.bg)
+        .background(background)
+    }
+
+    private var rail: some View {
+        VStack(spacing: 0) {
+            header(inset: 12, background: Palette.surface)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    AccountCard(fill: Palette.bg)
+                    railRoutes
+                        .padding(.top, 14)
+                    railActions
+                        .padding(.top, 12)
+                    versionLine
+                        .padding(.top, 4)
+                }
+                .padding(.horizontal, 12)
+                .padding(.bottom, 16)
+            }
+            .scrollBounceBehavior(.basedOnSize)
+        }
+        .background(Palette.surface.ignoresSafeArea())
     }
 
     private var routeRows: some View {
@@ -82,6 +151,22 @@ struct SettingsView: View {
                 .buttonStyle(.plain)
             }
         }
+    }
+
+    private var railRoutes: some View {
+        VStack(spacing: 2) {
+            ForEach(homeRoutes, id: \.self) { route in
+                railButton(route, value: summary(route))
+            }
+        }
+    }
+
+    private func railButton(_ route: SettingsRoute, value: String?) -> some View {
+        Button { path = [route] } label: {
+            SettingsRailRow(systemImage: route.systemImage, title: route.title, value: value,
+                            selected: route == selectedRoute)
+        }
+        .buttonStyle(.plain)
     }
 
     private var homeRoutes: [SettingsRoute] {
@@ -132,30 +217,50 @@ struct SettingsView: View {
                 SettingsNavRow(systemImage: SettingsRoute.devices.systemImage, title: SettingsRoute.devices.title)
             }
             .buttonStyle(.plain)
-            Button { confirmingSignOut = true } label: {
-                SettingsNavRow(systemImage: "rectangle.portrait.and.arrow.right", title: Self.signOutTitle,
-                               tint: Palette.error, showsChevron: false)
-                    .opacity(session.signingOut ? 0.5 : 1)
-                    .overlay(alignment: .trailing) {
-                        if session.signingOut {
-                            ProgressView()
-                                .tint(Palette.error)
-                                .padding(.trailing, 14)
-                        }
+            signOutButton(SettingsNavRow(systemImage: Self.signOutImage, title: Self.signOutTitle,
+                                         tint: Palette.error, showsChevron: false))
+        }
+    }
+
+    // Desktop's account actions sit under a rule at the foot of the section list.
+    private var railActions: some View {
+        VStack(spacing: 2) {
+            railButton(.devices, value: nil)
+            signOutButton(SettingsRailRow(systemImage: Self.signOutImage, title: Self.signOutTitle, tint: Palette.error))
+        }
+        .padding(.top, 12)
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(Palette.borderSubtle)
+                .frame(height: 1)
+                .accessibilityHidden(true)
+        }
+    }
+
+    // Anchored on the row itself, so a wide window's popover points at what was tapped.
+    private func signOutButton<Row: View>(_ row: Row) -> some View {
+        Button { confirmingSignOut = true } label: {
+            row
+                .opacity(session.signingOut ? 0.5 : 1)
+                .overlay(alignment: .trailing) {
+                    if session.signingOut {
+                        ProgressView()
+                            .tint(Palette.error)
+                            .padding(.trailing, 14)
                     }
-            }
-            .buttonStyle(.plain)
-            .disabled(session.signingOut)
-            .confirmationDialog(
-                String(localized: "settings_home_signout_title", defaultValue: "Sign out of PangeaVPN?"),
-                isPresented: $confirmingSignOut,
-                titleVisibility: .visible
-            ) {
-                Button(Self.signOutTitle, role: .destructive) { signOut() }
-                Button(String(localized: "settings_home_cancel", defaultValue: "Cancel"), role: .cancel) {}
-            } message: {
-                Text(String(localized: "settings_home_signout_body", defaultValue: "The VPN disconnects and this device leaves your account. You'll need your account number to sign in again."))
-            }
+                }
+        }
+        .buttonStyle(.plain)
+        .disabled(session.signingOut)
+        .confirmationDialog(
+            String(localized: "settings_home_signout_title", defaultValue: "Sign out of PangeaVPN?"),
+            isPresented: $confirmingSignOut,
+            titleVisibility: .visible
+        ) {
+            Button(Self.signOutTitle, role: .destructive) { signOut() }
+            Button(String(localized: "settings_home_cancel", defaultValue: "Cancel"), role: .cancel) {}
+        } message: {
+            Text(String(localized: "settings_home_signout_body", defaultValue: "The VPN disconnects and this device leaves your account. You'll need your account number to sign in again."))
         }
     }
 
@@ -201,7 +306,7 @@ struct SettingsView: View {
 
 #if DEBUG
 @MainActor
-private func previewSettings(developer: Bool = false) -> some View {
+private func previewSettings(developer: Bool = false, path: [SettingsRoute] = []) -> some View {
     let core = FakeCore()
     core.subscriptionResult = .success(Subscription(status: "active", renews: true, expiresAt: "2026-12-26T00:00:00Z", entitled: true))
     core.accountNumberValue = "ABCDEFGHJKMNPQRSTVWXYZ01"
@@ -216,7 +321,7 @@ private func previewSettings(developer: Bool = false) -> some View {
     settings.setDeveloperMode(developer)
     let servers = ServersStore(core: core, defaults: defaults)
     let session = SessionStore(core: core, tunnel: tunnel)
-    return SettingsView()
+    return SettingsView(path: path)
         .environment(session)
         .environment(servers)
         .environment(settings)
@@ -232,5 +337,9 @@ private func previewSettings(developer: Bool = false) -> some View {
 #Preview("Developer unlocked, dark") {
     previewSettings(developer: true)
         .preferredColorScheme(.dark)
+}
+
+#Preview("Deep link, landscape", traits: .landscapeLeft) {
+    previewSettings(path: [.startup])
 }
 #endif

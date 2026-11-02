@@ -13,7 +13,6 @@ struct DeveloperPage: View {
     @Environment(SettingsStore.self) private var settings
     @Environment(DiagnosticsStore.self) private var diagnostics
     @Environment(ToastCenter.self) private var toasts
-    @Environment(\.dismiss) private var dismiss
     @State private var loadingApp = false
     @State private var loadingTunnel = false
 
@@ -44,10 +43,10 @@ struct DeveloperPage: View {
                 InfoNote(String(localized: "developer_copy_diagnostics_hint", defaultValue: "Copies the app version, connection status, settings and recent logs. Your account number is never included."))
             }
             SettingsCard {
+                // SettingsView leaves this page once the mode is off; dismiss would close all of settings in a wide pane.
                 GhostButton(String(localized: "developer_turn_off", defaultValue: "Turn Off Developer Options")) {
                     settings.setDeveloperMode(false)
                     toasts.show(String(localized: "settings_home_developer_off", defaultValue: "Developer options off"))
-                    dismiss()
                 }
             }
         }

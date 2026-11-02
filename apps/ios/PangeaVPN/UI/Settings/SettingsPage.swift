@@ -31,6 +31,9 @@ struct SettingsPage<Content: View>: View {
             .padding(.horizontal, 16)
             .padding(.top, 8)
             .padding(.bottom, 32)
+            // Wider than any phone, so only a wide pane is held back from stretching the cards edge to edge.
+            .frame(maxWidth: Self.maxContentWidth)
+            .frame(maxWidth: .infinity)
         }
         .background(Palette.bg.ignoresSafeArea())
         .navigationTitle(route.title)
@@ -39,6 +42,8 @@ struct SettingsPage<Content: View>: View {
         // A failure belongs to the page it happened on, so leaving clears it for the next page.
         .onDisappear { settings.clearError() }
     }
+
+    private static var maxContentWidth: CGFloat { 640 }
 }
 
 // A titled group of rows on a raised surface, like desktop's settings cards.
@@ -118,6 +123,61 @@ struct SettingsNavRow: View {
         .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Palette.borderSubtle, lineWidth: 1))
         .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .accessibilityElement(children: .combine)
+    }
+}
+
+// Desktop's rail item: flat until selected, then washed in the accent with its icon and value tinted.
+struct SettingsRailRow: View {
+    @Environment(\.dynamicTypeSize) private var typeSize
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @ScaledMetric(relativeTo: .body) private var iconWidth: CGFloat = 26
+    private let systemImage: String
+    private let title: String
+    private let value: String?
+    private let tint: Color?
+    private let selected: Bool
+
+    private static let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
+
+    init(systemImage: String, title: String, value: String? = nil, tint: Color? = nil, selected: Bool = false) {
+        self.systemImage = systemImage
+        self.title = title
+        self.value = value
+        self.tint = tint
+        self.selected = selected
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: systemImage)
+                .scaledFont(size: 16, weight: .regular, relativeTo: .body)
+                .foregroundStyle(tint ?? (selected ? Palette.accent : Palette.textSecondary))
+                .frame(width: iconWidth)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .scaledFont(size: 15, weight: .semibold, relativeTo: .subheadline)
+                    .foregroundStyle(tint ?? Palette.text)
+                    .multilineTextAlignment(.leading)
+                if let value, !value.isEmpty {
+                    Text(value)
+                        .scaledFont(size: 12, design: .monospaced, relativeTo: .caption)
+                        .foregroundStyle(selected ? Palette.accent : Palette.textMuted)
+                        .multilineTextAlignment(.leading)
+                        .lineLimit(typeSize.isAccessibilitySize ? 3 : 2)
+                        .truncationMode(.tail)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .frame(minHeight: 48)
+        .background(selected ? Palette.accent.opacity(0.15) : Color.clear, in: Self.shape)
+        .contentShape(Self.shape)
+        .animation(Motion.state(reduceMotion), value: selected)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
 

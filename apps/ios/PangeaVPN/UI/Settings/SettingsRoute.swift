@@ -11,6 +11,20 @@ enum SettingsRoute: Hashable, CaseIterable, Sendable {
         .notifications, .panic, .language, .appearance, .support, .update, .developer,
     ]
 
+    // A wide window always shows a page: the path's first stop, else the first section.
+    static func selected(in path: [SettingsRoute]) -> SettingsRoute {
+        path.first ?? home[0]
+    }
+
+    // What was pushed past the selected section, which the wide detail pane stacks.
+    static func pushed(in path: [SettingsRoute]) -> [SettingsRoute] {
+        Array(path.dropFirst())
+    }
+
+    static func withoutDeveloper(_ path: [SettingsRoute]) -> [SettingsRoute] {
+        path.filter { $0 != .developer }
+    }
+
     var title: String {
         switch self {
         case .transport: return String(localized: "settings_transport_heading", defaultValue: "Censorship Bypass")
