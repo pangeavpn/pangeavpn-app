@@ -40,6 +40,8 @@ targets:
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LSRequiresIPhoneOS: true
+        # Standard WireGuard and TLS only, self-classified as mass market; the yearly BIS report covers it.
+        ITSAppUsesNonExemptEncryption: false
         NSFaceIDUsageDescription: PangeaVPN asks for Face ID before showing your account number.
         UILaunchScreen: {}
         UIApplicationSceneManifest:

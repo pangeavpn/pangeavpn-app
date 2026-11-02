@@ -118,9 +118,12 @@ One-time setup:
 The certificate and profiles last a year. Renew them, and regenerate the
 profiles whenever an App ID's capabilities change, then replace the secrets.
 
-The Info.plist leaves `ITSAppUsesNonExemptEncryption` unset, so App Store
-Connect asks the export compliance questions for each build before TestFlight
-releases it to testers.
+The Info.plist sets `ITSAppUsesNonExemptEncryption` to `NO`: the app uses only
+standard encryption (WireGuard, TLS), self-classified as mass market under EAR
+740.17(b)(1), so builds skip the export compliance questions. That
+classification needs the annual self-classification report to BIS, due each
+February 1 for the previous calendar year. France needs its own ANSSI
+declaration before the app is offered there again.
 
 ## Privacy manifests
 
