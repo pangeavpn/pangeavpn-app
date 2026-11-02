@@ -9,9 +9,8 @@ struct LoginView: View {
     @Environment(\.horizontalSizeClass) private var sizeClass
     @Binding private var token: String
     @State private var submitting = false
+    @State private var showAccountHelp = false
 
-    // Account lookup only; buying stays in the in-app paywall, never on the web (App Store rule 3.1.1).
-    private static let accountURL = URL(string: "https://pangeavpn.org/app")!
     private static let maxMapSize: CGFloat = 236
     private static let gutter: CGFloat = 20
 
@@ -66,6 +65,14 @@ struct LoginView: View {
             HeroDetail(String(localized: "login_subtitle", defaultValue: "Login with your account code."))
                 .padding(.top, 6)
             accountLink
+            if showAccountHelp {
+                Text(String(localized: "login_find_account_help", defaultValue: "Your account number is in Settings in any PangeaVPN app you're signed in to, and on your account page on the PangeaVPN website."))
+                    .scaledFont(size: 13, relativeTo: .footnote)
+                    .lineSpacing(2)
+                    .foregroundStyle(Palette.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .transition(.opacity)
+            }
             SectionLabel(String(localized: "login_account_label", defaultValue: "Account number"))
                 .padding(.top, 14)
                 .padding(.bottom, 9)
@@ -94,23 +101,25 @@ struct LoginView: View {
         .padding(.horizontal, Self.gutter)
         .frame(maxWidth: .infinity, alignment: .leading)
         .animation(Motion.quick, value: errorMessage)
+        .animation(Motion.quick, value: showAccountHelp)
     }
 
-    // The no-break space keeps the arrow on the last word's line; a link label centres unless told not to.
+    // Explained in place rather than linked: the website's account pages also sell plans (App Store rule 3.1.1).
     private var accountLink: some View {
         let label = String(localized: "login_find_account", defaultValue: "Find your account number")
-        return Link(destination: Self.accountURL) {
-            Text("\(label)\u{00A0}\(Image(systemName: "arrow.up.right"))")
+        return Button { showAccountHelp.toggle() } label: {
+            Text("\(label)\u{00A0}\(Image(systemName: showAccountHelp ? "chevron.up" : "chevron.down"))")
                 .scaledFont(size: 13, weight: .semibold, relativeTo: .footnote)
                 .multilineTextAlignment(.leading)
                 .foregroundStyle(Palette.accent)
                 .frame(minHeight: 44)
                 .contentShape(Rectangle())
         }
+        .buttonStyle(PressFadeStyle())
         .accessibilityLabel(label)
     }
 
-    // The free week is promised only until StoreKit says this Apple ID has used it.
+    // The free week is promised only once StoreKit says this Apple ID can still have it.
     private var newUserLink: some View {
         Button { purchases.showPaywall() } label: {
             FadeSwap(PlanText.newUserLink(trialEligible: purchases.trialEligible)) { label in

@@ -32,6 +32,18 @@
 "connect_progress_still_connecting" = "La conexión sigue en curso…";
 "connect_progress_still_working" = "Seguimos trabajando. Probaremos otros servidores si es necesario.";
 "connect_progress_taking_longer" = "Esto está tardando más de lo habitual…";
+"data_notice_continue" = "Continuar";
+"data_notice_intro" = "PangeaVPN está hecho para saber lo menos posible de ti. Esto es todo lo que guarda el servicio y por qué.";
+"data_notice_keep_body" = "Tu número de cuenta, guardado cifrado. De cada dispositivo, su clave pública, su dirección del túnel y el nombre que le pongas, para que nuestros servidores acepten su conexión. Las fechas de tu plan y, si te suscribes en la app, el ID de transacción de Apple, para saber que tu plan está activo.";
+"data_notice_keep_title" = "Lo que guardamos";
+"data_notice_kicker" = "Antes de empezar";
+"data_notice_never_body" = "Los sitios que visitas, tu tráfico, tus consultas DNS, cuándo te conectas o desconectas y tu dirección IP.";
+"data_notice_never_title" = "Lo que nunca guardamos";
+"data_notice_reports_body" = "Solo se envían cuando tocas Enviar informe. Los números de cuenta, las claves y las direcciones IP se eliminan antes en tu dispositivo, y los informes se borran a los 30 días.";
+"data_notice_reports_title" = "Informes de soporte";
+"data_notice_title" = "Tu privacidad";
+"data_notice_unsold_body" = "Nada sobre tu uso de la VPN se vende, se usa para otra cosa que no sea hacer funcionar PangeaVPN ni se comparte con nadie.";
+"data_notice_unsold_title" = "Nunca se vende ni se comparte";
 "developer_app_log" = "Registro de la app";
 "developer_copy_diagnostics" = "Copiar diagnóstico";
 "developer_copy_diagnostics_hint" = "Copia la versión de la app, el estado de la conexión, los ajustes y los registros recientes. Tu número de cuenta nunca se incluye.";
@@ -155,6 +167,7 @@
 "login_error_unknown" = "Error al iniciar sesión. Inténtalo de nuevo.";
 "login_error_unreachable" = "No se pudo conectar con PangeaVPN. Comprueba tu conexión a internet e inténtalo de nuevo.";
 "login_find_account" = "Encuentra tu número de cuenta";
+"login_find_account_help" = "Tu número de cuenta está en Ajustes en cualquier app de PangeaVPN en la que hayas iniciado sesión, y en la página de tu cuenta en el sitio web de PangeaVPN.";
 "login_hint" = "Encuentra tu número de cuenta en pangeavpn.org/account";
 "login_new_free_week" = "¿Nuevo en Pangea? Empieza tu semana gratis";
 "login_new_see_plans" = "¿Nuevo en Pangea? Ver planes";
@@ -444,6 +457,7 @@
 "support_no_mail_app" = "No hay ninguna app de correo configurada. Escribe a %@.";
 "support_note_label" = "Nota (opcional)";
 "support_note_placeholder" = "¿Qué ha fallado?";
+"support_privacy_data" = "Privacidad y datos";
 "support_rejected_body" = "El servidor rechazó el informe. Espera un minuto e inténtalo de nuevo.";
 "support_report_anonymous" = "El informe es anónimo. No podemos saber quién lo envió, así que recibirás un código corto para citarlo en tu correo.";
 "support_report_body" = "Esto envía al soporte el registro de la aplicación y el del servicio VPN. Los números de cuenta y las claves se eliminan antes, y tu dirección IP también.";

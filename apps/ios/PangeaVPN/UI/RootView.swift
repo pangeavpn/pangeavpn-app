@@ -12,15 +12,17 @@ struct RootView: View {
     @State private var draftToken = ""
     @State private var lastSubscriptionCheck: Date?
     @State private var wipe: Task<Void, Never>?
+    @State private var noticeAccepted = DataNotice.isAccepted(in: .standard)
 
     init() {}
 
     private var erasing: Bool { wipe != nil || PanicTrigger.shared.requested }
 
-    private enum Screen { case splash, deviceLimit, restoreFailed, login, main }
+    private enum Screen { case splash, dataNotice, deviceLimit, restoreFailed, login, main }
 
     private var screen: Screen {
         if !hasRestored || erasing { return .splash }
+        if !noticeAccepted { return .dataNotice }
         if session.showDeviceLimit { return .deviceLimit }
         if session.session == nil { return session.restoreFailed ? .restoreFailed : .login }
         return .main
@@ -90,6 +92,7 @@ struct RootView: View {
     private var content: some View {
         switch screen {
         case .splash: SplashView().transition(.opacity)
+        case .dataNotice: DataNoticeView(mode: .firstLaunch, onDone: acceptNotice).transition(.opacity)
         case .deviceLimit: DeviceLimitView().transition(.opacity)
         case .restoreFailed: RestoreFailedView().transition(.opacity)
         case .login: LoginView(token: $draftToken).transition(.opacity)
@@ -104,6 +107,11 @@ struct RootView: View {
         await session.restore()
         hasRestored = true
         purchases.start()
+    }
+
+    private func acceptNotice() {
+        DataNotice.accept(in: .standard)
+        noticeAccepted = true
     }
 
     private func loadSignedInData() async {

@@ -32,6 +32,18 @@
 "connect_progress_still_connecting" = "ما زال الاتصال جارياً…";
 "connect_progress_still_working" = "ما زلنا نعمل على ذلك. سنجرب خوادم أخرى عند الحاجة.";
 "connect_progress_taking_longer" = "يستغرق هذا وقتاً أطول من المعتاد…";
+"data_notice_continue" = "متابعة";
+"data_notice_intro" = "صُمّم PangeaVPN ليعرف عنك أقل قدر ممكن. هذا كل ما تحتفظ به الخدمة، ولماذا.";
+"data_notice_keep_body" = "رقم حسابك، محفوظًا بشكل مشفّر. ولكل جهاز: مفتاحه العام وعنوانه في النفق والاسم الذي تمنحه له، كي تقبل خوادمنا اتصاله. وتواريخ خطتك، ومعرّف معاملة Apple إن اشتركت من التطبيق، لنعرف أن خطتك فعّالة.";
+"data_notice_keep_title" = "ما نحتفظ به";
+"data_notice_kicker" = "قبل أن تبدأ";
+"data_notice_never_body" = "المواقع التي تزورها، وحركة بياناتك، واستعلامات DNS، ووقت اتصالك أو قطعه، وعنوان IP الخاص بك.";
+"data_notice_never_title" = "ما لا نحتفظ به أبدًا";
+"data_notice_reports_body" = "تُرسل فقط عندما تنقر «إرسال تقرير». تُحذف أرقام الحسابات والمفاتيح وعناوين IP على جهازك أولاً، وتُحذف التقارير بعد 30 يومًا.";
+"data_notice_reports_title" = "تقارير الدعم";
+"data_notice_title" = "خصوصيتك";
+"data_notice_unsold_body" = "لا يُباع أي شيء عن استخدامك للـ VPN، ولا يُستخدم إلا لتشغيل PangeaVPN، ولا يُشارك مع أي أحد.";
+"data_notice_unsold_title" = "لا نبيعها ولا نشاركها أبدًا";
 "developer_app_log" = "سجل التطبيق";
 "developer_copy_diagnostics" = "نسخ التشخيصات";
 "developer_copy_diagnostics_hint" = "ينسخ إصدار التطبيق وحالة الاتصال والإعدادات والسجلات الأخيرة. لا يُضمَّن رقم حسابك أبدًا.";
@@ -155,6 +167,7 @@
 "login_error_unknown" = "فشل تسجيل الدخول. حاول مرة أخرى.";
 "login_error_unreachable" = "تعذّر الوصول إلى PangeaVPN. تحقق من اتصالك بالإنترنت وحاول مرة أخرى.";
 "login_find_account" = "اعثر على رقم حسابك";
+"login_find_account_help" = "تجد رقم حسابك في الإعدادات في أي تطبيق PangeaVPN سجّلت الدخول إليه، وفي صفحة حسابك على موقع PangeaVPN.";
 "login_hint" = "اعثر على رقم حسابك في pangeavpn.org/account";
 "login_new_free_week" = "جديد على Pangea؟ ابدأ أسبوعك المجاني";
 "login_new_see_plans" = "جديد على Pangea؟ اطّلع على الخطط";
@@ -444,6 +457,7 @@
 "support_no_mail_app" = "لم يتم إعداد تطبيق بريد. راسلنا على %@.";
 "support_note_label" = "ملاحظة (اختياري)";
 "support_note_placeholder" = "ما الذي حدث؟";
+"support_privacy_data" = "الخصوصية والبيانات";
 "support_rejected_body" = "رفض الخادم التقرير. انتظر دقيقة ثم حاول مرة أخرى.";
 "support_report_anonymous" = "التقرير مجهول المصدر. لا يمكننا معرفة من أرسله، لذلك ستحصل على رمز قصير تذكره في رسالتك.";
 "support_report_body" = "يرسل هذا سجل التطبيق وسجل خدمة VPN إلى الدعم. تُزال أرقام الحسابات والمفاتيح أولاً، وكذلك عنوان IP الخاص بك.";

@@ -28,6 +28,13 @@ final class ScreenGalleryTests: XCTestCase {
         try await camera.shoot("01-splash") { SplashView() }
     }
 
+    func testDataNotice() async throws {
+        let (camera, stores) = try await gallery()
+        try await camera.shoot("01-data-notice", looks: ScreenCamera.Look.all) {
+            stores.stage(DataNoticeView(mode: .firstLaunch, onDone: {}))
+        }
+    }
+
     func testLogin() async throws {
         let (camera, stores) = try await gallery()
         try await camera.shoot("02-login", looks: ScreenCamera.Look.all) {

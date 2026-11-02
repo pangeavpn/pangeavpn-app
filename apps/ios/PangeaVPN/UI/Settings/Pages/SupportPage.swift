@@ -9,7 +9,9 @@ enum SupportContact {
 
 struct SupportPage: View {
     @Environment(ToastCenter.self) private var toasts
+    @Environment(\.openURL) private var openURL
     @State private var showReport = false
+    @State private var showDataNotice = false
 
     init() {}
 
@@ -32,10 +34,33 @@ struct SupportPage: View {
                     .buttonStyle(.plain)
                 }
             }
+            SettingsCard {
+                Button { showDataNotice = true } label: {
+                    SettingsNavRow(
+                        systemImage: "hand.raised",
+                        title: String(localized: "support_privacy_data", defaultValue: "Privacy and Data"))
+                }
+                .buttonStyle(.plain)
+                legalRow(String(localized: "paywall_privacy_link", defaultValue: "Privacy Policy"),
+                         systemImage: "lock.doc", url: PaywallView.privacyURL)
+                legalRow(String(localized: "paywall_terms_link", defaultValue: "Terms of Use"),
+                         systemImage: "doc.text", url: PaywallView.termsURL)
+            }
         }
         .sheet(isPresented: $showReport) {
             SendReportSheet()
         }
+        .sheet(isPresented: $showDataNotice) {
+            DataNoticeView(mode: .review, onDone: { showDataNotice = false })
+                .formSheetSized()
+        }
+    }
+
+    private func legalRow(_ title: String, systemImage: String, url: URL) -> some View {
+        Button { openURL(url) } label: {
+            SettingsNavRow(systemImage: systemImage, title: title)
+        }
+        .buttonStyle(.plain)
     }
 
     private func contact(_ url: URL) {

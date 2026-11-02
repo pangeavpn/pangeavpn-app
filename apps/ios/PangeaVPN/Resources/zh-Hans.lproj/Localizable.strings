@@ -32,6 +32,18 @@
 "connect_progress_still_connecting" = "仍在连接…";
 "connect_progress_still_working" = "仍在处理中。如有需要，我们会尝试其他服务器。";
 "connect_progress_taking_longer" = "这比平时花费更长时间…";
+"data_notice_continue" = "继续";
+"data_notice_intro" = "PangeaVPN 的设计原则是尽可能少地了解你。以下是服务保存的全部内容及其原因。";
+"data_notice_keep_body" = "你的账号，加密保存。每台设备的公钥、隧道地址和你为它起的名称，以便我们的服务器接受它的连接。你的方案日期；如果你在应用内订阅，还有 Apple 的交易编号，以便我们知道你的方案有效。";
+"data_notice_keep_title" = "我们保存的内容";
+"data_notice_kicker" = "开始之前";
+"data_notice_never_body" = "你访问的网站、你的流量、你的 DNS 查询、你何时连接或断开，以及你的 IP 地址。";
+"data_notice_never_title" = "我们从不保存的内容";
+"data_notice_reports_body" = "仅在你点击“发送报告”时发送。账号、密钥和 IP 地址会先在你的设备上删除，报告会在 30 天后删除。";
+"data_notice_reports_title" = "支持报告";
+"data_notice_title" = "你的隐私";
+"data_notice_unsold_body" = "关于你使用 VPN 的任何信息，都绝不会被出售、用于运行 PangeaVPN 以外的任何用途，或与任何人分享。";
+"data_notice_unsold_title" = "绝不出售或分享";
 "developer_app_log" = "应用日志";
 "developer_copy_diagnostics" = "复制诊断信息";
 "developer_copy_diagnostics_hint" = "复制应用版本、连接状态、设置和最近的日志。绝不包含你的账号。";
@@ -155,6 +167,7 @@
 "login_error_unknown" = "登录失败。请重试。";
 "login_error_unreachable" = "无法连接到 PangeaVPN。请检查网络连接后重试。";
 "login_find_account" = "查找您的账号";
+"login_find_account_help" = "你的账号可以在任何已登录的 PangeaVPN 应用的“设置”中找到，也可以在 PangeaVPN 网站上的账户页面找到。";
 "login_hint" = "在 pangeavpn.org/account 查找您的账号";
 "login_new_free_week" = "初次使用 Pangea？开始免费一周";
 "login_new_see_plans" = "初次使用 Pangea？查看套餐";
@@ -444,6 +457,7 @@
 "support_no_mail_app" = "未设置邮件应用。请发送邮件至 %@。";
 "support_note_label" = "备注（可选）";
 "support_note_placeholder" = "出了什么问题？";
+"support_privacy_data" = "隐私与数据";
 "support_rejected_body" = "服务器拒绝了该报告。请等一分钟后重试。";
 "support_report_anonymous" = "报告是匿名的。我们无法得知是谁发送的，所以你会收到一个短代码，写在邮件里即可。";
 "support_report_body" = "这会把应用日志和 VPN 服务日志发给技术支持。账号和密钥会先被移除，你的 IP 地址也一样。";

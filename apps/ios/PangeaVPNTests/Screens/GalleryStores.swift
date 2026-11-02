@@ -63,6 +63,8 @@ final class GalleryStores {
         let test = try makeTestDefaults()
         defaults = test.defaults
         suite = test.suite
+        // RootView reads the notice from standard defaults; the notice has its own shot.
+        DataNotice.accept(in: .standard)
         self.connectedFor = connectedFor
         let core = FakeCore()
         var config = AppSettings()
