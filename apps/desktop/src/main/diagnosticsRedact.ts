@@ -46,6 +46,21 @@ function isLikelyKey(run: string): boolean {
   return run.length >= 32 && /[a-z]/.test(run) && /[A-Z]/.test(run) && /\d/.test(run);
 }
 
+// Six or more groups of four in any case, split by what the hub strips, line
+// breaks aside so a marker never joins two lines.
+const ACCOUNT_GROUPS =
+  /(?<![0-9A-Za-z])[0-9A-Za-z]{4}(?:[\t\v\f \u00a0\u1680\u2000-\u200a\u202f\u205f\u3000\ufeff-]{0,3}[0-9A-Za-z]{4}){5,}(?![0-9A-Za-z])/g;
+const ACCOUNT_NUMBER_LENGTH = 24;
+
+/** Spares prose, often six four-letter words: only the dashed form the app
+ *  shows counts on shape alone, while a spaced or unbroken run needs a digit. */
+function isAccountRun(run: string): boolean {
+  const gaps = run.split(/[0-9A-Za-z]{4}/).slice(1, -1);
+  const hasDigit = /\d/.test(run);
+  if (gaps.every((gap) => gap.length === 0)) return run.length === ACCOUNT_NUMBER_LENGTH && hasDigit;
+  return gaps.every((gap) => gap.includes("-")) || hasDigit;
+}
+
 type Rule = readonly [RegExp, string | ((match: string, ...rest: string[]) => string)];
 
 // The separators also take the JSON-escaped (\\) and C:/Users spellings.
@@ -75,6 +90,8 @@ const RULES: readonly Rule[] = [
     /(?<![A-Za-z0-9+/=])[A-Za-z0-9+/]{24,}={0,2}(?![A-Za-z0-9+/=])/g,
     (match: string) => (isLikelyKey(match) ? "[redacted:key]" : match)
   ],
+  [ACCOUNT_GROUPS, (match: string) => (isAccountRun(match) ? "[redacted:accountNumber]" : match)],
+  // Desktop's own two rules, so a run spared as prose is never one they redact.
   [/(?<![A-Za-z0-9-])[0-9A-Z]{4}(?:-[0-9A-Z]{4}){5}(?![A-Za-z0-9-])/g, "[redacted:accountNumber]"],
   [/(?<![A-Za-z0-9])[0-9A-HJKMNP-TV-Z]{24}(?![A-Za-z0-9])/g, "[redacted:accountNumber]"],
   [/(?<![A-Za-z0-9])\d{16}(?![A-Za-z0-9])/g, "[redacted:accountNumber]"],

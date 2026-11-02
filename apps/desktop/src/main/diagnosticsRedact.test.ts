@@ -271,3 +271,64 @@ test("system paths outside home directories are left alone", () => {
     assert.equal(redactDiagnostics(line, ""), line);
   }
 });
+
+interface Spelling {
+  readonly line: string;
+  readonly groups?: readonly string[];
+}
+
+const ACCOUNT_GROUPS = ["K7M2", "Q9X4", "C8V1", "B6N3", "R5T0", "W2Y7"];
+
+// The hub folds case, spaces, dashes and I/L/O before matching a number, so
+// every spelling it accepts must be redacted.
+const HUB_SPELLINGS: readonly Spelling[] = [
+  { line: "my account k7m2-q9x4-c8v1-b6n3-r5t0-w2y7 thanks" },
+  { line: "my account K7M2 Q9X4 C8V1 B6N3 R5T0 W2Y7 thanks" },
+  { line: "acct K7M2Q9X4C8V1B6N3R5TOW2Y7" },
+  { line: "acct k7m2q9x4c8v1b6n3r5t0w2y7." },
+  { line: "lookalikes K7M2-Q9X4-C8VI-B6N3-R5TO-W2Y7 and C8VL too" },
+  { line: "acct K7M2 - Q9X4 - C8V1 - B6N3 - R5T0 - W2Y7" },
+  { line: "acct K7M2Q9X4 C8V1B6N3 R5T0W2Y7 end" },
+  { line: "note abcd K7M2 Q9X4 C8V1 B6N3 R5T0 W2Y7 thanks" },
+  { line: "id K7M2-Q9X4-C8V1-B6N3-R5T0-W2Y7-" },
+  { line: "id K7M2-Q9X4-C8V1-B6N3-R5T0-W2Y7-X" },
+  { line: '{"n":"K7M2\tQ9X4\tC8V1\tB6N3\tR5T0\tW2Y7"}' },
+  { line: "one digit is enough spaced ABCD EFGH JKMN PQRS TVWX YZA7", groups: ["ABCD", "YZA7"] },
+  { line: "dashed with no digit ABCD-EFGH-JKMN-PQRS-TVWX-YZAB", groups: ["ABCD", "YZAB"] },
+  { line: "lower dashed with no digit abcd-efgh-jkmn-pqrs-tvwx-yzab.", groups: ["ABCD", "YZAB"] },
+  { line: "desktop's unbroken rule ABCDEFGHJKMNPQRSTVWXYZAB", groups: ["ABCD", "YZAB"] },
+  { line: "desktop's dashed rule ABCD-EFGH-JKMN-PQRS-TVWX-YZAB", groups: ["ABCD", "YZAB"] }
+];
+
+for (const { line, groups = ACCOUNT_GROUPS } of HUB_SPELLINGS) {
+  test(`redacts the account number the hub would accept in ${JSON.stringify(line)}`, () => {
+    const out = redactDiagnostics(line, "").toUpperCase();
+    for (const group of groups) {
+      assert.ok(!out.includes(group), `kept ${group} in: ${out}`);
+    }
+    assert.ok(out.includes("[REDACTED:ACCOUNTNUMBER]"), out);
+  });
+}
+
+test("runs of four-character words that are not account numbers survive", () => {
+  for (const line of [
+    `n ${ACCOUNT_NORMALIZED}Q`,
+    `x${ACCOUNT_NORMALIZED}`,
+    "md5 d41d8cd98f00b204e9800998ecf8427e ok",
+    "five groups K7M2 Q9X4 C8V1 B6N3 R5T0.",
+    "this does work with wifi only",
+    "This Does Work With Wifi Only, then that fails over mobile data",
+    "this does work with wifi-only mode",
+    "\tthis\tdoes\twork\twith\twifi\tonly",
+    "internationalizationsxyz is long"
+  ]) {
+    assert.equal(redactDiagnostics(line, ""), line);
+  }
+});
+
+test("long runs of four-character words are scanned quickly", () => {
+  const line = `${"wifi ".repeat(40000)}and ${"wifi\t".repeat(40000)}and ${"wifi ".repeat(40000)}wifiX`;
+  const started = Date.now();
+  assert.equal(redactDiagnostics(line, ""), line);
+  assert.ok(Date.now() - started < 10_000, `took ${Date.now() - started}ms`);
+});

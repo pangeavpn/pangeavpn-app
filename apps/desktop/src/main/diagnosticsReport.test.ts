@@ -115,6 +115,13 @@ test("the whole payload stays under the total budget", async () => {
   }
 });
 
+test("a huge note is bounded before redaction, so it stays fast", () => {
+  const started = Date.now();
+  const note = normalizeNote("a".repeat(200_000) + "@example.com");
+  assert.equal(note?.length, 500);
+  assert.ok(Date.now() - started < 2000, `took ${Date.now() - started} ms`);
+});
+
 test("the user note is trimmed, length-capped and redacted", async () => {
   assert.equal(normalizeNote("   "), undefined);
   assert.equal(normalizeNote(undefined), undefined);
@@ -123,6 +130,29 @@ test("the user note is trimmed, length-capped and redacted", async () => {
   assert.equal(normalizeNote("z".repeat(900))?.length, 500);
   const payload = await collectDiagnostics(sources({ note: "stuck on connecting" }));
   assert.equal(payload.note, "stuck on connecting");
+});
+
+test("the note is cut on code points, never through a surrogate pair", () => {
+  assert.equal(Array.from(normalizeNote("é".repeat(900)) ?? "").length, 500);
+  const emoji = normalizeNote("\u{1F600}".repeat(900)) ?? "";
+  assert.equal(Array.from(emoji).length, 500);
+  assert.ok(!/[\uD800-\uDFFF]/u.test(emoji), "split a surrogate pair");
+});
+
+test("the note is redacted before it is cut, so a cut never leaves part of a number", () => {
+  const account = "K7M2-Q9X4-C8V1-B6N3-R5T0-W2Y7";
+  for (let pad = 470; pad <= 500; pad++) {
+    const got = normalizeNote(`${"a".repeat(pad - 1)} ${account} thanks`) ?? "";
+    assert.ok(Array.from(got).length <= 500, `pad ${pad}: ${Array.from(got).length} code points`);
+    for (const piece of ["K7M2", "Q9X4", "W2Y7", "K7M", "K7"]) {
+      assert.ok(!got.includes(piece), `pad ${pad}: leaked ${piece} in: ${got}`);
+    }
+    const open = got.lastIndexOf("[");
+    assert.ok(open < 0 || got.includes("]", open), `pad ${pad}: ends in a partial marker: ${got.slice(open)}`);
+    assert.equal(got, got.trimEnd(), `pad ${pad}: ends in whitespace`);
+  }
+  assert.equal(normalizeNote(`my number ${account}`), "my number [redacted:accountNumber]");
+  assert.equal(normalizeNote("see [log] and [redact"), "see [log] and [redact");
 });
 
 test("a host snapshot lands in its own section, redacted", async () => {

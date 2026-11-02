@@ -8,6 +8,8 @@ export const SECTION_MAX_BYTES = 64 * 1024;
 /** Hub body limit is 1mb and JSON escaping inflates text, so half is the cap. */
 export const TOTAL_MAX_BYTES = 512 * 1024;
 const MAX_NOTE_CHARS = 500;
+const NOTE_SCAN_CHARS = 2000;
+const REDACTED_HEAD = "[redacted:";
 const MAX_CRASH_ENTRIES = 40;
 
 export interface DiagnosticsSection {
@@ -180,10 +182,26 @@ function capTotal(sections: DiagnosticsSection[], budget: number): DiagnosticsSe
   });
 }
 
+/** Redacts the whole note before keeping its first 500 code points, so a cut
+ *  never leaves part of a secret behind. */
 export function normalizeNote(note: string | undefined): string | undefined {
   const trimmed = (note ?? "").trim();
   if (trimmed.length === 0) return undefined;
-  return redactDiagnostics(trimmed.slice(0, MAX_NOTE_CHARS));
+  // Anything past the scan window is dropped before the cut anyway, and bounding it keeps
+  // the email rule (quadratic on long runs) cheap whatever length reaches the handler.
+  const scanned = Array.from(trimmed).slice(0, NOTE_SCAN_CHARS).join("");
+  const redacted = redactDiagnostics(scanned);
+  const points = Array.from(redacted);
+  if (points.length <= MAX_NOTE_CHARS) return redacted;
+  return dropCutMarker(points.slice(0, MAX_NOTE_CHARS).join("")).trimEnd() || undefined;
+}
+
+/** Removes a [redacted:...] marker the cut ran through. */
+function dropCutMarker(cut: string): string {
+  const open = cut.lastIndexOf("[");
+  if (open < 0 || cut.includes("]", open)) return cut;
+  const tail = cut.slice(open);
+  return tail.startsWith(REDACTED_HEAD) || REDACTED_HEAD.startsWith(tail) ? cut.slice(0, open) : cut;
 }
 
 export async function collectDiagnostics(sources: DiagnosticsSources): Promise<DiagnosticsPayload> {
