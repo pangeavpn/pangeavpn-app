@@ -74,27 +74,14 @@ struct HeroKicker: View {
         !reduceMotion && (state == .connecting || state == .disconnecting)
     }
 
-    private var dotColor: Color {
-        state == .disconnected ? Palette.off : HeroText.accent(state)
-    }
-
     var body: some View {
-        HStack(spacing: 9) {
-            Circle()
-                .frame(width: 8, height: 8)
-                .padding(4)
-                // Only colour and glow animate here, so the dot moves with the label on the layout spring.
-                .animation(Motion.state(reduceMotion)) { dot in
-                    dot
-                        .foregroundStyle(dotColor)
-                        .background(Circle().fill(dotColor.opacity(state == .connected ? 0.2 : 0)))
-                }
-                .opacity(pulsing && dimmed ? 0.4 : 1)
-            // Label and chips swap as one, in a row that always keeps a chip's height,
-            // so a chip arriving never pushes the headline down mid-transition.
-            ZStack(alignment: .leading) {
-                HeroChip.postQuantum.hidden().accessibilityHidden(true)
-                FadeSwap(KickerFace(state: state, postQuantum: postQuantum, split: split)) { face in
+        // Dot, label and chips swap as one view, so they always move together; the hidden
+        // chip keeps the row's height, so a chip arriving never pushes the headline down.
+        ZStack(alignment: .leading) {
+            HeroChip.postQuantum.hidden().accessibilityHidden(true)
+            FadeSwap(KickerFace(state: state, postQuantum: postQuantum, split: split)) { face in
+                HStack(spacing: 9) {
+                    dot(face.state)
                     HStack(spacing: 8) {
                         Text(HeroText.label(face.state).uppercased())
                             .kerning(1.8)
@@ -111,6 +98,16 @@ struct HeroKicker: View {
         .padding(.leading, -4)
         .onAppear { updatePulse() }
         .onChange(of: pulsing) { _, _ in updatePulse() }
+    }
+
+    private func dot(_ state: TunnelState) -> some View {
+        let color = state == .disconnected ? Palette.off : HeroText.accent(state)
+        return Circle()
+            .fill(color)
+            .frame(width: 8, height: 8)
+            .padding(4)
+            .background(Circle().fill(color.opacity(state == .connected ? 0.2 : 0)))
+            .opacity(pulsing && dimmed ? 0.4 : 1)
     }
 
     private func updatePulse() {
