@@ -51,6 +51,12 @@ enum HeroText {
     }
 }
 
+private struct KickerFace: Equatable, Sendable {
+    let state: TunnelState
+    let postQuantum: Bool
+    let split: Bool
+}
+
 struct HeroKicker: View {
     let state: TunnelState
     let postQuantum: Bool
@@ -73,25 +79,32 @@ struct HeroKicker: View {
     }
 
     var body: some View {
-        HStack(spacing: 8) {
-            HStack(spacing: 9) {
-                Circle()
-                    .fill(dotColor)
-                    .frame(width: 8, height: 8)
-                    .padding(4)
-                    .background(Circle().fill(dotColor.opacity(state == .connected ? 0.2 : 0)))
-                    .opacity(pulsing && dimmed ? 0.4 : 1)
-                    .animation(Motion.state(reduceMotion), value: state)
-                Text(HeroText.label(state).uppercased())
-                    .kerning(1.8)
-                    .scaledFont(size: 11, weight: .bold, relativeTo: .caption2)
-                    .lineLimit(1)
-                    .foregroundStyle(HeroText.accent(state))
+        HStack(spacing: 9) {
+            Circle()
+                .fill(dotColor)
+                .frame(width: 8, height: 8)
+                .padding(4)
+                .background(Circle().fill(dotColor.opacity(state == .connected ? 0.2 : 0)))
+                .opacity(pulsing && dimmed ? 0.4 : 1)
+                .animation(Motion.state(reduceMotion), value: state)
+            // Label and chips swap as one, in a row that always keeps a chip's height,
+            // so a chip arriving never pushes the headline down mid-transition.
+            ZStack(alignment: .leading) {
+                HeroChip.postQuantum.hidden().accessibilityHidden(true)
+                FadeSwap(KickerFace(state: state, postQuantum: postQuantum, split: split)) { face in
+                    HStack(spacing: 8) {
+                        Text(HeroText.label(face.state).uppercased())
+                            .kerning(1.8)
+                            .scaledFont(size: 11, weight: .bold, relativeTo: .caption2)
+                            .lineLimit(1)
+                            .foregroundStyle(HeroText.accent(face.state))
+                        if face.postQuantum { HeroChip.postQuantum }
+                        if face.split { HeroChip.split }
+                    }
+                }
             }
-            .accessibilityElement(children: .combine)
-            if postQuantum { HeroChip.postQuantum }
-            if split { HeroChip.split }
         }
+        .accessibilityElement(children: .combine)
         .padding(.leading, -4)
         .onAppear { updatePulse() }
         .onChange(of: pulsing) { _, _ in updatePulse() }

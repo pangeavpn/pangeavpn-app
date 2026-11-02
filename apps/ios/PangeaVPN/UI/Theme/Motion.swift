@@ -18,6 +18,11 @@ enum Motion {
     // Whole screens swapping, such as splash to sign-in.
     static let screen = Animation.timingCurve(0.4, 0, 0.2, 1, duration: 0.3)
 
+    // Text changing in place leaves fast and arrives gently (see FadeSwap).
+    static let fadeOutTime = Duration.milliseconds(120)
+    static let fadeOut = Animation.timingCurve(0.4, 0, 1, 1, duration: 0.12)
+    static let fadeIn = Animation.timingCurve(0, 0, 0.2, 1, duration: 0.22)
+
     static func rise(_ reduce: Bool, by distance: CGFloat = 12) -> AnyTransition {
         reduce ? .opacity : .opacity.combined(with: .offset(y: distance))
     }

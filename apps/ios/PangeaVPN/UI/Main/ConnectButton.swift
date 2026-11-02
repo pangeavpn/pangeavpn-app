@@ -43,12 +43,14 @@ struct ConnectButton: View {
             taps += 1
             action()
         } label: {
-            Text(label)
-                .scaledFont(size: 17, weight: .semibold, relativeTo: .body)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-                .foregroundStyle(primary ? Palette.onAccent : Palette.textSecondary)
-                .frame(maxWidth: .infinity, minHeight: 52)
+            FadeSwap(label) {
+                Text($0)
+                    .scaledFont(size: 17, weight: .semibold, relativeTo: .body)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+            .foregroundStyle(primary ? Palette.onAccent : Palette.textSecondary)
+            .frame(maxWidth: .infinity, minHeight: 52)
                 .background(primary ? Palette.accent : Color.clear, in: Capsule())
                 .overlay(Capsule().strokeBorder(primary ? Color.clear : Palette.border, lineWidth: 1))
                 .contentShape(Capsule())

@@ -128,10 +128,10 @@ struct MainView: View {
                 postQuantum: HeroChips.showsPostQuantum(display: shown, postQuantum: status.postQuantum),
                 split: HeroChips.showsSplit(display: shown, enabled: settings.splitTunnelEnabled,
                                             ranges: settings.splitTunnelRanges, strictKillSwitch: settings.killSwitch))
-            HeroHeadline(state: shown)
-            HeroDetail(HeroDetailText.resolve(
+            FadeSwap(shown) { HeroHeadline(state: $0) }
+            FadeSwap(HeroDetailText.resolve(
                 display: shown, statusDetail: status.detail, serverName: status.serverName,
-                error: connection.error, progress: connection.progress, paused: reconnecting))
+                error: connection.error, progress: connection.progress, paused: reconnecting)) { HeroDetail($0) }
             if !status.entryServerId.isEmpty {
                 RoutePath(
                     entry: RouteNode.resolve(id: status.entryServerId, fallbackName: status.entryServerName,
@@ -139,6 +139,7 @@ struct MainView: View {
                     exit: RouteNode.resolve(id: status.serverId, fallbackName: status.serverName, in: servers.regions),
                     live: shown == .connected)
                     .padding(.top, 4)
+                    .transition(.opacity)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
