@@ -68,6 +68,62 @@ final class MainLayoutTests: XCTestCase {
         }
     }
 
+    func testWideMapTakesAboutTwoFifthsOfTheStage() {
+        XCTAssertEqual(MapSizing.wideColumn(width: 700), 280)
+        XCTAssertEqual(MapSizing.wideColumn(width: 1000), 400)
+    }
+
+    func testWideMapColumnStopsAtItsMaximum() {
+        XCTAssertEqual(MapSizing.wideColumn(width: 1376), MapSizing.wideColumnMaximum)
+        XCTAssertEqual(MapSizing.wideColumn(width: -10), 0)
+    }
+
+    // Desktop draws its 336 pt map in a 268 pt column.
+    func testWideMapOverhangsItsColumnAsOnDesktop() {
+        XCTAssertEqual(MapSizing.wideSide(column: 268, height: 1000), 335)
+    }
+
+    func testWideMapShrinksToAShortStage() {
+        XCTAssertEqual(MapSizing.wideSide(column: 400, height: 420), 420)
+        XCTAssertEqual(MapSizing.wideSide(column: 400, height: -5), 0)
+    }
+
+    func testWideRowsWaitForMeasurements() {
+        XCTAssertEqual(SlotBudget.wideRows(viewport: 900, fixed: 106, metrics: SlotMetrics()), Regions.slotCount)
+    }
+
+    // Heights are what the capped hero column leaves on an iPad mini, an 11-inch and a 13-inch iPad in landscape.
+    func testWideRowsFillTheColumn() {
+        XCTAssertEqual(SlotBudget.wideRows(viewport: 530, fixed: 106, metrics: slotMetrics), 5)
+        XCTAssertEqual(SlotBudget.wideRows(viewport: 620, fixed: 106, metrics: slotMetrics), 6)
+        XCTAssertEqual(SlotBudget.wideRows(viewport: 734, fixed: 106, metrics: slotMetrics), 8)
+    }
+
+    func testWideRowsStopAtTheMaximum() {
+        XCTAssertEqual(SlotBudget.wideRows(viewport: 3000, fixed: 106, metrics: slotMetrics), SlotBudget.wideMaximum)
+    }
+
+    // A column too short for even two rows keeps them and scrolls.
+    func testWideRowsKeepTheTwoSlots() {
+        XCTAssertEqual(SlotBudget.wideRows(viewport: 200, fixed: 106, metrics: slotMetrics), Regions.slotCount)
+    }
+
+    func testWideFactsTakeBackTheRowsTheyCover() {
+        let idle = SlotBudget.wideRows(viewport: 734, fixed: 106, metrics: slotMetrics)
+        let busy = SlotBudget.wideRows(viewport: 734, fixed: 106 + 70, metrics: slotMetrics)
+        XCTAssertEqual(idle, 8)
+        XCTAssertEqual(busy, 7)
+    }
+
+    func testWideRowsNeverOverfillTheColumn() {
+        for viewport in stride(from: CGFloat(300), through: 1400, by: 7) {
+            let rows = SlotBudget.wideRows(viewport: viewport, fixed: 106, metrics: slotMetrics)
+            guard rows > Regions.slotCount else { continue }
+            let used = 106 + slotMetrics.chrome + CGFloat(rows) * slotMetrics.pitch
+            XCTAssertLessThanOrEqual(used, viewport, "\(viewport)")
+        }
+    }
+
     func testPhonesGetTwoByTwoFacts() {
         for width: CGFloat in [295, 335, 362, 400] {
             XCTAssertEqual(FactsLayout.columns(width: width, valueSize: 15), 2, "\(width)")

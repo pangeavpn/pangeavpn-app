@@ -21,6 +21,21 @@ enum MapSizing {
     static func band(viewport: CGFloat, content: CGFloat, side: CGFloat) -> CGFloat {
         max(side, viewport - content)
     }
+
+    // Desktop draws its map 336 pt in a 268 pt column, with 63 pt of it off the left edge.
+    static let wideShare: CGFloat = 0.4
+    static let wideColumnMaximum: CGFloat = 500
+    static let wideScale: CGFloat = 1.25
+    static let wideBleed: CGFloat = 0.1875
+
+    static func wideColumn(width: CGFloat) -> CGFloat {
+        max(0, min(width * wideShare, wideColumnMaximum))
+    }
+
+    // A short stage shrinks the map rather than cropping it.
+    static func wideSide(column: CGFloat, height: CGFloat) -> CGFloat {
+        max(0, min(column * wideScale, height))
+    }
 }
 
 // The parts of the region section that stay put however many rows it lists.
@@ -46,6 +61,16 @@ enum SlotBudget {
         let map = { (rows: Int) in viewport - fixed - metrics.chrome - CGFloat(rows) * metrics.pitch }
         if let roomy = (base + 1...idleMaximum).last(where: { map($0) >= comfortableMap }) { return roomy }
         return map(base + 1) >= MapSizing.minimum ? base + 1 : base
+    }
+
+    static let wideMaximum = 8
+
+    // The wide hero column has no map to keep, so its list takes every whole row the column has room for.
+    static func wideRows(viewport: CGFloat, fixed: CGFloat, metrics: SlotMetrics) -> Int {
+        let base = Regions.slotCount
+        guard metrics.measured else { return base }
+        let room = viewport - fixed - metrics.chrome
+        return (base...wideMaximum).last(where: { CGFloat($0) * metrics.pitch <= room }) ?? base
     }
 }
 
