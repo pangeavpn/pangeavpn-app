@@ -62,13 +62,23 @@ final class ScreenCamera {
         let scrollToEnd: Bool
     }
 
+    // Sideways is the fallback when iPadOS keeps the scene upright: drawn turned, then turned back.
+    private enum Orientation {
+        case upright, turned
+        case sideways(UIEdgeInsets)
+    }
+
     private static let tick = Duration.milliseconds(100)
     private static let readyTicks = 100
     private static let stillTicks = 30
     // A busy 3-core runner can take well over 10 s to answer one screenshot.
     private static let framebufferTicks = 300
+    private static let turnTicks = 30
+    // The rotation animation outlasts the geometry change that starts it.
+    private static let turnSettle = Duration.milliseconds(600)
 
     private let folder: URL
+    private var orientation = Orientation.upright
 
     init(root: URL) throws {
         folder = root.appendingPathComponent(ScreenGallery.deviceFolder, isDirectory: true)
@@ -93,6 +103,49 @@ final class ScreenCamera {
         }
     }
 
+    // Shoots everything in `shots` in landscape, then turns the scene back upright.
+    func inLandscape(_ shots: @MainActor () async throws -> Void) async throws {
+        guard let scene = Self.activeScene() else { throw Failure.noScene }
+        let turned = try await Self.turn(scene, landscape: true)
+        if turned {
+            orientation = .turned
+        } else {
+            print("::notice::iPadOS kept the scene upright, so landscape shots are drawn sideways and turned back")
+            _ = try await Self.turn(scene, landscape: false)
+            orientation = .sideways(scene.keyWindow?.safeAreaInsets ?? .zero)
+        }
+        let outcome: Result<Void, Error>
+        do {
+            try await shots()
+            outcome = .success(())
+        } catch {
+            outcome = .failure(error)
+        }
+        orientation = .upright
+        if turned {
+            let upright = try await Self.turn(scene, landscape: false)
+            if !upright { XCTFail("the scene never turned back to portrait, so later shots may be sideways") }
+        }
+        try outcome.get()
+    }
+
+    private static func turn(_ scene: UIWindowScene, landscape: Bool) async throws -> Bool {
+        let mask: UIInterfaceOrientationMask = landscape ? .landscapeRight : .portrait
+        scene.requestGeometryUpdate(UIWindowScene.GeometryPreferences.iOS(interfaceOrientations: mask)) { error in
+            print("::notice::the scene declined to turn: \(error.localizedDescription)")
+        }
+        for _ in 0..<turnTicks {
+            try await Task.sleep(for: tick)
+            let bounds = scene.coordinateSpace.bounds
+            if scene.effectiveGeometry.interfaceOrientation.isLandscape == landscape,
+               (bounds.width > bounds.height) == landscape {
+                try await Task.sleep(for: turnSettle)
+                return true
+            }
+        }
+        return false
+    }
+
     private func capture<V: View>(_ view: V, shot: Shot, ready: @MainActor () -> Bool) async throws {
         guard let scene = Self.activeScene() else { throw Failure.noScene }
         let previousKey = scene.keyWindow
@@ -102,7 +155,14 @@ final class ScreenCamera {
         window.windowLevel = UIWindow.Level(rawValue: UIWindow.Level.alert.rawValue + 1)
         window.overrideUserInterfaceStyle = shot.look.style
         window.traitOverrides.preferredContentSizeCategory = shot.look.textSize
-        let host = UIHostingController(rootView: view)
+        var sidewaysInsets: UIEdgeInsets?
+        if case .sideways(let insets) = orientation { sidewaysInsets = insets }
+        let host: UIViewController
+        if let sidewaysInsets {
+            host = Self.sideways(view, in: window, insets: sidewaysInsets)
+        } else {
+            host = UIHostingController(rootView: view)
+        }
         window.rootViewController = host
         window.makeKeyAndVisible()
         let outcome: Result<Void, Error>
@@ -113,7 +173,12 @@ final class ScreenCamera {
             if shot.scrollToEnd { worthSaving = try await scrollToEnd(host) }
             if worthSaving {
                 let png = try await stillFrame(of: window, file: shot.file)
-                try await save(png, as: shot.file)
+                if sidewaysInsets != nil {
+                    try Self.uprighted(png, file: shot.file).write(to: pngURL(shot.file), options: .atomic)
+                } else {
+                    let landscape = window.bounds.width > window.bounds.height
+                    try await save(png, as: shot.file, landscape: landscape)
+                }
             }
             outcome = .success(())
         } catch {
@@ -130,6 +195,40 @@ final class ScreenCamera {
             if presented && ready() && Self.isSettled(host) { return }
         }
         throw Failure.notReady(shot.file)
+    }
+
+    // Lays the screen out landscape, turned a quarter clockwise to fill a portrait window, with landscape's safe area.
+    private static func sideways<V: View>(_ view: V, in window: UIWindow, insets: UIEdgeInsets) -> UIViewController {
+        let portrait = window.bounds.size
+        let safeArea = EdgeInsets(top: insets.top, leading: 0, bottom: insets.bottom, trailing: 0)
+        let screen = UIHostingController(rootView: view.safeAreaPadding(safeArea))
+        screen.safeAreaRegions = []
+        let container = UIViewController()
+        container.addChild(screen)
+        screen.view.autoresizingMask = []
+        screen.view.bounds = CGRect(x: 0, y: 0, width: portrait.height, height: portrait.width)
+        screen.view.center = CGPoint(x: portrait.width / 2, y: portrait.height / 2)
+        screen.view.transform = CGAffineTransform(rotationAngle: .pi / 2)
+        container.view.addSubview(screen.view)
+        screen.didMove(toParent: container)
+        return container
+    }
+
+    // Undoes the sideways layout's clockwise quarter turn.
+    private static func uprighted(_ png: Data, file: String) throws -> Data {
+        guard let image = UIImage(data: png)?.cgImage else { throw Failure.noImage(file) }
+        let width = CGFloat(image.width)
+        let height = CGFloat(image.height)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = true
+        format.preferredRange = .standard
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: height, height: width), format: format)
+        return renderer.pngData { context in
+            context.cgContext.translateBy(x: 0, y: width)
+            context.cgContext.rotate(by: -.pi / 2)
+            UIImage(cgImage: image).draw(in: CGRect(x: 0, y: 0, width: width, height: height))
+        }
     }
 
     // Walks children and presentations, so a push inside a NavigationStack or a sheet counts too.
@@ -195,15 +294,19 @@ final class ScreenCamera {
         return drawn ? image.pngData() : nil
     }
 
-    private func save(_ png: Data, as file: String) async throws {
-        let target = folder.appendingPathComponent("\(file).png")
-        if try await framebufferCaptured(to: target, file: file) { return }
+    private func pngURL(_ file: String) -> URL {
+        folder.appendingPathComponent("\(file).png")
+    }
+
+    private func save(_ png: Data, as file: String, landscape: Bool) async throws {
+        let target = pngURL(file)
+        if try await framebufferCaptured(to: target, file: file, landscape: landscape) { return }
         try png.write(to: target, options: .atomic)
     }
 
     // The workflow's watcher answers each request with `simctl io screenshot`, adding the
     // status bar and home indicator, which live outside the app and so outside any render.
-    private func framebufferCaptured(to target: URL, file: String) async throws -> Bool {
+    private func framebufferCaptured(to target: URL, file: String, landscape: Bool) async throws -> Bool {
         guard ScreenGallery.framebuffer, let root = ScreenGallery.directory,
               let udid = ScreenGallery.environment["SIMULATOR_UDID"] else { return false }
         let files = FileManager.default
@@ -217,7 +320,7 @@ final class ScreenCamera {
             try await Task.sleep(for: Self.tick)
             if files.fileExists(atPath: target.path) {
                 ScreenGallery.missedCaptures = 0
-                return true
+                return Self.keepsOrientation(target, file: file, landscape: landscape)
             }
         }
         // One slow capture only costs that shot its status bar, so it warns rather than fails.
@@ -227,6 +330,14 @@ final class ScreenCamera {
             ScreenGallery.framebuffer = false
             XCTFail("\(ScreenGallery.missedCaptures) framebuffer captures in a row never arrived; the watcher looks dead")
         }
+        return false
+    }
+
+    // simctl may return a turned scene in the device's own portrait, which the app-window render then replaces.
+    private static func keepsOrientation(_ target: URL, file: String, landscape: Bool) -> Bool {
+        guard landscape, let size = UIImage(contentsOfFile: target.path)?.size else { return true }
+        if size.width > size.height { return true }
+        print("::notice::\(file) came back from simctl in portrait, so its app-window render is kept")
         return false
     }
 

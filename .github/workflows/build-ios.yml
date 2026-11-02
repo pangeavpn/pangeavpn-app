@@ -263,7 +263,7 @@ jobs:
             MARKETING_VERSION="$MARKETING" \
             CURRENT_PROJECT_VERSION="$BUILD_NUMBER"
 
-  # Every screen on three iPhone sizes, one runner each in parallel (in turn took half an hour).
+  # Every screen on three iPhone sizes and an iPad, one runner each in parallel (in turn took half an hour).
   # Fetch them all with: gh run download <run-id> -p 'ios-screens-*'
   screens:
     name: Screen gallery (${{ matrix.slug }})
@@ -283,12 +283,15 @@ jobs:
           - device: iPhone 17 Pro Max
             slug: 17-pro-max
             motion: false
+          - device: iPad Pro 13-inch (M4)
+            slug: ipad
+            motion: false
     env:
       GALLERY_DEVICE: ${{ matrix.device }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
-      # Booted now, so it comes up while the tests compile; the image ships no SE, so it may be created.
+      # Booted now, so it comes up while the tests compile; the image may lack the SE or iPad, so it may be created.
       - name: Create and boot the simulator
         id: sim
         run: |

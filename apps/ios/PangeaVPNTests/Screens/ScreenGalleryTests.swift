@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import XCTest
 @testable import PangeaVPN
 
@@ -160,6 +161,68 @@ final class ScreenGalleryTests: XCTestCase {
             try await camera.shoot("14-large-\(route)", looks: [.largeText], scrollToEnd: true) {
                 stores.stage(SettingsView(path: [route]))
             }
+        }
+    }
+
+    // The wide layouts again in landscape and in an iPhone-wide window, light only to keep the run short.
+    func testIPadLandscapeAndNarrow() async throws {
+        try requireIPad()
+        let (camera, idle) = try await gallery()
+        let connected = GalleryData.status(.connected, bytesIn: 1_572_864, bytesOut: 327_680,
+                                           transport: "reality", postQuantum: true)
+        let (_, live) = try await gallery(status: connected, connectedFor: 754)
+        try await camera.inLandscape {
+            try await shootWideScreens(camera, idle: idle, live: live, variant: "landscape", narrow: false)
+        }
+        try await shootWideScreens(camera, idle: idle, live: live, variant: "narrow", narrow: true)
+    }
+
+    // Opened after the main screen has measured itself, as a tap would be, so a wide iPad shows it as a sheet.
+    func testIPadRegionSheet() async throws {
+        try requireIPad()
+        let (camera, stores) = try await gallery(status: GalleryData.status(.connected, transport: "reality"))
+        try await camera.shoot("10c-regions-sheet", looks: [.light], presents: true,
+                               ready: { !stores.servers.regions.isEmpty }) {
+            stores.stage(MainView())
+                .task {
+                    try? await Task.sleep(for: .milliseconds(500))
+                    stores.connection.showServerSheet = true
+                }
+        }
+    }
+
+    private func requireIPad() throws {
+        guard UIDevice.current.userInterfaceIdiom == .pad else {
+            throw XCTSkip("Landscape, narrow-window and sheet shots only differ on an iPad.")
+        }
+    }
+
+    private func shootWideScreens(
+        _ camera: ScreenCamera, idle: GalleryStores, live: GalleryStores, variant: String, narrow: Bool
+    ) async throws {
+        try await camera.shoot("06-main-disconnected-\(variant)", looks: [.light],
+                               ready: { !idle.servers.regions.isEmpty }) {
+            staged(MainView(), on: idle, narrow: narrow)
+        }
+        try await camera.shoot("08-main-connected-\(variant)", looks: [.light],
+                               before: { live.restartClock() },
+                               ready: { !live.servers.regions.isEmpty }) {
+            staged(MainView(), on: live, narrow: narrow)
+        }
+        try await camera.shoot("12-settings-\(variant)", looks: [.light]) {
+            staged(SettingsView(), on: idle, narrow: narrow)
+        }
+        try await camera.shoot("13-03-network-\(variant)", looks: [.light]) {
+            staged(SettingsView(path: [.network]), on: idle, narrow: narrow)
+        }
+    }
+
+    @ViewBuilder
+    private func staged<V: View>(_ view: V, on stores: GalleryStores, narrow: Bool) -> some View {
+        if narrow {
+            stores.stageNarrow(view)
+        } else {
+            stores.stage(view)
         }
     }
 }

@@ -121,4 +121,16 @@ final class GalleryStores {
             // A bare hosting controller has no active scene, so the privacy cover would hide the screen.
             .environment(\.scenePhase, .active)
     }
+
+    static let narrowWidth: CGFloat = 375
+
+    // An iPhone-wide window at the left of the screen, as in Split View, so the compact fallback shows.
+    func stageNarrow<V: View>(_ view: V) -> some View {
+        HStack(spacing: 0) {
+            stage(view)
+                .frame(width: Self.narrowWidth)
+                .environment(\.horizontalSizeClass, .compact)
+            Color.black.ignoresSafeArea()
+        }
+    }
 }
