@@ -263,23 +263,34 @@ jobs:
             MARKETING_VERSION="$MARKETING" \
             CURRENT_PROJECT_VERSION="$BUILD_NUMBER"
 
-  # Every screen on three iPhone sizes, as PNGs: gh run download <run-id> -n ios-screens
+  # Every screen on three iPhone sizes, one runner each in parallel (in turn took half an hour).
+  # Fetch them all with: gh run download <run-id> -p 'ios-screens-*'
   screens:
-    name: Screen gallery
+    name: Screen gallery (${{ matrix.slug }})
     needs: core
     runs-on: macos-26
-    timeout-minutes: 60
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - device: iPhone SE (3rd generation)
+            slug: se
+            motion: false
+          - device: iPhone 17 Pro
+            slug: 17-pro
+            motion: true
+          - device: iPhone 17 Pro Max
+            slug: 17-pro-max
+            motion: false
     env:
-      # One simulator per size; the image ships no SE, so it is created.
-      GALLERY_DEVICES: |-
-        iPhone SE (3rd generation)
-        iPhone 17 Pro
-        iPhone 17 Pro Max
+      GALLERY_DEVICE: ${{ matrix.device }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
-      - name: Create the gallery simulators
-        id: sims
+      # Booted now, so it comes up while the tests compile; the image ships no SE, so it may be created.
+      - name: Create and boot the simulator
+        id: sim
         run: |
           sdk=$(xcrun --sdk iphonesimulator --show-sdk-version)
           runtime=$(xcrun simctl list runtimes available -j | jq -r --arg sdk "$sdk" '
@@ -292,24 +303,20 @@ jobs:
             xcrun simctl list runtimes
             exit 1
           fi
-          udids=()
-          while IFS= read -r name; do
-            [ -n "$name" ] || continue
-            udid=$(xcrun simctl list devices available -j | jq -r --arg rt "$runtime" --arg name "$name" \
-              '(.devices[$rt] // []) | map(select(.name == $name)) | .[0].udid // empty')
-            if [ -z "$udid" ]; then
-              type=$(xcrun simctl list devicetypes -j | jq -r --arg name "$name" \
-                'first(.devicetypes[] | select(.name == $name) | .identifier) // empty')
-              if [ -z "$type" ]; then
-                echo "::error::Xcode has no simulator type named $name"
-                exit 1
-              fi
-              udid=$(xcrun simctl create "$name" "$type" "$runtime")
+          udid=$(xcrun simctl list devices available -j | jq -r --arg rt "$runtime" --arg name "$GALLERY_DEVICE" \
+            '(.devices[$rt] // []) | map(select(.name == $name)) | .[0].udid // empty')
+          if [ -z "$udid" ]; then
+            type=$(xcrun simctl list devicetypes -j | jq -r --arg name "$GALLERY_DEVICE" \
+              'first(.devicetypes[] | select(.name == $name) | .identifier) // empty')
+            if [ -z "$type" ]; then
+              echo "::error::Xcode has no simulator type named $GALLERY_DEVICE"
+              exit 1
             fi
-            echo "$name: $udid"
-            udids+=("$udid")
-          done <<<"$GALLERY_DEVICES"
-          echo "udids=${udids[*]}" >>"$GITHUB_OUTPUT"
+            udid=$(xcrun simctl create "$GALLERY_DEVICE" "$type" "$runtime")
+          fi
+          echo "$GALLERY_DEVICE: $udid"
+          xcrun simctl boot "$udid" || true
+          echo "udid=$udid" >>"$GITHUB_OUTPUT"
 
       - name: Fetch the xcframework
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
@@ -342,7 +349,6 @@ jobs:
           IFS=. read -r major minor patch <<<"${version%%-*}"
           echo "marketing=$major.$minor.${patch:-0}" >>"$GITHUB_OUTPUT"
 
-      # Built once, then run per iPhone, so no simulator boots while the compiler holds the CPU.
       - name: Build the gallery tests
         timeout-minutes: 15
         working-directory: apps/ios
@@ -376,65 +382,55 @@ jobs:
               sleep 0.1
             done' _ "$SCREENS" >"$RUNNER_TEMP/framebuffer-watcher.log" 2>&1 &
 
-      # One iPhone at a time: three booted simulators starve the 3-core runner and stall boots.
       - name: Render the screens
-        timeout-minutes: 40
+        timeout-minutes: 20
         working-directory: apps/ios
         env:
-          UDIDS: ${{ steps.sims.outputs.udids }}
+          UDID: ${{ steps.sim.outputs.udid }}
+          MOTION: ${{ matrix.motion }}
           TEST_RUNNER_PANGEA_SCREENS_DIR: ${{ runner.temp }}/screens
           TEST_RUNNER_PANGEA_SCREENS_FRAMEBUFFER: '1'
           MOTION_DIR: ${{ runner.temp }}/screens/motion
         run: |
           failed=0
-          # The motion tour runs on the 17 Pro only, before Reduce Motion goes on for the stills.
-          set -- $UDIDS
-          motion_udid=$2
-          for udid in $UDIDS; do
-            echo "::group::$udid"
-            xcrun simctl boot "$udid" || true
-            if ! perl -e 'alarm 900; exec @ARGV' xcrun simctl bootstatus "$udid" -b; then
-              echo "::error::simulator $udid did not finish booting"
-              failed=1
-              echo "::endgroup::"
-              continue
-            fi
-            xcrun simctl status_bar "$udid" override --time 9:41 \
-              --dataNetwork wifi --wifiMode active --wifiBars 3 \
-              --cellularMode active --cellularBars 4 \
-              --batteryState charged --batteryLevel 100
-            if [ "$udid" = "$motion_udid" ]; then
-              mkdir -p "$MOTION_DIR"
-              xcrun simctl io "$udid" recordVideo --codec=h264 --force "$MOTION_DIR/tour.mp4" >/dev/null 2>&1 &
-              recorder=$!
-              perl -MTime::HiRes=time -e 'printf "%.3f\n", time' >"$MOTION_DIR/record-start.txt"
-              TEST_RUNNER_PANGEA_MOTION_DIR="$MOTION_DIR" xcodebuild test-without-building -scheme PangeaVPN \
-                -destination "id=$udid" \
-                -derivedDataPath "$RUNNER_TEMP/derived" \
-                -only-testing:PangeaVPNTests/MotionTourTests \
-                -parallel-testing-enabled NO || failed=1
-              kill -INT "$recorder" 2>/dev/null || true
-              wait "$recorder" || true
-            fi
-            # Reduce Motion stops the map orbit and status pulses, so frames hold still.
-            xcrun simctl spawn "$udid" defaults write com.apple.Accessibility ReduceMotionEnabled -bool true
-            # The first screenshot after a boot is the slow one, so it is taken before any test waits on it.
-            xcrun simctl io "$udid" screenshot --type=png "$RUNNER_TEMP/warmup.png" >/dev/null 2>&1 || true
-            xcodebuild test-without-building -scheme PangeaVPN \
-              -destination "id=$udid" \
+          if ! perl -e 'alarm 900; exec @ARGV' xcrun simctl bootstatus "$UDID" -b; then
+            echo "::error::simulator $UDID did not finish booting"
+            exit 1
+          fi
+          xcrun simctl status_bar "$UDID" override --time 9:41 \
+            --dataNetwork wifi --wifiMode active --wifiBars 3 \
+            --cellularMode active --cellularBars 4 \
+            --batteryState charged --batteryLevel 100
+          # The motion tour records before Reduce Motion goes on for the stills.
+          if [ "$MOTION" = "true" ]; then
+            mkdir -p "$MOTION_DIR"
+            xcrun simctl io "$UDID" recordVideo --codec=h264 --force "$MOTION_DIR/tour.mp4" >/dev/null 2>&1 &
+            recorder=$!
+            perl -MTime::HiRes=time -e 'printf "%.3f\n", time' >"$MOTION_DIR/record-start.txt"
+            TEST_RUNNER_PANGEA_MOTION_DIR="$MOTION_DIR" xcodebuild test-without-building -scheme PangeaVPN \
+              -destination "id=$UDID" \
               -derivedDataPath "$RUNNER_TEMP/derived" \
-              -only-testing:PangeaVPNTests/ScreenGalleryTests \
+              -only-testing:PangeaVPNTests/MotionTourTests \
               -parallel-testing-enabled NO || failed=1
-            xcrun simctl shutdown "$udid" || true
-            echo "::endgroup::"
-          done
+            kill -INT "$recorder" 2>/dev/null || true
+            wait "$recorder" || true
+          fi
+          # Reduce Motion stops the map orbit and status pulses, so frames hold still.
+          xcrun simctl spawn "$UDID" defaults write com.apple.Accessibility ReduceMotionEnabled -bool true
+          # The first screenshot after a boot is the slow one, so it is taken before any test waits on it.
+          xcrun simctl io "$UDID" screenshot --type=png "$RUNNER_TEMP/warmup.png" >/dev/null 2>&1 || true
+          xcodebuild test-without-building -scheme PangeaVPN \
+            -destination "id=$UDID" \
+            -derivedDataPath "$RUNNER_TEMP/derived" \
+            -only-testing:PangeaVPNTests/ScreenGalleryTests \
+            -parallel-testing-enabled NO || failed=1
           exit "$failed"
 
       - name: Upload the screen gallery
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
-          name: ios-screens
+          name: ios-screens-${{ matrix.slug }}
           path: ${{ runner.temp }}/screens
           if-no-files-found: warn
           retention-days: 14
@@ -447,9 +443,9 @@ jobs:
           mkdir -p "$RUNNER_TEMP/screens"
           count=$(find "$RUNNER_TEMP/screens" -name '*.png' | wc -l | tr -d ' ')
           {
-            echo "### Screen gallery: $count PNGs"
+            echo "### Screen gallery ($GALLERY_DEVICE): $count PNGs"
             echo '```'
-            echo "gh run download $GITHUB_RUN_ID --repo $GITHUB_REPOSITORY -n ios-screens -D ios-screens-$GITHUB_RUN_ID"
+            echo "gh run download $GITHUB_RUN_ID --repo $GITHUB_REPOSITORY -p 'ios-screens-*' -D ios-screens-$GITHUB_RUN_ID"
             echo '```'
           } >>"$GITHUB_STEP_SUMMARY"
 
