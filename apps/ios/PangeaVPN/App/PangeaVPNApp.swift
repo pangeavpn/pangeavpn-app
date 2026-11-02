@@ -8,6 +8,7 @@ struct PangeaVPNApp: App {
     @State private var settings: SettingsStore
     @State private var connection: ConnectionStore
     @State private var diagnostics: DiagnosticsStore
+    @State private var purchases: PurchaseStore
     @State private var toasts = ToastCenter()
 
     init() {
@@ -22,6 +23,7 @@ struct PangeaVPNApp: App {
         _connection = State(initialValue: ConnectionStore(
             tunnel: tunnel, servers: servers, settings: settings, session: session))
         _diagnostics = State(initialValue: DiagnosticsStore(core: core, tunnel: tunnel))
+        _purchases = State(initialValue: PurchaseStore(core: core, session: session, store: AppStoreClient()))
     }
 
     var body: some Scene {
@@ -32,6 +34,7 @@ struct PangeaVPNApp: App {
                 .environment(settings)
                 .environment(connection)
                 .environment(diagnostics)
+                .environment(purchases)
                 .toastOverlay()
                 .privacyCover()
                 .environment(toasts)

@@ -104,6 +104,11 @@ func hubFetch(path, method string, headers map[string]string, body []byte) ([]by
 
 // hubFetchSince drops the answer, undecoded, once a Wipe has run since wipe.
 func hubFetchSince(wipe uint64, path, method string, headers map[string]string, body []byte) ([]byte, int, error) {
+	return hubFetchWithin(wipe, hubRequestTimeout, path, method, headers, body)
+}
+
+// hubFetchWithin is hubFetchSince giving the request itself timeout to answer.
+func hubFetchWithin(wipe uint64, timeout time.Duration, path, method string, headers map[string]string, body []byte) ([]byte, int, error) {
 	// Twice: a route dropped between ensureHubPath and the read is not a failure.
 	for attempt := 0; attempt < 2; attempt++ {
 		if err := ensureHubPath(wipe); err != nil {
@@ -120,7 +125,7 @@ func hubFetchSince(wipe uint64, path, method string, headers map[string]string, 
 		if err != nil {
 			return nil, 0, fmt.Errorf("seal request: %w", err)
 		}
-		inner, err := sendOnRoute(route, sealed)
+		inner, err := sendOnRoute(route, sealed, timeout)
 		if err != nil {
 			hubRequestFailed(route)
 			return nil, 0, err
@@ -134,8 +139,8 @@ func hubFetchSince(wipe uint64, path, method string, headers map[string]string, 
 	return nil, 0, errors.New("hub unreachable: no working connection method")
 }
 
-func sendOnRoute(route *hubPath, sealed sealedRequest) (innerResponse, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), hubRequestTimeout)
+func sendOnRoute(route *hubPath, sealed sealedRequest, timeout time.Duration) (innerResponse, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	respBytes, status, err := route.postEnvelope(ctx, sealed.route, sealed.envelope)
 	if err != nil {

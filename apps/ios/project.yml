@@ -19,9 +19,12 @@ targets:
     platform: iOS
     sources:
       - path: PangeaVPN
-        excludes: ["PrivacyInfo.xcprivacy"]
+        excludes: ["PrivacyInfo.xcprivacy", "Purchases.storekit"]
       - path: PangeaVPN/PrivacyInfo.xcprivacy
         buildPhase: resources
+      # Local App Store products for Xcode runs; listed for editing, never shipped in the bundle.
+      - path: PangeaVPN/Purchases.storekit
+        buildPhase: none
       - path: Shared
     dependencies:
       - target: PacketTunnel
@@ -73,6 +76,7 @@ targets:
     scheme:
       testTargets:
         - PangeaVPNTests
+      storeKitConfiguration: PangeaVPN/Purchases.storekit
 
   PacketTunnel:
     type: app-extension

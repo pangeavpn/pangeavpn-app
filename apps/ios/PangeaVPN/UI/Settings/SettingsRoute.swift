@@ -1,9 +1,9 @@
 import Foundation
 
-// One entry per desktop settings rail item, plus the iOS-only kill switch and devices pages.
+// One entry per desktop settings rail item, plus the iOS-only kill switch, devices and subscription pages.
 enum SettingsRoute: Hashable, CaseIterable, Sendable {
     case transport, provisioning, network, killSwitch, splitTunnel, startup
-    case notifications, panic, language, appearance, support, update, developer, devices
+    case notifications, panic, language, appearance, support, update, developer, devices, subscription
 
     // The home list, in desktop's rail order; developer appears only once unlocked.
     static let home: [SettingsRoute] = [
@@ -41,6 +41,7 @@ enum SettingsRoute: Hashable, CaseIterable, Sendable {
         case .update: return String(localized: "settings_section_update", defaultValue: "Software Update")
         case .developer: return String(localized: "settings_section_developer", defaultValue: "Developer Options")
         case .devices: return String(localized: "devices_title", defaultValue: "Devices")
+        case .subscription: return String(localized: "settings_account_subscription", defaultValue: "Subscription")
         }
     }
 
@@ -60,6 +61,7 @@ enum SettingsRoute: Hashable, CaseIterable, Sendable {
         case .update: return "arrow.down.circle"
         case .developer: return "chevron.left.forwardslash.chevron.right"
         case .devices: return "laptopcomputer.and.iphone"
+        case .subscription: return "creditcard"
         }
     }
 }

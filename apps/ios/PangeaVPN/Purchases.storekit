@@ -1,0 +1,148 @@
+{
+  "identifier" : "7C1E4B92",
+  "nonRenewingSubscriptions" : [],
+  "products" : [],
+  "settings" : {
+    "_failTransactionsEnabled" : false,
+    "_locale" : "en_GB",
+    "_storeKitErrors" : [
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Load Products"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Purchase"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Verification"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "App Store Sync"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Subscription Status"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "App Transaction"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Manage Subscriptions Sheet"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Refund Request Sheet"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Offer Code Redeem Sheet"
+      }
+    ],
+    "_storefront" : "GBR"
+  },
+  "subscriptionGroups" : [
+    {
+      "id" : "5A3C9E21",
+      "localizations" : [],
+      "name" : "Pangea VPN",
+      "subscriptions" : [
+        {
+          "adHocOffers" : [],
+          "codeOffers" : [],
+          "displayPrice" : "27.99",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "D41F7A10",
+          "introductoryOffer" : {
+            "internalID" : "E52A8B21",
+            "numberOfPeriods" : 1,
+            "paymentMode" : "free",
+            "subscriptionPeriod" : "P1W"
+          },
+          "localizations" : [
+            {
+              "description" : "PangeaVPN for 12 months",
+              "displayName" : "12 Months",
+              "locale" : "en_GB"
+            }
+          ],
+          "productID" : "org.pangeavpn.app.premium.yearly",
+          "recurringSubscriptionPeriod" : "P1Y",
+          "referenceName" : "Pangea VPN 12 Months",
+          "subscriptionGroupID" : "5A3C9E21",
+          "type" : "RecurringSubscription"
+        },
+        {
+          "adHocOffers" : [],
+          "codeOffers" : [],
+          "displayPrice" : "12.99",
+          "familyShareable" : false,
+          "groupNumber" : 2,
+          "internalID" : "B27C5E32",
+          "introductoryOffer" : {
+            "internalID" : "C38D6F43",
+            "numberOfPeriods" : 1,
+            "paymentMode" : "free",
+            "subscriptionPeriod" : "P1W"
+          },
+          "localizations" : [
+            {
+              "description" : "PangeaVPN for 3 months",
+              "displayName" : "3 Months",
+              "locale" : "en_GB"
+            }
+          ],
+          "productID" : "org.pangeavpn.app.premium.quarterly",
+          "recurringSubscriptionPeriod" : "P3M",
+          "referenceName" : "Pangea VPN 3 Months",
+          "subscriptionGroupID" : "5A3C9E21",
+          "type" : "RecurringSubscription"
+        },
+        {
+          "adHocOffers" : [],
+          "codeOffers" : [],
+          "displayPrice" : "5.49",
+          "familyShareable" : false,
+          "groupNumber" : 3,
+          "internalID" : "A16B4D54",
+          "introductoryOffer" : {
+            "internalID" : "F49E7A65",
+            "numberOfPeriods" : 1,
+            "paymentMode" : "free",
+            "subscriptionPeriod" : "P1W"
+          },
+          "localizations" : [
+            {
+              "description" : "PangeaVPN for 1 month",
+              "displayName" : "1 Month",
+              "locale" : "en_GB"
+            }
+          ],
+          "productID" : "org.pangeavpn.app.premium.monthly",
+          "recurringSubscriptionPeriod" : "P1M",
+          "referenceName" : "Pangea VPN 1 Month",
+          "subscriptionGroupID" : "5A3C9E21",
+          "type" : "RecurringSubscription"
+        }
+      ]
+    }
+  ],
+  "version" : {
+    "major" : 3,
+    "minor" : 0
+  }
+}

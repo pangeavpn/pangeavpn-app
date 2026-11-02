@@ -80,6 +80,14 @@ struct TunnelConfig: Codable, Equatable, Sendable {
     let serverName: String
 }
 
+struct ApplePurchaseResult: Codable, Equatable, Sendable {
+    let accountNumber: String
+    // True when this purchase made a new account rather than extending one.
+    let created: Bool
+    let expiresAt: String
+    let productId: String
+}
+
 struct Subscription: Codable, Equatable, Sendable {
     let status: String
     let renews: Bool

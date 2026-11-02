@@ -325,12 +325,7 @@ func Logout() {
 	}
 	storeGate.Unlock()
 
-	// The history records which networks the tunnel got through on.
-	if memory != nil {
-		if err := memory.Clear(); err != nil {
-			logAdd(logs, state.LogWarn, fmt.Sprintf("failed to clear transport memory: %v", err))
-		}
-	}
+	forgetTransportHistory(memory, logs)
 }
 
 // ListServers fetches the current region list from the hub.

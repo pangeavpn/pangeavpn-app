@@ -14,6 +14,7 @@ struct SettingsView: View {
     // Fits the account number on one line at the default text size.
     private static let railWidth: CGFloat = 320
     private static let signOutImage = "rectangle.portrait.and.arrow.right"
+    private static let deleteImage = "trash"
 
     init(path: [SettingsRoute] = []) {
         _path = State(initialValue: path)
@@ -187,6 +188,7 @@ struct SettingsView: View {
         case .appearance: return SettingsSummary.appearance(settings)
         case .update: return SettingsSummary.update()
         case .developer: return SettingsSummary.developer(settings)
+        case .subscription: return SubscriptionText.line(session.subscription).text
         case .support, .devices: return nil
         }
     }
@@ -208,25 +210,35 @@ struct SettingsView: View {
         case .update: UpdatePage()
         case .developer: DeveloperPage()
         case .devices: DevicesPage()
+        case .subscription: SubscriptionPage()
         }
     }
 
     private var accountActions: some View {
         VStack(spacing: 8) {
-            NavigationLink(value: SettingsRoute.devices) {
-                SettingsNavRow(systemImage: SettingsRoute.devices.systemImage, title: SettingsRoute.devices.title)
+            ForEach([SettingsRoute.subscription, .devices], id: \.self) { route in
+                NavigationLink(value: route) {
+                    SettingsNavRow(systemImage: route.systemImage, title: route.title, value: summary(route))
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
             signOutButton(SettingsNavRow(systemImage: Self.signOutImage, title: Self.signOutTitle,
                                          tint: Palette.error, showsChevron: false))
+            DeleteAccountButton(row: SettingsNavRow(systemImage: Self.deleteImage, title: Self.deleteTitle,
+                                                    tint: Palette.error, showsChevron: false),
+                                onSignedOut: { dismiss() })
         }
     }
 
     // Desktop's account actions sit under a rule at the foot of the section list.
     private var railActions: some View {
         VStack(spacing: 2) {
+            railButton(.subscription, value: summary(.subscription))
             railButton(.devices, value: nil)
             signOutButton(SettingsRailRow(systemImage: Self.signOutImage, title: Self.signOutTitle, tint: Palette.error))
+            DeleteAccountButton(row: SettingsRailRow(systemImage: Self.deleteImage, title: Self.deleteTitle,
+                                                     tint: Palette.error),
+                                onSignedOut: { dismiss() })
         }
         .padding(.top, 12)
         .overlay(alignment: .top) {
@@ -266,6 +278,10 @@ struct SettingsView: View {
 
     private static var signOutTitle: String {
         String(localized: "settings_signout", defaultValue: "Sign Out")
+    }
+
+    private static var deleteTitle: String {
+        String(localized: "settings_delete_account", defaultValue: "Delete Account")
     }
 
     private var versionLine: some View {
@@ -323,6 +339,7 @@ private func previewSettings(developer: Bool = false, path: [SettingsRoute] = []
     let session = SessionStore(core: core, tunnel: tunnel)
     return SettingsView(path: path)
         .environment(session)
+        .environment(PurchaseStore(core: core, session: session, store: FakeStoreClient()))
         .environment(servers)
         .environment(settings)
         .environment(ConnectionStore(tunnel: tunnel, servers: servers, settings: settings, session: session))

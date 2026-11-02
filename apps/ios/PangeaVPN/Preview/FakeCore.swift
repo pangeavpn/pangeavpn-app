@@ -18,6 +18,10 @@ final class FakeCore: CoreBridge, @unchecked Sendable {
     var hubStatusValue = HubStatus.none
     var deregisterResult: Result<Void, CoreError> = .success(())
     var wipeResult: Result<Void, CoreError> = .success(())
+    var applePurchaseResult: Result<ApplePurchaseResult, CoreError> = .success(ApplePurchaseResult(
+        accountNumber: "ABCDEFGHJKMNPQRSTVWXYZ01", created: true,
+        expiresAt: "2026-12-01T00:00:00Z", productId: "org.pangeavpn.app.premium.monthly"))
+    var deleteAccountResult: Result<Void, CoreError> = .success(())
     var multihopEntriesValue: [String] = []
     var prepareResult: Result<TunnelConfig, CoreError> = .failure(CoreError(message: "no server"))
     var startResult: Result<Void, CoreError> = .success(())
@@ -124,6 +128,12 @@ final class FakeCore: CoreBridge, @unchecked Sendable {
     func deregister() throws { try record("deregister", deregisterResult) }
 
     func wipe() throws { try record("wipe", wipeResult) }
+
+    func applePurchase(signedTransaction: String, accountNumber: String?) throws -> ApplePurchaseResult {
+        try record("applePurchase(\(accountNumber ?? "new"))", applePurchaseResult)
+    }
+
+    func deleteAccount() throws { try record("deleteAccount", deleteAccountResult) }
 
     func setClientInfo(appVersion: String, osVersion: String) {
         note("setClientInfo(\(appVersion),\(osVersion))")

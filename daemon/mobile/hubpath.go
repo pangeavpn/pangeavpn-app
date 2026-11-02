@@ -34,6 +34,9 @@ const (
 	hubProbeTimout = 8 * time.Second
 	// hubRequestTimeout is for real requests, which may outlast a probe.
 	hubRequestTimeout = 15 * time.Second
+	// hubSlowRequestTimeout outlasts the hub's own 15s wait on the website. Path
+	// clients use it as a ceiling; each request's context sets its own limit.
+	hubSlowRequestTimeout = 30 * time.Second
 	// hubProxyStartTimeout covers the REALITY handshake Start proves first.
 	hubProxyStartTimeout = 15 * time.Second
 	maxHubResponseBytes  = 8 << 20
@@ -79,7 +82,7 @@ func newDirectIPPath(ip string) *hubPath {
 		base:   "https://" + urlHost(ip),
 		host:   hubHost,
 		client: &http.Client{
-			Timeout: hubRequestTimeout,
+			Timeout: hubSlowRequestTimeout,
 			Transport: &http.Transport{
 				DialContext:     nat64Dial(protectedDialer(hubProbeTimout).DialContext, nat64Synthesize),
 				TLSClientConfig: &tls.Config{ServerName: "", InsecureSkipVerify: true},
@@ -106,7 +109,7 @@ func newValidatedPath(kind, host string) *hubPath {
 		base:   "https://" + urlHost(host),
 		host:   host,
 		client: &http.Client{
-			Timeout:   hubRequestTimeout,
+			Timeout:   hubSlowRequestTimeout,
 			Transport: &http.Transport{DialContext: protectedDialer(hubProbeTimout).DialContext},
 		},
 	}
@@ -126,7 +129,7 @@ func newProxyPath(kind, node string, port int, username, password string) *hubPa
 		base:   "https://" + hubHost,
 		host:   hubHost,
 		client: &http.Client{
-			Timeout: hubRequestTimeout,
+			Timeout: hubSlowRequestTimeout,
 			Transport: &http.Transport{
 				Proxy:           http.ProxyURL(proxyURL),
 				DialContext:     protectedDialer(hubProbeTimout).DialContext,

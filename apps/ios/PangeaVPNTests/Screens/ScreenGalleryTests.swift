@@ -164,6 +164,53 @@ final class ScreenGalleryTests: XCTestCase {
         }
     }
 
+    // Purchase screens say "free", so the 20-paywall prefix keeps every one of them out of App Store shots.
+    func testPaywall() async throws {
+        let (camera, stores) = try await gallery(subscription: nil)
+        try await camera.shoot("20-paywall-trial", looks: ScreenCamera.Look.all,
+                               ready: { !stores.purchases.plans.isEmpty }) {
+            stores.stage(PaywallView(onClose: {}))
+        }
+        stores.storeClient.plansResult = .success(FakeStoreClient.samplePlans(trial: false))
+        await stores.purchases.loadPlans()
+        try await camera.shoot("20-paywall-no-trial", ready: { !stores.purchases.plans.isEmpty }) {
+            stores.stage(PaywallView(onClose: {}))
+        }
+        try await camera.shoot("20-paywall-account-number", looks: ScreenCamera.Look.all) {
+            stores.stage(AccountNumberSheet(number: "ABCD-EFGH-JKMN-PQRS-TVWX-YZ01", onDone: {}))
+        }
+    }
+
+    // Opened from the root once launch settles, as the expired panel opens it, so it draws as a real sheet.
+    func testPaywallSheet() async throws {
+        let (camera, stores) = try await gallery(subscription: GalleryData.expired)
+        try await camera.shoot("20-paywall-sheet", looks: [.light], presents: true,
+                               ready: { !stores.purchases.plans.isEmpty }) {
+            stores.stage(RootView())
+                .task {
+                    try? await Task.sleep(for: .milliseconds(500))
+                    stores.purchases.showPaywall()
+                }
+        }
+    }
+
+    func testSubscriptionSettings() async throws {
+        let (camera, lapsed) = try await gallery(subscription: GalleryData.expired)
+        try await camera.shoot("20-paywall-settings-subscribe", looks: ScreenCamera.Look.standard) {
+            lapsed.stage(SettingsView(path: [.subscription]))
+        }
+        let (_, stores) = try await gallery()
+        try await camera.shoot("20-paywall-settings-active", looks: [.light]) {
+            stores.stage(SettingsView(path: [.subscription]))
+        }
+        stores.storeClient.entitlements = [stores.storeClient.transaction(1)]
+        await stores.purchases.refreshEntitlements()
+        try await camera.shoot("20-paywall-settings-apple", looks: ScreenCamera.Look.all,
+                               ready: { stores.purchases.appleBilled }) {
+            stores.stage(SettingsView(path: [.subscription]))
+        }
+    }
+
     // The wide layouts again in landscape and in an iPhone-wide window, light only to keep the run short.
     func testIPadLandscapeAndNarrow() async throws {
         try requireIPad()

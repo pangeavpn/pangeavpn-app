@@ -45,6 +45,15 @@ final class GatedCore: CoreBridge, @unchecked Sendable {
         try fake.wipe()
     }
 
+    func applePurchase(signedTransaction: String, accountNumber: String?) throws -> ApplePurchaseResult {
+        try fake.applePurchase(signedTransaction: signedTransaction, accountNumber: accountNumber)
+    }
+
+    func deleteAccount() throws {
+        hold()
+        try fake.deleteAccount()
+    }
+
     func restoreSession() throws -> Session { try fake.restoreSession() }
     func login(token: String) throws -> Session { try fake.login(token: token) }
     func logout() { fake.logout() }

@@ -2,17 +2,21 @@
 
 package mobile
 
-// Ending a session: the hub refusing it, the user signing out, and a wipe.
+// Ending a session: the hub refusing it, the user signing out or deleting the
+// account, and a wipe.
 
 import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net/http"
 	"os"
 	"strings"
 
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/state"
 )
+
+const accountDeleteRoute = "/api/client/account/delete"
 
 // storedKeys is every SecretStore key this package writes; Wipe clears them
 // all, so a new key belongs here or a wipe leaves it behind.
@@ -72,6 +76,79 @@ func Deregister() error {
 		return nil
 	}
 	return err
+}
+
+// DeleteAccount deletes the signed-in account on the hub, then signs out here.
+// It ends the session only once the hub confirms the deletion.
+func DeleteAccount() error {
+	scope := captureScope()
+	if scope.licenseKey == "" {
+		return errors.New("mobile: not authenticated")
+	}
+
+	var out struct {
+		Deleted bool `json:"deleted"`
+	}
+	if err := hubRequestAs(scope, http.MethodPost, accountDeleteRoute, struct{}{}, &out); err != nil {
+		// The route checks the license, so this answer says the session is dead.
+		if isSignOutCode(err) {
+			signOutLocally(scope)
+		}
+		return err
+	}
+	if !out.Deleted {
+		return errors.New("mobile: the hub did not confirm the account was deleted")
+	}
+	endDeletedAccount(scope)
+	return nil
+}
+
+// endDeletedAccount is Logout for scope's session alone, and drops the identity
+// too: the hub deprovisioned its device along with the account.
+func endDeletedAccount(scope callScope) {
+	storeGate.Lock()
+	mu.Lock()
+	if sessionEpoch != scope.session {
+		mu.Unlock()
+		storeGate.Unlock()
+		return
+	}
+	st, memory, logs, pub := store, transportMem, wgLogs, identity.publicKey()
+	licenseKey, identity, servers = "", nil, nil
+	setPreparedLocked(nil)
+	sessionEpoch++
+	mu.Unlock()
+	if st != nil {
+		clearDeletedAccount(st, scope.licenseKey, pub)
+	}
+	storeGate.Unlock()
+
+	forgetTransportHistory(memory, logs)
+	logAdd(logs, state.LogInfo, "deleted the account; signed out")
+}
+
+// clearDeletedAccount leaves a session another process stored since alone.
+// Call it under storeGate.
+func clearDeletedAccount(st SecretStore, deleted, pub string) {
+	if stored := strings.TrimSpace(st.Get(keyLicense)); stored != "" && stored != deleted {
+		return
+	}
+	for _, key := range sessionKeys {
+		st.Set(key, "")
+	}
+	if stored, _ := parseIdentity(st.Get(keyIdentity)); stored.publicKey() == pub {
+		st.Set(keyIdentity, "")
+	}
+}
+
+// forgetTransportHistory clears which networks the tunnel got through on.
+func forgetTransportHistory(memory *state.TransportMemoryStore, logs *state.LogStore) {
+	if memory == nil {
+		return
+	}
+	if err := memory.Clear(); err != nil {
+		logAdd(logs, state.LogWarn, fmt.Sprintf("failed to clear transport memory: %v", err))
+	}
 }
 
 // Wipe forgets everything this install knows: session, identity, settings, hub

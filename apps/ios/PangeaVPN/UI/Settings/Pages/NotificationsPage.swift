@@ -43,7 +43,7 @@ struct NotificationsPage: View {
             GhostButton(String(localized: "notifications_open_settings", defaultValue: "Open Settings")) { openSettings() }
         case .notDetermined:
             InfoNote(String(localized: "notifications_not_asked", defaultValue: "PangeaVPN needs your permission to show alerts."), systemImage: "bell.badge")
-            GhostButton(String(localized: "notifications_allow", defaultValue: "Allow Notifications")) {
+            GhostButton(String(localized: "notifications_allow", defaultValue: "Continue")) {
                 Task { await askPermission() }
             }
         default:

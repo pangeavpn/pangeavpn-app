@@ -449,8 +449,8 @@ export default {
     fa: "PangeaVPN برای نمایش هشدارها به اجازه شما نیاز دارد."
   },
   notifications_allow: {
-    en: "Allow Notifications", es: "Permitir notificaciones", fr: "Autoriser les notifications", ru: "Разрешить уведомления",
-    uk: "Дозволити сповіщення", zh: "允许通知", ar: "السماح بالإشعارات", fa: "اجازه دادن به اعلان‌ها"
+    en: "Continue", es: "Continuar", fr: "Continuer", ru: "Продолжить",
+    uk: "Продовжити", zh: "继续", ar: "متابعة", fa: "ادامه"
   },
   notifications_toast_on: {
     en: "Connection alerts on.", es: "Alertas de conexión activadas.", fr: "Alertes de connexion activées.",

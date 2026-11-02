@@ -5,6 +5,7 @@ struct RootView: View {
     @Environment(ServersStore.self) private var servers
     @Environment(SettingsStore.self) private var settings
     @Environment(ConnectionStore.self) private var connection
+    @Environment(PurchaseStore.self) private var purchases
     @Environment(ToastCenter.self) private var toasts
     @Environment(\.scenePhase) private var scenePhase
     @State private var hasRestored = false
@@ -51,8 +52,37 @@ struct RootView: View {
                 guard requested else { return }
                 Task { await panicWipe() }
             }
+            .onChange(of: purchases.notice) { _, notice in
+                guard let notice else { return }
+                toasts.show(notice.text, style: notice.style)
+            }
+            .onChange(of: purchases.sheet) { _, sheet in
+                // A sign-in that failed after buying leaves the new number ready to retry.
+                guard case .accountNumber(let number) = sheet, session.session == nil else { return }
+                draftToken = number
+            }
+            .sheet(item: purchaseSheet) { sheet in
+                purchaseSheetContent(sheet)
+            }
             .task { await launch() }
             .task(id: hasRestored && session.session != nil) { await loadSignedInData() }
+    }
+
+    // Above every screen, so a purchase that signs in keeps its sheet as sign-in gives way to the main screen.
+    private var purchaseSheet: Binding<PurchaseSheet?> {
+        Binding(get: { purchases.sheet }, set: { purchases.sheet = $0 })
+    }
+
+    @ViewBuilder
+    private func purchaseSheetContent(_ sheet: PurchaseSheet) -> some View {
+        switch sheet {
+        case .paywall:
+            PaywallView(onClose: { purchases.closePaywall() })
+                .formSheetSized()
+        case .accountNumber(let number):
+            AccountNumberSheet(number: number, onDone: { purchases.sheet = nil })
+                .formSheetSized()
+        }
     }
 
     // Each screen cross-fades into the next rather than cutting.
@@ -73,6 +103,7 @@ struct RootView: View {
         if PanicTrigger.shared.requested { await panicWipe() }
         await session.restore()
         hasRestored = true
+        purchases.start()
     }
 
     private func loadSignedInData() async {
@@ -117,6 +148,7 @@ struct RootView: View {
     }
 
     private func erase() async {
+        purchases.reset()
         await session.wipe()
         settings.resetToDefaults()
         servers.reset()
@@ -178,6 +210,7 @@ struct SplashView: View {
     let toasts = ToastCenter()
     return RootView()
         .environment(session)
+        .environment(PurchaseStore(core: core, session: session, store: FakeStoreClient()))
         .environment(servers)
         .environment(settings)
         .environment(ConnectionStore(tunnel: tunnel, servers: servers, settings: settings, session: session))

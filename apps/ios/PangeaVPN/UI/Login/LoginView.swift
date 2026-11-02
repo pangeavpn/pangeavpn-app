@@ -4,12 +4,13 @@ import UIKit
 struct LoginView: View {
     @Environment(SessionStore.self) private var session
     @Environment(SettingsStore.self) private var settings
+    @Environment(PurchaseStore.self) private var purchases
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.horizontalSizeClass) private var sizeClass
     @Binding private var token: String
     @State private var submitting = false
 
-    // Account lookup only: App Store rule 3.1.1 keeps every purchase path out of the app.
+    // Account lookup only; buying stays in the in-app paywall, never on the web (App Store rule 3.1.1).
     private static let accountURL = URL(string: "https://pangeavpn.org/app")!
     private static let maxMapSize: CGFloat = 236
     private static let gutter: CGFloat = 20
@@ -48,6 +49,7 @@ struct LoginView: View {
             guard let message else { return }
             UIAccessibility.post(notification: .announcement, argument: message)
         }
+        .task { await purchases.loadPlans() }
     }
 
     private func form(viewport: CGSize) -> some View {
@@ -85,7 +87,9 @@ struct LoginView: View {
                 action: submit
             )
             .padding(.top, 14)
-            .padding(.bottom, 24)
+            newUserLink
+                .padding(.top, 6)
+                .padding(.bottom, 18)
         }
         .padding(.horizontal, Self.gutter)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -104,6 +108,22 @@ struct LoginView: View {
                 .contentShape(Rectangle())
         }
         .accessibilityLabel(label)
+    }
+
+    // The free week is promised only until StoreKit says this Apple ID has used it.
+    private var newUserLink: some View {
+        Button { purchases.showPaywall() } label: {
+            FadeSwap(PlanText.newUserLink(trialEligible: purchases.trialEligible)) { label in
+                Text(label)
+                    .scaledFont(size: 15, weight: .semibold, relativeTo: .subheadline)
+                    .foregroundStyle(Palette.accent)
+                    .multilineTextAlignment(.center)
+            }
+            .frame(maxWidth: .infinity, minHeight: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PressFadeStyle())
+        .disabled(session.loggingIn || submitting)
     }
 
     private func errorBox(_ message: String) -> some View {
@@ -238,21 +258,22 @@ enum LoginErrorText {
 
 #if DEBUG
 @MainActor
-private func previewStores(error: String?) -> (SessionStore, SettingsStore) {
+private func previewStores(error: String?) -> (SessionStore, SettingsStore, PurchaseStore) {
     let core = FakeCore()
     let session = SessionStore(core: core, tunnel: FakeTunnel())
     session.loginError = error
-    return (session, SettingsStore(core: core))
+    return (session, SettingsStore(core: core), PurchaseStore(core: core, session: session, store: FakeStoreClient()))
 }
 
 private struct LoginPreview: View {
     @State private var token = ""
-    let stores: (SessionStore, SettingsStore)
+    let stores: (SessionStore, SettingsStore, PurchaseStore)
 
     var body: some View {
         LoginView(token: $token)
             .environment(stores.0)
             .environment(stores.1)
+            .environment(stores.2)
     }
 }
 

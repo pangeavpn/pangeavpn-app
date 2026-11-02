@@ -1,9 +1,10 @@
 import SwiftUI
 import UIKit
 
-// No billing link or price here: App Store rule 3.1.1, so the only action is checking again.
+// No web billing link here (App Store rule 3.1.1): buying goes through the in-app paywall only.
 struct ExpiredPanel: View {
     @Environment(SessionStore.self) private var session
+    @Environment(PurchaseStore.self) private var purchases
     @Environment(ToastCenter.self) private var toasts
     @State private var checking = false
 
@@ -63,12 +64,11 @@ struct ExpiredPanel: View {
 
     private var actions: some View {
         VStack(spacing: 6) {
-            PillButton(
-                String(localized: "expired_check_again", defaultValue: "Check again"),
-                enabled: !session.signingOut,
-                loading: checking,
-                action: recheck
-            )
+            PillButton(String(localized: "paywall_subscribe", defaultValue: "Subscribe"), enabled: !busy) {
+                purchases.showPaywall()
+            }
+            checkAgainButton
+                .padding(.top, 4)
             Button(action: signOut) {
                 Text(String(localized: "expired_sign_out", defaultValue: "Sign Out"))
                     .scaledFont(size: 15, weight: .semibold, relativeTo: .subheadline)
@@ -80,6 +80,24 @@ struct ExpiredPanel: View {
             .disabled(busy)
             .opacity(session.signingOut ? 0.5 : 1)
         }
+    }
+
+    // Ghost rather than a pill, so Subscribe stays the one primary action.
+    private var checkAgainButton: some View {
+        GhostButton(String(localized: "expired_check_again", defaultValue: "Check again"), action: recheck)
+            .disabled(busy)
+            .opacity(session.signingOut ? 0.5 : 1)
+            .overlay {
+                if checking {
+                    ProgressView()
+                        .tint(Palette.textSecondary)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(Palette.bg, in: Capsule())
+                        .padding(1)
+                        .transition(.opacity)
+                }
+            }
+            .animation(Motion.quick, value: checking)
     }
 
     private func recheck() {
@@ -169,6 +187,7 @@ private struct ExpiredPreview: View {
         }
         .background(Palette.bg)
         .environment(session)
+        .environment(PurchaseStore(core: FakeCore(), session: session, store: FakeStoreClient()))
         .environment(ToastCenter())
         .task { await session.restore() }
     }

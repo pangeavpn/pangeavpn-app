@@ -125,6 +125,8 @@ releases it to testers.
 ## Privacy manifests
 
 Both targets ship a `PrivacyInfo.xcprivacy`: UserDefaults (`1C8F.1`, app-group
-suite), file timestamps (`C617.1`, Go core inside the container), no tracking,
-and the account identifier as collected data. Re-check against Xcode's privacy
-report on the first archive.
+suite), file timestamps (`C617.1`, Go core inside the container), boot time
+(`35F9.1`), no tracking and no collected data, matching the App Store label
+("Data Not Collected"). The anonymous account number, device keys and Apple
+purchase record exist only to run the service and identify no one. Keep both
+manifests and the label in step if that ever changes.

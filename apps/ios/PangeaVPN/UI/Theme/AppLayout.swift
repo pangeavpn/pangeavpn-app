@@ -44,4 +44,14 @@ extension View {
     func readableWidth() -> some View {
         frame(maxWidth: AppLayout.readableWidth).frame(maxWidth: .infinity)
     }
+
+    // A form-sized panel on a wide window; iOS 17 has no sizing control, so it keeps the default sheet.
+    @ViewBuilder
+    func formSheetSized() -> some View {
+        if #available(iOS 18.0, *) {
+            presentationSizing(.form)
+        } else {
+            presentationDetents([.large])
+        }
+    }
 }

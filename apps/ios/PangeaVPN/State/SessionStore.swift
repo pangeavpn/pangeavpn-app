@@ -24,6 +24,7 @@ final class SessionStore {
     private(set) var restoring = false
     private(set) var loggingIn = false
     private(set) var signingOut = false
+    private(set) var deletingAccount = false
     // A stored sign-in the hub could not confirm; the app offers a retry rather than sign-in.
     private(set) var restoreFailed = false
     var loginError: String?
@@ -100,7 +101,7 @@ final class SessionStore {
 
     // The profile goes before the license, so nothing can start a tunnel that would fail signed out.
     func signOut() async {
-        guard !signingOut else { return }
+        guard !signingOut, !deletingAccount else { return }
         signingOut = true
         let holdsSlot = session != nil
         await tunnel.disconnect()
@@ -111,6 +112,32 @@ final class SessionStore {
         await CoreQueue.perform { core.logout() }
         clearSession()
         signingOut = false
+    }
+
+    // The tunnel stays up until the hub confirms, so a refused delete leaves the user as they were.
+    // The core wipes its own session once the hub agrees; this clears what the app holds.
+    func deleteAccount() async -> Bool {
+        guard !deletingAccount, !signingOut else { return false }
+        deletingAccount = true
+        defer { deletingAccount = false }
+        let core = self.core
+        do {
+            try await CoreQueue.run { try core.deleteAccount() }
+        } catch {
+            Self.log.error("delete account failed (\(error.logCode, privacy: .public)): \(error.localizedDescription, privacy: .private)")
+            // A hub answer that the session is dead signs the core out anyway, so the app follows it.
+            let stored = await CoreQueue.perform { core.accountNumber() }
+            if stored.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { await endDeletedSession() }
+            return false
+        }
+        await endDeletedSession()
+        return true
+    }
+
+    private func endDeletedSession() async {
+        await tunnel.disconnect()
+        await tunnel.removeConfiguration()
+        clearSession()
     }
 
     // Panic: local only, because speed and leaving nothing behind matter more than freeing the slot.

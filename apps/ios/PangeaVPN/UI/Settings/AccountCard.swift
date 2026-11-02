@@ -17,7 +17,6 @@ struct AccountCard: View {
     @State private var generation = 0
 
     static let mask = "••••-••••-••••-••••-••••-••••"
-    private static let clipboardLifetime: TimeInterval = 120
     // A wide window's rail is already a surface, so the card sits in it as a recessed well.
     private let fill: Color
 
@@ -155,13 +154,8 @@ struct AccountCard: View {
         revealed = nil
     }
 
-    // Local only and short-lived, so the credential neither syncs to other devices nor lingers.
     private func copy(_ number: String) {
-        let expiry = Date().addingTimeInterval(Self.clipboardLifetime)
-        UIPasteboard.general.setItems(
-            [[UTType.plainText.identifier: number]],
-            options: [.expirationDate: expiry, .localOnly: true]
-        )
+        AccountClipboard.copy(number)
         toasts.show(String(localized: "settings_account_copied", defaultValue: "Copied"), style: .success)
     }
 
@@ -171,6 +165,19 @@ struct AccountCard: View {
         refreshing = true
         await session.refreshSubscription()
         refreshing = false
+    }
+}
+
+// Local only and short-lived, so the credential neither syncs to other devices nor lingers.
+enum AccountClipboard {
+    private static let lifetime: TimeInterval = 120
+
+    static func copy(_ number: String) {
+        let expiry = Date().addingTimeInterval(lifetime)
+        UIPasteboard.general.setItems(
+            [[UTType.plainText.identifier: number]],
+            options: [.expirationDate: expiry, .localOnly: true]
+        )
     }
 }
 

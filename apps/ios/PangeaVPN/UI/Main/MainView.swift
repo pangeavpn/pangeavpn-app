@@ -350,18 +350,6 @@ struct MainView: View {
     }
 }
 
-private extension View {
-    // A list reads best in a form-sized panel; iOS 17 has no sizing control, so it keeps the default sheet.
-    @ViewBuilder
-    func formSheetSized() -> some View {
-        if #available(iOS 18.0, *) {
-            presentationSizing(.form)
-        } else {
-            presentationDetents([.large])
-        }
-    }
-}
-
 #if DEBUG
 private struct MainPreview: View {
     let stores: MainPreviewStores

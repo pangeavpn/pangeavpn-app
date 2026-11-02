@@ -98,6 +98,16 @@ final class GoCore: CoreBridge {
         try check(ok, err)
     }
 
+    func applePurchase(signedTransaction: String, accountNumber: String?) throws -> ApplePurchaseResult {
+        try CoreJSON.decode(call { MobileApplePurchase(signedTransaction, accountNumber ?? "", $0) })
+    }
+
+    func deleteAccount() throws {
+        var err: NSError?
+        let ok = MobileDeleteAccount(&err)
+        try check(ok, err)
+    }
+
     func setClientInfo(appVersion: String, osVersion: String) {
         MobileSetClientInfo(appVersion, osVersion)
     }

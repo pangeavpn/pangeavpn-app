@@ -6,7 +6,7 @@ struct SubscriptionLine: Equatable, Sendable {
     let warn: Bool
 }
 
-// Desktop's account-bar wording; read-only, since iOS shows no purchase or billing link.
+// Desktop's account-bar wording; buying and billing live on the Subscription page and paywall.
 enum SubscriptionText {
     static func line(_ sub: Subscription?, locale: Locale = .current, timeZone: TimeZone = .current) -> SubscriptionLine {
         guard let sub else { return SubscriptionLine(text: none, warn: false) }

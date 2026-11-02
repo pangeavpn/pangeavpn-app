@@ -47,6 +47,8 @@ final class GalleryStores {
     let settings: SettingsStore
     let connection: ConnectionStore
     let diagnostics: DiagnosticsStore
+    let storeClient: FakeStoreClient
+    let purchases: PurchaseStore
     let toasts = ToastCenter()
     private let connectedFor: TimeInterval?
     private let defaults: UserDefaults
@@ -86,6 +88,9 @@ final class GalleryStores {
         self.session = session
         connection = ConnectionStore(tunnel: tunnel, servers: servers, settings: settings, session: session)
         diagnostics = DiagnosticsStore(core: core, tunnel: tunnel)
+        let storeClient = FakeStoreClient()
+        self.storeClient = storeClient
+        purchases = PurchaseStore(core: core, session: session, store: storeClient)
         restartClock()
     }
 
@@ -116,6 +121,7 @@ final class GalleryStores {
             .environment(settings)
             .environment(connection)
             .environment(diagnostics)
+            .environment(purchases)
             .toastOverlay()
             .environment(toasts)
             // A bare hosting controller has no active scene, so the privacy cover would hide the screen.
