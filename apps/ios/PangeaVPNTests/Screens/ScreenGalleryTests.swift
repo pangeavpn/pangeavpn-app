@@ -139,13 +139,14 @@ final class ScreenGalleryTests: XCTestCase {
     // Every page opens already pushed, so each one is its own shot.
     func testSettingsPages() async throws {
         let (camera, stores) = try await gallery(status: GalleryData.status(.connected, transport: "reality"))
-        stores.settings.setDeveloperMode(true)
         await stores.session.loadDevices()
         let pages: [SettingsRoute] = [
             .transport, .provisioning, .network, .killSwitch, .splitTunnel, .startup,
             .notifications, .panic, .language, .appearance, .support, .update, .developer, .devices,
         ]
         for (index, route) in pages.enumerated() {
+            // Only the developer page needs the hidden options on; the iPad rail would list them on every shot.
+            stores.settings.setDeveloperMode(route == .developer)
             let name = String(format: "13-%02d-%@", index + 1, String(describing: route))
             try await camera.shoot(name, looks: [.light, .dark],
                                    ready: { !stores.session.loadingDevices }) {

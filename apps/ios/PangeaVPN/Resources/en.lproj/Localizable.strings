@@ -251,7 +251,7 @@
 "paywall_restore" = "Restore Purchases";
 "paywall_start_trial" = "Start free week";
 "paywall_subscribe" = "Subscribe";
-"paywall_subtitle" = "No email or personal details needed. One account number works on all your devices and on the website.";
+"paywall_subtitle" = "No email or personal details needed. One account number works on all your devices.";
 "paywall_terms_link" = "Terms of Use";
 "paywall_terms_paid" = "%@, billed to your Apple ID.";
 "paywall_terms_renewal" = "Renews automatically until cancelled. Cancel at least 24 hours before the current period ends in your Apple ID settings.";
@@ -482,5 +482,4 @@
 "update_appstore" = "PangeaVPN updates through the App Store. Turn on automatic updates in Settings › App Store.";
 "update_build" = "Build";
 "update_installed_heading" = "Installed version";
-"update_testflight" = "PangeaVPN updates through TestFlight. Turn on automatic updates for PangeaVPN in the TestFlight app.";
 "update_version" = "Version";

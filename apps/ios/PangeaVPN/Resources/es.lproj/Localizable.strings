@@ -251,7 +251,7 @@
 "paywall_restore" = "Restaurar compras";
 "paywall_start_trial" = "Empezar semana gratis";
 "paywall_subscribe" = "Suscribirse";
-"paywall_subtitle" = "No hace falta correo electrónico ni datos personales. Un solo número de cuenta funciona en todos tus dispositivos y en el sitio web.";
+"paywall_subtitle" = "No hace falta correo electrónico ni datos personales. Un solo número de cuenta funciona en todos tus dispositivos.";
 "paywall_terms_link" = "Condiciones de uso";
 "paywall_terms_paid" = "%@, con cargo a tu Apple ID.";
 "paywall_terms_renewal" = "La suscripción se renueva automáticamente hasta que la canceles. Cancélala al menos 24 horas antes de que termine el periodo actual en los ajustes de tu Apple ID.";
@@ -482,5 +482,4 @@
 "update_appstore" = "PangeaVPN se actualiza a través del App Store. Activa las actualizaciones automáticas en Ajustes › App Store.";
 "update_build" = "Compilación";
 "update_installed_heading" = "Versión instalada";
-"update_testflight" = "PangeaVPN se actualiza a través de TestFlight. Activa las actualizaciones automáticas de PangeaVPN en la app TestFlight.";
 "update_version" = "Versión";

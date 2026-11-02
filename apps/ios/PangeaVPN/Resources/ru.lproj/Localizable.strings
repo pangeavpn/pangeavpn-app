@@ -251,7 +251,7 @@
 "paywall_restore" = "Восстановить покупки";
 "paywall_start_trial" = "Начать бесплатную неделю";
 "paywall_subscribe" = "Оформить подписку";
-"paywall_subtitle" = "Не нужны ни e-mail, ни личные данные. Один номер аккаунта работает на всех ваших устройствах и на сайте.";
+"paywall_subtitle" = "Не нужны ни e-mail, ни личные данные. Один номер аккаунта работает на всех ваших устройствах.";
 "paywall_terms_link" = "Условия использования";
 "paywall_terms_paid" = "%@ со списанием с вашего Apple ID.";
 "paywall_terms_renewal" = "Подписка продлевается автоматически, пока вы её не отмените. Отмените не позднее чем за 24 часа до конца текущего периода в настройках Apple ID.";
@@ -482,5 +482,4 @@
 "update_appstore" = "PangeaVPN обновляется через App Store. Включите автоматические обновления в разделе «Настройки › App Store».";
 "update_build" = "Сборка";
 "update_installed_heading" = "Установленная версия";
-"update_testflight" = "PangeaVPN обновляется через TestFlight. Включите автоматические обновления PangeaVPN в приложении TestFlight.";
 "update_version" = "Версия";

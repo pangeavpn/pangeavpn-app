@@ -251,7 +251,7 @@
 "paywall_restore" = "恢复购买";
 "paywall_start_trial" = "开始免费一周";
 "paywall_subscribe" = "订阅";
-"paywall_subtitle" = "无需电子邮件或个人信息。一个账号即可在您的所有设备和网站上使用。";
+"paywall_subtitle" = "无需电子邮件或个人信息。一个账号即可在您的所有设备上使用。";
 "paywall_terms_link" = "使用条款";
 "paywall_terms_paid" = "%@，从您的 Apple ID 扣费。";
 "paywall_terms_renewal" = "订阅会自动续订，直至取消。请在当前周期结束前至少 24 小时，在 Apple ID 设置中取消。";
@@ -482,5 +482,4 @@
 "update_appstore" = "PangeaVPN 通过 App Store 更新。请在“设置 › App Store”中开启自动更新。";
 "update_build" = "构建版本";
 "update_installed_heading" = "已安装版本";
-"update_testflight" = "PangeaVPN 通过 TestFlight 更新。请在 TestFlight App 中为 PangeaVPN 开启自动更新。";
 "update_version" = "版本";

@@ -15,14 +15,14 @@ export default {
     fa: "طرح خود را انتخاب کنید"
   },
   paywall_subtitle: {
-    en: "No email or personal details needed. One account number works on all your devices and on the website.",
-    es: "No hace falta correo electrónico ni datos personales. Un solo número de cuenta funciona en todos tus dispositivos y en el sitio web.",
-    fr: "Aucune adresse e-mail ni donnée personnelle requise. Un seul numéro de compte fonctionne sur tous vos appareils et sur le site web.",
-    ru: "Не нужны ни e-mail, ни личные данные. Один номер аккаунта работает на всех ваших устройствах и на сайте.",
-    uk: "Не потрібні ні e-mail, ні особисті дані. Один номер акаунта працює на всіх ваших пристроях і на сайті.",
-    zh: "无需电子邮件或个人信息。一个账号即可在您的所有设备和网站上使用。",
-    ar: "لا حاجة إلى بريد إلكتروني أو بيانات شخصية. رقم حساب واحد يعمل على جميع أجهزتك وعلى الموقع.",
-    fa: "به ایمیل یا اطلاعات شخصی نیازی نیست. یک شماره حساب روی همهٔ دستگاه‌های شما و در وب‌سایت کار می‌کند."
+    en: "No email or personal details needed. One account number works on all your devices.",
+    es: "No hace falta correo electrónico ni datos personales. Un solo número de cuenta funciona en todos tus dispositivos.",
+    fr: "Aucune adresse e-mail ni donnée personnelle requise. Un seul numéro de compte fonctionne sur tous vos appareils.",
+    ru: "Не нужны ни e-mail, ни личные данные. Один номер аккаунта работает на всех ваших устройствах.",
+    uk: "Не потрібні ні e-mail, ні особисті дані. Один номер акаунта працює на всіх ваших пристроях.",
+    zh: "无需电子邮件或个人信息。一个账号即可在您的所有设备上使用。",
+    ar: "لا حاجة إلى بريد إلكتروني أو بيانات شخصية. رقم حساب واحد يعمل على جميع أجهزتك.",
+    fa: "به ایمیل یا اطلاعات شخصی نیازی نیست. یک شماره حساب روی همهٔ دستگاه‌های شما کار می‌کند."
   },
   paywall_plan_month: {
     en: "1 month", es: "1 mes", fr: "1 mois", ru: "1 месяц",

@@ -62,7 +62,7 @@ struct PaywallView: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityAddTraits(.isHeader)
                 .padding(.top, 6)
-            Text(String(localized: "paywall_subtitle", defaultValue: "No email or personal details needed. One account number works on all your devices and on the website."))
+            Text(String(localized: "paywall_subtitle", defaultValue: "No email or personal details needed. One account number works on all your devices."))
                 .scaledFont(size: 14, relativeTo: .subheadline)
                 .lineSpacing(2)
                 .foregroundStyle(Palette.textSecondary)
@@ -201,13 +201,14 @@ struct PlanCard: View {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 8) {
                         Text(PlanText.title(plan.term))
-                            .scaledFont(size: 17, weight: .semibold, relativeTo: .body)
-                            .foregroundStyle(Palette.text)
+                            .scaledFont(size: 14, weight: .medium, relativeTo: .subheadline)
+                            .foregroundStyle(Palette.textSecondary)
                         if plan.trialEligible && !typeSize.isAccessibilitySize { badge }
                     }
+                    // The billed amount must be the most prominent price on the card, ahead of the free week.
                     Text(PlanText.price(plan))
-                        .scaledFont(size: 14, relativeTo: .subheadline)
-                        .foregroundStyle(Palette.textSecondary)
+                        .scaledFont(size: 17, weight: .semibold, relativeTo: .body)
+                        .foregroundStyle(Palette.text)
                         .fixedSize(horizontal: false, vertical: true)
                     if plan.trialEligible && typeSize.isAccessibilitySize { badge }
                 }
@@ -231,11 +232,11 @@ struct PlanCard: View {
 
     private var badge: some View {
         Text(PlanText.trialBadge)
-            .scaledFont(size: 11, weight: .bold, relativeTo: .caption2)
-            .foregroundStyle(Palette.onAccent)
+            .scaledFont(size: 11, weight: .semibold, relativeTo: .caption2)
+            .foregroundStyle(Palette.accent)
             .padding(.horizontal, 8)
             .padding(.vertical, 3)
-            .background(Palette.accent, in: Capsule())
+            .background(Palette.accent.opacity(0.12), in: Capsule())
     }
 }
 

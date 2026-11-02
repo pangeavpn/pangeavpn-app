@@ -154,16 +154,6 @@ export default {
     ar: "يتم تحديث PangeaVPN عبر App Store. فعّل التحديثات التلقائية من الإعدادات › App Store.",
     fa: "PangeaVPN از طریق App Store به‌روزرسانی می‌شود. به‌روزرسانی خودکار را در Settings › App Store روشن کنید."
   },
-  update_testflight: {
-    en: "PangeaVPN updates through TestFlight. Turn on automatic updates for PangeaVPN in the TestFlight app.",
-    es: "PangeaVPN se actualiza a través de TestFlight. Activa las actualizaciones automáticas de PangeaVPN en la app TestFlight.",
-    fr: "PangeaVPN se met à jour via TestFlight. Activez les mises à jour automatiques de PangeaVPN dans l'app TestFlight.",
-    ru: "PangeaVPN обновляется через TestFlight. Включите автоматические обновления PangeaVPN в приложении TestFlight.",
-    uk: "PangeaVPN оновлюється через TestFlight. Увімкніть автоматичні оновлення PangeaVPN у застосунку TestFlight.",
-    zh: "PangeaVPN 通过 TestFlight 更新。请在 TestFlight App 中为 PangeaVPN 开启自动更新。",
-    ar: "يتم تحديث PangeaVPN عبر TestFlight. فعّل التحديثات التلقائية لـ PangeaVPN في تطبيق TestFlight.",
-    fa: "PangeaVPN از طریق TestFlight به‌روزرسانی می‌شود. به‌روزرسانی خودکار PangeaVPN را در برنامه‌ی TestFlight روشن کنید."
-  },
   update_installed_heading: {
     en: "Installed version", es: "Versión instalada", fr: "Version installée", ru: "Установленная версия",
     uk: "Встановлена версія", zh: "已安装版本", ar: "الإصدار المثبّت", fa: "نسخه‌ی نصب‌شده"

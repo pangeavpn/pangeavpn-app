@@ -251,7 +251,7 @@
 "paywall_restore" = "بازیابی خریدها";
 "paywall_start_trial" = "شروع هفتهٔ رایگان";
 "paywall_subscribe" = "اشتراک بگیرید";
-"paywall_subtitle" = "به ایمیل یا اطلاعات شخصی نیازی نیست. یک شماره حساب روی همهٔ دستگاه‌های شما و در وب‌سایت کار می‌کند.";
+"paywall_subtitle" = "به ایمیل یا اطلاعات شخصی نیازی نیست. یک شماره حساب روی همهٔ دستگاه‌های شما کار می‌کند.";
 "paywall_terms_link" = "شرایط استفاده";
 "paywall_terms_paid" = "%@ که از Apple ID شما پرداخت می‌شود.";
 "paywall_terms_renewal" = "اشتراک تا زمانی که لغو نکنید، به‌طور خودکار تمدید می‌شود. دست‌کم ۲۴ ساعت پیش از پایان دورهٔ فعلی، آن را در تنظیمات Apple ID لغو کنید.";
@@ -482,5 +482,4 @@
 "update_appstore" = "PangeaVPN از طریق App Store به‌روزرسانی می‌شود. به‌روزرسانی خودکار را در Settings › App Store روشن کنید.";
 "update_build" = "شماره‌ی ساخت";
 "update_installed_heading" = "نسخه‌ی نصب‌شده";
-"update_testflight" = "PangeaVPN از طریق TestFlight به‌روزرسانی می‌شود. به‌روزرسانی خودکار PangeaVPN را در برنامه‌ی TestFlight روشن کنید.";
 "update_version" = "نسخه";
