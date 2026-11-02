@@ -5,6 +5,7 @@ struct LoginView: View {
     @Environment(SessionStore.self) private var session
     @Environment(SettingsStore.self) private var settings
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.horizontalSizeClass) private var sizeClass
     @Binding private var token: String
     @State private var submitting = false
 
@@ -29,9 +30,11 @@ struct LoginView: View {
         VStack(spacing: 0) {
             PangeaHeader(version: "v\(Self.versionName)", onToggleTheme: toggleTheme)
             GeometryReader { proxy in
+                let wide = AppLayout.isWide(width: proxy.size.width, sizeClass: sizeClass)
                 ScrollView {
                     form(viewport: proxy.size)
-                        .frame(minHeight: proxy.size.height, alignment: .top)
+                        .readableWidth()
+                        .frame(minHeight: proxy.size.height, alignment: wide ? .center : .top)
                 }
                 .scrollDismissesKeyboard(.interactively)
             }
@@ -48,7 +51,7 @@ struct LoginView: View {
     }
 
     private func form(viewport: CGSize) -> some View {
-        let available = viewport.width - Self.gutter * 2
+        let available = min(viewport.width, AppLayout.readableWidth) - Self.gutter * 2
         let mapSize = max(0, min(available, viewport.height * 0.38, Self.maxMapSize))
         return VStack(alignment: .leading, spacing: 0) {
             DriftMap(state: .disconnected)

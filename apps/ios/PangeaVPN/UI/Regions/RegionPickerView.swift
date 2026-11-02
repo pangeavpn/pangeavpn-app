@@ -1,6 +1,6 @@
 import SwiftUI
 
-// The full-screen region list, with the multihop options on top when any server can relay.
+// The region list (full screen on iPhone, a sheet on a wide iPad), with multihop on top when any server can relay.
 struct RegionPickerView: View {
     @Environment(ServersStore.self) private var servers
     @Environment(SettingsStore.self) private var settings

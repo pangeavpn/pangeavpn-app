@@ -3,11 +3,17 @@ import SwiftUI
 struct DeviceLimitView: View {
     @Environment(SessionStore.self) private var session
     @Environment(ToastCenter.self) private var toasts
+    @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var loaded = false
     @State private var removedAny = false
     @State private var removingId: String?
     @State private var retrying = false
     @State private var notice: DeviceLimitNotice?
+    @State private var listHeight: CGFloat = 0
+
+    // On a wide window the list hugs its rows, so the buttons sit under it; the floor keeps pull-to-refresh usable.
+    private static let wideListMinHeight: CGFloat = 120
+    private static let wideListMaxHeight: CGFloat = 440
 
     init() {}
 
@@ -27,6 +33,16 @@ struct DeviceLimitView: View {
     }
 
     var body: some View {
+        GeometryReader { proxy in
+            let wide = AppLayout.isWide(width: proxy.size.width, sizeClass: sizeClass)
+            column(wide: wide)
+                .readableWidth()
+        }
+        .background(Palette.bg.ignoresSafeArea())
+        .task { await load() }
+    }
+
+    private func column(wide: Bool) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             SectionLabel(String(localized: "devicelimit_title", defaultValue: "Device Limit Reached"))
             Text(String(
@@ -39,7 +55,7 @@ struct DeviceLimitView: View {
             .fixedSize(horizontal: false, vertical: true)
             .padding(.top, 8)
 
-            deviceList
+            deviceList(wide: wide)
                 .padding(.top, 22)
 
             if let message {
@@ -55,9 +71,7 @@ struct DeviceLimitView: View {
         .padding(.horizontal, 20)
         .padding(.top, 32)
         .padding(.bottom, 24)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(Palette.bg.ignoresSafeArea())
-        .task { await load() }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: wide ? .leading : .topLeading)
     }
 
     private var actions: some View {
@@ -78,11 +92,11 @@ struct DeviceLimitView: View {
     }
 
     @ViewBuilder
-    private var deviceList: some View {
+    private func deviceList(wide: Bool) -> some View {
         if session.loadingDevices && session.devices.isEmpty {
             ProgressView()
                 .tint(Palette.accent)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .frame(maxWidth: .infinity, maxHeight: wide ? Self.wideListMinHeight : .infinity)
         } else {
             ScrollView {
                 LazyVStack(spacing: 9) {
@@ -97,7 +111,9 @@ struct DeviceLimitView: View {
                     }
                 }
                 .padding(.bottom, 12)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { listHeight = $0 }
             }
+            .frame(maxHeight: wide ? min(max(listHeight, Self.wideListMinHeight), Self.wideListMaxHeight) : nil)
             .refreshable { await load() }
         }
     }
