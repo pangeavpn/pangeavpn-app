@@ -17,6 +17,8 @@
 "app_name" = "PangeaVPN";
 "appearance_accent_heading" = "لون التمييز";
 "appearance_description" = "السمة ولون التمييز المستخدمان في التطبيق.";
+"appearance_icon_match" = "أيقونة التطبيق بلون التمييز";
+"appearance_icon_match_hint" = "تأخذ أيقونة الشاشة الرئيسية لون التمييز. يطلب منك iOS تأكيد كل تغيير.";
 "appearance_theme_dark" = "داكن";
 "appearance_theme_heading" = "السمة";
 "appearance_theme_light" = "فاتح";

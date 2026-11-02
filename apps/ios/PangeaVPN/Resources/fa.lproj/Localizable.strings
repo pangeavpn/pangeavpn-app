@@ -17,6 +17,8 @@
 "app_name" = "PangeaVPN";
 "appearance_accent_heading" = "رنگ تأکیدی";
 "appearance_description" = "پوسته و رنگ تأکیدی مورد استفاده در برنامه.";
+"appearance_icon_match" = "نماد برنامه به رنگ تأکیدی";
+"appearance_icon_match_hint" = "نماد صفحهٔ اصلی رنگ تأکیدی را می‌گیرد. iOS هر تغییر را از شما تأیید می‌خواهد.";
 "appearance_theme_dark" = "تیره";
 "appearance_theme_heading" = "پوسته";
 "appearance_theme_light" = "روشن";

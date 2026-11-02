@@ -48,7 +48,17 @@ struct AppearancePage: View {
             SettingsCard(accentTitle) {
                 AccentSwatches(selected: settings.accent, label: accentTitle) { choice in
                     settings.setAccent(choice)
+                    Task { await AppIconSync.apply(choice, matching: settings.iconMatchesAccent, on: SystemAppIcon()) }
                 }
+                StoreSwitchRow(
+                    title: String(localized: "appearance_icon_match", defaultValue: "Match app icon to accent"),
+                    value: settings.iconMatchesAccent,
+                    hint: String(localized: "appearance_icon_match_hint", defaultValue: "Your Home Screen icon takes the accent colour. iOS asks you to confirm each change."),
+                    apply: { matching in
+                        settings.setIconMatchesAccent(matching)
+                        await AppIconSync.apply(settings.accent, matching: matching, on: SystemAppIcon())
+                    }
+                )
             }
         }
     }

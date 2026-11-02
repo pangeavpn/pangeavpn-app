@@ -10,6 +10,7 @@ enum SharedPrefs {
         static let connectionAlerts = "connectionAlerts"
         static let panicWipe = "panicWipe"
         static let accent = "accent"
+        static let iconMatchesAccent = "iconMatchesAccent"
         static let developerMode = "developerMode"
         static let splitTunnelEnabled = "splitTunnelEnabled"
         static let splitTunnelRanges = "splitTunnelRanges"

@@ -17,6 +17,8 @@
 "app_name" = "PangeaVPN";
 "appearance_accent_heading" = "Акцентний колір";
 "appearance_description" = "Тема й акцентний колір застосунку.";
+"appearance_icon_match" = "Значок застосунку в акцентному кольорі";
+"appearance_icon_match_hint" = "Значок на початковому екрані набуває акцентного кольору. iOS просить підтвердити кожну зміну.";
 "appearance_theme_dark" = "Темна";
 "appearance_theme_heading" = "Тема";
 "appearance_theme_light" = "Світла";

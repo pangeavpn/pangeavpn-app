@@ -17,6 +17,8 @@
 "app_name" = "PangeaVPN";
 "appearance_accent_heading" = "强调色";
 "appearance_description" = "应用中使用的主题和强调色。";
+"appearance_icon_match" = "应用图标跟随强调色";
+"appearance_icon_match_hint" = "主屏幕图标会采用强调色。每次更改时 iOS 都会请你确认。";
 "appearance_theme_dark" = "深色";
 "appearance_theme_heading" = "主题";
 "appearance_theme_light" = "浅色";

@@ -17,6 +17,8 @@
 "app_name" = "PangeaVPN";
 "appearance_accent_heading" = "Color de acento";
 "appearance_description" = "El tema y el color de acento de la aplicación.";
+"appearance_icon_match" = "Icono de la app en el color de acento";
+"appearance_icon_match_hint" = "El icono de tu pantalla de inicio toma el color de acento. iOS te pide confirmar cada cambio.";
 "appearance_theme_dark" = "Oscuro";
 "appearance_theme_heading" = "Tema";
 "appearance_theme_light" = "Claro";

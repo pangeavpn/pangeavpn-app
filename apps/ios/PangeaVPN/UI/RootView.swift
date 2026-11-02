@@ -159,6 +159,8 @@ struct RootView: View {
         purchases.reset()
         await session.wipe()
         settings.resetToDefaults()
+        // A custom Home Screen icon would outlive the wipe and hint the app was set up.
+        await AppIconSync.apply(.terra, matching: false, on: SystemAppIcon())
         servers.reset()
         PanicShortcut.update(enabled: false)
         PanicTrigger.shared.requested = false

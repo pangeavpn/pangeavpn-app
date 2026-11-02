@@ -19,6 +19,7 @@ final class SettingsStore {
     private(set) var connectionAlerts = true
     private(set) var panicWipe = false
     private(set) var accent = Accent.terra
+    private(set) var iconMatchesAccent = true
     private(set) var developerMode = false
     private(set) var splitTunnelEnabled = false
     private(set) var splitTunnelRanges: [String] = []
@@ -43,6 +44,7 @@ final class SettingsStore {
         connectionAlerts = SharedPrefs.connectionAlerts(in: defaults)
         panicWipe = SharedPrefs.bool(Key.panicWipe, default: false, in: defaults)
         accent = defaults.string(forKey: Key.accent).flatMap(Accent.init(rawValue:)) ?? .terra
+        iconMatchesAccent = SharedPrefs.bool(Key.iconMatchesAccent, default: true, in: defaults)
         developerMode = SharedPrefs.bool(Key.developerMode, default: false, in: defaults)
         splitTunnelEnabled = SharedPrefs.bool(Key.splitTunnelEnabled, default: false, in: defaults)
         splitTunnelRanges = SharedPrefs.strings(Key.splitTunnelRanges, in: defaults)
@@ -140,6 +142,11 @@ final class SettingsStore {
         AccentTheme.shared.accent = choice
     }
 
+    func setIconMatchesAccent(_ enabled: Bool) {
+        defaults.set(enabled, forKey: SharedPrefs.Key.iconMatchesAccent)
+        iconMatchesAccent = enabled
+    }
+
     func setDeveloperMode(_ enabled: Bool) {
         defaults.set(enabled, forKey: SharedPrefs.Key.developerMode)
         developerMode = enabled
@@ -187,6 +194,7 @@ final class SettingsStore {
         connectionAlerts = true
         panicWipe = false
         accent = .terra
+        iconMatchesAccent = true
         developerMode = false
         splitTunnelEnabled = false
         splitTunnelRanges = []
