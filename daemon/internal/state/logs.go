@@ -112,3 +112,15 @@ func (s *LogStore) Since(since int64) []LogEntry {
 
 	return out
 }
+
+// Clear empties the buffer in place, leaving any file sink attached, so
+// holders of this store keep a valid pointer.
+func (s *LogStore) Clear() {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
+	s.mu.Lock()
+	clear(s.entries)
+	s.entries = s.entries[:0]
+	s.mu.Unlock()
+}

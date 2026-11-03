@@ -1,0 +1,245 @@
+import SwiftUI
+
+// The frame every settings detail page shares: title in the nav bar, description, scrolling cards.
+struct SettingsPage<Content: View>: View {
+    @Environment(SettingsStore.self) private var settings
+    private let route: SettingsRoute
+    private let description: String
+    private let content: Content
+
+    init(_ route: SettingsRoute, description: String, @ViewBuilder content: () -> Content) {
+        self.route = route
+        self.description = description
+        self.content = content()
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                Text(description)
+                    .scaledFont(size: 14, relativeTo: .subheadline)
+                    .foregroundStyle(Palette.textMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let message = settings.error {
+                    InfoNote(message, systemImage: "exclamationmark.circle", tint: Palette.error)
+                        .transition(.opacity)
+                }
+                content
+            }
+            .animation(Motion.quick, value: settings.error)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+            .padding(.bottom, 32)
+            // Wider than any phone, so only a wide pane is held back from stretching the cards edge to edge.
+            .frame(maxWidth: Self.maxContentWidth)
+            .frame(maxWidth: .infinity)
+        }
+        .background(Palette.bg.ignoresSafeArea())
+        .navigationTitle(route.title)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(Palette.bg, for: .navigationBar)
+        // A failure belongs to the page it happened on, so leaving clears it for the next page.
+        .onDisappear { settings.clearError() }
+    }
+
+    private static var maxContentWidth: CGFloat { 640 }
+}
+
+// A titled group of rows on a raised surface, like desktop's settings cards.
+struct SettingsCard<Content: View>: View {
+    private let title: String?
+    private let content: Content
+
+    init(_ title: String? = nil, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            if let title {
+                SectionLabel(title)
+                    .padding(.leading, 4)
+            }
+            content
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+// Icon, title and current value, with a chevron when the row leads to another page.
+struct SettingsNavRow: View {
+    @Environment(\.dynamicTypeSize) private var typeSize
+    // Grows with the glyph, so wide symbols never reach the title at large text sizes.
+    @ScaledMetric(relativeTo: .body) private var iconWidth: CGFloat = 28
+    private let systemImage: String
+    private let title: String
+    private let value: String?
+    private let tint: Color?
+    private let showsChevron: Bool
+
+    init(systemImage: String, title: String, value: String? = nil, tint: Color? = nil, showsChevron: Bool = true) {
+        self.systemImage = systemImage
+        self.title = title
+        self.value = value
+        self.tint = tint
+        self.showsChevron = showsChevron
+    }
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Image(systemName: systemImage)
+                .scaledFont(size: 17, weight: .regular, relativeTo: .body)
+                .foregroundStyle(tint ?? Palette.textSecondary)
+                .frame(width: iconWidth)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .scaledFont(size: 16, weight: .semibold, relativeTo: .body)
+                    .foregroundStyle(tint ?? Palette.text)
+                    .multilineTextAlignment(.leading)
+                if let value, !value.isEmpty {
+                    Text(value)
+                        .scaledFont(size: 12, design: .monospaced, relativeTo: .caption)
+                        .foregroundStyle(Palette.textMuted)
+                        .multilineTextAlignment(.leading)
+                        .lineLimit(typeSize.isAccessibilitySize ? 3 : 2)
+                        .truncationMode(.tail)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            if showsChevron {
+                Image(systemName: "chevron.right")
+                    .scaledFont(size: 13, weight: .semibold, relativeTo: .footnote)
+                    .foregroundStyle(Palette.textMuted)
+                    .accessibilityHidden(true)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .frame(minHeight: 56)
+        .background(Palette.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Palette.borderSubtle, lineWidth: 1))
+        .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .accessibilityElement(children: .combine)
+    }
+}
+
+// Desktop's rail item: flat until selected, then washed in the accent with its icon and value tinted.
+struct SettingsRailRow: View {
+    @Environment(\.dynamicTypeSize) private var typeSize
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @ScaledMetric(relativeTo: .body) private var iconWidth: CGFloat = 26
+    private let systemImage: String
+    private let title: String
+    private let value: String?
+    private let tint: Color?
+    private let selected: Bool
+
+    private static let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
+
+    init(systemImage: String, title: String, value: String? = nil, tint: Color? = nil, selected: Bool = false) {
+        self.systemImage = systemImage
+        self.title = title
+        self.value = value
+        self.tint = tint
+        self.selected = selected
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: systemImage)
+                .scaledFont(size: 16, weight: .regular, relativeTo: .body)
+                .foregroundStyle(tint ?? (selected ? Palette.accent : Palette.textSecondary))
+                .frame(width: iconWidth)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .scaledFont(size: 15, weight: .semibold, relativeTo: .subheadline)
+                    .foregroundStyle(tint ?? Palette.text)
+                    .multilineTextAlignment(.leading)
+                if let value, !value.isEmpty {
+                    Text(value)
+                        .scaledFont(size: 12, design: .monospaced, relativeTo: .caption)
+                        .foregroundStyle(selected ? Palette.accent : Palette.textMuted)
+                        .multilineTextAlignment(.leading)
+                        .lineLimit(typeSize.isAccessibilitySize ? 3 : 2)
+                        .truncationMode(.tail)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .frame(minHeight: 48)
+        .background(selected ? Palette.accent.opacity(0.15) : Color.clear, in: Self.shape)
+        .contentShape(Self.shape)
+        .animation(Motion.state(reduceMotion), value: selected)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+}
+
+// A muted explanatory line with an icon, for consequences and caveats.
+struct InfoNote: View {
+    // A fixed column, so every note's text starts at the same x whatever its glyph's width.
+    @ScaledMetric(relativeTo: .caption) private var iconWidth: CGFloat = 18
+    private let text: String
+    private let systemImage: String
+    private let tint: Color
+
+    init(_ text: String, systemImage: String = "info.circle", tint: Color = Palette.textMuted) {
+        self.text = text
+        self.systemImage = systemImage
+        self.tint = tint
+    }
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Image(systemName: systemImage)
+                .scaledFont(size: 12, relativeTo: .caption)
+                .foregroundStyle(tint)
+                .frame(width: iconWidth)
+                .accessibilityHidden(true)
+            Text(text)
+                .scaledFont(size: 12, relativeTo: .caption)
+                .foregroundStyle(tint)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 4)
+    }
+}
+
+// The top-bar button that leaves the full-screen settings.
+struct SettingsCloseButton: View {
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "xmark")
+                .scaledFont(size: 15, weight: .semibold, relativeTo: .body)
+                .foregroundStyle(Palette.text)
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(String(localized: "settings_close", defaultValue: "Close"))
+    }
+}
+
+#if DEBUG
+#Preview("Settings scaffold") {
+    NavigationStack {
+        SettingsPage(.network, description: "Tunnel settings and fixes for restrictive Wi-Fi.") {
+            SettingsCard("Example") {
+                SettingsNavRow(systemImage: "shield", title: "Censorship Bypass", value: "Automatic (recommended)")
+                SettingsNavRow(systemImage: "rectangle.portrait.and.arrow.right", title: "Sign Out", tint: Palette.error, showsChevron: false)
+                InfoNote("Applies on next connect.")
+            }
+        }
+    }
+    .environment(SettingsStore(core: FakeCore()))
+}
+#endif

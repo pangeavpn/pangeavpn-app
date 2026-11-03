@@ -2,6 +2,8 @@ package shadowsocks
 
 import (
 	"context"
+	"net"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -112,5 +114,21 @@ func TestProxyManager_RestartRebinds(t *testing.T) {
 	t.Cleanup(func() { mgr.Stop(context.Background()) })
 	if port <= 0 {
 		t.Fatalf("restart port = %d, want > 0", port)
+	}
+}
+
+func TestProxyManager_LogsAnIPv6RemoteBracketed(t *testing.T) {
+	logs := state.NewLogStore(100)
+	mgr := NewProxyManager(logs)
+	profile := startableProfile(t)
+	profile.RemoteHost = "::1"
+	if _, err := mgr.Start(context.Background(), profile); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() { mgr.Stop(context.Background()) })
+
+	want := "via " + net.JoinHostPort("::1", strconv.Itoa(profile.RemotePort))
+	if !loggedContaining(logs, want) {
+		t.Fatalf("no log line contains %q: %+v", want, logs.Since(0))
 	}
 }

@@ -1,0 +1,409 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>PangeaVPN — Android design preview</title>
+<style>
+/* Tokens are the desktop stylesheet's, verbatim — the point of the preview is
+   that the phone and the desktop app are the same product. */
+:root{
+  color-scheme: dark;
+  --bg-base:#141312; --bg-surface:#1e1c1c; --bg-elevated:#272424;
+  --border:#332f2f; --border-subtle:#272424;
+  --text-primary:#fbf9f2; --text-secondary:#aea299; --text-muted:#84847c;
+  --accent:#c3562b; --accent-hover:#a84a25; --accent-glow:rgba(195,86,43,.15); --accent-text:#fbf9f2;
+  --success:#10b981; --warning:#f59e0b; --danger:#f43f5e;
+  --dot-off:#5a5654;
+  --mono:"SF Mono","Cascadia Mono",ui-monospace,monospace;
+}
+body[data-theme="light"]{
+  color-scheme: light;
+  --bg-base:#fbf9f2; --bg-surface:#ffffff; --bg-elevated:#ffffff;
+  --border:#ddd8cf; --border-subtle:#eee9e0;
+  --text-primary:#1e1c1c; --text-secondary:#5f5b53; --text-muted:#6d685f;
+  --accent-glow:rgba(195,86,43,.10); --dot-off:#ccc8c0;
+}
+*{box-sizing:border-box}
+body{
+  margin:0; padding:32px 16px 64px;
+  font-family:system-ui,-apple-system,"Segoe UI",sans-serif;
+  background:var(--bg-base); color:var(--text-primary);
+  display:flex; flex-direction:column; align-items:center; gap:24px;
+}
+
+/* ── Preview chrome (not part of the app) ───────────────────── */
+.toolbar{display:flex; flex-wrap:wrap; gap:8px; justify-content:center; max-width:920px}
+.toolbar button{
+  font:inherit; font-size:.78rem; font-weight:600; cursor:pointer;
+  padding:7px 14px; border-radius:999px;
+  border:1px solid var(--border); background:var(--bg-surface); color:var(--text-secondary);
+}
+.toolbar button[aria-pressed="true"]{border-color:var(--accent); color:var(--accent); background:var(--accent-glow)}
+.caption{font-size:.72rem; letter-spacing:.14em; text-transform:uppercase; font-weight:700; color:var(--text-muted)}
+.stage{display:flex; flex-wrap:wrap; gap:36px; justify-content:center; align-items:flex-start}
+.frame{display:flex; flex-direction:column; align-items:center; gap:10px}
+
+.phone{
+  width:360px; height:740px; overflow:hidden;
+  border-radius:34px; border:1px solid var(--border); background:var(--bg-base);
+  display:flex; flex-direction:column;
+}
+.tv{
+  width:760px; height:428px; overflow:hidden;
+  border-radius:12px; border:1px solid var(--border); background:var(--bg-base);
+  display:flex; flex-direction:column;
+}
+
+/* ── Header ─────────────────────────────────────────────────── */
+.header{flex:none; height:56px; display:flex; align-items:center; gap:10px; padding:0 18px}
+.brand{width:30px; height:30px; flex:none; background:var(--accent);
+  -webkit-mask:url("logo.png") no-repeat center/contain; mask:url("logo.png") no-repeat center/contain}
+.brand-fallback{width:30px; height:30px; border-radius:50%; background:var(--accent); flex:none}
+.version{font-size:.68rem; color:var(--text-muted)}
+.header-spacer{flex:1}
+.icon-btn{width:40px; height:40px; display:grid; place-items:center; border:0; background:none;
+  color:var(--text-muted); cursor:pointer; border-radius:999px}
+.icon-btn:hover{color:var(--text-primary); background:var(--bg-elevated)}
+.icon-btn svg{width:19px; height:19px}
+
+/* ── Body ───────────────────────────────────────────────────── */
+.body{flex:1; min-height:0; overflow-y:auto; padding:0 20px 24px}
+.tv .body{display:flex; gap:24px; padding:0 40px 16px}
+.tv .map-col{flex:0 0 40%; display:grid; place-items:center}
+.tv .hero-col{flex:1; min-width:0; display:flex; flex-direction:column}
+
+.map-wrap{display:grid; place-items:center}
+.drift-map{width:100%; max-width:236px; height:auto; color:var(--text-muted); opacity:.5;
+  transition:color 700ms ease, opacity 700ms ease}
+.tv .drift-map{max-width:260px}
+.drift-frag{transform-box:fill-box; transform-origin:center;
+  transition:transform 1400ms cubic-bezier(.32,.72,0,1)}
+.drift-frag[data-frag="north"]{--dx:20.8px; --dy:-88.4px; --dr:-3.2deg}
+.drift-frag[data-frag="southWest"]{--dx:-78px; --dy:57.2px; --dr:-4deg}
+.drift-frag[data-frag="southEast"]{--dx:83.2px; --dy:67.6px; --dr:4.8deg}
+[data-state="DISCONNECTED"] .drift-frag,
+[data-state="DISCONNECTING"] .drift-frag,
+[data-state="ERROR"] .drift-frag{transform:translate(var(--dx),var(--dy)) rotate(var(--dr))}
+[data-state="CONNECTING"] .drift-frag{transform:translate(calc(var(--dx)*.12),calc(var(--dy)*.12)) rotate(calc(var(--dr)*.12))}
+[data-state="CONNECTED"] .drift-frag{transform:none}
+[data-state="CONNECTING"] .drift-map{opacity:.85; color:var(--accent)}
+[data-state="CONNECTED"] .drift-map{opacity:1; color:var(--success)}
+[data-state="ERROR"] .drift-map{opacity:.55; color:var(--danger)}
+.drift-orbit{transform-box:fill-box; transform-origin:center; animation:orbit 90s linear infinite}
+@keyframes orbit{to{transform:rotate(360deg)}}
+
+.kicker{display:flex; align-items:center; gap:9px}
+.dot{width:8px; height:8px; border-radius:50%; flex:none; background:var(--dot-off);
+  transition:background .4s ease}
+.kicker strong{font-size:.66rem; font-weight:700; letter-spacing:.16em; text-transform:uppercase; color:var(--text-muted)}
+[data-state="CONNECTED"] .dot{background:var(--success)}
+[data-state="CONNECTED"] .kicker strong{color:var(--success)}
+[data-state="CONNECTING"] .dot,[data-state="DISCONNECTING"] .dot{background:var(--warning); animation:pulse 1.6s ease-in-out infinite}
+[data-state="CONNECTING"] .kicker strong,[data-state="DISCONNECTING"] .kicker strong{color:var(--warning)}
+[data-state="ERROR"] .dot{background:var(--danger)}
+[data-state="ERROR"] .kicker strong{color:var(--danger)}
+@keyframes pulse{50%{opacity:.4}}
+
+.headline{margin:6px 0 0; font-size:2rem; font-weight:300; letter-spacing:-.03em; line-height:1.1; color:var(--text-primary)}
+.headline strong{font-weight:700}
+.tv .headline{font-size:1.75rem}
+.detail{display:block; margin-top:6px; font-size:.8rem; line-height:1.35; color:var(--text-muted); min-height:1.35em}
+
+.facts{display:flex; margin-top:14px; padding-top:10px; border-top:1px solid var(--border-subtle)}
+.fact{flex:1; min-width:0; padding-right:10px; border-right:1px solid var(--border-subtle)}
+.fact:last-child{border-right:0; padding-right:0}
+.fact + .fact{padding-left:10px}
+.fact-key{display:block; font-size:.56rem; font-weight:700; letter-spacing:.14em; text-transform:uppercase; color:var(--text-muted)}
+.fact-value{display:block; margin-top:3px; font-family:var(--mono); font-size:.86rem; color:var(--text-primary);
+  font-variant-numeric:tabular-nums; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+
+.section-label{display:block; margin:20px 0 9px; font-size:.6rem; font-weight:700;
+  letter-spacing:.16em; text-transform:uppercase; color:var(--text-muted)}
+
+.regions{display:flex; flex-direction:column; gap:9px}
+.tv .regions{overflow-y:auto; flex:1; min-height:0}
+.region{display:flex; align-items:center; gap:12px; width:100%; padding:11px 14px; border-radius:14px;
+  background:var(--bg-surface); border:1px solid var(--border-subtle); cursor:pointer;
+  font:inherit; color:inherit; text-align:left}
+.region[aria-current="true"]{border-color:var(--accent); background:var(--accent-glow)}
+.region-flag{font-size:1.35rem; line-height:1}
+.region-text{display:flex; flex-direction:column; min-width:0; flex:1}
+.region-name{font-size:.95rem; font-weight:600; color:var(--text-primary)}
+.region-sub{margin-top:1px; font-family:var(--mono); font-size:.65rem; color:var(--text-muted)}
+.load-bar{width:42px; height:5px; border-radius:3px; background:var(--border); overflow:hidden; flex:none}
+.load-fill{display:block; height:100%; border-radius:3px; background:var(--success)}
+.load-mid .load-fill{background:var(--warning)}
+.load-high .load-fill{background:var(--danger)}
+.load-pct{min-width:34px; font-size:.78rem; color:var(--text-muted); text-align:right; font-variant-numeric:tabular-nums}
+.tick{width:18px; text-align:center; color:var(--accent); font-weight:700; opacity:0}
+.region[aria-current="true"] .tick{opacity:1}
+
+.all-regions-row{display:flex; align-items:center; gap:8px; margin-top:9px}
+.all-regions{flex:1; display:flex; align-items:center; gap:12px; padding:13px 14px; border-radius:14px;
+  border:1px dashed var(--border); background:none; color:var(--text-secondary); font:inherit; cursor:pointer}
+.all-regions:hover{border-style:solid; border-color:var(--accent); color:var(--accent)}
+.all-regions svg{width:18px; height:18px; flex:none}
+.all-regions-label{flex:1; font-size:.9rem; font-weight:600}
+.all-regions-count{font-family:var(--mono); font-size:.66rem; color:var(--text-muted)}
+
+.connect{display:block; width:100%; margin-top:18px; padding:16px 24px; border-radius:999px;
+  border:1px solid transparent; background:var(--accent); color:var(--accent-text);
+  font:inherit; font-size:1rem; font-weight:600; cursor:pointer}
+.connect:hover{background:var(--accent-hover)}
+[data-state="CONNECTED"] .connect{background:none; border-color:var(--border); color:var(--text-secondary)}
+[data-state="CONNECTING"] .connect,[data-state="DISCONNECTING"] .connect{animation:pulse 1.8s ease-in-out infinite; cursor:default}
+.tv .connect{margin-top:12px}
+
+/* ── Sign-in ────────────────────────────────────────────────── */
+.auth{min-height:100%; display:flex; flex-direction:column}
+.auth .section-label:first-of-type{margin-top:0}
+.auth-fill{flex:1; min-height:12px}
+.login-map .drift-frag{transform:translate(var(--dx),var(--dy)) rotate(var(--dr))}
+
+.token{display:block; width:100%; padding:15px 16px; border-radius:14px;
+  background:var(--bg-surface); border:1px solid var(--border-subtle); color:var(--text-primary);
+  font-family:var(--mono); font-size:1rem; letter-spacing:.14em; outline:none}
+.token::placeholder{color:var(--text-muted)}
+.token:focus{border-color:var(--accent); background:var(--accent-glow)}
+.auth .connect{margin-top:14px}
+.auth .connect:disabled{opacity:.4; cursor:default}
+
+.auth-error{display:none; margin-top:14px; padding:12px 14px; border-radius:12px;
+  border:1px solid rgba(244,63,94,.35); background:rgba(244,63,94,.1)}
+.has-error .auth-error{display:block}
+.auth-error p{margin:0; font-size:.8rem; line-height:1.45; color:var(--danger)}
+.auth-error button{margin-top:8px; padding:0; border:0; background:none; font:inherit; font-size:.78rem;
+  font-weight:600; color:var(--text-secondary); text-decoration:underline; cursor:pointer}
+
+.auth-hint{margin:16px 0 0; text-align:center; font-size:.72rem; color:var(--text-muted)}
+.auth-hint u{color:var(--text-secondary); text-decoration-color:var(--border)}
+
+.hint{max-width:760px; font-size:.78rem; line-height:1.6; color:var(--text-muted); text-align:center}
+.hint code{font-family:var(--mono); font-size:.9em; color:var(--text-secondary)}
+</style>
+</head>
+<body data-theme="dark">
+
+<div class="toolbar" id="toolbar">
+  <button type="button" data-state-btn="DISCONNECTED" aria-pressed="true">Disconnected</button>
+  <button type="button" data-state-btn="CONNECTING" aria-pressed="false">Connecting</button>
+  <button type="button" data-state-btn="CONNECTED" aria-pressed="false">Connected</button>
+  <button type="button" data-state-btn="DISCONNECTING" aria-pressed="false">Disconnecting</button>
+  <button type="button" data-state-btn="ERROR" aria-pressed="false">Error</button>
+  <button type="button" id="authErrorBtn" aria-pressed="false">Sign-in error</button>
+  <button type="button" id="themeBtn" aria-pressed="false">Light theme</button>
+</div>
+
+<div class="stage">
+  <div class="frame">
+    <span class="caption">Phone — app-mobile</span>
+    <div class="phone" data-state="DISCONNECTED" id="phone">
+      <header class="header">
+        <span class="brand"></span>
+        <span class="version">v1.0.0</span>
+        <span class="header-spacer"></span>
+        <button class="icon-btn" type="button" title="Toggle theme">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="4.6"/><path d="M12 2.6v2.2M12 19.2v2.2M2.6 12h2.2M19.2 12h2.2M5.4 5.4l1.6 1.6M17 17l1.6 1.6M18.6 5.4 17 7M7 17l-1.6 1.6"/></svg>
+        </button>
+        <button class="icon-btn" type="button" title="Menu">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+        </button>
+      </header>
+      <div class="body">
+        <div class="map-wrap"><svg class="drift-map" viewBox="0 0 800 800" fill="none" aria-hidden="true"><g stroke="currentColor" stroke-width="0.75" opacity="0.16"><circle cx="400" cy="400" r="340"/><ellipse cx="400" cy="400" rx="240" ry="340"/><ellipse cx="400" cy="400" rx="120" ry="340"/><ellipse cx="400" cy="400" rx="340" ry="240"/><ellipse cx="400" cy="400" rx="340" ry="120"/><line x1="60" y1="400" x2="740" y2="400"/><line x1="400" y1="60" x2="400" y2="740"/></g><circle class="drift-orbit" cx="400" cy="400" r="356" stroke="currentColor" stroke-width="0.75" stroke-dasharray="2 10" opacity="0.14"/><g class="drift-frag" data-frag="north"><path d="M 205.0 360.0 L 205.9 349.8 L 209.1 340.0 L 213.3 330.7 L 218.6 321.9 L 221.6 312.3 L 225.5 302.9 L 229.6 293.6 L 235.0 285.0 L 237.4 277.0 L 239.1 268.8 L 240.1 260.5 L 241.5 252.3 L 242.7 244.0 L 244.6 235.8 L 248.5 228.3 L 250.0 220.0 L 252.4 212.0 L 254.4 203.9 L 259.9 197.6 L 264.2 190.4 L 270.2 184.6 L 276.9 179.6 L 281.9 172.8 L 285.0 165.0 L 295.6 158.7 L 303.8 149.7 L 315.5 145.8 L 326.0 139.7 L 337.4 135.6 L 348.2 130.4 L 358.4 123.7 L 370.0 120.0 L 382.8 119.6 L 395.5 119.5 L 407.1 113.8 L 419.9 111.8 L 431.5 105.9 L 444.3 103.4 L 457.1 105.2 L 470.0 105.0 L 480.5 112.0 L 490.4 119.8 L 499.7 128.4 L 510.6 134.9 L 523.3 134.9 L 535.9 137.0 L 548.4 139.7 L 560.0 145.0 L 563.6 155.4 L 568.4 165.3 L 571.9 175.8 L 577.7 185.2 L 587.1 191.1 L 594.1 199.8 L 603.3 206.1 L 610.0 215.0 L 615.0 222.0 L 618.0 230.0 L 620.0 238.3 L 620.3 246.9 L 620.5 255.2 L 621.4 263.6 L 622.5 272.0 L 625.0 280.0 L 609.8 282.2 L 594.3 281.9 L 579.0 284.5 L 565.3 291.9 L 549.8 292.8 L 534.4 290.6 L 519.0 293.2 L 505.0 300.0 L 495.5 304.5 L 488.1 311.8 L 481.1 319.4 L 472.9 325.7 L 467.6 334.6 L 460.7 342.4 L 456.9 352.2 L 450.0 360.0 L 442.1 357.0 L 434.2 353.8 L 425.9 352.0 L 417.5 350.9 L 409.5 348.2 L 401.3 346.3 L 393.0 344.8 L 385.0 342.0 L 377.3 346.8 L 368.9 350.4 L 360.3 352.9 L 351.4 354.6 L 343.1 358.1 L 334.6 361.2 L 326.4 364.8 L 318.0 368.0 L 310.7 364.8 L 303.4 362.0 L 295.7 360.0 L 288.4 356.8 L 280.8 354.6 L 273.1 352.6 L 265.6 350.2 L 258.0 348.0 L 251.4 349.4 L 244.7 350.6 L 237.9 351.4 L 231.3 353.1 L 224.5 353.7 L 217.8 355.3 L 211.3 357.2 Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" fill="currentColor" fill-opacity="0.05"/><path d="M 296 220 C 330 208, 366 224, 400 212 C 424 204, 448 214, 470 226" stroke="currentColor" stroke-width="1" opacity="0.4" stroke-linecap="round"/><g fill="currentColor" opacity="0.3"><circle cx="330" cy="180" r="1.6"/><circle cx="392" cy="158" r="1.6"/><circle cx="450" cy="180" r="1.6"/><circle cx="520" cy="230" r="1.6"/><circle cx="280" cy="260" r="1.6"/><circle cx="300" cy="310" r="1.6"/><circle cx="560" cy="200" r="1.6"/></g></g><g class="drift-frag" data-frag="southWest"><path d="M 450.0 360.0 L 459.1 361.9 L 467.9 365.0 L 475.6 370.1 L 482.6 376.2 L 488.6 383.2 L 493.0 391.3 L 499.0 398.2 L 505.0 405.0 L 504.7 413.5 L 503.6 421.9 L 501.3 430.0 L 499.0 438.1 L 496.9 446.4 L 495.7 454.8 L 491.6 462.3 L 488.0 470.0 L 490.5 478.7 L 493.2 487.3 L 496.2 495.9 L 500.3 503.9 L 499.4 513.0 L 500.4 522.0 L 501.8 531.0 L 502.0 540.0 L 497.0 547.5 L 491.3 554.5 L 485.6 561.5 L 481.1 569.4 L 476.0 576.9 L 470.5 584.1 L 466.4 592.1 L 462.0 600.0 L 458.4 607.6 L 454.0 614.6 L 448.7 621.1 L 442.4 626.6 L 439.0 634.2 L 435.3 641.7 L 434.5 650.0 L 432.0 658.0 L 426.0 660.9 L 419.7 663.2 L 412.9 662.5 L 406.3 663.9 L 399.6 663.9 L 393.2 665.8 L 386.6 665.4 L 380.0 665.0 L 369.1 655.9 L 359.5 645.4 L 350.6 634.3 L 339.6 625.2 L 326.4 619.6 L 313.6 613.0 L 299.5 609.1 L 285.0 610.0 L 278.1 598.1 L 270.0 587.0 L 260.4 577.2 L 249.8 568.5 L 242.8 556.7 L 239.0 543.4 L 230.7 532.5 L 225.0 520.0 L 223.5 509.1 L 219.7 498.7 L 220.4 487.7 L 217.7 476.9 L 220.1 466.0 L 220.0 454.8 L 223.9 444.4 L 230.0 435.0 L 225.8 426.0 L 223.5 416.3 L 221.5 406.6 L 218.0 397.3 L 216.6 387.5 L 212.9 378.2 L 208.7 369.2 L 205.0 360.0 L 211.3 357.2 L 217.8 355.3 L 224.5 353.7 L 231.3 353.1 L 237.9 351.4 L 244.7 350.6 L 251.4 349.4 L 258.0 348.0 L 265.6 350.2 L 273.1 352.6 L 280.8 354.6 L 288.4 356.8 L 295.7 360.0 L 303.4 362.0 L 310.7 364.8 L 318.0 368.0 L 326.4 364.8 L 334.6 361.2 L 343.1 358.1 L 351.4 354.6 L 360.3 352.9 L 368.9 350.4 L 377.3 346.8 L 385.0 342.0 L 393.0 344.8 L 401.3 346.3 L 409.5 348.2 L 417.5 350.9 L 425.9 352.0 L 434.2 353.8 L 442.1 357.0 Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" fill="currentColor" fill-opacity="0.05"/><path d="M 268 440 C 296 464, 306 500, 334 524 C 356 542, 382 556, 400 574" stroke="currentColor" stroke-width="1" opacity="0.4" stroke-linecap="round"/><g fill="currentColor" opacity="0.3"><circle cx="300" cy="470" r="1.6"/><circle cx="260" cy="520" r="1.6"/><circle cx="340" cy="560" r="1.6"/><circle cx="310" cy="610" r="1.6"/><circle cx="270" cy="410" r="1.6"/></g></g><g class="drift-frag" data-frag="southEast"><path d="M 505.0 405.0 L 515.9 408.5 L 527.4 409.7 L 538.3 413.3 L 549.5 415.6 L 560.6 418.7 L 572.1 419.6 L 583.6 418.1 L 595.0 420.0 L 600.6 427.1 L 607.0 433.5 L 614.4 438.7 L 621.6 444.2 L 629.0 449.8 L 634.1 457.6 L 638.5 465.8 L 640.0 475.0 L 640.0 484.4 L 640.9 493.7 L 638.3 502.6 L 635.4 511.5 L 634.0 520.8 L 630.4 529.5 L 625.9 537.7 L 620.0 545.0 L 617.8 557.2 L 618.4 569.7 L 615.8 581.9 L 609.9 592.9 L 604.5 603.9 L 597.5 614.0 L 593.0 625.5 L 585.0 635.0 L 571.8 641.8 L 557.7 646.6 L 543.1 649.0 L 528.3 649.4 L 513.8 652.4 L 499.1 651.5 L 484.6 654.2 L 470.0 655.0 L 465.1 655.1 L 460.2 654.8 L 455.2 654.2 L 450.7 652.3 L 446.2 654.4 L 441.3 654.9 L 436.7 656.6 L 432.0 658.0 L 434.5 650.0 L 435.3 641.7 L 439.0 634.2 L 442.4 626.6 L 448.7 621.1 L 454.0 614.6 L 458.4 607.6 L 462.0 600.0 L 466.4 592.1 L 470.5 584.1 L 476.0 576.9 L 481.1 569.4 L 485.6 561.5 L 491.3 554.5 L 497.0 547.5 L 502.0 540.0 L 501.8 531.0 L 500.4 522.0 L 499.4 513.0 L 500.3 503.9 L 496.2 495.9 L 493.2 487.3 L 490.5 478.7 L 488.0 470.0 L 491.6 462.3 L 495.7 454.8 L 496.9 446.4 L 499.0 438.1 L 501.3 430.0 L 503.6 421.9 L 504.7 413.5 Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" fill="currentColor" fill-opacity="0.05"/><g fill="currentColor" opacity="0.3"><circle cx="560" cy="470" r="1.6"/><circle cx="540" cy="560" r="1.6"/><circle cx="530" cy="610" r="1.6"/><circle cx="590" cy="505" r="1.6"/></g></g><g stroke="currentColor" stroke-width="0.9" opacity="0.5" stroke-linecap="round"><line x1="676" y1="138" x2="676" y2="198"/><line x1="646" y1="168" x2="706" y2="168"/><line x1="657" y1="149" x2="695" y2="187"/><line x1="695" y1="149" x2="657" y2="187"/><circle cx="676" cy="168" r="6"/><circle cx="676" cy="168" r="1.5" fill="currentColor" stroke="none"/></g></svg></div>
+        <span class="kicker"><i class="dot"></i><strong data-role="state">Disconnected</strong></span>
+        <h2 class="headline" data-role="headline">The world is <strong>apart</strong></h2>
+        <span class="detail" data-role="detail">idle</span>
+        <div class="facts">
+          <div class="fact"><span class="fact-key">Session</span><span class="fact-value" data-role="session">—</span></div>
+          <div class="fact"><span class="fact-key">Down</span><span class="fact-value" data-role="down">—</span></div>
+          <div class="fact"><span class="fact-key">Up</span><span class="fact-value" data-role="up">—</span></div>
+          <div class="fact"><span class="fact-key">Via</span><span class="fact-value" data-role="via">—</span></div>
+        </div>
+        <span class="section-label">Region</span>
+        <div class="regions">
+          <button class="region" type="button" aria-current="true">
+            <span class="region-flag">🇬🇧</span>
+            <span class="region-text"><span class="region-name">London</span><span class="region-sub">eu-west-1</span></span>
+            <span class="load-bar"><i class="load-fill" style="width:47%"></i></span>
+            <span class="load-pct">47%</span>
+            <span class="tick">✓</span>
+          </button>
+          <button class="region" type="button" aria-current="false">
+            <span class="region-flag">🇳🇱</span>
+            <span class="region-text"><span class="region-name">Amsterdam</span><span class="region-sub">eu-central-1</span></span>
+            <span class="load-bar load-mid"><i class="load-fill" style="width:56%"></i></span>
+            <span class="load-pct">56%</span>
+            <span class="tick">✓</span>
+          </button>
+        </div>
+        <div class="all-regions-row">
+          <button class="all-regions" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"/></svg>
+            <span class="all-regions-label">All regions</span>
+            <span class="all-regions-count">1 more</span>
+          </button>
+          <button class="icon-btn" type="button" title="Refresh servers">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 1 0-.6 4"/><path d="M20 4.5V11h-6.5"/></svg>
+          </button>
+        </div>
+        <button class="connect" type="button" data-role="connect">Connect</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="frame">
+    <span class="caption">Phone — sign-in</span>
+    <div class="phone" id="auth">
+      <header class="header">
+        <span class="brand"></span>
+        <span class="version">v1.0.0</span>
+        <span class="header-spacer"></span>
+        <button class="icon-btn" type="button" title="Toggle theme">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="4.6"/><path d="M12 2.6v2.2M12 19.2v2.2M2.6 12h2.2M19.2 12h2.2M5.4 5.4l1.6 1.6M17 17l1.6 1.6M18.6 5.4 17 7M7 17l-1.6 1.6"/></svg>
+        </button>
+      </header>
+      <div class="body">
+        <div class="auth">
+          <div class="map-wrap" id="authMap"></div>
+          <span class="section-label">Sign in</span>
+          <h2 class="headline">The world is <strong>apart</strong></h2>
+          <span class="detail">Enter your sign-in token to continue.</span>
+          <span class="section-label">Token</span>
+          <input class="token" type="text" placeholder="0000000000000000" spellcheck="false" />
+          <div class="auth-error">
+            <p>That token was not accepted.</p>
+            <button type="button">Device Limit Reached</button>
+          </div>
+          <button class="connect" type="button">Sign In</button>
+          <span class="auth-fill"></span>
+          <p class="auth-hint">Get your token at <u>pangeavpn.org/account</u></p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="frame">
+    <span class="caption">Television — app-tv</span>
+    <div class="tv" data-state="DISCONNECTED" id="tv">
+      <header class="header">
+        <span class="brand"></span>
+        <span class="version">v1.0.0</span>
+        <span class="header-spacer"></span>
+        <button class="icon-btn" type="button" title="Toggle theme">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="4.6"/><path d="M12 2.6v2.2M12 19.2v2.2M2.6 12h2.2M19.2 12h2.2M5.4 5.4l1.6 1.6M17 17l1.6 1.6M18.6 5.4 17 7M7 17l-1.6 1.6"/></svg>
+        </button>
+        <button class="icon-btn" type="button" title="Menu">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+        </button>
+      </header>
+      <div class="body">
+        <div class="map-col"><svg class="drift-map" viewBox="0 0 800 800" fill="none" aria-hidden="true"><g stroke="currentColor" stroke-width="0.75" opacity="0.16"><circle cx="400" cy="400" r="340"/><ellipse cx="400" cy="400" rx="240" ry="340"/><ellipse cx="400" cy="400" rx="120" ry="340"/><ellipse cx="400" cy="400" rx="340" ry="240"/><ellipse cx="400" cy="400" rx="340" ry="120"/><line x1="60" y1="400" x2="740" y2="400"/><line x1="400" y1="60" x2="400" y2="740"/></g><circle class="drift-orbit" cx="400" cy="400" r="356" stroke="currentColor" stroke-width="0.75" stroke-dasharray="2 10" opacity="0.14"/><g class="drift-frag" data-frag="north"><path d="M 205.0 360.0 L 205.9 349.8 L 209.1 340.0 L 213.3 330.7 L 218.6 321.9 L 221.6 312.3 L 225.5 302.9 L 229.6 293.6 L 235.0 285.0 L 237.4 277.0 L 239.1 268.8 L 240.1 260.5 L 241.5 252.3 L 242.7 244.0 L 244.6 235.8 L 248.5 228.3 L 250.0 220.0 L 252.4 212.0 L 254.4 203.9 L 259.9 197.6 L 264.2 190.4 L 270.2 184.6 L 276.9 179.6 L 281.9 172.8 L 285.0 165.0 L 295.6 158.7 L 303.8 149.7 L 315.5 145.8 L 326.0 139.7 L 337.4 135.6 L 348.2 130.4 L 358.4 123.7 L 370.0 120.0 L 382.8 119.6 L 395.5 119.5 L 407.1 113.8 L 419.9 111.8 L 431.5 105.9 L 444.3 103.4 L 457.1 105.2 L 470.0 105.0 L 480.5 112.0 L 490.4 119.8 L 499.7 128.4 L 510.6 134.9 L 523.3 134.9 L 535.9 137.0 L 548.4 139.7 L 560.0 145.0 L 563.6 155.4 L 568.4 165.3 L 571.9 175.8 L 577.7 185.2 L 587.1 191.1 L 594.1 199.8 L 603.3 206.1 L 610.0 215.0 L 615.0 222.0 L 618.0 230.0 L 620.0 238.3 L 620.3 246.9 L 620.5 255.2 L 621.4 263.6 L 622.5 272.0 L 625.0 280.0 L 609.8 282.2 L 594.3 281.9 L 579.0 284.5 L 565.3 291.9 L 549.8 292.8 L 534.4 290.6 L 519.0 293.2 L 505.0 300.0 L 495.5 304.5 L 488.1 311.8 L 481.1 319.4 L 472.9 325.7 L 467.6 334.6 L 460.7 342.4 L 456.9 352.2 L 450.0 360.0 L 442.1 357.0 L 434.2 353.8 L 425.9 352.0 L 417.5 350.9 L 409.5 348.2 L 401.3 346.3 L 393.0 344.8 L 385.0 342.0 L 377.3 346.8 L 368.9 350.4 L 360.3 352.9 L 351.4 354.6 L 343.1 358.1 L 334.6 361.2 L 326.4 364.8 L 318.0 368.0 L 310.7 364.8 L 303.4 362.0 L 295.7 360.0 L 288.4 356.8 L 280.8 354.6 L 273.1 352.6 L 265.6 350.2 L 258.0 348.0 L 251.4 349.4 L 244.7 350.6 L 237.9 351.4 L 231.3 353.1 L 224.5 353.7 L 217.8 355.3 L 211.3 357.2 Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" fill="currentColor" fill-opacity="0.05"/><path d="M 296 220 C 330 208, 366 224, 400 212 C 424 204, 448 214, 470 226" stroke="currentColor" stroke-width="1" opacity="0.4" stroke-linecap="round"/><g fill="currentColor" opacity="0.3"><circle cx="330" cy="180" r="1.6"/><circle cx="392" cy="158" r="1.6"/><circle cx="450" cy="180" r="1.6"/><circle cx="520" cy="230" r="1.6"/><circle cx="280" cy="260" r="1.6"/><circle cx="300" cy="310" r="1.6"/><circle cx="560" cy="200" r="1.6"/></g></g><g class="drift-frag" data-frag="southWest"><path d="M 450.0 360.0 L 459.1 361.9 L 467.9 365.0 L 475.6 370.1 L 482.6 376.2 L 488.6 383.2 L 493.0 391.3 L 499.0 398.2 L 505.0 405.0 L 504.7 413.5 L 503.6 421.9 L 501.3 430.0 L 499.0 438.1 L 496.9 446.4 L 495.7 454.8 L 491.6 462.3 L 488.0 470.0 L 490.5 478.7 L 493.2 487.3 L 496.2 495.9 L 500.3 503.9 L 499.4 513.0 L 500.4 522.0 L 501.8 531.0 L 502.0 540.0 L 497.0 547.5 L 491.3 554.5 L 485.6 561.5 L 481.1 569.4 L 476.0 576.9 L 470.5 584.1 L 466.4 592.1 L 462.0 600.0 L 458.4 607.6 L 454.0 614.6 L 448.7 621.1 L 442.4 626.6 L 439.0 634.2 L 435.3 641.7 L 434.5 650.0 L 432.0 658.0 L 426.0 660.9 L 419.7 663.2 L 412.9 662.5 L 406.3 663.9 L 399.6 663.9 L 393.2 665.8 L 386.6 665.4 L 380.0 665.0 L 369.1 655.9 L 359.5 645.4 L 350.6 634.3 L 339.6 625.2 L 326.4 619.6 L 313.6 613.0 L 299.5 609.1 L 285.0 610.0 L 278.1 598.1 L 270.0 587.0 L 260.4 577.2 L 249.8 568.5 L 242.8 556.7 L 239.0 543.4 L 230.7 532.5 L 225.0 520.0 L 223.5 509.1 L 219.7 498.7 L 220.4 487.7 L 217.7 476.9 L 220.1 466.0 L 220.0 454.8 L 223.9 444.4 L 230.0 435.0 L 225.8 426.0 L 223.5 416.3 L 221.5 406.6 L 218.0 397.3 L 216.6 387.5 L 212.9 378.2 L 208.7 369.2 L 205.0 360.0 L 211.3 357.2 L 217.8 355.3 L 224.5 353.7 L 231.3 353.1 L 237.9 351.4 L 244.7 350.6 L 251.4 349.4 L 258.0 348.0 L 265.6 350.2 L 273.1 352.6 L 280.8 354.6 L 288.4 356.8 L 295.7 360.0 L 303.4 362.0 L 310.7 364.8 L 318.0 368.0 L 326.4 364.8 L 334.6 361.2 L 343.1 358.1 L 351.4 354.6 L 360.3 352.9 L 368.9 350.4 L 377.3 346.8 L 385.0 342.0 L 393.0 344.8 L 401.3 346.3 L 409.5 348.2 L 417.5 350.9 L 425.9 352.0 L 434.2 353.8 L 442.1 357.0 Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" fill="currentColor" fill-opacity="0.05"/><path d="M 268 440 C 296 464, 306 500, 334 524 C 356 542, 382 556, 400 574" stroke="currentColor" stroke-width="1" opacity="0.4" stroke-linecap="round"/><g fill="currentColor" opacity="0.3"><circle cx="300" cy="470" r="1.6"/><circle cx="260" cy="520" r="1.6"/><circle cx="340" cy="560" r="1.6"/><circle cx="310" cy="610" r="1.6"/><circle cx="270" cy="410" r="1.6"/></g></g><g class="drift-frag" data-frag="southEast"><path d="M 505.0 405.0 L 515.9 408.5 L 527.4 409.7 L 538.3 413.3 L 549.5 415.6 L 560.6 418.7 L 572.1 419.6 L 583.6 418.1 L 595.0 420.0 L 600.6 427.1 L 607.0 433.5 L 614.4 438.7 L 621.6 444.2 L 629.0 449.8 L 634.1 457.6 L 638.5 465.8 L 640.0 475.0 L 640.0 484.4 L 640.9 493.7 L 638.3 502.6 L 635.4 511.5 L 634.0 520.8 L 630.4 529.5 L 625.9 537.7 L 620.0 545.0 L 617.8 557.2 L 618.4 569.7 L 615.8 581.9 L 609.9 592.9 L 604.5 603.9 L 597.5 614.0 L 593.0 625.5 L 585.0 635.0 L 571.8 641.8 L 557.7 646.6 L 543.1 649.0 L 528.3 649.4 L 513.8 652.4 L 499.1 651.5 L 484.6 654.2 L 470.0 655.0 L 465.1 655.1 L 460.2 654.8 L 455.2 654.2 L 450.7 652.3 L 446.2 654.4 L 441.3 654.9 L 436.7 656.6 L 432.0 658.0 L 434.5 650.0 L 435.3 641.7 L 439.0 634.2 L 442.4 626.6 L 448.7 621.1 L 454.0 614.6 L 458.4 607.6 L 462.0 600.0 L 466.4 592.1 L 470.5 584.1 L 476.0 576.9 L 481.1 569.4 L 485.6 561.5 L 491.3 554.5 L 497.0 547.5 L 502.0 540.0 L 501.8 531.0 L 500.4 522.0 L 499.4 513.0 L 500.3 503.9 L 496.2 495.9 L 493.2 487.3 L 490.5 478.7 L 488.0 470.0 L 491.6 462.3 L 495.7 454.8 L 496.9 446.4 L 499.0 438.1 L 501.3 430.0 L 503.6 421.9 L 504.7 413.5 Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" fill="currentColor" fill-opacity="0.05"/><g fill="currentColor" opacity="0.3"><circle cx="560" cy="470" r="1.6"/><circle cx="540" cy="560" r="1.6"/><circle cx="530" cy="610" r="1.6"/><circle cx="590" cy="505" r="1.6"/></g></g><g stroke="currentColor" stroke-width="0.9" opacity="0.5" stroke-linecap="round"><line x1="676" y1="138" x2="676" y2="198"/><line x1="646" y1="168" x2="706" y2="168"/><line x1="657" y1="149" x2="695" y2="187"/><line x1="695" y1="149" x2="657" y2="187"/><circle cx="676" cy="168" r="6"/><circle cx="676" cy="168" r="1.5" fill="currentColor" stroke="none"/></g></svg></div>
+        <div class="hero-col">
+          <span class="kicker"><i class="dot"></i><strong data-role="state">Disconnected</strong></span>
+          <h2 class="headline" data-role="headline">The world is <strong>apart</strong></h2>
+          <span class="detail" data-role="detail">idle</span>
+          <div class="facts">
+            <div class="fact"><span class="fact-key">Session</span><span class="fact-value" data-role="session">—</span></div>
+            <div class="fact"><span class="fact-key">Down</span><span class="fact-value" data-role="down">—</span></div>
+            <div class="fact"><span class="fact-key">Up</span><span class="fact-value" data-role="up">—</span></div>
+            <div class="fact"><span class="fact-key">Via</span><span class="fact-value" data-role="via">—</span></div>
+          </div>
+          <span class="section-label">Region</span>
+          <div class="regions">
+            <button class="region" type="button" aria-current="true">
+              <span class="region-flag">🇬🇧</span>
+              <span class="region-text"><span class="region-name">London</span><span class="region-sub">eu-west-1</span></span>
+              <span class="load-bar"><i class="load-fill" style="width:47%"></i></span>
+              <span class="load-pct">47%</span>
+              <span class="tick">✓</span>
+            </button>
+            <button class="region" type="button" aria-current="false">
+              <span class="region-flag">🇳🇱</span>
+              <span class="region-text"><span class="region-name">Amsterdam</span><span class="region-sub">eu-central-1</span></span>
+              <span class="load-bar load-mid"><i class="load-fill" style="width:56%"></i></span>
+              <span class="load-pct">56%</span>
+              <span class="tick">✓</span>
+            </button>
+            <button class="region" type="button" aria-current="false">
+              <span class="region-flag">🇺🇸</span>
+              <span class="region-text"><span class="region-name">New York</span><span class="region-sub">us-east-1</span></span>
+              <span class="load-bar load-high"><i class="load-fill" style="width:82%"></i></span>
+              <span class="load-pct">82%</span>
+              <span class="tick">✓</span>
+            </button>
+          </div>
+          <button class="connect" type="button" data-role="connect">Connect</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<p class="hint">
+  A static mirror of what <code>app-mobile</code> and <code>app-tv</code> render, kept alongside them so the
+  design can be reviewed without an emulator. Tokens are the desktop stylesheet's and the coastline is the same
+  seeded geometry as <code>driftMap.ts</code>. It is a picture of the UI, not the UI — behaviour lives in Compose.
+</p>
+
+<script>
+const COPY = {
+  DISCONNECTED: { state:"Disconnected", head:"The world is ", em:"apart",     detail:"idle",             connect:"Connect" },
+  CONNECTING:   { state:"Connecting",   head:"Drawing it ",  em:"together",   detail:"starting reality", connect:"Provisioning..." },
+  CONNECTED:    { state:"Connected",    head:"The world is ", em:"whole",     detail:"London",           connect:"Disconnect" },
+  DISCONNECTING:{ state:"Disconnecting",head:"Letting it ",  em:"drift",      detail:"closing tunnel",   connect:"Disconnecting..." },
+  ERROR:        { state:"Error",        head:"Couldn't ",    em:"connect",    detail:"no transport could establish a tunnel", connect:"Connect" },
+};
+const FACTS = {
+  CONNECTED: { session:"04:12", down:"18.4 MB", up:"2.1 MB", via:"REALITY" },
+};
+const EMPTY = { session:"—", down:"—", up:"—", via:"—" };
+
+function setState(state) {
+  for (const frame of document.querySelectorAll("[data-state]")) {
+    frame.dataset.state = state;
+    const copy = COPY[state];
+    const facts = FACTS[state] || EMPTY;
+    frame.querySelector('[data-role="state"]').textContent = copy.state.toUpperCase();
+    frame.querySelector('[data-role="headline"]').innerHTML =
+      copy.head + "<strong>" + copy.em + "</strong>";
+    frame.querySelector('[data-role="detail"]').textContent = copy.detail;
+    frame.querySelector('[data-role="connect"]').textContent = copy.connect;
+    for (const key of ["session", "down", "up", "via"]) {
+      frame.querySelector('[data-role="' + key + '"]').textContent = facts[key];
+    }
+  }
+  for (const button of document.querySelectorAll("[data-state-btn]")) {
+    button.setAttribute("aria-pressed", String(button.dataset.stateBtn === state));
+  }
+}
+
+document.getElementById("toolbar").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-state-btn]");
+  if (button) setState(button.dataset.stateBtn);
+});
+
+// The sign-in frame borrows the phone's map rather than repeating the geometry.
+const authMap = document.querySelector("#phone .drift-map").cloneNode(true);
+authMap.classList.add("login-map");
+document.getElementById("authMap").append(authMap);
+
+const authErrorBtn = document.getElementById("authErrorBtn");
+authErrorBtn.addEventListener("click", () => {
+  const shown = document.getElementById("auth").classList.toggle("has-error");
+  authErrorBtn.setAttribute("aria-pressed", String(shown));
+});
+
+const themeBtn = document.getElementById("themeBtn");
+themeBtn.addEventListener("click", () => {
+  const light = document.body.dataset.theme !== "light";
+  document.body.dataset.theme = light ? "light" : "dark";
+  themeBtn.setAttribute("aria-pressed", String(light));
+  themeBtn.textContent = light ? "Dark theme" : "Light theme";
+});
+
+setState("DISCONNECTED");
+</script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="notification_channel_name">Состояние VPN</string>
+    <string name="notification_connected">Подключено</string>
+    <string name="notification_connecting">Подключение…</string>
+    <string name="notification_disconnect">Отключить</string>
+    <string name="notification_disconnected">ОТКЛЮЧЕНО</string>
+    <string name="notification_disconnecting">ОТКЛЮЧЕНИЕ</string>
+    <string name="notification_error">ОШИБКА</string>
+</resources>

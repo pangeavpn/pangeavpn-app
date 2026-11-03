@@ -1,0 +1,283 @@
+import SwiftUI
+import UIKit
+import XCTest
+@testable import PangeaVPN
+
+// Writes every screen to PANGEA_SCREENS_DIR/<device>/ for review off-Mac; skipped when it is unset,
+// so the ordinary test run never pays for it. A new screen is one more `shoot` call.
+@MainActor
+final class ScreenGalleryTests: XCTestCase {
+    private func gallery(
+        status: TunnelStatus = .disconnected,
+        connectedFor: TimeInterval? = nil,
+        subscription: Subscription? = GalleryData.active,
+        servers: [Server] = GalleryData.servers
+    ) async throws -> (camera: ScreenCamera, stores: GalleryStores) {
+        guard let root = ScreenGallery.directory else {
+            throw XCTSkip("PANGEA_SCREENS_DIR is unset, so the screen gallery is not rendered.")
+        }
+        let stores = try GalleryStores(
+            status: status, connectedFor: connectedFor, subscription: subscription, servers: servers)
+        await stores.load()
+        let camera = try ScreenCamera(root: root)
+        return (camera, stores)
+    }
+
+    func testSplash() async throws {
+        let (camera, _) = try await gallery()
+        try await camera.shoot("01-splash") { SplashView() }
+    }
+
+    func testDataNotice() async throws {
+        let (camera, stores) = try await gallery()
+        try await camera.shoot("01-data-notice", looks: ScreenCamera.Look.all) {
+            stores.stage(DataNoticeView(mode: .firstLaunch, onDone: {}))
+        }
+    }
+
+    func testLogin() async throws {
+        let (camera, stores) = try await gallery()
+        try await camera.shoot("02-login", looks: ScreenCamera.Look.all) {
+            stores.stage(LoginView(token: .constant("")))
+        }
+        stores.session.loginError = "Invalid account number"
+        try await camera.shoot("03-login-error") {
+            stores.stage(LoginView(token: .constant("ABCD-EFGH-JKMN-PQRS-TVWX-YZ01")))
+        }
+    }
+
+    func testDeviceLimit() async throws {
+        let (camera, stores) = try await gallery()
+        stores.session.showDeviceLimit = true
+        await stores.session.loadDevices()
+        try await camera.shoot("04-device-limit", ready: { !stores.session.loadingDevices }) {
+            stores.stage(DeviceLimitView())
+        }
+        stores.session.loginError = "Network unreachable"
+        try await camera.shoot("05-device-limit-error", ready: { !stores.session.loadingDevices }) {
+            stores.stage(DeviceLimitView())
+        }
+    }
+
+    func testMain() async throws {
+        let connected = GalleryData.status(.connected, bytesIn: 1_572_864, bytesOut: 327_680,
+                                           transport: "reality", postQuantum: true)
+        let multihop = GalleryData.status(.connected, bytesIn: 88_431_002, bytesOut: 4_120_000,
+                                          transport: "hysteria2", postQuantum: true,
+                                          entry: ("eu-central-2", "Amsterdam"))
+        let failed = GalleryData.status(.error, detail: "The server did not answer the handshake.")
+        let states: [(name: String, status: TunnelStatus, seconds: TimeInterval?, plan: Subscription?)] = [
+            ("06-main-disconnected", .disconnected, nil, GalleryData.active),
+            ("07-main-connecting", GalleryData.status(.connecting), nil, GalleryData.active),
+            ("08-main-connected", connected, 754, GalleryData.active),
+            ("08b-main-multihop", multihop, 3_725, GalleryData.active),
+            ("09-main-error", failed, nil, GalleryData.pastDue),
+            ("09b-main-expired", .disconnected, nil, GalleryData.expired),
+        ]
+        for state in states {
+            let (camera, stores) = try await gallery(
+                status: state.status, connectedFor: state.seconds, subscription: state.plan)
+            try await camera.shoot(state.name, looks: ScreenCamera.Look.all,
+                                   before: { stores.restartClock() },
+                                   ready: { !stores.servers.regions.isEmpty }) {
+                stores.stage(MainView())
+            }
+            try await camera.shoot("\(state.name)-end", looks: [.light, .largeText], scrollToEnd: true,
+                                   before: { stores.restartClock() },
+                                   ready: { !stores.servers.regions.isEmpty }) {
+                stores.stage(MainView())
+            }
+        }
+    }
+
+    func testMainWithAnotherAccent() async throws {
+        let (camera, stores) = try await gallery(status: GalleryData.status(.disconnected))
+        // Restored here rather than in tearDown, whose override would differ in actor isolation.
+        defer { AccentTheme.shared.accent = .terra }
+        stores.settings.setAccent(.ocean)
+        try await camera.shoot("06b-main-ocean", ready: { !stores.servers.regions.isEmpty }) {
+            stores.stage(MainView())
+        }
+    }
+
+    func testRegionPicker() async throws {
+        let (camera, stores) = try await gallery(status: GalleryData.status(.connected, transport: "reality"))
+        try await camera.shoot("10-regions", looks: ScreenCamera.Look.all, ready: { !stores.servers.regions.isEmpty }) {
+            stores.stage(RegionPickerView())
+        }
+        try await camera.shoot("10-regions-end", looks: [.light], scrollToEnd: true,
+                               ready: { !stores.servers.regions.isEmpty }) {
+            stores.stage(RegionPickerView())
+        }
+        stores.settings.setMultihopEnabled(true)
+        try await camera.shoot("10b-regions-multihop", ready: { !stores.servers.regions.isEmpty }) {
+            stores.stage(RegionPickerView())
+        }
+    }
+
+    func testRegionPickerEmpty() async throws {
+        let (camera, stores) = try await gallery(servers: [])
+        try await camera.shoot("11-regions-empty", ready: { !stores.servers.loading }) {
+            stores.stage(RegionPickerView())
+        }
+    }
+
+    func testSettingsHome() async throws {
+        let (camera, stores) = try await gallery()
+        try await camera.shoot("12-settings", looks: ScreenCamera.Look.all) {
+            stores.stage(SettingsView())
+        }
+        try await camera.shoot("12-settings-end", looks: [.light, .dark], scrollToEnd: true) {
+            stores.stage(SettingsView())
+        }
+        stores.settings.setDeveloperMode(true)
+        try await camera.shoot("12b-settings-developer", scrollToEnd: true) {
+            stores.stage(SettingsView())
+        }
+    }
+
+    // Every page opens already pushed, so each one is its own shot.
+    func testSettingsPages() async throws {
+        let (camera, stores) = try await gallery(status: GalleryData.status(.connected, transport: "reality"))
+        await stores.session.loadDevices()
+        let pages: [SettingsRoute] = [
+            .transport, .provisioning, .network, .killSwitch, .splitTunnel, .startup,
+            .notifications, .panic, .language, .appearance, .support, .update, .developer, .devices,
+        ]
+        for (index, route) in pages.enumerated() {
+            // Only the developer page needs the hidden options on; the iPad rail would list them on every shot.
+            stores.settings.setDeveloperMode(route == .developer)
+            let name = String(format: "13-%02d-%@", index + 1, String(describing: route))
+            try await camera.shoot(name, looks: [.light, .dark],
+                                   ready: { !stores.session.loadingDevices }) {
+                stores.stage(SettingsView(path: [route]))
+            }
+        }
+        // A torn-down page clears its error a moment later, so each look sets it once that has run.
+        for look in ScreenCamera.Look.standard {
+            try await Task.sleep(for: .milliseconds(500))
+            stores.settings.error = "At least one connection method must stay on."
+            try await camera.shoot("13-99-settings-error", looks: [look]) {
+                stores.stage(SettingsView(path: [.provisioning]))
+            }
+        }
+    }
+
+    func testSettingsPagesAtLargeText() async throws {
+        let (camera, stores) = try await gallery()
+        for route in [SettingsRoute.network, .killSwitch, .devices] {
+            try await camera.shoot("14-large-\(route)", looks: [.largeText], scrollToEnd: true) {
+                stores.stage(SettingsView(path: [route]))
+            }
+        }
+    }
+
+    // Purchase screens say "free", so the 20-paywall prefix keeps every one of them out of App Store shots.
+    func testPaywall() async throws {
+        let (camera, stores) = try await gallery(subscription: nil)
+        try await camera.shoot("20-paywall-trial", looks: ScreenCamera.Look.all,
+                               ready: { !stores.purchases.plans.isEmpty }) {
+            stores.stage(PaywallView(onClose: {}))
+        }
+        stores.storeClient.plansResult = .success(FakeStoreClient.samplePlans(trial: false))
+        await stores.purchases.loadPlans()
+        try await camera.shoot("20-paywall-no-trial", ready: { !stores.purchases.plans.isEmpty }) {
+            stores.stage(PaywallView(onClose: {}))
+        }
+        try await camera.shoot("20-paywall-account-number", looks: ScreenCamera.Look.all) {
+            stores.stage(AccountNumberSheet(number: "ABCD-EFGH-JKMN-PQRS-TVWX-YZ01", onDone: {}))
+        }
+    }
+
+    // Opened from the root once launch settles, as the expired panel opens it, so it draws as a real sheet.
+    func testPaywallSheet() async throws {
+        let (camera, stores) = try await gallery(subscription: GalleryData.expired)
+        try await camera.shoot("20-paywall-sheet", looks: [.light], presents: true,
+                               ready: { !stores.purchases.plans.isEmpty }) {
+            stores.stage(RootView())
+                .task {
+                    try? await Task.sleep(for: .milliseconds(500))
+                    stores.purchases.showPaywall()
+                }
+        }
+    }
+
+    func testSubscriptionSettings() async throws {
+        let (camera, lapsed) = try await gallery(subscription: GalleryData.expired)
+        try await camera.shoot("20-paywall-settings-subscribe", looks: ScreenCamera.Look.standard) {
+            lapsed.stage(SettingsView(path: [.subscription]))
+        }
+        let (_, stores) = try await gallery()
+        try await camera.shoot("20-paywall-settings-active", looks: [.light]) {
+            stores.stage(SettingsView(path: [.subscription]))
+        }
+        stores.storeClient.entitlements = [stores.storeClient.transaction(1)]
+        await stores.purchases.refreshEntitlements()
+        try await camera.shoot("20-paywall-settings-apple", looks: ScreenCamera.Look.all,
+                               ready: { stores.purchases.appleBilled }) {
+            stores.stage(SettingsView(path: [.subscription]))
+        }
+    }
+
+    // The wide layouts again in landscape and in an iPhone-wide window, light only to keep the run short.
+    func testIPadLandscapeAndNarrow() async throws {
+        try requireIPad()
+        let (camera, idle) = try await gallery()
+        let connected = GalleryData.status(.connected, bytesIn: 1_572_864, bytesOut: 327_680,
+                                           transport: "reality", postQuantum: true)
+        let (_, live) = try await gallery(status: connected, connectedFor: 754)
+        try await camera.inLandscape {
+            try await shootWideScreens(camera, idle: idle, live: live, variant: "landscape", narrow: false)
+        }
+        try await shootWideScreens(camera, idle: idle, live: live, variant: "narrow", narrow: true)
+    }
+
+    // Opened after the main screen has measured itself, as a tap would be, so a wide iPad shows it as a sheet.
+    func testIPadRegionSheet() async throws {
+        try requireIPad()
+        let (camera, stores) = try await gallery(status: GalleryData.status(.connected, transport: "reality"))
+        try await camera.shoot("10c-regions-sheet", looks: [.light], presents: true,
+                               ready: { !stores.servers.regions.isEmpty }) {
+            stores.stage(MainView())
+                .task {
+                    try? await Task.sleep(for: .milliseconds(500))
+                    stores.connection.showServerSheet = true
+                }
+        }
+    }
+
+    private func requireIPad() throws {
+        guard UIDevice.current.userInterfaceIdiom == .pad else {
+            throw XCTSkip("Landscape, narrow-window and sheet shots only differ on an iPad.")
+        }
+    }
+
+    private func shootWideScreens(
+        _ camera: ScreenCamera, idle: GalleryStores, live: GalleryStores, variant: String, narrow: Bool
+    ) async throws {
+        try await camera.shoot("06-main-disconnected-\(variant)", looks: [.light],
+                               ready: { !idle.servers.regions.isEmpty }) {
+            staged(MainView(), on: idle, narrow: narrow)
+        }
+        try await camera.shoot("08-main-connected-\(variant)", looks: [.light],
+                               before: { live.restartClock() },
+                               ready: { !live.servers.regions.isEmpty }) {
+            staged(MainView(), on: live, narrow: narrow)
+        }
+        try await camera.shoot("12-settings-\(variant)", looks: [.light]) {
+            staged(SettingsView(), on: idle, narrow: narrow)
+        }
+        try await camera.shoot("13-03-network-\(variant)", looks: [.light]) {
+            staged(SettingsView(path: [.network]), on: idle, narrow: narrow)
+        }
+    }
+
+    @ViewBuilder
+    private func staged<V: View>(_ view: V, on stores: GalleryStores, narrow: Bool) -> some View {
+        if narrow {
+            stores.stageNarrow(view)
+        } else {
+            stores.stage(view)
+        }
+    }
+}

@@ -1,0 +1,137 @@
+name: PangeaVPN
+
+options:
+  deploymentTarget:
+    iOS: "17.0"
+  developmentLanguage: en
+  knownRegions: [en, es, fr, ru, uk, zh-Hans, ar, fa, Base]
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    # CI overrides both from the root package.json; see README.md.
+    MARKETING_VERSION: "0.0.0"
+    CURRENT_PROJECT_VERSION: "1"
+
+targets:
+  PangeaVPN:
+    type: application
+    platform: iOS
+    sources:
+      - path: PangeaVPN
+        excludes: ["PrivacyInfo.xcprivacy", "Purchases.storekit"]
+      - path: PangeaVPN/PrivacyInfo.xcprivacy
+        buildPhase: resources
+      # Local App Store products for Xcode runs; listed for editing, never shipped in the bundle.
+      - path: PangeaVPN/Purchases.storekit
+        buildPhase: none
+      - path: Shared
+    dependencies:
+      - target: PacketTunnel
+      - framework: Frameworks/Pangeacore.xcframework
+        embed: false
+      - sdk: libresolv.tbd
+      - sdk: Network.framework
+      - sdk: Security.framework
+    info:
+      path: Generated/PangeaVPN-Info.plist
+      properties:
+        CFBundleDisplayName: PangeaVPN
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSRequiresIPhoneOS: true
+        # Standard WireGuard and TLS only, self-classified as mass market; the yearly BIS report covers it.
+        ITSAppUsesNonExemptEncryption: false
+        NSFaceIDUsageDescription: PangeaVPN asks for Face ID before showing your account number.
+        UILaunchScreen: {}
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        UISupportedInterfaceOrientations~iphone:
+          - UIInterfaceOrientationPortrait
+        # iPad multitasking (Split View, Slide Over) needs all four, or App Store validation rejects the build.
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+    entitlements:
+      path: Generated/PangeaVPN.entitlements
+      properties:
+        com.apple.developer.networking.networkextension:
+          - packet-tunnel-provider
+        com.apple.security.application-groups:
+          - group.org.pangeavpn.app
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.pangeavpn.app
+        TARGETED_DEVICE_FAMILY: "1,2"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        # The accent icons Appearance can switch to; actool writes their Info.plist entries.
+        ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES: "AppIcon-Purple AppIcon-Ocean AppIcon-Emerald AppIcon-Rose"
+        # Empty unless CI's TestFlight job passes the App Store profile's UUID.
+        PROVISIONING_PROFILE_SPECIFIER: $(PANGEA_APP_PROFILE)
+      configs:
+        # Hosted tests resolve core symbols through the app binary, so Debug
+        # loads and exports all of them even before app code calls them.
+        Debug:
+          OTHER_LDFLAGS: ["$(inherited)", "-ObjC", "-Wl,-export_dynamic"]
+    scheme:
+      testTargets:
+        - PangeaVPNTests
+      storeKitConfiguration: PangeaVPN/Purchases.storekit
+
+  PacketTunnel:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: PacketTunnel
+        excludes: ["PrivacyInfo.xcprivacy"]
+      - path: PacketTunnel/PrivacyInfo.xcprivacy
+        buildPhase: resources
+      - path: Shared
+      - path: PangeaVPN/Resources
+        includes: ["*.lproj/**"]
+    dependencies:
+      - framework: Frameworks/Pangeacore.xcframework
+        embed: false
+      - sdk: libresolv.tbd
+      - sdk: Network.framework
+      - sdk: Security.framework
+    info:
+      path: Generated/PacketTunnel-Info.plist
+      properties:
+        CFBundleDisplayName: PangeaVPN
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.networkextension.packet-tunnel
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).PacketTunnelProvider
+    entitlements:
+      path: Generated/PacketTunnel.entitlements
+      properties:
+        com.apple.developer.networking.networkextension:
+          - packet-tunnel-provider
+        com.apple.security.application-groups:
+          - group.org.pangeavpn.app
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.pangeavpn.app.tunnel
+        TARGETED_DEVICE_FAMILY: "1,2"
+        PROVISIONING_PROFILE_SPECIFIER: $(PANGEA_TUNNEL_PROFILE)
+
+  PangeaVPNTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: PangeaVPNTests
+    dependencies:
+      - target: PangeaVPN
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.pangeavpn.app.tests
+        TARGETED_DEVICE_FAMILY: "1,2"
+        GENERATE_INFOPLIST_FILE: YES
+        # The core already lives in the host app; a second Go runtime would clash.
+        OTHER_SWIFT_FLAGS: "$(inherited) -Xfrontend -disable-autolink-framework -Xfrontend Pangeacore"

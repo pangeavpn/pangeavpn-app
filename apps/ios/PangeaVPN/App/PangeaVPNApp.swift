@@ -1,0 +1,43 @@
+import SwiftUI
+
+@main
+struct PangeaVPNApp: App {
+    @UIApplicationDelegateAdaptor(PanicAppDelegate.self) private var appDelegate
+    @State private var session: SessionStore
+    @State private var servers: ServersStore
+    @State private var settings: SettingsStore
+    @State private var connection: ConnectionStore
+    @State private var diagnostics: DiagnosticsStore
+    @State private var purchases: PurchaseStore
+    @State private var toasts = ToastCenter()
+
+    init() {
+        let core = GoCore.forApp()
+        let tunnel = TunnelController()
+        let settings = SettingsStore(core: core)
+        let servers = ServersStore(core: core)
+        let session = SessionStore(core: core, tunnel: tunnel)
+        _session = State(initialValue: session)
+        _servers = State(initialValue: servers)
+        _settings = State(initialValue: settings)
+        _connection = State(initialValue: ConnectionStore(
+            tunnel: tunnel, servers: servers, settings: settings, session: session))
+        _diagnostics = State(initialValue: DiagnosticsStore(core: core, tunnel: tunnel))
+        _purchases = State(initialValue: PurchaseStore(core: core, session: session, store: AppStoreClient()))
+    }
+
+    var body: some Scene {
+        WindowGroup {
+            RootView()
+                .environment(session)
+                .environment(servers)
+                .environment(settings)
+                .environment(connection)
+                .environment(diagnostics)
+                .environment(purchases)
+                .toastOverlay()
+                .privacyCover()
+                .environment(toasts)
+        }
+    }
+}
