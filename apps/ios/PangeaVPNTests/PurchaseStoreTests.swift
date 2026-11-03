@@ -291,7 +291,8 @@ final class PurchaseStoreTests: XCTestCase {
         XCTAssertEqual(rig.client.finished, [24])
     }
 
-    func testUpdateForANewAccountSignsIn() async {
+    // A deleted account's subscription keeps renewing; that must not quietly open a new account.
+    func testAnUpdateWithNoAccountAndNoPurchaseOfOursOpensNothing() async {
         let rig = await rig(signedIn: false)
         rig.core.applePurchaseResult = .success(result(newNumber, created: true))
         rig.store.start()
@@ -299,10 +300,43 @@ final class PurchaseStoreTests: XCTestCase {
 
         rig.client.send(.verified(rig.client.transaction(21)))
 
-        let signedIn = await eventually { rig.store.sheet != nil }
-        XCTAssertTrue(signedIn)
+        let finished = await eventually { rig.client.finished == [21] }
+        XCTAssertTrue(finished)
+        XCTAssertFalse(rig.core.calls.contains { $0.hasPrefix("applePurchase") })
+        XCTAssertNil(rig.session.session)
+        XCTAssertNil(rig.store.sheet)
+    }
+
+    func testAnAskToBuyApprovalForASignedOutPurchaseSignsIn() async {
+        let rig = await rig(signedIn: false)
+        rig.client.purchaseResult = .pending
+        let done = await rig.store.purchase(monthly())
+        XCTAssertFalse(done)
+        XCTAssertEqual(rig.store.notice?.kind, .pending)
+
+        rig.core.applePurchaseResult = .success(result(newNumber, created: true))
+        rig.store.start()
+        defer { rig.store.stop() }
+        rig.client.send(.verified(rig.client.transaction(25)))
+
+        let shown = await eventually { rig.store.sheet != nil }
+        XCTAssertTrue(shown)
+        XCTAssertEqual(rig.store.sheet, .accountNumber(AccountNumber.format(newNumber)))
         XCTAssertEqual(rig.session.session, signedInSession)
-        XCTAssertEqual(rig.client.finished, [21])
+        XCTAssertEqual(rig.client.finished, [25])
+    }
+
+    func testARenewalForAStoredAccountIsStillCredited() async {
+        let rig = await rig(signedIn: true)
+        rig.core.applePurchaseResult = .success(result(existingNumber, created: false))
+        rig.store.start()
+        defer { rig.store.stop() }
+
+        rig.client.send(.verified(rig.client.transaction(26)))
+
+        let finished = await eventually { rig.client.finished == [26] }
+        XCTAssertTrue(finished)
+        XCTAssertTrue(rig.core.calls.contains("applePurchase(\(existingNumber))"))
     }
 
     func testRenewalForSomeoneSignedOutLeavesThemSignedOut() async {

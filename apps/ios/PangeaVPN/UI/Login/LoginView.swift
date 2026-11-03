@@ -220,6 +220,20 @@ enum LoginErrorText {
         String(localized: "login_error_unknown", defaultValue: "Sign in failed. Please try again.")
     }
 
+    // The same scrubbed classes for loads outside sign-in, so no sign-in wording leaks into them.
+    static func general(for raw: String) -> String {
+        switch kind(of: raw) {
+        case .hubUnreachable, .timeout:
+            return String(localized: "login_error_unreachable", defaultValue: "Couldn't reach PangeaVPN. Check your internet connection and try again.")
+        case .other(let text) where !text.isEmpty:
+            return text
+        case .invalidAccount, .subscriptionExpired, .deviceLimit:
+            return message(for: raw)
+        default:
+            return String(localized: "login_error_server", defaultValue: "Our servers are having trouble. Please try again in a moment.")
+        }
+    }
+
     // Hub answers come first: their bodies can quote words the transport markers look for.
     static func kind(of raw: String) -> LoginErrorKind {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)

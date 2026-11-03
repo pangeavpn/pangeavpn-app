@@ -57,7 +57,11 @@ struct RegionPickerView: View {
         let empty = RegionPickerModel.empty(visible: regions, all: servers.regions)
         VStack(alignment: .leading, spacing: 16) {
             if empty == nil, let message = servers.error {
-                InfoNote(message, systemImage: "exclamationmark.circle", tint: Palette.error)
+                VStack(alignment: .leading, spacing: 10) {
+                    InfoNote(message, systemImage: "exclamationmark.circle", tint: Palette.error)
+                    // Pulling down closes the sheet now, so a failed load carries its own retry.
+                    GhostButton(String(localized: "restore_failed_retry", defaultValue: "Try Again"), action: refresh)
+                }
             }
             if multihopAvailable { multihopPanel(regions) }
             if let empty {

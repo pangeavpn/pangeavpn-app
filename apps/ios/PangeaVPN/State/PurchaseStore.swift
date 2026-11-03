@@ -126,6 +126,8 @@ final class PurchaseStore {
         case .cancelled:
             return false
         case .pending:
+            // An Ask to Buy approval comes back as an update, which must still sign this purchaser in.
+            if session.session == nil { awaitingAccount = true }
             post(.pending)
             return false
         case .unverified:
@@ -169,8 +171,21 @@ final class PurchaseStore {
             Self.log.error("ignored an App Store update that failed verification")
             return
         }
+        // No account here and no purchase of ours waiting (say, after Delete Account): open nothing.
+        // Apple tells the server about renewals itself, and Restore Purchases can still claim it.
+        if !awaitingAccount, await storedAccount() == nil {
+            await transaction.finish()
+            return
+        }
         guard let delivery = await deliver(transaction, announce: false) else { return }
         await settle(delivery, origin: .update)
+    }
+
+    private func storedAccount() async -> String? {
+        let core = self.core
+        let stored = await CoreQueue.perform { core.accountNumber() }
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return stored.isEmpty ? nil : stored
     }
 
     // Finished only once the hub holds it, so StoreKit redelivers anything the hub never saw.
@@ -178,9 +193,8 @@ final class PurchaseStore {
         guard inFlight.insert(transaction.id).inserted else { return nil }
         defer { inFlight.remove(transaction.id) }
         let core = self.core
-        let stored = await CoreQueue.perform { core.accountNumber() }
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        let account: String? = preset ?? (stored.isEmpty ? nil : stored)
+        let stored = preset == nil ? await storedAccount() : nil
+        let account = preset ?? stored
         let signed = transaction.signed
         do {
             let result = try await CoreQueue.run {

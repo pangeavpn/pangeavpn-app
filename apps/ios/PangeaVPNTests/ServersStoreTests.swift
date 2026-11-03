@@ -140,7 +140,8 @@ final class ServersStoreTests: XCTestCase {
         core.serversResult = .failure(CoreError(message: "mobile: hub unreachable"))
         await store.refresh()
         XCTAssertEqual(store.regions.map(\.key), ["eu"])
-        XCTAssertEqual(store.error, "mobile: hub unreachable")
+        XCTAssertEqual(store.error, LoginErrorText.general(for: "mobile: hub unreachable"))
+        XCTAssertFalse(store.error?.contains("mobile:") ?? true)
     }
 
     func testSlotsPutRecentsFirstAndKeepTheSelection() async throws {

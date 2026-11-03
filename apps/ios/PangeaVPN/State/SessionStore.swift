@@ -170,7 +170,7 @@ final class SessionStore {
             let listed = try await CoreQueue.run { try core.listDevices() }
             if started == generation { devices = listed }
         } catch {
-            if started == generation { deviceError = error.localizedDescription }
+            if started == generation { deviceError = LoginErrorText.general(for: error.localizedDescription) }
         }
         loadingDevices = false
     }
@@ -181,7 +181,7 @@ final class SessionStore {
         do {
             try await CoreQueue.run { try core.removeDevice(id: id) }
         } catch {
-            deviceError = error.localizedDescription
+            deviceError = LoginErrorText.general(for: error.localizedDescription)
             return
         }
         await loadDevices()

@@ -52,6 +52,17 @@ final class TokenInputTests: XCTestCase {
 }
 
 final class LoginErrorTextTests: XCTestCase {
+    // Region and device loads reuse the sign-in wording, minus anything about signing in.
+    func testGeneralErrorsNeverEchoHostsOrMentionSigningIn() {
+        let unreachable = LoginErrorText.general(for: "hub request failed: dial tcp 203.0.113.9:443: connection refused")
+        XCTAssertEqual(unreachable, LoginErrorText.general(for: "context deadline exceeded"))
+        XCTAssertFalse(unreachable.contains("203.0.113.9"))
+        XCTAssertFalse(unreachable.lowercased().contains("sign"))
+        XCTAssertFalse(LoginErrorText.general(for: "hub auth error (401): denied").lowercased().contains("sign"))
+        let other = LoginErrorText.general(for: "config write failed at https://hub.example.org/v1")
+        XCTAssertFalse(other.contains("hub.example.org"))
+    }
+
     func testTokenLoginStatusesMapToAccountAndThrottleAndServer() {
         XCTAssertEqual(LoginErrorText.kind(of: #"token login failed (401): {"error":"invalid"}"#), .invalidAccount)
         XCTAssertEqual(LoginErrorText.kind(of: "token login failed (404): not found"), .invalidAccount)

@@ -15,6 +15,10 @@ struct DevicesPage: View {
         SettingsPage(.devices, description: String(localized: "devices_subtitle", defaultValue: "Devices signed in to your account.")) {
             if let message = session.deviceError {
                 InfoNote(message, systemImage: "exclamationmark.circle", tint: Palette.error)
+                // Pulling down closes the sheet now, so a failed load carries its own retry.
+                GhostButton(String(localized: "restore_failed_retry", defaultValue: "Try Again")) {
+                    Task { await load() }
+                }
             }
             list
         }

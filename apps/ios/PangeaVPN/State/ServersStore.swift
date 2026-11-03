@@ -75,7 +75,7 @@ final class ServersStore {
         } catch {
             guard started == generation else { return }
             Self.log.error("server refresh failed: \(error.localizedDescription, privacy: .private)")
-            self.error = error.localizedDescription
+            self.error = LoginErrorText.general(for: error.localizedDescription)
         }
         loading = false
     }
@@ -129,7 +129,7 @@ final class ServersStore {
             }
         } catch {
             Self.log.error("saving the server failed: \(error.localizedDescription, privacy: .private)")
-            self.error = error.localizedDescription
+            self.error = LoginErrorText.general(for: error.localizedDescription)
         }
     }
 
