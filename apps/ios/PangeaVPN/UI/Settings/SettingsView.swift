@@ -11,6 +11,7 @@ struct SettingsView: View {
     @State private var confirmingSignOut = false
     @State private var versionTaps = VersionTapUnlock()
     private let closable: Bool
+    private let account: Bool
 
     // Fits the account number on one line at the default text size.
     private static let railWidth: CGFloat = 320
@@ -18,9 +19,11 @@ struct SettingsView: View {
     private static let deleteImage = "trash"
 
     // A swipe-down sheet has its grabber instead, so only the full-screen cover shows the close button.
-    init(path: [SettingsRoute] = [], closable: Bool = true) {
+    // Fixed at opening, so signing out from here does not reflow the page as it closes.
+    init(path: [SettingsRoute] = [], closable: Bool = true, account: Bool = true) {
         _path = State(initialValue: path)
         self.closable = closable
+        self.account = account
     }
 
     var body: some View {
@@ -54,11 +57,13 @@ struct SettingsView: View {
                 header(inset: 16, background: Palette.bg)
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
-                        AccountCard()
+                        if account { AccountCard() }
                         routeRows
-                            .padding(.top, 20)
-                        accountActions
-                            .padding(.top, 20)
+                            .padding(.top, account ? 20 : 8)
+                        if account {
+                            accountActions
+                                .padding(.top, 20)
+                        }
                         versionLine
                             .padding(.top, 12)
                     }
@@ -132,11 +137,13 @@ struct SettingsView: View {
             header(inset: 12, background: Palette.surface)
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    AccountCard(fill: Palette.bg)
+                    if account { AccountCard(fill: Palette.bg) }
                     railRoutes
-                        .padding(.top, 14)
-                    railActions
-                        .padding(.top, 12)
+                        .padding(.top, account ? 14 : 4)
+                    if account {
+                        railActions
+                            .padding(.top, 12)
+                    }
                     versionLine
                         .padding(.top, 4)
                 }
@@ -327,7 +334,7 @@ struct SettingsView: View {
 
 #if DEBUG
 @MainActor
-private func previewSettings(developer: Bool = false, path: [SettingsRoute] = []) -> some View {
+private func previewSettings(developer: Bool = false, path: [SettingsRoute] = [], account: Bool = true) -> some View {
     let core = FakeCore()
     core.subscriptionResult = .success(Subscription(status: "active", renews: true, expiresAt: "2026-12-26T00:00:00Z", entitled: true))
     core.accountNumberValue = "ABCDEFGHJKMNPQRSTVWXYZ01"
@@ -342,7 +349,7 @@ private func previewSettings(developer: Bool = false, path: [SettingsRoute] = []
     settings.setDeveloperMode(developer)
     let servers = ServersStore(core: core, defaults: defaults)
     let session = SessionStore(core: core, tunnel: tunnel)
-    return SettingsView(path: path)
+    return SettingsView(path: path, account: account)
         .environment(session)
         .environment(PurchaseStore(core: core, session: session, store: FakeStoreClient()))
         .environment(servers)
@@ -354,6 +361,10 @@ private func previewSettings(developer: Bool = false, path: [SettingsRoute] = []
 
 #Preview("Settings home") {
     previewSettings()
+}
+
+#Preview("Signed out") {
+    previewSettings(account: false)
 }
 
 #Preview("Developer unlocked, dark") {

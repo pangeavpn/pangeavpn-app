@@ -92,6 +92,12 @@ final class GoCore: CoreBridge {
         try check(ok, err)
     }
 
+    func retryPendingDeregister() throws {
+        var err: NSError?
+        let ok = MobileRetryPendingDeregister(&err)
+        try check(ok, err)
+    }
+
     func wipe() throws {
         var err: NSError?
         let ok = MobileWipe(&err)

@@ -37,6 +37,8 @@ protocol CoreBridge: AnyObject, Sendable {
     func hubStatus() -> HubStatus
     // Frees this install's device slot on the hub; sign-out calls it before logout.
     func deregister() throws
+    // Frees a slot a past sign-out could not reach the hub to free; a no-op when none is pending.
+    func retryPendingDeregister() throws
     // Hands an App Store transaction to the hub, which credits it to an account (new or given).
     func applePurchase(signedTransaction: String, accountNumber: String?) throws -> ApplePurchaseResult
     func deleteAccount() throws

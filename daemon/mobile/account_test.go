@@ -155,9 +155,9 @@ func TestDeregisterKeepsAnIdentityALoginReplaced(t *testing.T) {
 	}
 }
 
-// The host gives Deregister 8s, then signs out and may sign straight back in,
-// reusing the identity; the deregistration's late answer must not take it.
-func TestALateDeregisterAnswerLeavesTheIdentityALoginReused(t *testing.T) {
+// The host stops waiting on Deregister, signs out and may sign straight back in.
+// That sign-in waits for the deregistration, finishes freeing the slot, then registers a clean identity.
+func TestASignInDuringALateDeregisterWaitsForIt(t *testing.T) {
 	s, ident, h := newSignedInHub(t)
 	h.handle("/api/client/token-login", replyWith(http.StatusOK, map[string]any{
 		"vpnAccessToken": "lk2", "user": map[string]string{"email": "b@example.com"}, "servers": []serverInfo{},
@@ -165,10 +165,15 @@ func TestALateDeregisterAnswerLeavesTheIdentityALoginReused(t *testing.T) {
 	h.handle("/api/device/register", replyWith(http.StatusOK, map[string]string{"deviceId": "d2", "assignedIp": "10.0.0.3"}))
 	h.handle("/api/client/regions", replyWith(http.StatusOK, regionsWith(t, "mine")))
 	loginErr := make(chan error, 1)
+	var calls atomic.Int32
 	h.handle("/api/device/deregister", func(fakeRequest) (int, any) {
-		Logout()
-		_, err := Login("token")
-		loginErr <- err
+		if calls.Add(1) == 1 {
+			Logout()
+			go func() {
+				_, err := Login("token")
+				loginErr <- err
+			}()
+		}
 		return http.StatusOK, map[string]bool{"ok": true}
 	})
 
@@ -178,14 +183,18 @@ func TestALateDeregisterAnswerLeavesTheIdentityALoginReused(t *testing.T) {
 	if err := <-loginErr; err != nil {
 		t.Fatalf("Login: %v", err)
 	}
-	if got := bodyFields(t, h.requestsTo("/api/device/register")[0])["identityPubkey"]; got != ident.pubB64 {
-		t.Fatalf("Login registered %q, want the reused identity", got)
+	if n := len(h.requestsTo("/api/device/deregister")); n != 2 {
+		t.Fatalf("deregister requests = %d, want the sign-out's and the sign-in's retry", n)
 	}
-	if stored, _ := parseIdentity(s.Get(keyIdentity)); stored.publicKey() != ident.pubB64 || s.Get(keyLicense) != "lk2" {
+	registered := bodyFields(t, h.requestsTo("/api/device/register")[0])["identityPubkey"]
+	if registered == ident.pubB64 {
+		t.Fatal("Login re-registered the identity whose slot was just freed")
+	}
+	if stored, _ := parseIdentity(s.Get(keyIdentity)); stored.publicKey() != registered || s.Get(keyLicense) != "lk2" {
 		t.Fatalf("store = %v, want the new license beside the identity it registered", s.values)
 	}
-	if lk, _, _, kept := sessionState(); lk != "lk2" || kept.publicKey() != ident.pubB64 {
-		t.Fatalf("memory lk=%q identity kept=%v", lk, kept.publicKey() == ident.pubB64)
+	if s.Get(keyPendingDeregister) != "" {
+		t.Fatal("the freed slot is still pending")
 	}
 }
 

@@ -24,7 +24,7 @@ var storedKeys = []string{
 	keyLicense, keyIdentity, keyConfig,
 	keyHubIP, keyFronted, keyHubSS, keyHubReality,
 	keyDeadDropSeq, keyDeadDropAttempt,
-	keySubscription, keyServers,
+	keySubscription, keyServers, keyPendingDeregister,
 }
 
 // sessionKeys belong to one signed-in account and go with it.
@@ -59,8 +59,10 @@ func signOutLocally(scope callScope) {
 // Deregister frees this install's device slot on the hub; call it before
 // Logout. It forgets the identity only once the hub no longer holds it.
 func Deregister() error {
+	deregGate.Lock()
+	defer deregGate.Unlock()
 	mu.Lock()
-	scope, ident := scopeLocked(), identity
+	scope, ident, logs := scopeLocked(), identity, wgLogs
 	mu.Unlock()
 	if scope.licenseKey == "" {
 		return errors.New("mobile: not authenticated")
@@ -69,11 +71,18 @@ func Deregister() error {
 		return errors.New("mobile: no device identity")
 	}
 
+	// Recorded first, so a host that stops waiting and signs out still leaves the slot to retry.
+	savePendingDeregister(pendingDeregister{LicenseKey: scope.licenseKey, IdentityPubkey: ident.pubB64})
 	err := deregisterDeviceHub(scope, ident.pubB64)
-	switch code := hubErrorCode(err); {
-	case err == nil, code == "DEVICE_NOT_FOUND", code == "FORBIDDEN":
+	if slotFreed(err) {
+		clearPendingDeregister(ident.pubB64)
 		forgetIdentityIf(scope.session, ident.pubB64)
 		return nil
+	}
+	if isSignOutCode(err) {
+		clearPendingDeregister(ident.pubB64)
+	} else {
+		logAdd(logs, state.LogWarn, "could not free this device's slot on sign-out; will retry")
 	}
 	return err
 }
