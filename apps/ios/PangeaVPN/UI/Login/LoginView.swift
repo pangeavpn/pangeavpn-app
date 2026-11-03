@@ -11,6 +11,10 @@ struct LoginView: View {
     @State private var submitting = false
     @State private var showAccountHelp = false
     @State private var keyboardFreeHeight: CGFloat = 0
+    @State private var width: CGFloat = 0
+    @State private var showSettings = false
+    // As on the main screen: a phone swipes settings away as a sheet, a wide window gets the full-screen rail.
+    @State private var settingsOnSheet = true
 
     private static let maxMapSize: CGFloat = 236
     private static let gutter: CGFloat = 20
@@ -29,7 +33,7 @@ struct LoginView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            PangeaHeader(version: "v\(Self.versionName)", onToggleTheme: toggleTheme)
+            PangeaHeader(version: "v\(Self.versionName)", onToggleTheme: toggleTheme, onMenu: openSettings)
             GeometryReader { proxy in
                 let wide = AppLayout.isWide(width: proxy.size.width, sizeClass: sizeClass)
                 // The globe is a Canvas that redraws at its new size in one frame, so the keyboard must not resize it.
@@ -50,7 +54,12 @@ struct LoginView: View {
                 .ignoresSafeArea(.keyboard)
             }
         }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
         .background(Palette.bg.ignoresSafeArea())
+        .fullScreenCover(isPresented: settingsShown(onSheet: false)) { SettingsView(account: false) }
+        .sheet(isPresented: settingsShown(onSheet: true)) {
+            SettingsView(closable: false, account: false).swipeDownSheet()
+        }
         .onChange(of: token) { _, value in
             let formatted = AccountNumber.format(value)
             if formatted != value { token = formatted }
@@ -170,6 +179,15 @@ struct LoginView: View {
 
     private func toggleTheme() {
         settings.setDarkTheme(colorScheme == .light)
+    }
+
+    private func settingsShown(onSheet: Bool) -> Binding<Bool> {
+        Binding(get: { showSettings && settingsOnSheet == onSheet }, set: { showSettings = $0 })
+    }
+
+    private func openSettings() {
+        settingsOnSheet = !AppLayout.isWide(width: width, sizeClass: sizeClass)
+        showSettings = true
     }
 
     private static var versionName: String {
