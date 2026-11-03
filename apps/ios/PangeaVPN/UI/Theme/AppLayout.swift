@@ -45,6 +45,11 @@ extension View {
         frame(maxWidth: AppLayout.readableWidth).frame(maxWidth: .infinity)
     }
 
+    // Full height with the grabber showing, so swiping down reads as the way back to the main screen.
+    func swipeDownSheet() -> some View {
+        presentationDetents([.large]).presentationDragIndicator(.visible)
+    }
+
     // A form-sized panel on a wide window; iOS 17 has no sizing control, so it keeps the default sheet.
     @ViewBuilder
     func formSheetSized() -> some View {

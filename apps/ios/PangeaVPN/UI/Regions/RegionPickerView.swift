@@ -1,6 +1,6 @@
 import SwiftUI
 
-// The region list (full screen on iPhone, a sheet on a wide iPad), with multihop on top when any server can relay.
+// The region list (a swipe-down sheet on iPhone, a form sheet on a wide iPad), with multihop on top when any server can relay.
 struct RegionPickerView: View {
     @Environment(ServersStore.self) private var servers
     @Environment(SettingsStore.self) private var settings
@@ -24,18 +24,13 @@ struct RegionPickerView: View {
                     .padding(.top, 8)
                     .padding(.bottom, 32)
             }
-            .refreshable { await servers.refresh() }
             .background(Palette.bg.ignoresSafeArea())
             .navigationTitle(String(localized: "regions_title", defaultValue: "Select region"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(Palette.bg, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    SettingsCloseButton { dismiss() }
-                }
-            }
         }
         .preferredColorScheme(settings.darkTheme.map { $0 ? ColorScheme.dark : ColorScheme.light })
+        // Refreshed on open rather than by pulling, so a downward swipe always dismisses the sheet.
         .task { await servers.refresh() }
         .toastOverlay()
         .privacyCover()

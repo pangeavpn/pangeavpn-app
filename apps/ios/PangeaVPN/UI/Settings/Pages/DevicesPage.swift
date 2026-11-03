@@ -18,7 +18,6 @@ struct DevicesPage: View {
             }
             list
         }
-        .refreshable { await session.loadDevices() }
         .task { await load() }
         .alert(String(localized: "devices_rename", defaultValue: "Rename"), isPresented: renameShown, presenting: renaming) { device in
             TextField(String(localized: "devices_rename_label", defaultValue: "Device name"), text: nameField)

@@ -11,6 +11,8 @@ struct MainView: View {
     @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var showSettings = false
     @State private var settingsPath: [SettingsRoute] = []
+    // Picked as settings opens: a phone swipes it away as a sheet, a wide window keeps the full-screen rail.
+    @State private var settingsOnSheet = true
     // Whether this tunnel has been up since it last stopped, so a reassert reads as a reconnect.
     @State private var sawConnected = false
     @State private var bannerHeight: CGFloat = 0
@@ -18,7 +20,7 @@ struct MainView: View {
     @State private var slotMetrics = SlotMetrics()
     @State private var stageWidth: CGFloat = 0
     // Unset until the width is known, then held while the picker is up so a resize never swaps its presentation.
-    @State private var pickerOnSheet: Bool?
+    @State private var pickerFormSheet: Bool?
     @State private var wideBannerHeight: CGFloat = 0
     @State private var wideHeroHeight: CGFloat = 0
     @State private var wideFactsHeight: CGFloat = 0
@@ -41,9 +43,13 @@ struct MainView: View {
 
     private var isWide: Bool { AppLayout.isWide(width: stageWidth, sizeClass: sizeClass) }
 
-    private func regionPickerShown(onSheet: Bool) -> Binding<Bool> {
-        Binding(get: { connection.showServerSheet && pickerOnSheet == onSheet },
+    private func regionPickerShown(formSheet: Bool) -> Binding<Bool> {
+        Binding(get: { connection.showServerSheet && pickerFormSheet == formSheet },
                 set: { connection.showServerSheet = $0 })
+    }
+
+    private func settingsShown(onSheet: Bool) -> Binding<Bool> {
+        Binding(get: { showSettings && settingsOnSheet == onSheet }, set: { showSettings = $0 })
     }
 
     private var status: TunnelStatus { connection.status }
@@ -75,25 +81,30 @@ struct MainView: View {
         // Capped here only, so the screens it opens keep the accessibility sizes.
         .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
         .background(Palette.bg.ignoresSafeArea())
-        .fullScreenCover(isPresented: $showSettings) { SettingsView(path: settingsPath) }
-        .fullScreenCover(isPresented: regionPickerShown(onSheet: false)) { RegionPickerView() }
-        .sheet(isPresented: regionPickerShown(onSheet: true)) { RegionPickerView().formSheetSized() }
+        .fullScreenCover(isPresented: settingsShown(onSheet: false)) { SettingsView(path: settingsPath) }
+        .sheet(isPresented: settingsShown(onSheet: true)) {
+            SettingsView(path: settingsPath, closable: false).swipeDownSheet()
+        }
+        .sheet(isPresented: regionPickerShown(formSheet: false)) { RegionPickerView().swipeDownSheet() }
+        .sheet(isPresented: regionPickerShown(formSheet: true)) {
+            RegionPickerView().formSheetSized().presentationDragIndicator(.visible)
+        }
         .onAppear { sawConnected = status.state == .connected }
         .onChange(of: status.state) { _, state in track(state) }
         .onChange(of: connection.error) { _, message in toast(message) }
         .onChange(of: isWide) { _, wide in
-            if !connection.showServerSheet { pickerOnSheet = wide }
+            if !connection.showServerSheet { pickerFormSheet = wide }
         }
         .onChange(of: connection.showServerSheet) { _, shown in
-            if !shown { pickerOnSheet = isWide }
+            if !shown { pickerFormSheet = isWide }
         }
     }
 
     // A picker already asked for before the first layout waits for this, so it opens in the right style.
     private func measured(width: CGFloat) {
         stageWidth = width
-        if pickerOnSheet == nil, width > 0 {
-            pickerOnSheet = AppLayout.isWide(width: width, sizeClass: sizeClass)
+        if pickerFormSheet == nil, width > 0 {
+            pickerFormSheet = AppLayout.isWide(width: width, sizeClass: sizeClass)
         }
     }
 
@@ -340,6 +351,7 @@ struct MainView: View {
     // The Lockdown switch lives on the Startup page, so the note opens settings already there.
     private func openSettings(at path: [SettingsRoute] = []) {
         settingsPath = path
+        settingsOnSheet = !isWide
         showSettings = true
     }
 

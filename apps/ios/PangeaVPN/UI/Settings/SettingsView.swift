@@ -10,14 +10,17 @@ struct SettingsView: View {
     @State private var path: [SettingsRoute]
     @State private var confirmingSignOut = false
     @State private var versionTaps = VersionTapUnlock()
+    private let closable: Bool
 
     // Fits the account number on one line at the default text size.
     private static let railWidth: CGFloat = 320
     private static let signOutImage = "rectangle.portrait.and.arrow.right"
     private static let deleteImage = "trash"
 
-    init(path: [SettingsRoute] = []) {
+    // A swipe-down sheet has its grabber instead, so only the full-screen cover shows the close button.
+    init(path: [SettingsRoute] = [], closable: Bool = true) {
         _path = State(initialValue: path)
+        self.closable = closable
     }
 
     var body: some View {
@@ -28,7 +31,7 @@ struct SettingsView: View {
         }
         .tint(Palette.accent)
         .preferredColorScheme(settings.darkTheme.map { $0 ? ColorScheme.dark : ColorScheme.light })
-        // A full-screen cover sits above the app-wide toast and privacy layers, so it carries its own.
+        // A cover or sheet sits above the app-wide toast and privacy layers, so it carries its own.
         .toastOverlay()
         .privacyCover()
         .task {
@@ -113,9 +116,11 @@ struct SettingsView: View {
                 .minimumScaleFactor(0.7)
                 .accessibilityAddTraits(.isHeader)
             Spacer(minLength: 8)
-            SettingsCloseButton { dismiss() }
-                .background(Palette.surface, in: Circle())
-                .overlay(Circle().strokeBorder(Palette.borderSubtle, lineWidth: 1))
+            if closable {
+                SettingsCloseButton { dismiss() }
+                    .background(Palette.surface, in: Circle())
+                    .overlay(Circle().strokeBorder(Palette.borderSubtle, lineWidth: 1))
+            }
         }
         .padding(.horizontal, inset)
         .padding(.vertical, 8)
