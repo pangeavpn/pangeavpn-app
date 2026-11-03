@@ -25,7 +25,7 @@ func TestMarkCurrentDevicesFlagsOnlyThisInstall(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := markCurrentDevices(rows, tc.myPub)
+			got := markCurrentDevices(rows, tc.myPub, nil)
 			if len(got) != len(rows) {
 				t.Fatalf("got %d rows, want %d", len(got), len(rows))
 			}
@@ -45,7 +45,7 @@ func TestMarkCurrentDevicesFlagsOnlyThisInstall(t *testing.T) {
 }
 
 func TestMarkCurrentDevicesGivesAnEmptyListNotNull(t *testing.T) {
-	b, err := json.Marshal(markCurrentDevices(nil, "pub"))
+	b, err := json.Marshal(markCurrentDevices(nil, "pub", nil))
 	if err != nil || string(b) != "[]" {
 		t.Fatalf("got %s, %v, want []", b, err)
 	}
@@ -53,7 +53,7 @@ func TestMarkCurrentDevicesGivesAnEmptyListNotNull(t *testing.T) {
 
 func TestDeviceJSONNeverCarriesTheIdentityKey(t *testing.T) {
 	rows := []hubDevice{{ID: "d1", IdentityPubkey: strPtr("c2VjcmV0LWlkZW50aXR5"), Status: "active"}}
-	b, err := json.Marshal(markCurrentDevices(rows, "c2VjcmV0LWlkZW50aXR5"))
+	b, err := json.Marshal(markCurrentDevices(rows, "c2VjcmV0LWlkZW50aXR5", nil))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,5 +63,31 @@ func TestDeviceJSONNeverCarriesTheIdentityKey(t *testing.T) {
 	}
 	if !strings.Contains(out, `"current":true`) {
 		t.Fatalf("device JSON lacks current: %s", out)
+	}
+}
+
+func TestMarkCurrentDevicesOpensEncryptedNames(t *testing.T) {
+	rows := []hubDevice{
+		{ID: "d1", EncryptedName: strPtr(zk1Sealed)},
+		{ID: "d2", FriendlyName: strPtr("Swift Fox")},
+		{ID: "d3", EncryptedName: strPtr(zk1Sealed), FriendlyName: strPtr("Calm Owl")},
+		{ID: "d4"},
+	}
+	names := func(got []deviceInfo) []string {
+		out := make([]string, len(got))
+		for i, row := range got {
+			if row.FriendlyName != nil {
+				out[i] = *row.FriendlyName
+			}
+		}
+		return out
+	}
+	opened := names(markCurrentDevices(rows, "", deviceNameKey(zk1Credential)))
+	if strings.Join(opened, "|") != zk1Plaintext+"|Swift Fox|"+zk1Plaintext+"|" {
+		t.Fatalf("with the key = %q", opened)
+	}
+	labels := names(markCurrentDevices(rows, "", nil))
+	if strings.Join(labels, "|") != "|Swift Fox|Calm Owl|" {
+		t.Fatalf("without the key = %q", labels)
 	}
 }

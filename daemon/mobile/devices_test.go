@@ -33,9 +33,16 @@ func TestRenameDeviceValidatesBeforeTheHub(t *testing.T) {
 	}
 }
 
-func TestRenameDeviceReturnsTheStoredName(t *testing.T) {
-	_, _, h := newSignedInHub(t)
-	h.handle("/api/device/rename", replyWith(http.StatusOK, map[string]any{"ok": true, "friendlyName": "Work Phone"}))
+func newAccountNumberHub(t *testing.T) (*identityKeyPair, *fakeHub) {
+	t.Helper()
+	ident := mustIdentity(t)
+	initForTest(t, map[string]string{keyLicense: zk1Credential, keyIdentity: ident.marshal()})
+	return ident, newFakeHub(t)
+}
+
+func TestRenameDeviceSendsOnlyTheSealedName(t *testing.T) {
+	_, h := newAccountNumberHub(t)
+	h.handle("/api/device/rename", replyWith(http.StatusOK, map[string]any{"ok": true, "encryptedName": "zk1:ignored"}))
 
 	got, err := RenameDevice("d1", "  Work Phone \n")
 	if err != nil || got != "Work Phone" {
@@ -45,16 +52,23 @@ func TestRenameDeviceReturnsTheStoredName(t *testing.T) {
 	if len(reqs) != 1 || reqs[0].Method != http.MethodPost {
 		t.Fatalf("rename requests = %+v", reqs)
 	}
-	if string(reqs[0].Body) != `{"deviceId":"d1","friendlyName":"Work Phone"}` {
+	body := bodyFields(t, reqs[0])
+	name, ok := openDeviceName(deviceNameKey(zk1Credential), body["encryptedName"])
+	if len(body) != 2 || body["deviceId"] != "d1" || !ok || name != "Work Phone" {
 		t.Fatalf("body = %s", reqs[0].Body)
 	}
-	if reqs[0].Headers["X-License-Key"] != "lk" {
-		t.Fatalf("headers = %v, want the license", reqs[0].Headers)
+	if strings.Contains(string(reqs[0].Body), "Work Phone") {
+		t.Fatal("the plaintext name reached the hub")
 	}
+}
 
-	h.handle("/api/device/rename", replyWith(http.StatusOK, map[string]any{"ok": true}))
-	if got, err := RenameDevice("d1", " Tablet "); err != nil || got != "Tablet" {
-		t.Fatalf("a reply without a name = %q, %v; want the trimmed name", got, err)
+func TestRenameDeviceRefusesALegacyToken(t *testing.T) {
+	_, _, h := newSignedInHub(t)
+	if _, err := RenameDevice("d1", "Phone"); err == nil || !strings.Contains(err.Error(), "Sign in with your account number") {
+		t.Fatalf("RenameDevice = %v, want the account-number error", err)
+	}
+	if len(h.requestsTo("/api/device/rename")) != 0 {
+		t.Fatal("a legacy-token rename reached the hub")
 	}
 }
 
@@ -64,12 +78,12 @@ func TestRenameDeviceSurfacesHubCodes(t *testing.T) {
 		code   string
 	}{
 		{404, "DEVICE_NOT_FOUND"},
-		{503, "DEVICE_NAMES_UNAVAILABLE"},
+		{400, "DEVICE_NAME_NOT_ENCRYPTED"},
 		{400, "BAD_REQUEST"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.code, func(t *testing.T) {
-			_, _, h := newSignedInHub(t)
+			_, h := newAccountNumberHub(t)
 			h.handle("/api/device/rename", replyCode(tc.status, tc.code))
 			_, err := RenameDevice("d1", "Phone")
 			if got := hubErrorCode(err); got != tc.code {
@@ -112,5 +126,51 @@ func TestListDevicesWithoutAnIdentityMarksNothing(t *testing.T) {
 	raw, err := ListDevices()
 	if err != nil || strings.Contains(raw, `"current":true`) {
 		t.Fatalf("ListDevices = %s, %v", raw, err)
+	}
+}
+
+func TestListDevicesOpensEncryptedNames(t *testing.T) {
+	_, h := newAccountNumberHub(t)
+	h.handle("/api/device/list", replyWith(http.StatusOK, map[string]any{"devices": []map[string]any{
+		{"id": "d1", "friendlyName": nil, "encryptedName": zk1Sealed, "createdAt": "2026-01-01", "status": "active"},
+		{"id": "d2", "friendlyName": "Swift Fox", "encryptedName": nil, "createdAt": "2026-02-01", "status": "active"},
+	}}))
+
+	raw, err := ListDevices()
+	if err != nil {
+		t.Fatalf("ListDevices: %v", err)
+	}
+	var devices []deviceInfo
+	if err := json.Unmarshal([]byte(raw), &devices); err != nil || len(devices) != 2 {
+		t.Fatalf("ListDevices = %s (%v)", raw, err)
+	}
+	if *devices[0].FriendlyName != zk1Plaintext || *devices[1].FriendlyName != "Swift Fox" || strings.Contains(raw, "zk1:") {
+		t.Fatalf("ListDevices = %s", raw)
+	}
+}
+
+func TestLoginSealsTheNameOnlyForAnAccountNumber(t *testing.T) {
+	for _, credential := range []string{zk1Credential, "lk"} {
+		t.Run(credential, func(t *testing.T) {
+			initForTest(t, nil)
+			h := newFakeHub(t)
+			h.handle("/api/client/token-login", replyWith(http.StatusOK, map[string]any{"vpnAccessToken": credential, "user": map[string]string{}}))
+			h.handle("/api/device/register", replyWith(http.StatusOK, map[string]string{"deviceId": "d1", "assignedIp": "10.0.0.2"}))
+
+			if _, err := Login(credential); err != nil {
+				t.Fatalf("Login: %v", err)
+			}
+			body := bodyFields(t, h.requestsTo("/api/device/register")[0])
+			if _, plain := body["friendlyName"]; plain {
+				t.Fatalf("register sent a plaintext name: %v", body)
+			}
+			name, ok := openDeviceName(deviceNameKey(zk1Credential), body["encryptedName"])
+			if credential == zk1Credential && (!ok || name != platformName) {
+				t.Fatalf("register body = %v, want the sealed platform name", body)
+			}
+			if _, sealed := body["encryptedName"]; credential == "lk" && sealed {
+				t.Fatalf("a legacy token sealed a name: %v", body)
+			}
+		})
 	}
 }

@@ -156,6 +156,7 @@ type hubDevice struct {
 	ID             string  `json:"id"`
 	IdentityPubkey *string `json:"identityPubkey"`
 	FriendlyName   *string `json:"friendlyName"`
+	EncryptedName  *string `json:"encryptedName"`
 	CreatedAt      string  `json:"createdAt"`
 	Status         string  `json:"status"`
 }

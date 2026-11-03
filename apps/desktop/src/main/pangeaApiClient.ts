@@ -46,6 +46,13 @@ import {
   type PostQuantumProvider
 } from "../shared/postQuantum";
 import { DOH_TLS_OPTIONS, fetchViaConnectProxy } from "./hubTransport";
+import {
+  RENAME_NEEDS_ACCOUNT_NUMBER,
+  checkDeviceName,
+  deviceNameKey,
+  openDeviceName,
+  sealDeviceName
+} from "./deviceName";
 
 export class AuthError extends Error {
   status: number;
@@ -474,6 +481,7 @@ interface DeviceRegisterResponse {
   deviceId: string;
   assignedIp: string;
   friendlyName?: string | null;
+  encryptedName?: string | null;
 }
 
 export interface DeviceInfo {
@@ -1643,12 +1651,15 @@ export class PangeaApiClient {
     }
   }
 
-  async registerDevice(identityPubkey: string, friendlyName?: string): Promise<DeviceRegisterResponse> {
-    return this.hubRequest<DeviceRegisterResponse>("POST", "/api/device/register", {
+  /** Never sends a plaintext name: without an account number the hub picks a label. */
+  async registerDevice(identityPubkey: string, name?: string): Promise<DeviceRegisterResponse> {
+    const key = deviceNameKey(this.licenseKey);
+    const data = await this.hubRequest<DeviceRegisterResponse>("POST", "/api/device/register", {
       licenseKey: this.licenseKey,
       identityPubkey,
-      ...(friendlyName ? { friendlyName } : {})
+      ...(key && name ? { encryptedName: sealDeviceName(name, key) } : {})
     });
+    return { ...data, friendlyName: openDeviceName(data.encryptedName, key) ?? data.friendlyName ?? null };
   }
 
   async deregisterDevice(identityPubkey: string): Promise<void> {
@@ -1659,16 +1670,29 @@ export class PangeaApiClient {
   }
 
   async listDevices(): Promise<DeviceInfo[]> {
-    const data = await this.hubRequest<{ devices: DeviceInfo[] }>("GET", "/api/device/list");
-    return data.devices;
+    const data = await this.hubRequest<{ devices: Array<DeviceInfo & { encryptedName?: string | null }> }>(
+      "GET",
+      "/api/device/list"
+    );
+    const key = deviceNameKey(this.licenseKey);
+    return data.devices.map(({ encryptedName, ...device }) => ({
+      ...device,
+      friendlyName: openDeviceName(encryptedName, key) ?? device.friendlyName ?? null
+    }));
   }
 
   async removeDevice(deviceId: string): Promise<void> {
     await this.hubRequest<unknown>("POST", "/api/device/remove", { deviceId });
   }
 
-  async renameDevice(deviceId: string, friendlyName: string): Promise<void> {
-    await this.hubRequest<unknown>("POST", "/api/device/rename", { deviceId, friendlyName });
+  async renameDevice(deviceId: string, name: string): Promise<void> {
+    const trimmed = checkDeviceName(name);
+    const key = deviceNameKey(this.licenseKey);
+    if (!key) throw new Error(RENAME_NEEDS_ACCOUNT_NUMBER);
+    await this.hubRequest<unknown>("POST", "/api/device/rename", {
+      deviceId,
+      encryptedName: sealDeviceName(trimmed, key)
+    });
   }
 
   /** Drops the post-failure cooldown. Pressing Connect is the user asking for
