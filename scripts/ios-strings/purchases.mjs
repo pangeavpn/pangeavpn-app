@@ -15,14 +15,14 @@ export default {
     fa: "طرح خود را انتخاب کنید"
   },
   paywall_subtitle: {
-    en: "No email or personal details needed. One account number works on all your devices.",
-    es: "No hace falta correo electrónico ni datos personales. Un solo número de cuenta funciona en todos tus dispositivos.",
-    fr: "Aucune adresse e-mail ni donnée personnelle requise. Un seul numéro de compte fonctionne sur tous vos appareils.",
-    ru: "Не нужны ни e-mail, ни личные данные. Один номер аккаунта работает на всех ваших устройствах.",
-    uk: "Не потрібні ні e-mail, ні особисті дані. Один номер акаунта працює на всіх ваших пристроях.",
-    zh: "无需电子邮件或个人信息。一个账号即可在您的所有设备上使用。",
-    ar: "لا حاجة إلى بريد إلكتروني أو بيانات شخصية. رقم حساب واحد يعمل على جميع أجهزتك.",
-    fa: "به ایمیل یا اطلاعات شخصی نیازی نیست. یک شماره حساب روی همهٔ دستگاه‌های شما کار می‌کند."
+    en: "PangeaVPN Premium unlocks every region and connection method on all your devices. No email or personal details needed.",
+    es: "PangeaVPN Premium desbloquea todas las regiones y métodos de conexión en todos tus dispositivos. No hace falta correo electrónico ni datos personales.",
+    fr: "PangeaVPN Premium débloque toutes les régions et méthodes de connexion sur tous vos appareils. Aucune adresse e-mail ni donnée personnelle requise.",
+    ru: "PangeaVPN Premium открывает все регионы и способы подключения на всех ваших устройствах. Не нужны ни e-mail, ни личные данные.",
+    uk: "PangeaVPN Premium відкриває всі регіони й способи підключення на всіх ваших пристроях. Не потрібні ні e-mail, ні особисті дані.",
+    zh: "PangeaVPN Premium 可在您的所有设备上解锁全部地区和连接方式。无需电子邮件或个人信息。",
+    ar: "يفتح PangeaVPN Premium جميع المناطق وطرق الاتصال على كل أجهزتك. لا حاجة إلى بريد إلكتروني أو بيانات شخصية.",
+    fa: "PangeaVPN Premium همهٔ مناطق و روش‌های اتصال را روی همهٔ دستگاه‌های شما باز می‌کند. به ایمیل یا اطلاعات شخصی نیازی نیست."
   },
   paywall_plan_month: {
     en: "1 month", es: "1 mes", fr: "1 mois", ru: "1 месяц",

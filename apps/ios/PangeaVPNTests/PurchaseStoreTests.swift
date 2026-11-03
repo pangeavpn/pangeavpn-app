@@ -292,13 +292,13 @@ final class PurchaseStoreTests: XCTestCase {
     }
 
     // A deleted account's subscription keeps renewing; that must not quietly open a new account.
-    func testAnUpdateWithNoAccountAndNoPurchaseOfOursOpensNothing() async {
+    func testARenewalWithNoAccountOpensNothing() async {
         let rig = await rig(signedIn: false)
         rig.core.applePurchaseResult = .success(result(newNumber, created: true))
         rig.store.start()
         defer { rig.store.stop() }
 
-        rig.client.send(.verified(rig.client.transaction(21)))
+        rig.client.send(.verified(rig.client.transaction(21, original: 20)))
 
         let finished = await eventually { rig.client.finished == [21] }
         XCTAssertTrue(finished)
@@ -324,6 +324,39 @@ final class PurchaseStoreTests: XCTestCase {
         XCTAssertEqual(rig.store.sheet, .accountNumber(AccountNumber.format(newNumber)))
         XCTAssertEqual(rig.session.session, signedInSession)
         XCTAssertEqual(rig.client.finished, [25])
+    }
+
+    // An interrupted purchase (3-D Secure, say) or an offer code finishes outside purchase(); it still opens its account.
+    func testAFirstPurchaseArrivingLaterOpensItsAccount() async {
+        let rig = await rig(signedIn: false)
+        rig.core.applePurchaseResult = .success(result(newNumber, created: true))
+        rig.store.start()
+        defer { rig.store.stop() }
+
+        rig.client.send(.verified(rig.client.transaction(27)))
+
+        let shown = await eventually { rig.store.sheet != nil }
+        XCTAssertTrue(shown)
+        XCTAssertEqual(rig.store.sheet, .accountNumber(AccountNumber.format(newNumber)))
+        XCTAssertEqual(rig.session.session, signedInSession)
+        XCTAssertEqual(rig.client.finished, [27])
+    }
+
+    // A declined Ask to Buy leaves its flag behind; a later renewal must still not reopen an account.
+    func testALeftoverAwaitingFlagCannotReopenAnAccountFromARenewal() async {
+        let rig = await rig(signedIn: false)
+        rig.client.purchaseResult = .pending
+        _ = await rig.store.purchase(monthly())
+
+        rig.core.applePurchaseResult = .success(result(newNumber, created: true))
+        rig.store.start()
+        defer { rig.store.stop() }
+        rig.client.send(.verified(rig.client.transaction(29, original: 28)))
+
+        let finished = await eventually { rig.client.finished == [29] }
+        XCTAssertTrue(finished)
+        XCTAssertFalse(rig.core.calls.contains { $0.hasPrefix("applePurchase") })
+        XCTAssertNil(rig.store.sheet)
     }
 
     func testARenewalForAStoredAccountIsStillCredited() async {

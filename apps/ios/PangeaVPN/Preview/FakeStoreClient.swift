@@ -29,8 +29,9 @@ final class FakeStoreClient: StoreClient {
         ]
     }
 
-    func transaction(_ id: UInt64, product: String = StoreProducts.monthly) -> StoreTransaction {
-        StoreTransaction(id: id, productId: product, signed: "jws-\(id)") { [weak self] in
+    // Without an original, the transaction is a first purchase; with one, it renews that purchase.
+    func transaction(_ id: UInt64, original: UInt64? = nil, product: String = StoreProducts.monthly) -> StoreTransaction {
+        StoreTransaction(id: id, originalId: original ?? id, productId: product, signed: "jws-\(id)") { [weak self] in
             await self?.markFinished(id)
         }
     }

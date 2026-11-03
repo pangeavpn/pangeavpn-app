@@ -171,9 +171,9 @@ final class PurchaseStore {
             Self.log.error("ignored an App Store update that failed verification")
             return
         }
-        // No account here and no purchase of ours waiting (say, after Delete Account): open nothing.
-        // Apple tells the server about renewals itself, and Restore Purchases can still claim it.
-        if !awaitingAccount, await storedAccount() == nil {
+        // A renewal with no account here (say, after Delete Account) opens nothing: Apple tells the
+        // server about renewals itself, and Restore claims it. A first purchase always opens its account.
+        if transaction.isRenewal, await storedAccount() == nil {
             await transaction.finish()
             return
         }
@@ -213,6 +213,9 @@ final class PurchaseStore {
     }
 
     private func settle(_ delivery: Delivery, origin: Origin) async {
+        // Any purchase the hub has credited ends the wait, so the flag never outlives it.
+        let waited = awaitingAccount
+        awaitingAccount = false
         let result = delivery.result
         let number = result.accountNumber.trimmingCharacters(in: .whitespacesAndNewlines)
         guard session.session == nil else {
@@ -230,7 +233,7 @@ final class PurchaseStore {
             return
         }
         // A renewal for someone who signed out leaves them signed out, unless their own purchase's reply was lost.
-        if origin == .update && !result.created && !awaitingAccount { return }
+        if origin == .update && !result.created && !waited { return }
         guard !number.isEmpty else { return }
         await session.login(number)
         reveal(number)

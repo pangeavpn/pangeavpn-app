@@ -62,7 +62,7 @@ struct PaywallView: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityAddTraits(.isHeader)
                 .padding(.top, 6)
-            Text(String(localized: "paywall_subtitle", defaultValue: "No email or personal details needed. One account number works on all your devices."))
+            Text(String(localized: "paywall_subtitle", defaultValue: "PangeaVPN Premium unlocks every region and connection method on all your devices. No email or personal details needed."))
                 .scaledFont(size: 14, relativeTo: .subheadline)
                 .lineSpacing(2)
                 .foregroundStyle(Palette.textSecondary)

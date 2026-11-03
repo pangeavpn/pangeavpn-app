@@ -27,9 +27,12 @@ struct StorePlan: Identifiable, Equatable, Sendable {
 // A transaction StoreKit verified on the device; the hub checks the signed form again itself.
 struct StoreTransaction: Sendable {
     let id: UInt64
+    let originalId: UInt64
     let productId: String
     let signed: String
     let finish: @Sendable () async -> Void
+
+    var isRenewal: Bool { id != originalId }
 }
 
 enum StorePurchaseResult: Sendable {

@@ -106,7 +106,8 @@ final class AppStoreClient: StoreClient {
         switch result {
         case .verified(let transaction):
             let signed = result.jwsRepresentation
-            return .verified(StoreTransaction(id: transaction.id, productId: transaction.productID, signed: signed) {
+            return .verified(StoreTransaction(id: transaction.id, originalId: transaction.originalID,
+                                              productId: transaction.productID, signed: signed) {
                 await transaction.finish()
             })
         case .unverified(_, let error):
