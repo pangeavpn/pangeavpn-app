@@ -40,6 +40,8 @@ final class GatedCore: CoreBridge, @unchecked Sendable {
         try fake.deregister()
     }
 
+    func retryPendingDeregister() throws { try fake.retryPendingDeregister() }
+
     func wipe() throws {
         hold()
         try fake.wipe()

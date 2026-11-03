@@ -10,6 +10,11 @@ import "errors"
 // Login performs a token login through the secure channel, generating and
 // registering a device identity on first use, and returns the Session JSON.
 func Login(token string) (string, error) {
+	deregGate.Lock()
+	defer deregGate.Unlock()
+	// Best effort: a slot a past sign-out left behind is freed before this identity registers again.
+	_ = retryPendingDeregisterLocked()
+
 	mu.Lock()
 	ident, st, scope := identity, store, scopeLocked()
 	mu.Unlock()
@@ -56,6 +61,8 @@ func Login(token string) (string, error) {
 	if !commitSession(scope, ident, srvs) {
 		return "", errSessionEnded
 	}
+	// This identity now holds the new session's registration, so a retry would delete the live device.
+	clearPendingDeregister(ident.pubB64)
 	return marshalSession(sessionJSON{Email: resp.User.Email, Name: resp.User.Name, Servers: publicServers(srvs)})
 }
 

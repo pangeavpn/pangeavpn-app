@@ -17,6 +17,7 @@ final class FakeCore: CoreBridge, @unchecked Sendable {
     var hubTestResults: [String: Result<HubTestResult, CoreError>] = [:]
     var hubStatusValue = HubStatus.none
     var deregisterResult: Result<Void, CoreError> = .success(())
+    var retryPendingDeregisterResult: Result<Void, CoreError> = .success(())
     var wipeResult: Result<Void, CoreError> = .success(())
     var applePurchaseResult: Result<ApplePurchaseResult, CoreError> = .success(ApplePurchaseResult(
         accountNumber: "ABCDEFGHJKMNPQRSTVWXYZ01", created: true,
@@ -126,6 +127,8 @@ final class FakeCore: CoreBridge, @unchecked Sendable {
     func hubStatus() -> HubStatus { hubStatusValue }
 
     func deregister() throws { try record("deregister", deregisterResult) }
+
+    func retryPendingDeregister() throws { try record("retryPendingDeregister", retryPendingDeregisterResult) }
 
     func wipe() throws { try record("wipe", wipeResult) }
 

@@ -5,12 +5,14 @@ import os
 struct SessionTimeouts: Sendable {
     let deregister: TimeInterval
     let coreWipe: TimeInterval
+    let networkSettle: TimeInterval
 
-    // The hub search alone can outlast 8 s when censored, and sign-out must not hang on it.
+    // Deregister covers one hub search plus its request; a slot still held then is retried on a later launch.
     // A panic wipe must finish even if the core is stuck; the local cleanup runs either way.
-    init(deregister: TimeInterval = 8, coreWipe: TimeInterval = 3) {
+    init(deregister: TimeInterval = 25, coreWipe: TimeInterval = 3, networkSettle: TimeInterval = 5) {
         self.deregister = deregister
         self.coreWipe = coreWipe
+        self.networkSettle = networkSettle
     }
 
     static let standard = SessionTimeouts()
@@ -107,7 +109,10 @@ final class SessionStore {
         await tunnel.disconnect()
         await tunnel.removeConfiguration()
         // Cancelling on the device-limit screen has no registered slot to free.
-        if holdsSlot { await deregister() }
+        if holdsSlot {
+            await NetworkPath.waitUntilUsable(within: timeouts.networkSettle)
+            await deregister()
+        }
         let core = self.core
         await CoreQueue.perform { core.logout() }
         clearSession()
@@ -239,11 +244,20 @@ final class SessionStore {
         }
     }
 
-    // Best effort: a failure or timeout keeps the identity, so signing back in reuses the slot.
+    // A failure or timeout keeps the identity, and the core keeps the slot to free on a later try.
     private func deregister() async {
         let core = self.core
         let outcome = await BoundedCall.run(timeout: timeouts.deregister) { try core.deregister() }
         report("deregister", outcome)
+    }
+
+    // Frees a device slot an earlier sign-out could not; the core skips it while a sign-in runs.
+    func retryPendingDeregistration() async {
+        let core = self.core
+        let outcome = await BoundedCall.run(timeout: timeouts.deregister, on: .global(qos: .utility)) {
+            try core.retryPendingDeregister()
+        }
+        report("pending deregister", outcome)
     }
 
     private func report(_ step: String, _ outcome: BoundedCall.Outcome) {

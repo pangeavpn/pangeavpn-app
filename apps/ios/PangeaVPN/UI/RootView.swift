@@ -107,6 +107,7 @@ struct RootView: View {
         await session.restore()
         hasRestored = true
         purchases.start()
+        await session.retryPendingDeregistration()
     }
 
     private func acceptNotice() {
@@ -134,7 +135,10 @@ struct RootView: View {
 
     // The profile waits for loaded settings, so a default Allow LAN never overwrites the saved one.
     private func becameActive() async {
-        guard hasRestored, session.session != nil, !erasing else { return }
+        guard hasRestored, !erasing else { return }
+        // A device slot an earlier sign-out left on the hub is retried on every return to the app.
+        Task { await session.retryPendingDeregistration() }
+        guard session.session != nil else { return }
         if settings.loaded { await connection.applyProfile() }
         let now = Date()
         guard RootScenePolicy.subscriptionDue(lastCheck: lastSubscriptionCheck, now: now, entitled: session.entitled)

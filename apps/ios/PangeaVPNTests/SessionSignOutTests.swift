@@ -64,7 +64,7 @@ final class SessionSignOutTests: XCTestCase {
         let core = GatedCore(fake)
         fake.loginResult = .success(signedIn)
         let store = SessionStore(
-            core: core, tunnel: trackedTunnel(fake), timeouts: SessionTimeouts(deregister: 0.1))
+            core: core, tunnel: trackedTunnel(fake), timeouts: SessionTimeouts(deregister: 0.1, networkSettle: 0))
         await store.login("ABCD-EFGH")
         let started = Date()
         await store.signOut()
@@ -76,6 +76,15 @@ final class SessionSignOutTests: XCTestCase {
         XCTAssertFalse(calls.contains("deregister"))
         XCTAssertNil(store.session)
         XCTAssertFalse(store.signingOut)
+    }
+
+    func testRetryingAPendingDeregistrationAsksTheCoreAndSwallowsAFailure() async {
+        let core = FakeCore()
+        core.retryPendingDeregisterResult = .failure(CoreError(message: "hub unreachable"))
+        let store = SessionStore(core: core, tunnel: trackedTunnel(core))
+        await store.retryPendingDeregistration()
+        XCTAssertEqual(core.calls.last, "retryPendingDeregister")
+        XCTAssertNil(store.loginError)
     }
 
     func testOverlappingSignOutsLogOutOnce() async {
