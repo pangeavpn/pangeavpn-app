@@ -10,6 +10,7 @@ struct LoginView: View {
     @Binding private var token: String
     @State private var submitting = false
     @State private var showAccountHelp = false
+    @State private var keyboardFreeHeight: CGFloat = 0
 
     private static let maxMapSize: CGFloat = 236
     private static let gutter: CGFloat = 20
@@ -31,12 +32,22 @@ struct LoginView: View {
             PangeaHeader(version: "v\(Self.versionName)", onToggleTheme: toggleTheme)
             GeometryReader { proxy in
                 let wide = AppLayout.isWide(width: proxy.size.width, sizeClass: sizeClass)
+                // The globe is a Canvas that redraws at its new size in one frame, so the keyboard must not resize it.
+                let viewport = CGSize(width: proxy.size.width, height: max(proxy.size.height, keyboardFreeHeight))
                 ScrollView {
-                    form(viewport: proxy.size)
+                    form(viewport: viewport)
                         .readableWidth()
                         .frame(minHeight: proxy.size.height, alignment: wide ? .center : .top)
                 }
                 .scrollDismissesKeyboard(.interactively)
+            }
+            .background {
+                GeometryReader { full in
+                    Color.clear.onChange(of: full.size.height, initial: true) { _, height in
+                        keyboardFreeHeight = height
+                    }
+                }
+                .ignoresSafeArea(.keyboard)
             }
         }
         .background(Palette.bg.ignoresSafeArea())
