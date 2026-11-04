@@ -407,7 +407,7 @@ func ListDevices() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	b, err := json.Marshal(markCurrentDevices(rows, pub, deviceNameKey(scope.licenseKey)))
+	b, err := json.Marshal(markCurrentDevices(rows, pub))
 	if err != nil {
 		return "", fmt.Errorf("marshal devices: %w", err)
 	}
@@ -423,8 +423,8 @@ func RemoveDevice(deviceID string) error {
 	return removeDeviceHub(scope, deviceID)
 }
 
-// RenameDevice seals the new name under the account number and returns it in
-// plaintext. The name is checked first, so a bad one never costs a request.
+// RenameDevice renames one of the account's devices and returns the name the
+// hub stored. The name is checked first, so a bad one never costs a request.
 func RenameDevice(deviceID, name string) (string, error) {
 	scope := captureScope()
 	if scope.licenseKey == "" {
@@ -438,16 +438,12 @@ func RenameDevice(deviceID, name string) (string, error) {
 		return "", err
 	}
 
-	key := deviceNameKey(scope.licenseKey)
-	if key == nil {
-		return "", errRenameNeedsAccountNumber
-	}
-	sealed, err := sealDeviceName(key, trimmed)
+	stored, err := renameDeviceHub(scope, deviceID, trimmed)
 	if err != nil {
 		return "", err
 	}
-	if err := renameDeviceHub(scope, deviceID, sealed); err != nil {
-		return "", err
+	if stored != nil && *stored != "" {
+		return *stored, nil
 	}
 	return trimmed, nil
 }

@@ -245,15 +245,10 @@ type deviceRegisterResponse struct {
 	FriendlyName *string `json:"friendlyName"`
 }
 
-// registerDevice never sends a plaintext name: without an account number the hub picks a label.
-func registerDevice(scope callScope, identityPub, name string) (*deviceRegisterResponse, error) {
+func registerDevice(scope callScope, identityPub, friendlyName string) (*deviceRegisterResponse, error) {
 	body := map[string]string{"licenseKey": scope.licenseKey, "identityPubkey": identityPub}
-	if key := deviceNameKey(scope.licenseKey); key != nil && name != "" {
-		sealed, err := sealDeviceName(key, name)
-		if err != nil {
-			return nil, err
-		}
-		body["encryptedName"] = sealed
+	if friendlyName != "" {
+		body["friendlyName"] = friendlyName
 	}
 	var out deviceRegisterResponse
 	if err := hubRequestAs(scope, http.MethodPost, "/api/device/register", body, &out); err != nil {
@@ -300,9 +295,16 @@ func removeDeviceHub(scope callScope, deviceID string) error {
 	return hubRequestAs(scope, http.MethodPost, "/api/device/remove", map[string]string{"deviceId": deviceID}, nil)
 }
 
-func renameDeviceHub(scope callScope, deviceID, encryptedName string) error {
-	body := map[string]string{"deviceId": deviceID, "encryptedName": encryptedName}
-	return hubRequestAs(scope, http.MethodPost, "/api/device/rename", body, nil)
+// renameDeviceHub returns the name the hub stored, nil when it did not say.
+func renameDeviceHub(scope callScope, deviceID, name string) (*string, error) {
+	var out struct {
+		FriendlyName *string `json:"friendlyName"`
+	}
+	body := map[string]string{"deviceId": deviceID, "friendlyName": name}
+	if err := hubRequestAs(scope, http.MethodPost, "/api/device/rename", body, &out); err != nil {
+		return nil, err
+	}
+	return out.FriendlyName, nil
 }
 
 // deregisterDeviceHub sends the license in the body: this route never reads
