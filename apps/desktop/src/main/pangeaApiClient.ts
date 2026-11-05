@@ -1,6 +1,6 @@
 import { generateKeyPairSync } from "node:crypto";
 import https from "node:https";
-import { net } from "electron";
+import { app, net } from "electron";
 import type { Profile } from "@pangeavpn/shared-types";
 import type { ServerInfo, SubscriptionInfo } from "../shared/ipc";
 import { normalizeCustomDns, resolveWireGuardDns } from "../shared/dns";
@@ -46,6 +46,7 @@ import {
   type PostQuantumProvider
 } from "../shared/postQuantum";
 import { DOH_TLS_OPTIONS, fetchViaConnectProxy } from "./hubTransport";
+import { renameDevice as renameDeviceOnHub, shownDevices, type HubDeviceList } from "./deviceName";
 
 export class AuthError extends Error {
   status: number;
@@ -474,6 +475,8 @@ interface DeviceRegisterResponse {
   deviceId: string;
   assignedIp: string;
   friendlyName?: string | null;
+  label?: string | null;
+  sealedName?: string | null;
 }
 
 export interface DeviceInfo {
@@ -1478,7 +1481,7 @@ export class PangeaApiClient {
     }
   ): Promise<Response> {
     const method = options.method ?? "GET";
-    const headers = options.headers ?? {};
+    const headers = { ...options.headers, "X-Pangea-App": `desktop/${app.getVersion()}` };
     const bodyObj = options.body ? JSON.parse(options.body) : undefined;
 
     const sealed = await this.sealRequest(method, path, headers, bodyObj);
@@ -1643,12 +1646,14 @@ export class PangeaApiClient {
     }
   }
 
+  /** Sends only the generated label; a names v2 reply's label wins over the hub-opened name. */
   async registerDevice(identityPubkey: string, friendlyName?: string): Promise<DeviceRegisterResponse> {
-    return this.hubRequest<DeviceRegisterResponse>("POST", "/api/device/register", {
+    const data = await this.hubRequest<DeviceRegisterResponse>("POST", "/api/device/register", {
       licenseKey: this.licenseKey,
       identityPubkey,
       ...(friendlyName ? { friendlyName } : {})
     });
+    return { ...data, friendlyName: data.label || data.friendlyName || null };
   }
 
   async deregisterDevice(identityPubkey: string): Promise<void> {
@@ -1659,16 +1664,17 @@ export class PangeaApiClient {
   }
 
   async listDevices(): Promise<DeviceInfo[]> {
-    const data = await this.hubRequest<{ devices: DeviceInfo[] }>("GET", "/api/device/list");
-    return data.devices;
+    const data = await this.hubRequest<HubDeviceList>("GET", "/api/device/list");
+    return shownDevices(data, this.licenseKey);
   }
 
   async removeDevice(deviceId: string): Promise<void> {
     await this.hubRequest<unknown>("POST", "/api/device/remove", { deviceId });
   }
 
-  async renameDevice(deviceId: string, friendlyName: string): Promise<void> {
-    await this.hubRequest<unknown>("POST", "/api/device/rename", { deviceId, friendlyName });
+  async renameDevice(deviceId: string, name: string): Promise<void> {
+    const call = (method: string, route: string, body?: unknown) => this.hubRequest<unknown>(method, route, body);
+    await renameDeviceOnHub(call, this.licenseKey, deviceId, name);
   }
 
   /** Drops the post-failure cooldown. Pressing Connect is the user asking for

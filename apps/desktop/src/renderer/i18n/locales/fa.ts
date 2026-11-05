@@ -64,6 +64,8 @@ export const fa = {
   "devices.renameLabel": "نام دستگاه",
   "devices.renamed": "نام دستگاه تغییر کرد.",
   "devices.renameFailed": "تغییر نام دستگاه ناموفق بود. لطفاً دوباره تلاش کنید.",
+  "devices.renameLength": "برای نام از 1 تا 40 نویسه استفاده کنید.",
+  "devices.renameNeedsAccountNumber": "برای تغییر نام دستگاه‌ها با شماره حساب خود وارد شوید.",
   "devices.none": "دستگاهی یافت نشد.",
   "devices.noneRemaining": "دستگاهی باقی نمانده است.",
 

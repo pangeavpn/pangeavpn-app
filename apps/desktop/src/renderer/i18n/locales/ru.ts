@@ -64,6 +64,8 @@ export const ru = {
   "devices.renameLabel": "Имя устройства",
   "devices.renamed": "Устройство переименовано.",
   "devices.renameFailed": "Не удалось переименовать устройство. Попробуйте ещё раз.",
+  "devices.renameLength": "Используйте от 1 до 40 символов для имени.",
+  "devices.renameNeedsAccountNumber": "Войдите по номеру аккаунта, чтобы переименовывать устройства.",
   "devices.none": "Устройства не найдены.",
   "devices.noneRemaining": "Устройств не осталось.",
 

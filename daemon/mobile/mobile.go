@@ -403,11 +403,11 @@ func ListDevices() (string, error) {
 		return "", errors.New("mobile: not authenticated")
 	}
 
-	rows, err := listDevicesHub(scope)
+	list, err := listDevicesHub(scope)
 	if err != nil {
 		return "", err
 	}
-	b, err := json.Marshal(markCurrentDevices(rows, pub))
+	b, err := json.Marshal(markCurrentDevices(list.shownRows(scope.licenseKey), pub))
 	if err != nil {
 		return "", fmt.Errorf("marshal devices: %w", err)
 	}
@@ -423,8 +423,8 @@ func RemoveDevice(deviceID string) error {
 	return removeDeviceHub(scope, deviceID)
 }
 
-// RenameDevice renames one of the account's devices and returns the name the
-// hub stored. The name is checked first, so a bad one never costs a request.
+// RenameDevice renames one of the account's devices and returns the name to
+// show. The name is checked first, so a bad one never costs a request.
 func RenameDevice(deviceID, name string) (string, error) {
 	scope := captureScope()
 	if scope.licenseKey == "" {
@@ -438,14 +438,7 @@ func RenameDevice(deviceID, name string) (string, error) {
 		return "", err
 	}
 
-	stored, err := renameDeviceHub(scope, deviceID, trimmed)
-	if err != nil {
-		return "", err
-	}
-	if stored != nil && *stored != "" {
-		return *stored, nil
-	}
-	return trimmed, nil
+	return renameDeviceHub(scope, deviceID, trimmed)
 }
 
 // AccountNumber is the stored license key, "" unless fully signed in. It is

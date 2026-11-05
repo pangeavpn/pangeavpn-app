@@ -7,12 +7,12 @@ import (
 	"unicode/utf16"
 )
 
-// maxDeviceNameUnits is the hub's limit, counted in UTF-16 code units.
-const maxDeviceNameUnits = 64
+// maxDeviceNameUnits is the names v2 limit, counted in UTF-16 code units like JS length.
+const maxDeviceNameUnits = 40
 
-var errDeviceNameLength = errors.New("mobile: device name must be 1-64 characters")
+var errDeviceNameLength = errors.New("mobile: device name must be 1-40 characters")
 
-// validateDeviceName mirrors the hub: JS trim, then 1..64 UTF-16 code units.
+// validateDeviceName mirrors the other apps: JS trim, then 1..40 UTF-16 code units.
 // Control characters are refused too, which the hub would store verbatim.
 func validateDeviceName(raw string) (string, error) {
 	trimmed := strings.TrimFunc(raw, isJSTrimSpace)

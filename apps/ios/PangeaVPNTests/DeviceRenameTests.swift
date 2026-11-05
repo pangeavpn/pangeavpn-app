@@ -19,11 +19,11 @@ final class DeviceRenameTests: XCTestCase {
             (" Work Phone ", "Work Phone"),
             ("", nil),
             ("   \n", nil),
-            (String(repeating: "a", count: 64), String(repeating: "a", count: 64)),
-            (String(repeating: "a", count: 65), nil),
-            (String(repeating: "\u{E9}", count: 64), String(repeating: "\u{E9}", count: 64)),
-            (String(repeating: "😀", count: 32), String(repeating: "😀", count: 32)),
-            (String(repeating: "😀", count: 33), nil),
+            (String(repeating: "a", count: 40), String(repeating: "a", count: 40)),
+            (String(repeating: "a", count: 41), nil),
+            (String(repeating: "\u{E9}", count: 40), String(repeating: "\u{E9}", count: 40)),
+            (String(repeating: "😀", count: 20), String(repeating: "😀", count: 20)),
+            (String(repeating: "😀", count: 21), nil),
             ("\u{FEFF}Tab\u{FEFF}", "Tab"),
             ("\u{85}x", "\u{85}x"),
         ]
@@ -53,7 +53,7 @@ final class DeviceRenameTests: XCTestCase {
     }
 
     func testOutOfRangeNamesNeverReachTheCore() async {
-        for name in ["   ", String(repeating: "😀", count: 33)] {
+        for name in ["   ", String(repeating: "😀", count: 21)] {
             let core = FakeCore()
             let store = await loadedStore(core)
             let ok = await store.renameDevice("d1", to: name)
@@ -63,10 +63,10 @@ final class DeviceRenameTests: XCTestCase {
         }
     }
 
-    func testSixtyFourUnitsOfEmojiAreAllowed() async {
+    func testFortyUnitsOfEmojiAreAllowed() async {
         let core = FakeCore()
         let store = await loadedStore(core)
-        let name = String(repeating: "😀", count: 32)
+        let name = String(repeating: "😀", count: 20)
         let ok = await store.renameDevice("d1", to: name)
         XCTAssertTrue(ok)
         XCTAssertEqual(core.calls.last, "renameDevice(d1,\(name))")
@@ -76,7 +76,8 @@ final class DeviceRenameTests: XCTestCase {
         let cases: [(String, String)] = [
             (#"hub error (404): {"error":"Device not found","code":"DEVICE_NOT_FOUND"}"#, DeviceRename.notFoundMessage),
             (#"hub error (503): {"code":"DEVICE_NAMES_UNAVAILABLE"}"#, DeviceRename.unavailableMessage),
-            ("device name must be 1-64 characters", DeviceRename.lengthMessage),
+            ("device name must be 1-40 characters", DeviceRename.lengthMessage),
+            ("Sign in with your account number to rename devices", DeviceRename.accountNumberMessage),
             ("hub unreachable: retrying in 30s", DeviceRename.failedMessage),
         ]
         for (coreText, shown) in cases {

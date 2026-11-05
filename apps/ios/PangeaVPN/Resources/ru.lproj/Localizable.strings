@@ -319,8 +319,9 @@
 "root_data_erased" = "Данные PangeaVPN удалены.";
 "server_picker_none_for_transport" = "Нет серверов с поддержкой этого транспорта";
 "servers_title" = "Серверы";
+"session_rename_account_number" = "Войдите по номеру аккаунта, чтобы переименовывать устройства.";
 "session_rename_failed" = "Не удалось переименовать устройство. Попробуйте ещё раз.";
-"session_rename_length" = "Имя должно содержать от 1 до 64 символов.";
+"session_rename_length" = "Имя должно содержать от 1 до 40 символов.";
 "session_rename_not_found" = "Этого устройства больше нет в вашем аккаунте.";
 "session_rename_unavailable" = "Сейчас переименовать устройства нельзя. Попробуйте позже.";
 "session_reveal_reason" = "Подтвердите, что это вы, чтобы увидеть номер аккаунта.";

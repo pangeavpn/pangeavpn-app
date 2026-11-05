@@ -64,6 +64,8 @@ export const zh = {
   "devices.renameLabel": "设备名称",
   "devices.renamed": "设备已重命名。",
   "devices.renameFailed": "重命名设备失败，请重试。",
+  "devices.renameLength": "名称需为 1 到 40 个字符。",
+  "devices.renameNeedsAccountNumber": "请使用账号登录后再重命名设备。",
   "devices.none": "未找到设备。",
   "devices.noneRemaining": "没有剩余设备。",
 

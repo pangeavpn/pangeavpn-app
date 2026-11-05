@@ -319,8 +319,9 @@
 "root_data_erased" = "تم مسح بيانات PangeaVPN.";
 "server_picker_none_for_transport" = "لا توجد خوادم تدعم هذا النقل";
 "servers_title" = "الخوادم";
+"session_rename_account_number" = "سجّل الدخول برقم حسابك لإعادة تسمية الأجهزة.";
 "session_rename_failed" = "فشلت إعادة تسمية الجهاز. يرجى المحاولة مرة أخرى.";
-"session_rename_length" = "استخدم من 1 إلى 64 حرفًا للاسم.";
+"session_rename_length" = "استخدم من 1 إلى 40 حرفًا للاسم.";
 "session_rename_not_found" = "لم يعد هذا الجهاز ضمن حسابك.";
 "session_rename_unavailable" = "إعادة تسمية الأجهزة غير متاحة حاليًا. حاول مرة أخرى لاحقًا.";
 "session_reveal_reason" = "أكّد هويتك لعرض رقم حسابك.";

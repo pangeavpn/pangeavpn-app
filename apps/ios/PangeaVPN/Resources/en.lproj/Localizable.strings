@@ -319,8 +319,9 @@
 "root_data_erased" = "PangeaVPN data erased.";
 "server_picker_none_for_transport" = "No servers support this transport";
 "servers_title" = "Servers";
+"session_rename_account_number" = "Sign in with your account number to rename devices.";
 "session_rename_failed" = "Failed to rename device. Please try again.";
-"session_rename_length" = "Use 1 to 64 characters for the name.";
+"session_rename_length" = "Use 1 to 40 characters for the name.";
 "session_rename_not_found" = "This device is no longer on your account.";
 "session_rename_unavailable" = "Renaming devices isn't available right now. Try again later.";
 "session_reveal_reason" = "Confirm it's you to see your account number.";

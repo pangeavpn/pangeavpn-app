@@ -64,6 +64,8 @@ export const ar = {
   "devices.renameLabel": "اسم الجهاز",
   "devices.renamed": "تمت إعادة تسمية الجهاز.",
   "devices.renameFailed": "فشلت إعادة تسمية الجهاز. يرجى المحاولة مرة أخرى.",
+  "devices.renameLength": "استخدم من 1 إلى 40 حرفًا للاسم.",
+  "devices.renameNeedsAccountNumber": "سجّل الدخول برقم حسابك لإعادة تسمية الأجهزة.",
   "devices.none": "لم يتم العثور على أجهزة.",
   "devices.noneRemaining": "لم يتبقَّ أي جهاز.",
 

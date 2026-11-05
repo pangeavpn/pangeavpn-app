@@ -319,8 +319,9 @@
 "root_data_erased" = "Datos de PangeaVPN borrados.";
 "server_picker_none_for_transport" = "Ningún servidor admite este transporte";
 "servers_title" = "Servidores";
+"session_rename_account_number" = "Inicia sesión con tu número de cuenta para renombrar dispositivos.";
 "session_rename_failed" = "No se pudo renombrar el dispositivo. Inténtalo de nuevo.";
-"session_rename_length" = "Usa entre 1 y 64 caracteres para el nombre.";
+"session_rename_length" = "Usa entre 1 y 40 caracteres para el nombre.";
 "session_rename_not_found" = "Este dispositivo ya no está en tu cuenta.";
 "session_rename_unavailable" = "Ahora mismo no se pueden renombrar dispositivos. Inténtalo más tarde.";
 "session_reveal_reason" = "Confirma que eres tú para ver tu número de cuenta.";

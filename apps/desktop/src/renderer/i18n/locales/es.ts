@@ -64,6 +64,8 @@ export const es = {
   "devices.renameLabel": "Nombre del dispositivo",
   "devices.renamed": "Dispositivo renombrado.",
   "devices.renameFailed": "No se pudo renombrar el dispositivo. Inténtalo de nuevo.",
+  "devices.renameLength": "Usa entre 1 y 40 caracteres para el nombre.",
+  "devices.renameNeedsAccountNumber": "Inicia sesión con tu número de cuenta para renombrar dispositivos.",
   "devices.none": "No se encontraron dispositivos.",
   "devices.noneRemaining": "No quedan dispositivos.",
 

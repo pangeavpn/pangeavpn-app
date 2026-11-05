@@ -68,8 +68,8 @@ func TestSendDiagnosticsIsAnonymous(t *testing.T) {
 	if len(sent) != 1 || sent[0].Method != http.MethodPost {
 		t.Fatalf("got %+v, want one POST", sent)
 	}
-	if len(sent[0].Headers) != 1 || sent[0].Headers["Content-Type"] != "application/json" {
-		t.Fatalf("got headers %v, want only Content-Type", sent[0].Headers)
+	if len(sent[0].Headers) != 2 || sent[0].Headers["Content-Type"] != "application/json" || sent[0].Headers["X-Pangea-App"] == "" {
+		t.Fatalf("got headers %v, want only Content-Type and X-Pangea-App", sent[0].Headers)
 	}
 	for _, secret := range []string{license, ident.pubB64} {
 		if strings.Contains(string(sent[0].Body), secret) {

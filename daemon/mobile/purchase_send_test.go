@@ -35,8 +35,8 @@ func TestApplePurchaseSendsTheTransactionWithoutTheLicense(t *testing.T) {
 	if len(sent) != 1 || sent[0].Method != http.MethodPost {
 		t.Fatalf("purchase requests = %+v, want one POST", sent)
 	}
-	if len(sent[0].Headers) != 1 || sent[0].Headers["Content-Type"] != "application/json" {
-		t.Fatalf("headers = %v, want only Content-Type", sent[0].Headers)
+	if len(sent[0].Headers) != 2 || sent[0].Headers["Content-Type"] != "application/json" || sent[0].Headers["X-Pangea-App"] == "" {
+		t.Fatalf("headers = %v, want only Content-Type and X-Pangea-App", sent[0].Headers)
 	}
 	if fields := bodyFields(t, sent[0]); len(fields) != 2 || fields["signedTransaction"] != testJWS || fields["accountNumber"] != "lk" {
 		t.Fatalf("body = %s", sent[0].Body)

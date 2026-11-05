@@ -1575,6 +1575,14 @@ interface DeviceRowEls {
   actions: HTMLElement;
 }
 
+// The main process's rejection reaches us inside Electron's "Error invoking remote method" text.
+function renameFailureText(err: unknown): string {
+  const text = String(err);
+  if (text.includes("1-40 characters")) return t("devices.renameLength");
+  if (text.includes("Sign in with your account number")) return t("devices.renameNeedsAccountNumber");
+  return t("devices.renameFailed");
+}
+
 function startDeviceRename(
   deviceId: string,
   isMine: boolean,
@@ -1584,7 +1592,7 @@ function startDeviceRename(
   if (els.info.querySelector(".device-rename-input")) return;
   const input = document.createElement("input");
   input.type = "text";
-  input.maxLength = 64;
+  input.maxLength = 40;
   input.className = "device-rename-input";
   input.value = name.get() ?? "";
   input.setAttribute("aria-label", t("devices.renameLabel"));
@@ -1631,7 +1639,7 @@ function startDeviceRename(
     } catch (err) {
       saveBtn.disabled = false;
       cancelBtn.disabled = false;
-      devicesModalMessage.textContent = reportError("renameDevice", err, t("devices.renameFailed"));
+      devicesModalMessage.textContent = reportError("renameDevice", err, renameFailureText(err));
     }
   };
 

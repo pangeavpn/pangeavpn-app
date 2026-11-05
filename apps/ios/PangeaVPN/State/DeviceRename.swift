@@ -1,7 +1,7 @@
 import Foundation
 
 enum DeviceRename {
-    static let maxUnits = 64
+    static let maxUnits = 40
 
     // String.prototype.trim's set: Swift's own adds U+0085 and lacks the byte order mark.
     private static let jsWhitespace: CharacterSet = {
@@ -13,14 +13,18 @@ enum DeviceRename {
         return set
     }()
 
-    // The trimmed name, or nil when the hub would refuse it; length is in UTF-16 units, as JavaScript counts.
+    // The trimmed name, or nil when the core would refuse it; length is in UTF-16 units, as JavaScript counts.
     static func validated(_ raw: String) -> String? {
         let trimmed = raw.trimmingCharacters(in: jsWhitespace)
         return (1...maxUnits).contains(trimmed.utf16.count) ? trimmed : nil
     }
 
     static var lengthMessage: String {
-        String(localized: "session_rename_length", defaultValue: "Use 1 to 64 characters for the name.")
+        String(localized: "session_rename_length", defaultValue: "Use 1 to 40 characters for the name.")
+    }
+
+    static var accountNumberMessage: String {
+        String(localized: "session_rename_account_number", defaultValue: "Sign in with your account number to rename devices.")
     }
 
     static var notFoundMessage: String {
@@ -40,7 +44,8 @@ enum DeviceRename {
         let text = (error as? CoreError)?.message ?? error.localizedDescription
         if text.contains("DEVICE_NOT_FOUND") { return notFoundMessage }
         if text.contains("DEVICE_NAMES_UNAVAILABLE") { return unavailableMessage }
-        if text.contains("1-64 characters") { return lengthMessage }
+        if text.contains("1-40 characters") { return lengthMessage }
+        if text.contains("Sign in with your account number") { return accountNumberMessage }
         return failedMessage
     }
 }

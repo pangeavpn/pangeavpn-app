@@ -21,15 +21,15 @@ final class DevicesPageTests: XCTestCase {
     }
 
     func testClampCountsUtf16UnitsAsTheHubDoes() {
-        XCTAssertEqual(DeviceNames.clamped(String(repeating: "😀", count: 33)), String(repeating: "😀", count: 32))
-        XCTAssertEqual(DeviceNames.clamped("a" + String(repeating: "😀", count: 32)), "a" + String(repeating: "😀", count: 31))
+        XCTAssertEqual(DeviceNames.clamped(String(repeating: "😀", count: 21)), String(repeating: "😀", count: 20))
+        XCTAssertEqual(DeviceNames.clamped("a" + String(repeating: "😀", count: 20)), "a" + String(repeating: "😀", count: 19))
     }
 
     func testClampNeverSplitsACharacter() {
         let family = "👨\u{200D}👩\u{200D}👧"
-        let prefix = String(repeating: "a", count: 60)
+        let prefix = String(repeating: "a", count: 36)
         XCTAssertEqual(DeviceNames.clamped(prefix + family), prefix)
-        XCTAssertEqual(DeviceNames.clamped(String(repeating: "e\u{301}", count: 40)), String(repeating: "e\u{301}", count: 32))
+        XCTAssertEqual(DeviceNames.clamped(String(repeating: "e\u{301}", count: 40)), String(repeating: "e\u{301}", count: 20))
     }
 
     func testClampedNamesAlwaysFit() {

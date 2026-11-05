@@ -1,0 +1,46 @@
+{
+  "description": "Device names v2 (zero-access). Every implementation must reproduce these byte for byte.",
+  "salt": "pangea-names",
+  "names_key_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+  "account_number": "0123456789ABCDEFGHJKMNPQ",
+  "account_number_inputs": [
+    "0123-4567-89AB-CDEF-GHJK-MNPQ",
+    "o123 4567 89ab cdef ghjk mnpq"
+  ],
+  "names_secret_b64url": "ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8",
+  "device_name_key": "test-device-name-key",
+  "device_id": "3f1c9a52-7d4e-4b8a-9c2f-5e6d7a8b9c0d",
+  "other_device_id": "9b2e7c41-0a6d-4f3e-8b1c-2d4e6f8a0b1c",
+  "number_wrap_key_hex": "3097e30de582bfbcaf17ce8f22b8ac5d9f1ad25a4e9ea414d172595ba7c40afc",
+  "secret_seal_key_hex": "201d2d5dec6e3ef95cf60fc83b46742d3f89264320b6e178976a5ebe314dad59",
+  "server_wrap_key_hex": "0bedab65e202b62eab3e2bfdc7b9e76e844aebba3312dce159b44f7615bb12d4",
+  "name_key": {
+    "nonce_hex": "a0a1a2a3a4a5a6a7a8a9aaab",
+    "aad": "nameKey",
+    "sealed": "wk1:oKGio6SlpqeoqaqrX86w/Nviaje2OeYnMT85AlYrKkiVUbBuh0B8sRDIPvpZDf8EGJ3RtOI0mMa1sXaP"
+  },
+  "account_number_sealed": {
+    "nonce_hex": "d0d1d2d3d4d5d6d7d8d9dadb",
+    "aad": "accountNumber",
+    "sealed": "sn1:0NHS09TV1tfY2drbOowXD8Xlf95HMd7TfCa59jkGXVrEbB1lVN4EkjC3gj9sriOlGLhqpQ=="
+  },
+  "name_key_server": {
+    "nonce_hex": "e0e1e2e3e4e5e6e7e8e9eaeb",
+    "aad": "nameKeyServer",
+    "sealed": "ws1:4OHi4+Tl5ufo6errQNlOcxpAVVYCTGsfHZBEz0DwLKpOMIb3amWsj45Uht6hCf0E2xeL6T/eEh/mE4Uy"
+  },
+  "sealed_names": [
+    {
+      "plain": "Work laptop",
+      "nonce_hex": "b0b1b2b3b4b5b6b7b8b9babb",
+      "aad": "3f1c9a52-7d4e-4b8a-9c2f-5e6d7a8b9c0d",
+      "sealed": "zk2:sLGys7S1tre4ubq7zjoowMyh2i8zl+eWByYTBX6vdEtrdWK9P4oB"
+    },
+    {
+      "plain": "Mamá's 📱 phone",
+      "nonce_hex": "c0c1c2c3c4c5c6c7c8c9cacb",
+      "aad": "3f1c9a52-7d4e-4b8a-9c2f-5e6d7a8b9c0d",
+      "sealed": "zk2:wMHCw8TFxsfIycrLTSlKpNZf5X5oRm4TEtyAOSIWG+cGRrWtlyTY1sp2YT1Ngw=="
+    }
+  ]
+}

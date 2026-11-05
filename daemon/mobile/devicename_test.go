@@ -16,11 +16,11 @@ func TestValidateDeviceNameMatchesTheHub(t *testing.T) {
 		{"trims tabs and newlines", "\tPhone\n", "Phone", true},
 		{"empty", "", "", false},
 		{"blank", "   ", "", false},
-		{"64 ascii", strings.Repeat("a", 64), strings.Repeat("a", 64), true},
-		{"65 ascii", strings.Repeat("a", 65), "", false},
-		{"64 two-byte runes count as 64 units", strings.Repeat("é", 64), strings.Repeat("é", 64), true},
-		{"32 emoji are 64 units", strings.Repeat("😀", 32), strings.Repeat("😀", 32), true},
-		{"33 emoji are 66 units", strings.Repeat("😀", 33), "", false},
+		{"40 ascii", strings.Repeat("a", 40), strings.Repeat("a", 40), true},
+		{"41 ascii", strings.Repeat("a", 41), "", false},
+		{"40 two-byte runes count as 40 units", strings.Repeat("é", 40), strings.Repeat("é", 40), true},
+		{"20 emoji are 40 units", strings.Repeat("😀", 20), strings.Repeat("😀", 20), true},
+		{"21 emoji are 42 units", strings.Repeat("😀", 21), "", false},
 		{"C0 control", "a\x00b", "", false},
 		{"C1 control", "a\u0085b", "", false},
 		{"DEL", "a\x7fb", "", false},
@@ -53,9 +53,9 @@ func TestValidateDeviceNameMatchesTheHub(t *testing.T) {
 }
 
 func TestValidateDeviceNameExplainsTheLimit(t *testing.T) {
-	for _, raw := range []string{"", strings.Repeat("a", 65)} {
-		if _, err := validateDeviceName(raw); err == nil || !strings.Contains(err.Error(), "1-64 characters") {
-			t.Fatalf("validateDeviceName(%q) = %v, want it to mention 1-64 characters", raw, err)
+	for _, raw := range []string{"", strings.Repeat("a", 41)} {
+		if _, err := validateDeviceName(raw); err == nil || !strings.Contains(err.Error(), "1-40 characters") {
+			t.Fatalf("validateDeviceName(%q) = %v, want it to mention 1-40 characters", raw, err)
 		}
 	}
 }

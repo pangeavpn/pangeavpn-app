@@ -64,6 +64,8 @@ export const uk = {
   "devices.renameLabel": "Назва пристрою",
   "devices.renamed": "Пристрій перейменовано.",
   "devices.renameFailed": "Не вдалося перейменувати пристрій. Спробуйте ще раз.",
+  "devices.renameLength": "Використовуйте від 1 до 40 символів для назви.",
+  "devices.renameNeedsAccountNumber": "Увійдіть за номером акаунта, щоб перейменовувати пристрої.",
   "devices.none": "Пристроїв не знайдено.",
   "devices.noneRemaining": "Пристроїв не залишилося.",
 

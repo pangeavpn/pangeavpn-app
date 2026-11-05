@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	"net/url"
@@ -109,6 +110,7 @@ func hubFetchSince(wipe uint64, path, method string, headers map[string]string, 
 
 // hubFetchWithin is hubFetchSince giving the request itself timeout to answer.
 func hubFetchWithin(wipe uint64, timeout time.Duration, path, method string, headers map[string]string, body []byte) ([]byte, int, error) {
+	headers = withAppHeader(headers)
 	// Twice: a route dropped between ensureHubPath and the read is not a failure.
 	for attempt := 0; attempt < 2; attempt++ {
 		if err := ensureHubPath(wipe); err != nil {
@@ -137,6 +139,19 @@ func hubFetchWithin(wipe uint64, timeout time.Duration, path, method string, hea
 		return inner.Body, inner.Status, nil
 	}
 	return nil, 0, errors.New("hub unreachable: no working connection method")
+}
+
+// withAppHeader adds X-Pangea-App, which the hub counts to measure app adoption.
+func withAppHeader(headers map[string]string) map[string]string {
+	clientInfoMu.Lock()
+	version := clientAppVersion
+	clientInfoMu.Unlock()
+	if version == "" {
+		version = "unknown"
+	}
+	out := map[string]string{"X-Pangea-App": strings.ToLower(platformName) + "/" + version}
+	maps.Copy(out, headers)
+	return out
 }
 
 func sendOnRoute(route *hubPath, sealed sealedRequest, timeout time.Duration) (innerResponse, error) {
@@ -281,30 +296,54 @@ func rememberServers(scope callScope, servers []serverInfo, identityPub string) 
 	}
 }
 
-func listDevicesHub(scope callScope) ([]hubDevice, error) {
-	var out struct {
-		Devices []hubDevice `json:"devices"`
-	}
-	if err := hubRequestAs(scope, http.MethodGet, "/api/device/list", nil, &out); err != nil {
-		return nil, err
-	}
-	return out.Devices, nil
+func listDevicesHub(scope callScope) (hubDeviceList, error) {
+	var out hubDeviceList
+	err := hubRequestAs(scope, http.MethodGet, "/api/device/list", nil, &out)
+	return out, err
 }
 
 func removeDeviceHub(scope callScope, deviceID string) error {
 	return hubRequestAs(scope, http.MethodPost, "/api/device/remove", map[string]string{"deviceId": deviceID}, nil)
 }
 
-// renameDeviceHub returns the name the hub stored, nil when it did not say.
-func renameDeviceHub(scope callScope, deviceID, name string) (*string, error) {
+// renameDeviceHub seals the name on a names v2 hub, retrying once when another
+// device created the account's key first, and returns the name to show.
+func renameDeviceHub(scope callScope, deviceID, name string) (string, error) {
+	for retried := false; ; retried = true {
+		list, err := listDevicesHub(scope)
+		if err != nil {
+			return "", err
+		}
+		if !list.speaksNamesV2() {
+			return renamePlainHub(scope, deviceID, name)
+		}
+		body, err := list.sealRename(scope.licenseKey, deviceID, name)
+		if err != nil {
+			return "", err
+		}
+		err = hubRequestAs(scope, http.MethodPost, "/api/device/rename", body, nil)
+		if err == nil {
+			return name, nil
+		}
+		if retried || body.NameKey == "" || hubErrorCode(err) != "NAME_KEY_EXISTS" {
+			return "", err
+		}
+	}
+}
+
+// renamePlainHub is the old hub's rename, returning the name it stored.
+func renamePlainHub(scope callScope, deviceID, name string) (string, error) {
 	var out struct {
 		FriendlyName *string `json:"friendlyName"`
 	}
 	body := map[string]string{"deviceId": deviceID, "friendlyName": name}
 	if err := hubRequestAs(scope, http.MethodPost, "/api/device/rename", body, &out); err != nil {
-		return nil, err
+		return "", err
 	}
-	return out.FriendlyName, nil
+	if out.FriendlyName != nil && *out.FriendlyName != "" {
+		return *out.FriendlyName, nil
+	}
+	return name, nil
 }
 
 // deregisterDeviceHub sends the license in the body: this route never reads

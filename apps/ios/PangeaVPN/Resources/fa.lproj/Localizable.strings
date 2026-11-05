@@ -319,8 +319,9 @@
 "root_data_erased" = "داده‌های PangeaVPN پاک شد.";
 "server_picker_none_for_transport" = "هیچ سروری از این انتقال پشتیبانی نمی‌کند";
 "servers_title" = "سرورها";
+"session_rename_account_number" = "برای تغییر نام دستگاه‌ها با شماره حساب خود وارد شوید.";
 "session_rename_failed" = "تغییر نام دستگاه ناموفق بود. لطفاً دوباره تلاش کنید.";
-"session_rename_length" = "نام باید بین ۱ تا ۶۴ نویسه باشد.";
+"session_rename_length" = "نام باید بین ۱ تا ۴۰ نویسه باشد.";
 "session_rename_not_found" = "این دستگاه دیگر در حساب شما نیست.";
 "session_rename_unavailable" = "تغییر نام دستگاه‌ها اکنون ممکن نیست. بعداً دوباره تلاش کنید.";
 "session_reveal_reason" = "برای دیدن شماره حساب، هویت خود را تأیید کنید.";

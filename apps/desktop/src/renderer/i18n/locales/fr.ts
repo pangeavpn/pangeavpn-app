@@ -64,6 +64,8 @@ export const fr = {
   "devices.renameLabel": "Nom de l'appareil",
   "devices.renamed": "Appareil renommé.",
   "devices.renameFailed": "Échec du renommage de l'appareil. Veuillez réessayer.",
+  "devices.renameLength": "Utilisez entre 1 et 40 caractères pour le nom.",
+  "devices.renameNeedsAccountNumber": "Connectez-vous avec votre numéro de compte pour renommer les appareils.",
   "devices.none": "Aucun appareil trouvé.",
   "devices.noneRemaining": "Aucun appareil restant.",
 

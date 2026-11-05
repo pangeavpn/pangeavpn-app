@@ -319,8 +319,9 @@
 "root_data_erased" = "Données de PangeaVPN effacées.";
 "server_picker_none_for_transport" = "Aucun serveur ne prend en charge ce transport";
 "servers_title" = "Serveurs";
+"session_rename_account_number" = "Connectez-vous avec votre numéro de compte pour renommer les appareils.";
 "session_rename_failed" = "Échec du renommage de l'appareil. Veuillez réessayer.";
-"session_rename_length" = "Utilisez entre 1 et 64 caractères pour le nom.";
+"session_rename_length" = "Utilisez entre 1 et 40 caractères pour le nom.";
 "session_rename_not_found" = "Cet appareil ne fait plus partie de votre compte.";
 "session_rename_unavailable" = "Impossible de renommer les appareils pour le moment. Réessayez plus tard.";
 "session_reveal_reason" = "Confirmez votre identité pour voir votre numéro de compte.";
