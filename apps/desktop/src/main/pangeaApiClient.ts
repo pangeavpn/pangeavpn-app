@@ -135,13 +135,6 @@ const DOH_PROVIDERS = [
 // A healthy network still asks only the first provider; a blocked one gives up in ~6s, not 12s.
 const DOH_STAGGER_MS = 1000;
 
-interface BootstrapResponse {
-  vpnAccessToken: string;
-  servers: ServerInfo[];
-  /** Edge relays the hub currently runs. Absent on hubs that predate them. */
-  frontedEndpoints?: string[];
-}
-
 interface TokenLoginResponse {
   vpnAccessToken: string;
   user: { email: string; name: string };
@@ -1612,39 +1605,6 @@ export class PangeaApiClient {
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") {
         throw new Error("Token login request timeout");
-      }
-      throw error;
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-
-  async bootstrap(auth0AccessToken: string): Promise<BootstrapResponse> {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
-
-    try {
-      const response = await this.hubFetch("/api/client/bootstrap", {
-        method: "GET",
-        headers: { Authorization: `Bearer ${auth0AccessToken}` },
-        signal: controller.signal
-      });
-
-      if (!response.ok) {
-        const text = await response.text();
-        throw new Error(`Bootstrap failed (${response.status}): ${text}`);
-      }
-
-      const data = (await response.json()) as BootstrapResponse;
-      this.acceptLicenseKey(data.vpnAccessToken, "Bootstrap");
-      this.rememberServers(data.servers);
-      this.rememberHubShadowsocks(data.servers);
-      this.rememberHubReality(data.servers);
-      this.rememberFrontedEndpoints(data.frontedEndpoints);
-      return data;
-    } catch (error) {
-      if (error instanceof Error && error.name === "AbortError") {
-        throw new Error("Bootstrap request timeout");
       }
       throw error;
     } finally {
