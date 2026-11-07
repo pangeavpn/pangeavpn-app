@@ -1,14 +1,24 @@
 // Session: device rename errors and the account-number unlock prompt; rename failure follows desktop.
 export default {
   session_rename_length: {
-    en: "Use 1 to 64 characters for the name.",
-    es: "Usa entre 1 y 64 caracteres para el nombre.",
-    fr: "Utilisez entre 1 et 64 caractères pour le nom.",
-    ru: "Имя должно содержать от 1 до 64 символов.",
-    uk: "Назва має містити від 1 до 64 символів.",
-    zh: "名称须为 1 到 64 个字符。",
-    ar: "استخدم من 1 إلى 64 حرفًا للاسم.",
-    fa: "نام باید بین ۱ تا ۶۴ نویسه باشد."
+    en: "Use 1 to 40 characters for the name.",
+    es: "Usa entre 1 y 40 caracteres para el nombre.",
+    fr: "Utilisez entre 1 et 40 caractères pour le nom.",
+    ru: "Имя должно содержать от 1 до 40 символов.",
+    uk: "Назва має містити від 1 до 40 символів.",
+    zh: "名称须为 1 到 40 个字符。",
+    ar: "استخدم من 1 إلى 40 حرفًا للاسم.",
+    fa: "نام باید بین ۱ تا ۴۰ نویسه باشد."
+  },
+  session_rename_account_number: {
+    en: "Sign in with your account number to rename devices.",
+    es: "Inicia sesión con tu número de cuenta para renombrar dispositivos.",
+    fr: "Connectez-vous avec votre numéro de compte pour renommer les appareils.",
+    ru: "Войдите по номеру аккаунта, чтобы переименовывать устройства.",
+    uk: "Увійдіть за номером акаунта, щоб перейменовувати пристрої.",
+    zh: "请使用账号登录后再重命名设备。",
+    ar: "سجّل الدخول برقم حسابك لإعادة تسمية الأجهزة.",
+    fa: "برای تغییر نام دستگاه‌ها با شماره حساب خود وارد شوید."
   },
   session_rename_not_found: {
     en: "This device is no longer on your account.",
