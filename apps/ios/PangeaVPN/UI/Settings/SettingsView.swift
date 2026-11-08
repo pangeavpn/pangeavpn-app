@@ -15,6 +15,7 @@ struct SettingsView: View {
 
     // Fits the account number on one line at the default text size.
     private static let railWidth: CGFloat = 320
+    @ScaledMetric(relativeTo: .subheadline) private var scaledRailWidth: CGFloat = 320
     private static let signOutImage = "rectangle.portrait.and.arrow.right"
     private static let deleteImage = "trash"
 
@@ -82,22 +83,29 @@ struct SettingsView: View {
 
     // The rail selects a section and the pane beside it shows that page in place, with no push.
     private var wideBody: some View {
-        HStack(spacing: 0) {
-            rail
-                .frame(width: Self.railWidth)
-            Rectangle()
-                .fill(Palette.borderSubtle)
-                .frame(width: 1)
-                .ignoresSafeArea()
-                .accessibilityHidden(true)
-            NavigationStack(path: pushedPath) {
-                destination(selectedRoute)
-                    .navigationDestination(for: SettingsRoute.self) { route in
-                        destination(route)
-                    }
+        GeometryReader { proxy in
+            HStack(spacing: 0) {
+                rail
+                    .frame(width: railWidth(in: proxy.size.width))
+                Rectangle()
+                    .fill(Palette.borderSubtle)
+                    .frame(width: 1)
+                    .ignoresSafeArea()
+                    .accessibilityHidden(true)
+                NavigationStack(path: pushedPath) {
+                    destination(selectedRoute)
+                        .navigationDestination(for: SettingsRoute.self) { route in
+                            destination(route)
+                        }
+                }
+                .frame(maxWidth: .infinity)
             }
-            .frame(maxWidth: .infinity)
         }
+    }
+
+    // Larger text widens the rail so titles wrap between words, never past half the window.
+    private func railWidth(in width: CGFloat) -> CGFloat {
+        max(Self.railWidth, min(scaledRailWidth, width / 2))
     }
 
     private var selectedRoute: SettingsRoute {

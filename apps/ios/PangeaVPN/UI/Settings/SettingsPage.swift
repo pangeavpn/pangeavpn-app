@@ -147,8 +147,15 @@ struct SettingsRailRow: View {
         self.selected = selected
     }
 
+    // At accessibility sizes the icon sits above the title, so a long word keeps the rail's full width.
+    private var layout: AnyLayout {
+        typeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+            : AnyLayout(HStackLayout(spacing: 12))
+    }
+
     var body: some View {
-        HStack(spacing: 12) {
+        layout {
             Image(systemName: systemImage)
                 .scaledFont(size: 16, weight: .regular, relativeTo: .body)
                 .foregroundStyle(tint ?? (selected ? Palette.accent : Palette.textSecondary))
