@@ -2571,8 +2571,9 @@ async function connectWithRecovery(profileId: string): Promise<OkResponse> {
 // Applies settings.json (hand-editable, so every field is defensively typed)
 // onto module state at launch. Mirrors the validation each IPC setter applies.
 function applyPersistedSettings(settings: Record<string, unknown>): void {
-  if (settings.dohEnabled === true) {
-    pangeaApiClient.setDohEnabled(true);
+  // DoH defaults on, so a saved false is the only value that changes anything.
+  if (typeof settings.dohEnabled === "boolean") {
+    pangeaApiClient.setDohEnabled(settings.dohEnabled);
   }
   // Reads the current shape, and migrates the directIpEnabled/directIpOnly
   // pair it replaced. Always yields at least one enabled method.
