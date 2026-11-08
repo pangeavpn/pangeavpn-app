@@ -5,18 +5,23 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"regexp"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/securechannel"
+	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/securechannel/securechanneltest"
 )
 
-// hubStub is a TLS server standing in for the hub; it records the SNI and
-// nonce of every probe and answers with handler.
+// hubStub is a TLS server standing in for the hub. It holds the hub's keys,
+// opens each sealed probe, records its SNI and nonce, and answers with handler.
 type hubStub struct {
 	mu     sync.Mutex
 	snis   []string
@@ -24,14 +29,33 @@ type hubStub struct {
 	addr   string
 }
 
-func startHubStub(t *testing.T, handler http.HandlerFunc) *hubStub {
+// hubHandler sees the outer request plus the opened inner one; req.Route is
+// empty and reply nil when the envelope did not open.
+type hubHandler func(w http.ResponseWriter, r *http.Request, req securechanneltest.Request, reply securechanneltest.Reply)
+
+func startHubStub(t *testing.T, handler hubHandler) *hubStub {
 	t.Helper()
+	hub, keys, err := securechanneltest.NewHub()
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous := hubKeys
+	hubKeys = func() securechannel.Keys { return keys }
+	t.Cleanup(func() { hubKeys = previous })
+
 	stub := &hubStub{}
 	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		stub.mu.Lock()
-		stub.nonces = append(stub.nonces, r.URL.Query().Get("n"))
-		stub.mu.Unlock()
-		handler(w, r)
+		envelope, _ := io.ReadAll(r.Body)
+		req, reply, err := hub.Open(envelope)
+		if err != nil {
+			req, reply = securechanneltest.Request{}, nil
+		}
+		if u, err := url.Parse(req.Route); err == nil {
+			stub.mu.Lock()
+			stub.nonces = append(stub.nonces, u.Query().Get("n"))
+			stub.mu.Unlock()
+		}
+		handler(w, r, req, reply)
 	}))
 	srv.TLS = &tls.Config{GetConfigForClient: func(hello *tls.ClientHelloInfo) (*tls.Config, error) {
 		stub.mu.Lock()
@@ -56,18 +80,33 @@ func (s *hubStub) seen() (snis, nonces []string) {
 	return append([]string(nil), s.snis...), append([]string(nil), s.nonces...)
 }
 
-// echo is the hub's real behaviour, refusing anything not aimed at the route.
-func echo(w http.ResponseWriter, r *http.Request) {
-	if r.Host != HubHost || r.URL.Path != Path {
-		http.Error(w, "wrong target", http.StatusBadRequest)
+// sealedJSON answers 200 with an inner response sealed for the request.
+func sealedJSON(t *testing.T, w http.ResponseWriter, reply securechanneltest.Reply, status int, body string) {
+	raw, err := reply(securechannel.InnerResponse{Status: status, Body: json.RawMessage(body)})
+	if err != nil {
+		t.Error(err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]string{"n": r.URL.Query().Get("n")})
+	_, _ = w.Write(raw)
+}
+
+// echo is the hub's real behaviour: the sealed route only, the nonce sealed back.
+func echo(t *testing.T) hubHandler {
+	return func(w http.ResponseWriter, r *http.Request, req securechanneltest.Request, reply securechanneltest.Reply) {
+		u, err := url.Parse(req.Route)
+		if r.Host != HubHost || r.Method != http.MethodPost || r.URL.Path != securechannel.Route ||
+			reply == nil || err != nil || req.Method != http.MethodGet || u.Path != Path {
+			http.Error(w, "wrong target", http.StatusBadRequest)
+			return
+		}
+		body, _ := json.Marshal(map[string]string{"n": u.Query().Get("n")})
+		sealedJSON(t, w, reply, http.StatusOK, string(body))
+	}
 }
 
 func TestProbe_EchoedNonceIsAnswered(t *testing.T) {
-	stub := startHubStub(t, echo)
+	stub := startHubStub(t, echo(t))
 	if got := Probe(context.Background(), stub.dial); got != Answered {
 		t.Fatalf("Probe = %s, want answered", got)
 	}
@@ -77,7 +116,7 @@ func TestProbe_EchoedNonceIsAnswered(t *testing.T) {
 }
 
 func TestProbe_SendsAFreshNonceEachTime(t *testing.T) {
-	stub := startHubStub(t, echo)
+	stub := startHubStub(t, echo(t))
 	Probe(context.Background(), stub.dial)
 	Probe(context.Background(), stub.dial)
 	_, nonces := stub.seen()
@@ -93,17 +132,24 @@ func TestProbe_SendsAFreshNonceEachTime(t *testing.T) {
 }
 
 func TestProbe_Refusals(t *testing.T) {
-	cases := map[string]http.HandlerFunc{
-		"wrong echo": func(w http.ResponseWriter, _ *http.Request) {
-			_ = json.NewEncoder(w).Encode(map[string]string{"n": "deadbeef"})
+	cases := map[string]hubHandler{
+		"wrong echo": func(w http.ResponseWriter, _ *http.Request, _ securechanneltest.Request, reply securechanneltest.Reply) {
+			sealedJSON(t, w, reply, http.StatusOK, `{"n":"deadbeef"}`)
 		},
-		"rate limited": func(w http.ResponseWriter, _ *http.Request) {
+		"inner refusal": func(w http.ResponseWriter, _ *http.Request, _ securechanneltest.Request, reply securechanneltest.Reply) {
+			sealedJSON(t, w, reply, http.StatusForbidden, `{"code":"ROUTE_NOT_ALLOWED"}`)
+		},
+		"unsealed echo": func(w http.ResponseWriter, _ *http.Request, req securechanneltest.Request, _ securechanneltest.Reply) {
+			u, _ := url.Parse(req.Route)
+			_ = json.NewEncoder(w).Encode(map[string]string{"n": u.Query().Get("n")})
+		},
+		"rate limited": func(w http.ResponseWriter, _ *http.Request, _ securechanneltest.Request, _ securechanneltest.Reply) {
 			http.Error(w, `{"code":"RATE_LIMITED"}`, http.StatusTooManyRequests)
 		},
-		"block page": func(w http.ResponseWriter, _ *http.Request) {
+		"block page": func(w http.ResponseWriter, _ *http.Request, _ securechanneltest.Request, _ securechanneltest.Reply) {
 			_, _ = w.Write([]byte("<html>This site is blocked</html>"))
 		},
-		"upstream error": func(w http.ResponseWriter, _ *http.Request) {
+		"upstream error": func(w http.ResponseWriter, _ *http.Request, _ securechanneltest.Request, _ securechanneltest.Reply) {
 			http.Error(w, "bad gateway", http.StatusBadGateway)
 		},
 	}
@@ -114,6 +160,22 @@ func TestProbe_Refusals(t *testing.T) {
 				t.Fatalf("Probe = %s, want refused: something answered, just not our hub", got)
 			}
 		})
+	}
+}
+
+// The plain GET this replaced put the route and nonce on the wire for anyone
+// who intercepts the unverified TLS session; the request must be the envelope alone.
+func TestProbe_SendsOnlyASealedEnvelope(t *testing.T) {
+	var outer *http.Request
+	stub := startHubStub(t, func(w http.ResponseWriter, r *http.Request, req securechanneltest.Request, reply securechanneltest.Reply) {
+		outer = r
+		echo(t)(w, r, req, reply)
+	})
+	if got := Probe(context.Background(), stub.dial); got != Answered {
+		t.Fatalf("Probe = %s, want answered", got)
+	}
+	if outer.URL.RawQuery != "" || strings.Contains(outer.URL.String(), "reach") {
+		t.Fatalf("outer request %s %s leaks the probe", outer.Method, outer.URL)
 	}
 }
 
@@ -166,7 +228,7 @@ func TestProbe_NoReplyIsSilentWithinTheDeadline(t *testing.T) {
 }
 
 func TestProbe_ResetBeforeReplyIsSilent(t *testing.T) {
-	stub := startHubStub(t, func(w http.ResponseWriter, _ *http.Request) {
+	stub := startHubStub(t, func(w http.ResponseWriter, _ *http.Request, _ securechanneltest.Request, _ securechanneltest.Reply) {
 		conn, _, err := w.(http.Hijacker).Hijack()
 		if err == nil {
 			conn.Close()
@@ -187,9 +249,9 @@ func TestDirectDialer_UnknownInterfaceFails(t *testing.T) {
 // TestProbe_OversizedReplyIsNotReadInFull: with no certificate check an on-path
 // box can stream headers at the SYSTEM daemon, so the read must stop early.
 func TestProbe_OversizedReplyIsNotReadInFull(t *testing.T) {
-	stub := startHubStub(t, func(w http.ResponseWriter, r *http.Request) {
+	stub := startHubStub(t, func(w http.ResponseWriter, r *http.Request, req securechanneltest.Request, reply securechanneltest.Reply) {
 		w.Header().Set("X-Pad", strings.Repeat("a", 64<<10))
-		echo(w, r)
+		echo(t)(w, r, req, reply)
 	})
 	if got := Probe(context.Background(), stub.dial); got != Silent {
 		t.Fatalf("Probe = %s, want silent: a reply past the size cap must not be trusted", got)
