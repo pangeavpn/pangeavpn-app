@@ -2706,8 +2706,10 @@ function wirePangeaApiClient(): void {
   pangeaApiClient.onSubscriptionResolved((cached) => void persistSubscription(cached));
 
   // Same split for post-quantum key material: the daemon holds it, the
-  // client only carries public halves to and from the hub.
+  // client only carries public halves to and from the hub. Every hub request
+  // is sealed with it, so launch-time requests wait for the daemon to start.
   pangeaApiClient.setPostQuantum(daemonClient);
+  pangeaApiClient.setDaemonStarted(daemonStarted);
 
   // The daemon owns the proxy; the client only decides when to ask for it.
   pangeaApiClient.setShadowsocksHubProxy({
@@ -2820,9 +2822,19 @@ function buildApplicationMenu(): void {
 
 // Ensures the daemon is running and, on first launch with no persisted lock
 // state, re-engages Lockdown. Fire-and-forget: boot() does not await this.
+// Settles once launch has tried to start the daemon, whether or not it came up.
+let markDaemonStarted: () => void = () => {};
+const daemonStarted = new Promise<void>((resolve) => {
+  markDaemonStarted = resolve;
+});
+
 async function runDaemonStartupSequence(): Promise<void> {
   try {
-    await daemonProcess.ensureRunning();
+    try {
+      await daemonProcess.ensureRunning();
+    } finally {
+      markDaemonStarted();
+    }
     // The daemon outlives the app, so its transport memory has to be dropped
     // here rather than on quit, which a crash or force-kill never reaches.
     try {

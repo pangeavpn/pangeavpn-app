@@ -100,10 +100,13 @@ each reply to its request.
 
 `SERVER_KEM_PUBLIC_KEY_B64` in
 [`secureChannel.ts`](../apps/desktop/src/main/secureChannel.ts) is that second
-pin, and it's set. The app uses v2 whenever the local daemon can encapsulate,
-and v1 otherwise. Only the daemon decides that, so nothing on the network can
-force the older route. Emptying the pin would move every request back to
-`/v1/secure`.
+pin, and it's set. The desktop app uses v2 for every hub request and never
+falls back to v1. Launch-time requests wait for the daemon to start; if it
+still can't encapsulate, the request fails with
+`SecureChannelUnavailableError` and nothing is sent. That failure doesn't
+count against the hub path, so it never starts the cooldown or the search
+through DoH and the dead drop. The mobile core falls back to v1 only if its
+own pinned key can't be parsed.
 
 [Architecture](architecture.md#secure-request-envelope) walks through both
 envelope versions step by step.

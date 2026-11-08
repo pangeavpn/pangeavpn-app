@@ -149,7 +149,7 @@ registration, device management and peer registration.
 
 Hub payloads travel in an encrypted envelope built by
 [`secureChannel.ts`](../apps/desktop/src/main/secureChannel.ts). Two versions
-exist, and the client picks v2 whenever it can.
+exist; the desktop app only ever sends v2.
 
 **v2 (`/v2/secure`)**, hybrid classical and post-quantum:
 
@@ -166,9 +166,9 @@ exist, and the client picks v2 whenever it can.
    data, which ties the reply to the request it answers.
 
 **v1 (`/v1/secure`)** is the same exchange with X25519 alone and a single key
-for both directions. The client falls back to it when the daemon can't
-encapsulate. Only the local daemon decides that, so nothing on the network can
-force the downgrade. See [Post-quantum protection](post-quantum.md).
+for both directions. The desktop app no longer sends it: a request that can't
+be sealed for v2 is refused instead. The mobile core falls back to it only if
+its pinned KEM key can't be parsed. See [Post-quantum protection](post-quantum.md).
 
 The pinned keys authenticate the payload independently of whatever carries it.
 That's what lets the client use paths where the outer TLS session proves

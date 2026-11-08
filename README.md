@@ -189,7 +189,7 @@ For each request, the app:
 4. encrypts the inner `{method, route, headers, body}` with AES-256-GCM, binding the reply to the request it answers;
 5. sends it to `/v2/secure`, where only an allowlist of client-facing routes is reachable.
 
-If the daemon can't encapsulate, the request falls back to X25519 alone on `/v1/secure`. Only the local daemon makes that call, so nothing on the network can force the downgrade. [docs/post-quantum.md](docs/post-quantum.md) covers both the channel and the tunnel keys.
+The desktop app never falls back to `/v1/secure`: until the daemon can encapsulate, hub requests wait for it to start and are refused if it can't, rather than sent under X25519 alone. [docs/post-quantum.md](docs/post-quantum.md) covers both the channel and the tunnel keys.
 
 > [!IMPORTANT]
 > **About `rejectUnauthorized: false`.** Yes, the outer TLS layer skips CA validation, and yes, that's deliberate. On a network where a middlebox already terminates and re-signs TLS, validation either fails outright or passes against the middlebox's own certificate, and neither result tells you anything. The trust anchors are the pinned hub keys. Without the matching private keys an interceptor can't read or forge the inner payload, whatever it does to the outer TLS. Please read [docs/architecture.md](docs/architecture.md) before proposing a change here.

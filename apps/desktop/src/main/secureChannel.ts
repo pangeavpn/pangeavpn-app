@@ -14,13 +14,12 @@ import { PQ_ALGORITHM, type Encapsulation } from "../shared/postQuantum.ts";
 // Server X25519 public key (raw 32 bytes, base64)
 const SERVER_PUBLIC_KEY_B64 = "dCdC/tJM0oSQPUDROrrZeGR8VUgww2YPUPHlaDhqWFM=";
 
-// Server ML-KEM-768 public key (raw 1184 bytes, base64). Empty keeps every
-// request on /v1/secure; pin the hub's key here to turn /v2/secure on.
+// Server ML-KEM-768 public key (raw 1184 bytes, base64). Every hub request is
+// sealed on /v2/secure against it; there is no v1 fallback.
 export const SERVER_KEM_PUBLIC_KEY_B64 =
   "+VGdrHyFbqe1VCAIXhqVUKClytKNWNWF/ewL9SBBcNieILpWldUaXKyLxMxEZROHnFiDgRAfJ0cKfUh6a1Y6bIhDIZddpMc0kWHPbIUmHahUspeVHEbOICq7WZd7JIHIFCmY7gTMinDLcLLJXtJyOpk6XUAT4IQd3fNPVcuqeziGeZfPZeG1aeVYaXUR18Kv2VbHDGUp/fslJKMrv7jKYGR0CGHHNfucsrMF4GlVRYcSkXJHwao78pydQZEP+xYqDZkXEopAk0k94ORoJ1MmeUUZXFk47Lur58QxSXSeuzNrTcsdkNiomJK9m+mATsu1DluGOfyhuexzRrp8zWIPmzqpkLeG/PQOksVrOPKwd9OAEkavX9s6GVdBpad3bPsFdcxBNxt9GddxX9nAH4ybwqdoZtBcjksILlOMkMJb/MjL2ZkdjlIV+ZDNj/EJeIxl3tlqlMC2cewlZ9QBhHeOSsy47Fp50ChcifxcH/Z847grJCEeWeJ4RlTNqXMq3MY+v/bOldMWdfyacRG5+GdahZQM+fVQI8JmLiZd3kuKhPk15RGbMQADgCk9MJpUWkhxoewyBTbI3Oy659gXzxRq8IC0o1AvQroYBFI0+0pLWugF/sc7Yfl+6FOZo3TGqwm6PZbHtsEHKYdVV0OUiahC06K2lEPHGKBEQay6pIwVE5M4Twp+igzNrNjD17F9u9k2rmRvBhldPqq2Z0cnmrIsvqRhM2x+0bmH5ltXDBh3OEtOfmkNRiIHTfiqZnMS23hVArABO2MZoCMb4ppzzdR32vsOdfsBdNW9b4cmtNWtfcpf+LCKnpQJlmwe2SiVizMqUci/YtubJAtWpVA5A/isgdWbdRwWstwrLzt7+DTAkrQ7AgEbbCiwcyZL9eUjKAUfKBE5/ugD3UKx/lqDLZcP/vpLpFN+7llq/ARbFEmO9jQqUOhlB/uN5Ll7s+hb1PZCiUQXbWqpQ3UkVjWH57Ib21dkuiKbXqFefGJLU4Nbt7VQVMSsdWK5cnlY5PtYRqsO+DaTPXyf8YKAq5h3MYZ+TKl6E6AbIVkyHSh48QvP+EJ1WkGvihWRieG5EfG1qlRAsOkvScMxuXF66mt2ZiBZAO3Ax5YxvYIgjsibDSQ+v8pf9CZ4guwnBek3u8UXFGNR4mcuktkndvJzmwxatDAsTZkP1CR6MJFtSSMUaWxd0wureDy1TIU2ZGUSOhqje6KuyAJlysu959IxnqnEIURQBoFhL9yIVXcKKrmLctEhGSItPkUnRnI1AnLFEwTL/vGH82pdntfKBqRLRXdvYTWcIbUi1peaRQifvIdTJuK/u5hGxBBIVvaZ7uLCRSx34uUoMtKmfOhb7vJvcLvG96LGuLs+ICxMPhoRDBZtsORR+HgEhNItoWKm7aZBAXSM6AOujLy18EwSZVZdWuYfm+UQ7jkxv5eLeOg0ueAG6QReySF9BDErtYW3iIs/GYpExfKdMiTK2beC1RhbaLFRb6EkiiIUuQoEkDd/8sdUEelAVpZWvCwNngudPMgPzOx7G+FUUyXRUq8XMc/PUOlMmE3Y8Vp4XWxR9BF6mtpYbalmXlY=";
 
 const HKDF_SALT = Buffer.from("b9a288d01062a270368f67495ebafcec7eb910bee52855df69b22025cd205ae2", "hex");
-const HKDF_INFO = Buffer.from("pangea-secure-channel-v1");
 const HKDF_INFO_V2_C2S = Buffer.from("pangea-secure-channel-v2/c2s");
 const HKDF_INFO_V2_S2C = Buffer.from("pangea-secure-channel-v2/s2c");
 
@@ -42,6 +41,14 @@ interface EncryptedEnvelopeV2 extends EncryptedEnvelope {
   kem: string;
 }
 
+/** The request could not be sealed on /v2/secure, so it was never sent. */
+export class SecureChannelUnavailableError extends Error {
+  constructor(detail: string) {
+    super(`Secure channel unavailable: ${detail}`);
+    this.name = "SecureChannelUnavailableError";
+  }
+}
+
 export interface EncryptedResponse {
   iv: string;
   ct: string;
@@ -53,10 +60,10 @@ export interface InnerResponse {
   body: unknown;
 }
 
-/** A request sealed for one of the secure routes, and the way to read its reply. */
+/** A request sealed for /v2/secure, and the way to read its reply. */
 export interface SealedRequest {
-  route: "/v1/secure" | "/v2/secure";
-  envelope: EncryptedEnvelope | EncryptedEnvelopeV2;
+  route: "/v2/secure";
+  envelope: EncryptedEnvelopeV2;
   open(encrypted: EncryptedResponse): InnerResponse;
 }
 
@@ -94,23 +101,6 @@ function gcmOpen(key: Buffer, encrypted: EncryptedResponse, aad?: Buffer): strin
 // outside its window, so a captured request cannot be replayed indefinitely.
 function innerRequestJson(method: string, route: string, headers: Record<string, string>, body: unknown): string {
   return JSON.stringify({ method, route, headers, body, ts: Date.now() });
-}
-
-export function encryptRequest(
-  method: string,
-  route: string,
-  headers: Record<string, string>,
-  body?: unknown
-): { envelope: EncryptedEnvelope; aesKey: Buffer } {
-  // Fresh ephemeral client keypair per request (ephemeral-static ECDH against the pinned server key; not PFS)
-  const { ephB64, sharedSecret } = ephemeralAgreement(serverPublicKey);
-  const aesKey = Buffer.from(hkdfSync("sha256", sharedSecret, HKDF_SALT, HKDF_INFO, 32));
-  const sealed = gcmSeal(aesKey, innerRequestJson(method, route, headers, body));
-  return { envelope: { eph: ephB64, ...sealed }, aesKey };
-}
-
-export function decryptResponse(aesKey: Buffer, encrypted: EncryptedResponse): InnerResponse {
-  return JSON.parse(gcmOpen(aesKey, encrypted)) as InnerResponse;
 }
 
 /** Both v2 keys from the hybrid secret; exported so a test can play the hub. */
@@ -153,8 +143,9 @@ export function encryptRequestV2(
   };
 }
 
-// v2 when a server KEM key is pinned and the daemon can encapsulate for it,
-// else v1. Only the local daemon decides, so the network cannot force v1.
+// Only v2 exists: a request that cannot be sealed for it is refused rather
+// than sent on the weaker v1 route, so neither the network nor a daemon that
+// is down or restarting can push the client off post-quantum sealing.
 export async function sealRequest(
   method: string,
   route: string,
@@ -163,14 +154,14 @@ export async function sealRequest(
   encapsulate: Encapsulator | null,
   serverKemPublicKey: string = SERVER_KEM_PUBLIC_KEY_B64
 ): Promise<SealedRequest> {
-  if (serverKemPublicKey && encapsulate) {
-    try {
-      const kem = await encapsulate(PQ_ALGORITHM, serverKemPublicKey);
-      if (kem) return encryptRequestV2(method, route, headers, body, kem);
-    } catch (err) {
-      console.log(`[SecureChannel] v2 unavailable, using v1: ${err instanceof Error ? err.message : String(err)}`);
-    }
+  if (!serverKemPublicKey) throw new SecureChannelUnavailableError("no hub KEM key pinned");
+  if (!encapsulate) throw new SecureChannelUnavailableError("no daemon to encapsulate");
+  let kem: Encapsulation | null;
+  try {
+    kem = await encapsulate(PQ_ALGORITHM, serverKemPublicKey);
+  } catch (err) {
+    throw new SecureChannelUnavailableError(err instanceof Error ? err.message : String(err));
   }
-  const { envelope, aesKey } = encryptRequest(method, route, headers, body);
-  return { route: "/v1/secure", envelope, open: (encrypted) => decryptResponse(aesKey, encrypted) };
+  if (!kem) throw new SecureChannelUnavailableError("daemon has no encapsulate route");
+  return encryptRequestV2(method, route, headers, body, kem);
 }

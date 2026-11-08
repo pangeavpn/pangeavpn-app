@@ -38,7 +38,12 @@ import {
   restoreCachedSubscription,
   type CachedSubscription
 } from "../shared/cachedSubscription";
-import { sealRequest, type EncryptedResponse, type SealedRequest } from "./secureChannel";
+import {
+  sealRequest,
+  SecureChannelUnavailableError,
+  type EncryptedResponse,
+  type SealedRequest
+} from "./secureChannel";
 import { sanitizeLog } from "./logSanitize";
 import {
   parsePostQuantumAnswer,
@@ -97,6 +102,10 @@ export class HubUnreachableError extends Error {
 
 // How long a fully failed cascade is believed before it is attempted again.
 const HUB_RETRY_COOLDOWN_MS = 20000;
+// A daemon that is restarting cannot encapsulate for a moment; sealing is
+// retried this many times, this far apart, before the request is refused.
+const SEAL_RETRIES = 2;
+const SEAL_RETRY_DELAY_MS = 1000;
 // Consecutive hubFetch failures tolerated on a resolved path before it is
 // invalidated and the connection cascade is forced to re-run.
 const HUB_FAILURE_LIMIT = 2;
@@ -551,9 +560,12 @@ export class PangeaApiClient {
     null;
   private shadowsocksHubProxy: ShadowsocksHubProxy | null = null;
   private realityHubProxy: RealityHubProxy | null = null;
-  // The daemon's post-quantum key material. Null leaves peers unkeyed and the
-  // hub channel on v1, exactly as before the exchange existed.
+  // The daemon's post-quantum key material. Every hub request needs it: without
+  // it nothing can be sealed for /v2/secure, so nothing is sent.
   private postQuantum: PostQuantumProvider | null = null;
+  // Settles once the daemon's startup has run, so launch-time hub calls wait
+  // for it instead of failing to seal before it is up.
+  private daemonStarted: Promise<void> = Promise.resolve();
   // Off unless the user asks for it. Gates the tunnel pre-shared key only; the
   // hub channel stays on v2, which is not the user's to weaken.
   private postQuantumEnabled = false;
@@ -665,6 +677,11 @@ export class PangeaApiClient {
     this.postQuantum = provider;
   }
 
+  /** Hub requests wait for this before sealing. It must settle, never reject. */
+  setDaemonStarted(started: Promise<void>): void {
+    this.daemonStarted = started;
+  }
+
   /** Takes effect on the next connect: the key is agreed at registration. */
   setPostQuantumEnabled(enabled: boolean): void {
     this.postQuantumEnabled = enabled;
@@ -696,10 +713,19 @@ export class PangeaApiClient {
     return this.postQuantum.pqFinish(offer.id, answer);
   }
 
-  /** Seals a hub request, on v2 when the daemon can encapsulate for it. */
-  private sealRequest(method: string, route: string, headers: Record<string, string>, body?: unknown): Promise<SealedRequest> {
+  /** Seals a hub request for /v2/secure, or throws SecureChannelUnavailableError. */
+  private async sealRequest(method: string, route: string, headers: Record<string, string>, body?: unknown): Promise<SealedRequest> {
+    await this.daemonStarted;
     const provider = this.postQuantum;
-    return sealRequest(method, route, headers, body, provider ? (algorithm, key) => provider.pqEncapsulate(algorithm, key) : null);
+    const encapsulate = provider ? (algorithm: string, key: string) => provider.pqEncapsulate(algorithm, key) : null;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await sealRequest(method, route, headers, body, encapsulate);
+      } catch (err) {
+        if (!(err instanceof SecureChannelUnavailableError) || attempt >= SEAL_RETRIES) throw err;
+        await new Promise((resolve) => setTimeout(resolve, SEAL_RETRY_DELAY_MS));
+      }
+    }
   }
 
   /** The proxy port currently carrying hub traffic, for diagnostics. */
@@ -979,14 +1005,20 @@ export class PangeaApiClient {
       throw new HubUnreachableError(HUB_RETRY_COOLDOWN_MS - sinceFailure);
     }
 
-    this.hubResolution = this.resolveHubPath()
+    // Seal once before searching: if the daemon cannot encapsulate, every probe
+    // would fail and the search would fall through to DoH and the dead drop
+    // for a fault that is local.
+    this.hubResolution = this.sealRequest("GET", "/api/client/regions", {}, undefined)
+      .then(() => this.resolveHubPath())
       .then((confirmed) => {
         // An unconfirmed path still gets this call's real request, but it opens
         // the cooldown so the next caller fails fast instead of hanging again.
         this.hubResolutionFailedAtMs = confirmed ? 0 : Date.now();
       })
       .catch((err: unknown) => {
-        this.hubResolutionFailedAtMs = Date.now();
+        // Nothing could be sealed, which says nothing about the hub, so it
+        // must not hold every caller off for the cooldown.
+        if (!(err instanceof SecureChannelUnavailableError)) this.hubResolutionFailedAtMs = Date.now();
         throw err;
       })
       .finally(() => {
@@ -1370,6 +1402,8 @@ export class PangeaApiClient {
       // A user cancel says nothing about the path; the transports surface it
       // as a plain abort, converted to ConnectCancelledError only upstream.
       if (err instanceof ConnectCancelledError || options.cancelSignal?.aborted) throw err;
+      // Never sent, so the path is not to blame.
+      if (err instanceof SecureChannelUnavailableError) throw err;
       this.hubFailureStreak++;
       if (this.hubFailureStreak >= HUB_FAILURE_LIMIT) {
         console.log("[hubFetch] Path failed repeatedly, forcing hub re-resolution");

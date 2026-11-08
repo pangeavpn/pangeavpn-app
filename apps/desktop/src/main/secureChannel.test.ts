@@ -2,11 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import crypto from "node:crypto";
 import {
-  decryptResponse,
   deriveV2Keys,
-  encryptRequest,
   encryptRequestV2,
   sealRequest,
+  SecureChannelUnavailableError,
   v2AssociatedData,
   type EncryptedResponse
 } from "./secureChannel.ts";
@@ -88,27 +87,6 @@ function assertFreshSendTime(ts: unknown): void {
   assert.ok(Math.abs(Date.now() - (ts as number)) < 5_000, `ts ${String(ts)} is not the send time`);
 }
 
-test("v1 seals its send time with the request", () => {
-  const { envelope, aesKey } = encryptRequest("GET", "/api/x", { a: "b" }, undefined);
-  const { ts, ...request } = decryptResponse(aesKey, envelope) as unknown as Record<string, unknown>;
-  assertFreshSendTime(ts);
-  assert.deepEqual(request, { method: "GET", route: "/api/x", headers: { a: "b" } });
-});
-
-test("v1 request and response round-trip under the derived key", () => {
-  const { envelope, aesKey } = encryptRequest("GET", "/api/x", { a: "b" }, undefined);
-  assert.ok(envelope.eph && envelope.iv && envelope.ct && envelope.tag);
-  const iv = crypto.randomBytes(12);
-  const c = crypto.createCipheriv("aes-256-gcm", aesKey, iv);
-  const ct = Buffer.concat([c.update(JSON.stringify({ status: 200, body: { ok: 1 } })), c.final()]);
-  const inner = decryptResponse(aesKey, {
-    iv: iv.toString("base64"),
-    ct: ct.toString("base64"),
-    tag: c.getAuthTag().toString("base64")
-  });
-  assert.deepEqual(inner, { status: 200, body: { ok: 1 } });
-});
-
 test("v2 round-trips against a hub holding both static keys", skipWithoutMlKem, async () => {
   const hub = makeHub();
   const kem = await hub.encapsulate(PQ_ALGORITHM, hub.kemPublicB64);
@@ -153,15 +131,16 @@ test("encryptRequestV2 refuses key material of the wrong size", () => {
   assert.throws(() => encryptRequestV2("GET", "/x", {}, undefined, { kemCiphertext: "AAAA", sharedSecret: ss }), /ciphertext/);
 });
 
-test("sealRequest stays on v1 without a pinned key, an encapsulator, or a daemon answer", async () => {
+test("sealRequest refuses to seal without a pinned key, an encapsulator, or a daemon answer", async () => {
   const pinned = Buffer.alloc(1184).toString("base64");
   const failing = async () => {
     throw new Error("daemon down");
   };
-  assert.equal((await sealRequest("GET", "/x", {}, undefined, null, pinned)).route, "/v1/secure");
-  assert.equal((await sealRequest("GET", "/x", {}, undefined, async () => null, "")).route, "/v1/secure");
-  assert.equal((await sealRequest("GET", "/x", {}, undefined, async () => null, pinned)).route, "/v1/secure");
-  assert.equal((await sealRequest("GET", "/x", {}, undefined, failing, pinned)).route, "/v1/secure");
+  const refused = (err: unknown) => err instanceof SecureChannelUnavailableError;
+  await assert.rejects(sealRequest("GET", "/x", {}, undefined, null, pinned), refused);
+  await assert.rejects(sealRequest("GET", "/x", {}, undefined, async () => null, ""), refused);
+  await assert.rejects(sealRequest("GET", "/x", {}, undefined, async () => null, pinned), refused);
+  await assert.rejects(sealRequest("GET", "/x", {}, undefined, failing, pinned), refused);
 });
 
 test("sealRequest takes v2 when the daemon encapsulates", skipWithoutMlKem, async () => {
