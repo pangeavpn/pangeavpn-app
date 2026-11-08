@@ -23,6 +23,9 @@ final class ConnectionStore {
     @ObservationIgnored private var progressTask: Task<Void, Never>?
     // Set by a user stop, so an attempt it cut short is not reported as a failure.
     @ObservationIgnored private var stopRequested = false
+    // True until the tunnel is up, so a reconnect or server switch that passes back
+    // through connecting is not taken for a new connect.
+    @ObservationIgnored private var comingUp = true
 
     private static let log = Logger(subsystem: "org.pangeavpn", category: "connection")
 
@@ -288,7 +291,17 @@ final class ConnectionStore {
     private func entered(_ state: TunnelState) {
         // A tunnel that got going makes the last connect error stale.
         if Self.isUp(state) { error = nil }
-        if state == .connected { refreshSubscription() }
+        switch state {
+        case .connected:
+            // Each connect checks the subscription once; the extension's own reconnects do not,
+            // or a flaky network would ask the hub on every recovery.
+            if comingUp { refreshSubscription() }
+            comingUp = false
+        case .disconnected, .error:
+            comingUp = true
+        case .connecting, .disconnecting:
+            break
+        }
         trackProgress(state)
     }
 

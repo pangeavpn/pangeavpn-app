@@ -234,6 +234,23 @@ final class ConnectionStoreTests: XCTestCase {
         XCTAssertTrue(again)
     }
 
+    func testAReconnectWithoutGoingDownDoesNotRefreshTheSubscription() async throws {
+        let (defaults, suite) = try makeTestDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let rig = await makeConnectionRig(defaults)
+        try await rig.servers.select(server: rig.server("eu-2"), pinned: false)
+        let lookups = { rig.core.calls.filter { $0 == "subscription" }.count }
+        await rig.store.toggle()
+        let connected = await eventually { lookups() == 1 }
+        XCTAssertTrue(connected)
+        rig.tunnel.status = F.status("eu-2", .connecting)
+        rig.tunnel.status = F.status("eu-2")
+        rig.tunnel.status = F.status("eu-1", .connecting)
+        rig.tunnel.status = F.status("eu-1")
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertEqual(lookups(), 1, "a reassert or server switch is not a new connect")
+    }
+
     func testFixedTransportConnectsOnlyTheSelection() async throws {
         let (defaults, suite) = try makeTestDefaults()
         defer { defaults.removePersistentDomain(forName: suite) }
