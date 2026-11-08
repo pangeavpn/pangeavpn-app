@@ -6,13 +6,19 @@ struct SessionTimeouts: Sendable {
     let deregister: TimeInterval
     let coreWipe: TimeInterval
     let networkSettle: TimeInterval
+    let launchRestore: TimeInterval
 
     // Deregister covers one hub search plus its request; a slot still held then is retried on a later launch.
     // A panic wipe must finish even if the core is stuck; the local cleanup runs either way.
-    init(deregister: TimeInterval = 25, coreWipe: TimeInterval = 3, networkSettle: TimeInterval = 5) {
+    // A hub search on a dead network can run for minutes; launch waits on it two seconds at most.
+    init(
+        deregister: TimeInterval = 25, coreWipe: TimeInterval = 3, networkSettle: TimeInterval = 5,
+        launchRestore: TimeInterval = 2
+    ) {
         self.deregister = deregister
         self.coreWipe = coreWipe
         self.networkSettle = networkSettle
+        self.launchRestore = launchRestore
     }
 
     static let standard = SessionTimeouts()
@@ -65,10 +71,29 @@ final class SessionStore {
         self.timeouts = timeouts
     }
 
+    // A slow hub never holds the app on its splash: past the deadline a stored sign-in opens the app,
+    // and the restore still in flight settles it when it lands.
     func restore() async {
         restoring = true
         await sendClientInfoOnce()
-        let outcome = await restoreOutcome()
+        let started = generation
+        let pending = Task { await restoreOutcome() }
+        if let outcome = await BoundedCall.value(of: pending, within: timeouts.launchRestore) {
+            await apply(outcome)
+            return
+        }
+        guard await holdsAccount() else {
+            await apply(await pending.value)
+            return
+        }
+        Self.log.info("restore still waiting on the hub, opening with the stored sign-in")
+        session = Session(email: "", name: "", servers: [])
+        restoreFailed = false
+        restoring = false
+        Task { await settleLateRestore(pending, started: started) }
+    }
+
+    private func apply(_ outcome: RestoreOutcome) async {
         session = outcome.session
         restoring = false
         switch outcome {
@@ -82,6 +107,38 @@ final class SessionStore {
         case .failed:
             restoreFailed = true
         }
+    }
+
+    // The app is already open, so only a session the core no longer holds takes it away.
+    private func settleLateRestore(_ pending: Task<RestoreOutcome, Never>, started: Int) async {
+        let outcome = await pending.value
+        guard started == generation else { return }
+        switch outcome {
+        case .restored(let restored):
+            session = restored
+            await loadSubscription()
+        case .signedOut:
+            await endLateRestore()
+        case .failed:
+            // A hub answer that ended the session signs the core out, so the app follows it.
+            guard await holdsAccount() else {
+                await endLateRestore()
+                return
+            }
+            await loadSubscription()
+        }
+    }
+
+    private func endLateRestore() async {
+        clearSession()
+        await tunnel.disconnect()
+        await tunnel.removeConfiguration()
+    }
+
+    private func holdsAccount() async -> Bool {
+        let core = self.core
+        let stored = await CoreQueue.perform { core.accountNumber() }
+        return !stored.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     // A second tap while one login is in flight would register the device twice.

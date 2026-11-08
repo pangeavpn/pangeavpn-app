@@ -38,6 +38,7 @@ final class FakeCore: CoreBridge, @unchecked Sendable {
     // Same for a server list fetch, a login and a logout.
     var serversDelay: TimeInterval = 0
     var loginDelay: TimeInterval = 0
+    var restoreDelay: TimeInterval = 0
     var logoutDelay: TimeInterval = 0
 
     private let lock = NSLock()
@@ -67,7 +68,12 @@ final class FakeCore: CoreBridge, @unchecked Sendable {
         return try result.get()
     }
 
-    func restoreSession() throws -> Session { try record("restoreSession", restoreResult) }
+    func restoreSession() throws -> Session {
+        let result = restoreResult
+        note("restoreSession")
+        if restoreDelay > 0 { Thread.sleep(forTimeInterval: restoreDelay) }
+        return try result.get()
+    }
 
     func login(token: String) throws -> Session {
         let result = loginResult
