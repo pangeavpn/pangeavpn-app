@@ -12,7 +12,7 @@ export function parseConnectStatus(head: string): number {
   return Number(match[1]);
 }
 
-// The DoH direct-IP path carries a sealed /v1/secure envelope, so TLS is
+// The DoH direct-IP path carries a sealed /v2/secure envelope, so TLS is
 // carrier only: empty SNI hides the hub, and validation buys nothing.
 export const DOH_TLS_OPTIONS = {
   servername: "",

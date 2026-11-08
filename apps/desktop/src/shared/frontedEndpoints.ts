@@ -1,5 +1,5 @@
 /** Hostnames of edge workers that relay the secure envelope to the hub. Only
- *  the host is stored — the relay always answers on 443 at /v1/secure. */
+ *  the host is stored — the relay always answers on 443 at /v2/secure. */
 
 /** Shipped relays. Without them an install that has never reached the hub has
  *  no relay at all; the hub's list replaces them once one arrives. */
