@@ -15,8 +15,8 @@ final class SessionLaunchRestoreTests: XCTestCase {
         return core
     }
 
-    private func makeStore(_ core: FakeCore, tunnel: FakeTunnel = FakeTunnel()) -> SessionStore {
-        SessionStore(core: core, tunnel: tunnel, timeouts: SessionTimeouts(launchRestore: 0.05))
+    private func makeStore(_ core: FakeCore, tunnel: FakeTunnel? = nil) -> SessionStore {
+        SessionStore(core: core, tunnel: tunnel ?? FakeTunnel(), timeouts: SessionTimeouts(launchRestore: 0.05))
     }
 
     func testSlowRestoreOpensOnTheStoredSignInThenAdoptsTheAnswer() async {
