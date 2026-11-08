@@ -113,6 +113,8 @@ final class ModelsTests: XCTestCase {
         let json = #"{"email":"e","name":"n","servers":[{"id":"a","name":"A","region":"eu","country":"GB","load":12}]}"#
         let session = try decode(Session.self, json)
         XCTAssertEqual(session.servers.first?.load, 12)
+        XCTAssertFalse(session.cached)
+        XCTAssertTrue(try decode(Session.self, #"{"email":"","name":"","servers":[],"cached":true}"#).cached)
     }
 
     func testSubscriptionNullExpiry() throws {

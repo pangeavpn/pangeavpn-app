@@ -22,6 +22,18 @@ final class ServersStoreTests: XCTestCase {
         return store
     }
 
+    func testUsingAFetchedListShowsItWithoutAskingTheHubAgain() async throws {
+        let (defaults, suite) = try makeTestDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let core = FakeCore()
+        core.configResult = .success(settings(lastServerId: "eu-2"))
+        let store = await makeStore(core, defaults)
+        await store.use([server("eu-1"), server("eu-2")])
+        XCTAssertEqual(store.selected?.id, "eu-2")
+        XCTAssertEqual(store.regions.flatMap(\.servers).count, 2)
+        XCTAssertFalse(core.calls.contains("listServers"))
+    }
+
     func testSelectPersistsLastServer() async throws {
         let (defaults, suite) = try makeTestDefaults()
         defer { defaults.removePersistentDomain(forName: suite) }

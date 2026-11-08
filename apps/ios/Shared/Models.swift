@@ -69,6 +69,8 @@ struct Session: Codable, Equatable, Sendable {
     let email: String
     let name: String
     let servers: [Server]
+    // True when the core served the list from its store because the hub was unreachable.
+    var cached = false
 }
 
 struct TunnelConfig: Codable, Equatable, Sendable {
@@ -299,6 +301,7 @@ extension Session {
         email = try c.decode(String.self, forKey: .email)
         name = try c.decode(String.self, forKey: .name)
         servers = try c.decodeIfPresent([Server].self, forKey: .servers) ?? []
+        cached = try c.decodeIfPresent(Bool.self, forKey: .cached) ?? false
     }
 }
 

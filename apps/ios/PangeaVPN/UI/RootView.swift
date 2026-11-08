@@ -116,15 +116,25 @@ struct RootView: View {
     }
 
     private func loadSignedInData() async {
-        guard hasRestored, session.session != nil else {
+        guard hasRestored, let signedIn = session.session else {
             if hasRestored { servers.reset() }
             return
         }
         let settings = self.settings
         let servers = self.servers
         async let loadedSettings: Void = settings.load()
-        async let refreshedServers: Void = servers.refresh()
-        _ = await (loadedSettings, refreshedServers)
+        async let loadedServers: Void = Self.loadServers(servers, for: signedIn)
+        _ = await (loadedSettings, loadedServers)
+    }
+
+    // Restore and sign-in already fetched the list from the hub; only a stored copy
+    // or a sign-in still settling sends the app back for a fresh one.
+    private static func loadServers(_ servers: ServersStore, for session: Session) async {
+        if session.servers.isEmpty || session.cached {
+            await servers.refresh()
+        } else {
+            await servers.use(session.servers)
+        }
     }
 
     private func sceneChanged(to phase: ScenePhase) {

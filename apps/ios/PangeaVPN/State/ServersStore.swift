@@ -65,19 +65,32 @@ final class ServersStore {
             let listed = try await CoreQueue.run { try core.listServers() }
             let last = await lastServerId()
             guard started == generation else { return }
-            let preferred = [pendingFollow, selected?.id].compactMap { $0 }
-                .first { id in listed.contains { $0.id == id } }
-            let id = Regions.resolveSelection(visible: listed, previous: preferred ?? "", lastServerId: last)
-            regions = Regions.group(listed)
-            selected = id.isEmpty ? nil : listed.first { $0.id == id }
-            pendingFollow = nil
-            error = nil
+            show(listed, lastServerId: last)
         } catch {
             guard started == generation else { return }
             Self.log.error("server refresh failed: \(error.localizedDescription, privacy: .private)")
             self.error = LoginErrorText.general(for: error.localizedDescription)
         }
         loading = false
+    }
+
+    // The list a restore or sign-in just fetched, so launch does not ask the hub for it a second time.
+    func use(_ listed: [Server]) async {
+        guard !loading else { return }
+        let started = generation
+        let last = await lastServerId()
+        guard started == generation else { return }
+        show(listed, lastServerId: last)
+    }
+
+    private func show(_ listed: [Server], lastServerId last: String?) {
+        let preferred = [pendingFollow, selected?.id].compactMap { $0 }
+            .first { id in listed.contains { $0.id == id } }
+        let id = Regions.resolveSelection(visible: listed, previous: preferred ?? "", lastServerId: last)
+        regions = Regions.group(listed)
+        selected = id.isEmpty ? nil : listed.first { $0.id == id }
+        pendingFollow = nil
+        error = nil
     }
 
     // After sign-out, so the next account never sees the previous account's servers or history.
