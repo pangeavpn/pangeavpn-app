@@ -8,11 +8,14 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import org.pangeavpn.core.PangeaVpnService
 import org.pangeavpn.core.TunnelBridge
 import org.pangeavpn.core.data.SessionRepository
 import org.pangeavpn.core.model.Server
+import org.pangeavpn.core.model.Session
 import org.pangeavpn.core.model.Subscription
 import org.pangeavpn.core.model.TunnelStatus
 import org.pangeavpn.core.util.runCatchingCancellable
@@ -42,8 +45,30 @@ class ConnectionViewModel(app: Application) : AndroidViewModel(app) {
     var pendingServerId: String? = null
         private set
 
+    // After the state above: Main.immediate can run the first collect inside this block.
+    init {
+        // Once per sign-in rather than per composition, so rotating the screen or
+        // coming back to it does not ask the hub again.
+        viewModelScope.launch {
+            SessionRepository.session
+                .map { it != null }
+                .distinctUntilChanged()
+                .collect { signedIn -> if (signedIn) loadSignedInData() }
+        }
+    }
+
     fun selectServer(serverId: String) {
         _uiState.value = _uiState.value.copy(selectedServerId = serverId)
+    }
+
+    private fun loadSignedInData() {
+        val session = SessionRepository.session.value ?: return
+        if (usesFetchedList(session)) {
+            _uiState.value = _uiState.value.copy(servers = session.servers, error = null)
+        } else {
+            refreshServers()
+        }
+        loadSubscription()
     }
 
     fun refreshServers() {
@@ -82,3 +107,10 @@ class ConnectionViewModel(app: Application) : AndroidViewModel(app) {
         PangeaVpnService.disconnect(getApplication())
     }
 }
+
+/**
+ * Restore and sign-in already fetched the list from the hub; only an empty list
+ * or one the core served from its store sends the app back for a fresh one.
+ */
+internal fun usesFetchedList(session: Session): Boolean =
+    session.servers.isNotEmpty() && !session.cached

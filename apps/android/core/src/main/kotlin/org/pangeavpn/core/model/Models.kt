@@ -60,6 +60,8 @@ data class Session(
     val email: String = "",
     val name: String = "",
     val servers: List<Server> = emptyList(),
+    /** True when the core served the list from its store because the hub was unreachable. */
+    val cached: Boolean = false,
 )
 
 /** Mirrors hubMethods in daemon/mobile/hubmethods.go. */

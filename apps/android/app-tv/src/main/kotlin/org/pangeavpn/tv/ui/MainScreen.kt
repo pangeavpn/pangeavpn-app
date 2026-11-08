@@ -63,11 +63,6 @@ import org.pangeavpn.ui.theme.LocalThemeToggle
  */
 @Composable
 fun MainScreen(connectionViewModel: ConnectionViewModel, settingsViewModel: SettingsViewModel) {
-    LaunchedEffect(Unit) {
-        connectionViewModel.refreshServers()
-        connectionViewModel.loadSubscription()
-    }
-
     val status by connectionViewModel.status.collectAsState()
     val uiState by connectionViewModel.uiState.collectAsState()
     var showSettings by remember { mutableStateOf(false) }

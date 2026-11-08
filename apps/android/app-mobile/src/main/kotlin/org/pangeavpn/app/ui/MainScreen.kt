@@ -22,7 +22,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -73,11 +72,6 @@ fun MainScreen(
 ) {
     val status by connectionViewModel.status.collectAsState()
     val uiState by connectionViewModel.uiState.collectAsState()
-
-    LaunchedEffect(Unit) {
-        connectionViewModel.refreshServers()
-        connectionViewModel.loadSubscription()
-    }
 
     var showServerSheet by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
