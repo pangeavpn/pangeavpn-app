@@ -31,6 +31,8 @@ class LoginViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
         restore()
+        // A device slot an earlier sign-out could not free is retried on each launch.
+        viewModelScope.launch { runCatchingCancellable { TunnelBridge.retryPendingDeregister() } }
     }
 
     fun restore() {

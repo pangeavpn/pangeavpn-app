@@ -5,6 +5,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -12,6 +13,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -107,6 +109,21 @@ object TunnelBridge : StatusSink {
 
     suspend fun logout(): Unit = withContext(Dispatchers.IO) {
         Mobile.logout()
+    }
+
+    /**
+     * Frees this install's device slot on the hub; false when the hub did not confirm
+     * within [timeoutMs]. The call carries on past the deadline in the bridge's own
+     * scope, and the core records the slot first so a later launch or sign-in retries it.
+     */
+    suspend fun deregister(timeoutMs: Long): Boolean {
+        val call = scope.async { runCatching { Mobile.deregister() } }
+        return withTimeoutOrNull(timeoutMs) { call.await() }?.isSuccess == true
+    }
+
+    /** Frees a slot an earlier sign-out could not; a no-op when none is pending. */
+    suspend fun retryPendingDeregister(): Unit = withContext(Dispatchers.IO) {
+        Mobile.retryPendingDeregister()
     }
 
     suspend fun listServers(): List<Server> = withContext(Dispatchers.IO) {

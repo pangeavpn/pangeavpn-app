@@ -91,11 +91,16 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    private var signingOut = false
+
     fun signOut() {
+        if (signingOut) return
+        signingOut = true
         viewModelScope.launch {
             PangeaVpnService.disconnect(getApplication())
-            runCatchingCancellable { SessionRepository.logout() }
+            runCatchingCancellable { SessionRepository.signOut() }
             _state.value = _state.value.copy(signedOut = true)
+            signingOut = false
         }
     }
 }
