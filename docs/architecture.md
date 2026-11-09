@@ -45,7 +45,7 @@ flowchart LR
         Renderer[Sandboxed renderer] <-->|contextBridge + IPC| Main[Electron main process]
         Main -->|Bearer-authenticated HTTP<br/>127.0.0.1:8787| Daemon[Privileged Go daemon]
         OS[Application traffic and OS networking] --> WG[In-process WireGuard]
-        WG --> Transport[In-process transport<br/>REALITY / Cloak / Shadowsocks / Hysteria2 / Naive / AnyTLS]
+        WG --> Transport[In-process transport<br/>REALITY / Cloak / Shadowsocks / Hysteria2 / TUIC / Naive / AnyTLS / CDN]
         Daemon -. owns .-> OS
         Daemon -. owns .-> WG
         Daemon -. owns .-> Transport
@@ -310,9 +310,11 @@ In automatic mode the daemon tries transports in this order:
 2. Cloak
 3. Shadowsocks
 4. Hysteria2
-5. NaiveProxy
-6. AnyTLS
-7. Snowflake
+5. TUIC
+6. NaiveProxy
+7. AnyTLS
+8. CDN
+9. Snowflake
 
 Only transports configured in the selected profile are candidates, and the
 current profile model always includes Cloak. `snowflakeReleaseGated` removes
@@ -369,10 +371,18 @@ Application traffic
 | Cloak | [`daemon/internal/cloak`](../daemon/internal/cloak) using the Pangea Cloak Go module | Enabled; baseline transport |
 | Shadowsocks | [`daemon/internal/shadowsocks`](../daemon/internal/shadowsocks) using embedded sing-box (AEAD / SS-2022) | Enabled when provisioned |
 | Hysteria2 | [`daemon/internal/hysteria2`](../daemon/internal/hysteria2) using embedded sing-box/QUIC | Enabled when provisioned |
+| TUIC | [`daemon/internal/sbrelay`](../daemon/internal/sbrelay) using embedded sing-box (TUIC v5 over QUIC, node certificate pinned) | Enabled when provisioned |
 | NaiveProxy | [`daemon/internal/naive`](../daemon/internal/naive) with a CGO-linked native engine and in-process relay | Windows and macOS builds when the native inputs resolve; release CI requires it. Android arm64-v8a |
 | AnyTLS | [`daemon/internal/anytls`](../daemon/internal/anytls) using embedded sing-box (padded TLS session, WireGuard carried as UDP-over-TCP) | Enabled when provisioned |
+| CDN | [`daemon/internal/sbrelay`](../daemon/internal/sbrelay) using embedded sing-box (VLESS over HTTPUpgrade + TLS, dialled at a CDN edge that proxies to the node) | Enabled when provisioned |
 | Snowflake | [`daemon/internal/snowflake`](../daemon/internal/snowflake) using the Tor Snowflake library | Implemented but release-gated |
 | Plain WireGuard | None. The tunnel dials the node directly and skips the loopback listener | Enabled on explicit user selection only |
+
+CDN never dials the node, so it keeps working when every node address is
+null-routed. It dials a CDN edge IP instead, and that IP is excluded from the
+tunnel like every other transport endpoint. Other sites served from the same
+edge IP therefore bypass the tunnel whenever the server offers CDN, whichever
+transport is active.
 
 The daemon never launches a separate `wg`, `wg-quick`, `wireguard-go`, Cloak or
 NaiveProxy process. "In-process" is about the tunnel engines, though, not every

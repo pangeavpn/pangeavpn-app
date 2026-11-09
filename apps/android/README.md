@@ -47,7 +47,7 @@ gomobile bind -target=android -androidapi 24 -javapkg=org.pangeavpn \
 ```
 
 `with_utls` is required too: without it sing-box compiles REALITY's client out,
-and AnyTLS falls back to Go's own ClientHello instead of Chrome's.
+and AnyTLS and CDN fall back to Go's own ClientHello instead of Chrome's.
 
 `-checklinkname=0` is required: sing-box pulls in `wlynxg/anet`, which
 `//go:linkname`s into `net.zoneCache` to read interfaces on Android, and Go
