@@ -9,7 +9,6 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -29,8 +28,7 @@ import org.pangeavpn.ui.components.transportChoiceLabel
 fun TransportPage(onBack: () -> Unit) {
     val error = networkPageError()
     val settings by SettingsRepository.settings.collectAsState()
-    val resources = LocalContext.current.resources
-    val scope = rememberCoroutineScope()
+    val resources = LocalContext.current.applicationContext.resources
     // Shows the tap at once, so the list never lags behind the finger while the core saves.
     var pending by remember { mutableStateOf<String?>(null) }
     val selected = pending ?: TransportChoices.selected(settings.preferredTransport)
@@ -38,7 +36,7 @@ fun TransportPage(onBack: () -> Unit) {
     fun select(choice: String) {
         if (pending != null || choice == selected) return
         pending = choice
-        scope.launch {
+        pageSaveScope.launch {
             val saved = SettingsRepository.save { it.copy(preferredTransport = choice) }
             pending = null
             reportNetworkSave(resources, saved, resources.getString(R.string.bypass_updated))

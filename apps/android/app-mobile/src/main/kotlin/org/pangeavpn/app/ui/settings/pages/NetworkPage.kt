@@ -28,7 +28,6 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -64,8 +63,7 @@ import org.pangeavpn.ui.theme.Motion
 fun NetworkPage(onBack: () -> Unit) {
     val error = networkPageError()
     val settings by SettingsRepository.settings.collectAsState()
-    val resources = LocalContext.current.resources
-    val scope = rememberCoroutineScope()
+    val resources = LocalContext.current.applicationContext.resources
     // Custom stays picked while its field is empty or matches a preset, as on desktop.
     var customChosen by remember { mutableStateOf(false) }
     var dnsSaving by remember { mutableStateOf(false) }
@@ -81,7 +79,7 @@ fun NetworkPage(onBack: () -> Unit) {
 
     fun saveDns(servers: List<String>) {
         dnsSaving = true
-        scope.launch {
+        pageSaveScope.launch {
             val saved = SettingsRepository.save { it.copy(customDns = servers) }
             dnsSaving = false
             if (saved) {
@@ -127,7 +125,7 @@ fun NetworkPage(onBack: () -> Unit) {
             return
         }
         mtuInvalid = false
-        scope.launch {
+        pageSaveScope.launch {
             val saved = SettingsRepository.save { it.copy(mtu = mtu) }
             if (saved) mtuRevision++
             reportNetworkSave(

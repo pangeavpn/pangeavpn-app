@@ -77,14 +77,14 @@ fun ProvisioningPage(onBack: () -> Unit) {
     val status by SettingsRepository.hubStatus.collectAsState()
     val results = remember { mutableStateMapOf<String, HubTestResult>() }
     var confirmingNormalTest by remember { mutableStateOf(false) }
-    val resources = LocalContext.current.resources
+    val resources = LocalContext.current.applicationContext.resources
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(Unit) { SettingsRepository.refreshHubStatus() }
 
     // Undispatched, so a tap counts as pending before the next frame reads the switches.
     fun setMethod(method: String, title: String, enabled: Boolean) {
-        scope.launch(start = CoroutineStart.UNDISPATCHED) {
+        pageSaveScope.launch(start = CoroutineStart.UNDISPATCHED) {
             when (SettingsRepository.setHubMethod(method, enabled)) {
                 HubMethodChange.SAVED -> ToastCenter.show(
                     resources.getString(

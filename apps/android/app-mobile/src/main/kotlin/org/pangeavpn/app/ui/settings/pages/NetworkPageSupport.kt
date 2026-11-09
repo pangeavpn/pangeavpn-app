@@ -14,6 +14,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import org.pangeavpn.core.data.SettingsRepository
 import org.pangeavpn.ui.R
 import org.pangeavpn.ui.components.ToastCenter
@@ -30,6 +33,9 @@ internal fun networkPageError(): String? {
     val error by SettingsRepository.error.collectAsState()
     return error?.let { settingsErrorText(it) }
 }
+
+// Outlives the page, so leaving it mid-save still shows the save's toast.
+internal val pageSaveScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
 internal fun reportNetworkSave(resources: Resources, saved: Boolean, success: String) {
     if (saved) {
