@@ -14,6 +14,7 @@ import (
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/cloak"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/hysteria2"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/reality"
+	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/sbrelay"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/shadowsocks"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/state"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/transport"
@@ -75,6 +76,16 @@ func (s *starter) StarterFor(profile *state.Profile, kind string) (transport.Sta
 			return nil, transport.NotConfigured
 		}
 		return s.startAnyTLS, s.singBoxAvailability()
+	case "tuic":
+		if profile.TUIC == nil {
+			return nil, transport.NotConfigured
+		}
+		return s.startTUIC, s.singBoxAvailability()
+	case "cdn":
+		if profile.CDN == nil {
+			return nil, transport.NotConfigured
+		}
+		return s.startCDN, s.singBoxAvailability()
 	case "naive":
 		if !naiveLinked {
 			return nil, transport.Unavailable
@@ -206,5 +217,25 @@ func (s *starter) startAnyTLS(ctx context.Context, profile *state.Profile, _ *st
 		return fmt.Errorf("anytls session: %w", err)
 	}
 	s.record("anytls", mgr, profile.AnyTLS.LocalPort)
+	return nil
+}
+
+func (s *starter) startTUIC(ctx context.Context, profile *state.Profile, _ *state.WireGuardProfile) error {
+	start := *profile.TUIC
+	start.LocalPort = 0
+	return startRelay(ctx, s, "tuic", sbrelay.NewTUIC(s.logs), start)
+}
+
+func (s *starter) startCDN(ctx context.Context, profile *state.Profile, _ *state.WireGuardProfile) error {
+	start := *profile.CDN
+	start.LocalPort = 0
+	return startRelay(ctx, s, "cdn", sbrelay.NewCDN(s.logs), start)
+}
+
+func startRelay[P comparable](ctx context.Context, s *starter, kind string, mgr *sbrelay.Manager[P], profile P) error {
+	if err := mgr.Start(ctx, profile); err != nil {
+		return fmt.Errorf("%s start: %w", kind, err)
+	}
+	s.record(kind, mgr, 0)
 	return nil
 }

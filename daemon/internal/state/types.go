@@ -27,6 +27,8 @@ const (
 	SourceNaive       LogSource = "naive"
 	SourceShadowsocks LogSource = "shadowsocks"
 	SourceAnyTLS      LogSource = "anytls"
+	SourceTUIC        LogSource = "tuic"
+	SourceCDN         LogSource = "cdn"
 	SourceSnowflake   LogSource = "snowflake"
 	SourceWireGuard   LogSource = "wireguard"
 )
@@ -68,7 +70,7 @@ type StatusResponse struct {
 	// ProfileID is the profile the session runs on (or is held for), "" when idle.
 	ProfileID string `json:"profileId,omitempty"`
 	// ActiveTransport is "cloak", "naive", "reality", "hysteria2", "shadowsocks",
-	// "anytls", "snowflake", "wireguard" (no transport at all), or "" when disconnected.
+	// "anytls", "tuic", "cdn", "snowflake", "wireguard" (no transport at all), or "" when disconnected.
 	ActiveTransport string `json:"activeTransport"`
 	// ConnectingTransport is the candidate the cascade is trying right now,
 	// "" outside a bring-up. Lets clients show "via X" while connecting.
@@ -79,6 +81,8 @@ type StatusResponse struct {
 	Hysteria2           TransportStatus `json:"hysteria2"`
 	Shadowsocks         TransportStatus `json:"shadowsocks"`
 	AnyTLS              TransportStatus `json:"anytls"`
+	TUIC                TransportStatus `json:"tuic"`
+	CDN                 TransportStatus `json:"cdn"`
 	Snowflake           TransportStatus `json:"snowflake"`
 	WireGuard           WireGuardStatus `json:"wireguard"`
 	KillSwitchActive    bool            `json:"killSwitchActive"`
@@ -233,6 +237,33 @@ type AnyTLSProfile struct {
 	TargetPort int    `json:"targetPort,omitempty"`
 }
 
+// TUICProfile is a node's TUIC v5 (QUIC) settings; the node's cert is self-signed and pinned.
+type TUICProfile struct {
+	LocalPort  int    `json:"localPort"`
+	RemoteHost string `json:"remoteHost"`
+	RemotePort int    `json:"remotePort"`
+	UUID       string `json:"uuid"`
+	Password   string `json:"password"`
+	ServerName string `json:"serverName,omitempty"`
+	Insecure   bool   `json:"insecure,omitempty"`
+	PinSHA256  string `json:"pinSha256,omitempty"`
+	TargetHost string `json:"targetHost,omitempty"`
+	TargetPort int    `json:"targetPort,omitempty"`
+}
+
+// CDNProfile is VLESS over HTTPUpgrade+TLS dialled at a CDN edge that proxies to the node.
+// RemoteHost is the edge, never the node; ServerName is the proxied hostname.
+type CDNProfile struct {
+	LocalPort  int    `json:"localPort"`
+	RemoteHost string `json:"remoteHost"`
+	RemotePort int    `json:"remotePort"`
+	UUID       string `json:"uuid"`
+	ServerName string `json:"serverName"`
+	Path       string `json:"path,omitempty"`
+	TargetHost string `json:"targetHost,omitempty"`
+	TargetPort int    `json:"targetPort,omitempty"`
+}
+
 // SnowflakeProfile carries per-device Tor Snowflake (WebRTC rendezvous)
 // settings; unlike other transports it has no fixed remote host, only a broker.
 type SnowflakeProfile struct {
@@ -274,7 +305,7 @@ const DefaultWireGuardPort = 51820
 // node relaying WireGuard to the exit node holding the peer. Nil means single-hop.
 type HopProfile struct {
 	// SingBoxPort is the entry's loopback hop port for REALITY, Hysteria2,
-	// Shadowsocks and AnyTLS.
+	// Shadowsocks, AnyTLS, TUIC and CDN.
 	SingBoxPort int `json:"singBoxPort"`
 	// CloakProxyMethod is the entry's ProxyBook key routing to this exit.
 	CloakProxyMethod string `json:"cloakProxyMethod,omitempty"`
@@ -307,6 +338,8 @@ type Profile struct {
 	// AnyTLS is optional; nil means this profile has no AnyTLS transport
 	// configured.
 	AnyTLS *AnyTLSProfile `json:"anytls,omitempty"`
+	TUIC   *TUICProfile   `json:"tuic,omitempty"`
+	CDN    *CDNProfile    `json:"cdn,omitempty"`
 	// Snowflake is optional; nil means this profile has no Snowflake
 	// transport configured.
 	Snowflake *SnowflakeProfile `json:"snowflake,omitempty"`

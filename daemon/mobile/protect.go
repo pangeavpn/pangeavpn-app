@@ -13,6 +13,7 @@ import (
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/hysteria2"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/protect"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/reality"
+	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/sbrelay"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/shadowsocks"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/state"
 )
@@ -36,6 +37,7 @@ func startProtectServer(filesDir string, logs *state.LogStore) error {
 	shadowsocks.ProtectPath = srv.Path()
 	hysteria2.ProtectPath = srv.Path()
 	anytls.ProtectPath = srv.Path()
+	sbrelay.ProtectPath = srv.Path()
 	return nil
 }
 

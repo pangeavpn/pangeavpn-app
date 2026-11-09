@@ -29,6 +29,8 @@ func buildProfile(server *serverInfo) *state.Profile {
 		Hysteria2:   buildHysteria2(server.Hysteria2, nodeIP),
 		Shadowsocks: buildShadowsocks(server.Shadowsocks, nodeIP),
 		AnyTLS:      buildAnyTLS(server.AnyTLS, nodeIP),
+		TUIC:        buildTUIC(server.TUIC, nodeIP),
+		CDN:         buildCDN(server.CDN),
 		Snowflake:   buildSnowflake(server.Snowflake),
 	}
 }
@@ -162,6 +164,60 @@ func buildAnyTLS(info *anytlsInfo, nodeIP string) *state.AnyTLSProfile {
 		ServerName: serverName,
 		Insecure:   info.Insecure,
 		PinSHA256:  info.PinSHA256,
+		TargetHost: info.TargetHost,
+		TargetPort: info.TargetPort,
+	}
+}
+
+// buildTUIC ports apps/desktop/src/shared/tuicProfile.ts, the same dial and SNI rules as AnyTLS.
+func buildTUIC(info *tuicInfo, nodeIP string) *state.TUICProfile {
+	if info == nil {
+		return nil
+	}
+	host := strings.TrimSpace(info.RemoteHost)
+	dial := nodeIP
+	if remoteIP := strings.TrimSpace(info.RemoteIP); isIPLiteral(remoteIP) {
+		dial = remoteIP
+	} else if isIPLiteral(host) {
+		dial = host
+	}
+	serverName := strings.TrimSpace(info.ServerName)
+	if serverName == "" && !isIPLiteral(host) {
+		serverName = host
+	}
+	return &state.TUICProfile{
+		RemoteHost: dial,
+		RemotePort: info.RemotePort,
+		UUID:       info.UUID,
+		Password:   info.Password,
+		ServerName: serverName,
+		PinSHA256:  info.PinSHA256,
+		TargetHost: info.TargetHost,
+		TargetPort: info.TargetPort,
+	}
+}
+
+// buildCDN ports apps/desktop/src/shared/cdnProfile.ts. It never falls back to
+// the node's address: hiding that address is the transport's whole point.
+func buildCDN(info *cdnInfo) *state.CDNProfile {
+	if info == nil {
+		return nil
+	}
+	host := strings.TrimSpace(info.RemoteHost)
+	dial := host
+	if remoteIP := strings.TrimSpace(info.RemoteIP); isIPLiteral(remoteIP) {
+		dial = remoteIP
+	}
+	serverName := strings.TrimSpace(info.ServerName)
+	if serverName == "" && !isIPLiteral(host) {
+		serverName = host
+	}
+	return &state.CDNProfile{
+		RemoteHost: dial,
+		RemotePort: info.RemotePort,
+		UUID:       info.UUID,
+		ServerName: serverName,
+		Path:       info.Path,
 		TargetHost: info.TargetHost,
 		TargetPort: info.TargetPort,
 	}

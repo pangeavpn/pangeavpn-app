@@ -96,6 +96,16 @@ func synthesizedProfile(p *state.Profile, synth func(string) string) (*state.Pro
 		anytls.RemoteHost, anytls.ServerName = m.namedHost(anytls.RemoteHost, anytls.ServerName)
 		out.AnyTLS = &anytls
 	}
+	if p.TUIC != nil {
+		tuic := *p.TUIC
+		tuic.RemoteHost, tuic.ServerName = m.namedHost(tuic.RemoteHost, tuic.ServerName)
+		out.TUIC = &tuic
+	}
+	if p.CDN != nil {
+		cdn := *p.CDN
+		cdn.RemoteHost = m.host(cdn.RemoteHost)
+		out.CDN = &cdn
+	}
 	return &out, m.changed
 }
 

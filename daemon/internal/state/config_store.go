@@ -402,6 +402,18 @@ func profilePortClaims(profile Profile) ([]portClaim, error) {
 		}
 		claims = append(claims, portClaim{"anytls", profile.AnyTLS.LocalPort})
 	}
+	if profile.TUIC != nil {
+		if profile.TUIC.RemoteHost == "" {
+			return nil, fmt.Errorf("profile %s tuic missing remote host", profile.ID)
+		}
+		claims = append(claims, portClaim{"tuic", profile.TUIC.LocalPort})
+	}
+	if profile.CDN != nil {
+		if profile.CDN.RemoteHost == "" {
+			return nil, fmt.Errorf("profile %s cdn missing remote host", profile.ID)
+		}
+		claims = append(claims, portClaim{"cdn", profile.CDN.LocalPort})
+	}
 	if profile.Snowflake != nil {
 		if profile.Snowflake.BrokerURL == "" {
 			return nil, fmt.Errorf("profile %s snowflake missing broker url", profile.ID)
@@ -444,6 +456,8 @@ func cloneProfile(profile Profile) Profile {
 	copyProfile.Hysteria2 = cloneHysteria2Profile(profile.Hysteria2)
 	copyProfile.Shadowsocks = cloneShadowsocksProfile(profile.Shadowsocks)
 	copyProfile.AnyTLS = cloneAnyTLSProfile(profile.AnyTLS)
+	copyProfile.TUIC = clonePtr(profile.TUIC)
+	copyProfile.CDN = clonePtr(profile.CDN)
 	copyProfile.Snowflake = cloneSnowflakeProfile(profile.Snowflake)
 	return copyProfile
 }
@@ -491,6 +505,15 @@ func cloneShadowsocksProfile(profile *ShadowsocksProfile) *ShadowsocksProfile {
 // cloneAnyTLSProfile mirrors cloneNaiveProfile: AnyTLSProfile is flat
 // (scalar fields only), so a value copy behind a fresh pointer is enough.
 func cloneAnyTLSProfile(profile *AnyTLSProfile) *AnyTLSProfile {
+	if profile == nil {
+		return nil
+	}
+	copyProfile := *profile
+	return &copyProfile
+}
+
+// clonePtr copies a flat (scalar-only) profile behind a fresh pointer.
+func clonePtr[T any](profile *T) *T {
 	if profile == nil {
 		return nil
 	}

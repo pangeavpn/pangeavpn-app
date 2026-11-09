@@ -71,6 +71,18 @@ func ApplyHop(p Profile) Profile {
 		anytls.TargetHost = loopbackHost
 		out.AnyTLS = &anytls
 	}
+	if p.TUIC != nil {
+		tuic := *p.TUIC
+		tuic.TargetPort = singBoxTargetPort(p.Hop)
+		tuic.TargetHost = loopbackHost
+		out.TUIC = &tuic
+	}
+	if p.CDN != nil {
+		cdn := *p.CDN
+		cdn.TargetPort = singBoxTargetPort(p.Hop)
+		cdn.TargetHost = loopbackHost
+		out.CDN = &cdn
+	}
 	if p.Naive != nil {
 		naive := *p.Naive
 		naive.BridgePort = naiveBridgePort(p.Hop)

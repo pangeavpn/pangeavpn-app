@@ -17,6 +17,7 @@ import (
 
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/platform"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/reach"
+	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/sbrelay"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/state"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/transport"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/wg"
@@ -88,6 +89,18 @@ type anytlsManager interface {
 	Status() state.TransportStatus
 }
 
+type tuicManager interface {
+	transport.Manager
+	Start(ctx context.Context, profile state.TUICProfile) error
+	Status() state.TransportStatus
+}
+
+type cdnManager interface {
+	transport.Manager
+	Start(ctx context.Context, profile state.CDNProfile) error
+	Status() state.TransportStatus
+}
+
 // shadowsocksProxyManager carries hub control-plane traffic: no WireGuard, no
 // activeTransport, runs before a profile exists. shadowsocks.ProxyManager fits.
 type shadowsocksProxyManager interface {
@@ -136,6 +149,8 @@ type Service struct {
 	hysteria2   hysteria2Manager
 	shadowsocks shadowsocksManager
 	anytls      anytlsManager
+	tuic        tuicManager
+	cdn         cdnManager
 	snowflake   snowflakeManager
 	wg          wg.Manager
 	killSwitch  platform.KillSwitch
@@ -396,6 +411,8 @@ func NewService(
 		hysteria2:      hysteria2Manager,
 		shadowsocks:    shadowsocksManager,
 		anytls:         anytlsManager,
+		tuic:           sbrelay.NewTUIC(logs),
+		cdn:            sbrelay.NewCDN(logs),
 		snowflake:      snowflakeManager,
 		wg:             wgManager,
 		killSwitch:     killSwitch,
@@ -530,6 +547,10 @@ func (s *Service) managerForKind(kind string) transport.Manager {
 		return s.shadowsocks
 	case "anytls":
 		return s.anytls
+	case "tuic":
+		return s.tuic
+	case "cdn":
+		return s.cdn
 	case "snowflake":
 		return s.snowflake
 	case transportKindWireGuard:
@@ -1097,35 +1118,59 @@ func (s *Service) startShadowsocksTransport(ctx context.Context, profile *state.
 	return nil
 }
 
-// startAnyTLSTransport runs AnyTLS's start sequence, mirroring
-// startHysteria2Transport. Cleans up (stops anytls) on its own failure.
+// startAnyTLSTransport de-aliases the store's *AnyTLSProfile before startRelay writes the bound port into it.
 func (s *Service) startAnyTLSTransport(ctx context.Context, profile *state.Profile, wireGuardProfile *state.WireGuardProfile) error {
-	// De-alias from the config store's shared *AnyTLSProfile before mutating LocalPort.
 	anytlsCopy := *profile.AnyTLS
 	profile.AnyTLS = &anytlsCopy
+	start := anytlsCopy
+	start.LocalPort = 0
+	return s.startRelay(ctx, s.anytls, func(ctx context.Context) error { return s.anytls.Start(ctx, start) }, &anytlsCopy.LocalPort, wireGuardProfile)
+}
 
-	anytlsStartProfile := *profile.AnyTLS
-	anytlsStartProfile.LocalPort = 0
-	if err := s.anytls.Start(ctx, anytlsStartProfile); err != nil {
+func (s *Service) startTUICTransport(ctx context.Context, profile *state.Profile, wireGuardProfile *state.WireGuardProfile) error {
+	tuicCopy := *profile.TUIC
+	profile.TUIC = &tuicCopy
+	start := tuicCopy
+	start.LocalPort = 0
+	return s.startRelay(ctx, s.tuic, func(ctx context.Context) error { return s.tuic.Start(ctx, start) }, &tuicCopy.LocalPort, wireGuardProfile)
+}
+
+func (s *Service) startCDNTransport(ctx context.Context, profile *state.Profile, wireGuardProfile *state.WireGuardProfile) error {
+	cdnCopy := *profile.CDN
+	profile.CDN = &cdnCopy
+	start := cdnCopy
+	start.LocalPort = 0
+	return s.startRelay(ctx, s.cdn, func(ctx context.Context) error { return s.cdn.Start(ctx, start) }, &cdnCopy.LocalPort, wireGuardProfile)
+}
+
+type statusManager interface {
+	transport.Manager
+	Status() state.TransportStatus
+}
+
+// startRelay runs the start sequence shared by in-process transports that dial
+// inside Start, and stops mgr on its own failure.
+func (s *Service) startRelay(ctx context.Context, mgr statusManager, start func(context.Context) error, localPort *int, wireGuardProfile *state.WireGuardProfile) error {
+	if err := start(ctx); err != nil {
 		return fmt.Errorf("start: %w", err)
 	}
-
-	profile.AnyTLS.LocalPort = s.rebindWireGuardEndpoint(s.anytls, profile.AnyTLS.LocalPort, wireGuardProfile)
-	anytlsRunning := func() bool { return s.anytls.Status().Running }
-	if err := s.waitForManagedTransportStable(ctx, anytlsRunning, profile.AnyTLS.LocalPort, 200*time.Millisecond); err != nil {
+	stop := func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 2*time.Second)
-		_ = s.anytls.Stop(cleanupCtx)
+		_ = mgr.Stop(cleanupCtx)
 		cleanupCancel()
+	}
+	*localPort = s.rebindWireGuardEndpoint(mgr, *localPort, wireGuardProfile)
+	running := func() bool { return mgr.Status().Running }
+	if err := s.waitForManagedTransportStable(ctx, running, *localPort, 200*time.Millisecond); err != nil {
+		stop()
 		return err
 	}
-	if waiter, ok := s.anytls.(transport.SessionWaiter); ok {
+	if waiter, ok := mgr.(transport.SessionWaiter); ok {
 		waitCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		err := waiter.WaitForSession(waitCtx, 10*time.Second)
 		cancel()
 		if err != nil {
-			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 2*time.Second)
-			_ = s.anytls.Stop(cleanupCtx)
-			cleanupCancel()
+			stop()
 			return fmt.Errorf("session: %w", err)
 		}
 	}
@@ -1254,6 +1299,16 @@ func (s *Service) StarterFor(profile *state.Profile, kind string) (transport.Sta
 			return nil, transport.NotConfigured
 		}
 		return s.startAnyTLSTransport, transport.Available
+	case "tuic":
+		if profile.TUIC == nil {
+			return nil, transport.NotConfigured
+		}
+		return s.startTUICTransport, transport.Available
+	case "cdn":
+		if profile.CDN == nil {
+			return nil, transport.NotConfigured
+		}
+		return s.startCDNTransport, transport.Available
 	case "snowflake":
 		if snowflakeReleaseGated {
 			return nil, transport.Unavailable
@@ -1511,6 +1566,14 @@ func transportLocalPort(profile *state.Profile, kind string) int {
 	case "anytls":
 		if profile.AnyTLS != nil {
 			return profile.AnyTLS.LocalPort
+		}
+	case "tuic":
+		if profile.TUIC != nil {
+			return profile.TUIC.LocalPort
+		}
+	case "cdn":
+		if profile.CDN != nil {
+			return profile.CDN.LocalPort
 		}
 	case "snowflake":
 		if profile.Snowflake != nil {
@@ -2218,6 +2281,8 @@ func (s *Service) Status(ctx context.Context) state.StatusResponse {
 	hysteria2Status := s.hysteria2.Status()
 	shadowsocksStatus := s.shadowsocks.Status()
 	anytlsStatus := s.anytls.Status()
+	tuicStatus := s.tuic.Status()
+	cdnStatus := s.cdn.Status()
 	snowflakeStatus := s.snowflake.Status()
 
 	wgStatus := state.WireGuardStatus{Running: false, Detail: "not connected"}
@@ -2250,6 +2315,8 @@ func (s *Service) Status(ctx context.Context) state.StatusResponse {
 		Hysteria2:           hysteria2Status,
 		Shadowsocks:         shadowsocksStatus,
 		AnyTLS:              anytlsStatus,
+		TUIC:                tuicStatus,
+		CDN:                 cdnStatus,
 		Snowflake:           snowflakeStatus,
 		WireGuard:           wgStatus,
 		KillSwitchActive:    s.killSwitch.Active(),
@@ -2535,6 +2602,10 @@ func (s *Service) runHealthCheck(ctx context.Context) {
 		transportRunning = s.shadowsocks.Status().Running
 	case "anytls":
 		transportRunning = s.anytls.Status().Running
+	case "tuic":
+		transportRunning = s.tuic.Status().Running
+	case "cdn":
+		transportRunning = s.cdn.Status().Running
 	case "snowflake":
 		transportRunning = s.snowflake.Status().Running
 	case transportKindWireGuard:
@@ -3222,6 +3293,26 @@ func (s *Service) recoverActiveTransport(ctx context.Context, profile state.Prof
 		start = func(ctx context.Context) error { return s.anytls.Start(ctx, *profile.AnyTLS) }
 		running = func() bool { return s.anytls.Status().Running }
 		localPort = profile.AnyTLS.LocalPort
+	case "tuic":
+		if s.tuic.Status().Running {
+			return nil
+		}
+		if profile.TUIC == nil {
+			return errors.New("active transport is tuic but profile has no tuic config")
+		}
+		start = func(ctx context.Context) error { return s.tuic.Start(ctx, *profile.TUIC) }
+		running = func() bool { return s.tuic.Status().Running }
+		localPort = profile.TUIC.LocalPort
+	case "cdn":
+		if s.cdn.Status().Running {
+			return nil
+		}
+		if profile.CDN == nil {
+			return errors.New("active transport is cdn but profile has no cdn config")
+		}
+		start = func(ctx context.Context) error { return s.cdn.Start(ctx, *profile.CDN) }
+		running = func() bool { return s.cdn.Status().Running }
+		localPort = profile.CDN.LocalPort
 	case "snowflake":
 		if s.snowflake.Status().Running {
 			return nil
@@ -3639,6 +3730,32 @@ func (s *Service) restoreTransportForAdoption(ctx context.Context, profile *stat
 			return fmt.Errorf("wireguard tunnel is already running but anytls restore failed: %w", err)
 		}
 		return nil
+	case "tuic":
+		if s.tuic.Status().Running {
+			return nil
+		}
+		if profile.TUIC == nil {
+			return errors.New("wireguard tunnel is already running but this profile has no tuic configuration to restore")
+		}
+		s.machine.Set(state.StateConnecting, "restoring tuic for active tunnel")
+		s.logs.Add(state.LogInfo, state.SourceDaemon, "wireguard was already running; restoring tuic process")
+		if err := s.tuic.Start(ctx, *profile.TUIC); err != nil {
+			return fmt.Errorf("wireguard tunnel is already running but tuic restore failed: %w", err)
+		}
+		return nil
+	case "cdn":
+		if s.cdn.Status().Running {
+			return nil
+		}
+		if profile.CDN == nil {
+			return errors.New("wireguard tunnel is already running but this profile has no cdn configuration to restore")
+		}
+		s.machine.Set(state.StateConnecting, "restoring cdn for active tunnel")
+		s.logs.Add(state.LogInfo, state.SourceDaemon, "wireguard was already running; restoring cdn process")
+		if err := s.cdn.Start(ctx, *profile.CDN); err != nil {
+			return fmt.Errorf("wireguard tunnel is already running but cdn restore failed: %w", err)
+		}
+		return nil
 	case "snowflake":
 		if snowflakeReleaseGated {
 			return errors.New("snowflake transport is temporarily unavailable")
@@ -3764,6 +3881,14 @@ func deepCopyProfile(profile state.Profile) state.Profile {
 	if profile.AnyTLS != nil {
 		anytlsCopy := *profile.AnyTLS
 		out.AnyTLS = &anytlsCopy
+	}
+	if profile.TUIC != nil {
+		tuicCopy := *profile.TUIC
+		out.TUIC = &tuicCopy
+	}
+	if profile.CDN != nil {
+		cdnCopy := *profile.CDN
+		out.CDN = &cdnCopy
 	}
 	if profile.Snowflake != nil {
 		snowflakeCopy := *profile.Snowflake
@@ -4033,7 +4158,7 @@ func transportPermitHosts(profile state.Profile) []string {
 	// Snowflake's rendezvous hosts are never covered by the hub's endpoint IPs (those
 	// name the node, not the broker), so they're appended regardless of which branch runs.
 	if len(out) > 0 {
-		return append(out, snowflakeHosts(profile.Snowflake)...)
+		return append(append(out, cdnHosts(profile.CDN)...), snowflakeHosts(profile.Snowflake)...)
 	}
 	if profile.Naive != nil {
 		if host := strings.TrimSpace(profile.Naive.RemoteHost); host != "" {
@@ -4060,7 +4185,24 @@ func transportPermitHosts(profile state.Profile) []string {
 			out = append(out, host)
 		}
 	}
-	return append(out, snowflakeHosts(profile.Snowflake)...)
+	if profile.TUIC != nil {
+		if host := strings.TrimSpace(profile.TUIC.RemoteHost); host != "" {
+			out = append(out, host)
+		}
+	}
+	return append(append(out, cdnHosts(profile.CDN)...), snowflakeHosts(profile.Snowflake)...)
+}
+
+// cdnHosts is the CDN edge, which the node's endpoint IPs never cover; a
+// hostname here names the CDN, so resolving it leaks nothing about the node.
+func cdnHosts(p *state.CDNProfile) []string {
+	if p == nil {
+		return nil
+	}
+	if host := strings.TrimSpace(p.RemoteHost); host != "" {
+		return []string{host}
+	}
+	return nil
 }
 
 // withTransportBypassHosts adds the cloak, naive, reality, hysteria2,
@@ -4143,6 +4285,12 @@ func (s *Service) vouchedHosts() map[string]bool {
 		}
 		if profile.AnyTLS != nil {
 			hosts = append(hosts, profile.AnyTLS.RemoteHost)
+		}
+		if profile.TUIC != nil {
+			hosts = append(hosts, profile.TUIC.RemoteHost)
+		}
+		if profile.CDN != nil {
+			hosts = append(hosts, profile.CDN.RemoteHost)
 		}
 		if host, _, err := net.SplitHostPort(profile.WireGuard.DirectEndpoint); err == nil {
 			hosts = append(hosts, host)

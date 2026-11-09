@@ -22,6 +22,8 @@ func toPublicServers(servers []serverInfo, runnable func(profile *state.Profile,
 			Hysteria2:   offers(s.Hysteria2 != nil, "hysteria2"),
 			Shadowsocks: offers(s.Shadowsocks != nil, "shadowsocks"),
 			AnyTLS:      offers(s.AnyTLS != nil, "anytls"),
+			TUIC:        offers(s.TUIC != nil, "tuic"),
+			CDN:         offers(s.CDN != nil, "cdn"),
 			Naive:       offers(s.Naive != nil, "naive"),
 			Snowflake:   offers(s.Snowflake != nil, "snowflake"),
 		})

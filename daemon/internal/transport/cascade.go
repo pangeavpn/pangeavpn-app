@@ -42,13 +42,13 @@ type Memory interface {
 
 // AutoCascadeOrder is the auto-mode fallback order. REALITY leads as it survives
 // active probing; consecutive rungs hide differently, so one block rarely stops the next.
-var AutoCascadeOrder = []string{"reality", "cloak", "shadowsocks", "hysteria2", "naive", "anytls", "snowflake"}
+var AutoCascadeOrder = []string{"reality", "cloak", "shadowsocks", "hysteria2", "tuic", "naive", "anytls", "cdn", "snowflake"}
 
 // knownKinds keeps an explicit request for something else an "unknown"
 // error rather than silently reporting it as unconfigured.
 var knownKinds = map[string]struct{}{
-	"cloak": {}, "reality": {}, "shadowsocks": {},
-	"hysteria2": {}, "naive": {}, "anytls": {}, "snowflake": {},
+	"cloak": {}, "reality": {}, "shadowsocks": {}, "hysteria2": {}, "tuic": {},
+	"naive": {}, "anytls": {}, "cdn": {}, "snowflake": {},
 }
 
 // IsAuto reports whether a selection means "walk the cascade".

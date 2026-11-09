@@ -67,6 +67,30 @@ type anytlsInfo struct {
 	TargetPort int    `json:"targetPort,omitempty"`
 }
 
+type tuicInfo struct {
+	RemoteHost string `json:"remoteHost"`
+	RemoteIP   string `json:"remoteIp,omitempty"`
+	RemotePort int    `json:"remotePort"`
+	UUID       string `json:"uuid"`
+	Password   string `json:"password"`
+	ServerName string `json:"serverName,omitempty"`
+	PinSHA256  string `json:"pinSha256,omitempty"`
+	TargetHost string `json:"targetHost,omitempty"`
+	TargetPort int    `json:"targetPort,omitempty"`
+}
+
+// cdnInfo's remoteHost is the CDN-proxied hostname; remoteIp is an edge address.
+type cdnInfo struct {
+	RemoteHost string `json:"remoteHost"`
+	RemoteIP   string `json:"remoteIp,omitempty"`
+	RemotePort int    `json:"remotePort"`
+	UUID       string `json:"uuid"`
+	Path       string `json:"path"`
+	ServerName string `json:"serverName,omitempty"`
+	TargetHost string `json:"targetHost,omitempty"`
+	TargetPort int    `json:"targetPort,omitempty"`
+}
+
 // controlPlaneShadowsocksInfo reaches the hub rather than WireGuard.
 type controlPlaneShadowsocksInfo struct {
 	RemoteHost string `json:"remoteHost"`
@@ -107,6 +131,8 @@ type serverInfo struct {
 	Hysteria2               *hysteria2Info               `json:"hysteria2,omitempty"`
 	Shadowsocks             *shadowsocksInfo             `json:"shadowsocks,omitempty"`
 	AnyTLS                  *anytlsInfo                  `json:"anytls,omitempty"`
+	TUIC                    *tuicInfo                    `json:"tuic,omitempty"`
+	CDN                     *cdnInfo                     `json:"cdn,omitempty"`
 	ControlPlaneShadowsocks *controlPlaneShadowsocksInfo `json:"controlPlaneShadowsocks,omitempty"`
 	ControlPlaneReality     *controlPlaneRealityInfo     `json:"controlPlaneReality,omitempty"`
 	Snowflake               *snowflakeInfo               `json:"snowflake,omitempty"`
@@ -131,6 +157,8 @@ type publicServer struct {
 	Hysteria2   bool   `json:"hysteria2"`
 	Shadowsocks bool   `json:"shadowsocks"`
 	AnyTLS      bool   `json:"anytls"`
+	TUIC        bool   `json:"tuic"`
+	CDN         bool   `json:"cdn"`
 	Naive       bool   `json:"naive"`
 	Snowflake   bool   `json:"snowflake"`
 }
