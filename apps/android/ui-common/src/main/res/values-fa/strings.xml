@@ -209,6 +209,8 @@
     <string name="notifications_open_settings">باز کردن تنظیمات</string>
     <string name="notifications_toast_off">هشدارهای اتصال خاموش شد.</string>
     <string name="notifications_toast_on">هشدارهای اتصال روشن شد.</string>
+    <string name="panic_android_confirm_message">این کار اتصال را قطع می‌کند، همه‌ی داده‌های PangeaVPN را از این دستگاه پاک می‌کند و به صفحه‌ی ورود برمی‌گرداند. این کار قابل بازگشت نیست.</string>
+    <string name="panic_android_enable_hint">عملکرد «پاک کردن داده‌ها» را به منویی اضافه می‌کند که با نگه داشتن انگشت روی نماد PangeaVPN باز می‌شود. انتخاب آن اتصال را قطع می‌کند، همه‌ی داده‌های PangeaVPN را از این دستگاه پاک می‌کند و به صفحه‌ی ورود برمی‌گرداند. پس از آن برنامه را حذف کنید تا کاملاً پاک شود. این کار قابل بازگشت نیست.</string>
     <string name="panic_confirm_cancel">لغو</string>
     <string name="panic_confirm_message">این کار اتصال را قطع می‌کند، همه‌ی داده‌های PangeaVPN و نمایه‌ی VPN را از این دستگاه پاک می‌کند و به صفحه‌ی ورود برمی‌گرداند. این کار قابل بازگشت نیست.</string>
     <string name="panic_confirm_title">PangeaVPN همین حالا پاک شود؟</string>

@@ -209,6 +209,8 @@
     <string name="notifications_open_settings">Відкрити Параметри</string>
     <string name="notifications_toast_off">Сповіщення про підключення вимкнено.</string>
     <string name="notifications_toast_on">Сповіщення про підключення увімкнено.</string>
+    <string name="panic_android_confirm_message">VPN від\'єднається, усі дані PangeaVPN буде стерто з цього пристрою, і відкриється екран входу. Скасувати неможливо.</string>
+    <string name="panic_android_enable_hint">Додає дію «Стерти дані» до меню, що відкривається довгим натисканням на значок PangeaVPN. Вона від\'єднує VPN, стирає всі дані PangeaVPN з цього пристрою та повертає до екрана входу. Потім видаліть застосунок, щоб прибрати його повністю. Скасувати неможливо.</string>
     <string name="panic_confirm_cancel">Скасувати</string>
     <string name="panic_confirm_message">VPN від\'єднається, усі дані PangeaVPN і VPN-профіль буде стерто з цього пристрою, і відкриється екран входу. Скасувати неможливо.</string>
     <string name="panic_confirm_title">Стерти PangeaVPN зараз?</string>

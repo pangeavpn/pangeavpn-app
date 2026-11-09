@@ -209,6 +209,8 @@
     <string name="notifications_open_settings">فتح الإعدادات</string>
     <string name="notifications_toast_off">تنبيهات الاتصال متوقفة.</string>
     <string name="notifications_toast_on">تنبيهات الاتصال مفعّلة.</string>
+    <string name="panic_android_confirm_message">سيؤدي ذلك إلى قطع الاتصال ومسح كل بيانات PangeaVPN من هذا الجهاز، ثم العودة إلى شاشة تسجيل الدخول. لا يمكن التراجع عن ذلك.</string>
+    <string name="panic_android_enable_hint">يضيف إجراء «مسح البيانات» إلى القائمة التي تظهر عند الضغط مطولًا على أيقونة PangeaVPN. يؤدي اختياره إلى قطع الاتصال ومسح كل بيانات PangeaVPN من هذا الجهاز، ثم العودة إلى شاشة تسجيل الدخول. احذف التطبيق بعد ذلك لإزالته بالكامل. لا يمكن التراجع عن ذلك.</string>
     <string name="panic_confirm_cancel">إلغاء</string>
     <string name="panic_confirm_message">سيؤدي ذلك إلى قطع الاتصال ومسح كل بيانات PangeaVPN وملف تعريف VPN من هذا الجهاز، ثم العودة إلى شاشة تسجيل الدخول. لا يمكن التراجع عن ذلك.</string>
     <string name="panic_confirm_title">هل تريد مسح PangeaVPN الآن؟</string>

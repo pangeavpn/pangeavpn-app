@@ -209,6 +209,8 @@
     <string name="notifications_open_settings">Open Settings</string>
     <string name="notifications_toast_off">Connection alerts off.</string>
     <string name="notifications_toast_on">Connection alerts on.</string>
+    <string name="panic_android_confirm_message">This disconnects, erases all PangeaVPN data from this device, and returns to sign-in. It can\'t be undone.</string>
+    <string name="panic_android_enable_hint">Adds a “Wipe data” action to the PangeaVPN icon\'s long-press menu. Choosing it disconnects, erases all PangeaVPN data from this device, and returns to sign-in. Delete the app afterwards to remove it entirely. This can\'t be undone.</string>
     <string name="panic_confirm_cancel">Cancel</string>
     <string name="panic_confirm_message">This disconnects, erases all PangeaVPN data and the VPN profile from this device, and returns to sign-in. It can\'t be undone.</string>
     <string name="panic_confirm_title">Wipe PangeaVPN now?</string>

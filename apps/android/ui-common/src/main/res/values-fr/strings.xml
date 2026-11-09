@@ -209,6 +209,8 @@
     <string name="notifications_open_settings">Ouvrir Réglages</string>
     <string name="notifications_toast_off">Alertes de connexion désactivées.</string>
     <string name="notifications_toast_on">Alertes de connexion activées.</string>
+    <string name="panic_android_confirm_message">Cela déconnecte, efface toutes les données de PangeaVPN de cet appareil, puis revient à l\'écran de connexion. Cette action est irréversible.</string>
+    <string name="panic_android_enable_hint">Ajoute l\'action « Effacer les données » au menu qui s\'affiche en maintenant l\'icône de PangeaVPN. La choisir déconnecte, efface toutes les données de PangeaVPN de cet appareil, puis revient à l\'écran de connexion. Supprimez ensuite l\'application pour l\'enlever complètement. Cette action est irréversible.</string>
     <string name="panic_confirm_cancel">Annuler</string>
     <string name="panic_confirm_message">Cela déconnecte, efface toutes les données de PangeaVPN et le profil VPN de cet appareil, puis revient à l\'écran de connexion. Cette action est irréversible.</string>
     <string name="panic_confirm_title">Effacer PangeaVPN maintenant ?</string>

@@ -44,7 +44,7 @@ fun PanicPage(onBack: () -> Unit) {
                 title = stringResource(R.string.panic_enable_title),
                 checked = prefs.panicWipe,
                 onCheckedChange = { setEnabled(it) },
-                hint = stringResource(R.string.panic_enable_hint),
+                hint = stringResource(R.string.panic_android_enable_hint),
             )
         }
         SettingsGroup {
@@ -60,7 +60,7 @@ fun PanicPage(onBack: () -> Unit) {
     if (confirming) {
         ConfirmDialog(
             title = stringResource(R.string.panic_confirm_title),
-            message = stringResource(R.string.panic_confirm_message),
+            message = stringResource(R.string.panic_android_confirm_message),
             confirmLabel = stringResource(R.string.panic_confirm_wipe),
             onConfirm = { Panic.wipeNow(context) },
             onDismiss = { confirming = false },

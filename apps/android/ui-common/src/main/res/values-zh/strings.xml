@@ -209,6 +209,8 @@
     <string name="notifications_open_settings">打开设置</string>
     <string name="notifications_toast_off">连接提醒已关闭。</string>
     <string name="notifications_toast_on">连接提醒已开启。</string>
+    <string name="panic_android_confirm_message">这将断开连接，清除此设备上的所有 PangeaVPN 数据，并返回登录界面。此操作无法撤销。</string>
+    <string name="panic_android_enable_hint">在长按 PangeaVPN 图标弹出的菜单中添加“清除数据”操作。选择后会断开连接，清除此设备上的所有 PangeaVPN 数据，并返回登录界面。之后删除应用即可将其彻底移除。此操作无法撤销。</string>
     <string name="panic_confirm_cancel">取消</string>
     <string name="panic_confirm_message">这将断开连接，清除此设备上的所有 PangeaVPN 数据和 VPN 配置，并返回登录界面。此操作无法撤销。</string>
     <string name="panic_confirm_title">立即清除 PangeaVPN？</string>
