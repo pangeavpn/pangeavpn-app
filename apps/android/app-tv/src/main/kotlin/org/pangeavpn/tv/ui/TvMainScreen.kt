@@ -52,6 +52,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.map
@@ -121,6 +123,9 @@ fun TvMainScreen(onOpenSettings: () -> Unit, onOpenStartup: () -> Unit = onOpenS
     )
     val actionFocus = remember { FocusRequester() }
     val hidden = action == MainAction.HIDDEN
+
+    // Fires as the screen appears and on each return to the foreground: the list is always open here.
+    LifecycleEventEffect(Lifecycle.Event.ON_START) { ServersRepository.refresh() }
 
     // The remote starts on the main action, and comes back to it when an expired account is restored.
     LaunchedEffect(hidden, entitled) { if (!hidden) actionFocus.tryFocus() }
