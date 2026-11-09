@@ -101,12 +101,8 @@ export class DaemonProcessManager {
     }
 
     if (process.platform === "linux" && app.isPackaged) {
-      const daemonPath = this.resolveDaemonPath();
-      if (!daemonPath) {
-        throw new Error("daemon binary not found for this runtime");
-      }
       await ensureUserRuntimeFiles();
-      const restart = await restartLinuxDaemonServiceElevated(daemonPath, getAppSupportDir());
+      const restart = await restartLinuxDaemonServiceElevated();
       onElevationComplete();
       if (!restart.ok) {
         throw new Error(restart.message);
@@ -701,29 +697,16 @@ async function restartWindowsDaemonServiceElevated(): Promise<{ ok: boolean; mes
   return { ok: true, message: "" };
 }
 
-async function restartLinuxDaemonServiceElevated(
-  daemonPath: string,
-  appSupportDir: string
-): Promise<{ ok: boolean; message: string }> {
-  const serviceInstalled = hasManagedLinuxDaemonService();
-  if (!serviceInstalled && !fs.existsSync("/usr/bin/pkexec")) {
+async function restartLinuxDaemonServiceElevated(): Promise<{ ok: boolean; message: string }> {
+  // A root daemon needs the root-owned state dir and pangeavpn group that
+  // install-linux.sh sets up; without them it refuses to start or locks the app out.
+  if (!hasManagedLinuxDaemonService()) {
     return {
       ok: false,
-      message: "PolicyKit is required to restart the VPN service. Install policykit-1 or reinstall PangeaVPN."
+      message: "PangeaVPN's system service isn't installed. Install it with scripts/install-linux.sh, then reopen PangeaVPN."
     };
   }
-  const command = serviceInstalled ? "systemctl" : "/usr/bin/pkexec";
-  const args = serviceInstalled
-    ? ["restart", "pangea-daemon"]
-    : [
-        "/bin/sh",
-        "-c",
-        "for proc in /proc/[0-9]*; do [ \"$(readlink \"$proc/exe\" 2>/dev/null)\" = \"$2\" ] && kill -TERM \"${proc##*/}\" >/dev/null 2>&1 || true; done; /bin/sleep 0.2; /usr/bin/nohup /usr/bin/env PANGEA_APP_SUPPORT_DIR=\"$1\" \"$2\" >/dev/null 2>&1 &",
-        "pangeavpn-recovery",
-        appSupportDir,
-        daemonPath
-      ];
-  const result = await runProcess(command, args);
+  const result = await runProcess("systemctl", ["restart", "pangea-daemon"]);
   const output = combineOutput(result).trim();
 
   if (result.error) {
