@@ -5,9 +5,9 @@ import path from "node:path";
 import { app } from "electron";
 import { DaemonClient } from "./daemonClient";
 import { getBundledDaemonPath } from "./resourcePaths";
-import { ensureUserRuntimeFiles, getAppSupportDir, hasManagedLinuxDaemonService } from "./platformPaths";
+import { ensureUserRuntimeFiles, getAppSupportDir, getTokenPath, hasManagedLinuxDaemonService } from "./platformPaths";
 import { macLaunchDaemonRestartCommand } from "./macLaunchDaemon";
-import { DaemonNotReadyError } from "./runtimeFiles";
+import { DaemonNotReadyError, tokenPermissionMessage } from "./runtimeFiles";
 
 function openDaemonLogStdio(): ["ignore", number, number] | "ignore" {
   try {
@@ -222,6 +222,9 @@ export class DaemonProcessManager {
       const online = await this.safeApiReady();
       if (!forceRestart && online) {
         return;
+      }
+      if (!online && tokenUnreadable()) {
+        throw new DaemonNotReadyError(tokenPermissionMessage());
       }
 
       // Kickstarting a system-domain service needs root, so from the app it mostly
@@ -550,6 +553,16 @@ function shouldUseManagedMacLaunchDaemon(daemonPath: string): boolean {
 
 function shouldUseUnelevatedMacFallback(daemonPath: string): boolean {
   return app.isPackaged && process.platform === "darwin" && !shouldUseManagedMacLaunchDaemon(daemonPath);
+}
+
+function tokenUnreadable(): boolean {
+  try {
+    fs.accessSync(getTokenPath(), fs.constants.R_OK);
+    return false;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    return code === "EACCES" || code === "EPERM";
+  }
 }
 
 function kickstartManagedMacLaunchDaemon(): boolean {

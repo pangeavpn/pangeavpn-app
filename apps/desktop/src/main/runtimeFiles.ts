@@ -17,12 +17,30 @@ export class DaemonNotReadyError extends Error {}
 // their login session still carries the group list it was created with —
 // something only they can clear, so say so rather than failing anonymously.
 export function tokenPermissionMessage(): string {
-  return process.platform === "linux"
-    ? "PangeaVPN cannot read the background service's access token. If you just installed or " +
-        "updated PangeaVPN, log out and back in (or reboot) so your 'pangeavpn' group membership " +
-        "takes effect, then reopen the app."
-    : "PangeaVPN is not allowed to read the background service's access token. Reinstall " +
-        "PangeaVPN to repair the service's permissions.";
+  if (process.platform === "linux") {
+    return (
+      "PangeaVPN cannot read the background service's access token. If you just installed or " +
+      "updated PangeaVPN, log out and back in (or reboot) so your 'pangeavpn' group membership " +
+      "takes effect, then reopen the app."
+    );
+  }
+  // macOS grants the token to the admin group only, and a reinstall can't change that.
+  if (process.platform === "darwin" && !isMacAdmin()) {
+    return (
+      "PangeaVPN needs a macOS administrator account. Sign in to one, or have an administrator turn on " +
+      "\"Allow this user to administer this computer\" for your account in System Settings > Users & Groups."
+    );
+  }
+  return (
+    "PangeaVPN is not allowed to read the background service's access token. Reinstall " +
+    "PangeaVPN to repair the service's permissions."
+  );
+}
+
+const MAC_ADMIN_GID = 80;
+
+function isMacAdmin(): boolean {
+  return typeof process.getgroups !== "function" || process.getgroups().includes(MAC_ADMIN_GID);
 }
 
 export async function ensureRuntimeFiles(appDir: string, options: RuntimeFileOptions): Promise<void> {
