@@ -1,21 +1,37 @@
 package org.pangeavpn.core.util
 
-// Sign-in credential handling: a 24-char Crockford-base32 account number, or a
-// legacy 16-digit token. The server decides validity — nothing here rejects input.
+// The sign-in credential: a 24-character account number, or a legacy 16-digit token.
+// The hub decides what is valid; nothing here rejects input.
 
 private const val GROUP_SIZE = 4
 
-// ASCII-only, not isDigit(): that is Unicode-aware, so Arabic-Indic digits would
-// take a different branch here than on desktop, where the check is /^\d*$/.
+const val ACCOUNT_NUMBER_MAX_SYMBOLS = 64
+
+// ASCII only, so Arabic-Indic digits are not mistaken for a legacy token.
 private fun isLegacyToken(value: String): Boolean = value.all { it in '0'..'9' }
 
-/** Folds the characters Crockford omits, so a hand-copied number still matches. */
+private fun stripped(value: String): String = value.filterNot { it.isWhitespace() || it == '-' }.uppercase()
+
+/** What the field lets through: ASCII letters, digits and dashes, up to 64 symbols not counting dashes. */
+fun sanitizeAccountNumberInput(raw: String): String {
+    var symbols = 0
+    val out = StringBuilder()
+    for (c in raw) {
+        if (c != '-') {
+            if (c !in '0'..'9' && c !in 'A'..'Z' && c !in 'a'..'z') continue
+            if (symbols == ACCOUNT_NUMBER_MAX_SYMBOLS) break
+            symbols++
+        }
+        out.append(c)
+    }
+    return out.toString()
+}
+
+/** What is sent to the hub: folds the characters Crockford omits, so a hand-copied number still matches. */
 fun normalizeAccountNumber(value: String): String {
     val trimmed = value.trim()
     if (isLegacyToken(trimmed)) return trimmed
-    return trimmed
-        .filterNot { it.isWhitespace() || it == '-' }
-        .uppercase()
+    return stripped(trimmed)
         .map {
             when (it) {
                 'O' -> '0'
@@ -26,13 +42,9 @@ fun normalizeAccountNumber(value: String): String {
         .joinToString("")
 }
 
-/** Display form for what is being typed: upper case, blocks of 4. */
+/** Display form for what is being typed or revealed: upper case, blocks of 4. */
 fun formatAccountNumberInput(value: String): String {
     val trimmed = value.trim()
     if (isLegacyToken(trimmed)) return trimmed
-    return trimmed
-        .filterNot { it.isWhitespace() || it == '-' }
-        .uppercase()
-        .chunked(GROUP_SIZE)
-        .joinToString("-")
+    return stripped(trimmed).chunked(GROUP_SIZE).joinToString("-")
 }
