@@ -219,7 +219,7 @@ export class DaemonProcessManager {
       if (!forceRestart && online) {
         return;
       }
-      if (!online && tokenUnreadable()) {
+      if (!online && daemonTokenUnreadable()) {
         throw new DaemonNotReadyError(tokenPermissionMessage());
       }
 
@@ -552,7 +552,7 @@ function shouldUseUnelevatedMacFallback(daemonPath: string): boolean {
   return app.isPackaged && process.platform === "darwin" && !shouldUseManagedMacLaunchDaemon(daemonPath);
 }
 
-function tokenUnreadable(): boolean {
+export function daemonTokenUnreadable(): boolean {
   try {
     fs.accessSync(getTokenPath(), fs.constants.R_OK);
     return false;

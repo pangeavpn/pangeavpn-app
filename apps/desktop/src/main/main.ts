@@ -21,7 +21,7 @@ import type { ConfigResponse, OkResponse, Profile, StatusResponse } from "@pange
 import { DaemonClient, DaemonHttpError, HostOfflineError, TransportExhaustedError } from "./daemonClient";
 import { createAppCatalog } from "./appCatalog";
 import { createSplitTunnelWriter, protectRulesFor } from "../shared/splitTunnel";
-import { DaemonProcessManager } from "./daemonProcess";
+import { DaemonProcessManager, daemonTokenUnreadable } from "./daemonProcess";
 import { getAppSupportDir, getLegacyStateFilePath, getUserStateDir, readDaemonTokens } from "./platformPaths";
 import { getConnectedTrayIconPath, getTrayIconPath, getWindowsAppIconPath } from "./resourcePaths";
 import {
@@ -1917,6 +1917,8 @@ function registerConnectionHandlers(): void {
       daemonRecoveryInProgress = false;
     }
   });
+  // A macOS account outside the pangeavpn group: Restart service joins it, so say so.
+  ipcMain.handle(IPC_CHANNELS.needsAccountSetup, async () => process.platform === "darwin" && daemonTokenUnreadable());
   ipcMain.handle(IPC_CHANNELS.getAppVersion, async () => app.getVersion());
 
   ipcMain.handle(IPC_CHANNELS.openExternal, async (_event, url: string) => {

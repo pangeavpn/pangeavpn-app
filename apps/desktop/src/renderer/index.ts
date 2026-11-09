@@ -3204,8 +3204,11 @@ const daemonRecoveryScreen = document.getElementById("daemonRecoveryScreen") as 
 const daemonRecoveryBtn = document.getElementById("daemonRecoveryBtn") as HTMLButtonElement;
 const daemonRecoveryMessage = document.getElementById("daemonRecoveryMessage") as HTMLParagraphElement;
 const daemonRecoveryButtonLabel = daemonRecoveryBtn.querySelector<HTMLElement>(".daemon-recovery-button-label")!;
+const daemonRecoveryTitle = document.getElementById("daemonRecoveryTitle") as HTMLElement;
+const daemonRecoveryDescription = document.getElementById("daemonRecoveryDescription") as HTMLElement;
 let daemonHealth = initialDaemonHealth();
 let daemonRecoveryRestartInProgress = false;
+let daemonRecoveryAccountSetup = false;
 let daemonRecoveryReturnFocus: HTMLElement | null = null;
 let daemonRecoveryResolvers: Array<() => void> = [];
 const daemonRecoveryInerted = new Set<HTMLElement>();
@@ -3226,8 +3229,30 @@ function showDaemonRecovery(reason = ""): void {
   daemonRecoveryMessage.textContent = reason;
   daemonRecoveryBtn.disabled = false;
   daemonRecoveryBtn.removeAttribute("aria-busy");
-  daemonRecoveryButtonLabel.textContent = t("daemonRecovery.restart");
+  setDaemonRecoveryAccountSetup(false);
   window.setTimeout(() => daemonRecoveryBtn.focus(), 0);
+  void daemonApi
+    ?.needsAccountSetup()
+    .then((needed) => {
+      if (needed && !daemonRecoveryScreen.hidden && !daemonRecoveryRestartInProgress) {
+        setDaemonRecoveryAccountSetup(true);
+      }
+    })
+    .catch(() => {});
+}
+
+// Retags rather than sets text, so a language switch keeps the right variant.
+function setDaemonRecoveryAccountSetup(accountSetup: boolean): void {
+  daemonRecoveryAccountSetup = accountSetup;
+  const keys: Array<[HTMLElement, MessageKey]> = [
+    [daemonRecoveryTitle, accountSetup ? "daemonRecovery.setupTitle" : "daemonRecovery.title"],
+    [daemonRecoveryDescription, accountSetup ? "daemonRecovery.setupDescription" : "daemonRecovery.description"],
+    [daemonRecoveryButtonLabel, accountSetup ? "daemonRecovery.setupButton" : "daemonRecovery.restart"]
+  ];
+  for (const [element, key] of keys) {
+    element.dataset.i18n = key;
+    element.textContent = t(key);
+  }
 }
 
 function completeDaemonRecovery(force = false): void {
@@ -3269,7 +3294,9 @@ daemonRecoveryBtn.addEventListener("click", async () => {
   daemonRecoveryRestartInProgress = true;
   daemonRecoveryScreen.dataset.state = "working";
   daemonRecoveryBtn.setAttribute("aria-busy", "true");
-  daemonRecoveryButtonLabel.textContent = t("daemonRecovery.restarting");
+  daemonRecoveryButtonLabel.textContent = t(
+    daemonRecoveryAccountSetup ? "daemonRecovery.settingUp" : "daemonRecovery.restarting"
+  );
   daemonRecoveryMessage.textContent = t("daemonRecovery.waitingForApproval");
   try {
     const result = await daemonApi.restartDaemon();
@@ -3283,9 +3310,10 @@ daemonRecoveryBtn.addEventListener("click", async () => {
     daemonRecoveryRestartInProgress = false;
     daemonRecoveryScreen.dataset.state = "error";
     daemonRecoveryBtn.removeAttribute("aria-busy");
+    const failedKey = daemonRecoveryAccountSetup ? "daemonRecovery.setupFailed" : "daemonRecovery.failed";
     daemonRecoveryMessage.textContent = verboseErrors
-      ? `${t("daemonRecovery.failed")} ${error instanceof Error ? error.message : String(error)}`
-      : t("daemonRecovery.failed");
+      ? `${t(failedKey)} ${error instanceof Error ? error.message : String(error)}`
+      : t(failedKey);
     daemonRecoveryBtn.disabled = false;
     daemonRecoveryButtonLabel.textContent = t("daemonRecovery.tryAgain");
     daemonRecoveryBtn.focus();
@@ -3458,6 +3486,11 @@ async function init(): Promise<void> {
       }
     } catch (error) {
       lastDaemonError = daemonErrorText(error);
+      // Waiting can't let a new Mac account in; only the admin-approved setup can.
+      if (await daemonApi.needsAccountSetup().catch(() => false)) {
+        await waitForDaemonRecovery();
+        continue;
+      }
     }
     if (i === maxAttempts - 1) {
       loadingMessage.textContent = lastDaemonError || t("app.loading.didntStart");

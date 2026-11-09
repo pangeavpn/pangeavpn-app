@@ -10,6 +10,7 @@ const CH = {
   getConfig: "daemon:getConfig",
   setConfig: "daemon:setConfig",
   restartDaemon: "daemon:restart",
+  needsAccountSetup: "daemon:needsAccountSetup",
   getAppVersion: "app:getAppVersion",
   authLogin: "auth:login",
   authLogout: "auth:logout",
@@ -97,6 +98,7 @@ const daemonApi = {
   getConfig: () => ipcRenderer.invoke(CH.getConfig),
   setConfig: (profiles: unknown[]) => ipcRenderer.invoke(CH.setConfig, profiles),
   restartDaemon: () => ipcRenderer.invoke(CH.restartDaemon),
+  needsAccountSetup: () => ipcRenderer.invoke(CH.needsAccountSetup),
   getAppVersion: () => ipcRenderer.invoke(CH.getAppVersion),
 };
 

@@ -26,10 +26,7 @@ export function tokenPermissionMessage(): string {
   }
   // The admin-approved restart adds this account to the pangeavpn group.
   if (process.platform === "darwin") {
-    return (
-      "PangeaVPN isn't set up for this Mac account yet. Choose Restart service and have an " +
-      "administrator approve it once."
-    );
+    return "PangeaVPN isn't set up for this Mac account yet. An administrator needs to approve it once.";
   }
   return (
     "PangeaVPN is not allowed to read the background service's access token. Reinstall " +

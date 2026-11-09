@@ -17,6 +17,11 @@ export const fa = {
   "daemonRecovery.waitingForApproval": "در انتظار تأیید مدیر...",
   "daemonRecovery.failed": "سرویس دوباره راه‌اندازی نشد. درخواست مدیر را تأیید کنید و دوباره تلاش کنید.",
   "daemonRecovery.tryAgain": "تلاش دوباره",
+  "daemonRecovery.setupTitle": "حساب راه‌اندازی نشده است",
+  "daemonRecovery.setupDescription": "این حساب Mac هنوز اجازه استفاده از PangeaVPN را ندارد. یک مدیر باید یک بار آن را تأیید کند.",
+  "daemonRecovery.setupButton": "راه‌اندازی حساب",
+  "daemonRecovery.settingUp": "در حال راه‌اندازی حساب...",
+  "daemonRecovery.setupFailed": "حساب راه‌اندازی نشد. درخواست مدیر را تأیید کنید و دوباره تلاش کنید.",
 
   // ── Login screen ──────────────────────────────────────
   "login.subtitle": "با کد حساب خود وارد شوید.",

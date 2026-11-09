@@ -17,6 +17,11 @@ export const ar = {
   "daemonRecovery.waitingForApproval": "في انتظار موافقة المسؤول...",
   "daemonRecovery.failed": "تعذرت إعادة تشغيل الخدمة. وافق على طلب المسؤول وحاول مرة أخرى.",
   "daemonRecovery.tryAgain": "المحاولة مرة أخرى",
+  "daemonRecovery.setupTitle": "لم يتم إعداد الحساب",
+  "daemonRecovery.setupDescription": "لا يُسمح لحساب Mac هذا باستخدام PangeaVPN بعد. يجب أن يوافق المسؤول على ذلك مرة واحدة.",
+  "daemonRecovery.setupButton": "إعداد الحساب",
+  "daemonRecovery.settingUp": "جارٍ إعداد الحساب...",
+  "daemonRecovery.setupFailed": "تعذر إعداد الحساب. وافق على طلب المسؤول وحاول مرة أخرى.",
 
   // ── Login screen ──────────────────────────────────────
   "login.subtitle": "سجّل الدخول باستخدام رمز حسابك.",

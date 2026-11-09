@@ -17,6 +17,11 @@ export const uk = {
   "daemonRecovery.waitingForApproval": "Очікування дозволу адміністратора...",
   "daemonRecovery.failed": "Не вдалося перезапустити службу. Підтвердьте запит адміністратора та спробуйте ще раз.",
   "daemonRecovery.tryAgain": "Спробувати ще раз",
+  "daemonRecovery.setupTitle": "Обліковий запис не налаштовано",
+  "daemonRecovery.setupDescription": "Цьому обліковому запису Mac ще не дозволено використовувати PangeaVPN. Адміністратор має один раз це схвалити.",
+  "daemonRecovery.setupButton": "Налаштувати обліковий запис",
+  "daemonRecovery.settingUp": "Налаштування облікового запису...",
+  "daemonRecovery.setupFailed": "Не вдалося налаштувати обліковий запис. Підтвердьте запит адміністратора та спробуйте ще раз.",
 
   // ── Login screen ──────────────────────────────────────
   "login.subtitle": "Увійдіть за допомогою коду облікового запису.",

@@ -17,6 +17,11 @@ export const ru = {
   "daemonRecovery.waitingForApproval": "Ожидание разрешения администратора...",
   "daemonRecovery.failed": "Не удалось перезапустить службу. Разрешите запрос администратора и повторите попытку.",
   "daemonRecovery.tryAgain": "Повторить",
+  "daemonRecovery.setupTitle": "Требуется настройка",
+  "daemonRecovery.setupDescription": "Этой учетной записи Mac пока не разрешено использовать PangeaVPN. Администратор должен один раз это одобрить.",
+  "daemonRecovery.setupButton": "Настроить учетную запись",
+  "daemonRecovery.settingUp": "Настройка учетной записи...",
+  "daemonRecovery.setupFailed": "Не удалось настроить учетную запись. Разрешите запрос администратора и повторите попытку.",
 
   // ── Login screen ──────────────────────────────────────
   "login.subtitle": "Войдите с кодом вашей учетной записи.",

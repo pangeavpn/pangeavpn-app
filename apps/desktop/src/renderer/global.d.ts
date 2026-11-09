@@ -146,6 +146,7 @@ declare global {
     getConfig: () => Promise<ConfigResponse>;
     setConfig: (profiles: Profile[]) => Promise<OkResponse>;
     restartDaemon: () => Promise<{ ok: boolean; error?: string }>;
+    needsAccountSetup: () => Promise<boolean>;
     getAppVersion: () => Promise<string>;
   }
 

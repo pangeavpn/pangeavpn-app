@@ -17,6 +17,11 @@ export const fr = {
   "daemonRecovery.waitingForApproval": "En attente de l'autorisation administrateur...",
   "daemonRecovery.failed": "Le service n'a pas pu être redémarré. Autorisez la demande administrateur et réessayez.",
   "daemonRecovery.tryAgain": "Réessayer",
+  "daemonRecovery.setupTitle": "Compte non configuré",
+  "daemonRecovery.setupDescription": "Ce compte Mac n'est pas encore autorisé à utiliser PangeaVPN. Un administrateur doit l'approuver une fois.",
+  "daemonRecovery.setupButton": "Configurer le compte",
+  "daemonRecovery.settingUp": "Configuration du compte...",
+  "daemonRecovery.setupFailed": "Le compte n'a pas pu être configuré. Autorisez la demande administrateur et réessayez.",
 
   // ── Login screen ──────────────────────────────────────
   "login.subtitle": "Connectez-vous avec votre code de compte.",

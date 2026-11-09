@@ -17,6 +17,11 @@ export const zh = {
   "daemonRecovery.waitingForApproval": "正在等待管理员授权...",
   "daemonRecovery.failed": "无法重新启动服务。请批准管理员请求，然后重试。",
   "daemonRecovery.tryAgain": "重试",
+  "daemonRecovery.setupTitle": "账户尚未设置",
+  "daemonRecovery.setupDescription": "此 Mac 账户尚未获准使用 PangeaVPN。需要管理员批准一次。",
+  "daemonRecovery.setupButton": "设置账户",
+  "daemonRecovery.settingUp": "正在设置账户...",
+  "daemonRecovery.setupFailed": "无法设置该账户。请批准管理员请求，然后重试。",
 
   // ── Login screen ──────────────────────────────────────
   "login.subtitle": "使用您的账户代码登录。",

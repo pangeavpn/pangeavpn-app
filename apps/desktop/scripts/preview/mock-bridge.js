@@ -72,8 +72,11 @@
   });
 
   const hubMethods = { directIp: true, reality: true, shadowsocks: true, fronted: true, normal: true };
+  // ?daemon=down fails every status poll; ?daemon=setup also reports a Mac account outside the group.
+  const daemon = q.get("daemon");
   const answers = {
-    getStatus: status,
+    getStatus: () => (daemon ? Promise.reject(new Error("daemon unavailable")) : status()),
+    needsAccountSetup: daemon === "setup",
     getAppVersion: "0.0.0-preview",
     getConfig: { profiles: [] },
     getLogs: [],
