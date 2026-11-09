@@ -5,10 +5,11 @@ import android.content.Context
 import android.content.Intent
 import android.net.VpnService
 
-/** Brings the VPN back after a reboot when the user left it on, as iOS's Connect On Demand does. */
+/** Brings the VPN back after a reboot or an app update when the user left it on, as iOS's Connect On Demand does. */
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action != Intent.ACTION_BOOT_COMPLETED) return
+        val action = intent.action
+        if (action != Intent.ACTION_BOOT_COMPLETED && action != Intent.ACTION_MY_PACKAGE_REPLACED) return
         AppPrefs.init(context)
         val prefs = AppPrefs.value
         if (!prefs.tunnelWanted || !(prefs.autoConnect || prefs.lockdown)) return
