@@ -99,6 +99,7 @@ choose_channel() {
 }
 
 SUDO_KEEPALIVE_PID=""
+IS_ADMIN=0
 TMPDIR_PANGEA=""
 MOUNT_POINT=""
 
@@ -175,6 +176,20 @@ cleanup() {
     return 0
 }
 
+# Diagnostics only: root when an admin's sudo is already unlocked, never a prompt.
+as_root_if_cached() {
+    if [[ "$IS_ADMIN" == 1 ]]; then sudo -n "$@"; else "$@"; fi
+}
+
+shell_quote() {
+    printf "'%s'" "${1//\'/\'\\\'\'}"
+}
+
+applescript_string() {
+    local s="${1//\\/\\\\}"
+    printf '"%s"' "${s//\"/\\\"}"
+}
+
 # The package installs and starts the service itself; this only reports on it.
 report_service() {
     local service_ok=false dotted=false version label=""
@@ -219,12 +234,12 @@ report_service() {
     if [[ ! -f "$DAEMON_PLIST" ]]; then
         echo "    The service was not registered. The installer's log is /var/log/install.log."
     else
-        sudo launchctl print "system/$DAEMON_LABEL" 2>&1 \
+        as_root_if_cached launchctl print "system/$DAEMON_LABEL" 2>&1 \
             | grep -E '^[[:space:]]*(state|last exit code) =' \
             | sed 's/^[[:space:]]*/    launchctl: /' || true
     fi
-    if sudo test -s "$DAEMON_LOG"; then
-        sudo tail -n 15 "$DAEMON_LOG" 2>/dev/null | sed 's/^/    /' || true
+    if as_root_if_cached test -s "$DAEMON_LOG" 2>/dev/null; then
+        as_root_if_cached tail -n 15 "$DAEMON_LOG" 2>/dev/null | sed 's/^/    /' || true
     fi
     echo ""
 }
@@ -251,22 +266,29 @@ main() {
 
     log "Detected macOS $(sw_vers -productVersion) on $ARCH_TAG"
 
-    # ── Ask for admin rights up front ───────────────────────────────────────
-    # Prompting before the download avoids stalling on a password mid-install.
-    if ! sudo -n true 2>/dev/null; then
-        log "PangeaVPN installs a background service, which needs your Mac login password."
-        log "You'll be asked once, now. Typing won't show on screen - that's normal."
-    fi
-    if ! sudo -v; then
-        fail "Could not get administrator access. If you mistyped your password, run the installer again. Otherwise use an admin account."
-    fi
+    # sudo only works for admins. A Standard account installs through macOS's own
+    # prompt instead, which takes any administrator's name and password.
+    [[ " $(id -Gn) " == *" admin "* ]] && IS_ADMIN=1
+    if [[ "$IS_ADMIN" == 1 ]]; then
+        # Prompting before the download avoids stalling on a password mid-install.
+        if ! sudo -n true 2>/dev/null; then
+            log "PangeaVPN installs a background service, which needs your Mac login password."
+            log "You'll be asked once, now. Typing won't show on screen - that's normal."
+        fi
+        if ! sudo -v; then
+            fail "Could not get administrator access. If you mistyped your password, run the installer again."
+        fi
 
-    # Refresh the 5-minute sudo timestamp so a slow download cannot expire it.
-    while true; do sudo -n true || true; sleep 50; kill -0 "$$" 2>/dev/null || exit; done 2>/dev/null &
-    SUDO_KEEPALIVE_PID=$!
-    # disown it, or the shell prints a "Terminated" job notice over the
-    # closing message when the cleanup trap kills it.
-    disown "$SUDO_KEEPALIVE_PID" 2>/dev/null || true
+        # Refresh the 5-minute sudo timestamp so a slow download cannot expire it.
+        while true; do sudo -n true || true; sleep 50; kill -0 "$$" 2>/dev/null || exit; done 2>/dev/null &
+        SUDO_KEEPALIVE_PID=$!
+        # disown it, or the shell prints a "Terminated" job notice over the
+        # closing message when the cleanup trap kills it.
+        disown "$SUDO_KEEPALIVE_PID" 2>/dev/null || true
+    else
+        log "Your account isn't an administrator, so PangeaVPN's background service needs an"
+        log "administrator's approval. macOS will ask for their name and password once the download is ready."
+    fi
 
     choose_channel
 
@@ -379,8 +401,12 @@ main() {
         # ── Install the package ─────────────────────────────────────────────
         # It stops the old version, then installs and starts the service.
         log "Installing PangeaVPN (this can take a minute)..."
-        if ! sudo installer -pkg "$INSTALLER_PATH" -target / ; then
-            fail "Installation failed. The installer file may be damaged - download it again from ${DOWNLOAD_URL}"
+        if [[ "$IS_ADMIN" == 1 ]]; then
+            if ! sudo installer -pkg "$INSTALLER_PATH" -target / ; then
+                fail "Installation failed. The installer file may be damaged - download it again from ${DOWNLOAD_URL}"
+            fi
+        elif ! osascript -e "do shell script $(applescript_string "/usr/sbin/installer -pkg $(shell_quote "$INSTALLER_PATH") -target /") with administrator privileges" >/dev/null; then
+            fail "Installation didn't finish. The administrator prompt may have been cancelled, or the installer file is damaged - run this again, or download it from ${DOWNLOAD_URL}"
         fi
         if [[ ! -d "$APP_PATH" ]]; then
             fail "The installer finished but PangeaVPN is not in your Applications folder. The download may be incomplete - get it again from ${DOWNLOAD_URL}"
@@ -406,8 +432,7 @@ main() {
     fi
 
     # ── Delegate to the install-mac.sh inside the DMG ───────────────────────
-    # Only releases from before the signed .pkg have one, and it is the
-    # source of truth for their setup.
+    # Only pre-.pkg releases have one, and it is the source of truth for their setup.
     BUNDLED_INSTALLER="$MOUNT_POINT/install-mac.sh"
     PKG_FILE="$(find "$MOUNT_POINT" -maxdepth 1 -name "*.pkg" -print 2>/dev/null | head -1 || true)"
 
