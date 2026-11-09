@@ -1,0 +1,4 @@
+<resources>
+    <!-- The dark palette's background, so the window never flashes light before Compose draws. -->
+    <color name="window_background">#141312</color>
+</resources>

@@ -7,13 +7,42 @@
         android:name="android.hardware.touchscreen"
         android:required="false" />
 
+    <!-- Launchable apps for the split-tunnel list (no QUERY_ALL_PACKAGES), plus what
+         the website, support and VPN-settings links need to check before they open. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <category android:name="android.intent.category.BROWSABLE" />
+            <data android:scheme="https" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.SENDTO" />
+            <data android:scheme="mailto" />
+        </intent>
+        <intent>
+            <action android:name="android.settings.VPN_SETTINGS" />
+        </intent>
+    </queries>
+
     <!-- Restated from :core's manifest, which the merger folds in anyway:
          nothing here should survive an adb backup or a device transfer. -->
     <application
+        android:name=".TvApp"
         android:allowBackup="false"
         android:label="@string/app_name"
         android:icon="@mipmap/ic_launcher"
         android:banner="@drawable/banner"
+        android:supportsRtl="true"
+        android:localeConfig="@xml/locales_config"
+        android:enableOnBackInvokedCallback="true"
         android:theme="@style/Theme.Pangea.Tv">
 
         <activity
