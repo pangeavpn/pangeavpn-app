@@ -25,26 +25,26 @@ class RegionsTest {
             listOf(server("eu-1"), server("us-1"), server("eu-2")),
         )
         assertEquals(listOf("eu", "us"), regions.map { it.key })
-        assertEquals(2, regions.first().nodes.size)
+        assertEquals(2, regions.first().servers.size)
     }
 
     @Test
     fun `a node that reports load beats one that does not`() {
         val region = groupRegions(listOf(server("eu-1", load = null), server("eu-2", load = 90))).first()
-        assertEquals("eu-2", pickNode(region).id)
+        assertEquals("eu-2", region.best.id)
     }
 
     @Test
     fun `region picks its lowest load node`() {
         val region = groupRegions(listOf(server("eu-1", 80), server("eu-2", 10), server("eu-3", 40))).first()
-        assertEquals("eu-2", pickNode(region).id)
-        assertEquals(10, regionLoad(region))
+        assertEquals("eu-2", region.best.id)
+        assertEquals(10, region.best.load)
     }
 
     @Test
     fun `region load is null when no node reports`() {
         val region = groupRegions(listOf(server("eu-1"), server("eu-2"))).first()
-        assertNull(regionLoad(region))
+        assertNull(region.best.load)
     }
 
     @Test
@@ -105,9 +105,9 @@ class RegionsTest {
     }
 
     @Test
-    fun `slots leave the leading regions alone when the selection is already there`() {
+    fun `a selection already in the leading regions moves to the first slot`() {
         val regions = groupRegions(listOf(server("eu-1"), server("us-1"), server("ap-1")))
-        assertEquals(listOf("eu", "us"), regionSlots(regions, "us").map { it.key })
+        assertEquals(listOf("us", "eu"), regionSlots(regions, "us").map { it.key })
     }
 
     @Test

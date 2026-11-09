@@ -5,6 +5,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
+import org.pangeavpn.core.data.usesFetchedList
 import org.pangeavpn.core.model.Server
 import org.pangeavpn.core.model.Session
 

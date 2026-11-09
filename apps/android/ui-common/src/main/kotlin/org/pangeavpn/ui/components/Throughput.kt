@@ -1,6 +1,8 @@
 package org.pangeavpn.ui.components
 
-/** Formats a byte count as B/KB/MB/GB/TB with one decimal place. */
+import java.util.Locale
+
+/** B below 1024, else one decimal in 1024-based KB/MB/GB/TB; a dot and ASCII digits in every language, as on iOS. */
 fun humanBytes(n: Long): String {
     if (n < 1024) return "$n B"
     val units = arrayOf("KB", "MB", "GB", "TB")
@@ -10,5 +12,5 @@ fun humanBytes(n: Long): String {
         value /= 1024
         unitIndex++
     }
-    return "%.1f %s".format(value, units[unitIndex])
+    return String.format(Locale.ROOT, "%.1f %s", value, units[unitIndex])
 }

@@ -1,20 +1,17 @@
 package org.pangeavpn.ui.components
 
-import androidx.compose.runtime.Composable
-import androidx.compose.ui.res.stringResource
-import org.pangeavpn.ui.R
+// Product names, so they read the same in every language, as on desktop and iOS.
+private val TRANSPORT_NAMES = mapOf(
+    "cloak" to "Cloak",
+    "reality" to "VLESS+REALITY",
+    "shadowsocks" to "Shadowsocks",
+    "hysteria2" to "Hysteria2",
+    "anytls" to "AnyTLS",
+    "snowflake" to "Snowflake",
+    "naive" to "NaiveProxy",
+    "wireguard" to "WireGuard",
+)
 
-/** Names whichever cascade rung carried the tunnel, so the VIA fact reflects the
- *  live transport rather than always naming Cloak. */
-@Composable
-fun transportStatusLabel(activeTransport: String): String = when (activeTransport) {
-    "cloak" -> stringResource(R.string.transport_status_cloak)
-    "reality" -> stringResource(R.string.transport_status_reality)
-    "shadowsocks" -> stringResource(R.string.transport_status_shadowsocks)
-    "hysteria2" -> stringResource(R.string.transport_status_hysteria2)
-    "anytls" -> stringResource(R.string.transport_status_anytls)
-    "snowflake" -> stringResource(R.string.transport_status_snowflake)
-    // Only arm64-v8a links the naive engine; elsewhere it is never reported.
-    "naive" -> stringResource(R.string.transport_status_naive)
-    else -> stringResource(R.string.transport_status_none)
-}
+/** The transport carrying the live tunnel, for the Via fact; empty when there is none to name. */
+fun transportStatusLabel(activeTransport: String?): String =
+    activeTransport?.let { TRANSPORT_NAMES[it] }.orEmpty()
