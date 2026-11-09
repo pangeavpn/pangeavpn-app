@@ -232,7 +232,7 @@ class PangeaVpnService : VpnService() {
         internal fun startFromBoot(context: Context) {
             val intent = Intent(context, PangeaVpnService::class.java).setAction(VpnService.SERVICE_INTERFACE)
             runCatching { ContextCompat.startForegroundService(context, intent) }
-                .onFailure { Log.w(TAG, "the VPN service could not be started at boot", it) }
+                .onFailure { Log.w(TAG, "the VPN service could not be started at boot or after an update", it) }
         }
     }
 }

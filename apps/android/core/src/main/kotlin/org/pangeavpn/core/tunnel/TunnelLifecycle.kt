@@ -1,5 +1,6 @@
 package org.pangeavpn.core.tunnel
 
+import android.os.Build
 import android.os.ParcelFileDescriptor
 import android.os.SystemClock
 import android.util.Log
@@ -324,7 +325,6 @@ internal class TunnelLifecycle(private val service: PangeaVpnService) {
         Log.i(TAG, "network unavailable, waiting")
     }
 
-    // Every third failure in a row moves on to the next candidate, wrapping around.
     private fun retry(afterFailedAttempt: Int, error: Throwable) {
         logFailure("attempt $afterFailedAttempt", error)
         val failure = TunnelFailure.of(error)
@@ -335,6 +335,28 @@ internal class TunnelLifecycle(private val service: PangeaVpnService) {
             publish()
             return
         }
+        if (failure == TunnelFailure.SIGNED_OUT && systemStart && !blockingAsked()) {
+            return letGoIfSignedOut(afterFailedAttempt, failure)
+        }
+        backOff(afterFailedAttempt, failure)
+    }
+
+    // iOS removes its configuration on sign-out, which Always-on cannot undo, so a signed-out system start
+    // lets go; a refusal that left the account in place (a lockout) keeps retrying.
+    private fun letGoIfSignedOut(afterFailedAttempt: Int, failure: TunnelFailure) {
+        val current = cycle
+        scope.launch {
+            val signedOut = runCatchingCancellable { TunnelBridge.accountNumber() }.getOrNull()?.isBlank() == true
+            if (phase != Phase.RECONNECTING || current != cycle) return@launch
+            if (!signedOut) return@launch backOff(afterFailedAttempt, failure)
+            Log.i(TAG, "signed out: the system start lets go")
+            alerts.handle(TunnelEvent.Stopped)
+            failStart(TunnelStartException(failure))
+        }
+    }
+
+    // Every third failure in a row moves on to the next candidate, wrapping around.
+    private fun backOff(afterFailedAttempt: Int, failure: TunnelFailure) {
         val missing = failure == TunnelFailure.NO_SERVER && targets.ids.size > 1
         val kind = if (missing) RetryKind.Transient else ReconnectPolicy.classify(failure)
         if (kind is RetryKind.Terminal) sessionReady = false
@@ -656,6 +678,9 @@ internal class TunnelLifecycle(private val service: PangeaVpnService) {
     // Lockdown stands in for iOS's on-demand, which turns a failed app start into a blocked system start.
     private fun continuesBlocked(error: Throwable): Boolean =
         (systemStart || AppPrefs.value.lockdown) && blockingDone && !isStopped(error)
+
+    private fun blockingAsked(): Boolean =
+        AppPrefs.value.lockdown || (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && service.isLockdownEnabled)
 
     private fun excludedRanges(): List<String> =
         AppPrefs.value.let { if (it.splitTunnelEnabled) it.splitTunnelRanges else emptyList() }
