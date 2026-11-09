@@ -224,11 +224,17 @@ export class DaemonProcessManager {
         return;
       }
 
-      const kick = kickstartManagedMacLaunchDaemon();
-      if (!kick.ok) {
-        throw new Error(kick.message);
+      // Kickstarting a system-domain service needs root, so from the app it mostly
+      // fails; a daemon that is down gets respawned by launchd's KeepAlive instead.
+      const restarted = kickstartManagedMacLaunchDaemon();
+      if (forceRestart && !restarted && online) {
+        throw new Error("Restarting PangeaVPN's background service needs administrator approval. Use Restart service.");
       }
-      await this.waitForReachable();
+      try {
+        await this.waitForReachable();
+      } catch {
+        throw new Error(describeUnreachableManagedMacLaunchDaemon());
+      }
       return;
     }
 
@@ -546,40 +552,25 @@ function shouldUseUnelevatedMacFallback(daemonPath: string): boolean {
   return app.isPackaged && process.platform === "darwin" && !shouldUseManagedMacLaunchDaemon(daemonPath);
 }
 
-function kickstartManagedMacLaunchDaemon(): { ok: boolean; message: string } {
-  const serviceName = `system/${macLaunchDaemonLabel}`;
-  const result = spawnSync("/bin/launchctl", ["kickstart", "-k", serviceName], {
+function kickstartManagedMacLaunchDaemon(): boolean {
+  const result = spawnSync("/bin/launchctl", ["kickstart", "-k", `system/${macLaunchDaemonLabel}`], {
     stdio: "ignore",
     shell: false
   });
+  return !result.error && result.status === 0;
+}
 
-  if (!result.error && result.status === 0) {
-    return { ok: true, message: "" };
-  }
-
-  const probe = spawnSync("/bin/launchctl", ["print", serviceName], {
+function describeUnreachableManagedMacLaunchDaemon(): string {
+  const probe = spawnSync("/bin/launchctl", ["print", `system/${macLaunchDaemonLabel}`], {
     stdio: "pipe",
     shell: false
   });
   const details = combineOutput(probe).toLowerCase();
   if (details.includes("could not find service") || details.includes("service does not exist")) {
-    return {
-      ok: false,
-      // Plist present but unloaded: the elevated restart re-registers it, so point there first.
-      message: "The VPN service isn't registered with macOS. Restart it to repair; if that fails, reinstall PangeaVPN.pkg."
-    };
+    // Plist present but unloaded: the elevated restart re-registers it, so point there first.
+    return "The VPN service isn't registered with macOS. Restart it to repair; if that fails, reinstall PangeaVPN.pkg.";
   }
-  if (details.includes("not privileged") || details.includes("operation not permitted")) {
-    return {
-      ok: false,
-      message: "Installed daemon service is not reachable. Reinstall PangeaVPN.pkg to repair launchd registration."
-    };
-  }
-
-  return {
-    ok: false,
-    message: "Installed daemon service is not running. Reinstall PangeaVPN.pkg to repair it."
-  };
+  return "PangeaVPN's background service isn't responding. Use Restart service; if that fails, reinstall PangeaVPN.pkg.";
 }
 
 async function restartManagedMacLaunchDaemonElevated(): Promise<{ ok: boolean; message: string }> {
