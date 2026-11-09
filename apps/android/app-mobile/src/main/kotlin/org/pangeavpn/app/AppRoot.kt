@@ -19,7 +19,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
@@ -64,9 +64,10 @@ fun AppRoot() {
     val screen = rootScreen(restored, erasing, DataNotice.isAccepted(prefs), showDeviceLimit, signedIn, restoreFailed)
 
     // Settings belong to the screen that opened them, so a sign-out or wipe closes them with it.
-    var settingsFrom by remember { mutableStateOf<RootScreen?>(null) }
-    var settingsRoute by remember { mutableStateOf<SettingsRoute?>(null) }
-    var showRegions by remember { mutableStateOf(false) }
+    // Saved, so a rotation or an in-app language switch (both recreate the activity) keeps them open.
+    var settingsFrom by rememberSaveable { mutableStateOf<RootScreen?>(null) }
+    var settingsRoute by rememberSaveable { mutableStateOf<SettingsRoute?>(null) }
+    var showRegions by rememberSaveable { mutableStateOf(false) }
     val settingsShown = settingsFrom != null && settingsFrom == screen
     val reduced = reducedMotion()
 
