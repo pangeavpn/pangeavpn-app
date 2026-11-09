@@ -22,6 +22,7 @@ import org.pangeavpn.ui.theme.LocalAppearance
 import androidx.tv.material3.MaterialTheme as TvMaterialTheme
 
 internal const val PRIVACY_URL = "https://pangeavpn.org/legal/privacy"
+internal const val TERMS_URL = "https://pangeavpn.org/legal/terms"
 internal const val BILLING_URL = "https://pangeavpn.org/app/billing"
 
 /** Televisions crop up to 5% of each edge, so every screen keeps its content inside these margins. */

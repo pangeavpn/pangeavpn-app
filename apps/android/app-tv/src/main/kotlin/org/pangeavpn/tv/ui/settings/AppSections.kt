@@ -14,6 +14,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.DeleteForever
+import androidx.compose.material.icons.outlined.Description
+import androidx.compose.material.icons.outlined.PanTool
+import androidx.compose.material.icons.outlined.Policy
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material3.Icon
@@ -28,6 +32,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -39,12 +45,18 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.launch
 import org.pangeavpn.core.AppLocale
+import org.pangeavpn.core.PanicWiper
 import org.pangeavpn.core.ThemeChoice
 import org.pangeavpn.core.diagnostics.DiagnosticsReport
 import org.pangeavpn.core.diagnostics.DiagnosticsStore
 import org.pangeavpn.core.diagnostics.ReportPhase
 import org.pangeavpn.core.settings.AppLanguages
+import org.pangeavpn.tv.ui.PRIVACY_URL
+import org.pangeavpn.tv.ui.TERMS_URL
+import org.pangeavpn.tv.ui.browserIntent
+import org.pangeavpn.tv.ui.openIntent
 import org.pangeavpn.ui.R
 import org.pangeavpn.ui.components.AccentSwatches
 import org.pangeavpn.ui.components.KeyValueRow
@@ -113,10 +125,12 @@ internal fun AppearanceSection() {
 
 /** Send Report in place rather than in a sheet: compose, then the code or why it failed. */
 @Composable
-internal fun SupportSection() {
+internal fun SupportSection(onReviewNotice: () -> Unit, noticeFocus: FocusRequester) {
+    val app = LocalContext.current.applicationContext
     val phase by DiagnosticsStore.report.collectAsState()
     var note by rememberSaveable { mutableStateOf("") }
     var editing by remember { mutableStateOf(false) }
+    var confirmingWipe by remember { mutableStateOf(false) }
     val noteLabel = stringResource(R.string.support_note_label)
     val sending = phase == ReportPhase.Sending
 
@@ -180,6 +194,33 @@ internal fun SupportSection() {
         modifier = Modifier.padding(top = 4.dp),
     )
 
+    TvActionRow(
+        icon = Icons.Outlined.PanTool,
+        title = stringResource(R.string.support_privacy_data),
+        onClick = onReviewNotice,
+        modifier = Modifier.padding(top = 8.dp).focusRequester(noticeFocus),
+    )
+    LegalLinks()
+    TvActionRow(
+        icon = Icons.Outlined.DeleteForever,
+        title = stringResource(R.string.tv_support_erase_data),
+        onClick = { confirmingWipe = true },
+        modifier = Modifier.padding(top = 8.dp),
+        tint = StateError,
+    )
+
+    if (confirmingWipe) {
+        TvConfirmDialog(
+            title = stringResource(R.string.panic_confirm_title),
+            message = stringResource(R.string.panic_android_confirm_message),
+            confirmLabel = stringResource(R.string.panic_confirm_wipe),
+            onConfirm = { settingsScope.launch { PanicWiper.wipe(app) } },
+            onDismiss = { confirmingWipe = false },
+            destructive = true,
+            cancelLabel = stringResource(R.string.panic_confirm_cancel),
+        )
+    }
+
     if (editing) {
         TvEditDialog(
             title = noteLabel,
@@ -194,6 +235,26 @@ internal fun SupportSection() {
             counter = { "${DiagnosticsReport.noteLength(it)}/${DiagnosticsReport.NOTE_LIMIT}" },
             ltr = false,
         )
+    }
+}
+
+// Buttons where a browser can open the pages; elsewhere the addresses, to visit on another device.
+@Composable
+private fun LegalLinks() {
+    val context = LocalContext.current
+    val privacy = remember(context) { browserIntent(context, PRIVACY_URL) }
+    val terms = remember(context) { browserIntent(context, TERMS_URL) }
+    val privacyTitle = stringResource(R.string.support_privacy_policy)
+    val termsTitle = stringResource(R.string.support_terms)
+
+    if (privacy != null && terms != null) {
+        TvActionRow(icon = Icons.Outlined.Policy, title = privacyTitle, onClick = { openIntent(context, privacy) })
+        TvActionRow(icon = Icons.Outlined.Description, title = termsTitle, onClick = { openIntent(context, terms) })
+    } else {
+        TvInfoCard {
+            KeyValueRow(label = privacyTitle, value = PRIVACY_URL.removePrefix("https://"))
+            KeyValueRow(label = termsTitle, value = TERMS_URL.removePrefix("https://"))
+        }
     }
 }
 

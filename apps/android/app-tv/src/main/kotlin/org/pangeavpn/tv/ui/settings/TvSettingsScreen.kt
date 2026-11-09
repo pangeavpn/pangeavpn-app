@@ -90,6 +90,8 @@ import org.pangeavpn.core.diagnostics.DiagnosticsStore
 import org.pangeavpn.core.model.HubTestResult
 import org.pangeavpn.core.settings.SettingsSummary
 import org.pangeavpn.core.viewmodel.DevicesViewModel
+import org.pangeavpn.tv.ui.TvDataNoticeScreen
+import org.pangeavpn.tv.ui.tryFocus
 import org.pangeavpn.ui.R
 import org.pangeavpn.ui.components.ToastHost
 import org.pangeavpn.ui.text.displayedLanguageTag
@@ -142,8 +144,10 @@ fun TvSettingsScreen(signedIn: Boolean, onClose: () -> Unit, initialSection: TvS
     val devices: DevicesViewModel = viewModel()
     var refreshingSubscription by remember { mutableStateOf(false) }
     val build = remember(context) { appBuild(context) }
+    var reviewingNotice by rememberSaveable { mutableStateOf(false) }
+    var reviewedNotice by remember { mutableStateOf(false) }
+    val noticeFocus = remember { FocusRequester() }
 
-    LaunchedEffect(Unit) { railFocus.getValue(selected).requestFocus() }
     LaunchedEffect(Unit) { SettingsRepository.load() }
     // Once per visit, as iOS refreshes the account card and loads the device list.
     LaunchedEffect(signedIn) {
@@ -156,6 +160,16 @@ fun TvSettingsScreen(signedIn: Boolean, onClose: () -> Unit, initialSection: TvS
     DisposableEffect(Unit) {
         onDispose { DiagnosticsStore.resetReport() }
     }
+
+    if (reviewingNotice) {
+        TvDataNoticeScreen(review = true, onDone = {
+            reviewingNotice = false
+            reviewedNotice = true
+        })
+        return
+    }
+    // Back from the notice, the remote lands on the row that opened it.
+    LaunchedEffect(Unit) { if (reviewedNotice) noticeFocus.tryFocus() else railFocus.getValue(selected).requestFocus() }
 
     BackHandler {
         if (contentFocused) railFocus.getValue(selected).requestFocus() else onClose()
@@ -253,6 +267,8 @@ fun TvSettingsScreen(signedIn: Boolean, onClose: () -> Unit, initialSection: TvS
                             build = build,
                             screenScope = screenScope,
                             onClose = onClose,
+                            onReviewNotice = { reviewingNotice = true },
+                            noticeFocus = noticeFocus,
                         )
                     }
                 }
@@ -284,6 +300,8 @@ private fun SectionContent(
     build: AppBuild,
     screenScope: CoroutineScope,
     onClose: () -> Unit,
+    onReviewNotice: () -> Unit,
+    noticeFocus: FocusRequester,
 ) {
     when (section) {
         TvSection.ACCOUNT -> AccountSection(devices, refreshingSubscription, screenScope, onClose)
@@ -295,7 +313,7 @@ private fun SectionContent(
         TvSection.STARTUP -> StartupSection()
         TvSection.LANGUAGE -> LanguageSection()
         TvSection.APPEARANCE -> AppearanceSection()
-        TvSection.SUPPORT -> SupportSection()
+        TvSection.SUPPORT -> SupportSection(onReviewNotice, noticeFocus)
         TvSection.ABOUT -> AboutSection(build)
     }
 }
@@ -316,11 +334,7 @@ private fun railSummaries(refreshingSubscription: Boolean, build: AppBuild): Map
         TvSection.TRANSPORT to summaryText(SettingsSummary.transport(settings)),
         TvSection.PROVISIONING to summaryText(SettingsSummary.provisioning(settings)),
         TvSection.NETWORK to summaryText(SettingsSummary.network(settings)),
-        // Android's block switch, not iOS's "Strict", which names a mode this app does not have.
-        TvSection.KILL_SWITCH to stringResource(
-            if (systemVpn?.blockWithoutVpn == true) R.string.kill_switch_android_block_without_vpn
-            else R.string.kill_switch_always_on,
-        ),
+        TvSection.KILL_SWITCH to summaryText(SettingsSummary.killSwitch(strict = systemVpn?.blockWithoutVpn == true)),
         TvSection.SPLIT_TUNNEL to summaryText(SettingsSummary.splitTunnel(prefs, excludedApps.size)),
         TvSection.STARTUP to summaryText(SettingsSummary.startup(prefs)),
         TvSection.LANGUAGE to summaryText(SettingsSummary.language(displayedLanguageTag())),
