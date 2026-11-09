@@ -34,7 +34,7 @@ import org.pangeavpn.mobile.Mobile
 import org.pangeavpn.mobile.SocketProtector
 import org.pangeavpn.mobile.StatusSink
 
-private const val POLL_INTERVAL_MS = 2_000L
+private const val POLL_INTERVAL_MS = 1_000L
 
 /** Kotlin-side wrapper over the gomobile `Mobile` API. Single instance for the process. */
 object TunnelBridge : StatusSink {
