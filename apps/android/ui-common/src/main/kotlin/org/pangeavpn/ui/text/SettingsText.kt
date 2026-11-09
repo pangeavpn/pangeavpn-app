@@ -138,7 +138,7 @@ private fun summaryPartText(part: SummaryPart): String = when (part) {
         when (part) {
             SummaryPart.Flag.ALLOW_LAN -> R.string.settings_network_allowlan_title
             SummaryPart.Flag.POST_QUANTUM -> R.string.network_summary_pq
-            SummaryPart.Flag.KILL_SWITCH_STRICT -> R.string.kill_switch_summary_strict
+            SummaryPart.Flag.KILL_SWITCH_STRICT -> R.string.kill_switch_android_block_without_vpn
             SummaryPart.Flag.KILL_SWITCH_ALWAYS_ON -> R.string.kill_switch_always_on
             SummaryPart.Flag.NOTHING_EXCLUDED -> R.string.split_tunnel_summary_empty
             SummaryPart.Flag.AUTO_CONNECT -> R.string.startup_auto_connect_title
