@@ -100,10 +100,11 @@ jobs:
       - name: Install the NDK
         run: sdkmanager --install "ndk;${{ env.ANDROID_NDK }}"
 
+      # Inside daemon/ so the CLI is the version go.mod pins, the one the bind links.
       - name: Install gomobile
+        working-directory: daemon
         run: |
-          go install golang.org/x/mobile/cmd/gomobile@latest
-          go install golang.org/x/mobile/cmd/gobind@latest
+          go install golang.org/x/mobile/cmd/gomobile golang.org/x/mobile/cmd/gobind
           gomobile init
 
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
@@ -136,12 +137,28 @@ jobs:
           gomobile bind -target=android -androidapi ${{ env.ANDROID_API }} \
             -javapkg=org.pangeavpn \
             -tags=${{ steps.naive.outputs.tags }} \
-            -ldflags=-checklinkname=0 \
+            '-ldflags=-checklinkname=0 -extldflags=-Wl,-z,max-page-size=16384' \
             -o ../apps/android/core/libs/pangeacore.aar \
             ./mobile
 
       - name: Fail if the AAR is missing
         run: test -s apps/android/core/libs/pangeacore.aar
+
+      # Play refuses native code that 16 KB page devices cannot load.
+      - name: Native libraries are 16 KB aligned
+        run: |
+          readelf="$ANDROID_HOME/ndk/${{ env.ANDROID_NDK }}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"
+          dir=$(mktemp -d)
+          unzip -q -o apps/android/core/libs/pangeacore.aar 'jni/*' -d "$dir"
+          status=0
+          for so in "$dir"/jni/*/*.so; do
+            if "$readelf" -lW "$so" | awk '$1 == "LOAD" && $NF != "0x4000" && $NF != "0x10000" { bad = 1 } END { exit bad }'; then
+              echo "ok  $so"
+            else
+              echo "::error::$so has a LOAD segment aligned below 16 KB"; status=1
+            fi
+          done
+          exit $status
 
       - uses: gradle/actions/setup-gradle@48b5f213c81028ace310571dc5ec0fbbca0b2947 # v4
 
@@ -153,10 +170,37 @@ jobs:
         working-directory: apps/android
         run: ./gradlew --no-daemon :app-mobile:assembleDebug :app-tv:assembleDebug
 
-      # Unsigned, but it is the only place R8 runs, so a missing keep shows here.
-      - name: Assemble release APKs
+      - name: Lint
         working-directory: apps/android
-        run: ./gradlew --no-daemon :app-mobile:assembleRelease :app-tv:assembleRelease
+        run: ./gradlew --no-daemon :app-mobile:lintRelease :app-tv:lintRelease
+
+      # Signed only where the keystore secrets exist (pushes, not forks' PRs).
+      - name: Release signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "::notice::no signing secrets; release builds stay unsigned"
+            exit 0
+          fi
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d >"$RUNNER_TEMP/pangea-release.jks"
+          {
+            echo "PANGEA_KEYSTORE_FILE=$RUNNER_TEMP/pangea-release.jks"
+            echo "PANGEA_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD"
+            echo "PANGEA_KEY_ALIAS=$KEY_ALIAS"
+            echo "PANGEA_KEY_PASSWORD=$KEY_PASSWORD"
+          } >>"$GITHUB_ENV"
+
+      # The only place R8 runs, so a missing keep shows here. Two runs: the per-ABI
+      # APK split is off whenever a bundle task is requested.
+      - name: Assemble release APKs and bundles
+        working-directory: apps/android
+        run: |
+          ./gradlew --no-daemon :app-mobile:assembleRelease :app-tv:assembleRelease
+          ./gradlew --no-daemon :app-mobile:bundleRelease :app-tv:bundleRelease
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
@@ -165,6 +209,18 @@ jobs:
           path: |
             apps/android/app-mobile/build/outputs/apk/debug/*.apk
             apps/android/app-tv/build/outputs/apk/debug/*.apk
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: android-release
+          if-no-files-found: error
+          path: |
+            apps/android/app-mobile/build/outputs/apk/release/*.apk
+            apps/android/app-tv/build/outputs/apk/release/*.apk
+            apps/android/app-mobile/build/outputs/bundle/release/*.aab
+            apps/android/app-tv/build/outputs/bundle/release/*.aab
+            apps/android/app-mobile/build/outputs/mapping/release/mapping.txt
+            apps/android/app-tv/build/outputs/mapping/release/mapping.txt
 
   strings:
     name: Localization is in sync
