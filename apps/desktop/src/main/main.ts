@@ -251,6 +251,8 @@ function watchDisplayChanges(): void {
   screen.on("display-metrics-changed", reanchor);
 }
 
+const macPopover = anchoredWindow && process.platform === "darwin";
+
 function createWindow(): void {
   // Without an anchor the window is on its own in the window list, so it needs a
   // frame to move and close by, a taskbar entry, and an icon to be known by.
@@ -266,6 +268,9 @@ function createWindow(): void {
     resizable: false,
     skipTaskbar: anchoredWindow,
     alwaysOnTop: anchoredWindow,
+    // An NSPanel can join another app's fullscreen Space; a plain window can't,
+    // so opening the popover from there used to throw the user back to the desktop.
+    ...(macPopover ? { type: "panel" } : {}),
     show: false,
     ...(windowIconPath ? { icon: windowIconPath } : {}),
     webPreferences: {
@@ -276,6 +281,12 @@ function createWindow(): void {
       preload: path.join(__dirname, "preload.js")
     }
   });
+
+  if (macPopover) {
+    // Show on whichever Space is current, fullscreen ones included. Skipping the
+    // process-type transform keeps the Dock icon from blinking out.
+    mainWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
+  }
 
   mainWindow.loadFile(path.join(__dirname, "../renderer/index.html")).catch((err) => {
     console.error("failed to load renderer:", err);
