@@ -1,3 +1,4 @@
+import { createHash, createHmac, randomBytes } from "node:crypto";
 import http from "node:http";
 
 import type {
@@ -56,15 +57,19 @@ export class DaemonClient implements PostQuantumProvider {
   private readonly defaultRequestTimeoutMs: number;
   private readonly connectTimeoutMs: number;
   private readonly disconnectTimeoutMs: number;
+  private readonly signRequests: boolean;
 
   constructor(
     baseUrl: string,
     tokenProvider: () => Promise<string | string[]>,
-    options?: { defaultRequestTimeoutMs?: number }
+    options?: { defaultRequestTimeoutMs?: number; signRequests?: boolean }
   ) {
     this.baseUrl = baseUrl;
     this.tokenProvider = tokenProvider;
     this.defaultRequestTimeoutMs = options?.defaultRequestTimeoutMs ?? 5000;
+    // Any interactive Windows user can already read the token, so a bearer
+    // header leaks nothing there and keeps working against an older daemon.
+    this.signRequests = options?.signRequests ?? process.platform !== "win32";
     // Auto mode can spend 10s proving each configured transport end-to-end.
     this.connectTimeoutMs = 120000;
     this.disconnectTimeoutMs = 45000;
@@ -351,6 +356,7 @@ export class DaemonClient implements PostQuantumProvider {
       throw new Error("daemon token not found");
     }
 
+    const payload = body === undefined ? undefined : JSON.stringify(body);
     for (const token of tokens) {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs ?? this.defaultRequestTimeoutMs);
@@ -365,9 +371,11 @@ export class DaemonClient implements PostQuantumProvider {
           route,
           {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`
+            Authorization: this.signRequests
+              ? signedAuthorization(token, method, route, payload ?? "")
+              : `Bearer ${token}`
           },
-          body === undefined ? undefined : JSON.stringify(body),
+          payload,
           controller.signal
         );
 
@@ -407,4 +415,13 @@ export class DaemonClient implements PostQuantumProvider {
 
     throw new Error("daemon unauthorized (token mismatch)");
   }
+}
+
+// Must match requestSignature in daemon/internal/auth/middleware.go.
+export function signedAuthorization(token: string, method: string, route: string, body: string): string {
+  const ts = String(Date.now());
+  const nonce = randomBytes(16).toString("hex");
+  const bodyHash = createHash("sha256").update(body).digest("hex");
+  const sig = createHmac("sha256", token).update(`${method}\n${route}\n${ts}\n${nonce}\n${bodyHash}`).digest("hex");
+  return `Pangea-HMAC ts=${ts},nonce=${nonce},sig=${sig}`;
 }

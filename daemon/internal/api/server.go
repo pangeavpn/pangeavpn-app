@@ -307,7 +307,7 @@ func serviceErrorResponse(err error) okResponse {
 // withAuthAndLimit authenticates first, then rate-limits: an unauthenticated
 // caller never spends a token from the shared bucket the real UI depends on.
 func withAuthAndLimit(token string, limiter *rateLimiter, handler http.HandlerFunc) http.Handler {
-	return auth.RequireBearer(token, rateLimitMiddleware(limiter, handler))
+	return auth.RequireToken(token, rateLimitMiddleware(limiter, handler))
 }
 
 func NewHandler(token string, service *Service) http.Handler {

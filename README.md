@@ -158,7 +158,7 @@ On a normal connection all four steps finish in well under a second.
 Three components live in one repo:
 
 - **`apps/desktop`**: Electron and TypeScript, with vanilla HTML/CSS and no framework. The sandbox is on, context isolation is on, and the renderer has no Node access.
-- **`daemon`**: a Go HTTP daemon on `127.0.0.1:8787` with Bearer token auth, rate limiting, a 1 MB body cap and sanitised errors. It owns the state machine and the in-process WireGuard and transport managers.
+- **`daemon`**: a Go HTTP daemon on `127.0.0.1:8787` with token auth, rate limiting, a 1 MB body cap and sanitised errors. It owns the state machine and the in-process WireGuard and transport managers.
 - **`packages/shared-types`**: the Zod schemas shared between Electron and the daemon-facing TypeScript.
 
 [docs/architecture.md](docs/architecture.md) goes into the details.
@@ -206,7 +206,7 @@ The desktop app never falls back to `/v1/secure`: until the daemon can encapsula
 
 ### Daemon hardening
 
-- Every endpoint except `/ping` needs the Bearer token
+- Every endpoint except `/ping` needs the token. On macOS and Linux the app never sends it: each request carries an HMAC of its method, path, body, timestamp and nonce, so whatever grabs the port while the daemon restarts gets nothing reusable
 - The token file is `0600`, machine-scoped (`%ProgramData%`) for the Windows service and user-scoped elsewhere
 - Token-bucket rate limit (2000 burst, refilling at about 33/s), a 1 MB request cap, and sanitised error messages
 - It listens on loopback only and never binds a network interface. Requests with a non-loopback `Host` or `Origin` are refused, so a web page can't reach it
@@ -260,7 +260,7 @@ apps/desktop/           Electron app (TypeScript, vanilla HTML/CSS)
 daemon/                 Go daemon
   cmd/daemon/           Entry point + Windows service host
   internal/api/         HTTP handlers (rate-limited, sanitised)
-  internal/auth/        Bearer token management
+  internal/auth/        Token management and request auth
   internal/state/       State machine, config store, log store
   internal/cloak/       In-process Cloak runtime
   internal/naive/       NaiveProxy transport (cgo)

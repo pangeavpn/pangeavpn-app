@@ -77,7 +77,7 @@ test("DaemonClient falls through a stale token to a working one", async (t) => {
     res.end(JSON.stringify({ state: "disconnected" }));
   });
 
-  const client = new DaemonClient(baseUrl, async () => ["stale", "good"]);
+  const client = new DaemonClient(baseUrl, async () => ["stale", "good"], { signRequests: false });
   const status = await client.getStatus();
   assert.equal(status.state, "disconnected");
 });
