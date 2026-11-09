@@ -15,15 +15,20 @@ val pangeaVersionName: String = run {
     match.groupValues[1]
 }
 
-// Monotonic while minor and patch stay under 100: 0.5.2 -> 502.
+// 0.8.3 -> 803099, 0.8.3-rc.2 -> 803002, 0.7.4.1 -> 704199: a release candidate
+// sorts under its final, which the old major*10000 + minor*100 + patch could not do.
 val pangeaVersionCode: Int = run {
-    val parts = pangeaVersionName.substringBefore('-').split('.')
-    val part = { index: Int -> parts.getOrNull(index)?.toIntOrNull() ?: 0 }
-    part(0) * 10000 + part(1) * 100 + part(2)
+    val match = Regex("""^(\d+)\.(\d{1,2})\.(\d{1,2})(?:\.(\d))?(?:-rc\.(\d{1,2}))?$""").matchEntire(pangeaVersionName)
+        ?: error("version \"$pangeaVersionName\" has no versionCode: expected X.Y.Z, X.Y.Z.W or either with -rc.N")
+    val (major, minor, patch, fourth, candidate) = match.destructured
+    val build = candidate.toIntOrNull()?.also { require(it in 1..98) { "rc number must be 1 to 98" } } ?: 99
+    major.toInt() * 10_000_000 + minor.toInt() * 100_000 + patch.toInt() * 1_000 +
+        (fourth.toIntOrNull() ?: 0) * 100 + build
 }
 
 extra["pangeaVersionName"] = pangeaVersionName
 extra["pangeaVersionCode"] = pangeaVersionCode
+extra["pangeaWebBilling"] = providers.gradleProperty("pangea.webBilling").orNull == "true"
 
 // Release signing comes from a gitignored keystore.properties, or from the
 // environment on CI. Absent, release builds stay unsigned rather than failing.

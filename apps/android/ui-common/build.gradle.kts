@@ -6,7 +6,7 @@ plugins {
 
 android {
     namespace = "org.pangeavpn.ui"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         minSdk = 24
@@ -32,6 +32,8 @@ dependencies {
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.material3)
     implementation(libs.compose.foundation)
+    // api: the screens draw their own icons from the same set; R8 keeps only those used.
+    api(libs.compose.material.icons)
     // The drift map cross-fades its tint through Transition.animateColor.
     implementation(libs.compose.animation)
 }
