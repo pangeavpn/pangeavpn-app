@@ -6,259 +6,247 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.net.VpnService
 import android.os.Build
-import android.os.ParcelFileDescriptor
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import org.pangeavpn.core.model.ConnState
-import org.pangeavpn.core.model.TunnelStatus
+import org.pangeavpn.core.tunnel.StartRequest
+import org.pangeavpn.core.tunnel.SystemVpnState
+import org.pangeavpn.core.tunnel.TunnelFailure
+import org.pangeavpn.core.tunnel.TunnelLifecycle
+import org.pangeavpn.core.tunnel.TunnelView
 import org.pangeavpn.core.util.runCatchingCancellable
 
+private const val TAG = "PangeaVpnService"
 private const val CHANNEL_ID = "vpn"
 private const val NOTIFICATION_ID = 1
 
-private const val BLACKHOLE_ADDRESS_V6 = "fd00::1"
-private const val BLACKHOLE_PREFIX_V6 = 128
-
-private const val REBUILD_SETTLE_MS = 1_500L
-private const val REBUILD_RETRY_MS = 3_000L
-private const val REBUILD_ATTEMPTS = 3
-
 class PangeaVpnService : VpnService() {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    internal lateinit var lifecycle: TunnelLifecycle
+    private var foreground = false
+    private var lastStartId = 0
 
-    private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
-    private var activeFd: ParcelFileDescriptor? = null
-    private var activeServerId: String? = null
-    private var rebuildJob: Job? = null
-    @Volatile private var foregroundActive = false
+    // Only what the notification shows, so byte counters never re-post it.
+    private data class Card(val state: ConnState, val serverName: String, val lockdown: Boolean)
 
     override fun onCreate() {
         super.onCreate()
         TunnelBridge.init(this)
         TunnelBridge.protector = { fd -> protect(fd.toInt()) }
-        watchNetwork()
-
+        lifecycle = TunnelLifecycle(this)
+        instance = this
         scope.launch {
-            TunnelBridge.status.collect { status ->
-                if (foregroundActive) {
-                    notificationManager().notify(NOTIFICATION_ID, buildNotification(status))
-                }
-            }
+            combine(TunnelBridge.status, AppPrefs.state) { status, prefs ->
+                Card(status.state, status.serverName, prefs.lockdown)
+            }.distinctUntilChanged().collect { if (foreground) post(it) }
         }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        lastStartId = startId
         when (intent?.action) {
+            ACTION_DISCONNECT -> lifecycle.stop()
             ACTION_CONNECT -> {
-                val serverId = intent.getStringExtra(EXTRA_SERVER_ID)
-                if (serverId.isNullOrEmpty()) return START_NOT_STICKY
-                beginForeground()
-                startTunnel(serverId)
+                AppPrefs.update { it.copy(tunnelWanted = true) }
+                val serverId = intent?.getStringExtra(EXTRA_SERVER_ID).orEmpty()
+                val candidates = intent?.getStringArrayListExtra(EXTRA_CANDIDATES).orEmpty()
+                lifecycle.start(StartRequest(serverId, candidates))
+                goForeground()
             }
-            ACTION_DISCONNECT -> stopTunnel()
+            VpnService.SERVICE_INTERFACE, null -> systemStart(restart = intent == null, startId = startId)
         }
-        return START_NOT_STICKY
+        refreshSystemVpn()
+        return if (AppPrefs.value.tunnelWanted) START_STICKY else START_NOT_STICKY
     }
 
-    private fun beginForeground() {
-        ensureChannel()
-        foregroundActive = true
-        startForeground(NOTIFICATION_ID, buildNotification(TunnelBridge.status.value))
-    }
-
-    private fun startTunnel(serverId: String) {
-        activeServerId = serverId
-        scope.launch {
-            try {
-                establish(serverId)
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                TunnelBridge.setError(e.message ?: "connection failed")
-                endForeground()
-                stopSelf()
-            }
+    // Always-on, boot or a sticky restart: the core's last server, with traffic held until it answers.
+    private fun systemStart(restart: Boolean, startId: Int) {
+        if (restart && !AppPrefs.value.tunnelWanted) {
+            stopSelf(startId)
+            return
         }
+        if (!lifecycle.active) lifecycle.start(null)
+        goForeground()
     }
 
-    private suspend fun establish(serverId: String) {
-        val config = TunnelBridge.prepare(serverId)
-        val settings = TunnelBridge.getSettings()
-        val builder = Builder()
-            .setSession("PangeaVPN")
-            .addAddress(config.address, config.prefixLength)
-        tunnelRoutes(settings.allowLan).forEach { builder.addRoute(it.address, it.prefixLength) }
-        builder.blackholeIpv6(settings.allowLan)
-        config.dns.forEach { builder.addDnsServer(it) }
-        builder.setMtu(config.mtu)
-        builder.setBlocking(false)
-        applySplitTunnel(builder)
-
-        val pfd = builder.establish() ?: error("VPN permission not granted")
-        activeFd?.close()
-        activeFd = pfd
-
-        TunnelBridge.start(pfd.detachFd().toLong())
-    }
-
-    /** The underlay moved, so the transport's socket is dead even though the
-     *  UI still reads connected. Rebuild over the network that replaced it. */
-    private fun watchNetwork() {
-        scope.launch {
-            NetworkMonitor(this@PangeaVpnService).changes().collect {
-                if (activeServerId != null) rebuild()
-            }
-        }
-    }
-
-    private fun rebuild() {
-        rebuildJob?.cancel()
-        rebuildJob = scope.launch {
-            // Settling first: a handover reports several times before it lands.
-            delay(REBUILD_SETTLE_MS)
-            val serverId = activeServerId ?: return@launch
-            for (attempt in 1..REBUILD_ATTEMPTS) {
-                withContext(NonCancellable) { runCatchingCancellable { TunnelBridge.stop() } }
-                val rebuilt = runCatchingCancellable { establish(serverId) }
-                if (rebuilt.isSuccess) return@launch
-                if (attempt < REBUILD_ATTEMPTS) delay(REBUILD_RETRY_MS * attempt)
-            }
-            TunnelBridge.setError("could not reconnect after the network changed")
-        }
-    }
-
-    /** Address and routes go in together or not at all: routes alone send IPv6
-     *  around the tunnel, and a device with IPv6 off rejects the address. */
-    private fun Builder.blackholeIpv6(allowLan: Boolean) {
-        val added = runCatching { addAddress(BLACKHOLE_ADDRESS_V6, BLACKHOLE_PREFIX_V6) }
-        if (added.isFailure) return
-        tunnelRoutesV6(allowLan).forEach { route -> addRoute(route.address, route.prefixLength) }
-    }
-
-    /** A package that has since been uninstalled throws, and would otherwise
-     *  block every connect until the user found the stale entry. */
-    private fun applySplitTunnel(builder: Builder) {
-        val excluded = SplitTunnelStore(this).excluded()
-        if (excluded.isEmpty()) return
-        val stillInstalled = mutableSetOf<String>()
-        for (packageName in excluded) {
-            runCatching { builder.addDisallowedApplication(packageName) }
-                .onSuccess { stillInstalled.add(packageName) }
-        }
-        if (stillInstalled.size != excluded.size) {
-            SplitTunnelStore(this).setExcluded(stillInstalled)
-        }
-    }
-
-    /** stopSelf only after the core has released the tunnel: onDestroy cancels
-     *  this scope, so stopping first could cancel the stop mid-flight. */
-    private fun stopTunnel() {
-        activeServerId = null
-        rebuildJob?.cancel()
-        scope.launch {
-            withContext(NonCancellable) { runCatchingCancellable { TunnelBridge.stop() } }
-            activeFd?.close()
-            activeFd = null
-            endForeground()
-            stopSelf()
-        }
-    }
-
-    private fun endForeground() {
-        foregroundActive = false
-        ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
-    }
-
+    // Another VPN took over or the user turned this one off in Settings: a user stop.
     override fun onRevoke() {
-        stopTunnel()
-        super.onRevoke()
+        lifecycle.stop()
     }
 
     override fun onDestroy() {
+        instance = null
+        _systemVpnState.value = null
+        lifecycle.release()
         TunnelBridge.protector = { true }
-        activeFd?.close()
-        activeFd = null
         scope.cancel()
         super.onDestroy()
     }
 
-    private fun notificationManager() = getSystemService(NotificationManager::class.java)
+    /** The lifecycle's teardown is done: leave the foreground and stop, unless a newer start arrived. */
+    internal fun finished() {
+        foreground = false
+        ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+        stopSelf(lastStartId)
+    }
+
+    internal fun refreshSystemVpn() {
+        _systemVpnState.value =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) SystemVpnState(isAlwaysOn, isLockdownEnabled) else null
+    }
+
+    private fun goForeground() {
+        ensureChannel()
+        val notification = buildNotification(currentCard())
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                ServiceCompat.startForeground(
+                    this,
+                    NOTIFICATION_ID,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_SYSTEM_EXEMPTED,
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+            foreground = true
+        } catch (e: RuntimeException) {
+            Log.w(TAG, "could not enter the foreground", e)
+        }
+    }
+
+    private fun currentCard(): Card {
+        val status = TunnelBridge.status.value
+        return Card(status.state, status.serverName, AppPrefs.value.lockdown)
+    }
+
+    private fun post(card: Card) {
+        getSystemService(NotificationManager::class.java)?.notify(NOTIFICATION_ID, buildNotification(card))
+    }
 
     private fun ensureChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val name = getString(R.string.notification_channel_name)
-            val channel = NotificationChannel(CHANNEL_ID, name, NotificationManager.IMPORTANCE_LOW)
-            notificationManager().createNotificationChannel(channel)
-        }
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val name = getString(R.string.notification_channel_name)
+        val channel = NotificationChannel(CHANNEL_ID, name, NotificationManager.IMPORTANCE_LOW)
+        getSystemService(NotificationManager::class.java)?.createNotificationChannel(channel)
     }
 
-    /** Resolved from the package rather than a class literal, so the phone and
-     *  TV apps each open their own launcher activity from one service. */
-    private fun openAppIntent(): PendingIntent? {
-        val launch = packageManager.getLaunchIntentForPackage(packageName) ?: return null
-        // Pinned to our own package so the PendingIntent can never resolve
-        // anywhere else, whatever the launcher intent came back as.
-        launch.setPackage(packageName)
-        launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-        return PendingIntent.getActivity(
-            this,
-            0,
-            launch,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
-    }
-
-    private fun buildNotification(status: TunnelStatus): Notification {
-        val title = when (status.state) {
-            ConnState.CONNECTED -> getString(R.string.notification_connected)
-            ConnState.CONNECTING -> getString(R.string.notification_connecting)
-            ConnState.DISCONNECTING -> getString(R.string.notification_disconnecting)
-            ConnState.ERROR -> getString(R.string.notification_error)
-            ConnState.DISCONNECTED -> getString(R.string.notification_disconnected)
+    private fun buildNotification(card: Card): Notification {
+        val title = when (card.state) {
+            ConnState.CONNECTED -> R.string.notification_connected
+            ConnState.CONNECTING -> R.string.notification_connecting
+            ConnState.DISCONNECTING -> R.string.notification_disconnecting
+            ConnState.ERROR -> R.string.notification_error
+            ConnState.DISCONNECTED -> R.string.notification_disconnected
         }
-        val disconnectIntent = PendingIntent.getService(
-            this,
-            0,
-            Intent(this, PangeaVpnService::class.java).setAction(ACTION_DISCONNECT),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
-        return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle(title)
+        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle(getString(title))
+            .setContentText(card.serverName.ifEmpty { null })
             .setSmallIcon(R.drawable.ic_stat_pangea)
-            .setContentIntent(openAppIntent())
+            .setContentIntent(openAppIntent(this))
             .setOngoing(true)
+            .setOnlyAlertOnce(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
-            .addAction(0, getString(R.string.notification_disconnect), disconnectIntent)
-            .build()
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
+        // Lockdown hides Disconnect, as it does in the app.
+        if (!card.lockdown) {
+            val stop = PendingIntent.getService(
+                this,
+                0,
+                Intent(this, PangeaVpnService::class.java).setAction(ACTION_DISCONNECT),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+            builder.addAction(0, getString(R.string.notification_disconnect), stop)
+        }
+        return builder.build()
     }
 
     companion object {
         const val ACTION_CONNECT = "org.pangeavpn.core.action.CONNECT"
         const val ACTION_DISCONNECT = "org.pangeavpn.core.action.DISCONNECT"
         const val EXTRA_SERVER_ID = "org.pangeavpn.core.extra.SERVER_ID"
+        const val EXTRA_CANDIDATES = "org.pangeavpn.core.extra.CANDIDATES"
 
-        fun connect(context: Context, serverId: String) {
+        private val main = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+
+        // Set from onCreate to onDestroy; the service shares the app's process.
+        @Volatile private var instance: PangeaVpnService? = null
+
+        private val _systemVpnState = MutableStateFlow<SystemVpnState?>(null)
+
+        /** Android's Always-on VPN and "Block connections without VPN"; null below API 29 or with no service. */
+        val systemVpnState: StateFlow<SystemVpnState?> = _systemVpnState.asStateFlow()
+
+        fun connect(context: Context, serverId: String, candidates: List<String> = emptyList()) {
             val intent = Intent(context, PangeaVpnService::class.java)
                 .setAction(ACTION_CONNECT)
                 .putExtra(EXTRA_SERVER_ID, serverId)
-            ContextCompat.startForegroundService(context, intent)
+                .putStringArrayListExtra(EXTRA_CANDIDATES, ArrayList(candidates))
+            try {
+                ContextCompat.startForegroundService(context, intent)
+            } catch (e: IllegalStateException) {
+                // Android refused a start from the background, so nothing will run and the start ends here.
+                Log.w(TAG, "the VPN service could not be started", e)
+                val failure = TunnelFailure.CONNECT_FAILED
+                TunnelBridge.show(TunnelView(ConnState.ERROR, context.getString(failure.messageRes), failure))
+            }
         }
 
+        /** Safe with no service running: then it only makes sure the core holds no tunnel. */
         fun disconnect(context: Context) {
-            val intent = Intent(context, PangeaVpnService::class.java).setAction(ACTION_DISCONNECT)
-            ContextCompat.startForegroundService(context, intent)
+            val service = instance
+            if (service != null) {
+                main.launch { service.lifecycle.stop() }
+                return
+            }
+            TunnelBridge.init(context)
+            AppPrefs.update { it.copy(tunnelWanted = false) }
+            TunnelBridge.show(TunnelView(ConnState.DISCONNECTED))
+            main.launch { runCatchingCancellable { TunnelBridge.stop() } }
+        }
+
+        /** Moves a running tunnel in place. False when there is no tunnel to move. */
+        fun switchTo(serverId: String, candidates: List<String>): Boolean {
+            val service = instance ?: return false
+            if (!service.lifecycle.active) return false
+            main.launch { service.lifecycle.switchServer(serverId, candidates) }
+            return true
+        }
+
+        internal fun startFromBoot(context: Context) {
+            val intent = Intent(context, PangeaVpnService::class.java).setAction(VpnService.SERVICE_INTERFACE)
+            runCatching { ContextCompat.startForegroundService(context, intent) }
+                .onFailure { Log.w(TAG, "the VPN service could not be started at boot", it) }
         }
     }
+}
+
+// Resolved from the package, so the phone and TV apps each open their own launcher activity,
+// and pinned to it, so the PendingIntent can never resolve anywhere else.
+internal fun openAppIntent(context: Context): PendingIntent? {
+    val launch = context.packageManager.getLaunchIntentForPackage(context.packageName) ?: return null
+    launch.setPackage(context.packageName)
+    launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+    return PendingIntent.getActivity(
+        context,
+        0,
+        launch,
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+    )
 }

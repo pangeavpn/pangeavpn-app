@@ -5,8 +5,7 @@ import java.math.BigInteger
 /** One route in CIDR form, either family. */
 data class Route(val address: String, val prefixLength: Int)
 
-/** Ranges kept out of the tunnel when Allow LAN is on: RFC1918 plus link-local,
- *  so routers, printers and captive portals stay reachable. */
+/** Kept out of the tunnel when Allow LAN is on: RFC1918 plus link-local, so routers and printers stay reachable. */
 val LAN_RANGES = listOf(
     Route("10.0.0.0", 8),
     Route("172.16.0.0", 12),
@@ -23,30 +22,19 @@ val LAN_RANGES_V6 = listOf(
 private val DEFAULT_ROUTE = Route("0.0.0.0", 0)
 private val DEFAULT_ROUTE_V6 = Route("::", 0)
 
-/**
- * The routes to install in the tunnel. Android has no "exclude this range", so
- * bypassing the LAN means installing the complement of those ranges instead of
- * a single default route.
- */
-fun tunnelRoutes(allowLan: Boolean): List<Route> {
-    if (!allowLan) return listOf(DEFAULT_ROUTE)
-    return excludeRanges(DEFAULT_ROUTE, LAN_RANGES)
-}
+/** Android before 13 has no excluded routes, so a carve-out installs the complement of [carved]. */
+fun includedRoutes(carved: List<Route>): List<Route> =
+    if (carved.isEmpty()) listOf(DEFAULT_ROUTE) else excludeRanges(DEFAULT_ROUTE, carved)
 
-/**
- * The IPv6 routes. Nothing carries IPv6 yet, so these exist to capture it and
- * let WireGuard drop it — left uncaptured it would leave the device outside the
- * tunnel. See [PangeaVpnService] for why an address must accompany them.
- */
+fun tunnelRoutes(allowLan: Boolean): List<Route> = includedRoutes(if (allowLan) LAN_RANGES else emptyList())
+
+/** Nothing carries IPv6 yet: these capture it so the tunnel drops it instead of letting it leak. */
 fun tunnelRoutesV6(allowLan: Boolean): List<Route> {
     if (!allowLan) return listOf(DEFAULT_ROUTE_V6)
     return excludeRangesIn(IPV6, DEFAULT_ROUTE_V6, LAN_RANGES_V6)
 }
 
-/**
- * Splits base into the largest CIDR blocks that cover it without overlapping
- * any excluded range.
- */
+/** The largest CIDR blocks that cover base without overlapping any excluded range. */
 internal fun excludeRanges(base: Route, excluded: List<Route>): List<Route> =
     excludeRangesIn(IPV4, base, excluded)
 
@@ -88,20 +76,23 @@ private fun rangeToCidrs(family: IpFamily, start: BigInteger, end: BigInteger): 
         var prefix = family.bits
         // Grow the block while it stays aligned and still fits.
         while (prefix > 0) {
-            val size = BigInteger.TWO.pow(family.bits - (prefix - 1))
+            val size = powerOfTwo(family.bits - (prefix - 1))
             if (current.mod(size).signum() != 0 || current + size - BigInteger.ONE > end) break
             prefix -= 1
         }
         out += Route(family.format(current), prefix)
-        current += BigInteger.TWO.pow(family.bits - prefix)
+        current += powerOfTwo(family.bits - prefix)
     }
     return out
 }
 
 private fun Route.toRange(family: IpFamily): Pair<BigInteger, BigInteger> {
     val start = family.parse(address)
-    return start to (start + BigInteger.TWO.pow(family.bits - prefixLength) - BigInteger.ONE)
+    return start to (start + powerOfTwo(family.bits - prefixLength) - BigInteger.ONE)
 }
+
+// BigInteger.TWO only exists from Android 13; minSdk is 24.
+private fun powerOfTwo(exponent: Int): BigInteger = BigInteger.ONE.shiftLeft(exponent)
 
 internal fun ipToLong(address: String): Long =
     address.split(".").fold(0L) { acc, octet -> (acc shl 8) or (octet.toLong() and 0xFF) }
