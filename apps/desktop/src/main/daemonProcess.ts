@@ -6,6 +6,7 @@ import { app } from "electron";
 import { DaemonClient } from "./daemonClient";
 import { getBundledDaemonPath } from "./resourcePaths";
 import { ensureUserRuntimeFiles, getAppSupportDir, hasManagedLinuxDaemonService } from "./platformPaths";
+import { macLaunchDaemonRestartCommand } from "./macLaunchDaemon";
 import { DaemonNotReadyError } from "./runtimeFiles";
 
 function openDaemonLogStdio(): ["ignore", number, number] | "ignore" {
@@ -564,7 +565,8 @@ function kickstartManagedMacLaunchDaemon(): { ok: boolean; message: string } {
   if (details.includes("could not find service") || details.includes("service does not exist")) {
     return {
       ok: false,
-      message: "Installed daemon service is missing. Reinstall PangeaVPN.pkg."
+      // Plist present but unloaded: the elevated restart re-registers it, so point there first.
+      message: "The VPN service isn't registered with macOS. Restart it to repair; if that fails, reinstall PangeaVPN.pkg."
     };
   }
   if (details.includes("not privileged") || details.includes("operation not permitted")) {
@@ -581,7 +583,7 @@ function kickstartManagedMacLaunchDaemon(): { ok: boolean; message: string } {
 }
 
 async function restartManagedMacLaunchDaemonElevated(): Promise<{ ok: boolean; message: string }> {
-  const shellCommand = `/bin/launchctl kickstart -k system/${macLaunchDaemonLabel}`;
+  const shellCommand = macLaunchDaemonRestartCommand(macLaunchDaemonLabel, macLaunchDaemonPlist);
   const appleScript = `do shell script ${appleScriptString(shellCommand)} with administrator privileges`;
   const result = await runProcess("osascript", ["-e", appleScript]);
   const output = combineOutput(result).trim();
