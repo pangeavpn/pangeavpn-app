@@ -41,7 +41,6 @@ import org.pangeavpn.ui.text.rangesErrorText
 
 @Composable
 fun SplitTunnelPage(onBack: () -> Unit) {
-    val error = networkPageError()
     var showApps by rememberSaveable { mutableStateOf(false) }
 
     if (showApps) {
@@ -49,12 +48,12 @@ fun SplitTunnelPage(onBack: () -> Unit) {
         BackHandler { showApps = false }
         SplitTunnelAppList(onBack = { showApps = false })
     } else {
-        SplitTunnelSettings(error = error, onBack = onBack, onOpenApps = { showApps = true })
+        SplitTunnelSettings(onBack = onBack, onOpenApps = { showApps = true })
     }
 }
 
 @Composable
-private fun SplitTunnelSettings(error: String?, onBack: () -> Unit, onOpenApps: () -> Unit) {
+private fun SplitTunnelSettings(onBack: () -> Unit, onOpenApps: () -> Unit) {
     val prefs by AppPrefs.state.collectAsState()
     val excludedApps by SplitTunnelStore.excludedApps.collectAsState()
     val resources = LocalContext.current.resources
@@ -83,7 +82,6 @@ private fun SplitTunnelSettings(error: String?, onBack: () -> Unit, onOpenApps: 
         title = stringResource(R.string.settings_section_split_tunnel),
         onBack = onBack,
         description = stringResource(R.string.split_tunnel_page_description),
-        error = error,
     ) {
         SettingsGroup {
             StoreSwitchRow(
