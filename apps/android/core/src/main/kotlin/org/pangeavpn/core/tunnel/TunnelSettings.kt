@@ -70,6 +70,9 @@ internal object TunnelSettingsBuilder {
         builder.setBlocking(false)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) builder.setMetered(false)
         configure?.let { builder.setConfigureIntent(it) }
+        // Our own lookups (Relay and Normal hub methods) would hit the blocking TUN's dead resolver;
+        // the iOS tunnel provider is outside its tunnel the same way. Always-on lockdown exempts us.
+        runCatching { builder.addDisallowedApplication(service.packageName) }
         // A package uninstalled since it was picked throws, and would otherwise block every connect.
         val kept = s.excludedApps.filterTo(LinkedHashSet<String>()) {
             runCatching { builder.addDisallowedApplication(it) }.isSuccess
