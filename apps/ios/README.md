@@ -49,8 +49,8 @@ gomobile bind -target=ios,iossimulator -iosversion=17.0 \
   ./mobile
 ```
 
-The tags and ldflags are the Android AAR's; `apps/android/README.md` explains
-both. The module is named after the output file, so Swift does
+The tags and `-checklinkname=0` are the Android AAR's; `apps/android/README.md`
+explains both. Its 16 KB page-size flag is ELF-only and does not apply here. The module is named after the output file, so Swift does
 `import Pangeacore`, and Go functions appear as `Mobile*` C functions.
 The framework is static: it is linked, never embedded. Re-run whenever
 `daemon/mobile` changes.

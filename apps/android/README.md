@@ -15,20 +15,28 @@ with `gomobile` — WireGuard-inside-Cloak runs in-process, identical to desktop
 | `app-tv` | Android TV app (`org.pangeavpn.tv`), D-pad / leanback. |
 
 The Go layer exposes a JSON API (`Login`, `ListServers`, `Prepare`, `Start(fd)`,
-`Stop`, `State`, …) plus three callbacks: `SocketProtector` (VpnService.protect),
-`StatusSink` (state pushes), `SecretStore` (encrypted persistence). See
-`daemon/mobile/mobile.go`.
+`Stop`, `State`, …) plus four callbacks: `SocketProtector` (VpnService.protect),
+`StatusSink` (state pushes), `SecretStore` (encrypted persistence) and
+`NetworkKeyProvider` (which network the device is on). See `daemon/mobile/mobile.go`.
+
+The iOS app is the behavioural reference: `core` ports its stores
+(`data/*Repository`, `session/`, `servers/`, `connection/`, `settings/`, `tunnel/`)
+with the same rules and timings, and the screens follow its views.
 
 ## Prerequisites
 
-- Android SDK (compileSdk 35) + platform-tools
-- Android NDK r30 (`ANDROID_NDK` in `.github/workflows/build-android.yml`). Older
-  NDKs are fine until you link the naive engine, whose libc++abi carries PAuth
-  relocations r27's lld rejects.
-- JDK 17
-- Go 1.25+ and `gomobile`:
+- Android SDK platform 36 + build-tools 35 + platform-tools (AGP installs the
+  first two on demand once the licences are accepted)
+- Android NDK r28 or newer (CI uses r30, `ANDROID_NDK` in
+  `.github/workflows/build-android.yml`). r27 links the naive engine badly (its
+  libc++abi carries PAuth relocations r27's lld rejects) and, without the linker
+  flag below, aligns native code to 4 KB, which Play refuses.
+- JDK 17 or newer
+- Go 1.26+ and `gomobile`, installed from `daemon/` so the CLI matches the
+  `golang.org/x/mobile` version `go.mod` pins:
   ```bash
-  go install golang.org/x/mobile/cmd/gomobile@latest
+  cd daemon
+  go install golang.org/x/mobile/cmd/gomobile golang.org/x/mobile/cmd/gobind
   gomobile init
   ```
 - `local.properties` with `sdk.dir` (and `ndk.dir` if not auto-detected)
@@ -41,10 +49,14 @@ From `daemon/`, the Go module root:
 
 ```bash
 gomobile bind -target=android -androidapi 24 -javapkg=org.pangeavpn \
-  -tags=with_utls -ldflags=-checklinkname=0 \
+  -tags=with_utls '-ldflags=-checklinkname=0 -extldflags=-Wl,-z,max-page-size=16384' \
   -o ../apps/android/core/libs/pangeacore.aar \
   ./mobile
 ```
+
+`max-page-size=16384` aligns `libgojni.so` for 16 KB page devices, which Play
+requires for apps targeting API 35 and up. CI checks every `.so` with
+`llvm-readelf -lW` and fails on a `LOAD` segment aligned below 16 KB.
 
 `with_utls` is required too: without it sing-box compiles REALITY's client out,
 and AnyTLS falls back to Go's own ClientHello instead of Chrome's.
@@ -92,16 +104,31 @@ cd apps/android
 ./gradlew :app-tv:assembleRelease       # Android TV APK
 ```
 
-Debug: swap `assembleDebug`. Play App Bundle: `:app-mobile:bundleRelease`.
+Debug: swap `assembleDebug`. Play App Bundles: `:app-mobile:bundleRelease` and
+`:app-tv:bundleRelease`.
 
 Release builds run R8 (`isMinifyEnabled`). The gomobile boundary is bound by
 name over JNI, so its keeps live in `core/consumer-rules.pro`.
+
+`assembleRelease` writes one APK per ABI (`arm64-v8a`, `armeabi-v7a`,
+`x86_64`) plus a universal one, for direct download; bundles ignore the split.
+32-bit x86 native code is left out of everything.
+
+### Web billing links
+
+Play builds must not send people to buy elsewhere, so the apps show no link to
+the website's billing pages unless built with `-Ppangea.webBilling=true`, for
+channels outside Play. The flag reaches the code as `BuildConfig.WEB_BILLING`.
 
 ## Versioning
 
 `versionName` is read from the repo's root `package.json` by
 `apps/android/build.gradle.kts`, so the apps ride the desktop's version line.
-`versionCode` is derived from it (`0.5.2` → `502`); bump the version there.
+`versionCode` is derived from it: `major * 10000000 + minor * 100000 + patch * 1000
++ fourth * 100 + build`, where `build` is the rc number for `-rc.N` and 99 for a
+final, so `0.8.3-rc.2` is 803002 and `0.8.3` is 803099. A release candidate
+uploaded to a test track therefore never blocks its final. Any other version
+shape fails the build. Bump the version in `package.json`.
 
 ## Release signing
 
@@ -126,26 +153,52 @@ keytool -genkeypair -v -keystore pangea-release.jks -alias pangea \
   -keyalg RSA -keysize 4096 -validity 10000
 ```
 
+CI signs when these repository secrets exist, and uploads the release APKs,
+bundles and R8 mapping files as the `android-release` artifact:
+
+| Secret | What it is |
+|---|---|
+| `ANDROID_KEYSTORE_BASE64` | the `.jks` file, base64 |
+| `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD` | its credentials |
+
+With Play App Signing, this keystore is the upload key.
+
 ## Localization
 
-`strings.xml` for all 8 locales is generated from the desktop translations:
+`strings.xml` for all 8 locales is generated:
 
 ```bash
 node scripts/gen-android-strings.mjs
+node scripts/gen-ios-strings.mjs   # iOS reads the Android XML, so regenerate it too
 ```
 
-Edit the key map / mobile-only strings in that script, not the generated XML.
+Sources, in order: desktop keys mapped in `KEY_MAP`, the inline `MOBILE_ONLY`
+strings, every iOS string from `scripts/ios-strings/*.mjs` (bar the App Store
+ones), and the Android-only strings in `scripts/android-strings/*.mjs`, one file
+per feature area. Edit those, never the generated XML. A value starting with
+`@plural:` becomes a `<plurals>` resource.
+
+## Play Console
+
+- Declare the VpnService use and the `systemExempted` foreground service type.
+- Data safety: the same answers as the App Store label (data not collected).
+- Account deletion: in the app (Settings → Delete Account); for the web route,
+  give Play the dashboard at `https://pangeavpn.org/app`, which has a Delete
+  account button.
+- Phone apps must target API 36 (since 31 August 2026); TV apps 34.
 
 ## Notes
 
-- `minSdk 24` (maximizes Android TV coverage), `targetSdk 35`.
+- `minSdk 24` (maximizes Android TV coverage), `targetSdk 36`.
 - The kill switch is Android's system *Always-on VPN → Block connections without
-  VPN*; the app deep-links to it and keeps the TUN up across reconnects (fail-closed).
+  VPN*; the app deep-links to it. On its own the service fails closed: it keeps
+  its TUN up while it reconnects, waits out a lost network or switches servers,
+  and hands the core a `dup()` of the fd, so a core stop never removes it.
 - Only sockets that egress the real network are `protect()`ed; the WireGuard↔Cloak
   hop is loopback and isn't captured by the TUN.
 - Wi-Fi↔mobile handovers are rebuilt, not roamed. WireGuard survives a changed
   address but the TCP transport under it does not, so `NetworkMonitor` watches
   the non-VPN networks (via the same fingerprint the cascade keys its memory on)
-  and `PangeaVpnService` re-establishes over the network that replaced it. The
-  `NOT_VPN` capability keeps our own tunnel from registering as a change, and
-  the first emission is the baseline rather than a rebuild trigger.
+  and the service reconnects over the network that replaced it, with the iOS
+  debounce, backoff and liveness rules (`core/tunnel/`). The `NOT_VPN`
+  capability keeps our own tunnel from registering as a change.
