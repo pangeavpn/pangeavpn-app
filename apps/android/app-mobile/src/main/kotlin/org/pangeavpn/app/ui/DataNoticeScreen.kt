@@ -41,6 +41,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import org.pangeavpn.app.ui.settings.PRIVACY_URL
 import org.pangeavpn.core.session.DataNotice
 import org.pangeavpn.ui.R
 import org.pangeavpn.ui.components.IconAction
@@ -48,7 +49,6 @@ import org.pangeavpn.ui.components.PillButton
 import org.pangeavpn.ui.components.SectionLabel
 import org.pangeavpn.ui.theme.LocalTextSecondary
 
-private const val PRIVACY_URL = "https://pangeavpn.org/legal/privacy"
 private val Gutter = 20.dp
 private val ReadableWidth = 560.dp
 

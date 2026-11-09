@@ -44,6 +44,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.pangeavpn.app.BuildConfig
+import org.pangeavpn.app.ui.settings.BILLING_URL
 import org.pangeavpn.core.data.SessionRepository
 import org.pangeavpn.core.session.EXPIRED_CHECK_HOLD_MS
 import org.pangeavpn.core.session.ExpiredVerdict
@@ -56,8 +57,6 @@ import org.pangeavpn.ui.text.expiredRanOutText
 import org.pangeavpn.ui.text.expiredVerdictText
 import org.pangeavpn.ui.theme.LocalAppearance
 import org.pangeavpn.ui.theme.LocalTextSecondary
-
-private const val BILLING_URL = "https://pangeavpn.org/app/billing"
 
 // A restored plan removes the panel mid-check; the verdict toast must still land.
 private val panelScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)

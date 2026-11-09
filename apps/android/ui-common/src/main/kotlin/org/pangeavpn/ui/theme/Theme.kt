@@ -110,9 +110,6 @@ val LocalAppearance = staticCompositionLocalOf {
 /** --text-secondary has no Material slot, so it travels alongside the scheme. */
 val LocalTextSecondary = staticCompositionLocalOf { DarkOnSurfaceSecondary }
 
-/** LocalAppearance.current.toggle(), kept for the screens written before the controller. */
-val LocalThemeToggle = staticCompositionLocalOf<() -> Unit> { {} }
-
 /** Applies the Pangea palette with the stored theme and accent. Android TV reports no dark
  *  preference, so the TV app passes systemInDark = true to pin dark while the choice is System. */
 @Composable
@@ -127,13 +124,11 @@ fun PangeaTheme(
     val controller = remember(appearance, dark, store) {
         AppearanceController(appearance.theme, appearance.accent, dark, store)
     }
-    val toggle = remember(controller) { { controller.toggle() } }
     val colors = remember(appearance.accent, dark) { pangeaColors(dark, appearance.accent) }
 
     CompositionLocalProvider(
         LocalAppearance provides controller,
         LocalTextSecondary provides if (dark) DarkOnSurfaceSecondary else LightOnSurfaceSecondary,
-        LocalThemeToggle provides toggle,
     ) {
         MaterialTheme(
             colorScheme = colors,

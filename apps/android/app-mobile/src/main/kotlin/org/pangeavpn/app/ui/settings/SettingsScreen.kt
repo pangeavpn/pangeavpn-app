@@ -63,7 +63,6 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
-import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
@@ -138,8 +137,6 @@ fun SettingsScreen(signedIn: Boolean, initialRoute: SettingsRoute?, onClose: () 
     var path by rememberSaveable(stateSaver = PathSaver) { mutableStateOf(listOfNotNull(initialRoute)) }
     var refreshing by remember { mutableStateOf(account) }
     val prefs by AppPrefs.state.collectAsState()
-    val context = LocalContext.current
-    val focused = LocalWindowInfo.current.isWindowFocused
     val homeScroll = rememberScrollState()
     val railScroll = rememberScrollState()
 
@@ -152,9 +149,6 @@ fun SettingsScreen(signedIn: Boolean, initialRoute: SettingsRoute?, onClose: () 
     }
     LaunchedEffect(prefs.developerMode) {
         if (!prefs.developerMode) path = SettingsRoute.withoutDeveloper(path)
-    }
-    LaunchedEffect(focused) {
-        if (focused) AccountClipboard.sweep(context)
     }
 
     val push: (SettingsRoute) -> Unit = { route -> path = path.ifEmpty { listOf(SettingsRoute.selected(path)) } + route }

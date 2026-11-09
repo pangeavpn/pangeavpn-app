@@ -1,8 +1,5 @@
 package org.pangeavpn.app.ui.settings.pages
 
-import android.app.Activity
-import android.content.Context
-import android.content.ContextWrapper
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.selection.selectableGroup
@@ -60,10 +57,4 @@ fun LanguagePage(onBack: () -> Unit) {
             }
         }
     }
-}
-
-private tailrec fun Context.findActivity(): Activity? = when (this) {
-    is Activity -> this
-    is ContextWrapper -> baseContext.findActivity()
-    else -> null
 }

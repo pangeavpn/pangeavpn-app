@@ -459,14 +459,6 @@ fun CommittedField(
     }
 }
 
-/** Keeps only the digits of a numeric field, folding Persian and Arabic-Indic ones to ASCII. */
-fun asciiDigits(text: String): String = buildString {
-    for (char in text) {
-        val digit = Character.digit(char, 10)
-        if (digit >= 0) append('0' + digit)
-    }
-}
-
 /** A name and its monospaced value, 48 dp tall. Stack several in a PangeaCard with zero padding. */
 @Composable
 fun KeyValueRow(label: String, value: String, modifier: Modifier = Modifier) {
