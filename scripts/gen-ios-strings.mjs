@@ -3,7 +3,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
+import { loadAreaStrings } from "./lib/area-strings.mjs";
 
 const ANDROID_MODULES = ["ui-common", "core"];
 
@@ -155,24 +156,15 @@ const INLINE_IOS_ONLY = {
 };
 
 // Each feature area keeps its strings in its own file, so parallel edits never collide.
-const AREA_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "ios-strings");
+const SCRIPTS_DIR = path.dirname(fileURLToPath(import.meta.url));
 
-async function loadAreaStrings(dir) {
-  const merged = {};
-  if (!fs.existsSync(dir)) return merged;
-  const files = fs.readdirSync(dir).filter((name) => name.endsWith(".mjs")).sort();
-  for (const name of files) {
-    const { default: entries } = await import(pathToFileURL(path.join(dir, name)).href);
-    for (const [key, translations] of Object.entries(entries)) {
-      if (key in merged || key in INLINE_IOS_ONLY) throw new Error(`Key "${key}" is defined twice (${name})`);
-      merged[key] = translations;
-    }
-  }
-  return merged;
-}
-
-const AREA_STRINGS = await loadAreaStrings(AREA_DIR);
+const AREA_STRINGS = await loadAreaStrings(path.join(SCRIPTS_DIR, "ios-strings"), INLINE_IOS_ONLY);
 const IOS_ONLY = { ...INLINE_IOS_ONLY, ...AREA_STRINGS };
+
+// gen-android-strings copies IOS_ONLY into the Android XML and adds its own areas;
+// neither comes back in from there.
+const ANDROID_AREA_STRINGS = await loadAreaStrings(path.join(SCRIPTS_DIR, "android-strings"));
+const NOT_FROM_ANDROID = new Set([...Object.keys(IOS_ONLY), ...Object.keys(ANDROID_AREA_STRINGS)]);
 
 const ANDROID_ESCAPES = { n: "\n", t: "\t" };
 const XML_ENTITIES = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" };
@@ -215,20 +207,27 @@ function parsePlural(xmlValue) {
 
 function parseAndroid(xml, file) {
   const entries = {};
-  for (const m of xml.matchAll(/<string name="([^"]+)"[^>]*>(.*?)<\/string>/gs)) {
-    if (m[1] in entries) throw new Error(`Duplicate key "${m[1]}" in ${file}`);
-    entries[m[1]] = m[2];
+  const add = (key, value) => {
+    if (key in entries) throw new Error(`Duplicate key "${key}" in ${file}`);
+    entries[key] = value;
+  };
+  for (const m of xml.matchAll(/<string name="([^"]+)"[^>]*>(.*?)<\/string>/gs)) add(m[1], m[2]);
+  // Android's <plurals> go back to the @plural: form the catalogue wrote them in.
+  for (const m of xml.matchAll(/<plurals name="([^"]+)"[^>]*>(.*?)<\/plurals>/gs)) {
+    const items = [...m[2].matchAll(/<item quantity="([^"]+)">(.*?)<\/item>/gs)];
+    add(m[1], PLURAL_PREFIX + items.map((item) => `${item[1]}=${item[2]}`).join("|"));
   }
   return entries;
 }
 
-function collectRaw(rootDir, iosOnly) {
+function collectRaw(rootDir, iosOnly, skip = NOT_FROM_ANDROID) {
   const raw = {};
   for (const code of LOCALES) {
     const merged = {};
     for (const mod of ANDROID_MODULES) {
       const file = path.join(rootDir, "apps", "android", mod, "src", "main", "res", ANDROID_DIR[code], "strings.xml");
       for (const [key, value] of Object.entries(parseAndroid(fs.readFileSync(file, "utf8"), file))) {
+        if (skip.has(key)) continue;
         if (key in merged) throw new Error(`Key "${key}" appears in more than one module for ${code}`);
         merged[key] = value;
       }

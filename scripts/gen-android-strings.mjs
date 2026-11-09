@@ -3,6 +3,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
+import { fileURLToPath } from "node:url";
+import { IOS_ONLY } from "./gen-ios-strings.mjs";
+import { loadAreaStrings } from "./lib/area-strings.mjs";
 
 const rootDir = process.cwd();
 const localesDir = path.join(rootDir, "apps", "desktop", "src", "renderer", "i18n", "locales");
@@ -11,15 +14,13 @@ const outDir = path.join(rootDir, "apps", "android", "ui-common", "src", "main",
 // the strings the VpnService itself needs are emitted into core.
 const coreOutDir = path.join(rootDir, "apps", "android", "core", "src", "main", "res");
 // R classes are non-transitive, so a key must live in the module that uses it.
-const CORE_KEYS = new Set([
-  "notification_connected",
-  "notification_connecting",
-  "notification_disconnecting",
-  "notification_disconnected",
-  "notification_error",
-  "notification_disconnect",
-  "notification_channel_name"
-]);
+const CORE_PREFIXES = ["notification_", "alerts_", "error_"];
+
+// The iPhone strings are translated once and shared, bar the ones only Apple's store needs.
+const APPLE_ONLY_PREFIXES = ["paywall_", "purchase_", "account_sheet_", "appearance_icon_", "login_new_"];
+
+// Strings only Android has, one file per feature area like scripts/ios-strings.
+const ANDROID_AREA_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "android-strings");
 
 // Notification titles reuse the state wording rather than translating it twice.
 const CORE_ALIASES = {
@@ -29,6 +30,8 @@ const CORE_ALIASES = {
 };
 
 const LOCALES = ["en", "es", "fr", "ru", "uk", "zh", "ar", "fa"];
+
+const PLURAL_PREFIX = "@plural:";
 
 const RES_DIR = {
   en: "values",
@@ -280,36 +283,70 @@ const MOBILE_ONLY = {
   }
 };
 
-main();
+await main();
 
-function main() {
-  const parsedLocales = {};
-  for (const code of LOCALES) {
-    parsedLocales[code] = parseLocale(code);
-  }
+async function main() {
+  const areas = { ...sharedWithIos(), ...(await loadAreaStrings(ANDROID_AREA_DIR, IOS_ONLY)) };
 
-  let uiCount = 0;
-  let coreCount = 0;
+  const byLocale = {};
   for (const code of LOCALES) {
-    const entries = buildEntries(code, parsedLocales[code]);
+    const entries = buildEntries(code, parseLocale(code), areas);
     for (const [alias, source] of Object.entries(CORE_ALIASES)) {
       if (entries[source] === undefined) {
         throw new Error(`Alias "${alias}" needs missing key "${source}" for locale "${code}"`);
       }
       entries[alias] = entries[source];
     }
+    byLocale[code] = entries;
+  }
+
+  // A key that is plural in any locale is a <plurals> in all of them.
+  const pluralKeys = new Set();
+  for (const code of LOCALES) {
+    for (const [key, value] of Object.entries(byLocale[code])) {
+      if (value.startsWith(PLURAL_PREFIX)) pluralKeys.add(key);
+    }
+  }
+
+  let uiCount = 0;
+  let coreCount = 0;
+  for (const code of LOCALES) {
     const coreEntries = {};
     const uiEntries = {};
-    for (const [key, value] of Object.entries(entries)) {
-      (CORE_KEYS.has(key) ? coreEntries : uiEntries)[key] = value;
+    for (const [key, value] of Object.entries(byLocale[code])) {
+      (isCoreKey(key) ? coreEntries : uiEntries)[key] = value;
     }
     uiCount = Object.keys(uiEntries).length;
     coreCount = Object.keys(coreEntries).length;
-    writeStringsXml(outDir, code, uiEntries);
-    writeStringsXml(coreOutDir, code, coreEntries);
+    writeStringsXml(outDir, code, uiEntries, pluralKeys);
+    writeStringsXml(coreOutDir, code, coreEntries, pluralKeys);
   }
 
   console.log(`Wrote ${LOCALES.length} ui-common files (${uiCount} keys) and ${LOCALES.length} core files (${coreCount} keys)`);
+}
+
+function isCoreKey(key) {
+  return CORE_PREFIXES.some((prefix) => key.startsWith(prefix));
+}
+
+function sharedWithIos() {
+  const shared = {};
+  for (const [key, translations] of Object.entries(IOS_ONLY)) {
+    if (APPLE_ONLY_PREFIXES.some((prefix) => key.startsWith(prefix))) continue;
+    shared[key] = Object.fromEntries(
+      Object.entries(translations).map(([code, value]) => [code, fromIosFormat(value)])
+    );
+  }
+  return shared;
+}
+
+// %@ and %lld become %1$s and %1$d: Android wants positions once there are two.
+function fromIosFormat(value) {
+  let next = 0;
+  return value.replace(/%(?:(\d+)\$)?(@|lld|ld|d|s)/g, (_, position, kind) => {
+    const index = position ?? String(++next);
+    return `%${index}$${kind === "@" || kind === "s" ? "s" : "d"}`;
+  });
 }
 
 function parseLocale(code) {
@@ -359,15 +396,19 @@ function decodeJsString(raw) {
   return JSON.parse(`"${raw}"`);
 }
 
-function buildEntries(code, localeData) {
+function buildEntries(code, localeData, areas) {
   const entries = {};
+  const add = (key, value) => {
+    if (key in entries) throw new Error(`Key "${key}" is defined twice`);
+    entries[key] = value;
+  };
 
   for (const [desktopKey, androidKey] of Object.entries(KEY_MAP)) {
     const value = localeData[desktopKey];
     if (value === undefined) {
       throw new Error(`Missing desktop key "${desktopKey}" for locale "${code}"`);
     }
-    entries[androidKey] = value;
+    add(androidKey, convertPlaceholders(value));
   }
 
   for (const [desktopKey, androidKey] of Object.entries(LOCKDOWN_TAIL_KEYS)) {
@@ -375,7 +416,7 @@ function buildEntries(code, localeData) {
     if (value === undefined) {
       throw new Error(`Missing desktop key "${desktopKey}" for locale "${code}"`);
     }
-    entries[androidKey] = dropLockdownSentence(value, code, desktopKey);
+    add(androidKey, convertPlaceholders(dropLockdownSentence(value, code, desktopKey)));
   }
 
   for (const [androidKey, translations] of Object.entries(MOBILE_ONLY)) {
@@ -383,7 +424,15 @@ function buildEntries(code, localeData) {
     if (value === undefined) {
       throw new Error(`Missing mobile-only translation "${androidKey}" for locale "${code}"`);
     }
-    entries[androidKey] = value;
+    add(androidKey, convertPlaceholders(value));
+  }
+
+  for (const [androidKey, translations] of Object.entries(areas)) {
+    const value = translations[code];
+    if (value === undefined) {
+      throw new Error(`Missing area translation "${androidKey}" for locale "${code}"`);
+    }
+    add(androidKey, value);
   }
 
   return entries;
@@ -403,20 +452,30 @@ function dropLockdownSentence(value, code, desktopKey) {
   return body.slice(0, cut + 1);
 }
 
-function writeStringsXml(root, code, entries) {
+function writeStringsXml(root, code, entries, pluralKeys) {
   const dirPath = path.join(root, RES_DIR[code]);
   fs.mkdirSync(dirPath, { recursive: true });
 
   const lines = Object.keys(entries)
     .sort()
-    .map((key) => `    <string name="${key}">${formatValue(entries[key])}</string>`);
+    .map((key) => (pluralKeys.has(key)
+      ? pluralsXml(key, entries[key])
+      : `    <string name="${key}">${escapeXml(entries[key])}</string>`));
 
   const xml = `<?xml version="1.0" encoding="utf-8"?>\n<resources>\n${lines.join("\n")}\n</resources>\n`;
   fs.writeFileSync(path.join(dirPath, "strings.xml"), xml, "utf8");
 }
 
-function formatValue(value) {
-  return escapeXml(convertPlaceholders(value));
+// A locale with no plural forms of its own still needs "other".
+function pluralsXml(key, value) {
+  const forms = value.startsWith(PLURAL_PREFIX)
+    ? value.slice(PLURAL_PREFIX.length).split("|").map((part) => {
+        const eq = part.indexOf("=");
+        return [part.slice(0, eq), part.slice(eq + 1)];
+      })
+    : [["other", value]];
+  const items = forms.map(([quantity, text]) => `        <item quantity="${quantity}">${escapeXml(text)}</item>`);
+  return `    <plurals name="${key}">\n${items.join("\n")}\n    </plurals>`;
 }
 
 function convertPlaceholders(value) {
@@ -429,11 +488,15 @@ function convertPlaceholders(value) {
   });
 }
 
+// aapt trims edge whitespace unless the whole value is in plain double quotes.
 function escapeXml(value) {
-  return value
+  const escaped = value
     .replace(/\\/g, "\\\\")
+    .replace(/\n/g, "\\n")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/'/g, "\\'")
-    .replace(/"/g, '\\"');
+    .replace(/"/g, '\\"')
+    .replace(/^([@?])/, "\\$1");
+  return /^\s|\s$/.test(value) ? `"${escaped}"` : escaped;
 }
