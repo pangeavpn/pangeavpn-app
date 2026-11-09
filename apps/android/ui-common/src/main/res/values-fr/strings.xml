@@ -467,6 +467,7 @@
     <string name="tv_settings_account">Compte</string>
     <string name="tv_settings_kill_switch_no_settings">Ce téléviseur n\'a pas d\'écran de paramètres VPN : « VPN permanent » ne peut pas être activé ici.</string>
     <string name="tv_settings_split_finding">Recherche des applications…</string>
+    <string name="tv_vpn_unsupported">Ce téléviseur n\'a pas d\'écran pour autoriser un VPN : PangeaVPN ne peut donc pas s\'y connecter.</string>
     <string name="update_appstore">PangeaVPN se met à jour via l\'App Store. Activez les mises à jour automatiques dans Réglages › App Store.</string>
     <string name="update_build">Build</string>
     <string name="update_description">La version de PangeaVPN installée sur cet appareil.</string>

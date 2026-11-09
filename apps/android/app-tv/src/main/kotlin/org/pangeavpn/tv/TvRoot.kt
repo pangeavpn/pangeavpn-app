@@ -27,6 +27,7 @@ import org.pangeavpn.tv.ui.TvDeviceLimitScreen
 import org.pangeavpn.tv.ui.TvLoginScreen
 import org.pangeavpn.tv.ui.TvMainScreen
 import org.pangeavpn.tv.ui.TvRestoreFailedScreen
+import org.pangeavpn.tv.ui.settings.TvSection
 import org.pangeavpn.tv.ui.settings.TvSettingsScreen
 import org.pangeavpn.ui.R
 import org.pangeavpn.ui.components.BrandLogo
@@ -60,6 +61,7 @@ fun TvRoot() {
     var draftToken by remember { mutableStateOf("") }
     // Saved, so a language change that recreates the activity reopens settings where it was.
     var settingsOpen by rememberSaveable { mutableStateOf(false) }
+    var settingsAtStartup by rememberSaveable { mutableStateOf(false) }
     val settingsShown = settingsOpen && (screen == RootScreen.LOGIN || screen == RootScreen.MAIN)
 
     var lastSignedIn by remember { mutableStateOf(signedIn) }
@@ -93,7 +95,11 @@ fun TvRoot() {
         label = "root",
     ) { shown ->
         when (shown) {
-            null -> TvSettingsScreen(signedIn = signedIn, onClose = { settingsOpen = false })
+            null -> TvSettingsScreen(
+                signedIn = signedIn,
+                onClose = { settingsOpen = false },
+                initialSection = if (settingsAtStartup) TvSection.STARTUP else null,
+            )
             RootScreen.SPLASH -> Splash()
             RootScreen.DATA_NOTICE -> TvDataNoticeScreen(review = false, onDone = { DataNotice.accept() })
             RootScreen.DEVICE_LIMIT -> TvDeviceLimitScreen()
@@ -101,9 +107,21 @@ fun TvRoot() {
             RootScreen.LOGIN -> TvLoginScreen(
                 token = draftToken,
                 onTokenChange = { draftToken = it },
-                onOpenSettings = { settingsOpen = true },
+                onOpenSettings = {
+                    settingsAtStartup = false
+                    settingsOpen = true
+                },
             )
-            RootScreen.MAIN -> TvMainScreen(onOpenSettings = { settingsOpen = true })
+            RootScreen.MAIN -> TvMainScreen(
+                onOpenSettings = {
+                    settingsAtStartup = false
+                    settingsOpen = true
+                },
+                onOpenStartup = {
+                    settingsAtStartup = true
+                    settingsOpen = true
+                },
+            )
         }
     }
 }

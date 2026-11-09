@@ -465,6 +465,7 @@
     <string name="tv_settings_account">حساب</string>
     <string name="tv_settings_kill_switch_no_settings">این تلویزیون صفحهٔ تنظیمات VPN ندارد، پس «VPN همیشه روشن» را نمی‌توان اینجا روشن کرد.</string>
     <string name="tv_settings_split_finding">در حال یافتن برنامه‌ها…</string>
+    <string name="tv_vpn_unsupported">این تلویزیون صفحه‌ای برای تأیید VPN ندارد، پس PangeaVPN نمی‌تواند روی آن وصل شود.</string>
     <string name="update_appstore">PangeaVPN از طریق App Store به‌روزرسانی می‌شود. به‌روزرسانی خودکار را در Settings › App Store روشن کنید.</string>
     <string name="update_build">شماره‌ی ساخت</string>
     <string name="update_description">نسخه‌ی PangeaVPN نصب‌شده روی این دستگاه.</string>

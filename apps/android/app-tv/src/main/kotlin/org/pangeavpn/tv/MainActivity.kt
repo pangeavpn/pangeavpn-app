@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
@@ -29,7 +30,10 @@ import org.pangeavpn.core.data.ConnectionRepository
 import org.pangeavpn.core.data.SessionRepository
 import org.pangeavpn.core.model.ConnState
 import org.pangeavpn.tv.ui.TvTheme
+import org.pangeavpn.ui.R
+import org.pangeavpn.ui.components.ToastCenter
 import org.pangeavpn.ui.components.ToastHost
+import org.pangeavpn.ui.components.ToastStyle
 import org.pangeavpn.ui.theme.PangeaTheme
 
 private const val SHELL_PREFS = "tv_shell"
@@ -63,7 +67,8 @@ class MainActivity : ComponentActivity() {
                 TvTheme {
                     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
                         TvRoot()
-                        ToastHost(Modifier.padding(horizontal = 32.dp, vertical = 15.dp))
+                        // Never a focus stop: the remote would land on a toast that then vanishes under it.
+                        ToastHost(Modifier.focusProperties { canFocus = false }.padding(horizontal = 32.dp, vertical = 15.dp))
                     }
                 }
             }
@@ -94,6 +99,7 @@ class MainActivity : ComponentActivity() {
                 ConnectionRepository.consentLaunched()
             } catch (e: ActivityNotFoundException) {
                 ConnectionRepository.onConsentResult(false)
+                ToastCenter.show(getString(R.string.tv_vpn_unsupported), ToastStyle.WARNING)
             }
         }
     }

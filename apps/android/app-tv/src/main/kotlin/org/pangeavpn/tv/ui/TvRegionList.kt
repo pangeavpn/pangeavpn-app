@@ -1,5 +1,6 @@
 package org.pangeavpn.tv.ui
 
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -32,6 +33,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -55,6 +58,7 @@ import org.pangeavpn.ui.components.GhostButton
 import org.pangeavpn.ui.components.IconAction
 import org.pangeavpn.ui.components.InfoNote
 import org.pangeavpn.ui.components.NoteTone
+import org.pangeavpn.ui.components.PangeaCardShape
 import org.pangeavpn.ui.components.PangeaDialog
 import org.pangeavpn.ui.components.SectionLabel
 import org.pangeavpn.ui.components.ServerRow
@@ -92,12 +96,27 @@ fun TvRegionList(
     val listState = rememberLazyListState()
     val firstRegion = remember { FocusRequester() }
     var picking by remember { mutableStateOf(false) }
+    var refreshPressed by remember { mutableStateOf(false) }
+    val refresh = {
+        refreshPressed = true
+        ServersRepository.refresh()
+    }
     val leading = (if (multihop) 1 else 0) + (if (multihopOn) 1 else 0) + 1 + (if (listError != null) 1 else 0)
 
     // Opens on the selection, wherever hub order puts it.
     LaunchedEffect(regions.isNotEmpty()) {
         val index = regions.indexOfFirst { RegionPicker.holdsSelection(it, selectedId) }
         if (index > 0) listState.scrollToItem(leading + index)
+    }
+
+    // A refresh that works removes the control the remote pressed, so the first region takes the focus.
+    LaunchedEffect(empty == null && listError == null, servers.loading) {
+        if (!refreshPressed || servers.loading) return@LaunchedEffect
+        refreshPressed = false
+        if (empty != null || listError != null) return@LaunchedEffect
+        listState.scrollToItem(leading)
+        withFrameNanos {}
+        firstRegion.tryFocus()
     }
 
     // Connect with nothing to connect to asks for a pick; the list is already here, so it takes the focus.
@@ -133,13 +152,13 @@ fun TvRegionList(
         }
         item(key = "heading") {
             SectionLabel(
-                text = stringResource(if (prefs.multihopEnabled) R.string.main_exit_region else R.string.hero_region),
+                text = stringResource(if (multihopOn) R.string.main_exit_region else R.string.hero_region),
                 modifier = Modifier.padding(start = 4.dp, top = 4.dp),
             )
         }
         if (empty != null) {
             item(key = "empty") {
-                EmptyRegions(empty = empty, loading = servers.loading, error = servers.error)
+                EmptyRegions(empty = empty, loading = servers.loading, error = servers.error, onRefresh = refresh)
             }
         } else {
             if (listError != null) {
@@ -148,7 +167,7 @@ fun TvRegionList(
                         InfoNote(text = generalErrorText(listError), tone = NoteTone.ERROR)
                         GhostButton(
                             label = stringResource(R.string.restore_failed_retry),
-                            onClick = { ServersRepository.refresh() },
+                            onClick = refresh,
                             loading = servers.loading,
                             compact = true,
                         )
@@ -158,6 +177,7 @@ fun TvRegionList(
             itemsIndexed(regions, key = { _, region -> region.key }) { index, region ->
                 val role = if (multihopOn) Multihop.role(region, entry, chosenId, selectedId) else RowRole.PLAIN
                 val locked = role == RowRole.LOCKED_ENTRY
+                var focused by remember { mutableStateOf(false) }
                 // Dimmed, never disabled: a disabled row would drop the remote's focus mid-switch.
                 ServerRow(
                     name = region.name,
@@ -166,7 +186,10 @@ fun TvRegionList(
                     load = RegionPicker.node(region, selectedId, pinnedId).load,
                     selected = RegionPicker.holdsSelection(region, selectedId),
                     onClick = { if (!working && !locked) ConnectionRepository.activate(region) },
+                    // The shared row marks focus and selection in the same accent; this ring tells them apart.
                     modifier = Modifier
+                        .onFocusChanged { focused = it.isFocused }
+                        .border(2.dp, if (focused) MaterialTheme.colorScheme.onSurface else Color.Transparent, PangeaCardShape)
                         .alpha(if (working || locked) 0.6f else 1f)
                         .then(if (index == 0) Modifier.focusRequester(firstRegion) else Modifier),
                     badge = if (role == RowRole.PLAIN) null else stringResource(R.string.regions_entry_badge),
@@ -209,8 +232,8 @@ private fun EntryRow(panel: EntryPanel, onOpen: () -> Unit) {
                 modifier = Modifier.padding(horizontal = 4.dp),
                 color = LocalTextSecondary.current,
                 fontFamily = FontFamily.Monospace,
-                fontSize = 11.sp,
-                lineHeight = 15.sp,
+                fontSize = 12.sp,
+                lineHeight = 16.sp,
             )
         }
     }
@@ -237,7 +260,7 @@ private fun EntryDialog(panel: EntryPanel, onChoose: (String?) -> Unit, onDismis
 }
 
 @Composable
-private fun EmptyRegions(empty: PickerEmpty, loading: Boolean, error: LoginErrorKind?) {
+private fun EmptyRegions(empty: PickerEmpty, loading: Boolean, error: LoginErrorKind?, onRefresh: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -278,7 +301,7 @@ private fun EmptyRegions(empty: PickerEmpty, loading: Boolean, error: LoginError
         IconAction(
             icon = Icons.Rounded.Refresh,
             label = stringResource(R.string.region_refresh),
-            onClick = { ServersRepository.refresh() },
+            onClick = onRefresh,
         )
     }
 }

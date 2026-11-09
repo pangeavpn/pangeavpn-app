@@ -21,6 +21,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -31,6 +32,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
@@ -54,6 +57,7 @@ import org.pangeavpn.core.session.shownName
 import org.pangeavpn.core.util.formatAccountNumberInput
 import org.pangeavpn.core.util.runCatchingCancellable
 import org.pangeavpn.core.viewmodel.DevicesViewModel
+import org.pangeavpn.tv.ui.tryFocus
 import org.pangeavpn.ui.R
 import org.pangeavpn.ui.components.GhostButton
 import org.pangeavpn.ui.components.InfoNote
@@ -210,6 +214,9 @@ private fun DevicesGroup(model: DevicesViewModel) {
     var renaming by remember { mutableStateOf<Device?>(null) }
     var renameInvalid by remember { mutableStateOf(false) }
     var removing by remember { mutableStateOf<Device?>(null) }
+    // Set once the focused Remove or Try Again has left the screen; the first device's Rename takes the focus.
+    var refocus by remember { mutableStateOf(false) }
+    val firstDevice = remember { FocusRequester() }
     val renamed = stringResource(R.string.devices_renamed)
     val removed = stringResource(R.string.devices_removed)
     val failed = stringResource(R.string.network_update_failed)
@@ -220,13 +227,24 @@ private fun DevicesGroup(model: DevicesViewModel) {
         ToastCenter.show(error?.let { deviceErrorText(resources, it) } ?: failed, ToastStyle.WARNING)
     }
 
+    LaunchedEffect(refocus) {
+        if (!refocus) return@LaunchedEffect
+        refocus = false
+        firstDevice.tryFocus()
+    }
+
     TvGroupLabel(stringResource(R.string.devices_title))
     TvParagraph(stringResource(R.string.devices_subtitle))
     state.error?.let { error ->
         InfoNote(text = deviceErrorText(error), tone = NoteTone.ERROR)
         GhostButton(
             label = stringResource(R.string.restore_failed_retry),
-            onClick = { settingsScope.launch { model.load() } },
+            onClick = {
+                settingsScope.launch {
+                    model.load()
+                    if (model.state.value.error == null) refocus = true
+                }
+            },
             compact = true,
         )
     }
@@ -237,7 +255,7 @@ private fun DevicesGroup(model: DevicesViewModel) {
             }
         state.devices.isEmpty() ->
             if (state.error == null) TvParagraph(stringResource(R.string.devices_none))
-        else -> state.devices.forEach { device ->
+        else -> state.devices.forEachIndexed { index, device ->
             key(device.id) {
                 DeviceCard(
                     device = device,
@@ -248,6 +266,7 @@ private fun DevicesGroup(model: DevicesViewModel) {
                         renaming = device
                     },
                     onRemove = { removing = device },
+                    renameModifier = if (index == 0) Modifier.focusRequester(firstDevice) else Modifier,
                 )
             }
         }
@@ -290,7 +309,12 @@ private fun DevicesGroup(model: DevicesViewModel) {
             onConfirm = {
                 if (!device.current) {
                     settingsScope.launch {
-                        if (model.remove(device.id)) ToastCenter.show(removed, ToastStyle.SUCCESS) else showFailure()
+                        if (model.remove(device.id)) {
+                            ToastCenter.show(removed, ToastStyle.SUCCESS)
+                            refocus = true
+                        } else {
+                            showFailure()
+                        }
                     }
                 }
             },
@@ -300,7 +324,14 @@ private fun DevicesGroup(model: DevicesViewModel) {
 
 // The buttons stay focusable while another device is busy, so the remote never loses its place.
 @Composable
-private fun DeviceCard(device: Device, busy: Boolean, locked: Boolean, onRename: () -> Unit, onRemove: () -> Unit) {
+private fun DeviceCard(
+    device: Device,
+    busy: Boolean,
+    locked: Boolean,
+    onRename: () -> Unit,
+    onRemove: () -> Unit,
+    renameModifier: Modifier,
+) {
     Column(
         modifier = Modifier.fillMaxWidth().tvCard().padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -333,6 +364,7 @@ private fun DeviceCard(device: Device, busy: Boolean, locked: Boolean, onRename:
                 label = stringResource(R.string.devices_rename),
                 onClick = { if (!locked) onRename() },
                 compact = true,
+                modifier = renameModifier,
             )
             GhostButton(
                 label = stringResource(R.string.devices_remove),

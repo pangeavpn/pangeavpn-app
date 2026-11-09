@@ -478,6 +478,7 @@
     <string name="tv_settings_account">الحساب</string>
     <string name="tv_settings_kill_switch_no_settings">لا يحتوي هذا التلفاز على شاشة إعدادات VPN، لذا لا يمكن تفعيل «شبكة VPN الدائمة التشغيل» هنا.</string>
     <string name="tv_settings_split_finding">جارٍ البحث عن التطبيقات…</string>
+    <string name="tv_vpn_unsupported">لا يحتوي هذا التلفاز على شاشة للموافقة على شبكة VPN، لذا لا يمكن لـ PangeaVPN الاتصال عليه.</string>
     <string name="update_appstore">يتم تحديث PangeaVPN عبر App Store. فعّل التحديثات التلقائية من الإعدادات › App Store.</string>
     <string name="update_build">رقم البنية</string>
     <string name="update_description">إصدار PangeaVPN المثبّت على هذا الجهاز.</string>

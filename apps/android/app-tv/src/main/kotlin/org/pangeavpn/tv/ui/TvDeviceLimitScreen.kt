@@ -127,6 +127,9 @@ fun TvDeviceLimitScreen() {
                     if (SessionRepository.retryLogin() == DeviceLimitRetry.STILL_AT_LIMIT) {
                         notice = LimitNotice.STILL_AT_LIMIT
                         model.load()
+                        // Another Remove is the next step, and Continue may have left with an empty list.
+                        withFrameNanos {}
+                        if (model.state.value.devices.isNotEmpty()) firstRemove.tryFocus()
                     }
                 } finally {
                     retrying = false

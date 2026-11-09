@@ -472,6 +472,7 @@
     <string name="tv_settings_account">Аккаунт</string>
     <string name="tv_settings_kill_switch_no_settings">На этом телевизоре нет экрана настроек VPN, поэтому «Постоянную VPN» здесь не включить.</string>
     <string name="tv_settings_split_finding">Поиск приложений…</string>
+    <string name="tv_vpn_unsupported">На этом телевизоре нет экрана для разрешения VPN, поэтому PangeaVPN не может на нём подключиться.</string>
     <string name="update_appstore">PangeaVPN обновляется через App Store. Включите автоматические обновления в разделе «Настройки › App Store».</string>
     <string name="update_build">Сборка</string>
     <string name="update_description">Версия PangeaVPN, установленная на этом устройстве.</string>

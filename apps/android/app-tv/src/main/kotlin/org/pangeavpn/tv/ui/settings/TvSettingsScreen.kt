@@ -3,8 +3,10 @@
 package org.pangeavpn.tv.ui.settings
 
 import android.content.Context
+import android.view.KeyEvent
 import androidx.activity.compose.BackHandler
 import androidx.annotation.StringRes
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.focusGroup
@@ -56,13 +58,16 @@ import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.focus.FocusManager
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
@@ -94,7 +99,7 @@ import org.pangeavpn.ui.theme.LocalAppearance
 import org.pangeavpn.ui.theme.LocalTextSecondary
 import org.pangeavpn.ui.theme.accentTitle
 
-internal enum class TvSection(@StringRes val titleRes: Int, @StringRes val descriptionRes: Int?, val icon: ImageVector) {
+enum class TvSection(@StringRes val titleRes: Int, @StringRes val descriptionRes: Int?, val icon: ImageVector) {
     ACCOUNT(R.string.tv_settings_account, null, Icons.Outlined.AccountCircle),
     TRANSPORT(R.string.settings_transport_heading, R.string.settings_transport_description, Icons.Outlined.Shield),
     PROVISIONING(R.string.settings_censorship_heading, R.string.settings_censorship_description, Icons.Outlined.Dns),
@@ -123,10 +128,11 @@ private fun appBuild(context: Context): AppBuild {
 /** Settings for the remote: a rail of sections whose focus picks the page shown beside it. Back
  *  from the page returns to the rail, and Back on the rail closes the screen. */
 @Composable
-fun TvSettingsScreen(signedIn: Boolean, onClose: () -> Unit) {
+fun TvSettingsScreen(signedIn: Boolean, onClose: () -> Unit, initialSection: TvSection? = null) {
     val context = LocalContext.current
+    val focusManager = LocalFocusManager.current
     val sections = remember(signedIn) { if (signedIn) TvSection.entries else TvSection.entries - TvSection.ACCOUNT }
-    var chosen by rememberSaveable { mutableStateOf(sections.first()) }
+    var chosen by rememberSaveable { mutableStateOf(initialSection?.takeIf { it in sections } ?: sections.first()) }
     val selected = if (chosen in sections) chosen else sections.first()
     val railFocus = remember { TvSection.entries.associateWith { FocusRequester() } }
     val contentFocus = remember { FocusRequester() }
@@ -216,6 +222,7 @@ fun TvSettingsScreen(signedIn: Boolean, onClose: () -> Unit) {
                     overflow = TextOverflow.Ellipsis,
                 )
                 key(selected) {
+                    val scroll = rememberScrollState()
                     Column(
                         modifier = Modifier
                             .weight(1f)
@@ -232,7 +239,8 @@ fun TvSettingsScreen(signedIn: Boolean, onClose: () -> Unit) {
                                 }
                             }
                             .focusGroup()
-                            .verticalScroll(rememberScrollState())
+                            .onKeyEvent { revealEdge(it.nativeKeyEvent, focusManager, scroll, screenScope) }
+                            .verticalScroll(scroll)
                             .padding(top = 4.dp, bottom = 24.dp),
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
@@ -250,8 +258,21 @@ fun TvSettingsScreen(signedIn: Boolean, onClose: () -> Unit) {
                 }
             }
         }
-        ToastHost(modifier = Modifier.padding(horizontal = 32.dp, vertical = 15.dp))
+        ToastHost(modifier = Modifier.focusProperties { canFocus = false }.padding(horizontal = 32.dp, vertical = 15.dp))
     }
+}
+
+// Past the first or last control, the remote scrolls the text beyond it into view instead of stopping.
+private fun revealEdge(event: KeyEvent, focusManager: FocusManager, scroll: ScrollState, scope: CoroutineScope): Boolean {
+    if (event.action != KeyEvent.ACTION_DOWN) return false
+    val down = when (event.keyCode) {
+        KeyEvent.KEYCODE_DPAD_DOWN -> true
+        KeyEvent.KEYCODE_DPAD_UP -> false
+        else -> return false
+    }
+    if (focusManager.moveFocus(if (down) FocusDirection.Down else FocusDirection.Up)) return true
+    scope.launch { scroll.animateScrollTo(if (down) scroll.maxValue else 0) }
+    return true
 }
 
 @Composable

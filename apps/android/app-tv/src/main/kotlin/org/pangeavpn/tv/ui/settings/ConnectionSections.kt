@@ -28,6 +28,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -48,6 +50,7 @@ import org.pangeavpn.core.settings.HubTestTone
 import org.pangeavpn.core.settings.SettingsInput
 import org.pangeavpn.core.settings.TransportChoices
 import org.pangeavpn.core.settings.TunnelMtu
+import org.pangeavpn.tv.ui.tryFocus
 import org.pangeavpn.ui.R
 import org.pangeavpn.ui.components.GhostButton
 import org.pangeavpn.ui.components.InfoNote
@@ -307,6 +310,8 @@ internal fun NetworkSection() {
     var dnsInvalid by remember { mutableStateOf(false) }
     var mtuInvalid by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<NetworkField?>(null) }
+    var refocusDns by remember { mutableStateOf(false) }
+    val chosenDns = remember { FocusRequester() }
     val dnsChoice = if (customChosen) DnsChoice.CUSTOM else DnsPresets.choice(settings.customDns)
     val failed = stringResource(R.string.network_update_failed)
     val customDnsTitle = stringResource(R.string.settings_network_dns_title)
@@ -348,7 +353,15 @@ internal fun NetworkSection() {
         }
         dnsInvalid = false
         editing = null
+        refocusDns = true
         saveDns(servers)
+    }
+
+    // A save that lands on a preset drops the custom field the remote was on, so the picked row takes the focus.
+    LaunchedEffect(dnsChoice, dnsSaving) {
+        if (!refocusDns || dnsSaving) return@LaunchedEffect
+        refocusDns = false
+        if (dnsChoice != DnsChoice.CUSTOM) chosenDns.tryFocus()
     }
 
     fun commitMtu(text: String) {
@@ -396,6 +409,7 @@ internal fun NetworkSection() {
                 label = dnsChoiceTitle(choice),
                 selected = dnsChoice == choice,
                 onClick = { choose(choice) },
+                modifier = if (dnsChoice == choice) Modifier.focusRequester(chosenDns) else Modifier,
                 enabled = !dnsSaving,
             )
         }

@@ -70,7 +70,7 @@ private val checkScope = MainScope()
 
 /** iOS ExpiredPanel: no in-app purchase on Android, and a website link only in builds that allow one. */
 @Composable
-fun TvExpiredPanel(modifier: Modifier = Modifier) {
+fun TvExpiredPanel(modifier: Modifier = Modifier, refocus: Boolean = false) {
     val subscription by SessionRepository.subscription.collectAsState()
     val signingOut by SessionRepository.signingOut.collectAsState()
     var checking by remember { mutableStateOf(false) }
@@ -82,7 +82,7 @@ fun TvExpiredPanel(modifier: Modifier = Modifier) {
     val accent = MaterialTheme.colorScheme.primary
     val busy = checking || signingOut
 
-    LaunchedEffect(Unit) { checkAgain.tryFocus() }
+    LaunchedEffect(refocus) { checkAgain.tryFocus() }
 
     Box(modifier = modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
         Column(
@@ -109,7 +109,7 @@ fun TvExpiredPanel(modifier: Modifier = Modifier) {
                 Text(
                     text = stringResource(R.string.subscription_none).uppercase(),
                     color = amber,
-                    fontSize = 11.sp,
+                    fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
                     letterSpacing = 1.6.sp,
                 )

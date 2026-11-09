@@ -463,6 +463,7 @@
     <string name="tv_settings_account">账号</string>
     <string name="tv_settings_kill_switch_no_settings">这台电视没有 VPN 设置界面，因此无法在此开启「始终开启的 VPN」。</string>
     <string name="tv_settings_split_finding">正在查找应用…</string>
+    <string name="tv_vpn_unsupported">这台电视没有批准 VPN 的界面，因此 PangeaVPN 无法在上面连接。</string>
     <string name="update_appstore">PangeaVPN 通过 App Store 更新。请在“设置 › App Store”中开启自动更新。</string>
     <string name="update_build">构建版本</string>
     <string name="update_description">此设备上安装的 PangeaVPN 版本。</string>

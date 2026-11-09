@@ -63,6 +63,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import org.pangeavpn.tv.ui.tryFocus
 import org.pangeavpn.ui.R
 import org.pangeavpn.ui.components.GhostButton
 import org.pangeavpn.ui.components.InfoNote
@@ -495,7 +496,7 @@ internal fun TvEditDialog(
         }
         PillButton(label = stringResource(R.string.settings_save), onClick = { onSave(field.text) })
         GhostButton(label = stringResource(R.string.settings_home_cancel), onClick = onDismiss)
-        LaunchedEffect(Unit) { focus.requestFocus() }
+        LaunchedEffect(Unit) { focus.tryFocus() }
     }
 }
 
@@ -534,6 +535,6 @@ internal fun TvConfirmDialog(
             onClick = onDismiss,
             modifier = if (destructive) Modifier.focusRequester(initial) else Modifier,
         )
-        LaunchedEffect(Unit) { initial.requestFocus() }
+        LaunchedEffect(Unit) { initial.tryFocus() }
     }
 }

@@ -465,6 +465,7 @@
     <string name="tv_settings_account">Account</string>
     <string name="tv_settings_kill_switch_no_settings">This TV has no VPN settings screen, so Always-on VPN can\'t be turned on here.</string>
     <string name="tv_settings_split_finding">Finding apps…</string>
+    <string name="tv_vpn_unsupported">This TV has no screen to approve a VPN, so PangeaVPN can\'t connect on it.</string>
     <string name="update_appstore">PangeaVPN updates through the App Store. Turn on automatic updates in Settings › App Store.</string>
     <string name="update_build">Build</string>
     <string name="update_description">The version of PangeaVPN installed on this device.</string>

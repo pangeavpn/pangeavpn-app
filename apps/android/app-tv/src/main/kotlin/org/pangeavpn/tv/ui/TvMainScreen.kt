@@ -36,6 +36,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
@@ -98,7 +99,7 @@ private val ActionShape = RoundedCornerShape(percent = 50)
 
 /** iOS MainView's wide stage on a 960×540 screen: the map, and beside it the hero, the full region list and the action. */
 @Composable
-fun TvMainScreen(onOpenSettings: () -> Unit) {
+fun TvMainScreen(onOpenSettings: () -> Unit, onOpenStartup: () -> Unit = onOpenSettings) {
     val status by ConnectionRepository.status.collectAsState()
     val connection by ConnectionRepository.state.collectAsState()
     val canRotate by ConnectionRepository.canRotate.collectAsState()
@@ -122,7 +123,7 @@ fun TvMainScreen(onOpenSettings: () -> Unit) {
     val hidden = action == MainAction.HIDDEN
 
     // The remote starts on the main action, and comes back to it when an expired account is restored.
-    LaunchedEffect(hidden) { if (!hidden) actionFocus.tryFocus() }
+    LaunchedEffect(hidden, entitled) { if (!hidden) actionFocus.tryFocus() }
 
     // The detail line carries an idle failure; one that lands while the tunnel is up needs a toast.
     val currentDisplay by rememberUpdatedState(display)
@@ -148,30 +149,34 @@ fun TvMainScreen(onOpenSettings: () -> Unit) {
             }
             Spacer(modifier = Modifier.width(32.dp))
             Column(modifier = Modifier.weight(0.58f).fillMaxHeight()) {
-                if (showsSubscriptionBanner(subscription)) {
-                    SubscriptionBanner(subscription, Modifier.padding(bottom = 12.dp))
-                }
-                if (entitled) {
-                    Hero(
-                        status = status,
-                        display = display,
-                        connection = connection,
-                        split = HeroRules.showsSplit(
-                            display,
-                            prefs.splitTunnelEnabled,
-                            prefs.splitTunnelRanges.isNotEmpty() || excludedApps.isNotEmpty(),
-                        ),
-                        regions = servers.regions,
-                    )
-                    TvRegionList(
-                        servers = servers,
-                        transport = settings.preferredTransport,
-                        prefs = prefs,
-                        working = connection.inFlight,
-                        modifier = Modifier.weight(1f).padding(top = 14.dp),
-                    )
-                } else {
-                    TvExpiredPanel(modifier = Modifier.weight(1f))
+                // Weighted, so the action row is measured first and a tall hero can never push it off screen.
+                Column(modifier = Modifier.fillMaxWidth().weight(1f).clipToBounds()) {
+                    if (showsSubscriptionBanner(subscription)) {
+                        SubscriptionBanner(subscription, Modifier.padding(bottom = 12.dp))
+                    }
+                    if (entitled) {
+                        Hero(
+                            status = status,
+                            display = display,
+                            connection = connection,
+                            split = HeroRules.showsSplit(
+                                display,
+                                prefs.splitTunnelEnabled,
+                                prefs.splitTunnelRanges.isNotEmpty() || excludedApps.isNotEmpty(),
+                            ),
+                            regions = servers.regions,
+                        )
+                        TvRegionList(
+                            servers = servers,
+                            transport = settings.preferredTransport,
+                            prefs = prefs,
+                            working = connection.inFlight,
+                            modifier = Modifier.weight(1f).padding(top = 14.dp),
+                        )
+                    } else {
+                        // Takes the focus back when Disconnect, which held it, gives way to nothing.
+                        TvExpiredPanel(modifier = Modifier.weight(1f), refocus = hidden)
+                    }
                 }
                 if (!hidden) {
                     Row(
@@ -184,7 +189,7 @@ fun TvMainScreen(onOpenSettings: () -> Unit) {
                             onClick = {
                                 when (action) {
                                     MainAction.CONNECT, MainAction.STOP, MainAction.DISCONNECT -> ConnectionRepository.toggle()
-                                    MainAction.LOCKDOWN -> onOpenSettings()
+                                    MainAction.LOCKDOWN -> onOpenStartup()
                                     MainAction.PROVISIONING, MainAction.DISCONNECTING, MainAction.HIDDEN -> Unit
                                 }
                             },
