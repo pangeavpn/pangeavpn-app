@@ -25,11 +25,13 @@
 "appearance_theme_system" = "النظام";
 "bypass_anytls_desc" = "جلسة TLS مبطَّنة، تخفّف بصمة TLS داخل TLS التي تظهرها وسائط TLS الأخرى.";
 "bypass_auto_desc" = "يجرّب كل تمويه بالترتيب ويتذكّر ما نجح على هذه الشبكة.";
+"bypass_cdn_desc" = "يمرّ عبر شبكة توصيل محتوى (CDN)، فلا يوقفه حجب عناوين خوادمنا. أبطأ من غيره.";
 "bypass_cloak_desc" = "TLS موجَّه إلى موقع خادع، فتبدو الحركة كزيارة عادية له.";
 "bypass_hysteria2_desc" = "UDP وQUIC بدل TCP. يستحق التجربة عندما تنقطع كل اتصالات TCP.";
 "bypass_reality_desc" = "يستعير مصافحة TLS من موقع حقيقي، فيرى الفحص موقعًا أصيلًا. أقوى تمويه.";
 "bypass_regions_note" = "تُخفى المناطق التي لا توفّر الطريقة المختارة من قائمة المناطق.";
 "bypass_shadowsocks_desc" = "لا TLS إطلاقًا، فلا يطاله حجب موجَّه إلى TLS.";
+"bypass_tuic_desc" = "QUIC يبدو مثل HTTP/3 عادي. يحتاج إلى شبكة تسمح بمرور UDP.";
 "bypass_updated" = "تم تحديث طريقة الاتصال. أعد الاتصال ليسري المفعول.";
 "connect_progress_still_connecting" = "ما زال الاتصال جارياً…";
 "connect_progress_still_working" = "ما زلنا نعمل على ذلك. سنجرب خوادم أخرى عند الحاجة.";
@@ -395,6 +397,7 @@
 "settings_title" = "الإعدادات";
 "settings_transport_anytls" = "AnyTLS";
 "settings_transport_auto" = "تلقائي (موصى به)";
+"settings_transport_cdn" = "CDN";
 "settings_transport_cloak" = "Cloak";
 "settings_transport_description" = "كيف يموّه PangeaVPN حركة بياناتك.";
 "settings_transport_heading" = "تجاوز الحجب";
@@ -402,6 +405,7 @@
 "settings_transport_reality" = "VLESS+REALITY";
 "settings_transport_shadowsocks" = "Shadowsocks";
 "settings_transport_snowflake" = "Snowflake";
+"settings_transport_tuic" = "TUIC";
 "split_tunnel_description" = "العناوين المدرجة هنا تتجاوز VPN وتستخدم اتصالك العادي.";
 "split_tunnel_enabled_hint" = "عند الإيقاف، تمر كل الحركة عبر VPN. تُحفظ قائمة النطاقات. يسري عند الاتصال التالي.";
 "split_tunnel_enabled_title" = "استخدام الأنفاق المقسّمة";
@@ -473,6 +477,7 @@
 "toggle_off" = "معطّل";
 "toggle_on" = "مفعّل";
 "transport_status_anytls" = "التمويه: AnyTLS";
+"transport_status_cdn" = "التمويه: CDN";
 "transport_status_cloak" = "التمويه: Cloak";
 "transport_status_hysteria2" = "التمويه: Hysteria2";
 "transport_status_naive" = "التمويه: NaiveProxy";
@@ -480,6 +485,7 @@
 "transport_status_reality" = "التمويه: VLESS+REALITY";
 "transport_status_shadowsocks" = "التمويه: Shadowsocks";
 "transport_status_snowflake" = "التمويه: Snowflake";
+"transport_status_tuic" = "التمويه: TUIC";
 "update_appstore" = "يتم تحديث PangeaVPN عبر App Store. فعّل التحديثات التلقائية من الإعدادات › App Store.";
 "update_build" = "رقم البنية";
 "update_installed_heading" = "الإصدار المثبّت";

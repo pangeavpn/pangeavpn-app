@@ -60,6 +60,26 @@ export default {
     ar: "جلسة TLS مبطَّنة، تخفّف بصمة TLS داخل TLS التي تظهرها وسائط TLS الأخرى.",
     fa: "یک نشست TLS با لایه‌گذاری که الگوی TLS-در-TLS را که دیگر ترابری‌های TLS نشان می‌دهند، هموار می‌کند."
   },
+  bypass_tuic_desc: {
+    en: "QUIC that looks like ordinary HTTP/3. Needs a network that lets UDP through.",
+    es: "QUIC que parece HTTP/3 normal. Necesita una red que deje pasar UDP.",
+    fr: "Du QUIC qui ressemble à du HTTP/3 ordinaire. Nécessite un réseau qui laisse passer l'UDP.",
+    ru: "QUIC, похожий на обычный HTTP/3. Нужна сеть, которая пропускает UDP.",
+    uk: "QUIC, схожий на звичайний HTTP/3. Потрібна мережа, яка пропускає UDP.",
+    zh: "看起来像普通 HTTP/3 的 QUIC。需要网络放行 UDP。",
+    ar: "QUIC يبدو مثل HTTP/3 عادي. يحتاج إلى شبكة تسمح بمرور UDP.",
+    fa: "QUIC که شبیه HTTP/3 معمولی است. به شبکه‌ای نیاز دارد که UDP را عبور دهد."
+  },
+  bypass_cdn_desc: {
+    en: "Goes through a content delivery network, so blocking our servers' addresses doesn't stop it. Slower than the others.",
+    es: "Pasa por una red de distribución de contenidos, así que bloquear las direcciones de nuestros servidores no lo detiene. Más lento que los demás.",
+    fr: "Passe par un réseau de diffusion de contenu, donc bloquer les adresses de nos serveurs ne l'arrête pas. Plus lent que les autres.",
+    ru: "Идёт через сеть доставки контента (CDN), поэтому блокировка адресов наших серверов его не останавливает. Медленнее остальных.",
+    uk: "Іде через мережу доставки контенту (CDN), тож блокування адрес наших серверів його не зупиняє. Повільніший за інші.",
+    zh: "经由内容分发网络（CDN）连接，封锁我们服务器的地址也拦不住它。比其他方式慢。",
+    ar: "يمرّ عبر شبكة توصيل محتوى (CDN)، فلا يوقفه حجب عناوين خوادمنا. أبطأ من غيره.",
+    fa: "از راه یک شبکه توزیع محتوا (CDN) می‌رود، پس مسدود کردن نشانی سرورهای ما جلویش را نمی‌گیرد. کندتر از بقیه است."
+  },
   bypass_regions_note: {
     en: "Regions that don't offer the selected method are hidden from the region list.",
     es: "Las regiones que no ofrecen el método elegido se ocultan de la lista de regiones.",

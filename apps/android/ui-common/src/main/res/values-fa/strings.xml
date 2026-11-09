@@ -75,6 +75,7 @@
     <string name="settings_title">تنظیمات</string>
     <string name="settings_transport_anytls">AnyTLS</string>
     <string name="settings_transport_auto">خودکار (توصیه‌شده)</string>
+    <string name="settings_transport_cdn">CDN</string>
     <string name="settings_transport_cloak">Cloak</string>
     <string name="settings_transport_description">چگونه PangeaVPN ترافیک شما را استتار می‌کند.</string>
     <string name="settings_transport_heading">دور زدن سانسور</string>
@@ -82,6 +83,7 @@
     <string name="settings_transport_reality">VLESS+REALITY</string>
     <string name="settings_transport_shadowsocks">Shadowsocks</string>
     <string name="settings_transport_snowflake">Snowflake</string>
+    <string name="settings_transport_tuic">TUIC</string>
     <string name="split_tunnel_hint">برنامه‌های فعال‌شده در اینجا از VPN عبور نمی‌کنند و از اتصال عادی شما استفاده می‌کنند.</string>
     <string name="split_tunnel_title">تونل تفکیک‌شده</string>
     <string name="state_connected">متصل</string>
@@ -94,6 +96,7 @@
     <string name="toggle_off">خاموش</string>
     <string name="toggle_on">روشن</string>
     <string name="transport_status_anytls">مبهم‌سازی: AnyTLS</string>
+    <string name="transport_status_cdn">مبهم‌سازی: CDN</string>
     <string name="transport_status_cloak">مبهم‌سازی: Cloak</string>
     <string name="transport_status_hysteria2">مبهم‌سازی: Hysteria2</string>
     <string name="transport_status_naive">مبهم‌سازی: NaiveProxy</string>
@@ -101,4 +104,5 @@
     <string name="transport_status_reality">مبهم‌سازی: VLESS+REALITY</string>
     <string name="transport_status_shadowsocks">مبهم‌سازی: Shadowsocks</string>
     <string name="transport_status_snowflake">مبهم‌سازی: Snowflake</string>
+    <string name="transport_status_tuic">مبهم‌سازی: TUIC</string>
 </resources>

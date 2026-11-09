@@ -75,6 +75,7 @@
     <string name="settings_title">الإعدادات</string>
     <string name="settings_transport_anytls">AnyTLS</string>
     <string name="settings_transport_auto">تلقائي (موصى به)</string>
+    <string name="settings_transport_cdn">CDN</string>
     <string name="settings_transport_cloak">Cloak</string>
     <string name="settings_transport_description">كيف يموّه PangeaVPN حركة بياناتك.</string>
     <string name="settings_transport_heading">تجاوز الحجب</string>
@@ -82,6 +83,7 @@
     <string name="settings_transport_reality">VLESS+REALITY</string>
     <string name="settings_transport_shadowsocks">Shadowsocks</string>
     <string name="settings_transport_snowflake">Snowflake</string>
+    <string name="settings_transport_tuic">TUIC</string>
     <string name="split_tunnel_hint">التطبيقات المفعّلة هنا تتجاوز الشبكة الافتراضية وتستخدم اتصالك العادي.</string>
     <string name="split_tunnel_title">الأنفاق المقسّمة</string>
     <string name="state_connected">متصل</string>
@@ -94,6 +96,7 @@
     <string name="toggle_off">معطّل</string>
     <string name="toggle_on">مفعّل</string>
     <string name="transport_status_anytls">التمويه: AnyTLS</string>
+    <string name="transport_status_cdn">التمويه: CDN</string>
     <string name="transport_status_cloak">التمويه: Cloak</string>
     <string name="transport_status_hysteria2">التمويه: Hysteria2</string>
     <string name="transport_status_naive">التمويه: NaiveProxy</string>
@@ -101,4 +104,5 @@
     <string name="transport_status_reality">التمويه: VLESS+REALITY</string>
     <string name="transport_status_shadowsocks">التمويه: Shadowsocks</string>
     <string name="transport_status_snowflake">التمويه: Snowflake</string>
+    <string name="transport_status_tuic">التمويه: TUIC</string>
 </resources>

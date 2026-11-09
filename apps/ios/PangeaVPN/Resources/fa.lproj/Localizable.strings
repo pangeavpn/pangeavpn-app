@@ -25,11 +25,13 @@
 "appearance_theme_system" = "سیستم";
 "bypass_anytls_desc" = "یک نشست TLS با لایه‌گذاری که الگوی TLS-در-TLS را که دیگر ترابری‌های TLS نشان می‌دهند، هموار می‌کند.";
 "bypass_auto_desc" = "هر استتار را به‌ترتیب امتحان می‌کند و به‌یاد می‌سپارد روی این شبکه چه جواب داد.";
+"bypass_cdn_desc" = "از راه یک شبکه توزیع محتوا (CDN) می‌رود، پس مسدود کردن نشانی سرورهای ما جلویش را نمی‌گیرد. کندتر از بقیه است.";
 "bypass_cloak_desc" = "TLS به‌سمت یک سایت طعمه، طوری که ترافیک مثل بازدیدی عادی به‌نظر برسد.";
 "bypass_hysteria2_desc" = "UDP و QUIC به‌جای TCP. وقتی همه اتصال‌های TCP می‌افتند، ارزش امتحان دارد.";
 "bypass_reality_desc" = "دست‌دادن TLS یک سایت واقعی را قرض می‌گیرد، پس کاوش‌ها یک سایت اصیل می‌بینند. قوی‌ترین استتار.";
 "bypass_regions_note" = "منطقه‌هایی که روش انتخاب‌شده را ندارند، از فهرست منطقه‌ها پنهان می‌شوند.";
 "bypass_shadowsocks_desc" = "هیچ TLS ندارد، پس مسدودسازیِ متمرکز بر TLS به آن نمی‌رسد.";
+"bypass_tuic_desc" = "QUIC که شبیه HTTP/3 معمولی است. به شبکه‌ای نیاز دارد که UDP را عبور دهد.";
 "bypass_updated" = "روش اتصال به‌روزرسانی شد. برای اعمال، دوباره متصل شوید.";
 "connect_progress_still_connecting" = "اتصال همچنان در حال انجام است…";
 "connect_progress_still_working" = "هنوز در حال تلاش هستیم. در صورت نیاز سرورهای دیگری را امتحان می‌کنیم.";
@@ -395,6 +397,7 @@
 "settings_title" = "تنظیمات";
 "settings_transport_anytls" = "AnyTLS";
 "settings_transport_auto" = "خودکار (توصیه‌شده)";
+"settings_transport_cdn" = "CDN";
 "settings_transport_cloak" = "Cloak";
 "settings_transport_description" = "چگونه PangeaVPN ترافیک شما را استتار می‌کند.";
 "settings_transport_heading" = "دور زدن سانسور";
@@ -402,6 +405,7 @@
 "settings_transport_reality" = "VLESS+REALITY";
 "settings_transport_shadowsocks" = "Shadowsocks";
 "settings_transport_snowflake" = "Snowflake";
+"settings_transport_tuic" = "TUIC";
 "split_tunnel_description" = "نشانی‌هایی که اینجا فهرست شده‌اند از VPN عبور نمی‌کنند و از اتصال عادی شما استفاده می‌کنند.";
 "split_tunnel_enabled_hint" = "وقتی خاموش است، همه ترافیک از VPN می‌گذرد. فهرست محدوده‌ها حفظ می‌شود. از اتصال بعدی اعمال می‌شود.";
 "split_tunnel_enabled_title" = "استفاده از تونل تفکیک‌شده";
@@ -473,6 +477,7 @@
 "toggle_off" = "خاموش";
 "toggle_on" = "روشن";
 "transport_status_anytls" = "مبهم‌سازی: AnyTLS";
+"transport_status_cdn" = "مبهم‌سازی: CDN";
 "transport_status_cloak" = "مبهم‌سازی: Cloak";
 "transport_status_hysteria2" = "مبهم‌سازی: Hysteria2";
 "transport_status_naive" = "مبهم‌سازی: NaiveProxy";
@@ -480,6 +485,7 @@
 "transport_status_reality" = "مبهم‌سازی: VLESS+REALITY";
 "transport_status_shadowsocks" = "مبهم‌سازی: Shadowsocks";
 "transport_status_snowflake" = "مبهم‌سازی: Snowflake";
+"transport_status_tuic" = "مبهم‌سازی: TUIC";
 "update_appstore" = "PangeaVPN از طریق App Store به‌روزرسانی می‌شود. به‌روزرسانی خودکار را در Settings › App Store روشن کنید.";
 "update_build" = "شماره‌ی ساخت";
 "update_installed_heading" = "نسخه‌ی نصب‌شده";

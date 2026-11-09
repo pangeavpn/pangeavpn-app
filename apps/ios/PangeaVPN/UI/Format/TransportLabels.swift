@@ -4,12 +4,12 @@ enum TransportLabels {
     // Product names, so they read the same in every language, as on desktop.
     private static let names: [String: String] = [
         "cloak": "Cloak", "reality": "VLESS+REALITY", "shadowsocks": "Shadowsocks",
-        "hysteria2": "Hysteria2", "anytls": "AnyTLS", "snowflake": "Snowflake",
-        "naive": "NaiveProxy", "wireguard": "WireGuard",
+        "hysteria2": "Hysteria2", "anytls": "AnyTLS", "tuic": "TUIC", "cdn": "CDN",
+        "snowflake": "Snowflake", "naive": "NaiveProxy", "wireguard": "WireGuard",
     ]
 
     // Desktop's picker order, which is the order automatic mode walks.
-    static let pickerOrder: [Transport] = [.auto, .reality, .cloak, .shadowsocks, .hysteria2, .anytls]
+    static let pickerOrder: [Transport] = [.auto, .reality, .cloak, .shadowsocks, .hysteria2, .tuic, .anytls, .cdn]
 
     static func status(_ activeTransport: String?) -> String {
         activeTransport.flatMap { names[$0] } ?? ""
@@ -23,6 +23,8 @@ enum TransportLabels {
         case .shadowsocks: return String(localized: "settings_transport_shadowsocks", defaultValue: "Shadowsocks")
         case .hysteria2: return String(localized: "settings_transport_hysteria2", defaultValue: "Hysteria2")
         case .anytls: return String(localized: "settings_transport_anytls", defaultValue: "AnyTLS")
+        case .tuic: return String(localized: "settings_transport_tuic", defaultValue: "TUIC")
+        case .cdn: return String(localized: "settings_transport_cdn", defaultValue: "CDN")
         }
     }
 
@@ -40,6 +42,10 @@ enum TransportLabels {
             return String(localized: "bypass_hysteria2_desc", defaultValue: "UDP and QUIC instead of TCP. Worth a try when every TCP connection dies.")
         case .anytls:
             return String(localized: "bypass_anytls_desc", defaultValue: "A padded TLS session, smoothing the TLS-in-TLS shape other TLS transports leak.")
+        case .tuic:
+            return String(localized: "bypass_tuic_desc", defaultValue: "QUIC that looks like ordinary HTTP/3. Needs a network that lets UDP through.")
+        case .cdn:
+            return String(localized: "bypass_cdn_desc", defaultValue: "Goes through a content delivery network, so blocking our servers' addresses doesn't stop it. Slower than the others.")
         }
     }
 

@@ -25,11 +25,13 @@
 "appearance_theme_system" = "跟随系统";
 "bypass_anytls_desc" = "带填充的 TLS 会话，抹平其他 TLS 传输暴露的 TLS-in-TLS 特征。";
 "bypass_auto_desc" = "依次尝试每种伪装，并记住在这个网络上管用的那个。";
+"bypass_cdn_desc" = "经由内容分发网络（CDN）连接，封锁我们服务器的地址也拦不住它。比其他方式慢。";
 "bypass_cloak_desc" = "指向诱饵站点的 TLS，流量看起来就像一次普通访问。";
 "bypass_hysteria2_desc" = "用 UDP 和 QUIC 而非 TCP。所有 TCP 连接都断时值得一试。";
 "bypass_reality_desc" = "借用真实网站的 TLS 握手，探测看到的是一个真站点。最强的伪装。";
 "bypass_regions_note" = "不支持所选方式的地区会从地区列表中隐藏。";
 "bypass_shadowsocks_desc" = "完全不用 TLS，针对 TLS 的封锁碰不到它。";
+"bypass_tuic_desc" = "看起来像普通 HTTP/3 的 QUIC。需要网络放行 UDP。";
 "bypass_updated" = "连接方式已更新。请重新连接以生效。";
 "connect_progress_still_connecting" = "仍在连接…";
 "connect_progress_still_working" = "仍在处理中。如有需要，我们会尝试其他服务器。";
@@ -395,6 +397,7 @@
 "settings_title" = "设置";
 "settings_transport_anytls" = "AnyTLS";
 "settings_transport_auto" = "自动（推荐）";
+"settings_transport_cdn" = "CDN";
 "settings_transport_cloak" = "Cloak";
 "settings_transport_description" = "PangeaVPN 如何伪装您的流量。";
 "settings_transport_heading" = "绕过审查";
@@ -402,6 +405,7 @@
 "settings_transport_reality" = "VLESS+REALITY";
 "settings_transport_shadowsocks" = "Shadowsocks";
 "settings_transport_snowflake" = "Snowflake";
+"settings_transport_tuic" = "TUIC";
 "split_tunnel_description" = "此处列出的地址将绕过 VPN，使用您的普通网络连接。";
 "split_tunnel_enabled_hint" = "关闭时，所有流量都走 VPN。已填写的 IP 范围会保留。下次连接时生效。";
 "split_tunnel_enabled_title" = "启用分流";
@@ -473,6 +477,7 @@
 "toggle_off" = "关闭";
 "toggle_on" = "开启";
 "transport_status_anytls" = "混淆：AnyTLS";
+"transport_status_cdn" = "混淆：CDN";
 "transport_status_cloak" = "混淆：Cloak";
 "transport_status_hysteria2" = "混淆：Hysteria2";
 "transport_status_naive" = "混淆：NaiveProxy";
@@ -480,6 +485,7 @@
 "transport_status_reality" = "混淆：VLESS+REALITY";
 "transport_status_shadowsocks" = "混淆：Shadowsocks";
 "transport_status_snowflake" = "混淆：Snowflake";
+"transport_status_tuic" = "混淆：TUIC";
 "update_appstore" = "PangeaVPN 通过 App Store 更新。请在“设置 › App Store”中开启自动更新。";
 "update_build" = "构建版本";
 "update_installed_heading" = "已安装版本";

@@ -75,6 +75,7 @@
     <string name="settings_title">Настройки</string>
     <string name="settings_transport_anytls">AnyTLS</string>
     <string name="settings_transport_auto">Автоматически (рекомендуется)</string>
+    <string name="settings_transport_cdn">CDN</string>
     <string name="settings_transport_cloak">Cloak</string>
     <string name="settings_transport_description">Как PangeaVPN маскирует ваш трафик.</string>
     <string name="settings_transport_heading">Обход цензуры</string>
@@ -82,6 +83,7 @@
     <string name="settings_transport_reality">VLESS+REALITY</string>
     <string name="settings_transport_shadowsocks">Shadowsocks</string>
     <string name="settings_transport_snowflake">Snowflake</string>
+    <string name="settings_transport_tuic">TUIC</string>
     <string name="split_tunnel_hint">Приложения, включённые здесь, идут в обход VPN через обычное соединение.</string>
     <string name="split_tunnel_title">Раздельное туннелирование</string>
     <string name="state_connected">ПОДКЛЮЧЕНО</string>
@@ -94,6 +96,7 @@
     <string name="toggle_off">Выкл</string>
     <string name="toggle_on">Вкл</string>
     <string name="transport_status_anytls">Обфускация: AnyTLS</string>
+    <string name="transport_status_cdn">Обфускация: CDN</string>
     <string name="transport_status_cloak">Обфускация: Cloak</string>
     <string name="transport_status_hysteria2">Обфускация: Hysteria2</string>
     <string name="transport_status_naive">Обфускация: NaiveProxy</string>
@@ -101,4 +104,5 @@
     <string name="transport_status_reality">Обфускация: VLESS+REALITY</string>
     <string name="transport_status_shadowsocks">Обфускация: Shadowsocks</string>
     <string name="transport_status_snowflake">Обфускация: Snowflake</string>
+    <string name="transport_status_tuic">Обфускация: TUIC</string>
 </resources>

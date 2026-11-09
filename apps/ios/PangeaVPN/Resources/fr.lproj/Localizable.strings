@@ -25,11 +25,13 @@
 "appearance_theme_system" = "Système";
 "bypass_anytls_desc" = "Une session TLS avec remplissage, qui atténue la signature TLS-dans-TLS que d'autres transports TLS laissent voir.";
 "bypass_auto_desc" = "Essaie chaque déguisement à tour de rôle et retient ce qui a marché sur ce réseau.";
+"bypass_cdn_desc" = "Passe par un réseau de diffusion de contenu, donc bloquer les adresses de nos serveurs ne l'arrête pas. Plus lent que les autres.";
 "bypass_cloak_desc" = "TLS visant un site leurre, si bien que le trafic ressemble à une visite ordinaire.";
 "bypass_hysteria2_desc" = "UDP et QUIC au lieu de TCP. À essayer quand toutes les connexions TCP tombent.";
 "bypass_reality_desc" = "Emprunte la poignée de main TLS d'un vrai site, si bien que les sondages voient un site authentique. Le déguisement le plus solide.";
 "bypass_regions_note" = "Les régions qui ne proposent pas la méthode choisie sont masquées dans la liste des régions.";
 "bypass_shadowsocks_desc" = "Aucun TLS du tout, donc un blocage visant TLS le manque.";
+"bypass_tuic_desc" = "Du QUIC qui ressemble à du HTTP/3 ordinaire. Nécessite un réseau qui laisse passer l'UDP.";
 "bypass_updated" = "Méthode de connexion mise à jour. Reconnectez-vous pour qu'elle prenne effet.";
 "connect_progress_still_connecting" = "Connexion toujours en cours…";
 "connect_progress_still_working" = "Nous y travaillons toujours. D'autres serveurs seront essayés si nécessaire.";
@@ -395,6 +397,7 @@
 "settings_title" = "Paramètres";
 "settings_transport_anytls" = "AnyTLS";
 "settings_transport_auto" = "Automatique (recommandé)";
+"settings_transport_cdn" = "CDN";
 "settings_transport_cloak" = "Cloak";
 "settings_transport_description" = "Comment PangeaVPN camoufle votre trafic.";
 "settings_transport_heading" = "Contournement de la censure";
@@ -402,6 +405,7 @@
 "settings_transport_reality" = "VLESS+REALITY";
 "settings_transport_shadowsocks" = "Shadowsocks";
 "settings_transport_snowflake" = "Snowflake";
+"settings_transport_tuic" = "TUIC";
 "split_tunnel_description" = "Les adresses indiquées ici contournent le VPN et utilisent votre connexion normale.";
 "split_tunnel_enabled_hint" = "Désactivé, tout passe par le VPN. Vos plages sont conservées. Effectif à la prochaine connexion.";
 "split_tunnel_enabled_title" = "Utiliser le tunnel divisé";
@@ -473,6 +477,7 @@
 "toggle_off" = "Désactivé";
 "toggle_on" = "Activé";
 "transport_status_anytls" = "Obfuscation : AnyTLS";
+"transport_status_cdn" = "Obfuscation : CDN";
 "transport_status_cloak" = "Obfuscation : Cloak";
 "transport_status_hysteria2" = "Obfuscation : Hysteria2";
 "transport_status_naive" = "Obfuscation : NaiveProxy";
@@ -480,6 +485,7 @@
 "transport_status_reality" = "Obfuscation : VLESS+REALITY";
 "transport_status_shadowsocks" = "Obfuscation : Shadowsocks";
 "transport_status_snowflake" = "Obfuscation : Snowflake";
+"transport_status_tuic" = "Obfuscation : TUIC";
 "update_appstore" = "PangeaVPN se met à jour via l'App Store. Activez les mises à jour automatiques dans Réglages › App Store.";
 "update_build" = "Build";
 "update_installed_heading" = "Version installée";

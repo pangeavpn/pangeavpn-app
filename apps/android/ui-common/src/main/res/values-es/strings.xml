@@ -75,6 +75,7 @@
     <string name="settings_title">Ajustes</string>
     <string name="settings_transport_anytls">AnyTLS</string>
     <string name="settings_transport_auto">Automático (recomendado)</string>
+    <string name="settings_transport_cdn">CDN</string>
     <string name="settings_transport_cloak">Cloak</string>
     <string name="settings_transport_description">Cómo PangeaVPN camufla tu tráfico.</string>
     <string name="settings_transport_heading">Elusión de censura</string>
@@ -82,6 +83,7 @@
     <string name="settings_transport_reality">VLESS+REALITY</string>
     <string name="settings_transport_shadowsocks">Shadowsocks</string>
     <string name="settings_transport_snowflake">Snowflake</string>
+    <string name="settings_transport_tuic">TUIC</string>
     <string name="split_tunnel_hint">Las apps activadas aquí omiten la VPN y usan tu conexión normal.</string>
     <string name="split_tunnel_title">Túnel dividido</string>
     <string name="state_connected">CONECTADO</string>
@@ -94,6 +96,7 @@
     <string name="toggle_off">Desactivado</string>
     <string name="toggle_on">Activado</string>
     <string name="transport_status_anytls">Ofuscación: AnyTLS</string>
+    <string name="transport_status_cdn">Ofuscación: CDN</string>
     <string name="transport_status_cloak">Ofuscación: Cloak</string>
     <string name="transport_status_hysteria2">Ofuscación: Hysteria2</string>
     <string name="transport_status_naive">Ofuscación: NaiveProxy</string>
@@ -101,4 +104,5 @@
     <string name="transport_status_reality">Ofuscación: VLESS+REALITY</string>
     <string name="transport_status_shadowsocks">Ofuscación: Shadowsocks</string>
     <string name="transport_status_snowflake">Ofuscación: Snowflake</string>
+    <string name="transport_status_tuic">Ofuscación: TUIC</string>
 </resources>

@@ -13,6 +13,8 @@ fun transportChoiceLabel(kind: String): String = when (kind) {
     "shadowsocks" -> stringResource(R.string.settings_transport_shadowsocks)
     "hysteria2" -> stringResource(R.string.settings_transport_hysteria2)
     "anytls" -> stringResource(R.string.settings_transport_anytls)
+    "tuic" -> stringResource(R.string.settings_transport_tuic)
+    "cdn" -> stringResource(R.string.settings_transport_cdn)
     "snowflake" -> stringResource(R.string.settings_transport_snowflake)
     else -> kind
 }

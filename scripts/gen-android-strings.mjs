@@ -85,6 +85,8 @@ const KEY_MAP = {
   "settings.transport.shadowsocks": "settings_transport_shadowsocks",
   "settings.transport.hysteria2": "settings_transport_hysteria2",
   "settings.transport.anytls": "settings_transport_anytls",
+  "settings.transport.tuic": "settings_transport_tuic",
+  "settings.transport.cdn": "settings_transport_cdn",
   "settings.transport.snowflake": "settings_transport_snowflake",
   "serverPicker.noServersForTransport": "server_picker_none_for_transport",
   "settings.provisioning.heading": "settings_censorship_heading",
@@ -152,6 +154,14 @@ const MOBILE_ONLY = {
   transport_status_anytls: {
     en: "Obfuscation: AnyTLS", es: "Ofuscación: AnyTLS", fr: "Obfuscation : AnyTLS", ru: "Обфускация: AnyTLS",
     uk: "Обфускація: AnyTLS", zh: "混淆：AnyTLS", ar: "التمويه: AnyTLS", fa: "مبهم‌سازی: AnyTLS"
+  },
+  transport_status_tuic: {
+    en: "Obfuscation: TUIC", es: "Ofuscación: TUIC", fr: "Obfuscation : TUIC", ru: "Обфускация: TUIC",
+    uk: "Обфускація: TUIC", zh: "混淆：TUIC", ar: "التمويه: TUIC", fa: "مبهم‌سازی: TUIC"
+  },
+  transport_status_cdn: {
+    en: "Obfuscation: CDN", es: "Ofuscación: CDN", fr: "Obfuscation : CDN", ru: "Обфускация: CDN",
+    uk: "Обфускація: CDN", zh: "混淆：CDN", ar: "التمويه: CDN", fa: "مبهم‌سازی: CDN"
   },
   transport_status_naive: {
     en: "Obfuscation: NaiveProxy", es: "Ofuscación: NaiveProxy", fr: "Obfuscation : NaiveProxy", ru: "Обфускация: NaiveProxy",

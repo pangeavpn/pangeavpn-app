@@ -25,11 +25,13 @@
 "appearance_theme_system" = "Системна";
 "bypass_anytls_desc" = "TLS-сесія із заповненням, що згладжує ознаку TLS-у-TLS, яку видають інші TLS-транспорти.";
 "bypass_auto_desc" = "Пробує маскування по черзі й запам'ятовує, що спрацювало в цій мережі.";
+"bypass_cdn_desc" = "Іде через мережу доставки контенту (CDN), тож блокування адрес наших серверів його не зупиняє. Повільніший за інші.";
 "bypass_cloak_desc" = "TLS під сайт-прикриття, тож трафік має вигляд звичайного візиту туди.";
 "bypass_hysteria2_desc" = "UDP і QUIC замість TCP. Варто спробувати, коли всі TCP-з'єднання обриваються.";
 "bypass_reality_desc" = "Позичає TLS-рукостискання справжнього сайта, тож зонди бачать автентичний сайт. Найміцніше маскування.";
 "bypass_regions_note" = "Регіони без вибраного способу приховано зі списку регіонів.";
 "bypass_shadowsocks_desc" = "Жодного TLS, тож блокування, націлене на TLS, його не зачіпає.";
+"bypass_tuic_desc" = "QUIC, схожий на звичайний HTTP/3. Потрібна мережа, яка пропускає UDP.";
 "bypass_updated" = "Спосіб підключення оновлено. Перепідключіться, щоб зміни набули чинності.";
 "connect_progress_still_connecting" = "Підключення все ще триває…";
 "connect_progress_still_working" = "Ми все ще працюємо. За потреби спробуємо інші сервери.";
@@ -395,6 +397,7 @@
 "settings_title" = "Налаштування";
 "settings_transport_anytls" = "AnyTLS";
 "settings_transport_auto" = "Автоматично (рекомендовано)";
+"settings_transport_cdn" = "CDN";
 "settings_transport_cloak" = "Cloak";
 "settings_transport_description" = "Як PangeaVPN маскує ваш трафік.";
 "settings_transport_heading" = "Обхід цензури";
@@ -402,6 +405,7 @@
 "settings_transport_reality" = "VLESS+REALITY";
 "settings_transport_shadowsocks" = "Shadowsocks";
 "settings_transport_snowflake" = "Snowflake";
+"settings_transport_tuic" = "TUIC";
 "split_tunnel_description" = "Адреси, вказані тут, обходять VPN і використовують звичайне з'єднання.";
 "split_tunnel_enabled_hint" = "Якщо вимкнено, увесь трафік іде через VPN. Список діапазонів зберігається. Діє з наступного підключення.";
 "split_tunnel_enabled_title" = "Використовувати роздільне тунелювання";
@@ -473,6 +477,7 @@
 "toggle_off" = "Вимк";
 "toggle_on" = "Увімк";
 "transport_status_anytls" = "Обфускація: AnyTLS";
+"transport_status_cdn" = "Обфускація: CDN";
 "transport_status_cloak" = "Обфускація: Cloak";
 "transport_status_hysteria2" = "Обфускація: Hysteria2";
 "transport_status_naive" = "Обфускація: NaiveProxy";
@@ -480,6 +485,7 @@
 "transport_status_reality" = "Обфускація: VLESS+REALITY";
 "transport_status_shadowsocks" = "Обфускація: Shadowsocks";
 "transport_status_snowflake" = "Обфускація: Snowflake";
+"transport_status_tuic" = "Обфускація: TUIC";
 "update_appstore" = "PangeaVPN оновлюється через App Store. Увімкніть автоматичні оновлення в розділі «Параметри › App Store».";
 "update_build" = "Збірка";
 "update_installed_heading" = "Встановлена версія";
