@@ -4,10 +4,12 @@ import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.updateTransition
 import androidx.compose.animation.animateColor
 import androidx.compose.foundation.Canvas
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -28,6 +30,7 @@ import androidx.compose.ui.graphics.vector.PathParser
 import org.pangeavpn.core.model.ConnState
 import org.pangeavpn.ui.theme.StateConnected
 import org.pangeavpn.ui.theme.StateError
+import org.pangeavpn.ui.theme.reducedMotion
 
 /** The drift map is authored in an 800x800 space, like the desktop SVG's viewBox. */
 private const val VIEWPORT = 800f
@@ -58,11 +61,8 @@ private class Plate(val outline: Path, val ridge: Path?, val stipple: List<Pair<
 
 private fun parse(data: String): Path = PathParser().parsePathString(data).toPath()
 
-/**
- * The continental-drift map behind the hero. The plates sit together while the
- * tunnel is up and pull apart when it is down, which is the whole metaphor the
- * headline leans on.
- */
+/** The continental-drift map behind the hero: the plates sit together while the tunnel is up
+ *  and pull apart when it is down. With animations removed it jumps to each state and never orbits. */
 @Composable
 fun DriftMap(state: ConnState, modifier: Modifier = Modifier) {
     val plates = remember {
@@ -72,33 +72,39 @@ fun DriftMap(state: ConnState, modifier: Modifier = Modifier) {
             Plate(parse(DRIFT_SOUTH_EAST), null, SOUTH_EAST_STIPPLE, SOUTH_EAST_DRIFT),
         )
     }
+    val reduced = reducedMotion()
+    val accent = MaterialTheme.colorScheme.primary
 
     val transition = updateTransition(targetState = state, label = "drift")
     val spread by transition.animateFloat(
-        transitionSpec = { tween(durationMillis = 1400) },
+        transitionSpec = { if (reduced) snap() else tween(durationMillis = 1400) },
         label = "drift-spread",
     ) { it.spread() }
     val tint by transition.animateColor(
-        transitionSpec = { tween(durationMillis = 700) },
+        transitionSpec = { if (reduced) snap() else tween(durationMillis = 700) },
         label = "drift-tint",
-    ) { it.tint() }
+    ) { it.tint(accent) }
     val alpha by transition.animateFloat(
-        transitionSpec = { tween(durationMillis = 700) },
+        transitionSpec = { if (reduced) snap() else tween(durationMillis = 700) },
         label = "drift-alpha",
     ) { it.mapAlpha() }
 
-    val orbit by rememberInfiniteTransition(label = "drift-orbit").animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(tween(durationMillis = 90_000, easing = LinearEasing)),
-        label = "drift-orbit-angle",
-    )
+    val orbit = if (reduced) {
+        null
+    } else {
+        rememberInfiniteTransition(label = "drift-orbit").animateFloat(
+            initialValue = 0f,
+            targetValue = 360f,
+            animationSpec = infiniteRepeatable(tween(durationMillis = 90_000, easing = LinearEasing)),
+            label = "drift-orbit-angle",
+        )
+    }
 
     Canvas(modifier = modifier) {
         val unit = size.minDimension / VIEWPORT
         scale(scale = unit, pivot = Offset.Zero) {
             drawGraticule(tint, alpha)
-            drawOrbit(tint, alpha, orbit)
+            drawOrbit(tint, alpha, orbit?.value ?: 0f)
             plates.forEach { drawPlate(it, tint, alpha, spread) }
             drawCompassRose(tint, alpha)
         }
@@ -112,10 +118,11 @@ private fun ConnState.spread(): Float = when (this) {
     ConnState.DISCONNECTED, ConnState.DISCONNECTING, ConnState.ERROR -> 1f
 }
 
-private fun ConnState.tint(): Color = when (this) {
+/** A connecting map takes the chosen accent, as on desktop; the other tints never change. */
+private fun ConnState.tint(accent: Color): Color = when (this) {
     ConnState.CONNECTED -> StateConnected
     ConnState.ERROR -> StateError
-    ConnState.CONNECTING -> DriftAccent
+    ConnState.CONNECTING -> accent
     ConnState.DISCONNECTED, ConnState.DISCONNECTING -> DriftIdle
 }
 
@@ -126,7 +133,6 @@ private fun ConnState.mapAlpha(): Float = when (this) {
     ConnState.DISCONNECTED, ConnState.DISCONNECTING -> 0.5f
 }
 
-private val DriftAccent = Color(0xFFC3562B)
 private val DriftIdle = Color(0xFF84847C)
 
 private fun DrawScope.drawGraticule(tint: Color, alpha: Float) {
