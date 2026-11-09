@@ -24,6 +24,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.LayoutDirection
 import org.pangeavpn.core.AppPrefs
+import org.pangeavpn.core.PangeaVpnService
 import org.pangeavpn.core.SplitTunnelStore
 import org.pangeavpn.core.settings.RangesParse
 import org.pangeavpn.core.settings.SplitTunnelRanges
@@ -56,6 +57,7 @@ fun SplitTunnelPage(onBack: () -> Unit) {
 private fun SplitTunnelSettings(onBack: () -> Unit, onOpenApps: () -> Unit) {
     val prefs by AppPrefs.state.collectAsState()
     val excludedApps by SplitTunnelStore.excludedApps.collectAsState()
+    val systemVpn by PangeaVpnService.systemVpnState.collectAsState()
     val resources = LocalContext.current.resources
     var refused by remember { mutableStateOf<RangesParse.Refused?>(null) }
     // Bumped on each save, so the field drops what was typed and shows the stored, normalized list.
@@ -107,6 +109,9 @@ private fun SplitTunnelSettings(onBack: () -> Unit, onOpenApps: () -> Unit) {
                 onClick = onOpenApps,
                 summary = pluralStringResource(R.plurals.split_tunnel_summary_apps, excludedApps.size, excludedApps.size),
             )
+            if (systemVpn?.blockWithoutVpn == true) {
+                InfoNote(text = stringResource(R.string.split_tunnel_android_blocked_apps), tone = NoteTone.WARNING)
+            }
         }
         SettingsGroup(title = rangesTitle) {
             key(revision) {

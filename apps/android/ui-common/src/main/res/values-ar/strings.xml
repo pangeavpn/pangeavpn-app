@@ -174,6 +174,7 @@
     <string name="main_route_label">مسار متعدد القفزات: أنت، ثم %1$s، ثم %2$s</string>
     <string name="main_split_badge">مقسّم</string>
     <string name="main_split_label">بعض العناوين تتجاوز VPN</string>
+    <string name="main_split_label_android">بعض التطبيقات أو العناوين تتجاوز VPN</string>
     <string name="main_stop">إيقاف</string>
     <string name="network_allowlan_off">تم تعطيل السماح بشبكة LAN. أعد الاتصال ليسري المفعول.</string>
     <string name="network_allowlan_on">تم تفعيل السماح بشبكة LAN. أعد الاتصال ليسري المفعول.</string>
@@ -367,6 +368,7 @@
     <string name="settings_transport_reality">VLESS+REALITY</string>
     <string name="settings_transport_shadowsocks">Shadowsocks</string>
     <string name="settings_transport_snowflake">Snowflake</string>
+    <string name="split_tunnel_android_blocked_apps">خيار «حظر الاتصالات بدون VPN» مفعّل في إعدادات VPN في Android، لذا لن يكون للتطبيقات المستثناة أي اتصال بالشبكة.</string>
     <string name="split_tunnel_apps_no_match">لا توجد تطبيقات تطابق «%1$s».</string>
     <string name="split_tunnel_apps_none">لم يُعثر على تطبيقات.</string>
     <string name="split_tunnel_apps_off_note">الأنفاق المقسّمة معطّلة، لذا ما زالت هذه التطبيقات تستخدم VPN.</string>
@@ -478,6 +480,7 @@
     <string name="tv_settings_account">الحساب</string>
     <string name="tv_settings_kill_switch_no_settings">لا يحتوي هذا التلفاز على شاشة إعدادات VPN، لذا لا يمكن تفعيل «شبكة VPN الدائمة التشغيل» هنا.</string>
     <string name="tv_settings_split_finding">جارٍ البحث عن التطبيقات…</string>
+    <string name="tv_support_erase_data">مسح بيانات PangeaVPN</string>
     <string name="tv_vpn_unsupported">لا يحتوي هذا التلفاز على شاشة للموافقة على شبكة VPN، لذا لا يمكن لـ PangeaVPN الاتصال عليه.</string>
     <string name="update_appstore">يتم تحديث PangeaVPN عبر App Store. فعّل التحديثات التلقائية من الإعدادات › App Store.</string>
     <string name="update_build">رقم البنية</string>

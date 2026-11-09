@@ -174,6 +174,7 @@
     <string name="main_route_label">Маршрут мультихоп: ви, потім %1$s, потім %2$s</string>
     <string name="main_split_badge">Обхід</string>
     <string name="main_split_label">Частина адрес іде в обхід VPN</string>
+    <string name="main_split_label_android">Частина застосунків або адрес іде в обхід VPN</string>
     <string name="main_stop">Зупинити</string>
     <string name="network_allowlan_off">Дозвіл LAN вимкнено. Перепідключіться, щоб зміни набули чинності.</string>
     <string name="network_allowlan_on">Дозвіл LAN увімкнено. Перепідключіться, щоб зміни набули чинності.</string>
@@ -365,6 +366,7 @@
     <string name="settings_transport_reality">VLESS+REALITY</string>
     <string name="settings_transport_shadowsocks">Shadowsocks</string>
     <string name="settings_transport_snowflake">Snowflake</string>
+    <string name="split_tunnel_android_blocked_apps">У налаштуваннях VPN Android увімкнено «Блокувати з\'єднання без VPN», тож виключені застосунки зовсім не мають доступу до мережі.</string>
     <string name="split_tunnel_apps_no_match">Немає застосунків за запитом «%1$s».</string>
     <string name="split_tunnel_apps_none">Застосунки не знайдено.</string>
     <string name="split_tunnel_apps_off_note">Роздільне тунелювання вимкнено, тому ці застосунки й далі використовують VPN.</string>
@@ -472,6 +474,7 @@
     <string name="tv_settings_account">Акаунт</string>
     <string name="tv_settings_kill_switch_no_settings">На цьому телевізорі немає екрана налаштувань VPN, тож «Постійну VPN» тут не увімкнути.</string>
     <string name="tv_settings_split_finding">Пошук застосунків…</string>
+    <string name="tv_support_erase_data">Видалити дані PangeaVPN</string>
     <string name="tv_vpn_unsupported">На цьому телевізорі немає екрана для дозволу VPN, тому PangeaVPN не може на ньому під\'єднатися.</string>
     <string name="update_appstore">PangeaVPN оновлюється через App Store. Увімкніть автоматичні оновлення в розділі «Параметри › App Store».</string>
     <string name="update_build">Збірка</string>

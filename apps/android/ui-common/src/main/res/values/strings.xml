@@ -174,6 +174,7 @@
     <string name="main_route_label">Multihop route: you, then %1$s, then %2$s</string>
     <string name="main_split_badge">Split</string>
     <string name="main_split_label">Some addresses skip the VPN</string>
+    <string name="main_split_label_android">Some apps or addresses skip the VPN</string>
     <string name="main_stop">Stop</string>
     <string name="network_allowlan_off">Allow LAN disabled. Reconnect for it to take effect.</string>
     <string name="network_allowlan_on">Allow LAN enabled. Reconnect for it to take effect.</string>
@@ -362,6 +363,7 @@
     <string name="settings_transport_reality">VLESS+REALITY</string>
     <string name="settings_transport_shadowsocks">Shadowsocks</string>
     <string name="settings_transport_snowflake">Snowflake</string>
+    <string name="split_tunnel_android_blocked_apps">Block connections without VPN is on in Android\'s VPN settings, so excluded apps have no network connection at all.</string>
     <string name="split_tunnel_apps_no_match">No apps match “%1$s”.</string>
     <string name="split_tunnel_apps_none">No apps found.</string>
     <string name="split_tunnel_apps_off_note">Split tunnelling is off, so these apps still use the VPN.</string>
@@ -465,6 +467,7 @@
     <string name="tv_settings_account">Account</string>
     <string name="tv_settings_kill_switch_no_settings">This TV has no VPN settings screen, so Always-on VPN can\'t be turned on here.</string>
     <string name="tv_settings_split_finding">Finding apps…</string>
+    <string name="tv_support_erase_data">Erase PangeaVPN data</string>
     <string name="tv_vpn_unsupported">This TV has no screen to approve a VPN, so PangeaVPN can\'t connect on it.</string>
     <string name="update_appstore">PangeaVPN updates through the App Store. Turn on automatic updates in Settings › App Store.</string>
     <string name="update_build">Build</string>

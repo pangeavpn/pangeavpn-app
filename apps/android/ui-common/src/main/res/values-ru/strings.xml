@@ -174,6 +174,7 @@
     <string name="main_route_label">Маршрут мультихоп: вы, затем %1$s, затем %2$s</string>
     <string name="main_split_badge">Обход</string>
     <string name="main_split_label">Часть адресов идёт в обход VPN</string>
+    <string name="main_split_label_android">Часть приложений или адресов идёт в обход VPN</string>
     <string name="main_stop">Остановить</string>
     <string name="network_allowlan_off">«Разрешить LAN» выключено. Переподключитесь, чтобы изменение вступило в силу.</string>
     <string name="network_allowlan_on">«Разрешить LAN» включено. Переподключитесь, чтобы изменение вступило в силу.</string>
@@ -365,6 +366,7 @@
     <string name="settings_transport_reality">VLESS+REALITY</string>
     <string name="settings_transport_shadowsocks">Shadowsocks</string>
     <string name="settings_transport_snowflake">Snowflake</string>
+    <string name="split_tunnel_android_blocked_apps">В настройках VPN Android включено «Блокировать соединения без VPN», поэтому у исключённых приложений совсем нет доступа к сети.</string>
     <string name="split_tunnel_apps_no_match">Нет приложений по запросу «%1$s».</string>
     <string name="split_tunnel_apps_none">Приложения не найдены.</string>
     <string name="split_tunnel_apps_off_note">Раздельное туннелирование выключено, поэтому эти приложения по-прежнему используют VPN.</string>
@@ -472,6 +474,7 @@
     <string name="tv_settings_account">Аккаунт</string>
     <string name="tv_settings_kill_switch_no_settings">На этом телевизоре нет экрана настроек VPN, поэтому «Постоянную VPN» здесь не включить.</string>
     <string name="tv_settings_split_finding">Поиск приложений…</string>
+    <string name="tv_support_erase_data">Удалить данные PangeaVPN</string>
     <string name="tv_vpn_unsupported">На этом телевизоре нет экрана для разрешения VPN, поэтому PangeaVPN не может на нём подключиться.</string>
     <string name="update_appstore">PangeaVPN обновляется через App Store. Включите автоматические обновления в разделе «Настройки › App Store».</string>
     <string name="update_build">Сборка</string>

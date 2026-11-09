@@ -42,6 +42,7 @@ import org.pangeavpn.core.settings.SplitTunnelRanges
 import org.pangeavpn.core.viewmodel.SplitTunnelViewModel
 import org.pangeavpn.ui.R
 import org.pangeavpn.ui.components.InfoNote
+import org.pangeavpn.ui.components.NoteTone
 import org.pangeavpn.ui.components.PillButton
 import org.pangeavpn.ui.components.ToastCenter
 import org.pangeavpn.ui.components.ToastStyle
@@ -53,6 +54,7 @@ internal fun SplitTunnelSection() {
     val prefs by AppPrefs.state.collectAsState()
     val model: SplitTunnelViewModel = viewModel()
     val apps by model.state.collectAsState()
+    val system by PangeaVpnService.systemVpnState.collectAsState()
     var editing by remember { mutableStateOf(false) }
     var refused by remember { mutableStateOf<RangesParse.Refused?>(null) }
     val rangesTitle = stringResource(R.string.split_tunnel_ranges_title)
@@ -99,6 +101,9 @@ internal fun SplitTunnelSection() {
 
     TvGroupLabel(stringResource(R.string.split_tunnel_apps_title))
     if (!prefs.splitTunnelEnabled) InfoNote(text = stringResource(R.string.split_tunnel_apps_off_note))
+    if (system?.blockWithoutVpn == true) {
+        InfoNote(text = stringResource(R.string.split_tunnel_android_blocked_apps), tone = NoteTone.WARNING)
+    }
     when {
         apps.loading -> TvParagraph(stringResource(R.string.tv_settings_split_finding))
         apps.apps.isEmpty() -> TvParagraph(stringResource(R.string.split_tunnel_apps_none))
