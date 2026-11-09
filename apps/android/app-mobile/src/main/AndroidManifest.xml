@@ -6,20 +6,33 @@
         <intent>
             <action android:name="android.intent.action.MAIN" />
         </intent>
+        <!-- The Kill Switch page offers its settings button only when this resolves. -->
+        <intent>
+            <action android:name="android.settings.VPN_SETTINGS" />
+        </intent>
     </queries>
+
+    <!-- Showing the account number asks for the screen lock or a fingerprint first. -->
+    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
 
     <!-- Restated from :core's manifest, which the merger folds in anyway:
          nothing here should survive an adb backup or a device transfer. -->
     <application
+        android:name=".PangeaApp"
         android:allowBackup="false"
         android:label="@string/app_name"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:localeConfig="@xml/locales_config"
+        android:enableOnBackInvokedCallback="true"
         android:theme="@style/Theme.Pangea">
 
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:launchMode="singleTop"
+            android:windowSoftInputMode="adjustResize"
             android:theme="@style/Theme.Pangea">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -30,12 +43,15 @@
         <service
             android:name=".PangeaTileService"
             android:exported="true"
-            android:icon="@mipmap/ic_launcher"
+            android:icon="@drawable/ic_stat_pangea"
             android:label="@string/app_name"
             android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
             <intent-filter>
                 <action android:name="android.service.quicksettings.action.QS_TILE" />
             </intent-filter>
+            <meta-data
+                android:name="android.service.quicksettings.TOGGLEABLE_TILE"
+                android:value="true" />
         </service>
 
     </application>

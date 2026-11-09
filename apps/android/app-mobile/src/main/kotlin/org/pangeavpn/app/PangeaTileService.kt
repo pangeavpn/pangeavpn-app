@@ -1,79 +1,71 @@
 package org.pangeavpn.app
 
+import android.app.PendingIntent
 import android.content.Intent
 import android.os.Build
 import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
-import androidx.annotation.RequiresApi
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
-import org.pangeavpn.core.PangeaVpnService
-import org.pangeavpn.core.TunnelBridge
+import org.pangeavpn.core.connection.HeroRules
+import org.pangeavpn.core.data.ConnectionRepository
+import org.pangeavpn.core.data.ConnectionState
 import org.pangeavpn.core.model.ConnState
+import org.pangeavpn.core.model.TunnelStatus
+import org.pangeavpn.core.R as CoreR
+import org.pangeavpn.ui.R as UiR
 
-/** Quick Settings toggle: connect to the last server, or disconnect. */
-@RequiresApi(Build.VERSION_CODES.N)
+// A connect outlives the panel closing, so it does not run in the listening scope.
+private val actions = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+
+/** Quick Settings toggle: connect to the last pick, or disconnect. Anything needing the app opens it. */
 class PangeaTileService : TileService() {
-
-    private var scope: CoroutineScope? = null
+    private var listening: CoroutineScope? = null
 
     override fun onStartListening() {
         super.onStartListening()
-        TunnelBridge.init(this)
-        val active = CoroutineScope(Dispatchers.Main + SupervisorJob())
-        scope = active
-        active.launch {
-            TunnelBridge.status.collect { render(it.state) }
+        ConnectionRepository.init(this)
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+        listening = scope
+        scope.launch {
+            combine(ConnectionRepository.status, ConnectionRepository.state) { status, own -> status to own }
+                .collect { (status, own) -> render(status, own) }
         }
     }
 
     override fun onStopListening() {
-        scope?.cancel()
-        scope = null
+        listening?.cancel()
+        listening = null
         super.onStopListening()
     }
 
     override fun onClick() {
         super.onClick()
-        when (TunnelBridge.status.value.state) {
-            ConnState.CONNECTED, ConnState.CONNECTING -> PangeaVpnService.disconnect(this)
-            else -> connect()
-        }
+        ConnectionRepository.init(this)
+        if (isLocked) unlockAndRun { act() } else act()
     }
 
-    /** VpnService needs consent the tile cannot request, so an unprepared
-     *  device is sent to the app instead of failing silently. */
-    private fun connect() {
-        val consent = android.net.VpnService.prepare(this)
-        if (consent != null) {
+    private fun act() {
+        if (HeroRules.isUp(ConnectionRepository.status.value.state)) {
+            if (ConnectionRepository.lockdownBlocksDisconnect) openApp() else ConnectionRepository.toggle()
+            return
+        }
+        if (ConnectionRepository.needsConsent()) {
             openApp()
             return
         }
-        val scopeForLaunch = scope ?: CoroutineScope(Dispatchers.Main + Job()).also { scope = it }
-        scopeForLaunch.launch {
-            val lastServer = runCatching { TunnelBridge.getSettings().lastServerId }.getOrNull()
-            if (lastServer.isNullOrEmpty()) {
-                openApp()
-            } else {
-                PangeaVpnService.connect(this@PangeaTileService, lastServer)
-            }
-        }
+        actions.launch { if (!ConnectionRepository.connectUnattended()) openApp() }
     }
 
     private fun openApp() {
         val intent = Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             startActivityAndCollapse(
-                android.app.PendingIntent.getActivity(
-                    this,
-                    0,
-                    intent,
-                    android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE,
-                ),
+                PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE),
             )
         } else {
             @Suppress("DEPRECATION")
@@ -81,12 +73,21 @@ class PangeaTileService : TileService() {
         }
     }
 
-    private fun render(state: ConnState) {
+    private fun render(status: TunnelStatus, own: ConnectionState) {
         val tile = qsTile ?: return
-        tile.state = when (state) {
-            ConnState.CONNECTED -> Tile.STATE_ACTIVE
-            ConnState.CONNECTING, ConnState.DISCONNECTING -> Tile.STATE_UNAVAILABLE
-            else -> Tile.STATE_INACTIVE
+        val display = HeroRules.display(status.state, own.busy, own.switching)
+        tile.state = when (display) {
+            ConnState.CONNECTED, ConnState.CONNECTING -> Tile.STATE_ACTIVE
+            ConnState.DISCONNECTING -> Tile.STATE_UNAVAILABLE
+            ConnState.DISCONNECTED, ConnState.ERROR -> Tile.STATE_INACTIVE
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            tile.subtitle = when (display) {
+                ConnState.CONNECTED -> status.serverName.ifEmpty { null }
+                ConnState.CONNECTING -> getString(CoreR.string.notification_connecting)
+                ConnState.DISCONNECTING -> getString(UiR.string.hero_disconnecting)
+                ConnState.DISCONNECTED, ConnState.ERROR -> null
+            }
         }
         tile.updateTile()
     }

@@ -1,3 +1,5 @@
 <resources>
-    <style name="Theme.Pangea" parent="android:Theme.DeviceDefault.NoActionBar" />
+    <style name="Theme.Pangea" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/window_background</item>
+    </style>
 </resources>
