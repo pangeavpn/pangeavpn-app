@@ -1,5 +1,26 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="alerts_blocked_body">%1$s کلید قطع اضطراری ترافیک را مسدود می‌کند، در حالی که PangeaVPN دوباره تلاش می‌کند. برنامه را باز کنید و «قطع اتصال» را بزنید تا بدون VPN آنلاین شوید.</string>
+    <string name="alerts_blocked_title">اینترنت برای محافظت از شما موقتاً متوقف شد</string>
+    <string name="alerts_connected_body">ترافیک شما اکنون محافظت می‌شود.</string>
+    <string name="alerts_connected_title">متصل شد</string>
+    <string name="alerts_lost_body">PangeaVPN در حال اتصال مجدد است…</string>
+    <string name="alerts_lost_title">اتصال قطع شد</string>
+    <string name="alerts_restored_body">اتصال VPN بازیابی شد.</string>
+    <string name="alerts_restored_title">دوباره آنلاین</string>
+    <string name="error_connect_failed">اتصال برقرار نشد. اتصال خود را بررسی کنید یا منطقه دیگری را امتحان کنید.</string>
+    <string name="error_device_locked">برای اتصال، قفل دستگاه را باز کنید.</string>
+    <string name="error_dns_invalid">هیچ سرور DNS قابل استفاده‌ای وجود ندارد. DNS سفارشی را در تنظیمات بررسی کنید.</string>
+    <string name="error_no_server">PangeaVPN را باز کنید و یک منطقه انتخاب کنید.</string>
+    <string name="error_no_subscription">این حساب اشتراک فعالی ندارد.</string>
+    <string name="error_no_tun">باز کردن رابط تونل ممکن نشد</string>
+    <string name="error_reconnect_failed">پس از تغییر شبکه، اتصال دوباره برقرار نشد</string>
+    <string name="error_signed_out">برای ورود، PangeaVPN را باز کنید.</string>
+    <string name="error_signin_not_saved">ذخیرهٔ ورود شما در این دستگاه ممکن نشد.</string>
+    <string name="error_stopped">اتصال متوقف شد</string>
+    <string name="error_subscription_expired">اشتراک شما منقضی شده است.</string>
+    <string name="error_vpn_permission">PangeaVPN اجازهٔ راه‌اندازی VPN را ندارد. برای دادن این اجازه دوباره متصل شوید.</string>
+    <string name="notification_alerts_channel">هشدارهای اتصال</string>
     <string name="notification_channel_name">وضعیت VPN</string>
     <string name="notification_connected">متصل</string>
     <string name="notification_connecting">در حال اتصال...</string>

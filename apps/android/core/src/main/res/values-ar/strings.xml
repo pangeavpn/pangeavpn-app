@@ -1,5 +1,26 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="alerts_blocked_body">%1$s يحجب مفتاح الإيقاف حركة البيانات بينما يعيد PangeaVPN المحاولة. افتح التطبيق واضغط على قطع الاتصال للاتصال بالإنترنت بدون VPN.</string>
+    <string name="alerts_blocked_title">تم إيقاف الإنترنت مؤقتًا لحمايتك</string>
+    <string name="alerts_connected_body">حركة بياناتك محمية الآن.</string>
+    <string name="alerts_connected_title">متصل</string>
+    <string name="alerts_lost_body">يعيد PangeaVPN الاتصال…</string>
+    <string name="alerts_lost_title">انقطع الاتصال</string>
+    <string name="alerts_restored_body">تمت استعادة اتصال VPN.</string>
+    <string name="alerts_restored_title">عاد الاتصال</string>
+    <string name="error_connect_failed">تعذّر الاتصال. تحقق من اتصالك أو جرّب منطقة أخرى.</string>
+    <string name="error_device_locked">افتح قفل الجهاز للاتصال.</string>
+    <string name="error_dns_invalid">لا يوجد خادم DNS صالح. تحقق من DNS المخصص في الإعدادات.</string>
+    <string name="error_no_server">افتح PangeaVPN واختر منطقة.</string>
+    <string name="error_no_subscription">لا يوجد اشتراك نشط لهذا الحساب.</string>
+    <string name="error_no_tun">تعذّر فتح واجهة النفق</string>
+    <string name="error_reconnect_failed">تعذّرت إعادة الاتصال بعد تغيّر الشبكة</string>
+    <string name="error_signed_out">افتح PangeaVPN لتسجيل الدخول.</string>
+    <string name="error_signin_not_saved">تعذّر حفظ تسجيل الدخول على هذا الجهاز.</string>
+    <string name="error_stopped">تم إيقاف الاتصال</string>
+    <string name="error_subscription_expired">انتهت صلاحية اشتراكك.</string>
+    <string name="error_vpn_permission">لا يملك PangeaVPN إذنًا بإعداد VPN. اتصل مجددًا لمنحه.</string>
+    <string name="notification_alerts_channel">تنبيهات الاتصال</string>
     <string name="notification_channel_name">حالة VPN</string>
     <string name="notification_connected">متصل</string>
     <string name="notification_connecting">جارٍ الاتصال...</string>

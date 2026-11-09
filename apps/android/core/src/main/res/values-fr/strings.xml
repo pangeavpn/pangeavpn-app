@@ -1,5 +1,26 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="alerts_blocked_body">%1$s La coupure de sécurité bloque le trafic pendant que PangeaVPN réessaie. Ouvrez l\'app et touchez Se déconnecter pour naviguer sans VPN.</string>
+    <string name="alerts_blocked_title">Internet en pause pour vous protéger</string>
+    <string name="alerts_connected_body">Votre trafic est désormais protégé.</string>
+    <string name="alerts_connected_title">Connecté</string>
+    <string name="alerts_lost_body">PangeaVPN se reconnecte…</string>
+    <string name="alerts_lost_title">Connexion perdue</string>
+    <string name="alerts_restored_body">La connexion VPN est rétablie.</string>
+    <string name="alerts_restored_title">De retour en ligne</string>
+    <string name="error_connect_failed">Connexion impossible. Vérifiez votre connexion ou essayez une autre région.</string>
+    <string name="error_device_locked">Déverrouillez votre appareil pour vous connecter.</string>
+    <string name="error_dns_invalid">Aucun serveur DNS utilisable. Vérifiez le DNS personnalisé dans Paramètres.</string>
+    <string name="error_no_server">Ouvrez PangeaVPN et choisissez une région.</string>
+    <string name="error_no_subscription">Ce compte n\'a aucun abonnement actif.</string>
+    <string name="error_no_tun">Impossible d\'ouvrir l\'interface du tunnel</string>
+    <string name="error_reconnect_failed">Impossible de se reconnecter après le changement de réseau</string>
+    <string name="error_signed_out">Ouvrez PangeaVPN pour vous connecter.</string>
+    <string name="error_signin_not_saved">Impossible d\'enregistrer votre connexion sur cet appareil.</string>
+    <string name="error_stopped">La connexion a été interrompue</string>
+    <string name="error_subscription_expired">Votre abonnement a expiré.</string>
+    <string name="error_vpn_permission">PangeaVPN n\'a pas l\'autorisation de configurer le VPN. Reconnectez-vous pour l\'accorder.</string>
+    <string name="notification_alerts_channel">Alertes de connexion</string>
     <string name="notification_channel_name">État du VPN</string>
     <string name="notification_connected">Connecté</string>
     <string name="notification_connecting">Connexion…</string>

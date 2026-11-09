@@ -1,5 +1,26 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="alerts_blocked_body">%1$s断网保护正在拦截流量，PangeaVPN 正在重试。打开应用并点击「断开连接」即可在无 VPN 的情况下上网。</string>
+    <string name="alerts_blocked_title">已暂停网络以保护您</string>
+    <string name="alerts_connected_body">您的流量现已受到保护。</string>
+    <string name="alerts_connected_title">已连接</string>
+    <string name="alerts_lost_body">PangeaVPN 正在重新连接…</string>
+    <string name="alerts_lost_title">连接已断开</string>
+    <string name="alerts_restored_body">VPN 连接已恢复。</string>
+    <string name="alerts_restored_title">已恢复在线</string>
+    <string name="error_connect_failed">无法连接。请检查网络连接或尝试其他地区。</string>
+    <string name="error_device_locked">请解锁设备后再连接。</string>
+    <string name="error_dns_invalid">没有可用的 DNS 服务器。请在设置中检查自定义 DNS。</string>
+    <string name="error_no_server">请打开 PangeaVPN 并选择一个地区。</string>
+    <string name="error_no_subscription">此账户没有有效订阅。</string>
+    <string name="error_no_tun">无法打开隧道接口</string>
+    <string name="error_reconnect_failed">网络变化后无法重新连接</string>
+    <string name="error_signed_out">请打开 PangeaVPN 登录。</string>
+    <string name="error_signin_not_saved">无法在此设备上保存您的登录信息。</string>
+    <string name="error_stopped">连接已停止</string>
+    <string name="error_subscription_expired">您的订阅已过期。</string>
+    <string name="error_vpn_permission">PangeaVPN 没有设置 VPN 的权限。请重新连接以授予权限。</string>
+    <string name="notification_alerts_channel">连接提醒</string>
     <string name="notification_channel_name">VPN 状态</string>
     <string name="notification_connected">已连接</string>
     <string name="notification_connecting">连接中…</string>

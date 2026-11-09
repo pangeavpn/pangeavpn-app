@@ -1,5 +1,26 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="alerts_blocked_body">%1$s The kill switch is blocking traffic while PangeaVPN retries. Open the app and tap Disconnect to go online without VPN.</string>
+    <string name="alerts_blocked_title">Internet paused to protect you</string>
+    <string name="alerts_connected_body">Your traffic is now protected.</string>
+    <string name="alerts_connected_title">Connected</string>
+    <string name="alerts_lost_body">PangeaVPN is reconnecting…</string>
+    <string name="alerts_lost_title">Connection lost</string>
+    <string name="alerts_restored_body">Your VPN connection is restored.</string>
+    <string name="alerts_restored_title">Back online</string>
+    <string name="error_connect_failed">Could not connect. Check your connection or try another region.</string>
+    <string name="error_device_locked">Unlock your device to connect.</string>
+    <string name="error_dns_invalid">No usable DNS server. Check Custom DNS in Settings.</string>
+    <string name="error_no_server">Open PangeaVPN and pick a region.</string>
+    <string name="error_no_subscription">This account has no active subscription.</string>
+    <string name="error_no_tun">Could not open the tunnel interface</string>
+    <string name="error_reconnect_failed">Could not reconnect after the network changed</string>
+    <string name="error_signed_out">Open PangeaVPN to sign in.</string>
+    <string name="error_signin_not_saved">Could not save your sign-in on this device.</string>
+    <string name="error_stopped">The connection was stopped</string>
+    <string name="error_subscription_expired">Your subscription has expired.</string>
+    <string name="error_vpn_permission">PangeaVPN does not have permission to set up the VPN. Connect again to allow it.</string>
+    <string name="notification_alerts_channel">Connection alerts</string>
     <string name="notification_channel_name">VPN status</string>
     <string name="notification_connected">Connected</string>
     <string name="notification_connecting">Connecting…</string>

@@ -1,5 +1,26 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="alerts_blocked_body">%1$s Аварийное отключение блокирует трафик, пока PangeaVPN пытается переподключиться. Откройте приложение и нажмите «Отключить», чтобы выйти в сеть без VPN.</string>
+    <string name="alerts_blocked_title">Интернет приостановлен для вашей защиты</string>
+    <string name="alerts_connected_body">Ваш трафик теперь защищён.</string>
+    <string name="alerts_connected_title">Подключено</string>
+    <string name="alerts_lost_body">PangeaVPN переподключается…</string>
+    <string name="alerts_lost_title">Соединение потеряно</string>
+    <string name="alerts_restored_body">VPN-соединение восстановлено.</string>
+    <string name="alerts_restored_title">Снова в сети</string>
+    <string name="error_connect_failed">Не удалось подключиться. Проверьте соединение или выберите другой регион.</string>
+    <string name="error_device_locked">Разблокируйте устройство, чтобы подключиться.</string>
+    <string name="error_dns_invalid">Нет доступного DNS-сервера. Проверьте пользовательский DNS в настройках.</string>
+    <string name="error_no_server">Откройте PangeaVPN и выберите регион.</string>
+    <string name="error_no_subscription">У этой учётной записи нет активной подписки.</string>
+    <string name="error_no_tun">Не удалось открыть интерфейс туннеля</string>
+    <string name="error_reconnect_failed">Не удалось переподключиться после смены сети</string>
+    <string name="error_signed_out">Откройте PangeaVPN, чтобы войти.</string>
+    <string name="error_signin_not_saved">Не удалось сохранить вход на этом устройстве.</string>
+    <string name="error_stopped">Соединение остановлено</string>
+    <string name="error_subscription_expired">Срок действия вашей подписки истёк.</string>
+    <string name="error_vpn_permission">У PangeaVPN нет разрешения на настройку VPN. Подключитесь снова, чтобы его выдать.</string>
+    <string name="notification_alerts_channel">Оповещения о подключении</string>
     <string name="notification_channel_name">Состояние VPN</string>
     <string name="notification_connected">Подключено</string>
     <string name="notification_connecting">Подключение…</string>
