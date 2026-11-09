@@ -218,6 +218,11 @@ object SessionRepository {
     /** Drops the in-memory session after a wipe or a hub-side sign-out; no hub calls. */
     fun clearLocal() = clear()
 
+    /** After any failed hub call: ends the session if the hub's refusal took the core's account. No hub call. */
+    fun followSignOut() {
+        if (_session.value != null) scope.launch { followCoreSignOut() }
+    }
+
     private suspend fun <T> op(block: suspend () -> T): T = scope.async { block() }.await()
 
     // A slow hub never holds the app on its splash: past the deadline a stored sign-in opens the app,
@@ -316,12 +321,16 @@ object SessionRepository {
     private suspend fun fetchSubscription(): Boolean {
         val began = generation
         val answer = runCatchingCancellable { TunnelBridge.getSubscription() }
-        if (answer.isFailure || began != generation) return false
+        if (began != generation) return false
+        if (answer.isFailure) {
+            followCoreSignOut()
+            return false
+        }
         _subscription.value = answer.getOrNull()
         return true
     }
 
-    // A start refused as signed out, with the core's account gone, means the hub ended the session.
+    // A refusal, with the core's account gone, means the hub ended the session.
     private suspend fun followCoreSignOut() {
         if (_session.value == null || _signingOut.value || _deletingAccount.value) return
         val began = generation

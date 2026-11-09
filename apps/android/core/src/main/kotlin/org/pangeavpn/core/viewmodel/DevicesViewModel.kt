@@ -55,6 +55,7 @@ class DevicesViewModel : ViewModel() {
         if (began != generation) return@op false
         if (failure != null) {
             fail(DeviceError.Remove(LoginErrors.general(coreErrorText(failure))))
+            SessionRepository.followSignOut()
             return@op false
         }
         reload()
@@ -78,6 +79,7 @@ class DevicesViewModel : ViewModel() {
         val failure = stored.exceptionOrNull()
         if (failure != null) {
             fail(DeviceError.Rename(DeviceRename.error(coreErrorText(failure))))
+            SessionRepository.followSignOut()
             return@op false
         }
         val shown = stored.getOrNull().orEmpty().ifEmpty { trimmed }
@@ -99,6 +101,7 @@ class DevicesViewModel : ViewModel() {
         val listed = runCatchingCancellable { TunnelBridge.listDevices() }
         if (began != generation) return
         val failure = listed.exceptionOrNull()
+        if (failure != null) SessionRepository.followSignOut()
         _state.update {
             if (failure == null) {
                 it.copy(devices = currentFirst(listed.getOrNull().orEmpty()), loading = false, loaded = true)

@@ -156,7 +156,10 @@ object ServersRepository {
         val loaded = runCatchingCancellable { TunnelBridge.listServers() to lastServerId() }
         if (started != generation) return
         loaded.onSuccess { (listed, last) -> show(listed, last) }
-            .onFailure { failure -> publish { it.copy(error = general(failure)) } }
+            .onFailure { failure ->
+                publish { it.copy(error = general(failure)) }
+                SessionRepository.followSignOut()
+            }
         publish { it.copy(loading = false) }
     }
 
