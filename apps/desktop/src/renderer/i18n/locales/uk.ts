@@ -96,6 +96,8 @@ export const uk = {
   "hero.emphasis.KILL_SWITCH": "проходить",
   "hero.region": "Регіон",
   "hero.allRegions": "Усі регіони",
+  "hero.yourLocation": "Ваше розташування",
+  "hero.changeLocation": "Змінити розташування",
 
   // ── Multihop ──────────────────────────────────────────
   "multihop.title": "Мультихоп",
@@ -365,6 +367,14 @@ export const uk = {
   "settings.appearance.color.ocean": "Океан",
   "settings.appearance.color.emerald": "Смарагд",
   "settings.appearance.color.rose": "Троянда",
+  "settings.appearance.regionStyle": "Список регіонів",
+  "settings.appearance.regionStyle.tiles": "Плитки",
+  "settings.appearance.regionStyle.classic": "Класичний",
+  "settings.appearance.regionStyle.ledger": "Таблиця",
+  "settings.appearance.regionStyle.chips": "Мітки",
+  "settings.appearance.regionStyle.sheet": "Шторка",
+  "settings.appearance.regionStyle.poster": "Постер",
+  "settings.appearance.regionStyle.drawer": "Бічна панель",
   "settings.appearance.dock.title": "Показувати в Dock",
   "settings.appearance.dock.hint": "Вимкніть, щоб PangeaVPN залишався лише в рядку меню.",
   "settings.support.heading": "Підтримка",
@@ -385,6 +395,8 @@ export const uk = {
   "serverPicker.noServers": "Немає доступних серверів",
   "serverPicker.noServersForTransport": "Немає серверів із підтримкою цього транспорту",
   "serverPicker.load": "Завантаження сервера {pct}%",
+  "serverPicker.columnLocation": "Розташування",
+  "serverPicker.columnLoad": "Навантаження",
   "serverPicker.loadPct": "{pct}%",
 
   // ── Update modal ──────────────────────────────────────

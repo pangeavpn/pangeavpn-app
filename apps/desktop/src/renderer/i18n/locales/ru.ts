@@ -96,6 +96,8 @@ export const ru = {
   "hero.emphasis.KILL_SWITCH": "проходит",
   "hero.region": "Регион",
   "hero.allRegions": "Все регионы",
+  "hero.yourLocation": "Ваше местоположение",
+  "hero.changeLocation": "Сменить местоположение",
 
   // ── Multihop ──────────────────────────────────────────
   "multihop.title": "Мультихоп",
@@ -365,6 +367,14 @@ export const ru = {
   "settings.appearance.color.ocean": "Океан",
   "settings.appearance.color.emerald": "Изумруд",
   "settings.appearance.color.rose": "Роза",
+  "settings.appearance.regionStyle": "Список регионов",
+  "settings.appearance.regionStyle.tiles": "Плитки",
+  "settings.appearance.regionStyle.classic": "Классический",
+  "settings.appearance.regionStyle.ledger": "Таблица",
+  "settings.appearance.regionStyle.chips": "Метки",
+  "settings.appearance.regionStyle.sheet": "Шторка",
+  "settings.appearance.regionStyle.poster": "Постер",
+  "settings.appearance.regionStyle.drawer": "Боковая панель",
   "settings.appearance.dock.title": "Показывать в Dock",
   "settings.appearance.dock.hint": "Выключите, чтобы PangeaVPN оставался только в строке меню.",
   "settings.support.heading": "Поддержка",
@@ -385,6 +395,8 @@ export const ru = {
   "serverPicker.noServers": "Нет доступных серверов",
   "serverPicker.noServersForTransport": "Нет серверов с поддержкой этого транспорта",
   "serverPicker.load": "Загрузка сервера {pct}%",
+  "serverPicker.columnLocation": "Местоположение",
+  "serverPicker.columnLoad": "Нагрузка",
   "serverPicker.loadPct": "{pct}%",
 
   // ── Update modal ──────────────────────────────────────

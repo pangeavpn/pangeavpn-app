@@ -96,6 +96,8 @@ export const fa = {
   "hero.emphasis.KILL_SWITCH": "عبور نمی‌کند",
   "hero.region": "منطقه",
   "hero.allRegions": "همه مناطق",
+  "hero.yourLocation": "موقعیت شما",
+  "hero.changeLocation": "تغییر موقعیت",
 
   // ── Multihop ──────────────────────────────────────────
   "multihop.title": "چندپرشی",
@@ -365,6 +367,14 @@ export const fa = {
   "settings.appearance.color.ocean": "اقیانوسی",
   "settings.appearance.color.emerald": "زمردی",
   "settings.appearance.color.rose": "رز",
+  "settings.appearance.regionStyle": "فهرست مناطق",
+  "settings.appearance.regionStyle.tiles": "کاشی",
+  "settings.appearance.regionStyle.classic": "کلاسیک",
+  "settings.appearance.regionStyle.ledger": "جدول",
+  "settings.appearance.regionStyle.chips": "برچسب",
+  "settings.appearance.regionStyle.sheet": "برگه پایینی",
+  "settings.appearance.regionStyle.poster": "پوستر",
+  "settings.appearance.regionStyle.drawer": "کشوی کناری",
   "settings.appearance.dock.title": "نمایش در Dock",
   "settings.appearance.dock.hint": "این گزینه را خاموش کنید تا PangeaVPN فقط در نوار منو بماند.",
   "settings.support.heading": "پشتیبانی",
@@ -385,6 +395,8 @@ export const fa = {
   "serverPicker.noServers": "سروری در دسترس نیست",
   "serverPicker.noServersForTransport": "هیچ سروری از این انتقال پشتیبانی نمی‌کند",
   "serverPicker.load": "بار سرور {pct}%",
+  "serverPicker.columnLocation": "موقعیت",
+  "serverPicker.columnLoad": "بار",
   "serverPicker.loadPct": "{pct}%",
 
   // ── Update modal ──────────────────────────────────────

@@ -15,6 +15,12 @@ import { planRotation, recordRotation } from "./serverRotation.js";
 import { buildDriftMap } from "./driftMap.js";
 import { dnsChoiceFor, dnsServersFor, type DnsChoice } from "./dnsPresets.js";
 import { buildFlag } from "./flags.js";
+import {
+  REGION_STYLES,
+  pickerAlwaysReachable,
+  resolveRegionStyle,
+  type RegionStyle
+} from "./regionStyles.js";
 import { formatAccountNumberInput, normalizeAccountNumber } from "./accountNumber.js";
 import { loginErrorText } from "./loginErrorText.js";
 import {
@@ -103,6 +109,7 @@ const factSessionEl = document.getElementById("factSession") as HTMLSpanElement;
 const factViaEl = document.getElementById("factVia") as HTMLSpanElement;
 const regionSlots = document.getElementById("regionSlots") as HTMLElement;
 const regionMoreCount = document.getElementById("regionMoreCount") as HTMLElement;
+const serverPickerLabel = document.getElementById("serverPickerLabel") as HTMLElement;
 // One in the shell header, one on the sign-in screen — both stay in step.
 const themeToggleBtns = Array.from(document.querySelectorAll<HTMLButtonElement>(".theme-toggle"));
 const uiMessageEl = document.getElementById("uiMessage") as HTMLParagraphElement;
@@ -148,15 +155,11 @@ const expiredContent = expiredScreen.querySelector<HTMLElement>(".expired-conten
 const expiredDisconnectBtn = document.getElementById("expiredDisconnectBtn") as HTMLButtonElement;
 const expiredSignOutBtn = document.getElementById("expiredSignOutBtn") as HTMLButtonElement;
 const serverRotateBtn = document.getElementById("serverRotateBtn") as HTMLButtonElement;
-const heroPath = document.getElementById("heroPath") as HTMLElement;
-const heroPathEntry = document.getElementById("heroPathEntry") as HTMLElement;
-const heroPathExit = document.getElementById("heroPathExit") as HTMLElement;
 const heroPq = document.getElementById("heroPq") as HTMLElement;
 const heroSplit = document.getElementById("heroSplit") as HTMLElement;
 const heroServerLabel = document.getElementById("heroServerLabel") as HTMLElement;
-const multihopPanel = document.getElementById("multihopPanel") as HTMLElement;
-const multihopToggle = document.getElementById("multihopToggle") as HTMLInputElement;
-const multihopEntry = document.getElementById("multihopEntry") as HTMLElement;
+const multihopBtn = document.getElementById("multihopBtn") as HTMLButtonElement;
+const multihopEntryPop = document.getElementById("multihopEntryPop") as HTMLElement;
 const multihopEntryChips = document.getElementById("multihopEntryChips") as HTMLElement;
 const multihopEntryHint = document.getElementById("multihopEntryHint") as HTMLElement;
 const hubActiveDot = document.getElementById("hubActiveDot") as HTMLElement;
@@ -213,6 +216,7 @@ const setLanguageValue = document.getElementById("setLanguageValue") as HTMLSpan
 const checkUpdatesBtn = document.getElementById("checkUpdatesBtn") as HTMLButtonElement;
 const setAppearanceValue = document.getElementById("setAppearanceValue") as HTMLSpanElement;
 const accentSwatches = document.getElementById("accentSwatches") as HTMLElement | null;
+const regionStyleOptions = document.getElementById("regionStyleOptions") as HTMLElement | null;
 const settingsVersionEl = document.getElementById("settingsVersion") as HTMLSpanElement;
 const serverPickerBtn = document.getElementById("serverPickerBtn") as HTMLButtonElement;
 const serverPickerOverlay = document.getElementById("serverPickerOverlay") as HTMLElement;
@@ -222,6 +226,7 @@ const serverPickerOverlayCloseBtn = document.getElementById("serverPickerOverlay
 type ThemeMode = "light" | "dark";
 const THEME_STORAGE_KEY = "pangea-vpn-theme";
 const ACCENT_STORAGE_KEY = "pangea-vpn-accent";
+const REGION_STYLE_STORAGE_KEY = "pangea-vpn-region-style";
 const TOAST_HOVER_DISMISS_MS = 200;
 const COLLAPSE_STATE_KEY = "pangea-vpn-collapse-state";
 
@@ -359,7 +364,7 @@ function updateSettingsSummaries(): void {
   const language = languageSelect?.selectedOptions[0];
   setLanguageValue.textContent = language ? language.textContent : "";
 
-  setAppearanceValue.textContent = accentLabel(currentAccent);
+  setAppearanceValue.textContent = appearanceSummary();
 }
 
 function formatSubscriptionDate(iso: string | null): string {
@@ -854,10 +859,10 @@ serverPickerOverlayCloseBtn.addEventListener("click", closeServerPicker);
 let multihopLocal = false;
 // Entry picked by hand; null lets the lightest entry outside the exit region win.
 let entryChoiceLocal: string | null = null;
-// Entry of the live (or last) session, so the route strip shows what is really in use.
+// Entry of the live (or last) session, so the Entry tile shows what is really in use.
 let activeEntryId: string | null = null;
-// What the route chip last rendered; polls arrive every second and rarely change it.
-let heroPathKey = "";
+// What the Entry tile last showed; polls arrive every second and rarely change it.
+let entrySlotKey = "";
 
 const hasEntryCapableServers = (): boolean => servers.some((s) => s.multihop === true);
 
@@ -912,15 +917,104 @@ function applyMultihopChange(): void {
   }, 600);
 }
 
-multihopToggle.addEventListener("change", () => {
-  multihopLocal = multihopToggle.checked;
+multihopBtn.addEventListener("click", () => {
+  multihopLocal = !multihopLocal;
   if (multihopLocal && !entryFor(serverSelect.value)) showToast(t("multihop.noEntries"));
+  if (!multihopLocal) closeEntryPop();
   applyMultihopChange();
 });
 
 function chooseEntry(entryId: string | null): void {
   entryChoiceLocal = entryId;
+  closeEntryPop();
   applyMultihopChange();
+}
+
+// ── Entry popover, opened from the Entry tile ──
+function openEntryPop(anchor: HTMLElement): void {
+  multihopEntryPop.hidden = false;
+  // Just under the tiles; the hero card is the positioning box.
+  const card = heroCard.getBoundingClientRect();
+  const top = anchor.getBoundingClientRect().bottom - card.top + 6;
+  multihopEntryPop.style.top = `${top}px`;
+  // The card clips its overflow, so a long entry list scrolls inside the popover instead.
+  multihopEntryPop.style.maxHeight = `${Math.max(120, card.height - top - 12)}px`;
+  anchor.setAttribute("aria-expanded", "true");
+  multihopEntryPop.querySelector<HTMLElement>('.multihop-chip[aria-checked="true"]')?.focus();
+}
+
+function closeEntryPop(): void {
+  if (multihopEntryPop.hidden) return;
+  multihopEntryPop.hidden = true;
+  const tile = regionSlots.querySelector<HTMLElement>(".region-entry-slot");
+  tile?.setAttribute("aria-expanded", "false");
+}
+
+document.addEventListener("pointerdown", (e) => {
+  const target = e.target as Node;
+  if (multihopEntryPop.hidden || multihopEntryPop.contains(target)) return;
+  if ((target as Element).closest?.(".region-entry-slot")) return;
+  closeEntryPop();
+});
+
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape" || multihopEntryPop.hidden) return;
+  e.preventDefault();
+  closeEntryPop();
+  regionSlots.querySelector<HTMLElement>(".region-entry-slot")?.focus();
+});
+
+/** The entry in use while connected, else the one the next connect would take. */
+function shownEntry(exitId: string): ServerInfo | null {
+  const connected = currentDaemonState === "CONNECTED" && !disconnectingVisual;
+  if (connected && activeEntryId !== null) return servers.find((s) => s.id === activeEntryId) ?? null;
+  return entryFor(exitId);
+}
+
+function buildEntrySlot(exitId: string): HTMLElement {
+  const entry = shownEntry(exitId);
+  const row = document.createElement("button");
+  row.type = "button";
+  row.className = "region-row region-entry-slot";
+  row.setAttribute("aria-haspopup", "dialog");
+  row.setAttribute("aria-expanded", String(!multihopEntryPop.hidden));
+  row.setAttribute("aria-controls", "multihopEntryPop");
+  row.classList.toggle("is-missing", !entry);
+
+  row.append(buildFlag(entry?.country ?? ""));
+  const text = document.createElement("span");
+  text.className = "region-text";
+  const name = document.createElement("span");
+  name.className = "region-name";
+  name.textContent = entry ? regionNameOf(entry) : t("multihop.none");
+  const sub = document.createElement("span");
+  sub.className = "region-sub";
+  sub.textContent = !entry
+    ? t("multihop.noEntries")
+    : entryChoiceLocal ? entry.id : `${t("multihop.auto")} · ${entry.id}`;
+  text.append(name, sub);
+  row.append(text, buildRoleTag("multihop.entry"));
+
+  row.addEventListener("click", () => {
+    if (multihopEntryPop.hidden) openEntryPop(row);
+    else closeEntryPop();
+  });
+  return row;
+}
+
+function buildRoleTag(key: MessageKey): HTMLElement {
+  const tag = document.createElement("span");
+  tag.className = "region-role";
+  tag.textContent = t(key);
+  return tag;
+}
+
+/** Re-render the hero when the entry it shows changes (polls call this every second). */
+function refreshEntrySlot(): void {
+  const key = multihopActive() ? [shownEntry(serverSelect.value)?.id ?? "", entryChoiceLocal ?? ""].join("|") : "";
+  if (key === entrySlotKey) return;
+  entrySlotKey = key;
+  if (visibleRegions.length > 0) syncServerPicker();
 }
 
 function buildEntryChip(region: Region | null, selected: boolean, blocked: boolean): HTMLElement {
@@ -949,13 +1043,14 @@ function buildEntryChip(region: Region | null, selected: boolean, blocked: boole
   return chip;
 }
 
-function renderMultihopPanel(): void {
+function renderMultihopControls(): void {
   const available = authState.authenticated && hasEntryCapableServers();
-  multihopPanel.hidden = !available;
-  if (!available) return;
-  multihopToggle.checked = multihopLocal;
-  multihopEntry.hidden = !multihopLocal;
-  if (!multihopLocal) return;
+  multihopBtn.hidden = !available;
+  multihopBtn.setAttribute("aria-pressed", String(multihopLocal));
+  if (!available || !multihopLocal) {
+    closeEntryPop();
+    return;
+  }
 
   const exitId = serverSelect.value;
   const exitRegion = exitId ? regionKeyOf({ id: exitId }) : null;
@@ -979,63 +1074,12 @@ function renderMultihopPanel(): void {
       : t("multihop.noEntries");
 }
 
-window.addEventListener("resize", () => {
-  heroPathKey = "";
-  renderHeroPath();
-});
-
-function fillPathNode(el: HTMLElement, server: ServerInfo | null, roleKey: MessageKey): void {
-  el.classList.toggle("is-missing", !server);
-  el.title = t(roleKey);
-  const name = document.createElement("span");
-  name.className = "hero-path-name";
-  name.textContent = server ? regionNameOf(server) : t("multihop.none");
-  el.replaceChildren(buildFlag(server?.country ?? "", "hero-path-flag"), name);
-}
-
-/** Sub-pixel accurate: scrollWidth rounds away an overflow that still triggers the ellipsis. */
-function isTextClipped(el: HTMLElement): boolean {
-  const range = document.createRange();
-  range.selectNodeContents(el);
-  return range.getBoundingClientRect().width > el.getBoundingClientRect().width + 0.5;
-}
-
-function renderHeroPath(): void {
-  const labelKey: MessageKey = multihopActive() ? "multihop.exitRegions" : "hero.region";
+function renderHeroLabel(): void {
+  const labelKey: MessageKey = multihopActive() ? "multihop.title" : "hero.region";
   heroServerLabel.dataset.i18n = labelKey;
   heroServerLabel.textContent = t(labelKey);
-
-  const connected = currentDaemonState === "CONNECTED" && !disconnectingVisual;
-  const exitId = (connected && lastServerIdLocal) || serverSelect.value;
-  const show = authState.authenticated && multihopActive() && servers.length > 0 && Boolean(exitId);
-  heroPath.hidden = !show;
-  if (!show) {
-    heroPathKey = "";
-    return;
-  }
-
-  const live = connected && activeEntryId !== null;
-  const entry = live ? servers.find((s) => s.id === activeEntryId) ?? null : entryFor(exitId);
-  const exit = servers.find((s) => s.id === exitId) ?? null;
-  // The state text and the PQ and Split chips share the row, so any of them leaves this chip less room.
-  const key = [live, entry?.id ?? "", exit?.id ?? "", localeTag(), stateEl.textContent, heroPq.hidden, heroSplit.hidden].join("|");
-  if (key === heroPathKey) return;
-  heroPathKey = key;
-  heroPath.dataset.live = String(live);
-  fillPathNode(heroPathEntry, entry, "multihop.entry");
-  fillPathNode(heroPathExit, exit, "multihop.exit");
-  // Flags alone beat clipped names when the row is tight.
-  heroPath.classList.remove("is-compact");
-  const names = Array.from(heroPath.querySelectorAll<HTMLElement>(".hero-path-name"));
-  if (names.some(isTextClipped)) heroPath.classList.add("is-compact");
-  heroPath.setAttribute(
-    "aria-label",
-    t("multihop.pathAria", {
-      entry: entry ? regionNameOf(entry) : t("multihop.none"),
-      exit: exit ? regionNameOf(exit) : t("multihop.none")
-    })
-  );
 }
+
 
 // Keep the server list current whenever the app comes back into view — shown
 // from the tray, restored from minimize, or otherwise unhidden.
@@ -3390,6 +3434,8 @@ async function init(): Promise<void> {
   await applyStoredLocale();
   initLanguagePicker();
   initAccentPicker();
+  initRegionStyle();
+  initRegionStylePicker();
 
   if (!daemonApi) {
     loadingMessage.textContent = t("app.loading.cantStart");
@@ -4266,7 +4312,7 @@ function renderStatus(status: StatusResponse): void {
 
   if (!optimisticallyOff) reconcileUiMessage(status.state);
 
-  renderHeroPath();
+  refreshEntrySlot();
   updateControlStates();
   updateBusyIndicator();
 }
@@ -4339,7 +4385,7 @@ function applyAccent(accent: AccentName): void {
   for (const btn of accentSwatches?.querySelectorAll<HTMLButtonElement>(".accent-swatch") ?? []) {
     btn.setAttribute("aria-pressed", String(btn.dataset.accent === accent));
   }
-  setAppearanceValue.textContent = accentLabel(accent);
+  setAppearanceValue.textContent = appearanceSummary();
 
   try {
     window.localStorage.setItem(ACCENT_STORAGE_KEY, accent);
@@ -4365,7 +4411,97 @@ function initAccentPicker(): void {
     accentSwatches.append(btn);
   }
 
-  setAppearanceValue.textContent = accentLabel(currentAccent);
+  setAppearanceValue.textContent = appearanceSummary();
+}
+
+// ── Region list style ──────────────────────────────────────
+let currentRegionStyle: RegionStyle = resolveRegionStyle(null);
+
+function regionStyleLabel(style: RegionStyle): string {
+  return t(`settings.appearance.regionStyle.${style}`);
+}
+
+function appearanceSummary(): string {
+  return `${accentLabel(currentAccent)} · ${regionStyleLabel(currentRegionStyle)}`;
+}
+
+function initRegionStyle(): void {
+  let stored: string | null = null;
+  try {
+    stored = window.localStorage.getItem(REGION_STYLE_STORAGE_KEY);
+  } catch {
+    stored = null;
+  }
+  applyRegionStyle(resolveRegionStyle(stored));
+}
+
+function applyRegionStyle(style: RegionStyle): void {
+  currentRegionStyle = style;
+  const root = document.documentElement;
+  root.dataset.regionStyle = style;
+  // Labels some layouts draw from CSS (content: var(--…)), so they stay translated.
+  root.style.setProperty("--region-current-label", JSON.stringify(t("hero.yourLocation")));
+  root.style.setProperty("--region-column-location", JSON.stringify(t("serverPicker.columnLocation")));
+  root.style.setProperty("--region-column-load", JSON.stringify(t("serverPicker.columnLoad")));
+  serverPickerLabel.textContent = t(style === "drawer" ? "hero.changeLocation" : "hero.allRegions");
+
+  for (const btn of regionStyleOptions?.querySelectorAll<HTMLButtonElement>(".region-style-option") ?? []) {
+    btn.setAttribute("aria-checked", String(btn.dataset.style === style));
+  }
+  setAppearanceValue.textContent = appearanceSummary();
+  // The drawer changes whether the full-list button can hide, so re-sync once regions exist.
+  if (visibleRegions.length > 0) syncServerPicker();
+
+  try {
+    window.localStorage.setItem(REGION_STYLE_STORAGE_KEY, style);
+  } catch {
+    // Ignore storage failures in restricted environments.
+  }
+}
+
+// Thumbnail of each layout, drawn on a 40×28 grid in currentColor.
+const REGION_STYLE_GLYPHS: Record<RegionStyle, string> = {
+  tiles:
+    '<rect x="2" y="4" width="17" height="20" rx="3"/><rect x="21" y="4" width="17" height="20" rx="3"/><rect x="5" y="7" width="6" height="4" rx="1" fill="currentColor"/><rect x="24" y="7" width="6" height="4" rx="1" fill="currentColor"/><path d="M5 19h9M24 19h9"/>',
+  classic:
+    '<rect x="2" y="3" width="36" height="9" rx="3"/><rect x="2" y="16" width="36" height="9" rx="3"/><rect x="5" y="6" width="5" height="3" rx="0.8" fill="currentColor"/><rect x="5" y="19" width="5" height="3" rx="0.8" fill="currentColor"/><path d="M13 7.5h12M13 20.5h12"/>',
+  ledger:
+    '<path d="M2 5h36M2 12h36M2 19h36M2 26h36"/><rect x="3" y="7.5" width="3" height="2" fill="currentColor"/><path d="M9 8.5h12M9 15.5h12M9 22.5h12M29 8.5h7M29 15.5h7M29 22.5h7"/>',
+  chips:
+    '<rect x="2" y="4" width="20" height="9" rx="4.5" fill="currentColor" fill-opacity="0.35"/><rect x="24" y="4" width="14" height="9" rx="4.5"/><rect x="6" y="16" width="16" height="9" rx="4.5"/><rect x="24" y="16" width="11" height="9" rx="4.5"/>',
+  sheet:
+    '<path d="M2 26V10a4 4 0 0 1 4-4h28a4 4 0 0 1 4 4v16"/><path d="M17 3h6"/><circle cx="8" cy="13" r="2" fill="currentColor"/><circle cx="8" cy="21" r="2" fill="currentColor"/><path d="M12 13h14M12 21h14M12 17h24"/>',
+  poster:
+    '<rect x="2" y="3" width="36" height="10" rx="3" fill="currentColor" fill-opacity="0.3"/><rect x="2" y="15" width="36" height="10" rx="3" fill="currentColor" fill-opacity="0.15"/><path d="M6 8h12M6 20h10M31 7v2M33 7v2M31 19v2M33 19v2"/>',
+  drawer:
+    '<rect x="2" y="3" width="36" height="22" rx="3"/><path d="M22 3v22"/><circle cx="9" cy="12" r="3.5"/><path d="M26 8h9M26 13h9M26 18h9"/>'
+};
+
+function initRegionStylePicker(): void {
+  if (!regionStyleOptions) return;
+  regionStyleOptions.replaceChildren();
+  for (const style of REGION_STYLES) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "region-style-option";
+    btn.dataset.style = style;
+    btn.setAttribute("role", "radio");
+    btn.setAttribute("aria-checked", String(style === currentRegionStyle));
+    const glyph = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    glyph.setAttribute("viewBox", "0 0 40 28");
+    glyph.setAttribute("fill", "none");
+    glyph.setAttribute("stroke", "currentColor");
+    glyph.setAttribute("stroke-width", "1.4");
+    glyph.setAttribute("stroke-linecap", "round");
+    glyph.setAttribute("aria-hidden", "true");
+    glyph.innerHTML = REGION_STYLE_GLYPHS[style];
+    const name = document.createElement("span");
+    name.className = "region-style-name";
+    name.textContent = regionStyleLabel(style);
+    btn.append(glyph, name);
+    btn.addEventListener("click", () => applyRegionStyle(style));
+    regionStyleOptions.append(btn);
+  }
 }
 
 function setUiMessage(message: string): void {
@@ -4746,20 +4882,12 @@ function buildRegionRow(region: Region, forPicker: boolean): HTMLElement {
   const load = buildLoadIndicator(node.load);
   if (load) row.append(load);
 
-  const tick = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  tick.setAttribute("class", "region-tick");
-  tick.setAttribute("viewBox", "0 0 24 24");
-  tick.setAttribute("fill", "none");
-  tick.setAttribute("aria-hidden", "true");
-  tick.innerHTML =
-    '<path d="m5 13 4.5 4.5L19 7" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>';
+  // The current region is marked by its accent outline alone; no tick.
   if (isEntry) {
     const badge = document.createElement("span");
     badge.className = "region-entry-badge";
     badge.textContent = t("multihop.entryBadge");
     row.append(badge);
-  } else {
-    row.append(tick);
   }
 
   row.addEventListener("click", () => activateRegion(region, null));
@@ -4850,8 +4978,8 @@ function renderServers(): void {
     regionSlots.replaceChildren(emptyNotice(noneForTransport));
     serverPickerOverlayList.replaceChildren(emptyNotice(noneForTransport));
     regionMoreCount.textContent = "";
-    multihopPanel.hidden = true;
-    heroPath.hidden = true;
+    multihopBtn.hidden = true;
+    closeEntryPop();
     return;
   }
 
@@ -4890,21 +5018,32 @@ function syncServerPicker(): void {
   const ordered = orderByRecent(visibleRegions, recentRegions);
   const current = selectedRegion();
 
+  const multihop = multihopActive();
   // The connected region always holds a slot, so it can never scroll away.
-  const slots = current && !ordered.slice(0, SLOT_COUNT).includes(current)
-    ? [current, ...ordered.filter((r) => r !== current)].slice(0, SLOT_COUNT)
-    : ordered.slice(0, SLOT_COUNT);
+  // Multihop gives the first slot to the entry, leaving one for the exit.
+  const exitSlots = multihop ? 1 : SLOT_COUNT;
+  const slots = current && !ordered.slice(0, exitSlots).includes(current)
+    ? [current, ...ordered.filter((r) => r !== current)].slice(0, exitSlots)
+    : ordered.slice(0, exitSlots);
 
-  regionSlots.replaceChildren(...slots.map((region) => buildRegionRow(region, false)));
+  const rows = slots.map((region) => buildRegionRow(region, false));
+  regionSlots.classList.toggle("is-multihop", multihop);
+  if (multihop) {
+    rows[0]?.append(buildRoleTag("multihop.exit"));
+    rows.unshift(buildEntrySlot(serverSelect.value));
+    entrySlotKey = [shownEntry(serverSelect.value)?.id ?? "", entryChoiceLocal ?? ""].join("|");
+  } else {
+    entrySlotKey = "";
+  }
+  regionSlots.replaceChildren(...rows);
 
   const remaining = visibleRegions.length - slots.length;
   regionMoreCount.textContent = remaining > 0 ? t("region.more", { count: String(remaining) }) : "";
-  // Multihop options live in the picker, so it stays reachable even with few regions.
-  serverPickerBtn.hidden = visibleRegions.length <= SLOT_COUNT && !hasEntryCapableServers();
+  serverPickerBtn.hidden = remaining <= 0 && !pickerAlwaysReachable(currentRegionStyle);
 
   renderRegionPicker(ordered);
-  renderMultihopPanel();
-  renderHeroPath();
+  renderMultihopControls();
+  renderHeroLabel();
 }
 
 function renderRegionPicker(ordered: readonly Region[]): void {

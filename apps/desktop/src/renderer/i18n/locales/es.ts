@@ -96,6 +96,8 @@ export const es = {
   "hero.emphasis.KILL_SWITCH": "pasa",
   "hero.region": "Región",
   "hero.allRegions": "Todas las regiones",
+  "hero.yourLocation": "Tu ubicación",
+  "hero.changeLocation": "Cambiar ubicación",
 
   // ── Multihop ──────────────────────────────────────────
   "multihop.title": "Multisalto",
@@ -365,6 +367,14 @@ export const es = {
   "settings.appearance.color.ocean": "Océano",
   "settings.appearance.color.emerald": "Esmeralda",
   "settings.appearance.color.rose": "Rosa",
+  "settings.appearance.regionStyle": "Lista de regiones",
+  "settings.appearance.regionStyle.tiles": "Mosaico",
+  "settings.appearance.regionStyle.classic": "Clásico",
+  "settings.appearance.regionStyle.ledger": "Registro",
+  "settings.appearance.regionStyle.chips": "Etiquetas",
+  "settings.appearance.regionStyle.sheet": "Hoja",
+  "settings.appearance.regionStyle.poster": "Póster",
+  "settings.appearance.regionStyle.drawer": "Panel lateral",
   "settings.appearance.dock.title": "Mostrar en el Dock",
   "settings.appearance.dock.hint": "Desactívalo para tener PangeaVPN solo en la barra de menús.",
   "settings.support.heading": "Soporte",
@@ -385,6 +395,8 @@ export const es = {
   "serverPicker.noServers": "No hay servidores disponibles",
   "serverPicker.noServersForTransport": "Ningún servidor admite este transporte",
   "serverPicker.load": "Carga del servidor {pct}%",
+  "serverPicker.columnLocation": "Ubicación",
+  "serverPicker.columnLoad": "Carga",
   "serverPicker.loadPct": "{pct}%",
 
   // ── Update modal ──────────────────────────────────────

@@ -96,6 +96,8 @@ export const zh = {
   "hero.emphasis.KILL_SWITCH": "阻断",
   "hero.region": "区域",
   "hero.allRegions": "所有区域",
+  "hero.yourLocation": "你的位置",
+  "hero.changeLocation": "更改位置",
 
   // ── Multihop ──────────────────────────────────────────
   "multihop.title": "多跳",
@@ -365,6 +367,14 @@ export const zh = {
   "settings.appearance.color.ocean": "海洋蓝",
   "settings.appearance.color.emerald": "翡翠绿",
   "settings.appearance.color.rose": "玫瑰红",
+  "settings.appearance.regionStyle": "区域列表",
+  "settings.appearance.regionStyle.tiles": "卡片",
+  "settings.appearance.regionStyle.classic": "经典",
+  "settings.appearance.regionStyle.ledger": "表格",
+  "settings.appearance.regionStyle.chips": "标签",
+  "settings.appearance.regionStyle.sheet": "底部面板",
+  "settings.appearance.regionStyle.poster": "海报",
+  "settings.appearance.regionStyle.drawer": "侧边栏",
   "settings.appearance.dock.title": "在程序坞中显示",
   "settings.appearance.dock.hint": "关闭后，PangeaVPN 只显示在菜单栏中。",
   "settings.support.heading": "支持",
@@ -385,6 +395,8 @@ export const zh = {
   "serverPicker.noServers": "没有可用的服务器",
   "serverPicker.noServersForTransport": "没有服务器支持此传输方式",
   "serverPicker.load": "服务器负载 {pct}%",
+  "serverPicker.columnLocation": "位置",
+  "serverPicker.columnLoad": "负载",
   "serverPicker.loadPct": "{pct}%",
 
   // ── Update modal ──────────────────────────────────────

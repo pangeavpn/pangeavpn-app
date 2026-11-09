@@ -87,6 +87,6 @@ http
   .listen(port, "127.0.0.1", () => {
     console.log(`\nUI preview: http://127.0.0.1:${port}/renderer/index.html`);
     console.log("Query options: sub=active|expired|none  state=DISCONNECTED|CONNECTED|CONNECTING|ERROR  ks=1");
-    console.log("               auth=0  lang=en|es|fr|ru|uk|zh|ar|fa  platform=darwin|win32|linux  latency=<ms>");
+    console.log("               auth=0  lang=en|es|fr|ru|uk|zh|ar|fa  platform=darwin|win32|linux  latency=<ms>  servers=many");
     console.log(watch ? "Watching for changes; reload the page to see them.\n" : "Run with --watch to rebuild on change.\n");
   });

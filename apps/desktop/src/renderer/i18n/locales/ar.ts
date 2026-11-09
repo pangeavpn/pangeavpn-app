@@ -96,6 +96,8 @@ export const ar = {
   "hero.emphasis.KILL_SWITCH": "يمر",
   "hero.region": "المنطقة",
   "hero.allRegions": "كل المناطق",
+  "hero.yourLocation": "موقعك",
+  "hero.changeLocation": "تغيير الموقع",
 
   // ── Multihop ──────────────────────────────────────────
   "multihop.title": "متعدد القفزات",
@@ -365,6 +367,14 @@ export const ar = {
   "settings.appearance.color.ocean": "محيطي",
   "settings.appearance.color.emerald": "زمردي",
   "settings.appearance.color.rose": "وردي",
+  "settings.appearance.regionStyle": "قائمة المناطق",
+  "settings.appearance.regionStyle.tiles": "بطاقات",
+  "settings.appearance.regionStyle.classic": "كلاسيكي",
+  "settings.appearance.regionStyle.ledger": "جدول",
+  "settings.appearance.regionStyle.chips": "شارات",
+  "settings.appearance.regionStyle.sheet": "لوحة سفلية",
+  "settings.appearance.regionStyle.poster": "ملصق",
+  "settings.appearance.regionStyle.drawer": "درج جانبي",
   "settings.appearance.dock.title": "الإظهار في Dock",
   "settings.appearance.dock.hint": "أوقف هذا الخيار لإبقاء PangeaVPN في شريط القائمة فقط.",
   "settings.support.heading": "الدعم",
@@ -385,6 +395,8 @@ export const ar = {
   "serverPicker.noServers": "لا توجد خوادم متاحة",
   "serverPicker.noServersForTransport": "لا توجد خوادم تدعم هذا النقل",
   "serverPicker.load": "حمل الخادم {pct}%",
+  "serverPicker.columnLocation": "الموقع",
+  "serverPicker.columnLoad": "الحمل",
   "serverPicker.loadPct": "{pct}%",
 
   // ── Update modal ──────────────────────────────────────
