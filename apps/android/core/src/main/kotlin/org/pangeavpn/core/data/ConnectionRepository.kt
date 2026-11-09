@@ -327,7 +327,7 @@ object ConnectionRepository {
         }
     }
 
-    // Waits for the move to show, then to end. UNSEEN: the status never showed it, so it proves nothing.
+    // Waits for the move to show, then to end. UNSEEN: never shown or still retrying, so it proves nothing.
     private suspend fun moveTunnel(serverId: String, candidates: List<String>): Move {
         setError(null)
         val outage = status.value.reconnecting
@@ -341,13 +341,18 @@ object ConnectionRepository {
             if (stopRequested) return Move.FAILED
             if (!start(serverId, candidates)) return Move.UNSEEN
         }
-        // Over when the tunnel is up again, down, or back in the service's own retry loop.
+        // Over when the tunnel is up again, down, or back in the service's own retry loop, which still
+        // carries the move, as iOS's accepted switch does; only a failure the service gave up on is told.
         val end = status.first { it.state != ConnState.CONNECTING || it.reconnecting }
-        if (end.state == ConnState.CONNECTED) return Move.LANDED
-        if (end.state == ConnState.ERROR || end.state == ConnState.CONNECTING) {
-            report(end.detail.ifEmpty { text(R.string.error_connect_failed) })
+        return when (end.state) {
+            ConnState.CONNECTED -> Move.LANDED
+            ConnState.CONNECTING -> Move.UNSEEN
+            ConnState.ERROR -> {
+                report(end.detail.ifEmpty { text(R.string.error_connect_failed) })
+                Move.FAILED
+            }
+            ConnState.DISCONNECTED, ConnState.DISCONNECTING -> Move.FAILED
         }
-        return Move.FAILED
     }
 
     // Up on another server than the pick, so the pick goes back to it and the screen tells the truth.
