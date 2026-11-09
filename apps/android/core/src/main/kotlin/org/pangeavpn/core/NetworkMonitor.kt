@@ -29,8 +29,24 @@ class NetworkMonitor(context: Context) {
             return@callbackFlow
         }
         val links = HashMap<Network, Link>()
+        var preferred: Network? = null
         fun publish() {
-            trySend(synchronized(links) { pathUpdate(links.values) })
+            trySend(synchronized(links) { pathUpdate(links, preferred) })
+        }
+
+        // The app is outside its own tunnel, so its default network is the physical one traffic leaves on.
+        val defaultCallback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                val capabilities = connectivity.getNetworkCapabilities(network)
+                if (capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN) == false) return
+                synchronized(links) { preferred = network }
+                publish()
+            }
+
+            override fun onLost(network: Network) {
+                synchronized(links) { if (preferred == network) preferred = null }
+                publish()
+            }
         }
 
         val callback = object : ConnectivityManager.NetworkCallback() {
@@ -60,6 +76,7 @@ class NetworkMonitor(context: Context) {
 
         // Seeded first, so the first update describes the networks already up rather than none.
         synchronized(links) {
+            preferred = runCatching { connectivity.activeNetwork }.getOrNull()
             @Suppress("DEPRECATION")
             for (network in runCatching { connectivity.allNetworks }.getOrNull().orEmpty()) {
                 val capabilities = connectivity.getNetworkCapabilities(network) ?: continue
@@ -76,20 +93,29 @@ class NetworkMonitor(context: Context) {
             close()
             return@callbackFlow
         }
+        if (runCatching { connectivity.registerDefaultNetworkCallback(defaultCallback) }.isFailure) {
+            synchronized(links) { preferred = null }
+        }
         publish()
-        awaitClose { runCatching { connectivity.unregisterNetworkCallback(callback) } }
+        awaitClose {
+            runCatching { connectivity.unregisterNetworkCallback(callback) }
+            runCatching { connectivity.unregisterNetworkCallback(defaultCallback) }
+        }
     }.distinctUntilChanged()
 }
 
-// "wifi=wlan0,cell=rmnet0", then the stable address tokens of only those interfaces, as iOS keys a path.
-private fun pathUpdate(links: Collection<Link>): PathUpdate {
-    val usable = links.any { it.capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true }
-    val physical = links.mapNotNull { link ->
+// "wifi=wlan0,cell=rmnet0" with the default network first, as iOS lists the path's interfaces by preference,
+// then the stable address tokens of only those interfaces.
+private fun pathUpdate(links: Map<Network, Link>, preferred: Network?): PathUpdate {
+    val usable =
+        links.values.any { it.capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true }
+    val preferredName = preferred?.let { links[it]?.properties?.interfaceName }
+    val physical = links.values.mapNotNull { link ->
         val label = link.capabilities?.let(::transportLabel) ?: return@mapNotNull null
         val properties = link.properties ?: return@mapNotNull null
         val name = properties.interfaceName ?: return@mapNotNull null
         Triple("$label=$name", name, properties)
-    }.distinctBy { it.second }.sortedBy { it.first }
+    }.sortedWith(compareBy({ it.second != preferredName }, { it.first })).distinctBy { it.second }
     if (physical.isEmpty()) return PathUpdate(usable, "")
     val route = physical.joinToString(",") { it.first }
     val tokens = physical.flatMap { (_, name, properties) ->
