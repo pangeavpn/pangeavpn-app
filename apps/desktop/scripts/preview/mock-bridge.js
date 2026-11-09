@@ -55,6 +55,8 @@
     hysteria2: idle,
     shadowsocks: idle,
     anytls: idle,
+    tuic: idle,
+    cdn: idle,
     snowflake: idle,
     wireguard: {
       running: live,

@@ -410,23 +410,19 @@
         <section id="secTransport" class="settings-section">
           <h3 class="settings-section-title" data-i18n="settings.transport.heading">Censorship Bypass</h3>
           <p class="settings-description" data-i18n="settings.transport.description">How PangeaVPN disguises your traffic.</p>
-          <!-- The select holds the state (and every existing handler); the button
-               opens the full-pane picker that renders its options with room for
-               an explanation each.
-
-               Order mirrors autoCascadeOrder in daemon/internal/api/service.go,
-               so the list reads as the sequence auto mode actually walks. Direct
-               WireGuard trails it: auto never falls back to a bare handshake, so
-               it is only ever reached by picking it here. -->
+          <!-- The select holds the state; the button opens a full-pane picker. Order mirrors AutoCascadeOrder
+               in daemon/internal/transport/cascade.go; direct WireGuard trails because auto never picks it. -->
           <select id="preferredTransportSelect" aria-label="Censorship bypass" data-i18n-aria-label="settings.transport.heading" hidden>
             <option value="auto" data-i18n="settings.transport.auto">Automatic (recommended)</option>
             <option value="reality" data-i18n="settings.transport.reality">VLESS+REALITY</option>
             <option value="cloak" data-i18n="settings.transport.cloak">Cloak</option>
             <option value="shadowsocks" data-i18n="settings.transport.shadowsocks">Shadowsocks</option>
             <option value="hysteria2" data-i18n="settings.transport.hysteria2">Hysteria2</option>
+            <option value="tuic" data-i18n="settings.transport.tuic">TUIC</option>
             <option value="naive" data-i18n="settings.transport.naive">NaiveProxy</option>
             <option value="anytls" data-i18n="settings.transport.anytls">AnyTLS</option>
-            <!-- Snowflake option gated for this release pending kill-switch dynamic-peer support; restore to re-enable user selection (it sorts after naive). -->
+            <option value="cdn" data-i18n="settings.transport.cdn">CDN</option>
+            <!-- Snowflake option gated for this release pending kill-switch dynamic-peer support; restore to re-enable user selection (it sorts after cdn). -->
             <option value="wireguard" data-i18n="settings.transport.wireguard">WireGuard (no disguise)</option>
           </select>
           <button id="transportPickerBtn" class="settings-picker" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="transportPane">

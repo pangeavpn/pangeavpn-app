@@ -32,6 +32,8 @@ export function isCachedServer(value: unknown): value is ServerInfo {
     isOptionalBlock(s.hysteria2) &&
     isOptionalBlock(s.shadowsocks) &&
     isOptionalBlock(s.anytls) &&
+    isOptionalBlock(s.tuic) &&
+    isOptionalBlock(s.cdn) &&
     isOptionalBlock(s.snowflake)
   );
 }

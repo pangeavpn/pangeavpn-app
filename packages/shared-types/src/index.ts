@@ -14,6 +14,9 @@ export const LogSourceSchema = z.enum([
   "cloak",
   "naive",
   "shadowsocks",
+  "anytls",
+  "tuic",
+  "cdn",
   "snowflake",
   "wireguard"
 ]);
@@ -95,6 +98,31 @@ export const AnyTLSProfileSchema = z.object({
   targetPort: z.number().int().positive().optional()
 });
 
+export const TUICProfileSchema = z.object({
+  localPort: z.number().int().nonnegative(),
+  remoteHost: z.string().min(1),
+  remotePort: z.number().int().positive(),
+  uuid: z.string().min(1),
+  password: z.string().min(1),
+  serverName: z.string().optional(),
+  insecure: z.boolean().optional(),
+  pinSha256: z.string().optional(),
+  targetHost: z.string().optional(),
+  targetPort: z.number().int().positive().optional()
+});
+
+// remoteHost is a CDN edge, never the node; serverName is the CDN-proxied hostname.
+export const CDNProfileSchema = z.object({
+  localPort: z.number().int().nonnegative(),
+  remoteHost: z.string().min(1),
+  remotePort: z.number().int().positive(),
+  uuid: z.string().min(1),
+  serverName: z.string().min(1),
+  path: z.string().optional(),
+  targetHost: z.string().optional(),
+  targetPort: z.number().int().positive().optional()
+});
+
 export const SnowflakeProfileSchema = z.object({
   localPort: z.number().int().nonnegative(),
   brokerURL: z.string().min(1),
@@ -156,6 +184,8 @@ export const ProfileSchema = z.object({
   hysteria2: Hysteria2ProfileSchema.optional(),
   shadowsocks: ShadowsocksProfileSchema.optional(),
   anytls: AnyTLSProfileSchema.optional(),
+  tuic: TUICProfileSchema.optional(),
+  cdn: CDNProfileSchema.optional(),
   snowflake: SnowflakeProfileSchema.optional(),
   wireguard: WireGuardProfileSchema
 });
@@ -168,10 +198,10 @@ export const StatusResponseSchema = z.object({
   state: DaemonStateSchema,
   detail: z.string(),
   activeTransport: z
-    .enum(["cloak", "naive", "reality", "hysteria2", "shadowsocks", "anytls", "snowflake", "wireguard", ""])
+    .enum(["cloak", "naive", "reality", "hysteria2", "shadowsocks", "anytls", "tuic", "cdn", "snowflake", "wireguard", ""])
     .default(""),
   connectingTransport: z
-    .enum(["cloak", "naive", "reality", "hysteria2", "shadowsocks", "anytls", "snowflake", "wireguard", ""])
+    .enum(["cloak", "naive", "reality", "hysteria2", "shadowsocks", "anytls", "tuic", "cdn", "snowflake", "wireguard", ""])
     .default(""),
   cloak: z.object({
     running: z.boolean(),
@@ -194,6 +224,14 @@ export const StatusResponseSchema = z.object({
     pid: z.number().nullable()
   }),
   anytls: z.object({
+    running: z.boolean(),
+    pid: z.number().nullable()
+  }),
+  tuic: z.object({
+    running: z.boolean(),
+    pid: z.number().nullable()
+  }),
+  cdn: z.object({
     running: z.boolean(),
     pid: z.number().nullable()
   }),
@@ -246,7 +284,7 @@ export const ConnectRequestSchema = z.object({
   // "wireguard" is the direct method: no transport, straight to the node. Only
   // ever set when the user asks for it — the daemon's auto cascade never picks it.
   preferredTransport: z
-    .enum(["cloak", "naive", "reality", "hysteria2", "shadowsocks", "anytls", "snowflake", "wireguard"])
+    .enum(["cloak", "naive", "reality", "hysteria2", "shadowsocks", "anytls", "tuic", "cdn", "snowflake", "wireguard"])
     .optional(),
   allowLAN: z.boolean().optional(),
   lockdown: z.boolean().optional()
@@ -283,6 +321,8 @@ export type RealityProfile = z.infer<typeof RealityProfileSchema>;
 export type Hysteria2Profile = z.infer<typeof Hysteria2ProfileSchema>;
 export type ShadowsocksProfile = z.infer<typeof ShadowsocksProfileSchema>;
 export type AnyTLSProfile = z.infer<typeof AnyTLSProfileSchema>;
+export type TUICProfile = z.infer<typeof TUICProfileSchema>;
+export type CDNProfile = z.infer<typeof CDNProfileSchema>;
 export type SnowflakeProfile = z.infer<typeof SnowflakeProfileSchema>;
 export type WireGuardProfile = z.infer<typeof WireGuardProfileSchema>;
 export type Profile = z.infer<typeof ProfileSchema>;

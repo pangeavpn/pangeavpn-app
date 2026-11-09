@@ -663,6 +663,8 @@ const TRANSPORT_DESCRIPTIONS: Record<string, MessageKey> = {
   hysteria2: "settings.transport.hysteria2.desc",
   shadowsocks: "settings.transport.shadowsocks.desc",
   anytls: "settings.transport.anytls.desc",
+  tuic: "settings.transport.tuic.desc",
+  cdn: "settings.transport.cdn.desc",
   wireguard: "settings.transport.wireguard.desc"
 };
 
@@ -4029,6 +4031,8 @@ const TRANSPORT_LABELS: Record<string, string> = {
   shadowsocks: "Shadowsocks",
   hysteria2: "Hysteria2",
   anytls: "AnyTLS",
+  tuic: "TUIC",
+  cdn: "CDN",
   snowflake: "Snowflake",
   wireguard: "WireGuard",
 };
@@ -4753,6 +4757,8 @@ type TransportChoice =
   | "hysteria2"
   | "shadowsocks"
   | "anytls"
+  | "tuic"
+  | "cdn"
   | "snowflake"
   | "wireguard";
 
@@ -4770,6 +4776,10 @@ function serverSupportsTransport(server: ServerInfo, transport: TransportChoice)
       return Boolean(server.shadowsocks);
     case "anytls":
       return Boolean(server.anytls);
+    case "tuic":
+      return Boolean(server.tuic);
+    case "cdn":
+      return Boolean(server.cdn);
     case "snowflake":
       return Boolean(server.snowflake);
     default:

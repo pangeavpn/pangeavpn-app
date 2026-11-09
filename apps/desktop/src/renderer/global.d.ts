@@ -135,6 +135,8 @@ declare global {
     hysteria2?: boolean;
     shadowsocks?: boolean;
     anytls?: boolean;
+    tuic?: boolean;
+    cdn?: boolean;
     snowflake?: boolean;
   }
 
@@ -227,8 +229,8 @@ declare global {
     /** Developer option: send hub traffic through the tunnel, not around it. */
     setHubInTunnel: (enabled: boolean) => Promise<void>;
     getHubInTunnel: () => Promise<boolean>;
-    setPreferredTransport: (value: "auto" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "anytls" | "snowflake" | "wireguard") => Promise<void>;
-    getPreferredTransport: () => Promise<"auto" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "anytls" | "snowflake" | "wireguard">;
+    setPreferredTransport: (value: "auto" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "anytls" | "tuic" | "cdn" | "snowflake" | "wireguard") => Promise<void>;
+    getPreferredTransport: () => Promise<"auto" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "anytls" | "tuic" | "cdn" | "snowflake" | "wireguard">;
     setLaunchAtStartup: (enabled: boolean) => Promise<void>;
     getLaunchAtStartup: () => Promise<boolean>;
     setLockdown: (enabled: boolean) => Promise<void>;

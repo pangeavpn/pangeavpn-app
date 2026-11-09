@@ -9,6 +9,8 @@ import { resolveNaiveEndpoint } from "../shared/naiveEndpoint";
 import { directWireGuardEndpoint } from "../shared/wireguardEndpoint";
 import { buildShadowsocksProfile } from "../shared/shadowsocksProfile";
 import { buildAnyTLSProfile } from "../shared/anytlsProfile";
+import { buildTUICProfile } from "../shared/tuicProfile";
+import { buildCDNProfile } from "../shared/cdnProfile";
 import {
   DEFAULT_HUB_METHODS,
   type HubMethod,
@@ -1817,6 +1819,8 @@ export class PangeaApiClient {
     // the exit is never dialed directly, keeping it out of the permits.
     const wireguardEndpoint = directWireGuardEndpoint(reg.serverEndpoint, reg.hop, nodeIp);
     const anytls = server.anytls ? buildAnyTLSProfile(server.anytls, nodeIp) : undefined;
+    const tuic = server.tuic ? buildTUICProfile(server.tuic, nodeIp) : undefined;
+    const cdn = server.cdn ? buildCDNProfile(server.cdn) : undefined;
     const excludeIPs = uniqueNonEmpty([
       nodeIp,
       wireguardEndpoint?.host,
@@ -1826,7 +1830,9 @@ export class PangeaApiClient {
       server.reality?.remoteIp,
       server.hysteria2?.remoteIp,
       server.shadowsocks?.remoteIp,
-      anytls?.remoteHost
+      anytls?.remoteHost,
+      tuic?.remoteHost,
+      cdn?.remoteHost
     ]).filter(isIPv4Literal);
     // Snowflake is the exception and is left out: neither its broker nor its
     // per-session volunteer proxy is an address ours to know up front.
@@ -1903,6 +1909,8 @@ export class PangeaApiClient {
         shadowsocks: buildShadowsocksProfile(server.shadowsocks, nodeIp)
       } : {}),
       ...(anytls ? { anytls } : {}),
+      ...(tuic ? { tuic } : {}),
+      ...(cdn ? { cdn } : {}),
       ...(server.snowflake ? {
         snowflake: {
           localPort: 0,

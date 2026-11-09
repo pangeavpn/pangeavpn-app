@@ -263,6 +263,31 @@ export interface ServerInfo {
     targetHost?: string;
     targetPort?: number;
   };
+  /** TUIC v5 (QUIC), when the node has it. Same dial and pin rules as AnyTLS. */
+  tuic?: {
+    remoteHost: string;
+    /** Per-transport endpoint address; see naive.remoteIp above. */
+    remoteIp?: string;
+    remotePort: number;
+    uuid: string;
+    password: string;
+    serverName?: string;
+    pinSha256?: string;
+    targetHost?: string;
+    targetPort?: number;
+  };
+  /** VLESS over HTTPUpgrade+TLS through a CDN. `remoteHost` is the CDN-proxied
+   *  hostname and `remoteIp` an edge address, never the node's. */
+  cdn?: {
+    remoteHost: string;
+    remoteIp?: string;
+    remotePort?: number;
+    uuid: string;
+    path?: string;
+    serverName?: string;
+    targetHost?: string;
+    targetPort?: number;
+  };
   /** Shadowsocks listener that reaches the hub instead of WireGuard, used as a
    *  fallback path for account traffic. Per-region, but the same for all. */
   controlPlaneShadowsocks?: {
@@ -309,6 +334,8 @@ export interface PublicServerInfo {
   hysteria2?: boolean;
   shadowsocks?: boolean;
   anytls?: boolean;
+  tuic?: boolean;
+  cdn?: boolean;
   snowflake?: boolean;
 }
 
@@ -326,6 +353,8 @@ export function toPublicServerInfo(server: ServerInfo): PublicServerInfo {
     hysteria2: Boolean(server.hysteria2),
     shadowsocks: Boolean(server.shadowsocks),
     anytls: Boolean(server.anytls),
+    tuic: Boolean(server.tuic),
+    cdn: Boolean(server.cdn),
     snowflake: Boolean(server.snowflake)
   };
 }
@@ -395,8 +424,8 @@ export interface PangeaApi {
   /** Developer option: send hub traffic through the tunnel, not around it. */
   setHubInTunnel: (enabled: boolean) => Promise<void>;
   getHubInTunnel: () => Promise<boolean>;
-  setPreferredTransport: (value: "auto" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "anytls" | "snowflake" | "wireguard") => Promise<void>;
-  getPreferredTransport: () => Promise<"auto" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "anytls" | "snowflake" | "wireguard">;
+  setPreferredTransport: (value: "auto" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "anytls" | "tuic" | "cdn" | "snowflake" | "wireguard") => Promise<void>;
+  getPreferredTransport: () => Promise<"auto" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "anytls" | "tuic" | "cdn" | "snowflake" | "wireguard">;
   setLaunchAtStartup: (enabled: boolean) => Promise<void>;
   getLaunchAtStartup: () => Promise<boolean>;
   /** Kill switch stays armed while disconnected. Independent of auto-connect. */
