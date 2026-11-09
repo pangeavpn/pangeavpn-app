@@ -6,7 +6,7 @@ import { app } from "electron";
 import { DaemonClient } from "./daemonClient";
 import { getBundledDaemonPath } from "./resourcePaths";
 import { ensureUserRuntimeFiles, getAppSupportDir, getTokenPath, hasManagedLinuxDaemonService } from "./platformPaths";
-import { macLaunchDaemonRestartCommand } from "./macLaunchDaemon";
+import { macAccessGroupJoinCommand, macLaunchDaemonRestartCommand } from "./macLaunchDaemon";
 import { DaemonNotReadyError, tokenPermissionMessage } from "./runtimeFiles";
 
 function openDaemonLogStdio(): ["ignore", number, number] | "ignore" {
@@ -505,6 +505,7 @@ async function restartProcessElevatedMac(filePath: string, context: MacDaemonCon
     `/usr/sbin/chown root "$APP_SUPPORT_DIR" "$CONFIG_PATH" >/dev/null 2>&1 || true`,
     `/bin/chmod 755 "$APP_SUPPORT_DIR" >/dev/null 2>&1 || true`,
     `/bin/chmod 600 "$CONFIG_PATH" >/dev/null 2>&1 || true`,
+    macAccessGroupJoinCommand(os.userInfo().username),
     `for daemon_pid in $(/usr/sbin/lsof -tiTCP:8787 -sTCP:LISTEN 2>/dev/null); do /bin/kill -TERM "$daemon_pid" >/dev/null 2>&1 || true; done`,
     "/bin/sleep 0.2",
     `/usr/bin/nohup /usr/bin/env HOME="$TARGET_HOME" USER="$TARGET_USER" LOGNAME="$TARGET_USER" PANGEA_APP_SUPPORT_DIR="$APP_SUPPORT_DIR" ${daemonPath} >"$LOG_PATH" 2>&1 &`
@@ -583,7 +584,10 @@ function describeUnreachableManagedMacLaunchDaemon(): string {
 }
 
 async function restartManagedMacLaunchDaemonElevated(): Promise<{ ok: boolean; message: string }> {
-  const shellCommand = macLaunchDaemonRestartCommand(macLaunchDaemonLabel, macLaunchDaemonPlist);
+  const shellCommand = [
+    macAccessGroupJoinCommand(os.userInfo().username),
+    macLaunchDaemonRestartCommand(macLaunchDaemonLabel, macLaunchDaemonPlist)
+  ].join("; ");
   const appleScript = `do shell script ${appleScriptString(shellCommand)} with administrator privileges`;
   const result = await runProcess("osascript", ["-e", appleScript]);
   const output = combineOutput(result).trim();

@@ -24,23 +24,17 @@ export function tokenPermissionMessage(): string {
       "takes effect, then reopen the app."
     );
   }
-  // macOS grants the token to the admin group only, and a reinstall can't change that.
-  if (process.platform === "darwin" && !isMacAdmin()) {
+  // The admin-approved restart adds this account to the pangeavpn group.
+  if (process.platform === "darwin") {
     return (
-      "PangeaVPN needs a macOS administrator account. Sign in to one, or have an administrator turn on " +
-      "\"Allow this user to administer this computer\" for your account in System Settings > Users & Groups."
+      "PangeaVPN isn't set up for this Mac account yet. Choose Restart service and have an " +
+      "administrator approve it once."
     );
   }
   return (
     "PangeaVPN is not allowed to read the background service's access token. Reinstall " +
     "PangeaVPN to repair the service's permissions."
   );
-}
-
-const MAC_ADMIN_GID = 80;
-
-function isMacAdmin(): boolean {
-  return typeof process.getgroups !== "function" || process.getgroups().includes(MAC_ADMIN_GID);
 }
 
 export async function ensureRuntimeFiles(appDir: string, options: RuntimeFileOptions): Promise<void> {
