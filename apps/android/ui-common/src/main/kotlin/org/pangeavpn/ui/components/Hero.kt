@@ -136,7 +136,7 @@ fun HeroKicker(
                         HeroChip(
                             icon = Icons.AutoMirrored.Rounded.CallSplit,
                             label = stringResource(R.string.main_split_badge),
-                            spoken = stringResource(R.string.main_split_label),
+                            spoken = stringResource(R.string.main_split_label_android),
                             tint = MaterialTheme.colorScheme.primary,
                         )
                     }
