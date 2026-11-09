@@ -29,30 +29,82 @@ data class TunnelStatus(
     val serverName: String = "",
     // Which cascade rung carried the live tunnel; empty when disconnected.
     val activeTransport: String = "",
+    // Unix seconds of the newest WireGuard handshake, 0 before the first one.
+    val lastHandshake: Long = 0,
+    val postQuantum: Boolean = false,
+    // Empty unless the route is multihop; serverId stays the exit.
+    val entryServerId: String = "",
+    val entryServerName: String = "",
+    // The two below are set by PangeaVpnService, never by the core.
+    val reconnecting: Boolean = false,
+    // Wall-clock millis the session first came up; kept across switches and reconnects.
+    val connectedSince: Long = 0,
 )
 
 @Serializable
 data class Server(
     val id: String,
     val name: String,
-    val region: String,
-    val country: String,
-    val load: Int?,
-)
+    val region: String = "",
+    val country: String = "",
+    val load: Int? = null,
+    // The server may relay as the entry of a two-hop route.
+    val multihop: Boolean = false,
+    val reality: Boolean = false,
+    val hysteria2: Boolean = false,
+    val shadowsocks: Boolean = false,
+    val anytls: Boolean = false,
+    val naive: Boolean = false,
+    val snowflake: Boolean = false,
+) {
+    /** Cloak and plain WireGuard are on every node; the rest are advertised per server. */
+    fun supports(transport: String): Boolean = when (transport) {
+        "auto", "cloak", "wireguard" -> true
+        "reality" -> reality
+        "hysteria2" -> hysteria2
+        "shadowsocks" -> shadowsocks
+        "anytls" -> anytls
+        "naive" -> naive
+        "snowflake" -> snowflake
+        else -> false
+    }
+}
 
 @Serializable
 data class Subscription(
-    val status: String,
-    val renews: Boolean,
-    val expiresAt: String?,
+    val status: String = "",
+    val renews: Boolean = false,
+    val expiresAt: String? = null,
+    // null when the hub did not say; only an explicit false blocks connecting.
+    val entitled: Boolean? = null,
+    // Served from the last answer because the hub was unreachable.
+    val cached: Boolean = false,
 )
 
 @Serializable
 data class Device(
     val id: String,
-    val friendlyName: String?,
-    val createdAt: String,
-    val status: String,
+    val friendlyName: String? = null,
+    val createdAt: String = "",
+    val status: String = "",
+    val current: Boolean = false,
+)
+
+@Serializable
+data class HubTestResult(
+    val method: String = "",
+    val ok: Boolean = false,
+    val ms: Long = 0,
+    val detail: String = "",
+    // Why a method could not be tried at all: noAddress, noCredentials, noRelay or busy.
+    val unavailable: String = "",
+)
+
+@Serializable
+data class HubStatus(
+    // The method this process last reached the hub by; null before the first request.
+    val active: String? = null,
+    val detail: String? = null,
 )
 
 @Serializable
@@ -86,6 +138,7 @@ data class AppSettings(
     val lastServerId: String = "",
     val hubMethods: HubMethods = HubMethods(),
     val deadDrop: Boolean = true,
+    val postQuantum: Boolean = false,
 )
 
 /** Manual choices. NaiveProxy is reachable through "auto" but is not offered
@@ -107,8 +160,10 @@ fun HubMethods.isEnabled(method: String): Boolean = when (method) {
 data class TunnelConfig(
     val address: String,
     val prefixLength: Int,
-    val dns: List<String>,
+    val dns: List<String> = emptyList(),
     val mtu: Int,
     val serverId: String,
     val serverName: String,
+    val entryServerId: String = "",
+    val entryServerName: String = "",
 )
