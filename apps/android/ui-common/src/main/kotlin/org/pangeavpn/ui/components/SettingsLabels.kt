@@ -17,6 +17,18 @@ fun transportChoiceLabel(kind: String): String = when (kind) {
     else -> kind
 }
 
+/** What each connection method does, under its name on the Censorship Bypass page. */
+@Composable
+fun transportChoiceDescription(kind: String): String = when (kind) {
+    "auto" -> stringResource(R.string.bypass_auto_desc)
+    "cloak" -> stringResource(R.string.bypass_cloak_desc)
+    "reality" -> stringResource(R.string.bypass_reality_desc)
+    "shadowsocks" -> stringResource(R.string.bypass_shadowsocks_desc)
+    "hysteria2" -> stringResource(R.string.bypass_hysteria2_desc)
+    "anytls" -> stringResource(R.string.bypass_anytls_desc)
+    else -> ""
+}
+
 @Composable
 fun hubMethodTitle(method: String): String = when (method) {
     "directIp" -> stringResource(R.string.settings_censorship_directip_title)
