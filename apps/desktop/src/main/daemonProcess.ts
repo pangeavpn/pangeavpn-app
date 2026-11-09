@@ -792,25 +792,25 @@ function ensureWindowsDaemonServiceRunning(): { ok: boolean; message: string } {
     return validation;
   }
 
+  // sc.exe localizes its messages, but its exit status is the Win32 error code.
   const query = spawnSync("sc.exe", ["query", "PangeaDaemon"], {
     stdio: "pipe",
     shell: false,
     windowsHide: true
   });
-  const queryOutput = combineOutput(query);
-  if ((query.status ?? 1) !== 0 && queryOutput.toLowerCase().includes("1060")) {
+  if (query.status === WIN32_SERVICE_DOES_NOT_EXIST) {
     return {
       ok: false,
       message: "PangeaDaemon service is not installed. Run the installer Repair option as administrator."
     };
   }
-  if ((query.status ?? 1) !== 0 && queryOutput.toLowerCase().includes("access is denied")) {
+  if (query.status === WIN32_ACCESS_DENIED) {
     return {
       ok: false,
       message: "Access denied while checking PangeaDaemon service. Run installer repair as administrator."
     };
   }
-  if (queryOutput.toUpperCase().includes("RUNNING")) {
+  if (combineOutput(query).toUpperCase().includes("RUNNING")) {
     return { ok: true, message: "" };
   }
 
@@ -819,27 +819,23 @@ function ensureWindowsDaemonServiceRunning(): { ok: boolean; message: string } {
     shell: false,
     windowsHide: true
   });
-  const startOutput = combineOutput(start).toLowerCase();
 
-  if ((start.status ?? 1) === 0) {
+  if (start.status === 0 || start.status === WIN32_SERVICE_ALREADY_RUNNING) {
     return { ok: true, message: "" };
   }
-  if (startOutput.includes("already running")) {
-    return { ok: true, message: "" };
-  }
-  if (startOutput.includes("1060")) {
+  if (start.status === WIN32_SERVICE_DOES_NOT_EXIST) {
     return {
       ok: false,
       message: "PangeaDaemon service is missing. Reinstall or run installer repair as administrator."
     };
   }
-  if (startOutput.includes("access is denied")) {
+  if (start.status === WIN32_ACCESS_DENIED) {
     return {
       ok: false,
       message: "PangeaDaemon exists but cannot be started without elevated repair permissions."
     };
   }
-  if (startOutput.includes("disabled")) {
+  if (start.status === WIN32_SERVICE_DISABLED) {
     return {
       ok: false,
       message: "PangeaDaemon service is disabled. Enable it in Services or run installer repair."
@@ -848,45 +844,47 @@ function ensureWindowsDaemonServiceRunning(): { ok: boolean; message: string } {
 
   return {
     ok: false,
-    message: `Failed to start PangeaDaemon service. ${startOutput.trim()}`
+    message: `Failed to start PangeaDaemon service. ${combineOutput(start).trim()}`
   };
 }
 
+const WIN32_ACCESS_DENIED = 5;
+const WIN32_SERVICE_ALREADY_RUNNING = 1056;
+const WIN32_SERVICE_DISABLED = 1058;
+const WIN32_SERVICE_DOES_NOT_EXIST = 1060;
+
 function validateWindowsDaemonServiceInstallation(): { ok: boolean; message: string } {
   const expectedExecutable = expectedWindowsServiceDaemonPath();
-  const qc = spawnSync("sc.exe", ["qc", "PangeaDaemon"], {
-    stdio: "pipe",
-    shell: false,
-    windowsHide: true
-  });
-  const qcOutput = combineOutput(qc);
-  const qcLower = qcOutput.toLowerCase();
-  if ((qc.status ?? 1) !== 0 && qcLower.includes("1060")) {
+  // The registry value, not `sc qc`, whose field labels are translated on non-English Windows.
+  const query = spawnSync(
+    "reg.exe",
+    ["query", "HKLM\\SYSTEM\\CurrentControlSet\\Services\\PangeaDaemon", "/v", "ImagePath"],
+    { stdio: "pipe", shell: false, windowsHide: true }
+  );
+  if (query.status === 1) {
     return {
       ok: false,
       message: "PangeaDaemon service is not installed. Run the installer Repair option as administrator."
     };
   }
-  if ((qc.status ?? 1) !== 0) {
+  if (query.status !== 0) {
     return {
       ok: false,
       message: "PangeaDaemon service configuration could not be verified. Run installer repair as administrator."
     };
   }
-  if ((qc.status ?? 1) === 0) {
-    const configuredExecutable = parseServiceExecutablePath(qcOutput);
-    if (!configuredExecutable) {
-      return {
-        ok: false,
-        message: "PangeaDaemon service path could not be verified. Run installer repair as administrator."
-      };
-    }
-    if (!sameWindowsPath(configuredExecutable, expectedExecutable)) {
-      return {
-        ok: false,
-        message: `PangeaDaemon service path is ${configuredExecutable}, expected ${expectedExecutable}. Run installer repair as administrator.`
-      };
-    }
+  const configuredExecutable = parseServiceExecutablePath(combineOutput(query));
+  if (!configuredExecutable) {
+    return {
+      ok: false,
+      message: "PangeaDaemon service path could not be verified. Run installer repair as administrator."
+    };
+  }
+  if (!sameWindowsPath(configuredExecutable, expectedExecutable)) {
+    return {
+      ok: false,
+      message: `PangeaDaemon service path is ${configuredExecutable}, expected ${expectedExecutable}. Run installer repair as administrator.`
+    };
   }
   return { ok: true, message: "" };
 }
@@ -896,8 +894,8 @@ function expectedWindowsServiceDaemonPath(): string {
   return path.join(programData, "PangeaVPN", "PangeaDaemon.exe");
 }
 
-function parseServiceExecutablePath(scQcOutput: string): string | null {
-  const match = scQcOutput.match(/BINARY_PATH_NAME\s*:\s*(.+)/i);
+function parseServiceExecutablePath(regQueryOutput: string): string | null {
+  const match = regQueryOutput.match(/^\s*ImagePath\s+REG_(?:EXPAND_)?SZ\s+(.+)$/im);
   if (!match) {
     return null;
   }
@@ -915,7 +913,7 @@ function parseServiceExecutablePath(scQcOutput: string): string | null {
     return null;
   }
 
-  // Unquoted BINARY_PATH_NAME has no reliable delimiter for a path containing
+  // An unquoted ImagePath has no reliable delimiter for a path containing
   // spaces, so trust the whole remainder rather than truncate at the first one.
   return raw || null;
 }
