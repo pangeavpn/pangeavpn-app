@@ -4,26 +4,27 @@ package auth
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"log"
 	"os"
+	"os/exec"
 	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 )
 
 const (
-	macTrustGroup   = "admin"
-	linuxTrustGroup = "pangeavpn"
+	accessGroup   = "pangeavpn"
+	macAdminGroup = "admin"
 )
 
-// ensureTokenReadACL enforces 0600 on an fd we already hold, never a path,
-// so it can't be tricked into chmod'ing through a symlink swapped in later.
-// It then grants read access to the platform trust group (macOS "admin",
-// Linux "pangeavpn") so the desktop app, not just root, can read the token.
+// Works on an fd we already hold, never a path, so it can't be tricked into
+// chmod'ing through a symlink swapped in later.
 func ensureTokenReadACL(path string) error {
 	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
 	if err != nil {
@@ -34,8 +35,7 @@ func ensureTokenReadACL(path string) error {
 		return fmt.Errorf("chmod token file: %w", err)
 	}
 
-	groupName := trustGroupName()
-	gid, found, err := lookupGroupGID(groupName)
+	groupName, gid, found, err := tokenReadGroup()
 	if err != nil {
 		return fmt.Errorf("resolve %s group: %w", groupName, err)
 	}
@@ -56,11 +56,35 @@ func ensureTokenReadACL(path string) error {
 	return nil
 }
 
-func trustGroupName() string {
+// The pkg creates pangeavpn on macOS; installs that predate it keep the
+// admin-only access they always had.
+func tokenReadGroup() (name string, gid int, found bool, err error) {
 	if runtime.GOOS == "darwin" {
-		return macTrustGroup
+		if gid, ok := directoryGroupGID(accessGroup); ok {
+			return accessGroup, gid, true, nil
+		}
+		gid, found, err = lookupGroupGID(macAdminGroup)
+		return macAdminGroup, gid, found, err
 	}
-	return linuxTrustGroup
+	gid, found, err = lookupGroupGID(accessGroup)
+	return accessGroup, gid, found, err
+}
+
+// directoryGroupGID asks Directory Services, where macOS keeps groups made with
+// dseditgroup; its /etc/group lists only the built-in ones.
+func directoryGroupGID(name string) (int, bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "/usr/bin/dscl", ".", "-read", "/Groups/"+name, "PrimaryGroupID").Output()
+	if err != nil {
+		return 0, false
+	}
+	field, ok := strings.CutPrefix(strings.TrimSpace(string(out)), "PrimaryGroupID:")
+	if !ok {
+		return 0, false
+	}
+	gid, err := strconv.Atoi(strings.TrimSpace(field))
+	return gid, err == nil && gid > 0
 }
 
 // lookupGroupGID reads /etc/group directly instead of os/user, which needs

@@ -127,6 +127,25 @@ ensure_split_group() {
 
 ensure_split_group || echo "Could not create the ${SPLIT_GROUP} group; excluding apps from the VPN stays unavailable"
 
+# The daemon shares its token with this group, so standard accounts can use the
+# app. Admins join too: they had access through the admin group until now.
+ACCESS_GROUP="pangeavpn"
+
+ensure_access_group() {
+  if ! /usr/bin/dscl . -read "/Groups/${ACCESS_GROUP}" PrimaryGroupID >/dev/null 2>&1; then
+    /usr/sbin/dseditgroup -o create -r "PangeaVPN" "${ACCESS_GROUP}" || return 1
+  fi
+  admins="$(/usr/bin/dscl . -read /Groups/admin GroupMembership 2>/dev/null \
+    | /usr/bin/sed -n 's/^GroupMembership: //p' || true)"
+  for member in ${target_user} ${admins}; do
+    [ "${member}" != "root" ] || continue
+    /usr/sbin/dseditgroup -o edit -a "${member}" -t user "${ACCESS_GROUP}" >/dev/null 2>&1 || true
+  done
+  /usr/bin/dsmemberutil flushcache >/dev/null 2>&1 || true
+}
+
+ensure_access_group || echo "Could not create the ${ACCESS_GROUP} group; PangeaVPN stays limited to admin accounts"
+
 install_base="${2:-/Applications}"
 volume_root="${3:-/}"
 app_path=""
