@@ -31,7 +31,7 @@ enum TransportLabels {
     static func description(_ transport: Transport) -> String {
         switch transport {
         case .auto:
-            return String(localized: "bypass_auto_desc", defaultValue: "Picks the disguise that gets through, and remembers what worked on this network.")
+            return String(localized: "bypass_auto_desc", defaultValue: "Picks the disguise that gets through and remembers what worked on this network.")
         case .cloak:
             return String(localized: "bypass_cloak_desc", defaultValue: "TLS aimed at a decoy site, so the traffic looks like an ordinary visit there.")
         case .reality:

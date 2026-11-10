@@ -1,7 +1,7 @@
 // Censorship Bypass, Provisioning and Network settings pages; wording follows desktop.
 export default {
   bypass_auto_desc: {
-    en: "Picks the disguise that gets through, and remembers what worked on this network.",
+    en: "Picks the disguise that gets through and remembers what worked on this network.",
     es: "Elige el disfraz que logra pasar y recuerda cuál funcionó en esta red.",
     fr: "Choisit le déguisement qui passe et retient ce qui a marché sur ce réseau.",
     ru: "Выбирает маскировку, которая проходит, и запоминает, что сработало в этой сети.",

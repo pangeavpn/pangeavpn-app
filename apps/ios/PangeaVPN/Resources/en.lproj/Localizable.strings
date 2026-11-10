@@ -24,7 +24,7 @@
 "appearance_theme_light" = "Light";
 "appearance_theme_system" = "System";
 "bypass_anytls_desc" = "A padded TLS session, smoothing the TLS-in-TLS shape other TLS transports leak.";
-"bypass_auto_desc" = "Picks the disguise that gets through, and remembers what worked on this network.";
+"bypass_auto_desc" = "Picks the disguise that gets through and remembers what worked on this network.";
 "bypass_cdn_desc" = "Goes through a content delivery network, so blocking our servers' addresses doesn't stop it. Slower than the others.";
 "bypass_cloak_desc" = "TLS aimed at a decoy site, so the traffic looks like an ordinary visit there.";
 "bypass_hysteria2_desc" = "UDP and QUIC instead of TCP. Worth a try when every TCP connection dies.";

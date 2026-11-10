@@ -17,7 +17,7 @@ final class TransportLabelsTests: XCTestCase {
     }
 
     func testDescriptionsMatchDesktop() {
-        XCTAssertEqual(TransportLabels.description(.auto), "Tries each disguise in turn and remembers what worked on this network.")
+        XCTAssertEqual(TransportLabels.description(.auto), "Picks the disguise that gets through and remembers what worked on this network.")
         XCTAssertEqual(TransportLabels.description(.reality), "Borrows a real site's TLS handshake, so probes see a genuine site. The strongest disguise.")
         XCTAssertEqual(TransportLabels.description(.shadowsocks), "No TLS at all, so a block aimed at TLS misses it.")
         XCTAssertEqual(TransportLabels.description(.hysteria2), "UDP and QUIC instead of TCP. Worth a try when every TCP connection dies.")
