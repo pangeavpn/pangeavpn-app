@@ -20,6 +20,10 @@ func serverWithEveryTransport(t *testing.T) serverInfo {
 		Hysteria2:   &hysteria2Info{RemoteHost: "h.example", RemotePort: 443, Password: "secret-hy2-pass", ObfsPassword: "secret-obfs", RemotePorts: []string{"20000:30000"}},
 		Shadowsocks: &shadowsocksInfo{RemoteHost: "1.2.3.4", RemotePort: 8388, Method: "2022-blake3-aes-256-gcm", Password: "secret-ss-pass"},
 		AnyTLS:      &anytlsInfo{RemoteHost: "1.2.3.4", RemotePort: 8443, Password: "secret-anytls-pass"},
+		TUIC: &tuicInfo{RemoteHost: "1.2.3.4", RemotePort: 8444, UUID: "secret-tuic-uuid", Password: "secret-tuic-pass",
+			PinSHA256: "secret-tuic-pin"},
+		CDN: &cdnInfo{RemoteHost: "edge.example", RemoteIP: "1.2.3.4", RemotePort: 443, UUID: "secret-cdn-uuid",
+			Path: "/secret-cdn-path"},
 		ControlPlaneShadowsocks: &controlPlaneShadowsocksInfo{RemoteHost: "1.2.3.4", RemotePort: 8389, Method: "aes-256-gcm",
 			Password: "secret-cp-ss-pass"},
 		ControlPlaneReality: &controlPlaneRealityInfo{RemoteHost: "1.2.3.4", RemotePort: 9443, UUID: "secret-cp-uuid",
@@ -42,6 +46,10 @@ func everyBlockRunnable(p *state.Profile, kind string) bool {
 		return p.Shadowsocks != nil
 	case "anytls":
 		return p.AnyTLS != nil
+	case "tuic":
+		return p.TUIC != nil
+	case "cdn":
+		return p.CDN != nil
 	case "naive":
 		return p.Naive != nil
 	case "snowflake":
@@ -56,13 +64,14 @@ func TestPublicServerJSONCarriesNoCredentials(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := string(b)
-	for _, leak := range []string{"password", "Password", "uuid", "uid", "publicKey", "controlPlane", "secret", "remoteHost", "1.2.3.4", "fronted"} {
+	for _, leak := range []string{"password", "Password", "uuid", "uid", "publicKey", "controlPlane", "secret", "remoteHost", "1.2.3.4", "fronted",
+		"pinSha256", "path", "edge.example"} {
 		if strings.Contains(out, leak) {
 			t.Errorf("public server JSON contains %q: %s", leak, out)
 		}
 	}
 	want := `[{"id":"fra","name":"Frankfurt","region":"eu-central","country":"DE","load":12,"multihop":true,` +
-		`"cloak":true,"reality":true,"hysteria2":true,"shadowsocks":true,"anytls":true,"naive":true,"snowflake":true}]`
+		`"cloak":true,"reality":true,"hysteria2":true,"shadowsocks":true,"anytls":true,"tuic":true,"cdn":true,"naive":true,"snowflake":true}]`
 	if out != want {
 		t.Fatalf("got  %s\nwant %s", out, want)
 	}
@@ -71,7 +80,7 @@ func TestPublicServerJSONCarriesNoCredentials(t *testing.T) {
 func TestPublicServerFlagsNeedTheBlockAndTheBuild(t *testing.T) {
 	bare := serverInfo{ID: "lon", Name: "London", Region: "eu-west", Country: "GB", Cloak: cloakInfo{RemoteHost: "5.6.7.8"}}
 	got := toPublicServers([]serverInfo{bare}, everyBlockRunnable)[0]
-	if !got.Cloak || got.Reality || got.Hysteria2 || got.Shadowsocks || got.AnyTLS || got.Naive || got.Snowflake || got.Multihop {
+	if !got.Cloak || got.Reality || got.Hysteria2 || got.Shadowsocks || got.AnyTLS || got.TUIC || got.CDN || got.Naive || got.Snowflake || got.Multihop {
 		t.Fatalf("a server with only cloak = %+v", got)
 	}
 
