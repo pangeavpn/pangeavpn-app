@@ -8,6 +8,7 @@ import (
 )
 
 const (
+	raceMaxInFlight      = 3
 	platformName         = "Android"
 	anytlsClientMetadata = "pangeavpn-android"
 )

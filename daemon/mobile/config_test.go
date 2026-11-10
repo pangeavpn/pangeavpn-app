@@ -223,3 +223,16 @@ func TestDecodeConfigFillsWhatKotlinOmits(t *testing.T) {
 		t.Fatalf("got %+v, want the explicit offs kept", off)
 	}
 }
+
+// Racing is on by default, and a blob saved before the setting existed keeps it on.
+func TestTransportRaceDefaultsOn(t *testing.T) {
+	if !defaultConfig().TransportRace {
+		t.Fatal("transportRace should default on")
+	}
+	if !decodeConfig(`{"preferredTransport":"auto","mtu":1380}`).TransportRace {
+		t.Fatal("a blob without transportRace should decode with racing on")
+	}
+	if decodeConfig(`{"transportRace":false}`).TransportRace {
+		t.Fatal("transportRace=false was not kept")
+	}
+}

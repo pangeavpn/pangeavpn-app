@@ -37,6 +37,9 @@ type config struct {
 	// PostQuantum offers an ML-KEM key at the next Prepare; the exit node mixes
 	// the agreed secret into WireGuard as the peer's pre-shared key.
 	PostQuantum bool `json:"postQuantum"`
+	// TransportRace lets Automatic dial several transports at once instead of
+	// waiting out each blocked one in turn. A pinned transport never races.
+	TransportRace bool `json:"transportRace"`
 }
 
 // defaultConfig mirrors the desktop defaults: cascade on, hub methods all
@@ -47,6 +50,7 @@ func defaultConfig() config {
 		MTU:                mtuDefault,
 		HubMethods:         defaultHubMethods(),
 		DeadDrop:           true,
+		TransportRace:      true,
 	}
 }
 

@@ -13,6 +13,9 @@ import (
 )
 
 const (
+	// raceMaxInFlight is lower than desktop: each racer holds its own engine,
+	// and the extension lives under iosMemoryLimit.
+	raceMaxInFlight      = 2
 	platformName         = "iOS"
 	anytlsClientMetadata = "pangeavpn-ios"
 

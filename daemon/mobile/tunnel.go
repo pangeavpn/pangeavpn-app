@@ -78,6 +78,7 @@ func startTunnel(tunFd int) error {
 	mu.Lock()
 	logs := wgLogs
 	preferred := preferredTransport
+	race := settings.TransportRace
 	memory := transportMem
 	netKey := networkKey()
 	mu.Unlock()
@@ -129,6 +130,9 @@ func startTunnel(tunFd int) error {
 		dev.Close()
 		reportError(err.Error())
 		return fmt.Errorf("wg up: %w", err)
+	}
+	if race && transport.IsAuto(preferred) && len(candidates) > 1 {
+		return raceCascade(attempt, profile, dev, racersFor(profile, candidates, logs), logs, netKey)
 	}
 	return walkCascade(attempt, profile, dev, st, candidates, logs, netKey)
 }
@@ -210,11 +214,17 @@ func bringUpOver(ctx context.Context, dev *device.Device, p *preparedTunnel, pro
 	if err := candidate.Start(ctx, profile, nil); err != nil {
 		return err
 	}
-	if err := dev.IpcSet(buildUAPI(p.wgPrivateKeyRaw, p.serverPubKeyRaw, p.presharedKeyRaw, st.boundPort)); err != nil {
-		return fmt.Errorf("%s: wg configure: %w", candidate.Kind, err)
+	return proveOver(ctx, dev, p, candidate.Kind, st.boundPort)
+}
+
+// proveOver points WireGuard at a started transport's loopback port and waits
+// for a real handshake through it.
+func proveOver(ctx context.Context, dev *device.Device, p *preparedTunnel, kind string, port int) error {
+	if err := dev.IpcSet(buildUAPI(p.wgPrivateKeyRaw, p.serverPubKeyRaw, p.presharedKeyRaw, port)); err != nil {
+		return fmt.Errorf("%s: wg configure: %w", kind, err)
 	}
 	if err := waitForHandshake(ctx, dev, handshakeTimeout); err != nil {
-		return fmt.Errorf("%s: %w", candidate.Kind, err)
+		return fmt.Errorf("%s: %w", kind, err)
 	}
 	return nil
 }
