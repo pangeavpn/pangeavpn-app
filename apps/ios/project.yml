@@ -99,6 +99,9 @@ targets:
       - sdk: libresolv.tbd
       - sdk: Network.framework
       - sdk: Security.framework
+      # sing-box's powerreport reads UIDevice battery state via cgo; gomobile
+      # drops its "-framework UIKit" LDFLAGS, so the extension must link it.
+      - sdk: UIKit.framework
     info:
       path: Generated/PacketTunnel-Info.plist
       properties:
