@@ -18,6 +18,8 @@ type sessionRecord struct {
 	AllowLAN           bool   `json:"allowLAN,omitempty"`
 	Lockdown           bool   `json:"lockdown,omitempty"`
 	PreferredTransport string `json:"preferredTransport,omitempty"`
+	// Omitted means racing on, which is also what a record from before the setting means.
+	DisableTransportRace bool `json:"disableTransportRace,omitempty"`
 }
 
 const sessionRecordFile = "last-session.json"

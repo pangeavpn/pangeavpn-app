@@ -142,6 +142,8 @@ let multihopPrefs: MultihopPrefs = { enabled: false, entryServerId: null };
 let provisionedProfiles: ProfileRecords = {};
 let connectionAttemptRunning = false;
 let allowLanEnabled = true;
+// Auto mode dials transports in parallel unless this is switched off.
+let transportRaceEnabled = true;
 let launchAtStartupEnabled = false;
 // Lockdown (kill switch while disconnected) and auto-connect (reconnect on
 // launch/drop) shipped as one "alwaysConnected" toggle, migrated on load below.
@@ -1406,11 +1408,14 @@ function connectionOptions(): {
   allowLAN: boolean;
   lockdown: boolean;
   preferredTransport?: "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "anytls" | "tuic" | "cdn" | "snowflake" | "wireguard";
+  disableTransportRace?: boolean;
 } {
   return {
     allowLAN: allowLanEnabled,
     lockdown: lockdownEnabled,
-    ...(preferredTransport !== "auto" && { preferredTransport })
+    ...(preferredTransport !== "auto" && { preferredTransport }),
+    // Racing only ever applies to auto mode, so a pinned transport never sends it.
+    ...(preferredTransport === "auto" && !transportRaceEnabled && { disableTransportRace: true })
   };
 }
 
@@ -2123,6 +2128,17 @@ function registerTransportSettingsHandlers(): void {
   });
 
   ipcMain.handle(IPC_CHANNELS.getPreferredTransport, async () => preferredTransport);
+
+  registerBoolSetting(
+    { get: IPC_CHANNELS.getTransportRace, set: IPC_CHANNELS.setTransportRace },
+    "transportRace",
+    "transportRace setting",
+    (enabled) => {
+      transportRaceEnabled = !!enabled;
+      return transportRaceEnabled;
+    },
+    () => transportRaceEnabled
+  );
 }
 
 function registerStartupSettingsHandlers(): void {
@@ -2641,6 +2657,10 @@ function applyPersistedSettings(settings: Record<string, unknown>): void {
   pangeaApiClient.setHubMethods(normalizeHubMethods(settings.hubMethods ?? settings));
   if (settings.allowLan === false) {
     allowLanEnabled = false;
+  }
+  // Racing defaults on, so a saved false is the only value that changes anything.
+  if (settings.transportRace === false) {
+    transportRaceEnabled = false;
   }
   pangeaApiClient.setPostQuantumEnabled(settings.postQuantum === true);
   // settings.json is hand-editable, so this goes through the same normalizer

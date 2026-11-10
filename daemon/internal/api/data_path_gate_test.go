@@ -34,9 +34,11 @@ func cascadeProfile() state.Profile {
 }
 
 // gatedProbe records the order transport kinds were probed in — the order the
-// cascade attempted them, since only one candidate runs at a time.
+// cascade verified them. Racing can run several managers at once, so the kind
+// comes from the service, not from whichever fake manager is running.
 type gatedProbe struct {
 	mu          sync.Mutex
+	svc         *Service
 	reality     *fakeRealityManager
 	cloak       *fakeCloakManager
 	shadowsocks *fakeShadowsocksManager
@@ -47,6 +49,16 @@ type gatedProbe struct {
 }
 
 func (g *gatedProbe) runningKind() string {
+	if g.svc != nil {
+		// Mid-cascade the candidate being verified; once connected, the live one.
+		g.svc.activeMu.RLock()
+		kind := g.svc.connectingTransportKind
+		if kind == "" {
+			kind = g.svc.activeTransportKind
+		}
+		g.svc.activeMu.RUnlock()
+		return kind
+	}
 	switch {
 	case g.reality.Status().Running:
 		return "reality"
@@ -114,7 +126,7 @@ func cascadeTestService(t *testing.T, passing map[string]bool) (*Service, *gated
 		&fakeWGManager{}, &fakeKillSwitch{}, cascadeProfile())
 	svc.recoveryDelays = []time.Duration{0}
 	svc.networkKey = func() string { return "eth0:192.0.2.10" }
-	probe := &gatedProbe{reality: reality, cloak: cloak, shadowsocks: shadowsocks, passing: passing}
+	probe := &gatedProbe{svc: svc, reality: reality, cloak: cloak, shadowsocks: shadowsocks, passing: passing}
 	svc.probeResolver = probe.probe
 	return svc, probe
 }

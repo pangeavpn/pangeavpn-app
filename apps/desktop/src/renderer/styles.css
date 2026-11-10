@@ -3559,6 +3559,13 @@ button.ghost:hover:not(:disabled) {
   border-color: var(--accent);
 }
 
+/* A setting that does not apply right now (e.g. fast fallback with a pinned transport). */
+.toggle-label.is-disabled { cursor: default; opacity: 0.5; }
+.toggle-label.is-disabled .toggle-switch { cursor: default; }
+
+/* Toggles that sit under a section's picker button. */
+.settings-picker + .settings-toggles { margin-top: 10px; }
+
 .toggle-switch:checked::before {
   background: var(--accent-text);
   transform: translateY(-50%) translateX(17px);

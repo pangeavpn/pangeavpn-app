@@ -220,6 +220,8 @@ declare global {
     /** Post-quantum key for the tunnel. Applies on the next connect. */
     setPostQuantum: (enabled: boolean) => Promise<void>;
     getPostQuantum: () => Promise<boolean>;
+    setTransportRace: (enabled: boolean) => Promise<void>;
+    getTransportRace: () => Promise<boolean>;
     /** Resolves to the MTU actually stored — differs from `mtu` when it was rejected. */
     setWireguardMtu: (mtu: number) => Promise<number>;
     getWireguardMtu: () => Promise<number>;

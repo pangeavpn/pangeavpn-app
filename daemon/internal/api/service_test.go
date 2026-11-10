@@ -2675,6 +2675,7 @@ func TestConnect_RecordsLastGoodTransportForNetwork(t *testing.T) {
 
 // TestConnect_TriesRememberedTransportFirst proves the remembered transport is attempted
 // before the rest of the cascade: naive works, so neither reality nor cloak ever starts.
+// Racing is off so "never starts" holds; TestConnect_Race_RememberedTransportStillWins covers it on.
 func TestConnect_TriesRememberedTransportFirst(t *testing.T) {
 	profile := transportMemoryProfile()
 	cloak := &fakeCloakManager{}
@@ -2687,7 +2688,7 @@ func TestConnect_TriesRememberedTransportFirst(t *testing.T) {
 	svc.transportMemory = mem
 	svc.networkKey = func() string { return "wifi-home" }
 
-	if err := svc.Connect(context.Background(), "p1", ConnectOptions{}); err != nil {
+	if err := svc.Connect(context.Background(), "p1", ConnectOptions{DisableTransportRace: true}); err != nil {
 		t.Fatalf("connect failed: %v", err)
 	}
 	if svc.Status(context.Background()).ActiveTransport != "naive" {
@@ -2949,7 +2950,7 @@ func TestConnect_RealityFails_FallsBackToCloakBeforeNaive(t *testing.T) {
 	ks := &fakeKillSwitch{}
 	svc := newTestServiceWithReality(t, cloakMgr, naiveMgr, realityMgr, wgMgr, ks, profile)
 
-	if err := svc.Connect(context.Background(), "p1", ConnectOptions{}); err != nil {
+	if err := svc.Connect(context.Background(), "p1", ConnectOptions{DisableTransportRace: true}); err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
 	realityMgr.mu.Lock()
@@ -3374,14 +3375,14 @@ func TestConnect_AllOthersFail_FallsBackToAnyTLS(t *testing.T) {
 }
 
 // AnyTLS sits at the tail of the cascade: with cloak healthy the cascade stops
-// there and anytls is never touched.
+// there and anytls is never touched (with racing off; racing may dial it ahead).
 func TestConnect_AutoMode_DoesNotReachAnyTLSWhenCloakWorks(t *testing.T) {
 	profile := anytlsProfile()
 	anytlsMgr := &fakeAnyTLSManager{}
 	svc := newTestServiceFull(t, &fakeCloakManager{}, &fakeNaiveManager{}, &fakeRealityManager{},
 		&fakeHysteria2Manager{}, &fakeShadowsocksManager{}, anytlsMgr, &fakeSnowflakeManager{}, &fakeWGManager{}, &fakeKillSwitch{}, profile)
 
-	if err := svc.Connect(context.Background(), "p1", ConnectOptions{}); err != nil {
+	if err := svc.Connect(context.Background(), "p1", ConnectOptions{DisableTransportRace: true}); err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
 	anytlsMgr.mu.Lock()

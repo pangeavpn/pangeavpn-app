@@ -170,6 +170,8 @@ const hubShadowsocksToggle = document.getElementById("hubShadowsocksToggle") as 
 const hubFrontedToggle = document.getElementById("hubFrontedToggle") as HTMLInputElement;
 const hubNormalToggle = document.getElementById("hubNormalToggle") as HTMLInputElement;
 const allowLanToggle = document.getElementById("allowLanToggle") as HTMLInputElement;
+const transportRaceToggle = document.getElementById("transportRaceToggle") as HTMLInputElement;
+const transportRaceRow = document.getElementById("transportRaceRow") as HTMLElement;
 const postQuantumToggle = document.getElementById("postQuantumToggle") as HTMLInputElement;
 const dnsPresetSelect = document.getElementById("dnsPresetSelect") as HTMLSelectElement;
 const customDnsField = document.getElementById("customDnsField") as HTMLElement;
@@ -716,6 +718,9 @@ function syncTransportChoice(): void {
   for (const row of Array.from(transportOptions.children)) {
     row.setAttribute("aria-checked", String((row as HTMLElement).dataset.value === current));
   }
+  // Only Automatic has a cascade to race.
+  transportRaceToggle.disabled = current !== "auto";
+  transportRaceRow.classList.toggle("is-disabled", current !== "auto");
 }
 
 /** Route the choice back through the select so every existing handler runs. */
@@ -2319,6 +2324,13 @@ wireBooleanToggle(
 );
 
 wireBooleanToggle(
+  transportRaceToggle,
+  (value) => pangeaApi!.setTransportRace(value),
+  { on: "toggle.transportRace.on", off: "toggle.transportRace.off" },
+  "transportRace"
+);
+
+wireBooleanToggle(
   postQuantumToggle,
   (value) => pangeaApi!.setPostQuantum(value),
   { on: "toggle.postQuantum.on", off: "toggle.postQuantum.off" },
@@ -3553,6 +3565,8 @@ async function init(): Promise<void> {
       const preferredTransport = await pangeaApi.getPreferredTransport();
       preferredTransportSelect.value = preferredTransport;
       preferredTransportSelect.dataset.previousValue = preferredTransport;
+      transportRaceToggle.checked = await pangeaApi.getTransportRace();
+      syncTransportChoice();
     } catch {
       // default off
     }

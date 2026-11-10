@@ -48,6 +48,30 @@ test("DaemonClient leaves unrelated daemon failures non-retryable", async (t) =>
   );
 });
 
+// Racing is on by default, so the field is only sent to turn it off; an older
+// daemon that doesn't know it just races (or walks the cascade) as before.
+test("DaemonClient sends disableTransportRace only when racing is off", async (t) => {
+  const bodies: Record<string, unknown>[] = [];
+  const { baseUrl } = await serve(t, (req, res) => {
+    let raw = "";
+    req.on("data", (chunk) => (raw += chunk));
+    req.on("end", () => {
+      bodies.push(JSON.parse(raw));
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true }));
+    });
+  });
+
+  const client = new DaemonClient(baseUrl, async () => "token");
+  await client.connect("profile");
+  await client.connect("profile", { disableTransportRace: true });
+  await client.switch("profile", { disableTransportRace: true });
+
+  assert.equal("disableTransportRace" in bodies[0], false);
+  assert.equal(bodies[1].disableTransportRace, true);
+  assert.equal(bodies[2].disableTransportRace, true);
+});
+
 // The field failure this guards: a pooled keep-alive socket that died quietly
 // turned every later poll into a 5s timeout while the daemon sat healthy.
 test("DaemonClient opens a fresh connection per request", async (t) => {

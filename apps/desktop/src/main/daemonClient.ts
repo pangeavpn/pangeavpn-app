@@ -85,6 +85,7 @@ export class DaemonClient implements PostQuantumProvider {
       allowLAN?: boolean;
       lockdown?: boolean;
       preferredTransport?: "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "anytls" | "tuic" | "cdn" | "snowflake" | "wireguard";
+      disableTransportRace?: boolean;
     },
     signal?: AbortSignal
   ): Promise<OkResponse> {
@@ -97,6 +98,9 @@ export class DaemonClient implements PostQuantumProvider {
     }
     if (opts?.preferredTransport) {
       body.preferredTransport = opts.preferredTransport;
+    }
+    if (opts?.disableTransportRace) {
+      body.disableTransportRace = true;
     }
     return this.request<OkResponse>("POST", "/connect", body, this.connectTimeoutMs, signal);
   }
@@ -271,6 +275,7 @@ export class DaemonClient implements PostQuantumProvider {
       allowLAN?: boolean;
       lockdown?: boolean;
       preferredTransport?: "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "anytls" | "tuic" | "cdn" | "snowflake" | "wireguard";
+      disableTransportRace?: boolean;
     },
     signal?: AbortSignal
   ): Promise<OkResponse> {
@@ -283,6 +288,9 @@ export class DaemonClient implements PostQuantumProvider {
     }
     if (opts?.preferredTransport) {
       body.preferredTransport = opts.preferredTransport;
+    }
+    if (opts?.disableTransportRace) {
+      body.disableTransportRace = true;
     }
     return this.request<OkResponse>("POST", "/switch", body, this.connectTimeoutMs, signal);
   }

@@ -128,6 +128,8 @@ type connectRequest struct {
 	// One of the named transports, "wireguard" (no transport), or "" / "auto"
 	// for the memory-reordered transport.AutoCascadeOrder; see transportCandidates.
 	PreferredTransport string `json:"preferredTransport,omitempty"`
+	// Auto mode only: true tries transports one at a time instead of racing their dials.
+	DisableTransportRace bool `json:"disableTransportRace,omitempty"`
 }
 
 type disconnectRequest struct {
@@ -353,7 +355,7 @@ func NewHandler(token string, service *Service) http.Handler {
 			return
 		}
 
-		err := service.Connect(r.Context(), req.ProfileID, ConnectOptions{AllowLAN: req.AllowLAN, Lockdown: req.Lockdown, PreferredTransport: req.PreferredTransport})
+		err := service.Connect(r.Context(), req.ProfileID, ConnectOptions{AllowLAN: req.AllowLAN, Lockdown: req.Lockdown, PreferredTransport: req.PreferredTransport, DisableTransportRace: req.DisableTransportRace})
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, serviceErrorResponse(err))
 			return
@@ -617,7 +619,7 @@ func NewHandler(token string, service *Service) http.Handler {
 			return
 		}
 
-		err := service.Switch(r.Context(), req.ProfileID, ConnectOptions{AllowLAN: req.AllowLAN, Lockdown: req.Lockdown, PreferredTransport: req.PreferredTransport})
+		err := service.Switch(r.Context(), req.ProfileID, ConnectOptions{AllowLAN: req.AllowLAN, Lockdown: req.Lockdown, PreferredTransport: req.PreferredTransport, DisableTransportRace: req.DisableTransportRace})
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, serviceErrorResponse(err))
 			return

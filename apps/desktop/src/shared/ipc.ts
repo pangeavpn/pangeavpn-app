@@ -72,6 +72,8 @@ export const IPC_CHANNELS = {
   getAllowLan: "pangea:getAllowLan",
   setPostQuantum: "settings:setPostQuantum",
   getPostQuantum: "settings:getPostQuantum",
+  setTransportRace: "settings:setTransportRace",
+  getTransportRace: "settings:getTransportRace",
   setWireguardMtu: "settings:setWireguardMtu",
   getWireguardMtu: "settings:getWireguardMtu",
   setCustomDns: "settings:setCustomDns",
@@ -418,6 +420,8 @@ export interface PangeaApi {
   /** Post-quantum key for the tunnel. Applies on the next connect. */
   setPostQuantum: (enabled: boolean) => Promise<void>;
   getPostQuantum: () => Promise<boolean>;
+  setTransportRace: (enabled: boolean) => Promise<void>;
+  getTransportRace: () => Promise<boolean>;
   /** Resolves to the MTU actually stored — differs from `mtu` when it was rejected. */
   setWireguardMtu: (mtu: number) => Promise<number>;
   getWireguardMtu: () => Promise<number>;

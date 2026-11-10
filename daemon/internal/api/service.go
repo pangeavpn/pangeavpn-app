@@ -292,6 +292,9 @@ type Service struct {
 	repairNames []string
 	repairSeq   int
 
+	// raceConfig overrides transport.DefaultRaceConfig when set; tests set it small.
+	raceConfig transport.RaceConfig
+
 	// handshakeTimeout overrides the per-transport handshake budget; tests set it small.
 	// Zero in production, so a rebuild's longer context budget and the default both apply.
 	handshakeTimeout time.Duration
@@ -602,6 +605,10 @@ type ConnectOptions struct {
 	// "cloak", "naive", "reality", "hysteria2", "shadowsocks", "anytls",
 	// "snowflake", or "" for the auto cascade (see transport.AutoCascadeOrder).
 	PreferredTransport string
+
+	// DisableTransportRace makes the auto cascade try transports strictly one
+	// at a time. Racing is on by default, so the zero value keeps it on.
+	DisableTransportRace bool
 }
 
 // registerCancel publishes cancel as the interruptible operation. The returned
@@ -819,7 +826,7 @@ func (s *Service) bringUpAfterKillSwitch(ctx context.Context, profile state.Prof
 
 	netGen := s.networkChangeGen()
 	networkKey := s.currentNetworkKey()
-	kind, err := s.startTransportWithHandshake(ctx, &profile, &wireGuardProfile, opts.PreferredTransport, networkKey)
+	kind, err := s.startTransportWithHandshake(ctx, &profile, &wireGuardProfile, opts.PreferredTransport, networkKey, !opts.DisableTransportRace)
 	if err != nil {
 		if errors.Is(err, ErrHostOffline) {
 			s.holdBringUpOffline(err, netGen, networkKey)
@@ -1324,7 +1331,8 @@ func (s *Service) StarterFor(profile *state.Profile, kind string) (transport.Sta
 
 // startTransportWithHandshake brings up the first candidate transport that
 // carries a real WireGuard handshake, and returns its kind.
-func (s *Service) startTransportWithHandshake(ctx context.Context, profile *state.Profile, wireGuardProfile *state.WireGuardProfile, preferredTransport, networkKey string) (string, error) {
+// In auto mode with race set, it dials candidates in parallel; see raceTransports.
+func (s *Service) startTransportWithHandshake(ctx context.Context, profile *state.Profile, wireGuardProfile *state.WireGuardProfile, preferredTransport, networkKey string, race bool) (string, error) {
 	autoMode := transport.IsAuto(preferredTransport)
 	candidates, err := s.transportCandidates(profile, preferredTransport)
 	if err != nil {
@@ -1333,6 +1341,10 @@ func (s *Service) startTransportWithHandshake(ctx context.Context, profile *stat
 	candidates = s.reorderByMemory(candidates, preferredTransport, networkKey)
 	candidates = s.applyRecoveryLead(candidates)
 	defer s.setConnectingTransportKind("")
+
+	if autoMode && race && len(candidates) > 1 {
+		return s.raceTransports(ctx, profile, wireGuardProfile, candidates)
+	}
 
 	var failures cascadeFailures
 	for i, candidate := range candidates {
@@ -1363,6 +1375,84 @@ func (s *Service) startTransportWithHandshake(ctx context.Context, profile *stat
 		return "", failures[0]
 	}
 	return "", fmt.Errorf("%w: %w", ErrTransportExhausted, failures)
+}
+
+// raceCandidate is one candidate's own copies of the profile and WireGuard
+// config, which its start func rewrites (local port, MTU clamp, loopback endpoint).
+type raceCandidate struct {
+	profile   state.Profile
+	wireGuard state.WireGuardProfile
+}
+
+// raceTransports is the auto cascade with the dials run in parallel: each
+// candidate's transport connection to the node is raced (transport.Race), then
+// WireGuard is brought up over the best-ranked one that connected. The real
+// handshake and data-path checks still decide; a candidate that fails them hands
+// over to the next one already connected.
+func (s *Service) raceTransports(ctx context.Context, profile *state.Profile, wireGuardProfile *state.WireGuardProfile, candidates []transport.Candidate) (string, error) {
+	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("racing %d transports", len(candidates)))
+	newAttempt := func() *raceCandidate {
+		// A fresh copy per candidate: start funcs mutate the profile and ConfigText.
+		return &raceCandidate{profile: *profile, wireGuard: *wireGuardProfile}
+	}
+	res, err := transport.Race(ctx, len(candidates), s.raceConfigOrDefault(), transport.RaceFuncs[*raceCandidate]{
+		Lazy: func(i int) bool { return transport.LazyDial[candidates[i].Kind] },
+		Start: func(ctx context.Context, i int) (*raceCandidate, error) {
+			attempt := newAttempt()
+			if err := s.startCandidate(ctx, &attempt.profile, &attempt.wireGuard, candidates[i].Kind, candidates[i].Start); err != nil {
+				if ctx.Err() == nil {
+					s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("%s transport did not connect: %v", candidates[i].Kind, err))
+				}
+				return nil, err
+			}
+			return attempt, nil
+		},
+		Verify: func(ctx context.Context, i int, attempt *raceCandidate) error {
+			err := s.verifyCandidate(ctx, &attempt.profile, &attempt.wireGuard, candidates[i].Kind)
+			if err != nil && ctx.Err() == nil {
+				s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("%s transport did not establish a tunnel: %v", candidates[i].Kind, err))
+			}
+			return err
+		},
+		Discard: func(i int, attempt *raceCandidate) {
+			s.stopCandidateTransport(&attempt.profile, candidates[i].Kind, "losing the race")
+		},
+		Fatal: func(err error) bool {
+			return hostNetworkUnreachable(err) || s.hostOffline()
+		},
+		OnVerify: func(i int) { s.setConnectingTransportKind(candidates[i].Kind) },
+	})
+
+	if errors.Is(err, transport.ErrRaceFatal) {
+		return "", fmt.Errorf("%w: %v", ErrHostOffline, err)
+	}
+	if err != nil {
+		return "", err
+	}
+	if res.Winner >= 0 {
+		*profile = res.Value.profile
+		*wireGuardProfile = res.Value.wireGuard
+		kind := candidates[res.Winner].Kind
+		if res.Winner > 0 {
+			s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("fell back to %s transport", kind))
+		}
+		return kind, nil
+	}
+
+	var failures cascadeFailures
+	for _, failure := range res.Failures {
+		if failure != nil {
+			failures = append(failures, failure)
+		}
+	}
+	return "", fmt.Errorf("%w: %w", ErrTransportExhausted, failures)
+}
+
+func (s *Service) raceConfigOrDefault() transport.RaceConfig {
+	if s.raceConfig.MaxInFlight > 0 {
+		return s.raceConfig
+	}
+	return transport.DefaultRaceConfig
 }
 
 // cascadeFailures reads like the "; " list the logs and app already know while
@@ -1455,7 +1545,51 @@ func (s *Service) rememberTransport(networkKey, kind string) {
 
 // bringUpTransport starts one transport, brings WireGuard up over it, and waits
 // for a real WireGuard handshake — the proof the tunnel reaches the server through this transport.
-func (s *Service) bringUpTransport(ctx context.Context, profile *state.Profile, wireGuardProfile *state.WireGuardProfile, kind string, start transport.StartFn) (err error) {
+func (s *Service) bringUpTransport(ctx context.Context, profile *state.Profile, wireGuardProfile *state.WireGuardProfile, kind string, start transport.StartFn) error {
+	if err := s.startCandidate(ctx, profile, wireGuardProfile, kind, start); err != nil {
+		return err
+	}
+	return s.verifyCandidate(ctx, profile, wireGuardProfile, kind)
+}
+
+// startCandidate runs one transport's start, and stops it again if that fails.
+// It never touches WireGuard, so racing candidates may run it side by side.
+func (s *Service) startCandidate(ctx context.Context, profile *state.Profile, wireGuardProfile *state.WireGuardProfile, kind string, start transport.StartFn) error {
+	if err := start(ctx, profile, wireGuardProfile); err != nil {
+		s.stopCandidateTransport(profile, kind, "failed bring-up")
+		return fmt.Errorf("%s: %w", kind, err)
+	}
+	return nil
+}
+
+// stopCandidateTransport stops kind's manager and frees its local port. why
+// names the cleanup in the logs.
+func (s *Service) stopCandidateTransport(profile *state.Profile, kind, why string) {
+	mgr := s.managerForKind(kind)
+	if mgr == nil {
+		return
+	}
+	mgrCleanupCtx, mgrCleanupCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	if stopErr := mgr.Stop(mgrCleanupCtx); stopErr != nil {
+		s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("%s cleanup after %s: transport stop warning: %v", kind, why, stopErr))
+	}
+	mgrCleanupCancel()
+
+	// Best-effort: a transport that didn't release its local port
+	// in time would otherwise block the next candidate from binding it.
+	if port := transportLocalPort(profile, kind); port > 0 {
+		killCtx, killCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		if killed, killErr := platform.KillUDPPortOwners(killCtx, port, []int{os.Getpid()}); killErr == nil && len(killed) > 0 {
+			s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("%s cleanup: killed leftover process(es) still holding local port %d: %v", kind, port, killed))
+		}
+		killCancel()
+	}
+}
+
+// verifyCandidate brings WireGuard up over a started transport and proves it
+// carries traffic. On failure it tears both down again. One at a time only:
+// there is a single WireGuard device.
+func (s *Service) verifyCandidate(ctx context.Context, profile *state.Profile, wireGuardProfile *state.WireGuardProfile, kind string) (err error) {
 	defer func() {
 		if err != nil {
 			// Each stop gets its own deadline: on the common handshake-timeout
@@ -1467,30 +1601,9 @@ func (s *Service) bringUpTransport(ctx context.Context, profile *state.Profile, 
 				}
 				wgCleanupCancel()
 			}
-
-			if mgr := s.managerForKind(kind); mgr != nil {
-				mgrCleanupCtx, mgrCleanupCancel := context.WithTimeout(context.Background(), 2*time.Second)
-				if stopErr := mgr.Stop(mgrCleanupCtx); stopErr != nil {
-					s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("%s cleanup after failed bring-up: transport stop warning: %v", kind, stopErr))
-				}
-				mgrCleanupCancel()
-
-				// Best-effort: a transport that didn't release its local port
-				// in time would otherwise block the next candidate from binding it.
-				if port := transportLocalPort(profile, kind); port > 0 {
-					killCtx, killCancel := context.WithTimeout(context.Background(), 2*time.Second)
-					if killed, killErr := platform.KillUDPPortOwners(killCtx, port, []int{os.Getpid()}); killErr == nil && len(killed) > 0 {
-						s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("%s cleanup: killed leftover process(es) still holding local port %d: %v", kind, port, killed))
-					}
-					killCancel()
-				}
-			}
+			s.stopCandidateTransport(profile, kind, "failed bring-up")
 		}
 	}()
-
-	if err = start(ctx, profile, wireGuardProfile); err != nil {
-		return fmt.Errorf("%s: %w", kind, err)
-	}
 
 	s.machine.Set(state.StateConnecting, fmt.Sprintf("starting wireguard over %s", kind))
 	if err = s.wg.Start(ctx, *wireGuardProfile); err != nil {
@@ -3564,9 +3677,10 @@ func (s *Service) recoverRecordedSession(persisted platform.KillSwitchState) {
 		s.updateAppliedSplit(func(a *appliedSplit) { a.gen = store.generation() })
 	}
 	s.setSessionOpts(ConnectOptions{
-		AllowLAN:           record.AllowLAN || persisted.AllowLAN,
-		Lockdown:           record.Lockdown || persisted.Locked,
-		PreferredTransport: record.PreferredTransport,
+		AllowLAN:             record.AllowLAN || persisted.AllowLAN,
+		Lockdown:             record.Lockdown || persisted.Locked,
+		PreferredTransport:   record.PreferredTransport,
+		DisableTransportRace: record.DisableTransportRace,
 	})
 	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("kill switch survived a daemon restart; keeping it armed and reconnecting to %s", profile.ID))
 	s.machine.Set(state.StateError, "daemon restarted; reconnecting")
@@ -3942,10 +4056,11 @@ func (s *Service) setSessionOpts(opts ConnectOptions) {
 	}
 	// Persisted so a crashed daemon knows which session to rebuild on restart.
 	record := sessionRecord{
-		ProfileID:          profileID,
-		AllowLAN:           opts.AllowLAN,
-		Lockdown:           opts.Lockdown,
-		PreferredTransport: opts.PreferredTransport,
+		ProfileID:            profileID,
+		AllowLAN:             opts.AllowLAN,
+		Lockdown:             opts.Lockdown,
+		PreferredTransport:   opts.PreferredTransport,
+		DisableTransportRace: opts.DisableTransportRace,
 	}
 	if err := saveSessionRecord(record); err != nil {
 		s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("could not persist session record: %v", err))

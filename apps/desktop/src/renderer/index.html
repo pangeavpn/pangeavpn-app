@@ -429,6 +429,16 @@
             <span id="transportPickerValue" class="settings-picker-value"></span>
             <span class="settings-picker-chevron" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg></span>
           </button>
+          <!-- Only Automatic has a cascade to race, so this is disabled for a pinned transport. -->
+          <div class="settings-toggles">
+            <label id="transportRaceRow" class="toggle-label">
+              <span class="toggle-copy">
+                <span class="toggle-title" data-i18n="settings.transport.race.title">Fast fallback</span>
+                <span class="toggle-hint" data-i18n="settings.transport.race.hint">With Automatic, tries several disguises at once instead of waiting for each blocked one to time out. Applies on next connect.</span>
+              </span>
+              <input id="transportRaceToggle" class="toggle-switch" type="checkbox" checked />
+            </label>
+          </div>
         </section>
 
         <!-- Provisioning -->
