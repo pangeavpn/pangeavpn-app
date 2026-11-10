@@ -106,6 +106,14 @@ fun SettingsSheet(
                         onClick = { settingsViewModel.setPreferredTransport(choice) },
                     )
                 }
+                // Only Automatic races; a pinned transport dials just itself.
+                SwitchRow(
+                    title = stringResource(R.string.settings_transport_race_title),
+                    hint = stringResource(R.string.settings_transport_race_hint),
+                    checked = state.settings.transportRace,
+                    onCheckedChange = settingsViewModel::setTransportRace,
+                    enabled = state.settings.preferredTransport == "auto",
+                )
             }
 
             Section(

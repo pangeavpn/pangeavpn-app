@@ -80,6 +80,8 @@
     <string name="settings_transport_description">Comment PangeaVPN camoufle votre trafic.</string>
     <string name="settings_transport_heading">Contournement de la censure</string>
     <string name="settings_transport_hysteria2">Hysteria2</string>
+    <string name="settings_transport_race_hint">En mode Automatique, essaie plusieurs camouflages à la fois au lieu d\'attendre que chacun, s\'il est bloqué, expire. S\'applique à la prochaine connexion.</string>
+    <string name="settings_transport_race_title">Repli rapide</string>
     <string name="settings_transport_reality">VLESS+REALITY</string>
     <string name="settings_transport_shadowsocks">Shadowsocks</string>
     <string name="settings_transport_snowflake">Snowflake</string>

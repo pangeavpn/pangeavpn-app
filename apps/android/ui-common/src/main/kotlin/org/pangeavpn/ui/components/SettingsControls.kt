@@ -24,6 +24,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
@@ -36,6 +37,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 private val CardShape = RoundedCornerShape(14.dp)
+
+/** A switch that does not apply right now reads as set aside, not as broken. */
+private const val DisabledAlpha = 0.45f
 
 /** The settings surfaces reuse the region row's card so a sheet reads as the
  *  same app as the hero it opened from, not as stock Material. */
@@ -111,12 +115,14 @@ fun SwitchRow(
     onCheckedChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
     hint: String? = null,
+    enabled: Boolean = true,
 ) {
     Row(
         modifier = modifier
             .fillMaxWidth()
+            .alpha(if (enabled) 1f else DisabledAlpha)
             .settingsCard()
-            .clickable(role = Role.Switch) { onCheckedChange(!checked) }
+            .clickable(enabled = enabled, role = Role.Switch) { onCheckedChange(!checked) }
             .padding(start = 14.dp, end = 10.dp, top = 10.dp, bottom = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -141,6 +147,7 @@ fun SwitchRow(
         Switch(
             checked = checked,
             onCheckedChange = onCheckedChange,
+            enabled = enabled,
             colors = SwitchDefaults.colors(
                 checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
                 checkedTrackColor = MaterialTheme.colorScheme.primary,

@@ -80,6 +80,8 @@
     <string name="settings_transport_description">How PangeaVPN disguises your traffic.</string>
     <string name="settings_transport_heading">Censorship Bypass</string>
     <string name="settings_transport_hysteria2">Hysteria2</string>
+    <string name="settings_transport_race_hint">With Automatic, tries several disguises at once instead of waiting for each blocked one to time out. Applies on next connect.</string>
+    <string name="settings_transport_race_title">Fast fallback</string>
     <string name="settings_transport_reality">VLESS+REALITY</string>
     <string name="settings_transport_shadowsocks">Shadowsocks</string>
     <string name="settings_transport_snowflake">Snowflake</string>

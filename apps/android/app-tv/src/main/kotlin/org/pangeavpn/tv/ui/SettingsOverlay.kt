@@ -15,6 +15,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -83,6 +84,23 @@ fun SettingsOverlay(settingsViewModel: SettingsViewModel, onDismiss: () -> Unit)
                 Button(onClick = { settingsViewModel.setPreferredTransport(nextTransport(state.settings.preferredTransport)) }) {
                     TvText(transportChoiceLabel(state.settings.preferredTransport))
                 }
+                Spacer(modifier = Modifier.height(6.dp))
+                // Only Automatic races; a pinned transport dials just itself.
+                val raceApplies = state.settings.preferredTransport == "auto"
+                val transportRace = state.settings.transportRace
+                Button(
+                    onClick = { settingsViewModel.setTransportRace(!transportRace) },
+                    enabled = raceApplies,
+                ) {
+                    TvText("${stringResource(R.string.settings_transport_race_title)} — ${onOff(transportRace)}")
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = stringResource(R.string.settings_transport_race_hint),
+                    modifier = Modifier.alpha(if (raceApplies) 1f else 0.45f),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
 
                 Spacer(modifier = Modifier.height(16.dp))
                 Text(

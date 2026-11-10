@@ -80,6 +80,8 @@
     <string name="settings_transport_description">كيف يموّه PangeaVPN حركة بياناتك.</string>
     <string name="settings_transport_heading">تجاوز الحجب</string>
     <string name="settings_transport_hysteria2">Hysteria2</string>
+    <string name="settings_transport_race_hint">في الوضع التلقائي، يجرّب عدة أساليب تمويه في آنٍ واحد بدلًا من انتظار انتهاء مهلة كل أسلوب محظور. يُطبَّق عند الاتصال التالي.</string>
+    <string name="settings_transport_race_title">تبديل سريع</string>
     <string name="settings_transport_reality">VLESS+REALITY</string>
     <string name="settings_transport_shadowsocks">Shadowsocks</string>
     <string name="settings_transport_snowflake">Snowflake</string>

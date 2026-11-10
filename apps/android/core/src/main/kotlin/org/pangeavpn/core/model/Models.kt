@@ -86,6 +86,9 @@ data class AppSettings(
     val lastServerId: String = "",
     val hubMethods: HubMethods = HubMethods(),
     val deadDrop: Boolean = true,
+    // Lets Automatic dial several transports at once; a pinned transport never
+    // races. The default covers blobs written before the key existed.
+    val transportRace: Boolean = true,
 )
 
 /** Manual choices. NaiveProxy is reachable through "auto" but is not offered

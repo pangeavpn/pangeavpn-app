@@ -80,6 +80,8 @@
     <string name="settings_transport_description">PangeaVPN 如何伪装您的流量。</string>
     <string name="settings_transport_heading">绕过审查</string>
     <string name="settings_transport_hysteria2">Hysteria2</string>
+    <string name="settings_transport_race_hint">在自动模式下，同时尝试多种伪装，而不是逐个等待被封锁的伪装超时。下次连接时生效。</string>
+    <string name="settings_transport_race_title">快速切换</string>
     <string name="settings_transport_reality">VLESS+REALITY</string>
     <string name="settings_transport_shadowsocks">Shadowsocks</string>
     <string name="settings_transport_snowflake">Snowflake</string>

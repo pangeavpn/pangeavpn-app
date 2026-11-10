@@ -80,6 +80,8 @@
     <string name="settings_transport_description">Как PangeaVPN маскирует ваш трафик.</string>
     <string name="settings_transport_heading">Обход цензуры</string>
     <string name="settings_transport_hysteria2">Hysteria2</string>
+    <string name="settings_transport_race_hint">В автоматическом режиме пробует несколько способов маскировки одновременно, а не ждёт, пока истечёт время ожидания каждого заблокированного. Применяется при следующем подключении.</string>
+    <string name="settings_transport_race_title">Быстрый перебор</string>
     <string name="settings_transport_reality">VLESS+REALITY</string>
     <string name="settings_transport_shadowsocks">Shadowsocks</string>
     <string name="settings_transport_snowflake">Snowflake</string>
