@@ -86,6 +86,9 @@ data class AppSettings(
     val lastServerId: String = "",
     val hubMethods: HubMethods = HubMethods(),
     val deadDrop: Boolean = true,
+    // Offers an ML-KEM key at the next Prepare. It must be carried here even
+    // when off, or every save would reset what Go stored.
+    val postQuantum: Boolean = false,
     // Lets Automatic dial several transports at once; a pinned transport never
     // races. The default covers blobs written before the key existed.
     val transportRace: Boolean = true,

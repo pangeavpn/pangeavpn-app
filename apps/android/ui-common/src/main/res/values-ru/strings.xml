@@ -68,6 +68,8 @@
     <string name="settings_network_dns_placeholder">1.1.1.1, 1.0.0.1</string>
     <string name="settings_network_dns_title">Пользовательский DNS</string>
     <string name="settings_network_heading">Сеть</string>
+    <string name="settings_network_pq_hint">Добавляет в туннель ключ, устойчивый к квантовым вычислениям: перехваченный сегодня трафик не удастся расшифровать позже. Действует со следующего подключения.</string>
+    <string name="settings_network_pq_title">Постквантовый ключ</string>
     <string name="settings_network_mtu_hint">Размер пакетов в туннеле. Уменьшите, если страницы зависают в сети, которая в остальном работает. По умолчанию 1380. Действует со следующего подключения.</string>
     <string name="settings_network_mtu_title">MTU туннеля</string>
     <string name="settings_save">Сохранить</string>

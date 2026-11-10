@@ -122,6 +122,24 @@ fun SettingsOverlay(settingsViewModel: SettingsViewModel, onDismiss: () -> Unit)
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    text = stringResource(R.string.settings_network_heading),
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                val postQuantum = state.settings.postQuantum
+                Button(onClick = { settingsViewModel.setPostQuantum(!postQuantum) }) {
+                    TvText("${stringResource(R.string.settings_network_pq_title)} — ${onOff(postQuantum)}")
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = stringResource(R.string.settings_network_pq_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
                 Button(onClick = { settingsViewModel.showKillswitchGuide() }) {
                     TvText(stringResource(R.string.killswitch_title))
                 }

@@ -68,6 +68,8 @@
     <string name="settings_network_dns_placeholder">1.1.1.1, 1.0.0.1</string>
     <string name="settings_network_dns_title">DNS مخصص</string>
     <string name="settings_network_heading">الشبكة</string>
+    <string name="settings_network_pq_hint">يضيف إلى النفق مفتاحًا مقاومًا للحوسبة الكمية، فلا يمكن فك تشفير الحركة الملتقطة اليوم لاحقًا. يسري عند الاتصال التالي.</string>
+    <string name="settings_network_pq_title">مفتاح ما بعد الكم</string>
     <string name="settings_network_mtu_hint">حجم الحزم داخل النفق. قلّله إذا تجمّدت الصفحات على شبكة تعمل بخلاف ذلك. الافتراضي 1380. يسري عند الاتصال التالي.</string>
     <string name="settings_network_mtu_title">MTU النفق</string>
     <string name="settings_save">حفظ</string>

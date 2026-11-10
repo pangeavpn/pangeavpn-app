@@ -32,4 +32,13 @@ class AppSettingsTest {
         assertEquals(off, json.decodeFromString(json.encodeToString(off)))
         assertTrue(AppSettings().transportRace)
     }
+
+    // Go keeps postQuantum in the same blob; dropping it here reset it on every save.
+    @Test
+    fun `post-quantum survives a round trip`() {
+        val on = json.decodeFromString<AppSettings>("""{"postQuantum":true}""")
+        assertTrue(on.postQuantum)
+        assertTrue(json.decodeFromString<AppSettings>(json.encodeToString(on)).postQuantum)
+        assertFalse(AppSettings().postQuantum)
+    }
 }

@@ -147,6 +147,12 @@ fun SettingsSheet(
                 checked = state.settings.allowLan,
                 onCheckedChange = settingsViewModel::setAllowLan,
             )
+            SwitchRow(
+                title = stringResource(R.string.settings_network_pq_title),
+                hint = stringResource(R.string.settings_network_pq_hint),
+                checked = state.settings.postQuantum,
+                onCheckedChange = settingsViewModel::setPostQuantum,
+            )
 
             CommittedField(
                 label = stringResource(R.string.settings_network_dns_title),

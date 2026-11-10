@@ -71,6 +71,8 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setDeadDrop(enabled: Boolean) = store { it.copy(deadDrop = enabled) }
 
+    fun setPostQuantum(enabled: Boolean) = store { it.copy(postQuantum = enabled) }
+
     fun setTransportRace(enabled: Boolean) = store { it.copy(transportRace = enabled) }
 
     /** Goes through the core so the last-method rule is enforced in one place. */

@@ -68,6 +68,8 @@
     <string name="settings_network_dns_placeholder">1.1.1.1, 1.0.0.1</string>
     <string name="settings_network_dns_title">DNS سفارشی</string>
     <string name="settings_network_heading">شبکه</string>
+    <string name="settings_network_pq_hint">کلیدی مقاوم در برابر رایانش کوانتومی به تونل اضافه می‌کند تا ترافیک ضبط‌شده امروز بعداً رمزگشایی نشود. از اتصال بعدی اعمال می‌شود.</string>
+    <string name="settings_network_pq_title">کلید پساکوانتومی</string>
     <string name="settings_network_mtu_hint">اندازه بسته‌ها در تونل. اگر صفحه‌ها در شبکه‌ای که در بقیه موارد کار می‌کند هنگ می‌کنند، کمش کنید. پیش‌فرض 1380. از اتصال بعدی اعمال می‌شود.</string>
     <string name="settings_network_mtu_title">MTU تونل</string>
     <string name="settings_save">ذخیره</string>
