@@ -375,6 +375,8 @@
 "settings_network_heading" = "Network";
 "settings_network_mtu_hint" = "Packet size through the tunnel. Lower it if pages hang on a network that otherwise works. Default 1380. Applies on next connect.";
 "settings_network_mtu_title" = "Tunnel MTU";
+"settings_network_pq_hint" = "Adds a quantum-resistant key to the tunnel, so traffic recorded today can't be decrypted later. Applies on next connect.";
+"settings_network_pq_title" = "Post-quantum key";
 "settings_save" = "Save";
 "settings_section_appearance" = "Appearance";
 "settings_section_developer" = "Developer Options";

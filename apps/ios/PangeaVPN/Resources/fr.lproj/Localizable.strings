@@ -375,6 +375,8 @@
 "settings_network_heading" = "Réseau";
 "settings_network_mtu_hint" = "Taille des paquets dans le tunnel. Réduisez-la si les pages se figent sur un réseau qui marche par ailleurs. Par défaut 1380. Effectif à la prochaine connexion.";
 "settings_network_mtu_title" = "MTU du tunnel";
+"settings_network_pq_hint" = "Ajoute au tunnel une clé résistante au quantique : le trafic enregistré aujourd'hui ne pourra pas être déchiffré plus tard. Effectif à la prochaine connexion.";
+"settings_network_pq_title" = "Clé post-quantique";
 "settings_save" = "Enregistrer";
 "settings_section_appearance" = "Apparence";
 "settings_section_developer" = "Options développeur";

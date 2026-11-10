@@ -68,10 +68,10 @@
     <string name="settings_network_dns_placeholder">1.1.1.1, 1.0.0.1</string>
     <string name="settings_network_dns_title">Пользовательский DNS</string>
     <string name="settings_network_heading">Сеть</string>
-    <string name="settings_network_pq_hint">Добавляет в туннель ключ, устойчивый к квантовым вычислениям: перехваченный сегодня трафик не удастся расшифровать позже. Действует со следующего подключения.</string>
-    <string name="settings_network_pq_title">Постквантовый ключ</string>
     <string name="settings_network_mtu_hint">Размер пакетов в туннеле. Уменьшите, если страницы зависают в сети, которая в остальном работает. По умолчанию 1380. Действует со следующего подключения.</string>
     <string name="settings_network_mtu_title">MTU туннеля</string>
+    <string name="settings_network_pq_hint">Добавляет в туннель ключ, устойчивый к квантовым вычислениям: перехваченный сегодня трафик не удастся расшифровать позже. Действует со следующего подключения.</string>
+    <string name="settings_network_pq_title">Постквантовый ключ</string>
     <string name="settings_save">Сохранить</string>
     <string name="settings_signout">Выйти</string>
     <string name="settings_title">Настройки</string>
@@ -82,7 +82,7 @@
     <string name="settings_transport_description">Как PangeaVPN маскирует ваш трафик.</string>
     <string name="settings_transport_heading">Обход цензуры</string>
     <string name="settings_transport_hysteria2">Hysteria2</string>
-    <string name="settings_transport_race_hint">В автоматическом режиме пробует несколько способов маскировки одновременно, а не ждёт, пока истечёт время ожидания каждого заблокированного. Применяется при следующем подключении.</string>
+    <string name="settings_transport_race_hint">В автоматическом режиме пробует несколько маскировок сразу, а не ждёт, пока истечёт время у каждой заблокированной. Действует со следующего подключения.</string>
     <string name="settings_transport_race_title">Быстрый перебор</string>
     <string name="settings_transport_reality">VLESS+REALITY</string>
     <string name="settings_transport_shadowsocks">Shadowsocks</string>

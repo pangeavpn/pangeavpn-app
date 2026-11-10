@@ -375,6 +375,8 @@
 "settings_network_heading" = "Red";
 "settings_network_mtu_hint" = "Tamaño de los paquetes en el túnel. Bájalo si las páginas se cuelgan en una red que por lo demás va bien. Predeterminado 1380. Se aplica en la próxima conexión.";
 "settings_network_mtu_title" = "MTU del túnel";
+"settings_network_pq_hint" = "Añade al túnel una clave resistente a la computación cuántica: el tráfico grabado hoy no podrá descifrarse después. Se aplica en la próxima conexión.";
+"settings_network_pq_title" = "Clave poscuántica";
 "settings_save" = "Guardar";
 "settings_section_appearance" = "Apariencia";
 "settings_section_developer" = "Opciones de desarrollador";

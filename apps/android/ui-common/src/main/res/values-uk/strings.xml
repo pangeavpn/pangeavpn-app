@@ -68,10 +68,10 @@
     <string name="settings_network_dns_placeholder">1.1.1.1, 1.0.0.1</string>
     <string name="settings_network_dns_title">Власний DNS</string>
     <string name="settings_network_heading">Мережа</string>
-    <string name="settings_network_pq_hint">Додає в тунель ключ, стійкий до квантових обчислень: перехоплений сьогодні трафік не вдасться розшифрувати згодом. Діє з наступного підключення.</string>
-    <string name="settings_network_pq_title">Постквантовий ключ</string>
     <string name="settings_network_mtu_hint">Розмір пакетів у тунелі. Зменшіть, якщо сторінки зависають у мережі, яка в іншому працює. Типово 1380. Діє з наступного підключення.</string>
     <string name="settings_network_mtu_title">MTU тунелю</string>
+    <string name="settings_network_pq_hint">Додає в тунель ключ, стійкий до квантових обчислень: перехоплений сьогодні трафік не вдасться розшифрувати згодом. Діє з наступного підключення.</string>
+    <string name="settings_network_pq_title">Постквантовий ключ</string>
     <string name="settings_save">Зберегти</string>
     <string name="settings_signout">Вийти</string>
     <string name="settings_title">Налаштування</string>
@@ -82,7 +82,7 @@
     <string name="settings_transport_description">Як PangeaVPN маскує ваш трафік.</string>
     <string name="settings_transport_heading">Обхід цензури</string>
     <string name="settings_transport_hysteria2">Hysteria2</string>
-    <string name="settings_transport_race_hint">В автоматичному режимі пробує кілька способів маскування одночасно, а не чекає, доки мине час очікування кожного заблокованого. Застосовується під час наступного підключення.</string>
+    <string name="settings_transport_race_hint">В автоматичному режимі пробує кілька маскувань одночасно, а не чекає, поки сплине час у кожного заблокованого. Діє з наступного підключення.</string>
     <string name="settings_transport_race_title">Швидкий перебір</string>
     <string name="settings_transport_reality">VLESS+REALITY</string>
     <string name="settings_transport_shadowsocks">Shadowsocks</string>

@@ -1,14 +1,34 @@
 // Censorship Bypass, Provisioning and Network settings pages; wording follows desktop.
 export default {
   bypass_auto_desc: {
-    en: "Tries each disguise in turn and remembers what worked on this network.",
-    es: "Prueba cada disfraz por turno y recuerda cuál funcionó en esta red.",
-    fr: "Essaie chaque déguisement à tour de rôle et retient ce qui a marché sur ce réseau.",
-    ru: "Пробует маскировки по очереди и запоминает, что сработало в этой сети.",
-    uk: "Пробує маскування по черзі й запам'ятовує, що спрацювало в цій мережі.",
-    zh: "依次尝试每种伪装，并记住在这个网络上管用的那个。",
-    ar: "يجرّب كل تمويه بالترتيب ويتذكّر ما نجح على هذه الشبكة.",
-    fa: "هر استتار را به‌ترتیب امتحان می‌کند و به‌یاد می‌سپارد روی این شبکه چه جواب داد."
+    en: "Picks the disguise that gets through, and remembers what worked on this network.",
+    es: "Elige el disfraz que logra pasar y recuerda cuál funcionó en esta red.",
+    fr: "Choisit le déguisement qui passe et retient ce qui a marché sur ce réseau.",
+    ru: "Выбирает маскировку, которая проходит, и запоминает, что сработало в этой сети.",
+    uk: "Обирає маскування, яке проходить, і запам'ятовує, що спрацювало в цій мережі.",
+    zh: "自动选用能连通的伪装，并记住在这个网络上管用的那个。",
+    ar: "يختار التمويه الذي ينجح في العبور ويتذكّر ما نجح على هذه الشبكة.",
+    fa: "استتاری را که از فیلتر عبور می‌کند انتخاب می‌کند و به‌یاد می‌سپارد روی این شبکه چه جواب داد."
+  },
+  settings_transport_race_on: {
+    en: "Fast fallback enabled. Reconnect for it to take effect.",
+    es: "Respaldo rápido activado. Vuelve a conectar para que surta efecto.",
+    fr: "Repli rapide activé. Reconnectez-vous pour qu’il prenne effet.",
+    ru: "«Быстрый перебор» включён. Переподключитесь, чтобы изменение вступило в силу.",
+    uk: "Швидкий перебір увімкнено. Перепідключіться, щоб зміни набули чинності.",
+    zh: "已启用快速切换。请重新连接以生效。",
+    ar: "تم تفعيل التبديل السريع. أعد الاتصال ليسري المفعول.",
+    fa: "جایگزینی سریع فعال شد. برای اعمال، دوباره متصل شوید."
+  },
+  settings_transport_race_off: {
+    en: "Fast fallback disabled. Reconnect for it to take effect.",
+    es: "Respaldo rápido desactivado. Vuelve a conectar para que surta efecto.",
+    fr: "Repli rapide désactivé. Reconnectez-vous pour qu’il prenne effet.",
+    ru: "«Быстрый перебор» выключен. Переподключитесь, чтобы изменение вступило в силу.",
+    uk: "Швидкий перебір вимкнено. Перепідключіться, щоб зміни набули чинності.",
+    zh: "已禁用快速切换。请重新连接以生效。",
+    ar: "تم تعطيل التبديل السريع. أعد الاتصال ليسري المفعول.",
+    fa: "جایگزینی سریع غیرفعال شد. برای اعمال، دوباره متصل شوید."
   },
   bypass_cloak_desc: {
     en: "TLS aimed at a decoy site, so the traffic looks like an ordinary visit there.",

@@ -375,6 +375,8 @@
 "settings_network_heading" = "شبکه";
 "settings_network_mtu_hint" = "اندازه بسته‌ها در تونل. اگر صفحه‌ها در شبکه‌ای که در بقیه موارد کار می‌کند هنگ می‌کنند، کمش کنید. پیش‌فرض 1380. از اتصال بعدی اعمال می‌شود.";
 "settings_network_mtu_title" = "MTU تونل";
+"settings_network_pq_hint" = "کلیدی مقاوم در برابر رایانش کوانتومی به تونل اضافه می‌کند تا ترافیک ضبط‌شده امروز بعداً رمزگشایی نشود. از اتصال بعدی اعمال می‌شود.";
+"settings_network_pq_title" = "کلید پساکوانتومی";
 "settings_save" = "ذخیره";
 "settings_section_appearance" = "ظاهر";
 "settings_section_developer" = "گزینه‌های توسعه‌دهنده";

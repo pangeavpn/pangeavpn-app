@@ -68,10 +68,10 @@
     <string name="settings_network_dns_placeholder">1.1.1.1, 1.0.0.1</string>
     <string name="settings_network_dns_title">Custom DNS</string>
     <string name="settings_network_heading">Network</string>
-    <string name="settings_network_pq_hint">Adds a quantum-resistant key to the tunnel, so traffic recorded today can\'t be decrypted later. Applies on next connect.</string>
-    <string name="settings_network_pq_title">Post-quantum key</string>
     <string name="settings_network_mtu_hint">Packet size through the tunnel. Lower it if pages hang on a network that otherwise works. Default 1380. Applies on next connect.</string>
     <string name="settings_network_mtu_title">Tunnel MTU</string>
+    <string name="settings_network_pq_hint">Adds a quantum-resistant key to the tunnel, so traffic recorded today can\'t be decrypted later. Applies on next connect.</string>
+    <string name="settings_network_pq_title">Post-quantum key</string>
     <string name="settings_save">Save</string>
     <string name="settings_signout">Sign Out</string>
     <string name="settings_title">Settings</string>

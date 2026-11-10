@@ -375,6 +375,8 @@
 "settings_network_heading" = "Мережа";
 "settings_network_mtu_hint" = "Розмір пакетів у тунелі. Зменшіть, якщо сторінки зависають у мережі, яка в іншому працює. Типово 1380. Діє з наступного підключення.";
 "settings_network_mtu_title" = "MTU тунелю";
+"settings_network_pq_hint" = "Додає в тунель ключ, стійкий до квантових обчислень: перехоплений сьогодні трафік не вдасться розшифрувати згодом. Діє з наступного підключення.";
+"settings_network_pq_title" = "Постквантовий ключ";
 "settings_save" = "Зберегти";
 "settings_section_appearance" = "Оформлення";
 "settings_section_developer" = "Параметри розробника";

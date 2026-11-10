@@ -68,10 +68,10 @@
     <string name="settings_network_dns_placeholder">1.1.1.1, 1.0.0.1</string>
     <string name="settings_network_dns_title">DNS مخصص</string>
     <string name="settings_network_heading">الشبكة</string>
-    <string name="settings_network_pq_hint">يضيف إلى النفق مفتاحًا مقاومًا للحوسبة الكمية، فلا يمكن فك تشفير الحركة الملتقطة اليوم لاحقًا. يسري عند الاتصال التالي.</string>
-    <string name="settings_network_pq_title">مفتاح ما بعد الكم</string>
     <string name="settings_network_mtu_hint">حجم الحزم داخل النفق. قلّله إذا تجمّدت الصفحات على شبكة تعمل بخلاف ذلك. الافتراضي 1380. يسري عند الاتصال التالي.</string>
     <string name="settings_network_mtu_title">MTU النفق</string>
+    <string name="settings_network_pq_hint">يضيف إلى النفق مفتاحًا مقاومًا للحوسبة الكمية، فلا يمكن فك تشفير الحركة الملتقطة اليوم لاحقًا. يسري عند الاتصال التالي.</string>
+    <string name="settings_network_pq_title">مفتاح ما بعد الكم</string>
     <string name="settings_save">حفظ</string>
     <string name="settings_signout">تسجيل الخروج</string>
     <string name="settings_title">الإعدادات</string>
@@ -82,7 +82,7 @@
     <string name="settings_transport_description">كيف يموّه PangeaVPN حركة بياناتك.</string>
     <string name="settings_transport_heading">تجاوز الحجب</string>
     <string name="settings_transport_hysteria2">Hysteria2</string>
-    <string name="settings_transport_race_hint">في الوضع التلقائي، يجرّب عدة أساليب تمويه في آنٍ واحد بدلًا من انتظار انتهاء مهلة كل أسلوب محظور. يُطبَّق عند الاتصال التالي.</string>
+    <string name="settings_transport_race_hint">في الوضع التلقائي، يجرّب عدة أنواع من التمويه في آن واحد بدل انتظار انتهاء مهلة كل نوع محجوب. يسري عند الاتصال التالي.</string>
     <string name="settings_transport_race_title">تبديل سريع</string>
     <string name="settings_transport_reality">VLESS+REALITY</string>
     <string name="settings_transport_shadowsocks">Shadowsocks</string>

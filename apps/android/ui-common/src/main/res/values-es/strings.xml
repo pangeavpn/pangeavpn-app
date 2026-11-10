@@ -68,10 +68,10 @@
     <string name="settings_network_dns_placeholder">1.1.1.1, 1.0.0.1</string>
     <string name="settings_network_dns_title">DNS personalizado</string>
     <string name="settings_network_heading">Red</string>
-    <string name="settings_network_pq_hint">Añade al túnel una clave resistente a la computación cuántica: el tráfico grabado hoy no podrá descifrarse después. Se aplica en la próxima conexión.</string>
-    <string name="settings_network_pq_title">Clave poscuántica</string>
     <string name="settings_network_mtu_hint">Tamaño de los paquetes en el túnel. Bájalo si las páginas se cuelgan en una red que por lo demás va bien. Predeterminado 1380. Se aplica en la próxima conexión.</string>
     <string name="settings_network_mtu_title">MTU del túnel</string>
+    <string name="settings_network_pq_hint">Añade al túnel una clave resistente a la computación cuántica: el tráfico grabado hoy no podrá descifrarse después. Se aplica en la próxima conexión.</string>
+    <string name="settings_network_pq_title">Clave poscuántica</string>
     <string name="settings_save">Guardar</string>
     <string name="settings_signout">Cerrar sesión</string>
     <string name="settings_title">Ajustes</string>
@@ -82,7 +82,7 @@
     <string name="settings_transport_description">Cómo PangeaVPN camufla tu tráfico.</string>
     <string name="settings_transport_heading">Elusión de censura</string>
     <string name="settings_transport_hysteria2">Hysteria2</string>
-    <string name="settings_transport_race_hint">En modo Automático, prueba varios camuflajes a la vez en lugar de esperar a que cada uno bloqueado agote su tiempo de espera. Se aplica en la próxima conexión.</string>
+    <string name="settings_transport_race_hint">Con Automático, prueba varios disfraces a la vez en lugar de esperar a que cada uno bloqueado agote su tiempo. Se aplica en la próxima conexión.</string>
     <string name="settings_transport_race_title">Respaldo rápido</string>
     <string name="settings_transport_reality">VLESS+REALITY</string>
     <string name="settings_transport_shadowsocks">Shadowsocks</string>

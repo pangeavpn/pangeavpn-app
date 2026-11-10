@@ -375,6 +375,8 @@
 "settings_network_heading" = "网络";
 "settings_network_mtu_hint" = "隧道里的数据包大小。若在其他方面正常的网络上页面卡住，就调低它。默认 1380。下次连接时生效。";
 "settings_network_mtu_title" = "隧道 MTU";
+"settings_network_pq_hint" = "为隧道添加抗量子密钥，今天被截获的流量日后也无法解密。下次连接时生效。";
+"settings_network_pq_title" = "后量子密钥";
 "settings_save" = "保存";
 "settings_section_appearance" = "外观";
 "settings_section_developer" = "开发者选项";

@@ -68,10 +68,10 @@
     <string name="settings_network_dns_placeholder">1.1.1.1, 1.0.0.1</string>
     <string name="settings_network_dns_title">自定义 DNS</string>
     <string name="settings_network_heading">网络</string>
-    <string name="settings_network_pq_hint">为隧道添加抗量子密钥，今天被截获的流量日后也无法解密。下次连接时生效。</string>
-    <string name="settings_network_pq_title">后量子密钥</string>
     <string name="settings_network_mtu_hint">隧道里的数据包大小。若在其他方面正常的网络上页面卡住，就调低它。默认 1380。下次连接时生效。</string>
     <string name="settings_network_mtu_title">隧道 MTU</string>
+    <string name="settings_network_pq_hint">为隧道添加抗量子密钥，今天被截获的流量日后也无法解密。下次连接时生效。</string>
+    <string name="settings_network_pq_title">后量子密钥</string>
     <string name="settings_save">保存</string>
     <string name="settings_signout">退出登录</string>
     <string name="settings_title">设置</string>
@@ -82,7 +82,7 @@
     <string name="settings_transport_description">PangeaVPN 如何伪装您的流量。</string>
     <string name="settings_transport_heading">绕过审查</string>
     <string name="settings_transport_hysteria2">Hysteria2</string>
-    <string name="settings_transport_race_hint">在自动模式下，同时尝试多种伪装，而不是逐个等待被封锁的伪装超时。下次连接时生效。</string>
+    <string name="settings_transport_race_hint">在自动模式下同时尝试多种伪装，而不是等每个被封锁的伪装逐一超时。下次连接时生效。</string>
     <string name="settings_transport_race_title">快速切换</string>
     <string name="settings_transport_reality">VLESS+REALITY</string>
     <string name="settings_transport_shadowsocks">Shadowsocks</string>

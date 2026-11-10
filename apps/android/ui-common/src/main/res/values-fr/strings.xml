@@ -68,10 +68,10 @@
     <string name="settings_network_dns_placeholder">1.1.1.1, 1.0.0.1</string>
     <string name="settings_network_dns_title">DNS personnalisé</string>
     <string name="settings_network_heading">Réseau</string>
-    <string name="settings_network_pq_hint">Ajoute au tunnel une clé résistante au quantique : le trafic enregistré aujourd\'hui ne pourra pas être déchiffré plus tard. Effectif à la prochaine connexion.</string>
-    <string name="settings_network_pq_title">Clé post-quantique</string>
     <string name="settings_network_mtu_hint">Taille des paquets dans le tunnel. Réduisez-la si les pages se figent sur un réseau qui marche par ailleurs. Par défaut 1380. Effectif à la prochaine connexion.</string>
     <string name="settings_network_mtu_title">MTU du tunnel</string>
+    <string name="settings_network_pq_hint">Ajoute au tunnel une clé résistante au quantique : le trafic enregistré aujourd\'hui ne pourra pas être déchiffré plus tard. Effectif à la prochaine connexion.</string>
+    <string name="settings_network_pq_title">Clé post-quantique</string>
     <string name="settings_save">Enregistrer</string>
     <string name="settings_signout">Se déconnecter</string>
     <string name="settings_title">Paramètres</string>
@@ -82,7 +82,7 @@
     <string name="settings_transport_description">Comment PangeaVPN camoufle votre trafic.</string>
     <string name="settings_transport_heading">Contournement de la censure</string>
     <string name="settings_transport_hysteria2">Hysteria2</string>
-    <string name="settings_transport_race_hint">En mode Automatique, essaie plusieurs camouflages à la fois au lieu d\'attendre que chacun, s\'il est bloqué, expire. S\'applique à la prochaine connexion.</string>
+    <string name="settings_transport_race_hint">En mode Automatique, essaie plusieurs déguisements à la fois au lieu d\'attendre que chaque déguisement bloqué expire. Effectif à la prochaine connexion.</string>
     <string name="settings_transport_race_title">Repli rapide</string>
     <string name="settings_transport_reality">VLESS+REALITY</string>
     <string name="settings_transport_shadowsocks">Shadowsocks</string>
