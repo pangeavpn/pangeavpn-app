@@ -24,7 +24,7 @@
 "appearance_theme_light" = "Claro";
 "appearance_theme_system" = "Sistema";
 "bypass_anytls_desc" = "Una sesión TLS con relleno, que suaviza el patrón TLS-en-TLS que otros transportes TLS dejan ver.";
-"bypass_auto_desc" = "Prueba cada disfraz por turno y recuerda cuál funcionó en esta red.";
+"bypass_auto_desc" = "Elige el disfraz que logra pasar y recuerda cuál funcionó en esta red.";
 "bypass_cdn_desc" = "Pasa por una red de distribución de contenidos, así que bloquear las direcciones de nuestros servidores no lo detiene. Más lento que los demás.";
 "bypass_cloak_desc" = "TLS dirigido a un sitio señuelo, así el tráfico parece una visita corriente.";
 "bypass_hysteria2_desc" = "UDP y QUIC en lugar de TCP. Vale la pena si se caen todas las conexiones TCP.";
@@ -402,6 +402,10 @@
 "settings_transport_description" = "Cómo PangeaVPN camufla tu tráfico.";
 "settings_transport_heading" = "Elusión de censura";
 "settings_transport_hysteria2" = "Hysteria2";
+"settings_transport_race_hint" = "Con Automático, prueba varios disfraces a la vez en lugar de esperar a que cada uno bloqueado agote su tiempo. Se aplica en la próxima conexión.";
+"settings_transport_race_off" = "Respaldo rápido desactivado. Vuelve a conectar para que surta efecto.";
+"settings_transport_race_on" = "Respaldo rápido activado. Vuelve a conectar para que surta efecto.";
+"settings_transport_race_title" = "Respaldo rápido";
 "settings_transport_reality" = "VLESS+REALITY";
 "settings_transport_shadowsocks" = "Shadowsocks";
 "settings_transport_snowflake" = "Snowflake";

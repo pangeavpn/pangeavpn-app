@@ -24,7 +24,7 @@
 "appearance_theme_light" = "فاتح";
 "appearance_theme_system" = "النظام";
 "bypass_anytls_desc" = "جلسة TLS مبطَّنة، تخفّف بصمة TLS داخل TLS التي تظهرها وسائط TLS الأخرى.";
-"bypass_auto_desc" = "يجرّب كل تمويه بالترتيب ويتذكّر ما نجح على هذه الشبكة.";
+"bypass_auto_desc" = "يختار التمويه الذي ينجح في العبور ويتذكّر ما نجح على هذه الشبكة.";
 "bypass_cdn_desc" = "يمرّ عبر شبكة توصيل محتوى (CDN)، فلا يوقفه حجب عناوين خوادمنا. أبطأ من غيره.";
 "bypass_cloak_desc" = "TLS موجَّه إلى موقع خادع، فتبدو الحركة كزيارة عادية له.";
 "bypass_hysteria2_desc" = "UDP وQUIC بدل TCP. يستحق التجربة عندما تنقطع كل اتصالات TCP.";
@@ -402,6 +402,10 @@
 "settings_transport_description" = "كيف يموّه PangeaVPN حركة بياناتك.";
 "settings_transport_heading" = "تجاوز الحجب";
 "settings_transport_hysteria2" = "Hysteria2";
+"settings_transport_race_hint" = "في الوضع التلقائي، يجرّب عدة أنواع من التمويه في آن واحد بدل انتظار انتهاء مهلة كل نوع محجوب. يسري عند الاتصال التالي.";
+"settings_transport_race_off" = "تم تعطيل التبديل السريع. أعد الاتصال ليسري المفعول.";
+"settings_transport_race_on" = "تم تفعيل التبديل السريع. أعد الاتصال ليسري المفعول.";
+"settings_transport_race_title" = "تبديل سريع";
 "settings_transport_reality" = "VLESS+REALITY";
 "settings_transport_shadowsocks" = "Shadowsocks";
 "settings_transport_snowflake" = "Snowflake";

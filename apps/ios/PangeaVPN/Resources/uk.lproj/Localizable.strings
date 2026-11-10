@@ -24,7 +24,7 @@
 "appearance_theme_light" = "Світла";
 "appearance_theme_system" = "Системна";
 "bypass_anytls_desc" = "TLS-сесія із заповненням, що згладжує ознаку TLS-у-TLS, яку видають інші TLS-транспорти.";
-"bypass_auto_desc" = "Пробує маскування по черзі й запам'ятовує, що спрацювало в цій мережі.";
+"bypass_auto_desc" = "Обирає маскування, яке проходить, і запам'ятовує, що спрацювало в цій мережі.";
 "bypass_cdn_desc" = "Іде через мережу доставки контенту (CDN), тож блокування адрес наших серверів його не зупиняє. Повільніший за інші.";
 "bypass_cloak_desc" = "TLS під сайт-прикриття, тож трафік має вигляд звичайного візиту туди.";
 "bypass_hysteria2_desc" = "UDP і QUIC замість TCP. Варто спробувати, коли всі TCP-з'єднання обриваються.";
@@ -402,6 +402,10 @@
 "settings_transport_description" = "Як PangeaVPN маскує ваш трафік.";
 "settings_transport_heading" = "Обхід цензури";
 "settings_transport_hysteria2" = "Hysteria2";
+"settings_transport_race_hint" = "В автоматичному режимі пробує кілька маскувань одночасно, а не чекає, поки сплине час у кожного заблокованого. Діє з наступного підключення.";
+"settings_transport_race_off" = "Швидкий перебір вимкнено. Перепідключіться, щоб зміни набули чинності.";
+"settings_transport_race_on" = "Швидкий перебір увімкнено. Перепідключіться, щоб зміни набули чинності.";
+"settings_transport_race_title" = "Швидкий перебір";
 "settings_transport_reality" = "VLESS+REALITY";
 "settings_transport_shadowsocks" = "Shadowsocks";
 "settings_transport_snowflake" = "Snowflake";

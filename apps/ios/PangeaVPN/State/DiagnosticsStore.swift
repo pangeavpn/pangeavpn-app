@@ -53,6 +53,7 @@ enum DiagnosticsReport {
         let autoConnect: Bool
         let deadDrop: Bool
         let postQuantum: Bool
+        let transportRace: Bool
         let lastServerId: String
         let hubMethods: HubMethods
 
@@ -64,6 +65,7 @@ enum DiagnosticsReport {
             autoConnect = settings.autoConnect
             deadDrop = settings.deadDrop
             postQuantum = settings.postQuantum
+            transportRace = settings.transportRace
             lastServerId = settings.lastServerId
             hubMethods = settings.hubMethods
         }

@@ -24,7 +24,7 @@
 "appearance_theme_light" = "روشن";
 "appearance_theme_system" = "سیستم";
 "bypass_anytls_desc" = "یک نشست TLS با لایه‌گذاری که الگوی TLS-در-TLS را که دیگر ترابری‌های TLS نشان می‌دهند، هموار می‌کند.";
-"bypass_auto_desc" = "هر استتار را به‌ترتیب امتحان می‌کند و به‌یاد می‌سپارد روی این شبکه چه جواب داد.";
+"bypass_auto_desc" = "استتاری را که از فیلتر عبور می‌کند انتخاب می‌کند و به‌یاد می‌سپارد روی این شبکه چه جواب داد.";
 "bypass_cdn_desc" = "از راه یک شبکه توزیع محتوا (CDN) می‌رود، پس مسدود کردن نشانی سرورهای ما جلویش را نمی‌گیرد. کندتر از بقیه است.";
 "bypass_cloak_desc" = "TLS به‌سمت یک سایت طعمه، طوری که ترافیک مثل بازدیدی عادی به‌نظر برسد.";
 "bypass_hysteria2_desc" = "UDP و QUIC به‌جای TCP. وقتی همه اتصال‌های TCP می‌افتند، ارزش امتحان دارد.";
@@ -402,6 +402,10 @@
 "settings_transport_description" = "چگونه PangeaVPN ترافیک شما را استتار می‌کند.";
 "settings_transport_heading" = "دور زدن سانسور";
 "settings_transport_hysteria2" = "Hysteria2";
+"settings_transport_race_hint" = "در حالت خودکار، چند استتار را هم‌زمان امتحان می‌کند به‌جای اینکه منتظر بماند مهلت هر استتارِ مسدودشده تمام شود. از اتصال بعدی اعمال می‌شود.";
+"settings_transport_race_off" = "جایگزینی سریع غیرفعال شد. برای اعمال، دوباره متصل شوید.";
+"settings_transport_race_on" = "جایگزینی سریع فعال شد. برای اعمال، دوباره متصل شوید.";
+"settings_transport_race_title" = "جایگزینی سریع";
 "settings_transport_reality" = "VLESS+REALITY";
 "settings_transport_shadowsocks" = "Shadowsocks";
 "settings_transport_snowflake" = "Snowflake";

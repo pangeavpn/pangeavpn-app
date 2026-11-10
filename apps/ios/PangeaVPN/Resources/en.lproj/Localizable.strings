@@ -24,7 +24,7 @@
 "appearance_theme_light" = "Light";
 "appearance_theme_system" = "System";
 "bypass_anytls_desc" = "A padded TLS session, smoothing the TLS-in-TLS shape other TLS transports leak.";
-"bypass_auto_desc" = "Tries each disguise in turn and remembers what worked on this network.";
+"bypass_auto_desc" = "Picks the disguise that gets through, and remembers what worked on this network.";
 "bypass_cdn_desc" = "Goes through a content delivery network, so blocking our servers' addresses doesn't stop it. Slower than the others.";
 "bypass_cloak_desc" = "TLS aimed at a decoy site, so the traffic looks like an ordinary visit there.";
 "bypass_hysteria2_desc" = "UDP and QUIC instead of TCP. Worth a try when every TCP connection dies.";
@@ -402,6 +402,10 @@
 "settings_transport_description" = "How PangeaVPN disguises your traffic.";
 "settings_transport_heading" = "Censorship Bypass";
 "settings_transport_hysteria2" = "Hysteria2";
+"settings_transport_race_hint" = "With Automatic, tries several disguises at once instead of waiting for each blocked one to time out. Applies on next connect.";
+"settings_transport_race_off" = "Fast fallback disabled. Reconnect for it to take effect.";
+"settings_transport_race_on" = "Fast fallback enabled. Reconnect for it to take effect.";
+"settings_transport_race_title" = "Fast fallback";
 "settings_transport_reality" = "VLESS+REALITY";
 "settings_transport_shadowsocks" = "Shadowsocks";
 "settings_transport_snowflake" = "Snowflake";

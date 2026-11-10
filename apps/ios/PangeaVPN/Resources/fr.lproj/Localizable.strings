@@ -24,7 +24,7 @@
 "appearance_theme_light" = "Clair";
 "appearance_theme_system" = "Système";
 "bypass_anytls_desc" = "Une session TLS avec remplissage, qui atténue la signature TLS-dans-TLS que d'autres transports TLS laissent voir.";
-"bypass_auto_desc" = "Essaie chaque déguisement à tour de rôle et retient ce qui a marché sur ce réseau.";
+"bypass_auto_desc" = "Choisit le déguisement qui passe et retient ce qui a marché sur ce réseau.";
 "bypass_cdn_desc" = "Passe par un réseau de diffusion de contenu, donc bloquer les adresses de nos serveurs ne l'arrête pas. Plus lent que les autres.";
 "bypass_cloak_desc" = "TLS visant un site leurre, si bien que le trafic ressemble à une visite ordinaire.";
 "bypass_hysteria2_desc" = "UDP et QUIC au lieu de TCP. À essayer quand toutes les connexions TCP tombent.";
@@ -402,6 +402,10 @@
 "settings_transport_description" = "Comment PangeaVPN camoufle votre trafic.";
 "settings_transport_heading" = "Contournement de la censure";
 "settings_transport_hysteria2" = "Hysteria2";
+"settings_transport_race_hint" = "En mode Automatique, essaie plusieurs déguisements à la fois au lieu d'attendre que chaque déguisement bloqué expire. Effectif à la prochaine connexion.";
+"settings_transport_race_off" = "Repli rapide désactivé. Reconnectez-vous pour qu’il prenne effet.";
+"settings_transport_race_on" = "Repli rapide activé. Reconnectez-vous pour qu’il prenne effet.";
+"settings_transport_race_title" = "Repli rapide";
 "settings_transport_reality" = "VLESS+REALITY";
 "settings_transport_shadowsocks" = "Shadowsocks";
 "settings_transport_snowflake" = "Snowflake";

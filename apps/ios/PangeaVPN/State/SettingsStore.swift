@@ -116,6 +116,10 @@ final class SettingsStore {
         await edit { $0.postQuantum = enabled }
     }
 
+    func setTransportRace(_ enabled: Bool) async {
+        await edit { $0.transportRace = enabled }
+    }
+
     func setAutoConnect(_ enabled: Bool) {
         defaults.set(enabled, forKey: SharedPrefs.Key.autoConnect)
         autoConnect = enabled

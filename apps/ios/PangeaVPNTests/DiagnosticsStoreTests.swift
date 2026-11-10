@@ -120,7 +120,7 @@ final class DiagnosticsStoreTests: XCTestCase {
         let summary = try XCTUnwrap(try decode(text)["settings"] as? [String: Any])
         let expected: Set<String> = [
             "preferredTransport", "customDns", "mtu", "allowLan", "autoConnect",
-            "deadDrop", "postQuantum", "lastServerId", "hubMethods",
+            "deadDrop", "postQuantum", "transportRace", "lastServerId", "hubMethods",
         ]
         XCTAssertEqual(Set(summary.keys), expected)
         XCTAssertFalse(text.contains(core.accountNumberValue))

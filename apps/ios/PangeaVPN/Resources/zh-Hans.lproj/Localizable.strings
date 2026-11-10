@@ -24,7 +24,7 @@
 "appearance_theme_light" = "浅色";
 "appearance_theme_system" = "跟随系统";
 "bypass_anytls_desc" = "带填充的 TLS 会话，抹平其他 TLS 传输暴露的 TLS-in-TLS 特征。";
-"bypass_auto_desc" = "依次尝试每种伪装，并记住在这个网络上管用的那个。";
+"bypass_auto_desc" = "自动选用能连通的伪装，并记住在这个网络上管用的那个。";
 "bypass_cdn_desc" = "经由内容分发网络（CDN）连接，封锁我们服务器的地址也拦不住它。比其他方式慢。";
 "bypass_cloak_desc" = "指向诱饵站点的 TLS，流量看起来就像一次普通访问。";
 "bypass_hysteria2_desc" = "用 UDP 和 QUIC 而非 TCP。所有 TCP 连接都断时值得一试。";
@@ -402,6 +402,10 @@
 "settings_transport_description" = "PangeaVPN 如何伪装您的流量。";
 "settings_transport_heading" = "绕过审查";
 "settings_transport_hysteria2" = "Hysteria2";
+"settings_transport_race_hint" = "在自动模式下同时尝试多种伪装，而不是等每个被封锁的伪装逐一超时。下次连接时生效。";
+"settings_transport_race_off" = "已禁用快速切换。请重新连接以生效。";
+"settings_transport_race_on" = "已启用快速切换。请重新连接以生效。";
+"settings_transport_race_title" = "快速切换";
 "settings_transport_reality" = "VLESS+REALITY";
 "settings_transport_shadowsocks" = "Shadowsocks";
 "settings_transport_snowflake" = "Snowflake";

@@ -161,7 +161,16 @@ final class ModelsTests: XCTestCase {
         XCTAssertEqual(settings.hubMethods.rev, 2)
         XCTAssertTrue(settings.deadDrop)
         XCTAssertFalse(settings.postQuantum)
+        XCTAssertTrue(settings.transportRace)
         XCTAssertEqual(settings, AppSettings())
+    }
+
+    // Blobs saved before the race existed lack the key and must keep it on.
+    func testSettingsMissingTransportRaceDefaultsOn() throws {
+        let old = try decode(AppSettings.self, #"{"preferredTransport":"auto","mtu":1380,"postQuantum":true}"#)
+        XCTAssertTrue(old.transportRace)
+        let off = try decode(AppSettings.self, #"{"transportRace":false}"#)
+        XCTAssertFalse(off.transportRace)
     }
 
     func testSettingsPartialHubMethodsKeepDefaults() throws {
@@ -176,6 +185,7 @@ final class ModelsTests: XCTestCase {
         settings.customDns = ["9.9.9.9"]
         settings.autoConnect = true
         settings.hubMethods.normal = true
+        settings.transportRace = false
         let data = try JSONEncoder().encode(settings)
         XCTAssertEqual(try JSONDecoder().decode(AppSettings.self, from: data), settings)
     }

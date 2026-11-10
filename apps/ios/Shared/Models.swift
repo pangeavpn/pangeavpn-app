@@ -277,6 +277,8 @@ struct AppSettings: Codable, Equatable, Sendable {
     var hubMethods = HubMethods()
     var deadDrop = true
     var postQuantum = false
+    // Automatic dials several transports at once; a pinned transport never races.
+    var transportRace = true
 
     init() {}
 
@@ -292,6 +294,7 @@ struct AppSettings: Codable, Equatable, Sendable {
         hubMethods = try c.decodeIfPresent(HubMethods.self, forKey: .hubMethods) ?? d.hubMethods
         deadDrop = try c.decodeIfPresent(Bool.self, forKey: .deadDrop) ?? d.deadDrop
         postQuantum = try c.decodeIfPresent(Bool.self, forKey: .postQuantum) ?? d.postQuantum
+        transportRace = try c.decodeIfPresent(Bool.self, forKey: .transportRace) ?? d.transportRace
     }
 }
 
