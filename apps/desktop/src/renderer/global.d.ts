@@ -241,6 +241,9 @@ declare global {
     getNotifications: () => Promise<boolean>;
     setShowInDock: (enabled: boolean) => Promise<void>;
     getShowInDock: () => Promise<boolean>;
+    setIconMatchesAccent: (enabled: boolean) => Promise<void>;
+    getIconMatchesAccent: () => Promise<boolean>;
+    setIconAccent: (accent: string) => Promise<void>;
     setPanicWipe: (enabled: boolean) => Promise<void>;
     getPanicWipe: () => Promise<boolean>;
     setDeadDrop: (enabled: boolean) => Promise<void>;

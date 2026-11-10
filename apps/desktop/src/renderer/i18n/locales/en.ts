@@ -386,6 +386,8 @@ export const en = {
   "settings.appearance.regionStyle.drawer": "Drawer",
   "settings.appearance.dock.title": "Show in Dock",
   "settings.appearance.dock.hint": "Turn this off to keep PangeaVPN in the menu bar only.",
+  "settings.appearance.iconMatch.title": "Match app icon to accent",
+  "settings.appearance.iconMatch.hint": "Your Dock icon takes the accent colour.",
   "settings.support.heading": "Support",
   "settings.support.description": "Send your logs to support with personal details stripped out. You get a code to quote in your email.",
   "settings.support.send": "Send Report",

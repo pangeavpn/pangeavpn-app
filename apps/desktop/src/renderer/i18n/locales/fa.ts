@@ -386,6 +386,8 @@ export const fa = {
   "settings.appearance.regionStyle.drawer": "کشوی کناری",
   "settings.appearance.dock.title": "نمایش در Dock",
   "settings.appearance.dock.hint": "این گزینه را خاموش کنید تا PangeaVPN فقط در نوار منو بماند.",
+  "settings.appearance.iconMatch.title": "نماد برنامه به رنگ تأکیدی",
+  "settings.appearance.iconMatch.hint": "نماد Dock رنگ تأکیدی را می‌گیرد.",
   "settings.support.heading": "پشتیبانی",
   "settings.support.description": "گزارش‌های خود را بدون اطلاعات شخصی برای پشتیبانی بفرستید. یک کد می‌گیرید که در ایمیل خود بنویسید.",
   "settings.support.send": "ارسال گزارش",

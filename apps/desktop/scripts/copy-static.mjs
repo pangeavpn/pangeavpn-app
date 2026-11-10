@@ -15,14 +15,19 @@ for (const [source, destination] of filesToCopy) {
   await fs.copyFile(source, destination);
 }
 
-await ensureMacIconFromIco();
+await ensureMacIcon();
 
-async function ensureMacIconFromIco() {
+// The Mac app icon is the Terra Dock icon (iOS-style, on the macOS icon grid),
+// so the bundle icon matches what the Dock shows while the app runs.
+async function ensureMacIcon() {
   if (process.platform !== "darwin") {
     return;
   }
 
-  const icoPath = await resolveIcoPath();
+  const sourcePath = path.resolve("build", "dock", "PangeaVPN-terra.png");
+  await fs.access(sourcePath).catch(() => {
+    throw new Error(`Mac icon source not found at ${sourcePath}. Run scripts/gen-mac-icons.swift.`);
+  });
   const builtDir = path.resolve("built");
   const buildDir = path.resolve("build");
   const iconsetDir = path.join(builtDir, "pangeavpn.iconset");
@@ -34,7 +39,7 @@ async function ensureMacIconFromIco() {
   await fs.mkdir(buildDir, { recursive: true });
   await fs.rm(iconsetDir, { recursive: true, force: true });
   await fs.mkdir(iconsetDir, { recursive: true });
-  runTool("sips", ["-s", "format", "png", icoPath, "--out", basePngPath]);
+  runTool("sips", ["-s", "format", "png", sourcePath, "--out", basePngPath]);
 
   const specs = [
     ["icon_16x16.png", 16],
@@ -58,24 +63,6 @@ async function ensureMacIconFromIco() {
   await fs.copyFile(icnsPath, buildIcnsPath);
   await fs.rm(iconsetDir, { recursive: true, force: true });
   await fs.rm(basePngPath, { force: true });
-}
-
-async function resolveIcoPath() {
-  const candidates = [
-    path.resolve("built", "pangeavpn.ico"),
-    path.resolve("build", "PangeaVPN.ico")
-  ];
-
-  for (const candidate of candidates) {
-    try {
-      await fs.access(candidate);
-      return candidate;
-    } catch {
-      // continue
-    }
-  }
-
-  throw new Error("Icon source not found. Expected built/pangeavpn.ico or build/PangeaVPN.ico.");
 }
 
 function runTool(command, args) {

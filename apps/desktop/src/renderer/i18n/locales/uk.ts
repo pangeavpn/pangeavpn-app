@@ -386,6 +386,8 @@ export const uk = {
   "settings.appearance.regionStyle.drawer": "Бічна панель",
   "settings.appearance.dock.title": "Показувати в Dock",
   "settings.appearance.dock.hint": "Вимкніть, щоб PangeaVPN залишався лише в рядку меню.",
+  "settings.appearance.iconMatch.title": "Значок застосунку в акцентному кольорі",
+  "settings.appearance.iconMatch.hint": "Значок у Dock набуває акцентного кольору.",
   "settings.support.heading": "Підтримка",
   "settings.support.description": "Надішліть журнали в підтримку без особистих даних. Ви отримаєте код, який слід вказати в листі.",
   "settings.support.send": "Надіслати звіт",

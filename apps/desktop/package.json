@@ -143,6 +143,18 @@
         {
           "from": "built/pangeavpn.icns",
           "to": "build/PangeaVPN.icns"
+        },
+        {
+          "from": "build",
+          "to": "build",
+          "filter": [
+            "PangeaVPNTemplate*.png",
+            "PangeaVPN_connectedTemplate*.png"
+          ]
+        },
+        {
+          "from": "build/dock",
+          "to": "build/dock"
         }
       ]
     },

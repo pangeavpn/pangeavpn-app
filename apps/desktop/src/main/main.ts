@@ -23,7 +23,13 @@ import { createAppCatalog } from "./appCatalog";
 import { createSplitTunnelWriter, protectRulesFor } from "../shared/splitTunnel";
 import { DaemonProcessManager, daemonTokenUnreadable } from "./daemonProcess";
 import { getAppSupportDir, getLegacyStateFilePath, getUserStateDir, readDaemonTokens } from "./platformPaths";
-import { getConnectedTrayIconPath, getTrayIconPath, getWindowsAppIconPath } from "./resourcePaths";
+import {
+  getConnectedTrayIconPath,
+  getDockIconPath,
+  getMacAppIconPath,
+  getTrayIconPath,
+  getWindowsAppIconPath
+} from "./resourcePaths";
 import {
   IPC_CHANNELS,
   toPublicServerInfo,
@@ -145,6 +151,17 @@ let autoConnectEnabled = false;
 let notificationsEnabled = true;
 // macOS only: off hides the Dock icon, leaving PangeaVPN in the menu bar alone.
 let showInDockEnabled = true;
+// macOS only: the Dock icon takes the accent colour, as the iOS Home Screen
+// icon does. The accent itself lives in the renderer, which reports it here so
+// the right icon is up before the window loads on the next launch.
+let iconMatchesAccentEnabled = true;
+// Mirrors ACCENT_NAMES in renderer/accentThemes.ts; each has a build/dock icon.
+const DOCK_ICON_ACCENTS = ["terra", "purple", "ocean", "emerald", "rose"] as const;
+type DockIconAccent = (typeof DOCK_ICON_ACCENTS)[number];
+let iconAccent: DockIconAccent = "terra";
+function isDockIconAccent(value: unknown): value is DockIconAccent {
+  return typeof value === "string" && (DOCK_ICON_ACCENTS as readonly string[]).includes(value);
+}
 // Switching the Dock icon deactivates the app for a moment, which the popover
 // would otherwise take for the user clicking away.
 let dockSwitching = false;
@@ -569,9 +586,10 @@ function loadTrayImage(iconPath: string): NativeImage | null {
     return null;
   }
   if (process.platform === "darwin") {
-    icon = icon.resize({ height: 18 });
-    const lower = iconPath.toLowerCase();
-    const looksLikeTemplate = lower.includes("template");
+    const looksLikeTemplate = iconPath.toLowerCase().includes("template");
+    // Templates are drawn at 18pt with an @2x sibling; resizing would drop the
+    // Retina representation and blur the logo.
+    if (!looksLikeTemplate) icon = icon.resize({ height: 18 });
     icon.setTemplateImage(looksLikeTemplate);
   } else if (process.platform === "linux") {
     icon = icon.resize({ height: 22 });
@@ -2224,6 +2242,28 @@ function registerStartupSettingsHandlers(): void {
   );
 
   registerBoolSetting(
+    { get: IPC_CHANNELS.getIconMatchesAccent, set: IPC_CHANNELS.setIconMatchesAccent },
+    "iconMatchesAccent",
+    "iconMatchesAccent setting",
+    (enabled) => {
+      iconMatchesAccentEnabled = !!enabled;
+      applyDockIcon();
+      return iconMatchesAccentEnabled;
+    },
+    () => iconMatchesAccentEnabled
+  );
+
+  ipcMain.handle(IPC_CHANNELS.setIconAccent, async (_event, accent: unknown) => {
+    if (!isDockIconAccent(accent)) throw new Error("unknown accent");
+    if (accent === iconAccent) return;
+    iconAccent = accent;
+    applyDockIcon();
+    await updateSettings((settings) => {
+      settings.iconAccent = iconAccent;
+    }, "iconAccent setting");
+  });
+
+  registerBoolSetting(
     { get: IPC_CHANNELS.getPanicWipe, set: IPC_CHANNELS.setPanicWipe },
     "panicWipe",
     "panic wipe setting",
@@ -2651,6 +2691,12 @@ function applyPersistedSettings(settings: Record<string, unknown>): void {
   if (typeof settings.showInDock === "boolean") {
     showInDockEnabled = settings.showInDock;
   }
+  if (typeof settings.iconMatchesAccent === "boolean") {
+    iconMatchesAccentEnabled = settings.iconMatchesAccent;
+  }
+  if (isDockIconAccent(settings.iconAccent)) {
+    iconAccent = settings.iconAccent;
+  }
   panicWipeEnabled = settings.panicWipe === true;
   // Last known good hub IP: the only way to reach the hub once a Lockdown
   // lock is engaged, since the lock permits that IP but blocks DNS and DoH.
@@ -2789,11 +2835,32 @@ function setDockIconVisible(visible: boolean): void {
     }, 500);
   };
   if (visible) {
-    dock.show().catch((err) => console.warn("dock show failed:", sanitizeLog(err))).finally(settle);
+    dock
+      .show()
+      .then(applyDockIcon)
+      .catch((err) => console.warn("dock show failed:", sanitizeLog(err)))
+      .finally(settle);
   } else {
     dock.hide();
     settle();
   }
+}
+
+// The accent icon while matching is on, otherwise the app bundle's own. The
+// override lasts while the app runs; macOS shows the bundle icon once it quits.
+function applyDockIcon(): void {
+  const dock = app.dock;
+  if (process.platform !== "darwin" || !dock) return;
+  const iconPath = iconMatchesAccentEnabled
+    ? getDockIconPath(__dirname, iconAccent)
+    : getMacAppIconPath(__dirname);
+  if (!iconPath) return;
+  const icon = nativeImage.createFromPath(iconPath);
+  if (icon.isEmpty()) {
+    console.warn(`failed loading dock icon: ${iconPath}`);
+    return;
+  }
+  dock.setIcon(icon);
 }
 
 // Only macOS has a global menu bar; elsewhere this is a strip of chrome
@@ -3009,6 +3076,7 @@ async function boot(): Promise<void> {
   // Before any window exists. Without LSUIElement the icon still shows while
   // the app launches, which keeps the Dock-on default free of any flicker.
   setDockIconVisible(showInDockEnabled);
+  applyDockIcon();
 
   // Resolve the display locale for the tray/menu (built below). The language
   // is fixed for this run; changing it applies on the next launch.

@@ -386,6 +386,8 @@ export const ar = {
   "settings.appearance.regionStyle.drawer": "درج جانبي",
   "settings.appearance.dock.title": "الإظهار في Dock",
   "settings.appearance.dock.hint": "أوقف هذا الخيار لإبقاء PangeaVPN في شريط القائمة فقط.",
+  "settings.appearance.iconMatch.title": "أيقونة التطبيق بلون التمييز",
+  "settings.appearance.iconMatch.hint": "تأخذ أيقونة Dock لون التمييز.",
   "settings.support.heading": "الدعم",
   "settings.support.description": "أرسل سجلاتك إلى الدعم بعد إزالة البيانات الشخصية. ستحصل على رمز تذكره في رسالتك.",
   "settings.support.send": "إرسال تقرير",

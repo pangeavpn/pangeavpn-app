@@ -10,12 +10,20 @@ const macPngIconName = "PangeaVPN.png";
 const macConnectedPngIconName = "PangeaVPN_connected.png";
 const macIconName = "PangeaVPN.icns";
 const macConnectedIconName = "PangeaVPN_connected.icns";
+// White logo template images (with @2x siblings) that macOS tints to suit the menu bar.
+const macTemplateIconName = "PangeaVPNTemplate.png";
+const macConnectedTemplateIconName = "PangeaVPN_connectedTemplate.png";
 const macIcoFallbackName = "PangeaVPN.ico";
 const macConnectedIcoFallbackName = "PangeaVPN_connected.ico";
 
 export function getBundledDaemonPath(): string {
   const name = process.platform === "win32" ? "PangeaDaemon.exe" : "daemon";
   return path.join(process.resourcesPath, "daemon", name);
+}
+
+// On macOS the menu bar takes the template; Linux keeps the coloured PNG.
+function macTemplateFirst(template: string, png: string): string[] {
+  return process.platform === "darwin" ? [template, png] : [png, template];
 }
 
 function firstExisting(candidates: string[]): string | undefined {
@@ -56,10 +64,11 @@ export function getTrayIconPath(mainModuleDir: string): string | undefined {
   const candidates = [
     ...linuxPrefix,
     ...(app.isPackaged
-      ? packagedNamePairs([macPngIconName, "PangeaVPNTemplate.png", macIconName, macIcoFallbackName])
+      ? packagedNamePairs([...macTemplateFirst(macTemplateIconName, macPngIconName), macIconName, macIcoFallbackName])
       : [
-          path.resolve(mainModuleDir, "..", "..", "build", macPngIconName),
-          path.resolve(mainModuleDir, "..", "..", "build", "PangeaVPNTemplate.png"),
+          ...macTemplateFirst(macTemplateIconName, macPngIconName).map((name) =>
+            path.resolve(mainModuleDir, "..", "..", "build", name)
+          ),
           path.resolve(mainModuleDir, "..", "..", "build", macIconName),
           path.resolve(mainModuleDir, "..", "..", "built", "pangeavpn.icns"),
           path.resolve(mainModuleDir, "..", "..", "build", macIcoFallbackName)
@@ -84,14 +93,14 @@ export function getConnectedTrayIconPath(mainModuleDir: string): string | undefi
     ...linuxPrefix,
     ...(app.isPackaged
       ? packagedNamePairs([
-          macConnectedPngIconName,
-          "PangeaVPN_connectedTemplate.png",
+          ...macTemplateFirst(macConnectedTemplateIconName, macConnectedPngIconName),
           macConnectedIconName,
           macConnectedIcoFallbackName
         ])
       : [
-          path.resolve(mainModuleDir, "..", "..", "build", macConnectedPngIconName),
-          path.resolve(mainModuleDir, "..", "..", "build", "PangeaVPN_connectedTemplate.png"),
+          ...macTemplateFirst(macConnectedTemplateIconName, macConnectedPngIconName).map((name) =>
+            path.resolve(mainModuleDir, "..", "..", "build", name)
+          ),
           path.resolve(mainModuleDir, "..", "..", "build", macConnectedIconName),
           path.resolve(mainModuleDir, "..", "..", "built", "pangeavpn_connected.icns"),
           path.resolve(mainModuleDir, "..", "..", "build", macConnectedIcoFallbackName)
@@ -99,4 +108,25 @@ export function getConnectedTrayIconPath(mainModuleDir: string): string | undefi
   ];
 
   return firstExisting(candidates);
+}
+
+// The app bundle's own icon, which the Dock shows when nothing overrides it.
+export function getMacAppIconPath(mainModuleDir: string): string | undefined {
+  if (process.platform !== "darwin") return undefined;
+  return firstExisting(
+    app.isPackaged
+      ? packagedNamePairs([macIconName])
+      : [path.resolve(mainModuleDir, "..", "..", "build", macIconName)]
+  );
+}
+
+// The iOS-style Dock icon for an accent, from build/dock.
+export function getDockIconPath(mainModuleDir: string, accent: string): string | undefined {
+  if (process.platform !== "darwin") return undefined;
+  const name = `PangeaVPN-${accent}.png`;
+  return firstExisting(
+    app.isPackaged
+      ? [path.join(process.resourcesPath, "build", "dock", name)]
+      : [path.resolve(mainModuleDir, "..", "..", "build", "dock", name)]
+  );
 }

@@ -186,6 +186,7 @@ const lockdownToggle = document.getElementById("lockdownToggle") as HTMLInputEle
 const notificationsToggle = document.getElementById("notificationsToggle") as HTMLInputElement;
 const showInDockRow = document.getElementById("showInDockRow") as HTMLElement;
 const showInDockToggle = document.getElementById("showInDockToggle") as HTMLInputElement;
+const iconMatchesAccentToggle = document.getElementById("iconMatchesAccentToggle") as HTMLInputElement;
 const panicWipeToggle = document.getElementById("panicWipeToggle") as HTMLInputElement;
 const panicWipeHint = document.getElementById("panicWipeHint") as HTMLSpanElement | null;
 const loginScreen = document.getElementById("loginScreen") as HTMLElement;
@@ -2480,6 +2481,17 @@ showInDockToggle.addEventListener("change", async () => {
   }
 });
 
+iconMatchesAccentToggle.addEventListener("change", async () => {
+  if (!pangeaApi) return;
+  const requested = iconMatchesAccentToggle.checked;
+  try {
+    await pangeaApi.setIconMatchesAccent(requested);
+  } catch (err) {
+    iconMatchesAccentToggle.checked = !requested;
+    showToast(reportError("iconMatchesAccent", err, t("toggle.dock.failed")));
+  }
+});
+
 function panicChordLabel(): string {
   const isMac = /Mac/i.test(navigator.userAgent);
   return (isMac ? ["⌘", "⌥", "⇧", "F12"] : ["Ctrl", "Alt", "Shift", "F12"]).join(" + ");
@@ -3560,7 +3572,10 @@ async function init(): Promise<void> {
       lockdownToggle.checked = lockdownLocal;
       deadDropToggle.checked = await pangeaApi.getDeadDrop();
       notificationsToggle.checked = await pangeaApi.getNotifications();
-      if (window.appPlatform === "darwin") showInDockToggle.checked = await pangeaApi.getShowInDock();
+      if (window.appPlatform === "darwin") {
+        showInDockToggle.checked = await pangeaApi.getShowInDock();
+        iconMatchesAccentToggle.checked = await pangeaApi.getIconMatchesAccent();
+      }
       panicWipeToggle.checked = await pangeaApi.getPanicWipe();
       const last = await pangeaApi.getLastServer();
       lastServerIdLocal = last.lastServerId;
@@ -4423,12 +4438,21 @@ function applyAccent(accent: AccentName): void {
     btn.setAttribute("aria-pressed", String(btn.dataset.accent === accent));
   }
   setAppearanceValue.textContent = appearanceSummary();
+  syncDockIconAccent(accent);
 
   try {
     window.localStorage.setItem(ACCENT_STORAGE_KEY, accent);
   } catch {
     // Ignore storage failures in restricted environments.
   }
+}
+
+// The Dock icon follows the accent (macOS only); main ignores a repeat.
+function syncDockIconAccent(accent: AccentName): void {
+  if (window.appPlatform !== "darwin" || !pangeaApi) return;
+  pangeaApi.setIconAccent(accent).catch((err: unknown) => {
+    console.warn("dock icon accent sync failed:", err);
+  });
 }
 
 function initAccentPicker(): void {

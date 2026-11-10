@@ -386,6 +386,8 @@ export const ru = {
   "settings.appearance.regionStyle.drawer": "Боковая панель",
   "settings.appearance.dock.title": "Показывать в Dock",
   "settings.appearance.dock.hint": "Выключите, чтобы PangeaVPN оставался только в строке меню.",
+  "settings.appearance.iconMatch.title": "Значок приложения в акцентном цвете",
+  "settings.appearance.iconMatch.hint": "Значок в Dock принимает акцентный цвет.",
   "settings.support.heading": "Поддержка",
   "settings.support.description": "Отправьте журналы в поддержку без личных данных. Вы получите код, который нужно указать в письме.",
   "settings.support.send": "Отправить отчёт",

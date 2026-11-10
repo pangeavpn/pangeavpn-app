@@ -386,6 +386,8 @@ export const zh = {
   "settings.appearance.regionStyle.drawer": "侧边栏",
   "settings.appearance.dock.title": "在程序坞中显示",
   "settings.appearance.dock.hint": "关闭后，PangeaVPN 只显示在菜单栏中。",
+  "settings.appearance.iconMatch.title": "应用图标跟随强调色",
+  "settings.appearance.iconMatch.hint": "程序坞图标会使用强调色。",
   "settings.support.heading": "支持",
   "settings.support.description": "将日志发送给支持团队，个人信息会先被移除。你会收到一个代码，在邮件中注明。",
   "settings.support.send": "发送报告",
