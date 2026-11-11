@@ -179,6 +179,8 @@ github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 h1:C3w9PqII01/Oq
 github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822/go.mod h1:+n7T8mK8HuQTcFwEeznm/DIxMOiR9yIdICNftLE1DvQ=
 github.com/pangeavpn/cloak v0.0.0-20260511185428-bf0aeb6365cb h1:fov6CYiB/WW07YtQPrqufZIrtFoU0KgsnTOgt5mzhCw=
 github.com/pangeavpn/cloak v0.0.0-20260511185428-bf0aeb6365cb/go.mod h1:QaaW0f6yCoiX7GwxTe7mDuO1j3FmIlQ/R1nsjUYh8lY=
+github.com/pangeavpn/tectonic v0.0.0-20261111033906-bb1140f8b0c8 h1:BcRsDDoujQwMuNK/r8RYlv/RFKv6SBnt9ZxisF6sg00=
+github.com/pangeavpn/tectonic v0.0.0-20261111033906-bb1140f8b0c8/go.mod h1:tDEL88ZnpxFn0Q7JYwD72zdggSnehRLQoHm7yr6NCkA=
 github.com/patrickmn/go-cache v2.1.0+incompatible h1:HRMgzkcYKYpi3C8ajMPV8OFXaaRUnok+kx1WdO15EQc=
 github.com/patrickmn/go-cache v2.1.0+incompatible/go.mod h1:3Qf8kWWT7OJRJbdiICTKqZju1ZixQ/KpMGzzAfe6+WQ=
 github.com/pion/datachannel v1.6.2 h1:7EXQ8TH3vTouBUdRWYbcX2edSx9Yj6k5zl5P+qyxEPc=

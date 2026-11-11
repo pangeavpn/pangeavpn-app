@@ -19,6 +19,7 @@ import (
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/reach"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/sbrelay"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/state"
+	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/tectonic"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/transport"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/wg"
 )
@@ -89,6 +90,12 @@ type anytlsManager interface {
 	Status() state.TransportStatus
 }
 
+type tectonicManager interface {
+	transport.Manager
+	Start(ctx context.Context, profile state.TectonicProfile) error
+	Status() state.TransportStatus
+}
+
 type tuicManager interface {
 	transport.Manager
 	Start(ctx context.Context, profile state.TUICProfile) error
@@ -150,6 +157,7 @@ type Service struct {
 	shadowsocks shadowsocksManager
 	anytls      anytlsManager
 	tuic        tuicManager
+	tectonic    tectonicManager
 	cdn         cdnManager
 	snowflake   snowflakeManager
 	wg          wg.Manager
@@ -415,6 +423,7 @@ func NewService(
 		shadowsocks:    shadowsocksManager,
 		anytls:         anytlsManager,
 		tuic:           sbrelay.NewTUIC(logs),
+		tectonic:       tectonic.NewManager(logs, currentNetworkKey),
 		cdn:            sbrelay.NewCDN(logs),
 		snowflake:      snowflakeManager,
 		wg:             wgManager,
@@ -552,6 +561,8 @@ func (s *Service) managerForKind(kind string) transport.Manager {
 		return s.anytls
 	case "tuic":
 		return s.tuic
+	case "tectonic":
+		return s.tectonic
 	case "cdn":
 		return s.cdn
 	case "snowflake":
@@ -1134,6 +1145,15 @@ func (s *Service) startAnyTLSTransport(ctx context.Context, profile *state.Profi
 	return s.startRelay(ctx, s.anytls, func(ctx context.Context) error { return s.anytls.Start(ctx, start) }, &anytlsCopy.LocalPort, wireGuardProfile)
 }
 
+// startTectonicTransport de-aliases the store's *TectonicProfile before startRelay writes the bound port into it.
+func (s *Service) startTectonicTransport(ctx context.Context, profile *state.Profile, wireGuardProfile *state.WireGuardProfile) error {
+	tectonicCopy := state.CloneTectonicProfile(profile.Tectonic)
+	profile.Tectonic = tectonicCopy
+	start := *state.CloneTectonicProfile(tectonicCopy)
+	start.LocalPort = 0
+	return s.startRelay(ctx, s.tectonic, func(ctx context.Context) error { return s.tectonic.Start(ctx, start) }, &tectonicCopy.LocalPort, wireGuardProfile)
+}
+
 func (s *Service) startTUICTransport(ctx context.Context, profile *state.Profile, wireGuardProfile *state.WireGuardProfile) error {
 	tuicCopy := *profile.TUIC
 	profile.TUIC = &tuicCopy
@@ -1306,6 +1326,12 @@ func (s *Service) StarterFor(profile *state.Profile, kind string) (transport.Sta
 			return nil, transport.NotConfigured
 		}
 		return s.startAnyTLSTransport, transport.Available
+	case "tectonic":
+		// Never multihop: the node relays only to its own WireGuard (see state.ApplyHop).
+		if profile.Tectonic == nil || profile.Hop != nil {
+			return nil, transport.NotConfigured
+		}
+		return s.startTectonicTransport, transport.Available
 	case "tuic":
 		if profile.TUIC == nil {
 			return nil, transport.NotConfigured
@@ -1679,6 +1705,10 @@ func transportLocalPort(profile *state.Profile, kind string) int {
 	case "anytls":
 		if profile.AnyTLS != nil {
 			return profile.AnyTLS.LocalPort
+		}
+	case "tectonic":
+		if profile.Tectonic != nil {
+			return profile.Tectonic.LocalPort
 		}
 	case "tuic":
 		if profile.TUIC != nil {
@@ -2395,6 +2425,7 @@ func (s *Service) Status(ctx context.Context) state.StatusResponse {
 	shadowsocksStatus := s.shadowsocks.Status()
 	anytlsStatus := s.anytls.Status()
 	tuicStatus := s.tuic.Status()
+	tectonicStatus := s.tectonic.Status()
 	cdnStatus := s.cdn.Status()
 	snowflakeStatus := s.snowflake.Status()
 
@@ -2429,6 +2460,7 @@ func (s *Service) Status(ctx context.Context) state.StatusResponse {
 		Shadowsocks:         shadowsocksStatus,
 		AnyTLS:              anytlsStatus,
 		TUIC:                tuicStatus,
+		Tectonic:            tectonicStatus,
 		CDN:                 cdnStatus,
 		Snowflake:           snowflakeStatus,
 		WireGuard:           wgStatus,
@@ -2717,6 +2749,8 @@ func (s *Service) runHealthCheck(ctx context.Context) {
 		transportRunning = s.anytls.Status().Running
 	case "tuic":
 		transportRunning = s.tuic.Status().Running
+	case "tectonic":
+		transportRunning = s.tectonic.Status().Running
 	case "cdn":
 		transportRunning = s.cdn.Status().Running
 	case "snowflake":
@@ -3406,6 +3440,16 @@ func (s *Service) recoverActiveTransport(ctx context.Context, profile state.Prof
 		start = func(ctx context.Context) error { return s.anytls.Start(ctx, *profile.AnyTLS) }
 		running = func() bool { return s.anytls.Status().Running }
 		localPort = profile.AnyTLS.LocalPort
+	case "tectonic":
+		if s.tectonic.Status().Running {
+			return nil
+		}
+		if profile.Tectonic == nil {
+			return errors.New("active transport is tectonic but profile has no tectonic config")
+		}
+		start = func(ctx context.Context) error { return s.tectonic.Start(ctx, *profile.Tectonic) }
+		running = func() bool { return s.tectonic.Status().Running }
+		localPort = profile.Tectonic.LocalPort
 	case "tuic":
 		if s.tuic.Status().Running {
 			return nil
@@ -3844,6 +3888,19 @@ func (s *Service) restoreTransportForAdoption(ctx context.Context, profile *stat
 			return fmt.Errorf("wireguard tunnel is already running but anytls restore failed: %w", err)
 		}
 		return nil
+	case "tectonic":
+		if s.tectonic.Status().Running {
+			return nil
+		}
+		if profile.Tectonic == nil {
+			return errors.New("wireguard tunnel is already running but this profile has no tectonic configuration to restore")
+		}
+		s.machine.Set(state.StateConnecting, "restoring tectonic for active tunnel")
+		s.logs.Add(state.LogInfo, state.SourceDaemon, "wireguard was already running; restoring tectonic process")
+		if err := s.tectonic.Start(ctx, *profile.Tectonic); err != nil {
+			return fmt.Errorf("wireguard tunnel is already running but tectonic restore failed: %w", err)
+		}
+		return nil
 	case "tuic":
 		if s.tuic.Status().Running {
 			return nil
@@ -4000,6 +4057,7 @@ func deepCopyProfile(profile state.Profile) state.Profile {
 		tuicCopy := *profile.TUIC
 		out.TUIC = &tuicCopy
 	}
+	out.Tectonic = state.CloneTectonicProfile(profile.Tectonic)
 	if profile.CDN != nil {
 		cdnCopy := *profile.CDN
 		out.CDN = &cdnCopy
@@ -4273,7 +4331,7 @@ func transportPermitHosts(profile state.Profile) []string {
 	// Snowflake's rendezvous hosts are never covered by the hub's endpoint IPs (those
 	// name the node, not the broker), so they're appended regardless of which branch runs.
 	if len(out) > 0 {
-		return append(append(out, cdnHosts(profile.CDN)...), snowflakeHosts(profile.Snowflake)...)
+		return append(append(append(out, cdnHosts(profile.CDN)...), tectonicCDNHosts(profile.Tectonic)...), snowflakeHosts(profile.Snowflake)...)
 	}
 	if profile.Naive != nil {
 		if host := strings.TrimSpace(profile.Naive.RemoteHost); host != "" {
@@ -4305,7 +4363,23 @@ func transportPermitHosts(profile state.Profile) []string {
 			out = append(out, host)
 		}
 	}
-	return append(append(out, cdnHosts(profile.CDN)...), snowflakeHosts(profile.Snowflake)...)
+	if profile.Tectonic != nil {
+		if host := profile.Tectonic.NodeHost(); host != "" {
+			out = append(out, host)
+		}
+	}
+	return append(append(append(out, cdnHosts(profile.CDN)...), tectonicCDNHosts(profile.Tectonic)...), snowflakeHosts(profile.Snowflake)...)
+}
+
+// tectonicCDNHosts is Tectonic's CDN edge, which like cdnHosts names the CDN, never the node.
+func tectonicCDNHosts(p *state.TectonicProfile) []string {
+	if p == nil {
+		return nil
+	}
+	if host := p.CDNEdgeHost(); host != "" {
+		return []string{host}
+	}
+	return nil
 }
 
 // cdnHosts is the CDN edge, which the node's endpoint IPs never cover; a
@@ -4403,6 +4477,9 @@ func (s *Service) vouchedHosts() map[string]bool {
 		}
 		if profile.TUIC != nil {
 			hosts = append(hosts, profile.TUIC.RemoteHost)
+		}
+		if profile.Tectonic != nil {
+			hosts = append(hosts, profile.Tectonic.NodeHost(), profile.Tectonic.CDNEdgeHost())
 		}
 		if profile.CDN != nil {
 			hosts = append(hosts, profile.CDN.RemoteHost)

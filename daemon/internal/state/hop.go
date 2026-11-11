@@ -83,6 +83,11 @@ func ApplyHop(p Profile) Profile {
 		cdn.TargetHost = loopbackHost
 		out.CDN = &cdn
 	}
+	// Tectonic's node hands every session to its own WireGuard and takes no
+	// per-session target, so through an entry node it would egress there.
+	if p.Hop != nil {
+		out.Tectonic = nil
+	}
 	if p.Naive != nil {
 		naive := *p.Naive
 		naive.BridgePort = naiveBridgePort(p.Hop)
