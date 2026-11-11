@@ -31,6 +31,7 @@
 "bypass_reality_desc" = "Позичає TLS-рукостискання справжнього сайта, тож зонди бачать автентичний сайт. Найміцніше маскування.";
 "bypass_regions_note" = "Регіони без вибраного способу приховано зі списку регіонів.";
 "bypass_shadowsocks_desc" = "Жодного TLS, тож блокування, націлене на TLS, його не зачіпає.";
+"bypass_tectonic_desc" = "Власний транспорт PangeaVPN: WireGuard, розподілений між кількома короткими з'єднаннями, схожими на завантаження сайту в Chrome.";
 "bypass_tuic_desc" = "QUIC, схожий на звичайний HTTP/3. Потрібна мережа, яка пропускає UDP.";
 "bypass_updated" = "Спосіб підключення оновлено. Перепідключіться, щоб зміни набули чинності.";
 "connect_progress_still_connecting" = "Підключення все ще триває…";
@@ -411,6 +412,7 @@
 "settings_transport_reality" = "VLESS+REALITY";
 "settings_transport_shadowsocks" = "Shadowsocks";
 "settings_transport_snowflake" = "Snowflake";
+"settings_transport_tectonic" = "Tectonic";
 "settings_transport_tuic" = "TUIC";
 "split_tunnel_description" = "Адреси, вказані тут, обходять VPN і використовують звичайне з'єднання.";
 "split_tunnel_enabled_hint" = "Якщо вимкнено, увесь трафік іде через VPN. Список діапазонів зберігається. Діє з наступного підключення.";
@@ -491,6 +493,7 @@
 "transport_status_reality" = "Обфускація: VLESS+REALITY";
 "transport_status_shadowsocks" = "Обфускація: Shadowsocks";
 "transport_status_snowflake" = "Обфускація: Snowflake";
+"transport_status_tectonic" = "Обфускація: Tectonic";
 "transport_status_tuic" = "Обфускація: TUIC";
 "update_appstore" = "PangeaVPN оновлюється через App Store. Увімкніть автоматичні оновлення в розділі «Параметри › App Store».";
 "update_build" = "Збірка";

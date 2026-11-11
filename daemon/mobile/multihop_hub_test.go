@@ -124,3 +124,19 @@ func TestPrepareViaSurfacesHopCodes(t *testing.T) {
 		t.Fatalf("PrepareVia = %v, want the hub's ENTRY_REGION_NO_MULTIHOP", err)
 	}
 }
+
+// A Tectonic node relays only to its own WireGuard, so a hop never carries it.
+func TestPrepareViaDropsTectonic(t *testing.T) {
+	exit, entry := hopServers(t)
+	h := signedInWith(t, exit, entry)
+	answer := tectonicAnswer("198.51.100.1:443")
+	answer["hop"] = fullHop()
+	answerRegister(h, answer)
+
+	if _, err := PrepareVia("fra-1", "lon-1"); err != nil {
+		t.Fatalf("PrepareVia: %v", err)
+	}
+	if got := preparedNow().profile.Tectonic; got != nil {
+		t.Fatalf("tectonic = %+v, want none on a multihop route", got)
+	}
+}

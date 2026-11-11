@@ -31,6 +31,7 @@
 "bypass_reality_desc" = "借用真实网站的 TLS 握手，探测看到的是一个真站点。最强的伪装。";
 "bypass_regions_note" = "不支持所选方式的地区会从地区列表中隐藏。";
 "bypass_shadowsocks_desc" = "完全不用 TLS，针对 TLS 的封锁碰不到它。";
+"bypass_tectonic_desc" = "PangeaVPN 自有的传输方式：将 WireGuard 分散到多条短时连接上，看起来就像 Chrome 在加载网站。";
 "bypass_tuic_desc" = "看起来像普通 HTTP/3 的 QUIC。需要网络放行 UDP。";
 "bypass_updated" = "连接方式已更新。请重新连接以生效。";
 "connect_progress_still_connecting" = "仍在连接…";
@@ -411,6 +412,7 @@
 "settings_transport_reality" = "VLESS+REALITY";
 "settings_transport_shadowsocks" = "Shadowsocks";
 "settings_transport_snowflake" = "Snowflake";
+"settings_transport_tectonic" = "Tectonic";
 "settings_transport_tuic" = "TUIC";
 "split_tunnel_description" = "此处列出的地址将绕过 VPN，使用您的普通网络连接。";
 "split_tunnel_enabled_hint" = "关闭时，所有流量都走 VPN。已填写的 IP 范围会保留。下次连接时生效。";
@@ -491,6 +493,7 @@
 "transport_status_reality" = "混淆：VLESS+REALITY";
 "transport_status_shadowsocks" = "混淆：Shadowsocks";
 "transport_status_snowflake" = "混淆：Snowflake";
+"transport_status_tectonic" = "混淆：Tectonic";
 "transport_status_tuic" = "混淆：TUIC";
 "update_appstore" = "PangeaVPN 通过 App Store 更新。请在“设置 › App Store”中开启自动更新。";
 "update_build" = "构建版本";

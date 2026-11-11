@@ -31,6 +31,7 @@
 "bypass_reality_desc" = "Emprunte la poignée de main TLS d'un vrai site, si bien que les sondages voient un site authentique. Le déguisement le plus solide.";
 "bypass_regions_note" = "Les régions qui ne proposent pas la méthode choisie sont masquées dans la liste des régions.";
 "bypass_shadowsocks_desc" = "Aucun TLS du tout, donc un blocage visant TLS le manque.";
+"bypass_tectonic_desc" = "Le transport maison de PangeaVPN : WireGuard réparti sur plusieurs connexions brèves qui ressemblent à Chrome chargeant un site web.";
 "bypass_tuic_desc" = "Du QUIC qui ressemble à du HTTP/3 ordinaire. Nécessite un réseau qui laisse passer l'UDP.";
 "bypass_updated" = "Méthode de connexion mise à jour. Reconnectez-vous pour qu'elle prenne effet.";
 "connect_progress_still_connecting" = "Connexion toujours en cours…";
@@ -411,6 +412,7 @@
 "settings_transport_reality" = "VLESS+REALITY";
 "settings_transport_shadowsocks" = "Shadowsocks";
 "settings_transport_snowflake" = "Snowflake";
+"settings_transport_tectonic" = "Tectonic";
 "settings_transport_tuic" = "TUIC";
 "split_tunnel_description" = "Les adresses indiquées ici contournent le VPN et utilisent votre connexion normale.";
 "split_tunnel_enabled_hint" = "Désactivé, tout passe par le VPN. Vos plages sont conservées. Effectif à la prochaine connexion.";
@@ -491,6 +493,7 @@
 "transport_status_reality" = "Obfuscation : VLESS+REALITY";
 "transport_status_shadowsocks" = "Obfuscation : Shadowsocks";
 "transport_status_snowflake" = "Obfuscation : Snowflake";
+"transport_status_tectonic" = "Obfuscation : Tectonic";
 "transport_status_tuic" = "Obfuscation : TUIC";
 "update_appstore" = "PangeaVPN se met à jour via l'App Store. Activez les mises à jour automatiques dans Réglages › App Store.";
 "update_build" = "Build";

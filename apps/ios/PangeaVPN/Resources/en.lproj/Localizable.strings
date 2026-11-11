@@ -31,6 +31,7 @@
 "bypass_reality_desc" = "Borrows a real site's TLS handshake, so probes see a genuine site. The strongest disguise.";
 "bypass_regions_note" = "Regions that don't offer the selected method are hidden from the region list.";
 "bypass_shadowsocks_desc" = "No TLS at all, so a block aimed at TLS misses it.";
+"bypass_tectonic_desc" = "PangeaVPN's own transport: WireGuard spread over several short-lived connections that look like Chrome loading a website.";
 "bypass_tuic_desc" = "QUIC that looks like ordinary HTTP/3. Needs a network that lets UDP through.";
 "bypass_updated" = "Connection method updated. Reconnect for it to take effect.";
 "connect_progress_still_connecting" = "Still connecting…";
@@ -411,6 +412,7 @@
 "settings_transport_reality" = "VLESS+REALITY";
 "settings_transport_shadowsocks" = "Shadowsocks";
 "settings_transport_snowflake" = "Snowflake";
+"settings_transport_tectonic" = "Tectonic";
 "settings_transport_tuic" = "TUIC";
 "split_tunnel_description" = "Addresses listed here bypass the VPN and use your normal connection.";
 "split_tunnel_enabled_hint" = "Off sends everything through the VPN. Your ranges are kept. Applies on next connect.";
@@ -491,6 +493,7 @@
 "transport_status_reality" = "Obfuscation: VLESS+REALITY";
 "transport_status_shadowsocks" = "Obfuscation: Shadowsocks";
 "transport_status_snowflake" = "Obfuscation: Snowflake";
+"transport_status_tectonic" = "Obfuscation: Tectonic";
 "transport_status_tuic" = "Obfuscation: TUIC";
 "update_appstore" = "PangeaVPN updates through the App Store. Turn on automatic updates in Settings › App Store.";
 "update_build" = "Build";

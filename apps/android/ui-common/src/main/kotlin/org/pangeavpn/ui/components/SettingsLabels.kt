@@ -8,6 +8,7 @@ import org.pangeavpn.ui.R
 @Composable
 fun transportChoiceLabel(kind: String): String = when (kind) {
     "auto" -> stringResource(R.string.settings_transport_auto)
+    "tectonic" -> stringResource(R.string.settings_transport_tectonic)
     "cloak" -> stringResource(R.string.settings_transport_cloak)
     "reality" -> stringResource(R.string.settings_transport_reality)
     "shadowsocks" -> stringResource(R.string.settings_transport_shadowsocks)

@@ -87,6 +87,7 @@
     <string name="settings_transport_reality">VLESS+REALITY</string>
     <string name="settings_transport_shadowsocks">Shadowsocks</string>
     <string name="settings_transport_snowflake">Snowflake</string>
+    <string name="settings_transport_tectonic">Tectonic</string>
     <string name="settings_transport_tuic">TUIC</string>
     <string name="split_tunnel_hint">Приложения, включённые здесь, идут в обход VPN через обычное соединение.</string>
     <string name="split_tunnel_title">Раздельное туннелирование</string>
@@ -108,5 +109,6 @@
     <string name="transport_status_reality">Обфускация: VLESS+REALITY</string>
     <string name="transport_status_shadowsocks">Обфускация: Shadowsocks</string>
     <string name="transport_status_snowflake">Обфускация: Snowflake</string>
+    <string name="transport_status_tectonic">Обфускация: Tectonic</string>
     <string name="transport_status_tuic">Обфускация: TUIC</string>
 </resources>

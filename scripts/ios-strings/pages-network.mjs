@@ -30,6 +30,16 @@ export default {
     ar: "تم تعطيل التبديل السريع. أعد الاتصال ليسري المفعول.",
     fa: "جایگزینی سریع غیرفعال شد. برای اعمال، دوباره متصل شوید."
   },
+  bypass_tectonic_desc: {
+    en: "PangeaVPN's own transport: WireGuard spread over several short-lived connections that look like Chrome loading a website.",
+    es: "El transporte propio de PangeaVPN: WireGuard repartido en varias conexiones breves que parecen Chrome cargando un sitio web.",
+    fr: "Le transport maison de PangeaVPN : WireGuard réparti sur plusieurs connexions brèves qui ressemblent à Chrome chargeant un site web.",
+    ru: "Собственный транспорт PangeaVPN: WireGuard, распределённый по нескольким коротким соединениям, похожим на загрузку сайта в Chrome.",
+    uk: "Власний транспорт PangeaVPN: WireGuard, розподілений між кількома короткими з'єднаннями, схожими на завантаження сайту в Chrome.",
+    zh: "PangeaVPN 自有的传输方式：将 WireGuard 分散到多条短时连接上，看起来就像 Chrome 在加载网站。",
+    ar: "وسيلة النقل الخاصة بـ PangeaVPN: يتوزع WireGuard على عدة اتصالات قصيرة العمر تبدو مثل Chrome وهو يحمّل موقعًا.",
+    fa: "ترابری اختصاصی PangeaVPN: WireGuard روی چند اتصال کوتاه‌مدت پخش می‌شود که شبیه بارگذاری یک وب‌سایت در Chrome است."
+  },
   bypass_cloak_desc: {
     en: "TLS aimed at a decoy site, so the traffic looks like an ordinary visit there.",
     es: "TLS dirigido a un sitio señuelo, así el tráfico parece una visita corriente.",

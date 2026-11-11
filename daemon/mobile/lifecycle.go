@@ -78,6 +78,9 @@ func PrepareVia(exitServerID, entryServerID string) (string, error) {
 func (p *preparedTunnel) scrub() {
 	clear(p.wgPrivateKeyRaw)
 	clear(p.presharedKeyRaw)
+	if p.profile != nil && p.profile.Tectonic != nil {
+		clear(p.profile.Tectonic.DeviceKey)
+	}
 }
 
 // setPreparedLocked replaces the prepared config, scrubbing the one it drops
@@ -147,6 +150,8 @@ func provision(scope callScope, identityPub string, exit, entry *serverInfo, pos
 		if profile, err = hopProfile(exit, entry, reg.Hop); err != nil {
 			return provisioned{}, err
 		}
+	} else {
+		profile.Tectonic = tectonicFrom(reg.Tectonic, exit, logs)
 	}
 	psk, err := presharedKeyFrom(dk, reg.PQ)
 	if err != nil {
@@ -167,6 +172,21 @@ func provision(scope callScope, identityPub string, exit, entry *serverInfo, pos
 		entryServerName: entryName,
 	}
 	return provisioned{tunnel: tunnel, reg: reg}, nil
+}
+
+// tectonicFrom builds the Tectonic credential issued with this registration. Only
+// a single hop gets one: a Tectonic node relays to nothing but its own WireGuard.
+func tectonicFrom(raw json.RawMessage, exit *serverInfo, logs *state.LogStore) *state.TectonicProfile {
+	info, err := decodeTectonic(raw)
+	if err != nil {
+		logAdd(logs, state.LogWarn, "ignoring an unreadable Tectonic credential: "+err.Error())
+		return nil
+	}
+	profile := buildTectonic(info, exit.Cloak.RemoteHost)
+	if info != nil && profile == nil {
+		logAdd(logs, state.LogWarn, "ignoring a Tectonic credential with no usable key or node address")
+	}
+	return profile
 }
 
 // offerPostQuantum keeps the decapsulation key on Prepare's stack, so it is
@@ -260,6 +280,8 @@ type registerResponse struct {
 	PQ json.RawMessage `json:"pq"`
 	// Hop echoes the route the hub set up; only an entryRegion request gets one.
 	Hop *state.HopProfile `json:"hop"`
+	// Tectonic stays raw so a malformed block drops only Tectonic; see tectonicFrom.
+	Tectonic json.RawMessage `json:"tectonic"`
 }
 
 func registerServer(scope callScope, identityPub, wgPub, region, entryRegion string, dk *mlkem.DecapsulationKey768) (*registerResponse, error) {

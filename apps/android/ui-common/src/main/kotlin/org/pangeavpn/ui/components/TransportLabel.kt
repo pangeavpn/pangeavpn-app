@@ -8,6 +8,7 @@ import org.pangeavpn.ui.R
  *  live transport rather than always naming Cloak. */
 @Composable
 fun transportStatusLabel(activeTransport: String): String = when (activeTransport) {
+    "tectonic" -> stringResource(R.string.transport_status_tectonic)
     "cloak" -> stringResource(R.string.transport_status_cloak)
     "reality" -> stringResource(R.string.transport_status_reality)
     "shadowsocks" -> stringResource(R.string.transport_status_shadowsocks)

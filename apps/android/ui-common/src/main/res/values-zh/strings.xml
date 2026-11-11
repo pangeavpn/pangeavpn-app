@@ -87,6 +87,7 @@
     <string name="settings_transport_reality">VLESS+REALITY</string>
     <string name="settings_transport_shadowsocks">Shadowsocks</string>
     <string name="settings_transport_snowflake">Snowflake</string>
+    <string name="settings_transport_tectonic">Tectonic</string>
     <string name="settings_transport_tuic">TUIC</string>
     <string name="split_tunnel_hint">在此开启的应用将绕过 VPN，使用您的普通网络连接。</string>
     <string name="split_tunnel_title">分应用代理</string>
@@ -108,5 +109,6 @@
     <string name="transport_status_reality">混淆：VLESS+REALITY</string>
     <string name="transport_status_shadowsocks">混淆：Shadowsocks</string>
     <string name="transport_status_snowflake">混淆：Snowflake</string>
+    <string name="transport_status_tectonic">混淆：Tectonic</string>
     <string name="transport_status_tuic">混淆：TUIC</string>
 </resources>

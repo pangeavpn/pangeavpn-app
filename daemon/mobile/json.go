@@ -1,5 +1,7 @@
 package mobile
 
+import "encoding/json"
+
 // JSON shapes exchanged with the Kotlin side. Field names and nullability
 // mirror apps/desktop/src/shared/ipc.ts exactly.
 
@@ -77,6 +79,25 @@ type tuicInfo struct {
 	PinSHA256  string `json:"pinSha256,omitempty"`
 	TargetHost string `json:"targetHost,omitempty"`
 	TargetPort int    `json:"targetPort,omitempty"`
+}
+
+// tectonicInfo is /api/register's per-device Tectonic block, in Tectonic's own
+// snake_case; key_id and device_key are base64, decoded in buildTectonic.
+type tectonicInfo struct {
+	Node        string           `json:"node"`
+	CoverDomain string           `json:"cover_domain,omitempty"`
+	KeyID       string           `json:"key_id"`
+	DeviceKey   string           `json:"device_key"`
+	Pins        []string         `json:"pins,omitempty"`
+	BorrowedSNI []string         `json:"borrowed_sni,omitempty"`
+	CDN         *tectonicCDNInfo `json:"cdn,omitempty"`
+	Shaping     json.RawMessage  `json:"shaping,omitempty"`
+}
+
+type tectonicCDNInfo struct {
+	Host string `json:"host"`
+	Path string `json:"path"`
+	Edge string `json:"edge,omitempty"`
 }
 
 // cdnInfo's remoteHost is the CDN-proxied hostname; remoteIp is an edge address.

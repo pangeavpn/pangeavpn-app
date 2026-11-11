@@ -87,6 +87,7 @@
     <string name="settings_transport_reality">VLESS+REALITY</string>
     <string name="settings_transport_shadowsocks">Shadowsocks</string>
     <string name="settings_transport_snowflake">Snowflake</string>
+    <string name="settings_transport_tectonic">Tectonic</string>
     <string name="settings_transport_tuic">TUIC</string>
     <string name="split_tunnel_hint">التطبيقات المفعّلة هنا تتجاوز الشبكة الافتراضية وتستخدم اتصالك العادي.</string>
     <string name="split_tunnel_title">الأنفاق المقسّمة</string>
@@ -108,5 +109,6 @@
     <string name="transport_status_reality">التمويه: VLESS+REALITY</string>
     <string name="transport_status_shadowsocks">التمويه: Shadowsocks</string>
     <string name="transport_status_snowflake">التمويه: Snowflake</string>
+    <string name="transport_status_tectonic">التمويه: Tectonic</string>
     <string name="transport_status_tuic">التمويه: TUIC</string>
 </resources>
