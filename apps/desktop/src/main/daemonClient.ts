@@ -84,7 +84,7 @@ export class DaemonClient implements PostQuantumProvider {
     opts?: {
       allowLAN?: boolean;
       lockdown?: boolean;
-      preferredTransport?: "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "anytls" | "tuic" | "cdn" | "snowflake" | "wireguard";
+      preferredTransport?: "tectonic" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "anytls" | "tuic" | "cdn" | "snowflake" | "wireguard";
       disableTransportRace?: boolean;
     },
     signal?: AbortSignal
@@ -274,7 +274,7 @@ export class DaemonClient implements PostQuantumProvider {
     opts?: {
       allowLAN?: boolean;
       lockdown?: boolean;
-      preferredTransport?: "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "anytls" | "tuic" | "cdn" | "snowflake" | "wireguard";
+      preferredTransport?: "tectonic" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "anytls" | "tuic" | "cdn" | "snowflake" | "wireguard";
       disableTransportRace?: boolean;
     },
     signal?: AbortSignal

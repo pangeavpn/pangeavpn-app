@@ -54,6 +54,7 @@
     reality: running,
     hysteria2: idle,
     shadowsocks: idle,
+    tectonic: idle,
     anytls: idle,
     tuic: idle,
     cdn: idle,

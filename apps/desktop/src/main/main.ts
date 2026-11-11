@@ -169,9 +169,9 @@ function isDockIconAccent(value: unknown): value is DockIconAccent {
 let dockSwitching = false;
 // Panic wipe: the global removal shortcut is inert until the user opts in. Off by default.
 let panicWipeEnabled = false;
-// "auto" (reality, then cloak, shadowsocks, hysteria2, tuic, naive, anytls, cdn, snowflake),
+// "auto" (tectonic, then reality, cloak, shadowsocks, hysteria2, tuic, naive, anytls, cdn, snowflake),
 // or one of those transports only, or "wireguard".
-let preferredTransport: "auto" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "anytls" | "tuic" | "cdn" | "snowflake" | "wireguard" = "auto";
+let preferredTransport: "auto" | "tectonic" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "anytls" | "tuic" | "cdn" | "snowflake" | "wireguard" = "auto";
 // Stored language preference: a locale code, or "system" to follow the OS.
 let localePref = "system";
 const hiddenLaunch = process.argv.some(isHiddenLaunchArg);
@@ -1407,7 +1407,7 @@ async function cancelConnectAttempt(): Promise<void> {
 function connectionOptions(): {
   allowLAN: boolean;
   lockdown: boolean;
-  preferredTransport?: "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "anytls" | "tuic" | "cdn" | "snowflake" | "wireguard";
+  preferredTransport?: "tectonic" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "anytls" | "tuic" | "cdn" | "snowflake" | "wireguard";
   disableTransportRace?: boolean;
 } {
   return {
@@ -1649,6 +1649,9 @@ function redactConfigForRenderer(config: ConfigResponse): ConfigResponse {
       tuic: profile.tuic
         ? { ...profile.tuic, uuid: "<redacted>", password: "<redacted>" }
         : profile.tuic,
+      tectonic: profile.tectonic
+        ? { ...profile.tectonic, keyId: "<redacted>", deviceKey: "<redacted>" }
+        : profile.tectonic,
       cdn: profile.cdn ? { ...profile.cdn, uuid: "<redacted>", path: "<redacted>" } : profile.cdn,
       wireguard: { ...profile.wireguard, configText: redactWireGuardKeys(profile.wireguard.configText) }
     }))
@@ -2108,13 +2111,14 @@ function registerTransportSettingsHandlers(): void {
     () => pangeaApiClient.getHubInTunnel()
   );
 
-  ipcMain.handle(IPC_CHANNELS.setPreferredTransport, async (_event, value: "auto" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "anytls" | "tuic" | "cdn" | "snowflake" | "wireguard") => {
+  ipcMain.handle(IPC_CHANNELS.setPreferredTransport, async (_event, value: "auto" | "tectonic" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "anytls" | "tuic" | "cdn" | "snowflake" | "wireguard") => {
     preferredTransport =
       value === "cloak" ||
       value === "naive" ||
       value === "reality" ||
       value === "hysteria2" ||
       value === "shadowsocks" ||
+      value === "tectonic" ||
       value === "anytls" ||
       value === "tuic" ||
       value === "cdn" ||
@@ -2680,6 +2684,7 @@ function applyPersistedSettings(settings: Record<string, unknown>): void {
     settings.preferredTransport === "reality" ||
     settings.preferredTransport === "hysteria2" ||
     settings.preferredTransport === "shadowsocks" ||
+    settings.preferredTransport === "tectonic" ||
     settings.preferredTransport === "anytls" ||
     settings.preferredTransport === "tuic" ||
     settings.preferredTransport === "cdn" ||
