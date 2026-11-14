@@ -1,6 +1,8 @@
 package mobile
 
 import (
+	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"testing"
 
@@ -304,5 +306,129 @@ func TestDiscoverHubRoutesReadsEveryNode(t *testing.T) {
 	}
 	if !sameStrings(got.fronted, []string{"relay.example.com"}) {
 		t.Fatalf("fronted %v", got.fronted)
+	}
+}
+
+// tectonicBlock is /api/register's tectonic block with node swapped in.
+func tectonicBlock(node string) string {
+	return `{"node":` + node + `,"cover_domain":"cover.example","key_id":"` +
+		base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{1}, 20)) + `","device_key":"` +
+		base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{2}, 32)) + `",
+	  "pins":["pin=="],"borrowed_sni":["www.example.org"],"cdn":{"host":"cdn.example","path":"/t","edge":"198.51.100.40"},
+	  "shaping":[{"name":"chrome"}]}`
+}
+
+func decodeTectonicBlock(t *testing.T, raw string) *tectonicInfo {
+	t.Helper()
+	info, err := decodeTectonic(json.RawMessage(raw))
+	if err != nil {
+		t.Fatalf("decode tectonic: %v", err)
+	}
+	return info
+}
+
+func TestBuildTectonicMapsTheHubBlock(t *testing.T) {
+	got := buildTectonic(decodeTectonicBlock(t, tectonicBlock(`"203.0.113.7:8443"`)), "198.51.100.5")
+	if got == nil {
+		t.Fatal("tectonic profile missing")
+	}
+	if got.Node != "203.0.113.7:8443" || got.CoverDomain != "cover.example" || got.LocalPort != 0 {
+		t.Fatalf("node=%q cover=%q port=%d", got.Node, got.CoverDomain, got.LocalPort)
+	}
+	if !bytes.Equal(got.KeyID, bytes.Repeat([]byte{1}, 20)) || !bytes.Equal(got.DeviceKey, bytes.Repeat([]byte{2}, 32)) {
+		t.Fatalf("keyId=%x deviceKey=%x, want the decoded credential", got.KeyID, got.DeviceKey)
+	}
+	if !sameStrings(got.Pins, []string{"pin=="}) || !sameStrings(got.BorrowedSNI, []string{"www.example.org"}) {
+		t.Fatalf("pins=%v borrowedSni=%v", got.Pins, got.BorrowedSNI)
+	}
+	if got.CDN == nil || *got.CDN != (state.TectonicCDNRoute{Host: "cdn.example", Path: "/t", Edge: "198.51.100.40"}) {
+		t.Fatalf("cdn = %+v", got.CDN)
+	}
+	if string(got.Shaping) != `[{"name":"chrome"}]` || got.SNIMode != "" || got.SNI != "" {
+		t.Fatalf("shaping=%s sniMode=%q sni=%q, want shaping as sent and Tectonic left to pick", got.Shaping, got.SNIMode, got.SNI)
+	}
+}
+
+// Same dial-host rule as apps/desktop/src/shared/tectonicProfile.ts: an IP, never a name.
+func TestBuildTectonicDialsAnAddress(t *testing.T) {
+	tests := []struct {
+		name, node, nodeIP, want string
+	}{
+		{"address and port kept", `"203.0.113.7:8443"`, "198.51.100.5", "203.0.113.7:8443"},
+		{"no port means 443", `"203.0.113.7"`, "198.51.100.5", "203.0.113.7:443"},
+		{"hostname falls back to the node IP, keeping the port", `"node.example:8443"`, "198.51.100.5", "198.51.100.5:8443"},
+		{"bare hostname falls back to the node IP on 443", `"node.example"`, "198.51.100.5", "198.51.100.5:443"},
+		{"bracketed IPv6", `"[2001:db8::7]:8443"`, "198.51.100.5", "[2001:db8::7]:8443"},
+		{"bare IPv6", `"2001:db8::7"`, "198.51.100.5", "[2001:db8::7]:443"},
+		{"bad port reads as none", `"203.0.113.7:99999"`, "198.51.100.5", "203.0.113.7:443"},
+		{"empty node uses the node IP", `""`, "198.51.100.5", "198.51.100.5:443"},
+		{"no address anywhere drops it", `"node.example"`, "cloak.example", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := buildTectonic(decodeTectonicBlock(t, tectonicBlock(tt.node)), tt.nodeIP)
+			switch {
+			case tt.want == "" && got != nil:
+				t.Fatalf("got node %q, want Tectonic dropped", got.Node)
+			case tt.want != "" && (got == nil || got.Node != tt.want):
+				t.Fatalf("got %+v, want node %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBuildTectonicDropsAnUnusableCredential(t *testing.T) {
+	for name, raw := range map[string]string{
+		"no key id":          `{"node":"203.0.113.7","device_key":"AgI="}`,
+		"no device key":      `{"node":"203.0.113.7","key_id":"AQE="}`,
+		"key id not base64":  `{"node":"203.0.113.7","key_id":"!!","device_key":"AgI="}`,
+		"device key garbled": `{"node":"203.0.113.7","key_id":"AQE=","device_key":"not base64"}`,
+	} {
+		if got := buildTectonic(decodeTectonicBlock(t, raw), "198.51.100.5"); got != nil {
+			t.Errorf("%s: got %+v, want nil", name, got)
+		}
+	}
+	if got := buildTectonic(nil, "198.51.100.5"); got != nil {
+		t.Fatalf("no block = %+v, want nil", got)
+	}
+}
+
+func TestBuildTectonicOmitsEmptyOptionalBlocks(t *testing.T) {
+	raw := `{"node":"203.0.113.7","key_id":"AQE=","device_key":"AgI=","cdn":{"host":" ","path":"/t"},"shaping":[]}`
+	got := buildTectonic(decodeTectonicBlock(t, raw), "198.51.100.5")
+	if got == nil || got.CDN != nil || got.Shaping != nil {
+		t.Fatalf("got %+v, want no CDN route and no shaping", got)
+	}
+}
+
+func TestDecodeTectonicReportsAMalformedBlock(t *testing.T) {
+	for _, raw := range []string{"", "null", "  "} {
+		if info, err := decodeTectonic(json.RawMessage(raw)); info != nil || err != nil {
+			t.Fatalf("%q = %+v, %v; want nothing", raw, info, err)
+		}
+	}
+	if _, err := decodeTectonic(json.RawMessage(`{"pins":"not a list"}`)); err == nil {
+		t.Fatal("a malformed block decoded without error")
+	}
+}
+
+// Lanes spread one per address, so the hub's other node addresses are
+// carried, with a port each and literals only: a name would need a lookup
+// outside the tunnel.
+func TestBuildTectonicCarriesTheOtherNodeAddresses(t *testing.T) {
+	raw := `{"node":"203.0.113.7:8443","nodes":["198.51.100.5","198.51.100.6:9443","node2.example.net","  "],` +
+		`"key_id":"` + base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{1}, 20)) + `","device_key":"` +
+		base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{2}, 32)) + `"}`
+	got := buildTectonic(decodeTectonicBlock(t, raw), "198.51.100.9")
+	if got == nil {
+		t.Fatal("tectonic profile missing")
+	}
+	if !sameStrings(got.Nodes, []string{"198.51.100.5:8443", "198.51.100.6:9443"}) {
+		t.Fatalf("nodes = %v", got.Nodes)
+	}
+	// A block without them leaves the field empty rather than inventing one.
+	plain := buildTectonic(decodeTectonicBlock(t, tectonicBlock(`"203.0.113.7:8443"`)), "198.51.100.5")
+	if len(plain.Nodes) != 0 {
+		t.Fatalf("nodes = %v, want none", plain.Nodes)
 	}
 }

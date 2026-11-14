@@ -5,7 +5,7 @@ import XCTest
 final class TransportLabelsTests: XCTestCase {
     func testPickerListsEveryTransportOnceInDesktopOrder() {
         let order = TransportLabels.pickerOrder
-        XCTAssertEqual(order, [.auto, .reality, .cloak, .shadowsocks, .hysteria2, .tuic, .anytls, .cdn])
+        XCTAssertEqual(order, [.auto, .tectonic, .reality, .cloak, .shadowsocks, .hysteria2, .tuic, .anytls, .cdn])
         XCTAssertEqual(order.count, Transport.allCases.count)
         XCTAssertEqual(Set(order), Set(Transport.allCases))
     }
@@ -26,6 +26,7 @@ final class TransportLabelsTests: XCTestCase {
     func testSelectedReadsTheStoredChoice() {
         XCTAssertEqual(TransportLabels.selected("reality"), .reality)
         XCTAssertEqual(TransportLabels.selected("anytls"), .anytls)
+        XCTAssertEqual(TransportLabels.selected("tectonic"), .tectonic)
         XCTAssertEqual(TransportLabels.selected("auto"), .auto)
     }
 

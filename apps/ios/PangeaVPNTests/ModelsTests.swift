@@ -50,6 +50,7 @@ final class ModelsTests: XCTestCase {
         XCTAssertTrue(server.supports("auto"))
         XCTAssertTrue(server.supports("cloak"))
         XCTAssertTrue(server.supports("hysteria2"))
+        XCTAssertTrue(server.supports("tectonic"))
         XCTAssertFalse(server.supports("anytls"))
         XCTAssertFalse(server.supports("shadowsocks"))
     }
@@ -199,6 +200,6 @@ final class ModelsTests: XCTestCase {
 
     func testTransportRawValues() {
         XCTAssertEqual(Transport.allCases.map(\.rawValue),
-                       ["auto", "cloak", "reality", "shadowsocks", "hysteria2", "anytls", "tuic", "cdn"])
+                       ["auto", "tectonic", "cloak", "reality", "shadowsocks", "hysteria2", "anytls", "tuic", "cdn"])
     }
 }

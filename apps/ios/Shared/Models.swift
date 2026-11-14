@@ -60,8 +60,10 @@ struct Server: Codable, Equatable, Sendable {
         for key in Self.advertised { try c.encode(transports.contains(key.rawValue), forKey: key) }
     }
 
+    // Tectonic's credential comes with registration, not the list, so like desktop
+    // every server qualifies; a hub that issues none leaves the pin unconfigured.
     func supports(_ transport: String) -> Bool {
-        transport == "auto" || transports.contains(transport)
+        transport == "auto" || transport == "tectonic" || transports.contains(transport)
     }
 }
 
@@ -242,7 +244,7 @@ struct TunnelStatus: Codable, Equatable, Sendable {
 }
 
 enum Transport: String, CaseIterable, Sendable {
-    case auto, cloak, reality, shadowsocks, hysteria2, anytls, tuic, cdn
+    case auto, tectonic, cloak, reality, shadowsocks, hysteria2, anytls, tuic, cdn
 }
 
 struct HubMethods: Codable, Equatable, Sendable {

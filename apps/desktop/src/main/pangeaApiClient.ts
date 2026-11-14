@@ -12,6 +12,12 @@ import { buildAnyTLSProfile } from "../shared/anytlsProfile";
 import { buildTUICProfile } from "../shared/tuicProfile";
 import { buildCDNProfile } from "../shared/cdnProfile";
 import {
+  buildTectonicProfile,
+  tectonicCdnEdgeIp,
+  tectonicNodeHosts,
+  type TectonicHubBlock
+} from "../shared/tectonicProfile";
+import {
   DEFAULT_HUB_METHODS,
   type HubMethod,
   type HubMethods,
@@ -162,6 +168,8 @@ interface RegisterResponse {
     entryRegion: string;
     exitRegion: string;
   };
+  /** Per-device, expiring Tectonic credential for this node; absent when not issued. */
+  tectonic?: TectonicHubBlock;
 }
 
 interface DohAnswer {
@@ -1821,6 +1829,8 @@ export class PangeaApiClient {
     const anytls = server.anytls ? buildAnyTLSProfile(server.anytls, nodeIp) : undefined;
     const tuic = server.tuic ? buildTUICProfile(server.tuic, nodeIp) : undefined;
     const cdn = server.cdn ? buildCDNProfile(server.cdn) : undefined;
+    // Never under a hop: the node relays only to its own WireGuard, so it would egress at the entry.
+    const tectonic = reg.tectonic && !isMultihop ? buildTectonicProfile(reg.tectonic, nodeIp) : undefined;
     const excludeIPs = uniqueNonEmpty([
       nodeIp,
       wireguardEndpoint?.host,
@@ -1832,7 +1842,12 @@ export class PangeaApiClient {
       server.shadowsocks?.remoteIp,
       anytls?.remoteHost,
       tuic?.remoteHost,
-      cdn?.remoteHost
+      cdn?.remoteHost,
+      // Every address its lanes may use, or the lanes taking the ones left
+      // out would be blocked by the killswitch.
+      ...tectonicNodeHosts(tectonic),
+      // Like cdn above, the edge counts only as a literal; a CDN name is dropped.
+      tectonicCdnEdgeIp(tectonic)
     ]).filter(isIPv4Literal);
     // Snowflake is the exception and is left out: neither its broker nor its
     // per-session volunteer proxy is an address ours to know up front.
@@ -1910,6 +1925,7 @@ export class PangeaApiClient {
       } : {}),
       ...(anytls ? { anytls } : {}),
       ...(tuic ? { tuic } : {}),
+      ...(tectonic ? { tectonic } : {}),
       ...(cdn ? { cdn } : {}),
       ...(server.snowflake ? {
         snowflake: {

@@ -344,3 +344,33 @@ func TestURLHostBracketsIPv6(t *testing.T) {
 		}
 	}
 }
+
+func TestSynthesizedProfileMapsTectonicKeepingPorts(t *testing.T) {
+	p := &state.Profile{
+		Cloak: state.CloakProfile{RemoteHost: "203.0.113.10"},
+		Tectonic: &state.TectonicProfile{Node: "203.0.113.7:8443", CoverDomain: "cover.example",
+			KeyID: []byte{1}, DeviceKey: []byte{2},
+			CDN: &state.TectonicCDNRoute{Host: "cdn.example", Path: "/t", Edge: "198.51.100.40"}},
+	}
+	want := cloneProfile(t, p)
+
+	got, changed := synthesizedProfile(p, (&wellKnownNAT64{}).synthesize)
+
+	if !changed || got.Tectonic.Node != "[64:ff9b::cb00:7107]:8443" {
+		t.Fatalf("node = %q changed=%v, want the synthesized address on the same port", got.Tectonic.Node, changed)
+	}
+	if got.Tectonic.CDN.Edge != "64:ff9b::c633:6428" || got.Tectonic.CDN.Host != "cdn.example" {
+		t.Fatalf("cdn = %+v, want the edge synthesized and the host kept", got.Tectonic.CDN)
+	}
+	if got.Tectonic.CoverDomain != "cover.example" {
+		t.Fatalf("cover domain = %q, want it kept", got.Tectonic.CoverDomain)
+	}
+	if !reflect.DeepEqual(p, want) || got.Tectonic == p.Tectonic || &got.Tectonic.DeviceKey[0] == &p.Tectonic.DeviceKey[0] {
+		t.Fatal("the result shares Tectonic's block or key with the original")
+	}
+
+	kept, _ := synthesizedProfile(p, noNAT64)
+	if !reflect.DeepEqual(kept.Tectonic, want.Tectonic) {
+		t.Fatalf("got %+v, want a field-for-field copy of %+v", kept.Tectonic, want.Tectonic)
+	}
+}

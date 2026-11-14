@@ -154,3 +154,14 @@ func TestValidateHopIgnoresNaiveBridgePortWithoutNaive(t *testing.T) {
 		t.Fatalf("ValidateHop required naiveBridgePort with no naive profile: %v", err)
 	}
 }
+
+func TestApplyHopDropsTectonic(t *testing.T) {
+	p := Profile{Tectonic: &TectonicProfile{Node: "192.0.2.10:443"}}
+	if got := ApplyHop(p); got.Tectonic == nil {
+		t.Fatal("single hop lost its Tectonic block")
+	}
+	p.Hop = &HopProfile{SingBoxPort: 9100, CloakProxyMethod: "hop", EntryRegion: "a", ExitRegion: "b"}
+	if got := ApplyHop(p); got.Tectonic != nil {
+		t.Fatal("multihop kept Tectonic, which would egress at the entry")
+	}
+}

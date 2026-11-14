@@ -80,6 +80,7 @@ const KEY_MAP = {
   "settings.transport.heading": "settings_transport_heading",
   "settings.transport.description": "settings_transport_description",
   "settings.transport.auto": "settings_transport_auto",
+  "settings.transport.tectonic": "settings_transport_tectonic",
   "settings.transport.cloak": "settings_transport_cloak",
   "settings.transport.reality": "settings_transport_reality",
   "settings.transport.shadowsocks": "settings_transport_shadowsocks",
@@ -138,6 +139,10 @@ const MOBILE_ONLY = {
   hero_disconnecting: {
     en: "Disconnecting...", es: "Desconectando...", fr: "Déconnexion...", ru: "Отключение...",
     uk: "Відключення...", zh: "正在断开...", ar: "جارٍ قطع الاتصال...", fa: "در حال قطع اتصال..."
+  },
+  transport_status_tectonic: {
+    en: "Obfuscation: Tectonic", es: "Ofuscación: Tectonic", fr: "Obfuscation : Tectonic", ru: "Обфускация: Tectonic",
+    uk: "Обфускація: Tectonic", zh: "混淆：Tectonic", ar: "التمويه: Tectonic", fa: "مبهم‌سازی: Tectonic"
   },
   transport_status_cloak: {
     en: "Obfuscation: Cloak", es: "Ofuscación: Cloak", fr: "Obfuscation : Cloak", ru: "Обфускация: Cloak",

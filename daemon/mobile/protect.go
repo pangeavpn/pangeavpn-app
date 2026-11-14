@@ -2,8 +2,8 @@
 
 package mobile
 
-// Sockets leaving outside the tunnel need VpnService.protect(). Cloak takes a
-// Go callback; the sing-box transports take the unix socket served here.
+// Sockets leaving outside the tunnel need VpnService.protect(). Cloak and Tectonic
+// take a Go callback; the sing-box transports take the unix socket served here.
 
 import (
 	"fmt"
@@ -16,6 +16,7 @@ import (
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/sbrelay"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/shadowsocks"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/state"
+	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/tectonic"
 )
 
 const protectSocketName = "protect.sock"
@@ -37,6 +38,7 @@ func startProtectServer(filesDir string, logs *state.LogStore) error {
 	shadowsocks.ProtectPath = srv.Path()
 	hysteria2.ProtectPath = srv.Path()
 	anytls.ProtectPath = srv.Path()
+	tectonic.Protect = protectFD
 	sbrelay.ProtectPath = srv.Path()
 	return nil
 }

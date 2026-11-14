@@ -87,6 +87,7 @@
     <string name="settings_transport_reality">VLESS+REALITY</string>
     <string name="settings_transport_shadowsocks">Shadowsocks</string>
     <string name="settings_transport_snowflake">Snowflake</string>
+    <string name="settings_transport_tectonic">Tectonic</string>
     <string name="settings_transport_tuic">TUIC</string>
     <string name="split_tunnel_hint">برنامه‌های فعال‌شده در اینجا از VPN عبور نمی‌کنند و از اتصال عادی شما استفاده می‌کنند.</string>
     <string name="split_tunnel_title">تونل تفکیک‌شده</string>
@@ -108,5 +109,6 @@
     <string name="transport_status_reality">مبهم‌سازی: VLESS+REALITY</string>
     <string name="transport_status_shadowsocks">مبهم‌سازی: Shadowsocks</string>
     <string name="transport_status_snowflake">مبهم‌سازی: Snowflake</string>
+    <string name="transport_status_tectonic">مبهم‌سازی: Tectonic</string>
     <string name="transport_status_tuic">مبهم‌سازی: TUIC</string>
 </resources>

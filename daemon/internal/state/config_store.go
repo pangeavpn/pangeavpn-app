@@ -402,6 +402,12 @@ func profilePortClaims(profile Profile) ([]portClaim, error) {
 		}
 		claims = append(claims, portClaim{"anytls", profile.AnyTLS.LocalPort})
 	}
+	if profile.Tectonic != nil {
+		if profile.Tectonic.NodeHost() == "" {
+			return nil, fmt.Errorf("profile %s tectonic missing node", profile.ID)
+		}
+		claims = append(claims, portClaim{"tectonic", profile.Tectonic.LocalPort})
+	}
 	if profile.TUIC != nil {
 		if profile.TUIC.RemoteHost == "" {
 			return nil, fmt.Errorf("profile %s tuic missing remote host", profile.ID)
@@ -457,6 +463,7 @@ func cloneProfile(profile Profile) Profile {
 	copyProfile.Shadowsocks = cloneShadowsocksProfile(profile.Shadowsocks)
 	copyProfile.AnyTLS = cloneAnyTLSProfile(profile.AnyTLS)
 	copyProfile.TUIC = clonePtr(profile.TUIC)
+	copyProfile.Tectonic = CloneTectonicProfile(profile.Tectonic)
 	copyProfile.CDN = clonePtr(profile.CDN)
 	copyProfile.Snowflake = cloneSnowflakeProfile(profile.Snowflake)
 	return copyProfile
@@ -509,6 +516,23 @@ func cloneAnyTLSProfile(profile *AnyTLSProfile) *AnyTLSProfile {
 		return nil
 	}
 	copyProfile := *profile
+	return &copyProfile
+}
+
+// CloneTectonicProfile deep-copies the credential and lists, so no backing
+// array is shared with the store.
+func CloneTectonicProfile(profile *TectonicProfile) *TectonicProfile {
+	if profile == nil {
+		return nil
+	}
+	copyProfile := *profile
+	copyProfile.KeyID = append([]byte(nil), profile.KeyID...)
+	copyProfile.DeviceKey = append([]byte(nil), profile.DeviceKey...)
+	copyProfile.Nodes = cloneStrings(profile.Nodes)
+	copyProfile.Pins = cloneStrings(profile.Pins)
+	copyProfile.BorrowedSNI = cloneStrings(profile.BorrowedSNI)
+	copyProfile.CDN = clonePtr(profile.CDN)
+	copyProfile.Shaping = append(json.RawMessage(nil), profile.Shaping...)
 	return &copyProfile
 }
 

@@ -106,7 +106,30 @@ func synthesizedProfile(p *state.Profile, synth func(string) string) (*state.Pro
 		cdn.RemoteHost = m.host(cdn.RemoteHost)
 		out.CDN = &cdn
 	}
+	// Cloned whole, since scrub clears the prepared key. The SNI is the cover
+	// domain, never the node, so only the addresses change.
+	if p.Tectonic != nil {
+		tectonic := state.CloneTectonicProfile(p.Tectonic)
+		tectonic.Node = m.hostPort(tectonic.Node)
+		if tectonic.CDN != nil && tectonic.CDN.Edge != "" {
+			tectonic.CDN.Edge = m.hostPort(tectonic.CDN.Edge)
+		}
+		out.Tectonic = tectonic
+	}
 	return &out, m.changed
+}
+
+// hostPort maps the host of "host:port", or a bare host, keeping the port.
+func (m *hostMapper) hostPort(address string) string {
+	host, port, err := net.SplitHostPort(address)
+	if err != nil {
+		return m.host(address)
+	}
+	mapped := m.host(host)
+	if mapped == host {
+		return address
+	}
+	return net.JoinHostPort(mapped, port)
 }
 
 // hostMapper asks the synthesizer once per address, however many transports share it.

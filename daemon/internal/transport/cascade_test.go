@@ -31,7 +31,7 @@ func allAvailable() fakeStarter {
 		"shadowsocks": transport.Available, "hysteria2": transport.Available,
 		"naive": transport.Available, "anytls": transport.Available,
 		"tuic": transport.Available, "cdn": transport.Available,
-		"snowflake": transport.Available,
+		"snowflake": transport.Available, "tectonic": transport.Available,
 	}
 }
 
@@ -65,8 +65,8 @@ func TestSelectAutoFollowsCascadeOrder(t *testing.T) {
 	}
 }
 
-func TestAutoCascadeOrderRunsAnyTLSAfterNaive(t *testing.T) {
-	want := []string{"reality", "cloak", "shadowsocks", "hysteria2", "tuic", "naive", "anytls", "cdn", "snowflake"}
+func TestAutoCascadeOrderLeadsWithTectonic(t *testing.T) {
+	want := []string{"tectonic", "reality", "cloak", "shadowsocks", "hysteria2", "tuic", "naive", "anytls", "cdn", "snowflake"}
 	if !equal(transport.AutoCascadeOrder, want) {
 		t.Fatalf("got %v, want %v", transport.AutoCascadeOrder, want)
 	}

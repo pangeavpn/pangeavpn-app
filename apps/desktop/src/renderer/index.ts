@@ -660,6 +660,7 @@ const transportBackBtn = document.getElementById("transportBackBtn") as HTMLButt
 // label, so a newly ungated option can ship before its copy does.
 const TRANSPORT_DESCRIPTIONS: Record<string, MessageKey> = {
   auto: "settings.transport.auto.desc",
+  tectonic: "settings.transport.tectonic.desc",
   cloak: "settings.transport.cloak.desc",
   naive: "settings.transport.naive.desc",
   reality: "settings.transport.reality.desc",
@@ -4054,6 +4055,7 @@ let lastCloakWasDown = false;
 // Display names for the active-transport pill — protocol/product proper nouns,
 // identical across locales, so they are not translated.
 const TRANSPORT_LABELS: Record<string, string> = {
+  tectonic: "Tectonic",
   cloak: "Cloak",
   naive: "NaiveProxy",
   reality: "VLESS+REALITY",
@@ -4789,6 +4791,7 @@ function buildLoadIndicator(load: number | null | undefined): HTMLElement | null
 
 type TransportChoice =
   | "auto"
+  | "tectonic"
   | "cloak"
   | "naive"
   | "reality"
@@ -4820,8 +4823,9 @@ function serverSupportsTransport(server: ServerInfo, transport: TransportChoice)
       return Boolean(server.cdn);
     case "snowflake":
       return Boolean(server.snowflake);
+    // Per-device credential from /api/register, not the server list: any node may have it.
     default:
-      return true; // auto + cloak: every server qualifies
+      return true; // auto + cloak + tectonic: every server qualifies
   }
 }
 

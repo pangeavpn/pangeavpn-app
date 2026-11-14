@@ -31,6 +31,7 @@
 "bypass_reality_desc" = "دست‌دادن TLS یک سایت واقعی را قرض می‌گیرد، پس کاوش‌ها یک سایت اصیل می‌بینند. قوی‌ترین استتار.";
 "bypass_regions_note" = "منطقه‌هایی که روش انتخاب‌شده را ندارند، از فهرست منطقه‌ها پنهان می‌شوند.";
 "bypass_shadowsocks_desc" = "هیچ TLS ندارد، پس مسدودسازیِ متمرکز بر TLS به آن نمی‌رسد.";
+"bypass_tectonic_desc" = "ترابری اختصاصی PangeaVPN: WireGuard روی چند اتصال کوتاه‌مدت پخش می‌شود که شبیه بارگذاری یک وب‌سایت در Chrome است.";
 "bypass_tuic_desc" = "QUIC که شبیه HTTP/3 معمولی است. به شبکه‌ای نیاز دارد که UDP را عبور دهد.";
 "bypass_updated" = "روش اتصال به‌روزرسانی شد. برای اعمال، دوباره متصل شوید.";
 "connect_progress_still_connecting" = "اتصال همچنان در حال انجام است…";
@@ -411,6 +412,7 @@
 "settings_transport_reality" = "VLESS+REALITY";
 "settings_transport_shadowsocks" = "Shadowsocks";
 "settings_transport_snowflake" = "Snowflake";
+"settings_transport_tectonic" = "Tectonic";
 "settings_transport_tuic" = "TUIC";
 "split_tunnel_description" = "نشانی‌هایی که اینجا فهرست شده‌اند از VPN عبور نمی‌کنند و از اتصال عادی شما استفاده می‌کنند.";
 "split_tunnel_enabled_hint" = "وقتی خاموش است، همه ترافیک از VPN می‌گذرد. فهرست محدوده‌ها حفظ می‌شود. از اتصال بعدی اعمال می‌شود.";
@@ -491,6 +493,7 @@
 "transport_status_reality" = "مبهم‌سازی: VLESS+REALITY";
 "transport_status_shadowsocks" = "مبهم‌سازی: Shadowsocks";
 "transport_status_snowflake" = "مبهم‌سازی: Snowflake";
+"transport_status_tectonic" = "مبهم‌سازی: Tectonic";
 "transport_status_tuic" = "مبهم‌سازی: TUIC";
 "update_appstore" = "PangeaVPN از طریق App Store به‌روزرسانی می‌شود. به‌روزرسانی خودکار را در Settings › App Store روشن کنید.";
 "update_build" = "شماره‌ی ساخت";

@@ -1,5 +1,11 @@
 package state
 
+import (
+	"encoding/json"
+	"net"
+	"strings"
+)
+
 type DaemonState string
 
 const (
@@ -27,6 +33,7 @@ const (
 	SourceNaive       LogSource = "naive"
 	SourceShadowsocks LogSource = "shadowsocks"
 	SourceAnyTLS      LogSource = "anytls"
+	SourceTectonic    LogSource = "tectonic"
 	SourceTUIC        LogSource = "tuic"
 	SourceCDN         LogSource = "cdn"
 	SourceSnowflake   LogSource = "snowflake"
@@ -69,12 +76,13 @@ type StatusResponse struct {
 	Detail string      `json:"detail"`
 	// ProfileID is the profile the session runs on (or is held for), "" when idle.
 	ProfileID string `json:"profileId,omitempty"`
-	// ActiveTransport is "cloak", "naive", "reality", "hysteria2", "shadowsocks",
+	// ActiveTransport is "tectonic", "cloak", "naive", "reality", "hysteria2", "shadowsocks",
 	// "anytls", "tuic", "cdn", "snowflake", "wireguard" (no transport at all), or "" when disconnected.
 	ActiveTransport string `json:"activeTransport"`
 	// ConnectingTransport is the candidate the cascade is trying right now,
 	// "" outside a bring-up. Lets clients show "via X" while connecting.
 	ConnectingTransport string          `json:"connectingTransport"`
+	Tectonic            TransportStatus `json:"tectonic"`
 	Cloak               CloakStatus     `json:"cloak"`
 	Naive               TransportStatus `json:"naive"`
 	Reality             TransportStatus `json:"reality"`
@@ -237,6 +245,75 @@ type AnyTLSProfile struct {
 	TargetPort int    `json:"targetPort,omitempty"`
 }
 
+// TectonicProfile is the hub's per-device Tectonic credential for one node. It is
+// issued per registration, since key_id carries an expiry and is bound to the node.
+type TectonicProfile struct {
+	LocalPort int `json:"localPort"`
+	// Node is "ip:port" (port defaults to 443); always an IP literal, so permitting
+	// it never needs a lookup.
+	Node string `json:"node"`
+	// Nodes are more addresses of the same node, if it has them. Lanes spread
+	// one per address, which is what a browser shows per address. Each must be
+	// an IP literal like Node, and each must be permitted through the
+	// killswitch; one that is not a literal is dropped rather than refused,
+	// because losing it costs cover and not the tunnel.
+	Nodes []string `json:"nodes,omitempty"`
+	// CoverDomain is the node's own domain, sent as the SNI in Own mode.
+	CoverDomain string `json:"coverDomain,omitempty"`
+	// KeyID (20 bytes, with its expiry) and DeviceKey (32 bytes) are the credential,
+	// base64 in JSON; the node derives DeviceKey from KeyID.
+	KeyID     []byte `json:"keyId"`
+	DeviceKey []byte `json:"deviceKey"`
+	// Pins are base64 SHA-256 hashes of the node's default certificate's
+	// public key, checked when the SNI is borrowed or absent.
+	Pins []string `json:"pins,omitempty"`
+	// BorrowedSNI is the hub's list of names to borrow on SNI-allowlist networks.
+	BorrowedSNI []string `json:"borrowedSni,omitempty"`
+	// CDN routes lanes through a CDN edge when the node's own address is blocked.
+	CDN *TectonicCDNRoute `json:"cdn,omitempty"`
+	// Shaping is the hub's shaping profiles, passed to Tectonic as they came.
+	Shaping json.RawMessage `json:"shaping,omitempty"`
+	// SNIMode pins one SNI mode ("own", "borrowed", "none"); empty or "auto"
+	// lets Tectonic pick per network. SNI is a user-supplied borrowed name.
+	SNIMode string `json:"sniMode,omitempty"`
+	SNI     string `json:"sni,omitempty"`
+}
+
+// TectonicCDNRoute reaches a Tectonic node through a CDN (WebSocket over TLS).
+type TectonicCDNRoute struct {
+	// Host is the CDN host name, used as the SNI and the HTTP Host.
+	Host string `json:"host"`
+	// Path is the WebSocket path the CDN forwards to the node.
+	Path string `json:"path"`
+	// Edge is the address to dial when it is not Host on port 443.
+	Edge string `json:"edge,omitempty"`
+}
+
+// NodeHost is the node's address without the port.
+func (p *TectonicProfile) NodeHost() string {
+	node := strings.TrimSpace(p.Node)
+	if host, _, err := net.SplitHostPort(node); err == nil {
+		return host
+	}
+	return node
+}
+
+// CDNEdgeHost is the host a CDN lane dials, "" without a CDN route. Like the
+// CDN transport's edge, it names the CDN and never the node.
+func (p *TectonicProfile) CDNEdgeHost() string {
+	if p.CDN == nil {
+		return ""
+	}
+	edge := strings.TrimSpace(p.CDN.Edge)
+	if edge == "" {
+		return strings.TrimSpace(p.CDN.Host)
+	}
+	if host, _, err := net.SplitHostPort(edge); err == nil {
+		return host
+	}
+	return edge
+}
+
 // TUICProfile is a node's TUIC v5 (QUIC) settings; the node's cert is self-signed and pinned.
 type TUICProfile struct {
 	LocalPort  int    `json:"localPort"`
@@ -339,7 +416,10 @@ type Profile struct {
 	// configured.
 	AnyTLS *AnyTLSProfile `json:"anytls,omitempty"`
 	TUIC   *TUICProfile   `json:"tuic,omitempty"`
-	CDN    *CDNProfile    `json:"cdn,omitempty"`
+	// Tectonic is optional; nil means the hub issued no Tectonic credential.
+	// Never set on a multihop profile: see ApplyHop.
+	Tectonic *TectonicProfile `json:"tectonic,omitempty"`
+	CDN      *CDNProfile      `json:"cdn,omitempty"`
 	// Snowflake is optional; nil means this profile has no Snowflake
 	// transport configured.
 	Snowflake *SnowflakeProfile `json:"snowflake,omitempty"`

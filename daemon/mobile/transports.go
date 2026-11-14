@@ -17,6 +17,7 @@ import (
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/sbrelay"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/shadowsocks"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/state"
+	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/tectonic"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/transport"
 )
 
@@ -54,6 +55,12 @@ func newStarter(logs *state.LogStore) *starter {
 // unavailable: pion's WebRTC sockets expose no VpnService.protect() hook.
 func (s *starter) StarterFor(profile *state.Profile, kind string) (transport.StartFn, transport.Availability) {
 	switch kind {
+	case "tectonic":
+		// Its lanes are protected by fd, not the socket, but share the same gate.
+		if profile.Tectonic == nil || profile.Hop != nil {
+			return nil, transport.NotConfigured
+		}
+		return s.startTectonic, s.singBoxAvailability()
 	case "cloak":
 		return s.startCloak, transport.Available
 	case "reality":
@@ -217,6 +224,28 @@ func (s *starter) startAnyTLS(ctx context.Context, profile *state.Profile, _ *st
 	}
 	s.record("anytls", mgr, profile.AnyTLS.LocalPort)
 	return nil
+}
+
+func (s *starter) startTectonic(ctx context.Context, profile *state.Profile, _ *state.WireGuardProfile) error {
+	mgr := tectonic.NewManager(s.logs, lockedNetworkKey)
+	start := *state.CloneTectonicProfile(profile.Tectonic)
+	start.LocalPort = 0
+	if err := mgr.Start(ctx, start); err != nil {
+		return fmt.Errorf("tectonic start: %w", err)
+	}
+	if err := awaitSession(ctx, mgr); err != nil {
+		_ = mgr.Stop(context.Background())
+		return fmt.Errorf("tectonic session: %w", err)
+	}
+	s.record("tectonic", mgr, 0)
+	return nil
+}
+
+// lockedNetworkKey is networkKey for callers that do not hold mu.
+func lockedNetworkKey() string {
+	mu.Lock()
+	defer mu.Unlock()
+	return networkKey()
 }
 
 func (s *starter) startTUIC(ctx context.Context, profile *state.Profile, _ *state.WireGuardProfile) error {

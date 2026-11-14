@@ -15,6 +15,7 @@ import (
 
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/pq"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/shadowsocks"
+	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/state"
 )
 
 var testServerPub = bytes.Repeat([]byte{9}, 32)
@@ -353,6 +354,63 @@ func TestConcurrentPreparesAreSerialised(t *testing.T) {
 	wg.Wait()
 	if got := most.Load(); got != 1 {
 		t.Fatalf("up to %d registrations overlapped, want 1", got)
+	}
+}
+
+func tectonicAnswer(node string) map[string]any {
+	return map[string]any{"tectonic": map[string]any{
+		"node": node, "cover_domain": "cover.example",
+		"key_id":     base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{1}, 20)),
+		"device_key": base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{2}, 32)),
+	}}
+}
+
+func TestPrepareCarriesTheTectonicCredential(t *testing.T) {
+	h := signedInWith(t, serverInfo{ID: "fra-1", Name: "Frankfurt", Cloak: cloakInfo{RemoteHost: "198.51.100.1"}})
+	answerRegister(h, tectonicAnswer("node.example:8443"))
+
+	if _, err := Prepare("fra-1"); err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	got := preparedNow().profile.Tectonic
+	if got == nil || got.Node != "198.51.100.1:8443" || got.CoverDomain != "cover.example" ||
+		!bytes.Equal(got.DeviceKey, bytes.Repeat([]byte{2}, 32)) {
+		t.Fatalf("tectonic = %+v, want the hub's credential dialing the node IP", got)
+	}
+}
+
+func TestPrepareSurvivesAnUnreadableTectonicBlock(t *testing.T) {
+	for name, block := range map[string]any{
+		"wrong type":    "not an object",
+		"no key":        map[string]any{"node": "203.0.113.7"},
+		"garbled field": map[string]any{"node": "203.0.113.7", "pins": "not a list"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := signedInWith(t, serverInfo{ID: "fra-1", Name: "Frankfurt", Cloak: cloakInfo{RemoteHost: "198.51.100.1"}})
+			answerRegister(h, map[string]any{"tectonic": block})
+
+			if _, err := Prepare("fra-1"); err != nil {
+				t.Fatalf("Prepare: %v", err)
+			}
+			if got := preparedNow().profile.Tectonic; got != nil {
+				t.Fatalf("tectonic = %+v, want it dropped", got)
+			}
+		})
+	}
+}
+
+func TestPrepareScrubsTheTectonicKeyItReplaces(t *testing.T) {
+	h := signedInWith(t, serverInfo{ID: "B", Name: "Bravo"})
+	answerRegister(h, nil)
+	previous := keyedTunnel("A")
+	previous.profile.Tectonic = &state.TectonicProfile{DeviceKey: bytes.Repeat([]byte{4}, 32)}
+	stagePrepared(previous)
+
+	if _, err := Prepare("B"); err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	if !bytes.Equal(previous.profile.Tectonic.DeviceKey, make([]byte, 32)) {
+		t.Fatal("the replaced config's Tectonic key was left in memory")
 	}
 }
 

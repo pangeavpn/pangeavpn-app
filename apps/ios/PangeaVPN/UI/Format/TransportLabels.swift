@@ -3,13 +3,13 @@ import Foundation
 enum TransportLabels {
     // Product names, so they read the same in every language, as on desktop.
     private static let names: [String: String] = [
-        "cloak": "Cloak", "reality": "VLESS+REALITY", "shadowsocks": "Shadowsocks",
+        "tectonic": "Tectonic", "cloak": "Cloak", "reality": "VLESS+REALITY", "shadowsocks": "Shadowsocks",
         "hysteria2": "Hysteria2", "anytls": "AnyTLS", "tuic": "TUIC", "cdn": "CDN",
         "snowflake": "Snowflake", "naive": "NaiveProxy", "wireguard": "WireGuard",
     ]
 
     // Desktop's picker order, which is the order automatic mode walks.
-    static let pickerOrder: [Transport] = [.auto, .reality, .cloak, .shadowsocks, .hysteria2, .tuic, .anytls, .cdn]
+    static let pickerOrder: [Transport] = [.auto, .tectonic, .reality, .cloak, .shadowsocks, .hysteria2, .tuic, .anytls, .cdn]
 
     static func status(_ activeTransport: String?) -> String {
         activeTransport.flatMap { names[$0] } ?? ""
@@ -18,6 +18,7 @@ enum TransportLabels {
     static func choice(_ transport: Transport) -> String {
         switch transport {
         case .auto: return String(localized: "settings_transport_auto", defaultValue: "Automatic (recommended)")
+        case .tectonic: return String(localized: "settings_transport_tectonic", defaultValue: "Tectonic")
         case .cloak: return String(localized: "settings_transport_cloak", defaultValue: "Cloak")
         case .reality: return String(localized: "settings_transport_reality", defaultValue: "VLESS+REALITY")
         case .shadowsocks: return String(localized: "settings_transport_shadowsocks", defaultValue: "Shadowsocks")
@@ -32,6 +33,8 @@ enum TransportLabels {
         switch transport {
         case .auto:
             return String(localized: "bypass_auto_desc", defaultValue: "Picks the disguise that gets through and remembers what worked on this network.")
+        case .tectonic:
+            return String(localized: "bypass_tectonic_desc", defaultValue: "PangeaVPN's own transport: WireGuard spread over several short-lived connections that look like Chrome loading a website.")
         case .cloak:
             return String(localized: "bypass_cloak_desc", defaultValue: "TLS aimed at a decoy site, so the traffic looks like an ordinary visit there.")
         case .reality:

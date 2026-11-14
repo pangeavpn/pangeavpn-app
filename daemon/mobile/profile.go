@@ -3,6 +3,11 @@ package mobile
 // Ports the profile construction in apps/desktop/src/main/pangeaApiClient.ts.
 
 import (
+	"bytes"
+	"encoding/base64"
+	"encoding/json"
+	"net"
+	"strconv"
 	"strings"
 
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/state"
@@ -221,6 +226,101 @@ func buildCDN(info *cdnInfo) *state.CDNProfile {
 		TargetHost: info.TargetHost,
 		TargetPort: info.TargetPort,
 	}
+}
+
+// tectonicDefaultPort is the node port when the hub's node names none.
+const tectonicDefaultPort = 443
+
+// decodeTectonic reads register's raw tectonic block. A malformed one costs only
+// Tectonic, never the registration it rode in on.
+func decodeTectonic(raw json.RawMessage) (*tectonicInfo, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || string(trimmed) == "null" {
+		return nil, nil
+	}
+	var info tectonicInfo
+	if err := json.Unmarshal(trimmed, &info); err != nil {
+		return nil, err
+	}
+	return &info, nil
+}
+
+// buildTectonic ports apps/desktop/src/shared/tectonicProfile.ts. It dials an IP,
+// never a domain: a hostname node falls back to nodeIP, else Tectonic is dropped.
+// tectonicExtraNodes are the node's other addresses, each with a port, IP
+// literals only: a hostname would be resolved outside the tunnel. Lanes
+// spread one per address, so these also have to be protected per socket,
+// which they are, since every lane's socket is.
+func tectonicExtraNodes(addrs []string, defaultPort int) []string {
+	var out []string
+	for _, a := range addrs {
+		host, port := splitTectonicNode(strings.TrimSpace(a))
+		if !isIPLiteral(host) {
+			continue
+		}
+		if port == 0 {
+			port = defaultPort
+		}
+		out = append(out, net.JoinHostPort(strings.Trim(host, "[]"), strconv.Itoa(port)))
+	}
+	return out
+}
+
+func buildTectonic(info *tectonicInfo, nodeIP string) *state.TectonicProfile {
+	if info == nil {
+		return nil
+	}
+	keyID, keyErr := base64.StdEncoding.DecodeString(strings.TrimSpace(info.KeyID))
+	deviceKey, devErr := base64.StdEncoding.DecodeString(strings.TrimSpace(info.DeviceKey))
+	if keyErr != nil || devErr != nil || len(keyID) == 0 || len(deviceKey) == 0 {
+		return nil
+	}
+	host, port := splitTectonicNode(strings.TrimSpace(info.Node))
+	if !isIPLiteral(host) {
+		host = strings.TrimSpace(nodeIP)
+	}
+	if !isIPLiteral(host) {
+		return nil
+	}
+	if port == 0 {
+		port = tectonicDefaultPort
+	}
+	out := &state.TectonicProfile{
+		Node:        net.JoinHostPort(strings.Trim(host, "[]"), strconv.Itoa(port)),
+		Nodes:       tectonicExtraNodes(info.Nodes, port),
+		CoverDomain: strings.TrimSpace(info.CoverDomain),
+		KeyID:       keyID,
+		DeviceKey:   deviceKey,
+		Pins:        info.Pins,
+		BorrowedSNI: info.BorrowedSNI,
+	}
+	if info.CDN != nil {
+		if cdnHost := strings.TrimSpace(info.CDN.Host); cdnHost != "" {
+			out.CDN = &state.TectonicCDNRoute{Host: cdnHost, Path: info.CDN.Path, Edge: strings.TrimSpace(info.CDN.Edge)}
+		}
+	}
+	// Passed on as the hub sent it, like desktop; the daemon parses it at start.
+	if shaping := bytes.TrimSpace(info.Shaping); len(shaping) > 0 && string(shaping) != "null" && string(shaping) != "[]" {
+		out.Shaping = append(json.RawMessage(nil), shaping...)
+	}
+	return out
+}
+
+// splitTectonicNode splits "host", "host:port", "[v6]" or "[v6]:port"; a bare
+// IPv6 literal has no port. An unusable port reads as none.
+func splitTectonicNode(node string) (string, int) {
+	if isIPv6Literal(node) {
+		return strings.Trim(node, "[]"), 0
+	}
+	host, rawPort, err := net.SplitHostPort(node)
+	if err != nil {
+		return node, 0
+	}
+	port, err := strconv.Atoi(rawPort)
+	if err != nil || port < 1 || port > 65535 {
+		return host, 0
+	}
+	return host, port
 }
 
 func buildSnowflake(info *snowflakeInfo) *state.SnowflakeProfile {

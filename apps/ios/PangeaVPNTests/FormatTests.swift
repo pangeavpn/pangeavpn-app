@@ -49,6 +49,7 @@ final class FormatTests: XCTestCase {
         XCTAssertEqual(TransportLabels.status("shadowsocks"), "Shadowsocks")
         XCTAssertEqual(TransportLabels.status("hysteria2"), "Hysteria2")
         XCTAssertEqual(TransportLabels.status("anytls"), "AnyTLS")
+        XCTAssertEqual(TransportLabels.status("tectonic"), "Tectonic")
         XCTAssertEqual(TransportLabels.status("snowflake"), "Snowflake")
         XCTAssertEqual(TransportLabels.status("naive"), "NaiveProxy")
         XCTAssertEqual(TransportLabels.status("wireguard"), "WireGuard")
@@ -58,7 +59,7 @@ final class FormatTests: XCTestCase {
 
     func testTransportChoice() {
         let expected: [Transport: String] = [
-            .auto: "Automatic (recommended)", .cloak: "Cloak", .reality: "VLESS+REALITY",
+            .auto: "Automatic (recommended)", .tectonic: "Tectonic", .cloak: "Cloak", .reality: "VLESS+REALITY",
             .shadowsocks: "Shadowsocks", .hysteria2: "Hysteria2", .anytls: "AnyTLS",
             .tuic: "TUIC", .cdn: "CDN",
         ]

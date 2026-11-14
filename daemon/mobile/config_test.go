@@ -159,7 +159,7 @@ func TestDecodeConfigRejectsTransportsAndroidCannotRun(t *testing.T) {
 }
 
 func TestDecodeConfigKeepsEveryValidTransport(t *testing.T) {
-	for _, kind := range []string{"auto", "cloak", "reality", "shadowsocks", "hysteria2", "anytls"} {
+	for _, kind := range []string{"auto", "tectonic", "cloak", "reality", "shadowsocks", "hysteria2", "anytls", "tuic", "cdn"} {
 		got := decodeConfig(`{"preferredTransport":"` + kind + `"}`)
 		if got.PreferredTransport != kind {
 			t.Fatalf("%s was rewritten to %q", kind, got.PreferredTransport)
