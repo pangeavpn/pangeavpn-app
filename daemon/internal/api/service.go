@@ -18,6 +18,7 @@ import (
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/platform"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/reach"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/sbrelay"
+	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/shadowsocks"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/state"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/tectonic"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/transport"
@@ -380,7 +381,7 @@ var wgMTUPattern = regexp.MustCompile(`(?im)^(\s*MTU\s*=\s*)(\d+)(\s*)$`)
 
 // shadowsocksMaxMTU caps the tunnel MTU while Shadowsocks carries it: SS wraps each
 // datagram in a salt, address header and AEAD tag on top of WireGuard's own 32 B.
-const shadowsocksMaxMTU = 1280
+const shadowsocksMaxMTU = shadowsocks.MaxTunnelMTU
 
 // clampWireGuardMTU lowers an existing MTU line to max, leaving a lower one
 // alone. Returns the text unchanged when there is no MTU line to rewrite.

@@ -152,16 +152,15 @@ func (s *starter) stopActive(ctx context.Context) {
 	s.boundPort = 0
 }
 
+// startCloak only binds the listener. Cloak dials its session on WireGuard's
+// first datagram, so waiting for one here would always time out; the
+// handshake proof that follows is what shows the session works.
 func (s *starter) startCloak(ctx context.Context, profile *state.Profile, _ *state.WireGuardProfile) error {
 	mgr := cloak.NewManager(s.logs)
 	start := profile.Cloak
 	start.LocalPort = 0
 	if err := mgr.Start(ctx, start); err != nil {
 		return fmt.Errorf("cloak start: %w", err)
-	}
-	if err := awaitSession(ctx, mgr); err != nil {
-		_ = mgr.Stop(context.Background())
-		return fmt.Errorf("cloak session: %w", err)
 	}
 	s.record("cloak", mgr, profile.Cloak.LocalPort)
 	return nil

@@ -49,6 +49,8 @@ type preparedTunnel struct {
 	// Set only for a multihop route; serverID stays the exit.
 	entryServerID   string
 	entryServerName string
+	// mtu is what the host was told to give the TUN.
+	mtu int
 	// starts counts the cascades still reading the keys; guarded by mu.
 	starts int
 }

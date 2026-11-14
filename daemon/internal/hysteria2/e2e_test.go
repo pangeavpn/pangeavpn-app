@@ -226,9 +226,9 @@ func TestE2EPortHopping(t *testing.T) {
 	stopServer := startHysteria2TestServer(t, hyPort, certPEM, keyPEM, serverName, authPassword, obfsPassword)
 	defer stopServer()
 
-	old := relayDestination
-	relayDestination = net.JoinHostPort("127.0.0.1", strconv.Itoa(echoPort))
-	defer func() { relayDestination = old }()
+	old := relayDestinationOverride
+	relayDestinationOverride = net.JoinHostPort("127.0.0.1", strconv.Itoa(echoPort))
+	defer func() { relayDestinationOverride = old }()
 
 	profile := state.Hysteria2Profile{
 		RemoteHost:   "127.0.0.1",

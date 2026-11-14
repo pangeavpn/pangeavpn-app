@@ -9,6 +9,8 @@ import (
 	"context"
 	"errors"
 	"time"
+
+	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/tunclamp"
 )
 
 var errStartCancelled = errors.New("mobile: the start was cancelled by a stop")
@@ -23,6 +25,8 @@ type startAttempt struct {
 	// done closes once the attempt has released everything it held.
 	done     chan struct{}
 	prepared *preparedTunnel
+	// clamp wraps the attempt's TUN; nil until startTunnel has opened it.
+	clamp *tunclamp.Device
 	// live: the tunnel went up, and its runtime now owns ctx; guarded by mu.
 	live bool
 }

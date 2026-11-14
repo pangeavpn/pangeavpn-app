@@ -17,8 +17,10 @@ import (
 	"golang.zx2c4.com/wireguard/device"
 
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/pq"
+	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/shadowsocks"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/state"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/transport"
+	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/tunclamp"
 )
 
 type tunnelRuntime struct {
@@ -125,7 +127,8 @@ func startTunnel(tunFd int) error {
 		return fmt.Errorf("create tun: %w", err)
 	}
 
-	dev := device.NewDevice(tunDev, conn.NewDefaultBind(), newWGLogger())
+	attempt.clamp = tunclamp.Wrap(tunDev)
+	dev := device.NewDevice(attempt.clamp, conn.NewDefaultBind(), newWGLogger())
 	if err := dev.Up(); err != nil {
 		dev.Close()
 		reportError(err.Error())
@@ -159,6 +162,7 @@ func walkCascade(attempt *startAttempt, profile *state.Profile, dev *device.Devi
 		if i > 0 {
 			logAdd(logs, state.LogInfo, "fell back to "+candidate.Kind+" transport")
 		}
+		fitCarrier(attempt, candidate.Kind, logs)
 		if !goLive(attempt, dev, st, label, len(p.presharedKeyRaw) == pq.PresharedKeySize, candidate.Kind) {
 			break
 		}
@@ -174,6 +178,22 @@ func walkCascade(attempt *startAttempt, profile *state.Profile, dev *device.Devi
 	detail := "no transport could establish a tunnel: " + strings.Join(failures, "; ")
 	pushAttemptStatus(attempt, label.with(string(state.StateError), detail))
 	return errors.New("mobile: " + detail)
+}
+
+// fitCarrier clamps TCP to Shadowsocks's ceiling when Automatic lands on it
+// over a TUN sized for the others: otherwise full-size segments leave as
+// datagrams too big for the path, while the small handshake still gets through.
+// A pinned Shadowsocks already has a TUN that fits (see tunnelMTU).
+func fitCarrier(attempt *startAttempt, kind string, logs *state.LogStore) {
+	if attempt.clamp == nil {
+		return
+	}
+	if kind == "shadowsocks" && attempt.prepared.mtu > shadowsocks.MaxTunnelMTU {
+		attempt.clamp.SetMTU(shadowsocks.MaxTunnelMTU)
+		logAdd(logs, state.LogInfo, fmt.Sprintf("clamping TCP to a %d-byte MTU while shadowsocks carries the tunnel", shadowsocks.MaxTunnelMTU))
+		return
+	}
+	attempt.clamp.SetMTU(0)
 }
 
 // goLive publishes the runtime, then a connected status carrying the handshake

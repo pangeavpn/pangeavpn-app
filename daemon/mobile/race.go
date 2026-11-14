@@ -93,6 +93,7 @@ func raceCascade(attempt *startAttempt, profile *state.Profile, dev *device.Devi
 		if res.Winner > 0 {
 			logAdd(logs, state.LogInfo, "fell back to "+kind+" transport")
 		}
+		fitCarrier(attempt, kind, logs)
 		if goLive(attempt, dev, res.Value, label, len(p.presharedKeyRaw) == pq.PresharedKeySize, kind) {
 			rememberTransport(netKey, kind)
 			return nil

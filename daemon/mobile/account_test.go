@@ -359,6 +359,7 @@ func fillEveryStoredKey(t *testing.T, s *memoryStore, h *fakeHub) {
 	deadDropURLs = nil
 	t.Cleanup(func() { deadDropURLs = previous })
 	reseedFromDeadDrop(wipe, nil)
+	savePendingDeregister(pendingDeregister{LicenseKey: "token", IdentityPubkey: "an-old-identity"})
 
 	for _, key := range storedKeys {
 		if s.Get(key) == "" {
