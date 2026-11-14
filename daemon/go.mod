@@ -8,7 +8,7 @@ toolchain go1.26.7
 require (
 	github.com/clarkduvall/hyperloglog v0.0.0-20171127014514-a0107a5d8004
 	github.com/godbus/dbus/v5 v5.2.2
-	github.com/pangeavpn/tectonic v0.0.0-20261114141937-af5385184845
+	github.com/pangeavpn/tectonic v0.0.0-20261114162134-0732d56edd2f
 	github.com/sagernet/gvisor v0.0.0-20260727.0-sing-box-mod.1
 	github.com/sagernet/sing v0.9.7-0.20261023115459-5dc452e537bf
 	github.com/sagernet/sing-box v1.14.4
