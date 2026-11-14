@@ -9,7 +9,11 @@ import (
 	"testing"
 	"time"
 
+	"golang.zx2c4.com/wireguard/tun/tuntest"
+
+	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/shadowsocks"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/state"
+	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/tunclamp"
 )
 
 // closedTCPPort is a loopback port nothing listens on.
@@ -46,5 +50,50 @@ func TestStartCloakReturnsBeforeWireGuardSendsAnything(t *testing.T) {
 	}
 	if st.kind != "cloak" || st.boundPort == 0 {
 		t.Fatalf("starter recorded kind=%q port=%d, want cloak on a bound port", st.kind, st.boundPort)
+	}
+}
+
+func TestAPinnedShadowsocksGetsATunnelMTUItsDatagramsFit(t *testing.T) {
+	cases := []struct {
+		setting   int
+		preferred string
+		want      int
+	}{
+		{1380, "shadowsocks", shadowsocks.MaxTunnelMTU},
+		{1420, " shadowsocks ", shadowsocks.MaxTunnelMTU},
+		{1280, "shadowsocks", 1280},
+		{9000, "shadowsocks", shadowsocks.MaxTunnelMTU}, // out of range: the default, then the cap
+		{1380, "auto", 1380},
+		{1420, "", 1420},
+		{1420, "reality", 1420},
+		{1300, "cloak", 1300},
+	}
+	for _, c := range cases {
+		if got := tunnelMTU(c.setting, c.preferred); got != c.want {
+			t.Errorf("tunnelMTU(%d, %q) = %d, want %d", c.setting, c.preferred, got, c.want)
+		}
+	}
+}
+
+func TestShadowsocksWinningOverAWiderTUNClampsTCP(t *testing.T) {
+	logs := state.NewLogStore(50)
+	attempt := &startAttempt{
+		prepared: &preparedTunnel{mtu: 1380},
+		clamp:    tunclamp.Wrap(tuntest.NewChannelTUN().TUN()),
+	}
+
+	fitCarrier(attempt, "shadowsocks", logs)
+	if got := attempt.clamp.ClampMTU(); got != shadowsocks.MaxTunnelMTU {
+		t.Fatalf("shadowsocks over a 1380 TUN: clamp = %d, want %d", got, shadowsocks.MaxTunnelMTU)
+	}
+	fitCarrier(attempt, "reality", logs)
+	if got := attempt.clamp.ClampMTU(); got != 0 {
+		t.Fatalf("reality: clamp = %d, want off", got)
+	}
+
+	attempt.prepared.mtu = shadowsocks.MaxTunnelMTU
+	fitCarrier(attempt, "shadowsocks", logs)
+	if got := attempt.clamp.ClampMTU(); got != 0 {
+		t.Fatalf("shadowsocks over a TUN that already fits: clamp = %d, want off", got)
 	}
 }

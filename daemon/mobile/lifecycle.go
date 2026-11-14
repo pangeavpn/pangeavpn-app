@@ -13,8 +13,10 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 
+	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/shadowsocks"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/state"
 )
 
@@ -35,7 +37,7 @@ func PrepareVia(exitServerID, entryServerID string) (string, error) {
 	defer prepareMu.Unlock()
 
 	mu.Lock()
-	scope, ident, current, logs := scopeLocked(), identity, settings, wgLogs
+	scope, ident, current, logs, preferred := scopeLocked(), identity, settings, wgLogs, preferredTransport
 	mu.Unlock()
 	if scope.licenseKey == "" {
 		return "", errors.New("mobile: not authenticated")
@@ -68,9 +70,21 @@ func PrepareVia(exitServerID, entryServerID string) (string, error) {
 		got.tunnel.scrub()
 		return "", errors.New("mobile: the session changed while preparing")
 	}
+	got.tunnel.mtu = tunnelMTU(current.MTU, preferred)
 	setPreparedLocked(got.tunnel)
 	mu.Unlock()
 	return tunnelConfig(got, current)
+}
+
+// tunnelMTU is the MTU the host gives the TUN. A pinned Shadowsocks gets one
+// that fits its overhead, as on desktop; Automatic keeps the setting, and
+// fitCarrier clamps TCP instead should Shadowsocks be the one that connects.
+func tunnelMTU(setting int, preferred string) int {
+	mtu := normalizeMTU(setting)
+	if strings.TrimSpace(preferred) == "shadowsocks" && mtu > shadowsocks.MaxTunnelMTU {
+		return shadowsocks.MaxTunnelMTU
+	}
+	return mtu
 }
 
 // scrub zeroes the private key material once nothing will configure a peer
@@ -188,7 +202,7 @@ func tunnelConfig(got provisioned, current config) (string, error) {
 		Address:         got.reg.AssignedIP,
 		PrefixLength:    32,
 		DNS:             resolveDNS(got.reg.DNS, current.CustomDNS),
-		MTU:             normalizeMTU(current.MTU),
+		MTU:             got.tunnel.mtu,
 		ServerID:        got.tunnel.serverID,
 		ServerName:      got.tunnel.serverName,
 		EntryServerID:   got.tunnel.entryServerID,

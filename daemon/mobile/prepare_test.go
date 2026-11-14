@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/pq"
+	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/shadowsocks"
 )
 
 var testServerPub = bytes.Repeat([]byte{9}, 32)
@@ -352,5 +353,38 @@ func TestConcurrentPreparesAreSerialised(t *testing.T) {
 	wg.Wait()
 	if got := most.Load(); got != 1 {
 		t.Fatalf("up to %d registrations overlapped, want 1", got)
+	}
+}
+
+// The host sizes the TUN from Prepare's answer, before any transport starts.
+func TestPrepareSizesTheTUNForAPinnedShadowsocks(t *testing.T) {
+	h := signedInWith(t, serverInfo{ID: "fra-1", Name: "Frankfurt"})
+	answerRegister(h, nil)
+	if _, err := SetConfig(`{"mtu":1420}`); err != nil {
+		t.Fatalf("SetConfig: %v", err)
+	}
+
+	mtuFor := func(transport string) int {
+		t.Helper()
+		SetPreferredTransport(transport)
+		raw, err := Prepare("fra-1")
+		if err != nil {
+			t.Fatalf("Prepare with %s: %v", transport, err)
+		}
+		var cfg tunnelConfigJSON
+		if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
+			t.Fatalf("decode tunnel config %s: %v", raw, err)
+		}
+		if p := preparedNow(); p == nil || p.mtu != cfg.MTU {
+			t.Fatalf("prepared %+v does not remember the MTU %d it handed the host", p, cfg.MTU)
+		}
+		return cfg.MTU
+	}
+
+	if got := mtuFor("shadowsocks"); got != shadowsocks.MaxTunnelMTU {
+		t.Fatalf("pinned shadowsocks: MTU %d, want %d", got, shadowsocks.MaxTunnelMTU)
+	}
+	if got := mtuFor("auto"); got != 1420 {
+		t.Fatalf("automatic: MTU %d, want the 1420 setting", got)
 	}
 }

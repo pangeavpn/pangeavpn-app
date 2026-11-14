@@ -14,6 +14,11 @@ import (
 
 const outboundTag = "shadowsocks-out"
 
+// MaxTunnelMTU caps the WireGuard tunnel MTU while Shadowsocks carries it. SS
+// adds 62 B to each 32 B-wrapped WireGuard datagram, so a 1380 B packet leaves
+// as 1474 B, past a 1500 B path; 1280 leaves room for IPv6 or a tunnelled path.
+const MaxTunnelMTU = 1280
+
 // defaultMethod matches the nodes' public listeners. SS-2022 resists the active
 // probing that broke AEAD-2017; its keys are base64 PSKs of an exact length.
 const defaultMethod = "2022-blake3-aes-128-gcm"
