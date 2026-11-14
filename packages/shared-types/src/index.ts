@@ -116,6 +116,8 @@ export const TUICProfileSchema = z.object({
 export const TectonicProfileSchema = z.object({
   localPort: z.number().int().nonnegative(),
   node: z.string().min(1),
+  // More addresses of the same node; lanes spread one per address.
+  nodes: z.array(z.string()).optional(),
   coverDomain: z.string().optional(),
   keyId: z.string().min(1),
   deviceKey: z.string().min(1),

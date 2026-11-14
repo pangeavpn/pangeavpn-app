@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildTectonicProfile, tectonicCdnEdgeIp, tectonicNodeHost } from "./tectonicProfile.ts";
+import {
+  buildTectonicProfile,
+  tectonicCdnEdgeIp,
+  tectonicNodeHost,
+  tectonicNodeHosts
+} from "./tectonicProfile.ts";
 
 const base = {
   node: "203.0.113.7:8443",
@@ -92,4 +97,41 @@ test("exposes the node and CDN edge hosts for the AllowedIPs exclusion", () => {
   assert.equal(tectonicNodeHost(block), "203.0.113.7");
   assert.equal(tectonicCdnEdgeIp(block), "198.51.100.9");
   assert.equal(tectonicCdnEdgeIp(buildTectonicProfile(base, "192.0.2.10")), undefined);
+});
+
+// Lanes spread one per address, so a node with more than one sends them all.
+test("carries the node's other addresses, literals only", () => {
+  const block = buildTectonicProfile(
+    {
+      ...base,
+      nodes: [
+        "198.51.100.5",          // no port: takes the node's
+        "198.51.100.6:9443",     // its own port
+        "203.0.113.7:8443",      // the primary again: dropped
+        "198.51.100.5",          // a duplicate: dropped
+        "node2.example.net",     // a name: dropped, it would need a lookup
+        "   "                    // blank: dropped
+      ]
+    },
+    "192.0.2.10"
+  );
+  assert.equal(block?.node, "203.0.113.7:8443");
+  assert.deepEqual(block?.nodes, ["198.51.100.5:8443", "198.51.100.6:9443"]);
+});
+
+test("leaves the addresses out when the hub sends none it can use", () => {
+  assert.ok(!("nodes" in (buildTectonicProfile(base, "192.0.2.10") ?? {})));
+  const named = buildTectonicProfile({ ...base, nodes: ["node2.example.net"] }, "192.0.2.10");
+  assert.ok(named && !("nodes" in named), "a name alone leaves the field out");
+});
+
+// Every address a lane may use has to be permitted, or the lanes that take
+// the ones left out would be blocked by the killswitch.
+test("exposes every node address for the AllowedIPs exclusion", () => {
+  const block = buildTectonicProfile({ ...base, nodes: ["198.51.100.5"] }, "192.0.2.10");
+  assert.deepEqual(tectonicNodeHosts(block), ["203.0.113.7", "198.51.100.5"]);
+  assert.deepEqual(tectonicNodeHosts(buildTectonicProfile(base, "192.0.2.10")), ["203.0.113.7"]);
+  assert.deepEqual(tectonicNodeHosts(undefined), []);
+  // The single-address helper still answers for callers that want one.
+  assert.equal(tectonicNodeHost(block), "203.0.113.7");
 });

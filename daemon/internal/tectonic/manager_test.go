@@ -260,3 +260,47 @@ func TestUnprotectedLaneNeverDials(t *testing.T) {
 		t.Fatal("a lane logged in on a socket Protect refused")
 	}
 }
+
+// Lanes spread one per address, and the extra ones are an optimisation: a
+// hostname among them is dropped with a line in the log, rather than
+// refusing a profile whose first address works.
+func TestExtraNodeAddressesKeepOnlyLiterals(t *testing.T) {
+	m := newTestManager()
+	for name, tc := range map[string]struct {
+		in   []string
+		want []string
+	}{
+		"literals":        {[]string{"198.51.100.5:443", "198.51.100.6"}, []string{"198.51.100.5:443", "198.51.100.6"}},
+		"a name is gone":  {[]string{"node2.example:443", "198.51.100.5"}, []string{"198.51.100.5"}},
+		"blanks are gone": {[]string{"  ", ""}, nil},
+		"v6":              {[]string{"[2001:db8::1]:443"}, []string{"[2001:db8::1]:443"}},
+		"none":            {nil, nil},
+	} {
+		got := m.extraNodes(tc.in)
+		if len(got) != len(tc.want) {
+			t.Errorf("%s: %v, want %v", name, got, tc.want)
+			continue
+		}
+		for i := range got {
+			if got[i] != tc.want[i] {
+				t.Errorf("%s: %v, want %v", name, got, tc.want)
+				break
+			}
+		}
+	}
+}
+
+// And a profile that carries them reaches the client as they are.
+func TestProfileCarriesTheOtherNodeAddresses(t *testing.T) {
+	node := startNode(t)
+	m := newTestManager()
+	p := node.profile(t, time.Now().Add(24*time.Hour))
+	p.Nodes = []string{"198.51.100.5:443", "not-an-ip"}
+	cfg, err := m.config(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Profile.Nodes) != 1 || cfg.Profile.Nodes[0] != "198.51.100.5:443" {
+		t.Fatalf("Nodes = %v", cfg.Profile.Nodes)
+	}
+}

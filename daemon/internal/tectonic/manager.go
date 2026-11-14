@@ -184,6 +184,7 @@ func (m *Manager) config(profile state.TectonicProfile) (tect.Config, error) {
 	}
 	p := tect.Profile{
 		Node:        strings.TrimSpace(profile.Node),
+		Nodes:       m.extraNodes(profile.Nodes),
 		CoverDomain: profile.CoverDomain,
 		KeyID:       append([]byte(nil), profile.KeyID...),
 		DeviceKey:   append([]byte(nil), profile.DeviceKey...),
@@ -210,6 +211,34 @@ func (m *Manager) config(profile state.TectonicProfile) (tect.Config, error) {
 		cfg.Control = protectControl(protect)
 	}
 	return cfg, nil
+}
+
+// extraNodes are the node's other addresses, which lanes spread across so
+// that each address carries one at a time. Only IP literals: a hostname
+// would be resolved outside the tunnel, which Lockdown blocks and which
+// names the node to the network's resolver. One that is not a literal is
+// dropped with a line in the log rather than refusing the profile, since
+// these are an optimisation and the first address carries the session
+// without them.
+func (m *Manager) extraNodes(addrs []string) []string {
+	var out []string
+	for _, a := range addrs {
+		a = strings.TrimSpace(a)
+		if a == "" {
+			continue
+		}
+		host := a
+		if h, _, err := net.SplitHostPort(a); err == nil {
+			host = h
+		}
+		if net.ParseIP(host) == nil {
+			m.logs.Add(state.LogWarn, state.SourceTectonic, fmt.Sprintf(
+				"tectonic: ignoring node address %q: not an IP address", a))
+			continue
+		}
+		out = append(out, a)
+	}
+	return out
 }
 
 func parseSNIMode(s string) (tect.SNIMode, error) {

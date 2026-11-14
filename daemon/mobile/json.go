@@ -85,6 +85,7 @@ type tuicInfo struct {
 // snake_case; key_id and device_key are base64, decoded in buildTectonic.
 type tectonicInfo struct {
 	Node        string           `json:"node"`
+	Nodes       []string         `json:"nodes,omitempty"`
 	CoverDomain string           `json:"cover_domain,omitempty"`
 	KeyID       string           `json:"key_id"`
 	DeviceKey   string           `json:"device_key"`

@@ -14,7 +14,7 @@ import { buildCDNProfile } from "../shared/cdnProfile";
 import {
   buildTectonicProfile,
   tectonicCdnEdgeIp,
-  tectonicNodeHost,
+  tectonicNodeHosts,
   type TectonicHubBlock
 } from "../shared/tectonicProfile";
 import {
@@ -1843,7 +1843,9 @@ export class PangeaApiClient {
       anytls?.remoteHost,
       tuic?.remoteHost,
       cdn?.remoteHost,
-      tectonicNodeHost(tectonic),
+      // Every address its lanes may use, or the lanes taking the ones left
+      // out would be blocked by the killswitch.
+      ...tectonicNodeHosts(tectonic),
       // Like cdn above, the edge counts only as a literal; a CDN name is dropped.
       tectonicCdnEdgeIp(tectonic)
     ]).filter(isIPv4Literal);

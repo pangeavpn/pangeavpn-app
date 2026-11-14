@@ -411,3 +411,24 @@ func TestDecodeTectonicReportsAMalformedBlock(t *testing.T) {
 		t.Fatal("a malformed block decoded without error")
 	}
 }
+
+// Lanes spread one per address, so the hub's other node addresses are
+// carried, with a port each and literals only: a name would need a lookup
+// outside the tunnel.
+func TestBuildTectonicCarriesTheOtherNodeAddresses(t *testing.T) {
+	raw := `{"node":"203.0.113.7:8443","nodes":["198.51.100.5","198.51.100.6:9443","node2.example.net","  "],` +
+		`"key_id":"` + base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{1}, 20)) + `","device_key":"` +
+		base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{2}, 32)) + `"}`
+	got := buildTectonic(decodeTectonicBlock(t, raw), "198.51.100.9")
+	if got == nil {
+		t.Fatal("tectonic profile missing")
+	}
+	if !sameStrings(got.Nodes, []string{"198.51.100.5:8443", "198.51.100.6:9443"}) {
+		t.Fatalf("nodes = %v", got.Nodes)
+	}
+	// A block without them leaves the field empty rather than inventing one.
+	plain := buildTectonic(decodeTectonicBlock(t, tectonicBlock(`"203.0.113.7:8443"`)), "198.51.100.5")
+	if len(plain.Nodes) != 0 {
+		t.Fatalf("nodes = %v, want none", plain.Nodes)
+	}
+}

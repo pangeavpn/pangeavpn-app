@@ -4,6 +4,7 @@ import { isIPv6Literal, isIpLiteral } from "./ipLiteral.ts";
  *  JSON; byte fields are base64. Per-device and expiring, so never cached. */
 export interface TectonicHubBlock {
   node: string;
+  nodes?: string[];
   cover_domain?: string;
   key_id: string;
   device_key: string;
@@ -16,6 +17,8 @@ export interface TectonicHubBlock {
 export interface TectonicProfileBlock {
   localPort: number;
   node: string;
+  /** More addresses of the same node; lanes spread one per address. */
+  nodes?: string[];
   coverDomain?: string;
   keyId: string;
   deviceKey: string;
@@ -66,9 +69,23 @@ export function buildTectonicProfile(
   const cdnHost = tectonic.cdn?.host?.trim() ?? "";
   const cdnEdge = tectonic.cdn?.edge?.trim() ?? "";
   const coverDomain = tectonic.cover_domain?.trim() ?? "";
+  // More addresses of the same node, if it has them. Lanes spread one per
+  // address, which is what a browser shows per address. IP literals only, as
+  // the primary address is, and never the primary address again.
+  const port = hub.port ?? DEFAULT_PORT;
+  const primary = joinHostPort(host, port);
+  const extra = [
+    ...new Set(
+      (tectonic.nodes ?? [])
+        .map((raw) => splitNode(raw.trim()))
+        .filter((a) => isIpLiteral(a.host))
+        .map((a) => joinHostPort(a.host, a.port ?? port))
+    )
+  ].filter((a) => a !== primary);
   return {
     localPort: 0,
-    node: joinHostPort(host, hub.port ?? DEFAULT_PORT),
+    node: primary,
+    ...(extra.length ? { nodes: extra } : {}),
     ...(coverDomain ? { coverDomain } : {}),
     keyId,
     deviceKey,
@@ -92,4 +109,12 @@ export function tectonicCdnEdgeIp(block: TectonicProfileBlock | undefined): stri
 /** The node's host without its port or brackets. */
 export function tectonicNodeHost(block: TectonicProfileBlock | undefined): string | undefined {
   return block ? splitNode(block.node).host : undefined;
+}
+
+/** Every address the node's lanes may use, hosts only. All of them need
+ *  permitting through the killswitch, or the lanes that take the addresses
+ *  left out would be blocked. */
+export function tectonicNodeHosts(block: TectonicProfileBlock | undefined): string[] {
+  if (!block) return [];
+  return [block.node, ...(block.nodes ?? [])].map((a) => splitNode(a).host);
 }

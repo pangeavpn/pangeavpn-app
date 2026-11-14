@@ -252,6 +252,12 @@ type TectonicProfile struct {
 	// Node is "ip:port" (port defaults to 443); always an IP literal, so permitting
 	// it never needs a lookup.
 	Node string `json:"node"`
+	// Nodes are more addresses of the same node, if it has them. Lanes spread
+	// one per address, which is what a browser shows per address. Each must be
+	// an IP literal like Node, and each must be permitted through the
+	// killswitch; one that is not a literal is dropped rather than refused,
+	// because losing it costs cover and not the tunnel.
+	Nodes []string `json:"nodes,omitempty"`
 	// CoverDomain is the node's own domain, sent as the SNI in Own mode.
 	CoverDomain string `json:"coverDomain,omitempty"`
 	// KeyID (20 bytes, with its expiry) and DeviceKey (32 bytes) are the credential,

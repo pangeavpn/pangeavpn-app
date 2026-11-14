@@ -247,6 +247,25 @@ func decodeTectonic(raw json.RawMessage) (*tectonicInfo, error) {
 
 // buildTectonic ports apps/desktop/src/shared/tectonicProfile.ts. It dials an IP,
 // never a domain: a hostname node falls back to nodeIP, else Tectonic is dropped.
+// tectonicExtraNodes are the node's other addresses, each with a port, IP
+// literals only: a hostname would be resolved outside the tunnel. Lanes
+// spread one per address, so these also have to be protected per socket,
+// which they are, since every lane's socket is.
+func tectonicExtraNodes(addrs []string, defaultPort int) []string {
+	var out []string
+	for _, a := range addrs {
+		host, port := splitTectonicNode(strings.TrimSpace(a))
+		if !isIPLiteral(host) {
+			continue
+		}
+		if port == 0 {
+			port = defaultPort
+		}
+		out = append(out, net.JoinHostPort(strings.Trim(host, "[]"), strconv.Itoa(port)))
+	}
+	return out
+}
+
 func buildTectonic(info *tectonicInfo, nodeIP string) *state.TectonicProfile {
 	if info == nil {
 		return nil
@@ -268,6 +287,7 @@ func buildTectonic(info *tectonicInfo, nodeIP string) *state.TectonicProfile {
 	}
 	out := &state.TectonicProfile{
 		Node:        net.JoinHostPort(strings.Trim(host, "[]"), strconv.Itoa(port)),
+		Nodes:       tectonicExtraNodes(info.Nodes, port),
 		CoverDomain: strings.TrimSpace(info.CoverDomain),
 		KeyID:       keyID,
 		DeviceKey:   deviceKey,

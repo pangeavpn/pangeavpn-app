@@ -528,6 +528,7 @@ func CloneTectonicProfile(profile *TectonicProfile) *TectonicProfile {
 	copyProfile := *profile
 	copyProfile.KeyID = append([]byte(nil), profile.KeyID...)
 	copyProfile.DeviceKey = append([]byte(nil), profile.DeviceKey...)
+	copyProfile.Nodes = cloneStrings(profile.Nodes)
 	copyProfile.Pins = cloneStrings(profile.Pins)
 	copyProfile.BorrowedSNI = cloneStrings(profile.BorrowedSNI)
 	copyProfile.CDN = clonePtr(profile.CDN)
