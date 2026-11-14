@@ -347,6 +347,41 @@ func (e *wfpEngine) abortTransaction() {
 	e.sys().transactionAbort(e.handle)
 }
 
+// transact commits body whole. A BFE short on memory can refuse any commit over a
+// few filters, so body then reruns with only each unit committed atomically.
+func (e *wfpEngine) transact(body func(unit func(func() error) error) error) error {
+	if err := e.beginTransaction(); err != nil {
+		return err
+	}
+	if err := body(func(fn func() error) error { return fn() }); err != nil {
+		e.abortTransaction()
+		return err
+	}
+	err := e.commitTransaction()
+	if err == nil {
+		return nil
+	}
+	// Otherwise every later transaction fails with "transaction in progress".
+	e.abortTransaction()
+	KillSwitchWarn("kill switch: BFE would not commit the change whole (%v); applying it piece by piece", err)
+	return body(e.commitUnit)
+}
+
+func (e *wfpEngine) commitUnit(fn func() error) error {
+	if err := e.beginTransaction(); err != nil {
+		return err
+	}
+	if err := fn(); err != nil {
+		e.abortTransaction()
+		return err
+	}
+	if err := e.commitTransaction(); err != nil {
+		e.abortTransaction()
+		return err
+	}
+	return nil
+}
+
 func (e *wfpEngine) addSublayer() error {
 	name, err := windows.UTF16PtrFromString("PangeaVPN Kill Switch")
 	if err != nil {

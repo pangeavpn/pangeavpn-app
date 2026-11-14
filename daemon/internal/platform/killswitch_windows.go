@@ -129,44 +129,37 @@ func (ks *windowsKillSwitch) arm(ctx context.Context, endpointHosts []string, al
 			return persistLockedUpgrade(prev, locked)
 		}
 
-		if err := ks.engine.beginTransaction(); err != nil {
-			return fmt.Errorf("kill switch re-enable: %w", err)
-		}
-		endpointIds := make([]uint64, 0, 2*len(ips))
-		for _, ip := range ips {
-			ids, err := ks.engine.addPermitEndpointIP(ip)
-			endpointIds = append(endpointIds, ids...)
-			if err != nil {
-				ks.engine.abortTransaction()
-				return fmt.Errorf("kill switch re-enable: permit %s: %w", ip, err)
-			}
-		}
-		lanIds := make([]uint64, 0, len(LANAllowPrefixes))
-		if allowLAN {
-			for _, cidr := range LANAllowPrefixes {
-				id, err := ks.engine.addPermitIPv4Subnet(cidr)
-				if err != nil {
-					ks.engine.abortTransaction()
-					return fmt.Errorf("kill switch re-enable: permit LAN %s: %w", cidr, err)
-				}
-				lanIds = append(lanIds, id)
-			}
-		}
-		// Old permits out last, same transaction.
+		var endpointIds, lanIds []uint64
 		var staleDeletes []string
-		for _, id := range ks.endpointFilterIds {
-			if err := ks.engine.deleteFilter(id); err != nil {
-				staleDeletes = append(staleDeletes, fmt.Sprintf("%d: %v", id, err))
+		err = ks.engine.transact(func(func(func() error) error) error {
+			endpointIds = make([]uint64, 0, 2*len(ips))
+			for _, ip := range ips {
+				ids, err := ks.engine.addPermitEndpointIP(ip)
+				endpointIds = append(endpointIds, ids...)
+				if err != nil {
+					return fmt.Errorf("permit %s: %w", ip, err)
+				}
 			}
-		}
-		for _, id := range ks.lanFilterIds {
-			if err := ks.engine.deleteFilter(id); err != nil {
-				staleDeletes = append(staleDeletes, fmt.Sprintf("%d: %v", id, err))
+			lanIds = make([]uint64, 0, len(LANAllowPrefixes))
+			if allowLAN {
+				for _, cidr := range LANAllowPrefixes {
+					id, err := ks.engine.addPermitIPv4Subnet(cidr)
+					if err != nil {
+						return fmt.Errorf("permit LAN %s: %w", cidr, err)
+					}
+					lanIds = append(lanIds, id)
+				}
 			}
-		}
-		if err := ks.engine.commitTransaction(); err != nil {
-			// Otherwise every later re-arm fails with "transaction in progress".
-			ks.engine.abortTransaction()
+			// Old permits out last.
+			staleDeletes = nil
+			for _, id := range slices.Concat(ks.endpointFilterIds, ks.lanFilterIds) {
+				if err := ks.engine.deleteFilter(id); err != nil {
+					staleDeletes = append(staleDeletes, fmt.Sprintf("%d: %v", id, err))
+				}
+			}
+			return nil
+		})
+		if err != nil {
 			return fmt.Errorf("kill switch re-enable: %w", err)
 		}
 		ks.endpointFilterIds = endpointIds
@@ -278,118 +271,116 @@ func (e *splitInstallError) Unwrap() error { return e.err }
 // out, the persistent set replaced by this build's, this arm's permits in.
 func installWindowsLock(engine *wfpEngine, ips []string, allowLAN bool, split windowsSplitSpec) (lockFilterIds, error) {
 	var ids lockFilterIds
-	if err := engine.beginTransaction(); err != nil {
-		return ids, err
-	}
-	fail := func(err error) (lockFilterIds, error) {
-		engine.abortTransaction()
-		return lockFilterIds{}, err
-	}
-
-	if err := engine.addSublayer(); err != nil {
-		return fail(err)
-	}
-	// A restarted daemon inherits the engine-keyed permits of the process
-	// before it (old nodes, old tunnel LUID); retire them in this transaction.
-	if _, err := engine.deleteFiltersInSublayer(pangeaVPNSublayerKey, isEphemeralFilter); err != nil {
-		return fail(fmt.Errorf("sweep stale permits: %w", err))
-	}
-	// Delete-then-add under the same keys, so an older build's weights and
-	// filter set are replaced without the lock ever being down.
-	for _, key := range pangeaPersistentFilterKeys {
-		if err := engine.deleteFilterByKey(key); err != nil {
-			return fail(fmt.Errorf("retire persistent filter %v: %w", key, err))
+	err := engine.transact(func(unit func(func() error) error) error {
+		ids = lockFilterIds{}
+		if err := engine.addSublayer(); err != nil {
+			return err
 		}
-	}
-	for _, step := range persistentLockFilters {
-		if _, err := step.add(engine); err != nil {
-			return fail(fmt.Errorf("%s: %w", step.name, err))
+		// A restarted daemon inherits the engine-keyed permits of the process
+		// before it (old nodes, old tunnel LUID); retire them in this transaction.
+		if _, err := engine.deleteFiltersInSublayer(pangeaVPNSublayerKey, isEphemeralFilter); err != nil {
+			return fmt.Errorf("sweep stale permits: %w", err)
 		}
-	}
-
-	ids.endpoint = make([]uint64, 0, 2*len(ips))
-	for _, ip := range ips {
-		added, err := engine.addPermitEndpointIP(ip)
-		ids.endpoint = append(ids.endpoint, added...)
-		if err != nil {
-			return fail(fmt.Errorf("permit %s: %w", ip, err))
-		}
-	}
-
-	// Unicast renewals to the server itself and the LAN ranges themselves,
-	// only when the user opted into LAN access.
-	ids.lan = make([]uint64, 0, len(LANAllowPrefixes))
-	if allowLAN {
-		for _, cidr := range LANAllowPrefixes {
-			if cidr == "224.0.0.0/4" {
-				continue // multicast — not a DHCP server/relay address
-			}
-			if _, err := engine.addPermitDHCP(cidr); err != nil {
-				return fail(fmt.Errorf("permit DHCP renewal %s: %w", cidr, err))
+		// Delete-then-add under the same key, so an older build's weights and
+		// filter set are replaced without the lock ever being down.
+		for _, step := range persistentLockFilters {
+			if err := unit(func() error {
+				if err := engine.deleteFilterByKey(step.key); err != nil {
+					return fmt.Errorf("retire persistent filter %v: %w", step.key, err)
+				}
+				if _, err := step.add(engine); err != nil {
+					return fmt.Errorf("%s: %w", step.name, err)
+				}
+				return nil
+			}); err != nil {
+				return err
 			}
 		}
-		for _, cidr := range LANAllowPrefixes {
-			id, err := engine.addPermitIPv4Subnet(cidr)
+
+		ids.endpoint = make([]uint64, 0, 2*len(ips))
+		for _, ip := range ips {
+			added, err := engine.addPermitEndpointIP(ip)
+			ids.endpoint = append(ids.endpoint, added...)
 			if err != nil {
-				return fail(fmt.Errorf("permit LAN %s: %w", cidr, err))
+				return fmt.Errorf("permit %s: %w", ip, err)
 			}
-			ids.lan = append(ids.lan, id)
 		}
-	}
 
-	// The sweep above took the split permits too; whatever is still wanted goes back in.
-	if split.appID != nil {
-		added, err := engine.addPermitSplitEgress(split.appID, split.tunnelLUID)
-		if err != nil {
-			return fail(&splitInstallError{fmt.Errorf("permit split egress: %w", err)})
+		// Unicast renewals to the server itself and the LAN ranges themselves,
+		// only when the user opted into LAN access.
+		ids.lan = make([]uint64, 0, len(LANAllowPrefixes))
+		if allowLAN {
+			for _, cidr := range LANAllowPrefixes {
+				if cidr == "224.0.0.0/4" {
+					continue // multicast — not a DHCP server/relay address
+				}
+				if _, err := engine.addPermitDHCP(cidr); err != nil {
+					return fmt.Errorf("permit DHCP renewal %s: %w", cidr, err)
+				}
+			}
+			for _, cidr := range LANAllowPrefixes {
+				id, err := engine.addPermitIPv4Subnet(cidr)
+				if err != nil {
+					return fmt.Errorf("permit LAN %s: %w", cidr, err)
+				}
+				ids.lan = append(ids.lan, id)
+			}
 		}
-		ids.splitEgress = added
-	}
-	for _, cidr := range split.cidrs {
-		added, err := engine.addPermitSplitCIDR(cidr)
-		ids.splitCIDR = append(ids.splitCIDR, added...)
-		if err != nil {
-			return fail(&splitInstallError{fmt.Errorf("permit split range %s: %w", cidr, err)})
-		}
-	}
 
-	if err := engine.commitTransaction(); err != nil {
-		engine.abortTransaction()
+		// The sweep above took the split permits too; whatever is still wanted goes back in.
+		if split.appID != nil {
+			added, err := engine.addPermitSplitEgress(split.appID, split.tunnelLUID)
+			if err != nil {
+				return &splitInstallError{fmt.Errorf("permit split egress: %w", err)}
+			}
+			ids.splitEgress = added
+		}
+		for _, cidr := range split.cidrs {
+			added, err := engine.addPermitSplitCIDR(cidr)
+			ids.splitCIDR = append(ids.splitCIDR, added...)
+			if err != nil {
+				return &splitInstallError{fmt.Errorf("permit split range %s: %w", cidr, err)}
+			}
+		}
+		return nil
+	})
+	if err != nil {
 		return lockFilterIds{}, err
 	}
 	return ids, nil
 }
 
-// persistentLockFilters is the lock that outlives the process, in install
-// order. Blocks first, then the permits that keep the host usable while locked.
+// persistentLockFilters is the lock that outlives the process. Permits come
+// first, so a lock applied piece by piece never blocks loopback on the way up.
 var persistentLockFilters = []struct {
 	name string
+	key  windows.GUID
 	add  func(*wfpEngine) (uint64, error)
 }{
-	{"block outbound v4", (*wfpEngine).addBlockAllOutbound},
-	{"block inbound v4", (*wfpEngine).addBlockAllInbound},
-	{"block outbound v6", (*wfpEngine).addBlockAllOutboundV6},
-	{"block inbound v6", (*wfpEngine).addBlockAllInboundV6},
-	{"block forward v4", (*wfpEngine).addBlockAllForwardV4},
-	{"block forward v6", (*wfpEngine).addBlockAllForwardV6},
-	{"block DNS udp", (*wfpEngine).addBlockDNSUDP},
-	{"block DNS tcp", (*wfpEngine).addBlockDNSTCP},
-	{"block DoT udp", (*wfpEngine).addBlockDoTUDP},
-	{"block DoT tcp", (*wfpEngine).addBlockDoTTCP},
-	{"permit loopback v4", (*wfpEngine).addPermitLoopback},
-	{"permit loopback inbound v4", (*wfpEngine).addPermitLoopbackInboundV4},
-	{"permit loopback subnet v4", (*wfpEngine).addPermitLoopbackSubnet},
-	{"permit loopback subnet inbound v4", (*wfpEngine).addPermitLoopbackSubnetInboundV4},
-	{"permit loopback v6", (*wfpEngine).addPermitLoopbackV6},
-	{"permit loopback inbound v6", (*wfpEngine).addPermitLoopbackInboundV6},
-	{"permit loopback subnet v6", func(e *wfpEngine) (uint64, error) {
+	{"permit loopback v4", pangeaPermitLoopbackV4FilterKey, (*wfpEngine).addPermitLoopback},
+	{"permit loopback inbound v4", pangeaPermitLoopbackInboundV4FilterKey, (*wfpEngine).addPermitLoopbackInboundV4},
+	{"permit loopback subnet v4", pangeaPermitLoopbackNetV4FilterKey, (*wfpEngine).addPermitLoopbackSubnet},
+	{"permit loopback subnet inbound v4", pangeaPermitLoopbackNetInV4FilterKey, (*wfpEngine).addPermitLoopbackSubnetInboundV4},
+	{"permit loopback v6", pangeaPermitLoopbackV6FilterKey, (*wfpEngine).addPermitLoopbackV6},
+	{"permit loopback inbound v6", pangeaPermitLoopbackInboundV6FilterKey, (*wfpEngine).addPermitLoopbackInboundV6},
+	{"permit loopback subnet v6", pangeaPermitLoopbackNetV6FilterKey, func(e *wfpEngine) (uint64, error) {
 		return e.addPermitLoopbackSubnetV6(cFWPM_LAYER_ALE_AUTH_CONNECT_V6, pangeaPermitLoopbackNetV6FilterKey, "PangeaVPN Allow Loopback Subnet IPv6")
 	}},
-	{"permit loopback subnet inbound v6", func(e *wfpEngine) (uint64, error) {
+	{"permit loopback subnet inbound v6", pangeaPermitLoopbackNetInV6FilterKey, func(e *wfpEngine) (uint64, error) {
 		return e.addPermitLoopbackSubnetV6(cFWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V6, pangeaPermitLoopbackNetInV6FilterKey, "PangeaVPN Allow Loopback Subnet Inbound IPv6")
 	}},
-	{"permit DHCP broadcast", (*wfpEngine).addPermitDHCPBroadcast},
-	{"permit DHCP reply", (*wfpEngine).addPermitDHCPInbound},
+	{"permit DHCP broadcast", pangeaPermitDHCPOutV4FilterKey, (*wfpEngine).addPermitDHCPBroadcast},
+	{"permit DHCP reply", pangeaPermitDHCPInV4FilterKey, (*wfpEngine).addPermitDHCPInbound},
+	{"block outbound v4", pangeaBlockAllOutboundV4FilterKey, (*wfpEngine).addBlockAllOutbound},
+	{"block inbound v4", pangeaBlockAllInboundV4FilterKey, (*wfpEngine).addBlockAllInbound},
+	{"block outbound v6", pangeaBlockAllOutboundV6FilterKey, (*wfpEngine).addBlockAllOutboundV6},
+	{"block inbound v6", pangeaBlockAllInboundV6FilterKey, (*wfpEngine).addBlockAllInboundV6},
+	{"block forward v4", pangeaBlockForwardV4FilterKey, (*wfpEngine).addBlockAllForwardV4},
+	{"block forward v6", pangeaBlockForwardV6FilterKey, (*wfpEngine).addBlockAllForwardV6},
+	{"block DNS udp", pangeaBlockDNSUDPV4FilterKey, (*wfpEngine).addBlockDNSUDP},
+	{"block DNS tcp", pangeaBlockDNSTCPV4FilterKey, (*wfpEngine).addBlockDNSTCP},
+	{"block DoT udp", pangeaBlockDoTUDPV4FilterKey, (*wfpEngine).addBlockDoTUDP},
+	{"block DoT tcp", pangeaBlockDoTTCPV4FilterKey, (*wfpEngine).addBlockDoTTCP},
 }
 
 // v4Permits drops addresses the IPv4-only permit builders cannot express. IPv6
@@ -682,29 +673,26 @@ func (ks *windowsKillSwitch) swapForwardLANPermits(allowLAN bool) {
 	if !ks.forwardLock {
 		return
 	}
-	if err := ks.engine.beginTransaction(); err != nil {
-		ks.dropForwardLock(err)
-		return
-	}
-	ids := make([]uint64, 0, len(LANAllowPrefixes))
-	if allowLAN {
-		for _, cidr := range LANAllowPrefixes {
-			id, err := ks.engine.addPermitForwardIPv4Subnet(cidr)
-			if err != nil {
-				ks.engine.abortTransaction()
-				ks.dropForwardLock(fmt.Errorf("permit forwarding to LAN %s: %w", cidr, err))
-				return
+	var ids []uint64
+	err := ks.engine.transact(func(func(func() error) error) error {
+		ids = make([]uint64, 0, len(LANAllowPrefixes))
+		if allowLAN {
+			for _, cidr := range LANAllowPrefixes {
+				id, err := ks.engine.addPermitForwardIPv4Subnet(cidr)
+				if err != nil {
+					return fmt.Errorf("permit forwarding to LAN %s: %w", cidr, err)
+				}
+				ids = append(ids, id)
 			}
-			ids = append(ids, id)
 		}
-	}
-	for _, id := range ks.forwardLANFilterIds {
-		if err := ks.engine.deleteFilter(id); err != nil {
-			KillSwitchWarn("kill switch could not retire forward LAN permit %d: %v", id, err)
+		for _, id := range ks.forwardLANFilterIds {
+			if err := ks.engine.deleteFilter(id); err != nil {
+				KillSwitchWarn("kill switch could not retire forward LAN permit %d: %v", id, err)
+			}
 		}
-	}
-	if err := ks.engine.commitTransaction(); err != nil {
-		ks.engine.abortTransaction()
+		return nil
+	})
+	if err != nil {
 		ks.dropForwardLock(err)
 		return
 	}
@@ -746,31 +734,27 @@ func (ks *windowsKillSwitch) installBootTimeLock() {
 // installBootTimeTwins replaces the previous build's boot-time set by key in
 // one transaction, the same way installWindowsLock treats the persistent set.
 func installBootTimeTwins(engine *wfpEngine, includeForward bool) error {
-	if err := engine.beginTransaction(); err != nil {
-		return err
-	}
-	for _, key := range pangeaPersistentFilterKeys {
-		bootKey, _ := bootTimeVariant(key, 0)
-		if err := engine.deleteFilterByKey(bootKey); err != nil {
-			engine.abortTransaction()
-			return fmt.Errorf("retire boot-time filter %v: %w", bootKey, err)
-		}
-	}
 	view := engine.bootTimeView()
-	for _, step := range persistentLockFilters {
-		if !includeForward && strings.HasPrefix(step.name, "block forward") {
-			continue
+	return engine.transact(func(unit func(func() error) error) error {
+		for _, step := range persistentLockFilters {
+			if err := unit(func() error {
+				bootKey, _ := bootTimeVariant(step.key, 0)
+				if err := engine.deleteFilterByKey(bootKey); err != nil {
+					return fmt.Errorf("retire boot-time filter %v: %w", bootKey, err)
+				}
+				if !includeForward && strings.HasPrefix(step.name, "block forward") {
+					return nil
+				}
+				if _, err := step.add(view); err != nil {
+					return fmt.Errorf("%s (boot-time): %w", step.name, err)
+				}
+				return nil
+			}); err != nil {
+				return err
+			}
 		}
-		if _, err := step.add(view); err != nil {
-			engine.abortTransaction()
-			return fmt.Errorf("%s (boot-time): %w", step.name, err)
-		}
-	}
-	if err := engine.commitTransaction(); err != nil {
-		engine.abortTransaction()
-		return err
-	}
-	return nil
+		return nil
+	})
 }
 
 // DropTunnelPermit retires the tunnel permits while the lock stays armed, so a
@@ -944,20 +928,20 @@ func (ks *windowsKillSwitch) swapForwardSplitPermits(cidrs []string) {
 // swapFilters adds the new filters and retires old in one transaction, new in
 // before old out; any failure aborts it, leaving old exactly as it was.
 func (ks *windowsKillSwitch) swapFilters(old []uint64, add func() ([]uint64, error)) ([]uint64, error) {
-	if err := ks.engine.beginTransaction(); err != nil {
-		return nil, err
-	}
-	ids, err := add()
-	for i := 0; err == nil && i < len(old); i++ {
-		if delErr := ks.engine.deleteFilter(old[i]); delErr != nil {
-			err = fmt.Errorf("retire permit %d: %w", old[i], delErr)
+	var ids []uint64
+	err := ks.engine.transact(func(func(func() error) error) error {
+		var err error
+		if ids, err = add(); err != nil {
+			return err
 		}
-	}
-	if err == nil {
-		err = ks.engine.commitTransaction()
-	}
+		for _, id := range old {
+			if err := ks.engine.deleteFilter(id); err != nil {
+				return fmt.Errorf("retire permit %d: %w", id, err)
+			}
+		}
+		return nil
+	})
 	if err != nil {
-		ks.engine.abortTransaction()
 		return nil, err
 	}
 	return ids, nil
