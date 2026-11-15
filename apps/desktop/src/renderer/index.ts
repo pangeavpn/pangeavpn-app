@@ -172,6 +172,8 @@ const hubNormalToggle = document.getElementById("hubNormalToggle") as HTMLInputE
 const allowLanToggle = document.getElementById("allowLanToggle") as HTMLInputElement;
 const transportRaceToggle = document.getElementById("transportRaceToggle") as HTMLInputElement;
 const transportRaceRow = document.getElementById("transportRaceRow") as HTMLElement;
+const gamingModeToggle = document.getElementById("gamingModeToggle") as HTMLInputElement;
+const gamingModeRow = document.getElementById("gamingModeRow") as HTMLElement;
 const postQuantumToggle = document.getElementById("postQuantumToggle") as HTMLInputElement;
 const dnsPresetSelect = document.getElementById("dnsPresetSelect") as HTMLSelectElement;
 const customDnsField = document.getElementById("customDnsField") as HTMLElement;
@@ -722,6 +724,10 @@ function syncTransportChoice(): void {
   // Only Automatic has a cascade to race.
   transportRaceToggle.disabled = current !== "auto";
   transportRaceRow.classList.toggle("is-disabled", current !== "auto");
+  // Gaming mode is Tectonic's, so it only applies where Tectonic can run.
+  const gamingApplies = current === "auto" || current === "tectonic";
+  gamingModeToggle.disabled = !gamingApplies;
+  gamingModeRow.classList.toggle("is-disabled", !gamingApplies);
 }
 
 /** Route the choice back through the select so every existing handler runs. */
@@ -2332,6 +2338,13 @@ wireBooleanToggle(
 );
 
 wireBooleanToggle(
+  gamingModeToggle,
+  (value) => pangeaApi!.setGamingMode(value),
+  { on: "toggle.gamingMode.on", off: "toggle.gamingMode.off" },
+  "gamingMode"
+);
+
+wireBooleanToggle(
   postQuantumToggle,
   (value) => pangeaApi!.setPostQuantum(value),
   { on: "toggle.postQuantum.on", off: "toggle.postQuantum.off" },
@@ -3567,6 +3580,7 @@ async function init(): Promise<void> {
       preferredTransportSelect.value = preferredTransport;
       preferredTransportSelect.dataset.previousValue = preferredTransport;
       transportRaceToggle.checked = await pangeaApi.getTransportRace();
+      gamingModeToggle.checked = await pangeaApi.getGamingMode();
       syncTransportChoice();
     } catch {
       // default off

@@ -74,6 +74,8 @@ export const IPC_CHANNELS = {
   getPostQuantum: "settings:getPostQuantum",
   setTransportRace: "settings:setTransportRace",
   getTransportRace: "settings:getTransportRace",
+  setGamingMode: "settings:setGamingMode",
+  getGamingMode: "settings:getGamingMode",
   setWireguardMtu: "settings:setWireguardMtu",
   getWireguardMtu: "settings:getWireguardMtu",
   setCustomDns: "settings:setCustomDns",
@@ -422,6 +424,8 @@ export interface PangeaApi {
   getPostQuantum: () => Promise<boolean>;
   setTransportRace: (enabled: boolean) => Promise<void>;
   getTransportRace: () => Promise<boolean>;
+  setGamingMode: (enabled: boolean) => Promise<void>;
+  getGamingMode: () => Promise<boolean>;
   /** Resolves to the MTU actually stored — differs from `mtu` when it was rejected. */
   setWireguardMtu: (mtu: number) => Promise<number>;
   getWireguardMtu: () => Promise<number>;

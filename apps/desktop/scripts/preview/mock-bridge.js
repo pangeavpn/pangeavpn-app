@@ -104,6 +104,7 @@
     getCustomDns: [],
     getPreferredTransport: () => q.get("transport") || "auto",
     getTransportRace: true,
+    getGamingMode: false,
     getAccountNumber: "ABCD-EFGH-JKMN-PQRS",
     getRememberedAccountNumber: null,
     listDevices: [],

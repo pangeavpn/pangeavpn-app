@@ -144,6 +144,8 @@ let connectionAttemptRunning = false;
 let allowLanEnabled = true;
 // Auto mode dials transports in parallel unless this is switched off.
 let transportRaceEnabled = true;
+// Tectonic copies light traffic onto a second lane each way; off by default for cover.
+let gamingModeEnabled = false;
 let launchAtStartupEnabled = false;
 // Lockdown (kill switch while disconnected) and auto-connect (reconnect on
 // launch/drop) shipped as one "alwaysConnected" toggle, migrated on load below.
@@ -1409,13 +1411,15 @@ function connectionOptions(): {
   lockdown: boolean;
   preferredTransport?: "tectonic" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "anytls" | "tuic" | "cdn" | "snowflake" | "wireguard";
   disableTransportRace?: boolean;
+  gamingMode?: boolean;
 } {
   return {
     allowLAN: allowLanEnabled,
     lockdown: lockdownEnabled,
     ...(preferredTransport !== "auto" && { preferredTransport }),
     // Racing only ever applies to auto mode, so a pinned transport never sends it.
-    ...(preferredTransport === "auto" && !transportRaceEnabled && { disableTransportRace: true })
+    ...(preferredTransport === "auto" && !transportRaceEnabled && { disableTransportRace: true }),
+    ...(gamingModeEnabled && { gamingMode: true })
   };
 }
 
@@ -2143,6 +2147,17 @@ function registerTransportSettingsHandlers(): void {
     },
     () => transportRaceEnabled
   );
+
+  registerBoolSetting(
+    { get: IPC_CHANNELS.getGamingMode, set: IPC_CHANNELS.setGamingMode },
+    "gamingMode",
+    "gamingMode setting",
+    (enabled) => {
+      gamingModeEnabled = !!enabled;
+      return gamingModeEnabled;
+    },
+    () => gamingModeEnabled
+  );
 }
 
 function registerStartupSettingsHandlers(): void {
@@ -2666,6 +2681,7 @@ function applyPersistedSettings(settings: Record<string, unknown>): void {
   if (settings.transportRace === false) {
     transportRaceEnabled = false;
   }
+  gamingModeEnabled = settings.gamingMode === true;
   pangeaApiClient.setPostQuantumEnabled(settings.postQuantum === true);
   // settings.json is hand-editable, so this goes through the same normalizer
   // as IPC input — anything unusable falls back to the default.

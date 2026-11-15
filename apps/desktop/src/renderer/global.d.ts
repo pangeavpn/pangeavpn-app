@@ -222,6 +222,8 @@ declare global {
     getPostQuantum: () => Promise<boolean>;
     setTransportRace: (enabled: boolean) => Promise<void>;
     getTransportRace: () => Promise<boolean>;
+    setGamingMode: (enabled: boolean) => Promise<void>;
+    getGamingMode: () => Promise<boolean>;
     /** Resolves to the MTU actually stored — differs from `mtu` when it was rejected. */
     setWireguardMtu: (mtu: number) => Promise<number>;
     getWireguardMtu: () => Promise<number>;
