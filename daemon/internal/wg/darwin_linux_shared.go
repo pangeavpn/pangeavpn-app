@@ -21,6 +21,7 @@ import (
 	"golang.zx2c4.com/wireguard/device"
 	"golang.zx2c4.com/wireguard/tun"
 
+	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/platform"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/state"
 )
 
@@ -758,10 +759,22 @@ func resolveEndpointRoutes(ctx context.Context, endpointHosts []string) ([]route
 		return nil, nil
 	}
 
+	results := make([][]net.IP, len(endpointHosts))
+	errs := make([]error, len(endpointHosts))
+	var wg sync.WaitGroup
+	for i, host := range endpointHosts {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			results[i], errs[i] = resolveHostIPs(ctx, host)
+		}()
+	}
+	wg.Wait()
+
 	unique := map[string]routeSpec{}
 	var lastErr error
-	for _, host := range endpointHosts {
-		ips, err := resolveHostIPs(ctx, host)
+	for i := range endpointHosts {
+		ips, err := results[i], errs[i]
 		if err != nil {
 			lastErr = err
 			continue
@@ -811,9 +824,7 @@ func shouldSkipEndpointRouteIP(ip net.IP) bool {
 // it would otherwise hang on a tunnel that is already a black hole.
 const hostResolveTimeout = 5 * time.Second
 
-var lookupHostIPs = func(ctx context.Context, host string) ([]net.IP, error) {
-	return net.DefaultResolver.LookupIP(ctx, "ip", host)
-}
+var lookupHostIPs = platform.CachedLookupIP
 
 func resolveHostIPs(ctx context.Context, host string) ([]net.IP, error) {
 	if host == "" {

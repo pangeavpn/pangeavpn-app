@@ -2515,6 +2515,12 @@ func (s *Service) UpdateConfig(cfg state.Config) error {
 		return err
 	}
 	s.logs.Add(state.LogInfo, state.SourceDaemon, "config updated")
+	// Only through a live tunnel: unprompted lookups of every server's hosts would show on the network's resolver.
+	if current, _ := s.machine.Get(); current == state.StateConnected {
+		for _, profile := range cfg.Profiles {
+			platform.PrefetchHosts(withTransportBypassHosts(profile).BypassHosts)
+		}
+	}
 	return nil
 }
 

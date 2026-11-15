@@ -98,8 +98,8 @@ const killSwitchStateFile = "killswitch-state.json"
 // Set by platform-specific files (killswitch_windows.go, killswitch_darwin.go, killswitch_linux.go).
 var newPlatformKillSwitch func() KillSwitch
 
-var lookupResolverIP = func(ctx context.Context, network, host string) ([]net.IP, error) {
-	return net.DefaultResolver.LookupIP(ctx, network, host)
+var lookupResolverIP = func(ctx context.Context, _, host string) ([]net.IP, error) {
+	return CachedLookupIP(ctx, host)
 }
 
 // endpointResolveTimeout bounds one Enable's DNS pass: behind an armed lock,
@@ -313,11 +313,23 @@ func resolveEndpointHosts(ctx context.Context, hosts []string) ([]string, error)
 		ctx, cancel = context.WithTimeout(ctx, endpointResolveTimeout)
 		defer cancel()
 	}
+	results := make([][]string, len(hosts))
+	errs := make([]error, len(hosts))
+	var wg sync.WaitGroup
+	for i, host := range hosts {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			results[i], errs[i] = resolveEndpointIPs(ctx, host)
+		}()
+	}
+	wg.Wait()
+
 	seen := make(map[string]struct{}, len(hosts))
 	out := make([]string, 0, len(hosts))
 	anyFailed := false
-	for _, host := range hosts {
-		ips, err := resolveEndpointIPs(ctx, host)
+	for i, host := range hosts {
+		ips, err := results[i], errs[i]
 		if err != nil {
 			anyFailed = true
 			if warn := EndpointResolveWarn; warn != nil {
