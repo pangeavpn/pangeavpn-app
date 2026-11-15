@@ -36,8 +36,13 @@ func currentNetworkKeyExcluding(extraTunnelNames []string) string {
 	if err != nil {
 		return ""
 	}
+	primaryIsTunnel := isTunnelInterfaceName(primary, extraTunnelNames)
 	ifaces := make([]keyIface, 0, len(osIfaces))
 	for _, iface := range osIfaces {
+		// On Windows each Addrs call re-walks every adapter (~50ms), and only the primary's are read below.
+		if !primaryIsTunnel && iface.Name != primary {
+			continue
+		}
 		addrs, err := iface.Addrs()
 		if err != nil {
 			continue
