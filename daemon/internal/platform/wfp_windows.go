@@ -7,6 +7,8 @@ import (
 	"net"
 	"runtime"
 	"strings"
+	"sync/atomic"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -347,9 +349,20 @@ func (e *wfpEngine) abortTransaction() {
 	e.sys().transactionAbort(e.handle)
 }
 
+// wholeRefusedAt is when the real BFE last refused a whole commit; engines are opened per call.
+var wholeRefusedAt atomic.Int64
+
+// wholeRetryAfter is how long a refusal sends every change straight to piece by piece.
+const wholeRetryAfter = 10 * time.Minute
+
 // transact commits body whole. A BFE short on memory can refuse any commit over a
 // few filters, so body then reruns with only each unit committed atomically.
 func (e *wfpEngine) transact(body func(unit func(func() error) error) error) error {
+	if e.calls == nil {
+		if at := wholeRefusedAt.Load(); at != 0 && time.Since(time.Unix(0, at)) < wholeRetryAfter {
+			return body(e.commitUnit)
+		}
+	}
 	if err := e.beginTransaction(); err != nil {
 		return err
 	}
@@ -363,7 +376,10 @@ func (e *wfpEngine) transact(body func(unit func(func() error) error) error) err
 	}
 	// Otherwise every later transaction fails with "transaction in progress".
 	e.abortTransaction()
-	KillSwitchWarn("kill switch: BFE would not commit the change whole (%v); applying it piece by piece", err)
+	if e.calls == nil {
+		wholeRefusedAt.Store(time.Now().UnixNano())
+	}
+	KillSwitchWarn("kill switch: BFE would not commit the change whole (%v); applying it piece by piece for %v", err, wholeRetryAfter)
 	return body(e.commitUnit)
 }
 
