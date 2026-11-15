@@ -130,6 +130,8 @@ type connectRequest struct {
 	PreferredTransport string `json:"preferredTransport,omitempty"`
 	// Auto mode only: true tries transports one at a time instead of racing their dials.
 	DisableTransportRace bool `json:"disableTransportRace,omitempty"`
+	// GamingMode copies light traffic onto a second Tectonic lane each way.
+	GamingMode bool `json:"gamingMode,omitempty"`
 }
 
 type disconnectRequest struct {
@@ -355,7 +357,7 @@ func NewHandler(token string, service *Service) http.Handler {
 			return
 		}
 
-		err := service.Connect(r.Context(), req.ProfileID, ConnectOptions{AllowLAN: req.AllowLAN, Lockdown: req.Lockdown, PreferredTransport: req.PreferredTransport, DisableTransportRace: req.DisableTransportRace})
+		err := service.Connect(r.Context(), req.ProfileID, ConnectOptions{AllowLAN: req.AllowLAN, Lockdown: req.Lockdown, PreferredTransport: req.PreferredTransport, DisableTransportRace: req.DisableTransportRace, GamingMode: req.GamingMode})
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, serviceErrorResponse(err))
 			return
@@ -619,7 +621,7 @@ func NewHandler(token string, service *Service) http.Handler {
 			return
 		}
 
-		err := service.Switch(r.Context(), req.ProfileID, ConnectOptions{AllowLAN: req.AllowLAN, Lockdown: req.Lockdown, PreferredTransport: req.PreferredTransport, DisableTransportRace: req.DisableTransportRace})
+		err := service.Switch(r.Context(), req.ProfileID, ConnectOptions{AllowLAN: req.AllowLAN, Lockdown: req.Lockdown, PreferredTransport: req.PreferredTransport, DisableTransportRace: req.DisableTransportRace, GamingMode: req.GamingMode})
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, serviceErrorResponse(err))
 			return

@@ -20,6 +20,7 @@ type sessionRecord struct {
 	PreferredTransport string `json:"preferredTransport,omitempty"`
 	// Omitted means racing on, which is also what a record from before the setting means.
 	DisableTransportRace bool `json:"disableTransportRace,omitempty"`
+	GamingMode           bool `json:"gamingMode,omitempty"`
 }
 
 const sessionRecordFile = "last-session.json"

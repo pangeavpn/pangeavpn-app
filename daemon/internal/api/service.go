@@ -95,6 +95,7 @@ type tectonicManager interface {
 	transport.Manager
 	Start(ctx context.Context, profile state.TectonicProfile) error
 	Status() state.TransportStatus
+	SetGamingMode(on bool)
 }
 
 type tuicManager interface {
@@ -621,6 +622,9 @@ type ConnectOptions struct {
 	// DisableTransportRace makes the auto cascade try transports strictly one
 	// at a time. Racing is on by default, so the zero value keeps it on.
 	DisableTransportRace bool
+
+	// GamingMode copies light traffic onto a second Tectonic lane each way.
+	GamingMode bool
 }
 
 // registerCancel publishes cancel as the interruptible operation. The returned
@@ -838,6 +842,7 @@ func (s *Service) bringUpAfterKillSwitch(ctx context.Context, profile state.Prof
 
 	netGen := s.networkChangeGen()
 	networkKey := s.currentNetworkKey()
+	s.tectonic.SetGamingMode(opts.GamingMode)
 	kind, err := s.startTransportWithHandshake(ctx, &profile, &wireGuardProfile, opts.PreferredTransport, networkKey, !opts.DisableTransportRace)
 	if err != nil {
 		if errors.Is(err, ErrHostOffline) {
@@ -3726,6 +3731,7 @@ func (s *Service) recoverRecordedSession(persisted platform.KillSwitchState) {
 		Lockdown:             record.Lockdown || persisted.Locked,
 		PreferredTransport:   record.PreferredTransport,
 		DisableTransportRace: record.DisableTransportRace,
+		GamingMode:           record.GamingMode,
 	})
 	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("kill switch survived a daemon restart; keeping it armed and reconnecting to %s", profile.ID))
 	s.machine.Set(state.StateError, "daemon restarted; reconnecting")
@@ -4120,6 +4126,7 @@ func (s *Service) setSessionOpts(opts ConnectOptions) {
 		Lockdown:             opts.Lockdown,
 		PreferredTransport:   opts.PreferredTransport,
 		DisableTransportRace: opts.DisableTransportRace,
+		GamingMode:           opts.GamingMode,
 	}
 	if err := saveSessionRecord(record); err != nil {
 		s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("could not persist session record: %v", err))

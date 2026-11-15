@@ -44,6 +44,8 @@ type Manager struct {
 	logs    *state.LogStore
 	running bool
 	profile state.TectonicProfile
+	// gaming is gaming mode for the next Start; runningGaming is what the live session uses.
+	gaming, runningGaming bool
 
 	conn      *tect.Conn
 	localConn *net.UDPConn
@@ -76,9 +78,10 @@ func (m *Manager) Start(ctx context.Context, profile state.TectonicProfile) erro
 
 	m.mu.RLock()
 	running, current := m.running, m.profile
+	gaming, runningGaming := m.gaming, m.runningGaming
 	m.mu.RUnlock()
 
-	if running && reflect.DeepEqual(current, profile) {
+	if running && reflect.DeepEqual(current, profile) && gaming == runningGaming {
 		return nil
 	}
 
@@ -87,6 +90,7 @@ func (m *Manager) Start(ctx context.Context, profile state.TectonicProfile) erro
 	if err != nil {
 		return err
 	}
+	cfg.Redundant = gaming
 
 	if running {
 		if err := m.Stop(ctx); err != nil {
@@ -121,6 +125,7 @@ func (m *Manager) Start(ctx context.Context, profile state.TectonicProfile) erro
 	m.cancel = cancel
 	m.boundLocalPort = boundPort
 	m.running = true
+	m.runningGaming = gaming
 	m.profile = state.TectonicProfile{}
 	if cloned := state.CloneTectonicProfile(&profile); cloned != nil {
 		m.profile = *cloned
@@ -152,6 +157,14 @@ func (m *Manager) Start(ctx context.Context, profile state.TectonicProfile) erro
 	}()
 
 	return nil
+}
+
+// SetGamingMode makes the next Start copy light traffic onto a second lane, and asks the
+// node to do the same; a running session with the other setting is replaced on that Start.
+func (m *Manager) SetGamingMode(on bool) {
+	m.mu.Lock()
+	m.gaming = on
+	m.mu.Unlock()
 }
 
 // config turns the daemon's profile into the client's, validating it without dialing.
