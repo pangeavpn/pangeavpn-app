@@ -120,6 +120,10 @@ final class SettingsStore {
         await edit { $0.transportRace = enabled }
     }
 
+    func setGamingMode(_ enabled: Bool) async {
+        await edit { $0.gamingMode = enabled }
+    }
+
     func setAutoConnect(_ enabled: Bool) {
         defaults.set(enabled, forKey: SharedPrefs.Key.autoConnect)
         autoConnect = enabled

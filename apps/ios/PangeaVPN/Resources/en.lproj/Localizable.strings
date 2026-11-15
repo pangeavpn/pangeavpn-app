@@ -403,6 +403,10 @@
 "settings_transport_cdn" = "CDN";
 "settings_transport_cloak" = "Cloak";
 "settings_transport_description" = "How PangeaVPN disguises your traffic.";
+"settings_transport_gaming_hint" = "Sends game traffic over two connections at once, so a lost packet doesn't freeze the game. Uses a little more data and is easier to spot. Tectonic only. Applies on next connect.";
+"settings_transport_gaming_off" = "Gaming mode disabled. Reconnect for it to take effect.";
+"settings_transport_gaming_on" = "Gaming mode enabled. Reconnect for it to take effect.";
+"settings_transport_gaming_title" = "Gaming mode";
 "settings_transport_heading" = "Censorship Bypass";
 "settings_transport_hysteria2" = "Hysteria2";
 "settings_transport_race_hint" = "With Automatic, tries several disguises at once instead of waiting for each blocked one to time out. Applies on next connect.";

@@ -36,6 +36,16 @@ struct TransportPage: View {
                 .disabled(!raceApplies)
                 .opacity(raceApplies ? 1 : 0.45)
             }
+            SettingsCard {
+                StoreSwitchRow(
+                    title: String(localized: "settings_transport_gaming_title", defaultValue: "Gaming mode"),
+                    value: settings.settings.gamingMode,
+                    hint: String(localized: "settings_transport_gaming_hint", defaultValue: "Sends game traffic over two connections at once, so a lost packet doesn't freeze the game. Uses a little more data and is easier to spot. Tectonic only. Applies on next connect."),
+                    apply: { value in await setGamingMode(value) }
+                )
+                .disabled(!gamingApplies)
+                .opacity(gamingApplies ? 1 : 0.45)
+            }
             InfoNote(String(localized: "bypass_regions_note", defaultValue: "Regions that don't offer the selected method are hidden from the region list."))
         }
         .task {
@@ -52,12 +62,28 @@ struct TransportPage: View {
         selected == .auto && pending == nil
     }
 
+    private var gamingApplies: Bool {
+        (selected == .auto || selected == .tectonic) && pending == nil
+    }
+
     private func setTransportRace(_ enabled: Bool) async {
         await settings.setTransportRace(enabled)
         if settings.error == nil {
             toasts.show(enabled
                 ? String(localized: "settings_transport_race_on", defaultValue: "Fast fallback enabled. Reconnect for it to take effect.")
                 : String(localized: "settings_transport_race_off", defaultValue: "Fast fallback disabled. Reconnect for it to take effect."),
+                style: .success)
+        } else {
+            toasts.show(String(localized: "network_update_failed", defaultValue: "Failed to update setting."), style: .warning)
+        }
+    }
+
+    private func setGamingMode(_ enabled: Bool) async {
+        await settings.setGamingMode(enabled)
+        if settings.error == nil {
+            toasts.show(enabled
+                ? String(localized: "settings_transport_gaming_on", defaultValue: "Gaming mode enabled. Reconnect for it to take effect.")
+                : String(localized: "settings_transport_gaming_off", defaultValue: "Gaming mode disabled. Reconnect for it to take effect."),
                 style: .success)
         } else {
             toasts.show(String(localized: "network_update_failed", defaultValue: "Failed to update setting."), style: .warning)

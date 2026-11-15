@@ -30,6 +30,26 @@ export default {
     ar: "تم تعطيل التبديل السريع. أعد الاتصال ليسري المفعول.",
     fa: "جایگزینی سریع غیرفعال شد. برای اعمال، دوباره متصل شوید."
   },
+  settings_transport_gaming_on: {
+    en: "Gaming mode enabled. Reconnect for it to take effect.",
+    es: "Modo juego activado. Vuelve a conectar para que surta efecto.",
+    fr: "Mode jeu activé. Reconnectez-vous pour qu’il prenne effet.",
+    ru: "«Игровой режим» включён. Переподключитесь, чтобы изменение вступило в силу.",
+    uk: "Ігровий режим увімкнено. Перепідключіться, щоб зміни набули чинності.",
+    zh: "已启用游戏模式。请重新连接以生效。",
+    ar: "تم تفعيل وضع الألعاب. أعد الاتصال ليسري المفعول.",
+    fa: "حالت بازی فعال شد. برای اعمال، دوباره متصل شوید."
+  },
+  settings_transport_gaming_off: {
+    en: "Gaming mode disabled. Reconnect for it to take effect.",
+    es: "Modo juego desactivado. Vuelve a conectar para que surta efecto.",
+    fr: "Mode jeu désactivé. Reconnectez-vous pour qu’il prenne effet.",
+    ru: "«Игровой режим» выключен. Переподключитесь, чтобы изменение вступило в силу.",
+    uk: "Ігровий режим вимкнено. Перепідключіться, щоб зміни набули чинності.",
+    zh: "已禁用游戏模式。请重新连接以生效。",
+    ar: "تم تعطيل وضع الألعاب. أعد الاتصال ليسري المفعول.",
+    fa: "حالت بازی غیرفعال شد. برای اعمال، دوباره متصل شوید."
+  },
   bypass_tectonic_desc: {
     en: "PangeaVPN's own transport: WireGuard spread over several short-lived connections that look like Chrome loading a website.",
     es: "El transporte propio de PangeaVPN: WireGuard repartido en varias conexiones breves que parecen Chrome cargando un sitio web.",

@@ -403,6 +403,10 @@
 "settings_transport_cdn" = "CDN";
 "settings_transport_cloak" = "Cloak";
 "settings_transport_description" = "PangeaVPN 如何伪装您的流量。";
+"settings_transport_gaming_hint" = "通过两条连接同时发送游戏流量，丢一个包也不会让游戏卡住。会多用一点流量，也更容易被识别。仅适用于 Tectonic。下次连接时生效。";
+"settings_transport_gaming_off" = "已禁用游戏模式。请重新连接以生效。";
+"settings_transport_gaming_on" = "已启用游戏模式。请重新连接以生效。";
+"settings_transport_gaming_title" = "游戏模式";
 "settings_transport_heading" = "绕过审查";
 "settings_transport_hysteria2" = "Hysteria2";
 "settings_transport_race_hint" = "在自动模式下同时尝试多种伪装，而不是等每个被封锁的伪装逐一超时。下次连接时生效。";

@@ -403,6 +403,10 @@
 "settings_transport_cdn" = "CDN";
 "settings_transport_cloak" = "Cloak";
 "settings_transport_description" = "Как PangeaVPN маскирует ваш трафик.";
+"settings_transport_gaming_hint" = "Отправляет игровой трафик по двум соединениям сразу, чтобы потерянный пакет не замораживал игру. Расходует чуть больше трафика и заметнее для блокировок. Только для Tectonic. Действует со следующего подключения.";
+"settings_transport_gaming_off" = "«Игровой режим» выключен. Переподключитесь, чтобы изменение вступило в силу.";
+"settings_transport_gaming_on" = "«Игровой режим» включён. Переподключитесь, чтобы изменение вступило в силу.";
+"settings_transport_gaming_title" = "Игровой режим";
 "settings_transport_heading" = "Обход цензуры";
 "settings_transport_hysteria2" = "Hysteria2";
 "settings_transport_race_hint" = "В автоматическом режиме пробует несколько маскировок сразу, а не ждёт, пока истечёт время у каждой заблокированной. Действует со следующего подключения.";

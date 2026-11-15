@@ -403,6 +403,10 @@
 "settings_transport_cdn" = "CDN";
 "settings_transport_cloak" = "Cloak";
 "settings_transport_description" = "Cómo PangeaVPN camufla tu tráfico.";
+"settings_transport_gaming_hint" = "Envía el tráfico de los juegos por dos conexiones a la vez, para que un paquete perdido no congele la partida. Usa algo más de datos y es más fácil de detectar. Solo con Tectonic. Se aplica en la próxima conexión.";
+"settings_transport_gaming_off" = "Modo juego desactivado. Vuelve a conectar para que surta efecto.";
+"settings_transport_gaming_on" = "Modo juego activado. Vuelve a conectar para que surta efecto.";
+"settings_transport_gaming_title" = "Modo juego";
 "settings_transport_heading" = "Elusión de censura";
 "settings_transport_hysteria2" = "Hysteria2";
 "settings_transport_race_hint" = "Con Automático, prueba varios disfraces a la vez en lugar de esperar a que cada uno bloqueado agote su tiempo. Se aplica en la próxima conexión.";

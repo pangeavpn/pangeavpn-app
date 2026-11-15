@@ -403,6 +403,10 @@
 "settings_transport_cdn" = "CDN";
 "settings_transport_cloak" = "Cloak";
 "settings_transport_description" = "چگونه PangeaVPN ترافیک شما را استتار می‌کند.";
+"settings_transport_gaming_hint" = "ترافیک بازی را هم‌زمان از دو اتصال می‌فرستد تا گم شدن یک بسته بازی را متوقف نکند. کمی داده بیشتر مصرف می‌کند و راحت‌تر شناسایی می‌شود. فقط با Tectonic. از اتصال بعدی اعمال می‌شود.";
+"settings_transport_gaming_off" = "حالت بازی غیرفعال شد. برای اعمال، دوباره متصل شوید.";
+"settings_transport_gaming_on" = "حالت بازی فعال شد. برای اعمال، دوباره متصل شوید.";
+"settings_transport_gaming_title" = "حالت بازی";
 "settings_transport_heading" = "دور زدن سانسور";
 "settings_transport_hysteria2" = "Hysteria2";
 "settings_transport_race_hint" = "در حالت خودکار، چند استتار را هم‌زمان امتحان می‌کند به‌جای اینکه منتظر بماند مهلت هر استتارِ مسدودشده تمام شود. از اتصال بعدی اعمال می‌شود.";

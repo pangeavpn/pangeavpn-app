@@ -281,6 +281,8 @@ struct AppSettings: Codable, Equatable, Sendable {
     var postQuantum = false
     // Automatic dials several transports at once; a pinned transport never races.
     var transportRace = true
+    // Tectonic copies light traffic onto a second lane each way.
+    var gamingMode = false
 
     init() {}
 
@@ -297,6 +299,7 @@ struct AppSettings: Codable, Equatable, Sendable {
         deadDrop = try c.decodeIfPresent(Bool.self, forKey: .deadDrop) ?? d.deadDrop
         postQuantum = try c.decodeIfPresent(Bool.self, forKey: .postQuantum) ?? d.postQuantum
         transportRace = try c.decodeIfPresent(Bool.self, forKey: .transportRace) ?? d.transportRace
+        gamingMode = try c.decodeIfPresent(Bool.self, forKey: .gamingMode) ?? d.gamingMode
     }
 }
 
