@@ -140,7 +140,6 @@ func (m *Manager) Start(ctx context.Context, profile state.TectonicProfile) erro
 		bridgeErr := transport.BridgeUDP(bridgeCtx, localConn, conn, conn.RemoteAddr())
 		cancel()
 		localConn.Close()
-		conn.Close()
 
 		m.mu.Lock()
 		if m.generation == generation {
@@ -154,6 +153,8 @@ func (m *Manager) Start(ctx context.Context, profile state.TectonicProfile) erro
 			m.logs.Add(state.LogInfo, state.SourceTectonic, "tectonic stopped")
 		}
 		close(done)
+		// Last, as it waits up to a second for CLOSE to reach the node, and nothing needs that.
+		conn.Close()
 	}()
 
 	return nil
@@ -345,10 +346,10 @@ func (m *Manager) Stop(ctx context.Context) error {
 	if cancel != nil {
 		cancel()
 	}
-	// Closing the session sends CLOSE on a lane, so the node drops it now
-	// rather than holding it for the resume window.
+	// Closing the session sends CLOSE on a lane, so the node drops it now rather than holding
+	// it for the resume window; a switch has already cut the old node off, so nothing waits on it.
 	if conn != nil {
-		conn.Close()
+		go conn.Close()
 	}
 	if localConn != nil {
 		localConn.Close()
