@@ -443,7 +443,9 @@ func (s *Service) proveDataPath(ctx context.Context, kind string, wireGuardProfi
 		budget = dataPathGateBudget
 	}
 	deadline := time.Now().Add(budget)
+	readyStart := time.Now()
 	s.awaitTunnelReady(ctx, wireGuardProfile, deadline)
+	readyMs := time.Since(readyStart).Milliseconds()
 	iface := s.resolveWireGuardInterfaceName(ctx, wireGuardProfile)
 	rxBefore, rxKnown := s.peerRxBytes(ctx, wireGuardProfile)
 
@@ -461,8 +463,10 @@ func (s *Service) proveDataPath(ctx context.Context, kind string, wireGuardProfi
 
 		server := servers[attempt%len(servers)]
 		probeCtx, cancel := context.WithTimeout(ctx, dnsProbeTimeout)
+		probeStart := time.Now()
 		err := s.probeResolver(probeCtx, iface, server)
 		cancel()
+		s.logs.Add(state.LogDebug, state.SourceDaemon, fmt.Sprintf("data path: adapter ready after %dms; probe to %s took %dms (%v)", readyMs, server, time.Since(probeStart).Milliseconds(), err))
 		switch {
 		case err == nil, errors.Is(err, errDNSProbeConnRefused), errors.Is(err, errDNSProbeOversizedReply):
 			return nil
@@ -544,10 +548,13 @@ func (s *Service) awaitTunnelReady(ctx context.Context, wireGuardProfile state.W
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(dataPathGateRetryDelay):
+		case <-time.After(tunnelReadyPoll):
 		}
 	}
 }
+
+// tunnelReadyPoll spaces the adapter checks; one check reads the route table, about 50 ms.
+const tunnelReadyPoll = 50 * time.Millisecond
 
 // dnsProbeDue reports whether a round is due, claiming the slot when it is so
 // the 3s health tick does not probe on every pass.

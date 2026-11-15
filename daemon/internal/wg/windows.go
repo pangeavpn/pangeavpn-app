@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"golang.org/x/sys/windows"
 	"golang.zx2c4.com/wireguard/device"
@@ -126,10 +127,12 @@ func (m *wireGuardGoManager) startWindows(ctx context.Context, profile state.Wir
 
 	// Best-effort: a partial/failed resolve doesn't abort the connect, since an
 	// unusable path still fails the downstream WireGuard handshake.
+	routesStart := time.Now()
 	endpointRoutes, endpointErr := addWindowsEndpointRoutes(ctx, excludeLUIDs, parsed.endpointHosts)
 	if endpointErr != nil {
 		m.logs.Add(state.LogWarn, state.SourceWireGuard, fmt.Sprintf("endpoint bypass route setup warning: %v", endpointErr))
 	}
+	configureStart := time.Now()
 
 	if err := configureWindowsInterface(tunnelLUID, parsed.addresses, allowedIPs, parsed.dnsServers, clampWireGuardDeviceMTU(parsed.mtu)); err != nil {
 		_ = removeWindowsEndpointRoutes(endpointRoutes)
@@ -140,6 +143,8 @@ func (m *wireGuardGoManager) startWindows(ctx context.Context, profile state.Wir
 	if len(parsed.dnsServers) > 0 {
 		m.logs.Add(state.LogInfo, state.SourceWireGuard, fmt.Sprintf("applied Windows DNS servers %s", strings.Join(parsed.dnsServers, ", ")))
 	}
+	m.logs.Add(state.LogDebug, state.SourceWireGuard, fmt.Sprintf("windows interface set up: endpoint routes %dms, addresses/routes/DNS %dms",
+		configureStart.Sub(routesStart).Milliseconds(), time.Since(configureStart).Milliseconds()))
 
 	m.storeSession(tunnelKey, &tunnelSession{
 		interfaceName: interfaceName,
@@ -212,7 +217,9 @@ func (m *wireGuardGoManager) trySwitchInPlace(ctx context.Context, tunnelKey str
 		return false
 	}
 
+	repointStart := time.Now()
 	newRoutes, routeErr := addWindowsEndpointRoutes(ctx, m.ActiveLUIDs(), parsed.endpointHosts)
+	routesMs := time.Since(repointStart).Milliseconds()
 	if routeErr != nil {
 		// A failed resolve must not drop tracking of installed routes: the
 		// guard only re-pins what is tracked, so keep the union and no stale removal.
@@ -233,7 +240,8 @@ func (m *wireGuardGoManager) trySwitchInPlace(ctx context.Context, tunnelKey str
 	}
 	updateWrappedTunnelInfo(session, parsed)
 
-	m.logs.Add(state.LogInfo, state.SourceWireGuard, fmt.Sprintf("wireguard re-pointed in place on %s", session.interfaceName))
+	m.logs.Add(state.LogInfo, state.SourceWireGuard, fmt.Sprintf("wireguard re-pointed in place on %s (%dms: endpoint routes %dms)",
+		session.interfaceName, time.Since(repointStart).Milliseconds(), routesMs))
 	return true
 }
 
