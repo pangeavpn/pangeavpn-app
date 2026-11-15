@@ -91,6 +91,8 @@ const KEY_MAP = {
   "settings.transport.snowflake": "settings_transport_snowflake",
   "settings.transport.race.title": "settings_transport_race_title",
   "settings.transport.race.hint": "settings_transport_race_hint",
+  "settings.transport.gaming.title": "settings_transport_gaming_title",
+  "settings.transport.gaming.hint": "settings_transport_gaming_hint",
   "serverPicker.noServersForTransport": "server_picker_none_for_transport",
   "settings.provisioning.heading": "settings_censorship_heading",
   "settings.provisioning.description": "settings_censorship_description",

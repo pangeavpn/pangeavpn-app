@@ -75,6 +75,8 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setTransportRace(enabled: Boolean) = store { it.copy(transportRace = enabled) }
 
+    fun setGamingMode(enabled: Boolean) = store { it.copy(gamingMode = enabled) }
+
     /** Goes through the core so the last-method rule is enforced in one place. */
     fun setHubMethod(method: String, enabled: Boolean) {
         viewModelScope.launch {

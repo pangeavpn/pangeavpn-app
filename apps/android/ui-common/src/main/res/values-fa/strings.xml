@@ -80,6 +80,8 @@
     <string name="settings_transport_cdn">CDN</string>
     <string name="settings_transport_cloak">Cloak</string>
     <string name="settings_transport_description">چگونه PangeaVPN ترافیک شما را استتار می‌کند.</string>
+    <string name="settings_transport_gaming_hint">ترافیک بازی را هم‌زمان از دو اتصال می‌فرستد تا گم شدن یک بسته بازی را متوقف نکند. کمی داده بیشتر مصرف می‌کند و راحت‌تر شناسایی می‌شود. فقط با Tectonic. از اتصال بعدی اعمال می‌شود.</string>
+    <string name="settings_transport_gaming_title">حالت بازی</string>
     <string name="settings_transport_heading">دور زدن سانسور</string>
     <string name="settings_transport_hysteria2">Hysteria2</string>
     <string name="settings_transport_race_hint">در حالت خودکار، چند استتار را هم‌زمان امتحان می‌کند به‌جای اینکه منتظر بماند مهلت هر استتارِ مسدودشده تمام شود. از اتصال بعدی اعمال می‌شود.</string>

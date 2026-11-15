@@ -80,6 +80,8 @@
     <string name="settings_transport_cdn">CDN</string>
     <string name="settings_transport_cloak">Cloak</string>
     <string name="settings_transport_description">How PangeaVPN disguises your traffic.</string>
+    <string name="settings_transport_gaming_hint">Sends game traffic over two connections at once, so a lost packet doesn\'t freeze the game. Uses a little more data and is easier to spot. Tectonic only. Applies on next connect.</string>
+    <string name="settings_transport_gaming_title">Gaming mode</string>
     <string name="settings_transport_heading">Censorship Bypass</string>
     <string name="settings_transport_hysteria2">Hysteria2</string>
     <string name="settings_transport_race_hint">With Automatic, tries several disguises at once instead of waiting for each blocked one to time out. Applies on next connect.</string>

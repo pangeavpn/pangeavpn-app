@@ -80,6 +80,8 @@
     <string name="settings_transport_cdn">CDN</string>
     <string name="settings_transport_cloak">Cloak</string>
     <string name="settings_transport_description">Як PangeaVPN маскує ваш трафік.</string>
+    <string name="settings_transport_gaming_hint">Надсилає ігровий трафік двома з’єднаннями одночасно, щоб втрачений пакет не заморожував гру. Витрачає трохи більше даних і помітніший для блокувань. Лише для Tectonic. Діє з наступного підключення.</string>
+    <string name="settings_transport_gaming_title">Ігровий режим</string>
     <string name="settings_transport_heading">Обхід цензури</string>
     <string name="settings_transport_hysteria2">Hysteria2</string>
     <string name="settings_transport_race_hint">В автоматичному режимі пробує кілька маскувань одночасно, а не чекає, поки сплине час у кожного заблокованого. Діє з наступного підключення.</string>

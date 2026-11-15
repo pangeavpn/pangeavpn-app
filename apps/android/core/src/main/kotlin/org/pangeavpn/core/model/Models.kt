@@ -92,6 +92,8 @@ data class AppSettings(
     // Lets Automatic dial several transports at once; a pinned transport never
     // races. The default covers blobs written before the key existed.
     val transportRace: Boolean = true,
+    // Tectonic copies light traffic onto a second lane each way.
+    val gamingMode: Boolean = false,
 )
 
 /** Manual choices. NaiveProxy is reachable through "auto" but is not offered

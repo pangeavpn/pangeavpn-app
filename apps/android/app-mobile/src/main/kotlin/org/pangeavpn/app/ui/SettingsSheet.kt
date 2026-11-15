@@ -114,6 +114,13 @@ fun SettingsSheet(
                     onCheckedChange = settingsViewModel::setTransportRace,
                     enabled = state.settings.preferredTransport == "auto",
                 )
+                SwitchRow(
+                    title = stringResource(R.string.settings_transport_gaming_title),
+                    hint = stringResource(R.string.settings_transport_gaming_hint),
+                    checked = state.settings.gamingMode,
+                    onCheckedChange = settingsViewModel::setGamingMode,
+                    enabled = state.settings.preferredTransport in setOf("auto", "tectonic"),
+                )
             }
 
             Section(

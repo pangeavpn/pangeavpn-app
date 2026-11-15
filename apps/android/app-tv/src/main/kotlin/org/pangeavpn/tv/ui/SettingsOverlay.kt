@@ -101,6 +101,22 @@ fun SettingsOverlay(settingsViewModel: SettingsViewModel, onDismiss: () -> Unit)
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                Spacer(modifier = Modifier.height(6.dp))
+                val gamingApplies = state.settings.preferredTransport in setOf("auto", "tectonic")
+                val gamingMode = state.settings.gamingMode
+                Button(
+                    onClick = { settingsViewModel.setGamingMode(!gamingMode) },
+                    enabled = gamingApplies,
+                ) {
+                    TvText("${stringResource(R.string.settings_transport_gaming_title)} — ${onOff(gamingMode)}")
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = stringResource(R.string.settings_transport_gaming_hint),
+                    modifier = Modifier.alpha(if (gamingApplies) 1f else 0.45f),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
 
                 Spacer(modifier = Modifier.height(16.dp))
                 Text(
