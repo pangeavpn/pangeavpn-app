@@ -863,6 +863,7 @@ func (s *Service) bringUpAfterKillSwitch(ctx context.Context, profile state.Prof
 
 	s.setCurrentProfile(profile)
 	s.setSessionOpts(opts)
+	s.prefetchProfileHosts()
 	// A new session starts with a clean slate: a deferral count left over
 	// from the last one must not blunt this session's first genuine repair.
 	s.resetEndpointRouteRepairs()
@@ -1882,7 +1883,9 @@ func (s *Service) Switch(ctx context.Context, newProfileID string, opts ConnectO
 	if err := s.killSwitch.Enable(ctx, s.sessionKillSwitchPermits(newProfile, opts.AllowLAN), opts.AllowLAN, opts.Lockdown); err != nil {
 		return refuse(err, fmt.Sprintf("kill switch re-enable failed: %v", err))
 	}
-	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("kill switch re-enabled for %s (%dms)", newProfile.ID, time.Since(stepStart).Milliseconds()))
+	lockMs := time.Since(stepStart).Milliseconds()
+	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("kill switch re-enabled for %s (%dms)", newProfile.ID, lockMs))
+	phase := time.Now()
 
 	// Adapter reuse: pin the new server's bypass routes while the old tunnel
 	// still owns the default route, then let wg.Start re-point the live device.
@@ -1902,6 +1905,8 @@ func (s *Service) Switch(ctx context.Context, newProfileID string, opts ConnectO
 		}
 	}
 
+	routesMs := time.Since(phase).Milliseconds()
+	phase = time.Now()
 	s.machine.Set(state.StateConnecting, fmt.Sprintf("switching to %s: stopping transport", newProfile.ID))
 	if active := s.activeTransport(); active != nil {
 		transportStopCtx, transportStopCancel := context.WithTimeout(context.Background(), 4*time.Second)
@@ -1911,6 +1916,8 @@ func (s *Service) Switch(ctx context.Context, newProfileID string, opts ConnectO
 		transportStopCancel()
 	}
 	s.setActiveTransportKind("")
+	stopMs := time.Since(phase).Milliseconds()
+	phase = time.Now()
 
 	// Set eagerly, not cleared: a failed bring-up below still needs a current profile
 	// for retryDroppedSession to rebuild toward, or the kill switch has nothing to recover to.
@@ -1931,7 +1938,8 @@ func (s *Service) Switch(ctx context.Context, newProfileID string, opts ConnectO
 		}
 		return err
 	}
-	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("switch flow completed: %s -> %s", oldProfile.ID, newProfile.ID))
+	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("switch flow completed: %s -> %s (%dms: lock %dms, routes %dms, stop %dms, bring-up %dms)",
+		oldProfile.ID, newProfile.ID, time.Since(stepStart).Milliseconds(), lockMs, routesMs, stopMs, time.Since(phase).Milliseconds()))
 	return nil
 }
 
@@ -2515,13 +2523,18 @@ func (s *Service) UpdateConfig(cfg state.Config) error {
 		return err
 	}
 	s.logs.Add(state.LogInfo, state.SourceDaemon, "config updated")
-	// Only through a live tunnel: unprompted lookups of every server's hosts would show on the network's resolver.
 	if current, _ := s.machine.Get(); current == state.StateConnected {
-		for _, profile := range cfg.Profiles {
-			platform.PrefetchHosts(withTransportBypassHosts(profile).BypassHosts)
-		}
+		s.prefetchProfileHosts()
 	}
 	return nil
+}
+
+// prefetchProfileHosts warms the lookup cache for every server's hosts, so no switch waits on DNS.
+// Only call it with a tunnel up: unprompted lookups of them all would show on the network's resolver.
+func (s *Service) prefetchProfileHosts() {
+	for _, profile := range s.config.Get().Profiles {
+		platform.PrefetchHosts(withTransportBypassHosts(profile).BypassHosts)
+	}
 }
 
 // healthTickInterval is how often the health loop samples the live session.
