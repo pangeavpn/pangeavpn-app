@@ -228,6 +228,9 @@ func (s *starter) startAnyTLS(ctx context.Context, profile *state.Profile, _ *st
 
 func (s *starter) startTectonic(ctx context.Context, profile *state.Profile, _ *state.WireGuardProfile) error {
 	mgr := tectonic.NewManager(s.logs, lockedNetworkKey)
+	mu.Lock()
+	mgr.SetGamingMode(settings.GamingMode)
+	mu.Unlock()
 	start := *state.CloneTectonicProfile(profile.Tectonic)
 	start.LocalPort = 0
 	if err := mgr.Start(ctx, start); err != nil {

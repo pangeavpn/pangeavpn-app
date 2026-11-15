@@ -40,6 +40,8 @@ type config struct {
 	// TransportRace lets Automatic dial several transports at once instead of
 	// waiting out each blocked one in turn. A pinned transport never races.
 	TransportRace bool `json:"transportRace"`
+	// GamingMode copies Tectonic's light traffic onto a second lane each way.
+	GamingMode bool `json:"gamingMode"`
 }
 
 // defaultConfig mirrors the desktop defaults: cascade on, hub methods all
