@@ -17,6 +17,7 @@ enum TunnelSwitchError: LocalizedError, Equatable {
 enum ProviderChannel {
     static let stateRequest = Data([ProviderMessage.state.rawValue])
     static let logsRequest = Data([ProviderMessage.logs.rawValue])
+    static let applySettingsRequest = Data([ProviderMessage.applySettings.rawValue])
 
     static func canMessage(_ status: NEVPNStatus) -> Bool {
         switch status {

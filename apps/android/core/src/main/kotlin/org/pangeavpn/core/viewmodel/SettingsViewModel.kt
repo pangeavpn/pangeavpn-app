@@ -90,12 +90,20 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
      *  corrected one rather than a stale optimistic edit. */
     private fun store(transform: (AppSettings) -> AppSettings) {
         viewModelScope.launch {
-            val next = transform(_state.value.settings)
+            val before = _state.value.settings
+            val next = transform(before)
             runCatchingCancellable { TunnelBridge.setSettings(next) }
-                .onSuccess { _state.value = _state.value.copy(settings = it, error = null) }
+                .onSuccess {
+                    _state.value = _state.value.copy(settings = it, error = null)
+                    if (shapesInterface(before, it)) PangeaVpnService.applySettings(getApplication())
+                }
                 .onFailure { _state.value = _state.value.copy(error = it.message) }
         }
     }
+
+    /** DNS, MTU and Allow LAN only shape the interface, so a running tunnel takes them live. */
+    private fun shapesInterface(before: AppSettings, after: AppSettings): Boolean =
+        before.mtu != after.mtu || before.customDns != after.customDns || before.allowLan != after.allowLan
 
     private var signingOut = false
 

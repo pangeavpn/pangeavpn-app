@@ -79,6 +79,7 @@ final class GatedCore: CoreBridge, @unchecked Sendable {
         try fake.prepareVia(exitId: exitId, entryId: entryId)
     }
     func multihopEntries(exitId: String) -> [String] { fake.multihopEntries(exitId: exitId) }
+    func liveConfig() throws -> TunnelConfig { try fake.liveConfig() }
     func start(tunFd: Int) throws { try fake.start(tunFd: tunFd) }
     func stop() { fake.stop() }
     func stopForSwitch() { fake.stopForSwitch() }

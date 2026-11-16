@@ -40,6 +40,7 @@ protocol LifecycleCore {
     func prepare(serverId: String) throws -> TunnelConfig
     func prepareVia(exitId: String, entryId: String) throws -> TunnelConfig
     func multihopEntries(exitId: String) -> [String]
+    func liveConfig() throws -> TunnelConfig
     func start(tunFd: Int) throws
     func stop()
     func stopForSwitch()

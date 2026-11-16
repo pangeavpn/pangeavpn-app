@@ -21,6 +21,8 @@ struct BridgedLifecycleCore: LifecycleCore {
 
     func multihopEntries(exitId: String) -> [String] { bridge.multihopEntries(exitId: exitId) }
 
+    func liveConfig() throws -> TunnelConfig { try bridge.liveConfig() }
+
     func start(tunFd: Int) throws { try bridge.start(tunFd: tunFd) }
 
     func stop() { bridge.stop() }

@@ -163,6 +163,8 @@ final class FakeCore: CoreBridge, @unchecked Sendable {
         try record("prepare(\(serverId))", prepareResult)
     }
 
+    func liveConfig() throws -> TunnelConfig { try record("liveConfig", prepareResult) }
+
     func start(tunFd: Int) throws { try record("start(\(tunFd))", startResult) }
 
     func stop() { note("stop") }

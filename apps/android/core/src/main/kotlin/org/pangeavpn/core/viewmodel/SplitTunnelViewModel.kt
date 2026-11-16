@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.pangeavpn.core.PangeaVpnService
 import org.pangeavpn.core.SplitTunnelStore
 
 data class InstalledApp(
@@ -43,6 +44,7 @@ class SplitTunnelViewModel(app: Application) : AndroidViewModel(app) {
 
     fun toggle(packageName: String, excluded: Boolean) {
         store.toggle(packageName, excluded)
+        PangeaVpnService.applySettings(getApplication())
         _state.value = _state.value.copy(
             apps = _state.value.apps.map {
                 if (it.packageName == packageName) it.copy(excluded = excluded) else it

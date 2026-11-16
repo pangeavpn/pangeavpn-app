@@ -49,6 +49,8 @@ protocol CoreBridge: AnyObject, Sendable {
     // entryId "" is a plain single-hop prepare.
     func prepareVia(exitId: String, entryId: String) throws -> TunnelConfig
     func multihopEntries(exitId: String) -> [String]
+    // The running tunnel's interface under the settings saved now; throws when none runs.
+    func liveConfig() throws -> TunnelConfig
     func start(tunFd: Int) throws
     func stop()
     // Stops for an immediate start on the prepared server, reporting connecting, not disconnected.

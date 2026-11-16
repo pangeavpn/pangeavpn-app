@@ -75,6 +75,8 @@ final class FakeTunnel: TunnelControlling {
 
     func extensionLogs() async -> String? { logsValue }
 
+    func applySettings() async {}
+
     private static func connected(to serverId: String) -> TunnelStatus {
         TunnelStatus(
             state: .connected, detail: "", bytesIn: 0, bytesOut: 0,

@@ -262,28 +262,28 @@ export default {
     zh: "启用分流", ar: "استخدام الأنفاق المقسّمة", fa: "استفاده از تونل تفکیک‌شده"
   },
   split_tunnel_enabled_hint: {
-    en: "Off sends everything through the VPN. Your ranges are kept. Applies on next connect.",
-    es: "Desactivado, todo pasa por la VPN. Tus rangos se conservan. Se aplica en la próxima conexión.",
-    fr: "Désactivé, tout passe par le VPN. Vos plages sont conservées. Effectif à la prochaine connexion.",
-    ru: "Если выключено, весь трафик идёт через VPN. Список диапазонов сохраняется. Действует со следующего подключения.",
-    uk: "Якщо вимкнено, увесь трафік іде через VPN. Список діапазонів зберігається. Діє з наступного підключення.",
-    zh: "关闭时，所有流量都走 VPN。已填写的 IP 范围会保留。下次连接时生效。",
-    ar: "عند الإيقاف، تمر كل الحركة عبر VPN. تُحفظ قائمة النطاقات. يسري عند الاتصال التالي.",
-    fa: "وقتی خاموش است، همه ترافیک از VPN می‌گذرد. فهرست محدوده‌ها حفظ می‌شود. از اتصال بعدی اعمال می‌شود."
+    en: "Off sends everything through the VPN. Your ranges are kept.",
+    es: "Desactivado, todo pasa por la VPN. Tus rangos se conservan.",
+    fr: "Désactivé, tout passe par le VPN. Vos plages sont conservées.",
+    ru: "Если выключено, весь трафик идёт через VPN. Список диапазонов сохраняется.",
+    uk: "Якщо вимкнено, увесь трафік іде через VPN. Список діапазонів зберігається.",
+    zh: "关闭时，所有流量都走 VPN。已填写的 IP 范围会保留。",
+    ar: "عند الإيقاف، تمر كل الحركة عبر VPN. تُحفظ قائمة النطاقات.",
+    fa: "وقتی خاموش است، همه ترافیک از VPN می‌گذرد. فهرست محدوده‌ها حفظ می‌شود."
   },
   split_tunnel_ranges_title: {
     en: "Excluded IP ranges", es: "Rangos IP excluidos", fr: "Plages IP exclues", ru: "Исключённые IP-диапазоны",
     uk: "Виключені IP-діапазони", zh: "排除的 IP 范围", ar: "نطاقات IP المستثناة", fa: "محدوده‌های IP مستثنا"
   },
   split_tunnel_ranges_hint: {
-    en: "IPv4 addresses or ranges, separated by commas. Applies on next connect.",
-    es: "Direcciones o rangos IPv4 separados por comas. Se aplica en la próxima conexión.",
-    fr: "Adresses ou plages IPv4 séparées par des virgules. Effectif à la prochaine connexion.",
-    ru: "IPv4-адреса или диапазоны через запятую. Действует со следующего подключения.",
-    uk: "IPv4-адреси або діапазони через кому. Діє з наступного підключення.",
-    zh: "IPv4 地址或范围，用逗号分隔。下次连接时生效。",
-    ar: "عناوين أو نطاقات IPv4 مفصولة بفواصل. يسري عند الاتصال التالي.",
-    fa: "نشانی‌ها یا محدوده‌های IPv4 که با ویرگول جدا شده‌اند. از اتصال بعدی اعمال می‌شود."
+    en: "IPv4 addresses or ranges, separated by commas.",
+    es: "Direcciones o rangos IPv4 separados por comas.",
+    fr: "Adresses ou plages IPv4 séparées par des virgules.",
+    ru: "IPv4-адреса или диапазоны через запятую.",
+    uk: "IPv4-адреси або діапазони через кому.",
+    zh: "IPv4 地址或范围，用逗号分隔。",
+    ar: "عناوين أو نطاقات IPv4 مفصولة بفواصل.",
+    fa: "نشانی‌ها یا محدوده‌های IPv4 که با ویرگول جدا شده‌اند."
   },
   split_tunnel_ranges_placeholder: {
     en: "192.0.2.0/24, 198.51.100.7", es: "192.0.2.0/24, 198.51.100.7", fr: "192.0.2.0/24, 198.51.100.7",
@@ -321,24 +321,24 @@ export default {
     fa: "نمی‌توان برنامه‌های جداگانه را مستثنا کرد: iOS فقط اجازه می‌دهد VPN محدوده‌های نشانی را مستثنا کند."
   },
   split_tunnel_toast_on: {
-    en: "Split tunnelling on. Applies on next connect.",
-    es: "Túnel dividido activado. Se aplica en la próxima conexión.",
-    fr: "Tunnel divisé activé. Effectif à la prochaine connexion.",
-    ru: "Раздельное туннелирование включено. Действует со следующего подключения.",
-    uk: "Роздільне тунелювання увімкнено. Діє з наступного підключення.",
-    zh: "分流已开启。下次连接时生效。",
-    ar: "تم تفعيل الأنفاق المقسّمة. يسري عند الاتصال التالي.",
-    fa: "تونل تفکیک‌شده روشن شد. از اتصال بعدی اعمال می‌شود."
+    en: "Split tunnelling on.",
+    es: "Túnel dividido activado.",
+    fr: "Tunnel divisé activé.",
+    ru: "Раздельное туннелирование включено.",
+    uk: "Роздільне тунелювання увімкнено.",
+    zh: "分流已开启。",
+    ar: "تم تفعيل الأنفاق المقسّمة.",
+    fa: "تونل تفکیک‌شده روشن شد."
   },
   split_tunnel_toast_off: {
-    en: "Split tunnelling off. Applies on next connect.",
-    es: "Túnel dividido desactivado. Se aplica en la próxima conexión.",
-    fr: "Tunnel divisé désactivé. Effectif à la prochaine connexion.",
-    ru: "Раздельное туннелирование выключено. Действует со следующего подключения.",
-    uk: "Роздільне тунелювання вимкнено. Діє з наступного підключення.",
-    zh: "分流已关闭。下次连接时生效。",
-    ar: "تم إيقاف الأنفاق المقسّمة. يسري عند الاتصال التالي.",
-    fa: "تونل تفکیک‌شده خاموش شد. از اتصال بعدی اعمال می‌شود."
+    en: "Split tunnelling off.",
+    es: "Túnel dividido desactivado.",
+    fr: "Tunnel divisé désactivé.",
+    ru: "Раздельное туннелирование выключено.",
+    uk: "Роздільне тунелювання вимкнено.",
+    zh: "分流已关闭。",
+    ar: "تم إيقاف الأنفاق المقسّمة.",
+    fa: "تونل تفکیک‌شده خاموش شد."
   },
   split_tunnel_toast_saved: {
     en: "Excluded IP ranges saved.",

@@ -57,6 +57,10 @@ final class PacketTunnelProvider: NEPacketTunnelProvider, LifecycleHost {
         if let request = ProviderMessage.switchRequest(from: messageData) {
             return acceptSwitch(request, reply: completionHandler)
         }
+        if messageData.first == ProviderMessage.applySettings.rawValue {
+            completionHandler?(nil)
+            return queue.async { self.lifecycle?.applyLive() }
+        }
         do {
             let core = GoCore.shared(sink: nil)
             completionHandler?(try ProviderMessage.reply(to: messageData, core: core, reconnectDetail: note.value))

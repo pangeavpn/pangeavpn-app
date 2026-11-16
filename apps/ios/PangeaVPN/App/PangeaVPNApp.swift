@@ -15,6 +15,9 @@ struct PangeaVPNApp: App {
         let core = GoCore.forApp()
         let tunnel = TunnelController()
         let settings = SettingsStore(core: core)
+        settings.onTunnelSettingsChanged = { [weak tunnel] in
+            Task { await tunnel?.applySettings() }
+        }
         let servers = ServersStore(core: core)
         let session = SessionStore(core: core, tunnel: tunnel)
         _session = State(initialValue: session)

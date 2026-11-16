@@ -135,6 +135,10 @@ final class GoCore: CoreBridge {
         }
     }
 
+    func liveConfig() throws -> TunnelConfig {
+        try CoreJSON.decode(call { MobileLiveConfig($0) })
+    }
+
     func stopForSwitch() { MobileStopForSwitch() }
 
     func start(tunFd: Int) throws {

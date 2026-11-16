@@ -138,4 +138,6 @@ final class ScriptedTunnel: TunnelControlling {
     }
 
     func extensionLogs() async -> String? { nil }
+
+    func applySettings() async {}
 }

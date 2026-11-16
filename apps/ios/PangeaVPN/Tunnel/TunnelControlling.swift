@@ -28,4 +28,6 @@ protocol TunnelControlling: AnyObject {
     func disconnect() async
     func removeConfiguration() async
     func extensionLogs() async -> String?
+    // Reshapes a running tunnel for new DNS, MTU or split ranges; a no-op while it is down.
+    func applySettings() async
 }

@@ -17,10 +17,10 @@ import (
 	"golang.zx2c4.com/wireguard/device"
 
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/pq"
-	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/shadowsocks"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/state"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/transport"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/tunclamp"
+	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/tunswap"
 )
 
 type tunnelRuntime struct {
@@ -36,6 +36,11 @@ type tunnelRuntime struct {
 	postQuantum bool
 	// cancel ends the context the transports were started under.
 	cancel context.CancelFunc
+	// tun lets the host hand over a new TUN; clamp sits on top of it.
+	tun   *tunswap.Device
+	clamp *tunclamp.Device
+	// prepared is the config this runtime was started from.
+	prepared *preparedTunnel
 }
 
 // label is the runtime's server and entry, for a status about it.
@@ -127,7 +132,8 @@ func startTunnel(tunFd int) error {
 		return fmt.Errorf("create tun: %w", err)
 	}
 
-	attempt.clamp = tunclamp.Wrap(tunDev)
+	attempt.tun = tunswap.Wrap(tunDev)
+	attempt.clamp = tunclamp.Wrap(attempt.tun)
 	dev := device.NewDevice(attempt.clamp, conn.NewDefaultBind(), newWGLogger())
 	if err := dev.Up(); err != nil {
 		dev.Close()
@@ -188,12 +194,13 @@ func fitCarrier(attempt *startAttempt, kind string, logs *state.LogStore) {
 	if attempt.clamp == nil {
 		return
 	}
-	if kind == "shadowsocks" && attempt.prepared.mtu > shadowsocks.MaxTunnelMTU {
-		attempt.clamp.SetMTU(shadowsocks.MaxTunnelMTU)
-		logAdd(logs, state.LogInfo, fmt.Sprintf("clamping TCP to a %d-byte MTU while shadowsocks carries the tunnel", shadowsocks.MaxTunnelMTU))
-		return
+	mu.Lock()
+	clamp := carrierClamp(kind, attempt.prepared.mtu)
+	mu.Unlock()
+	attempt.clamp.SetMTU(clamp)
+	if clamp > 0 {
+		logAdd(logs, state.LogInfo, fmt.Sprintf("clamping TCP to a %d-byte MTU while shadowsocks carries the tunnel", clamp))
 	}
-	attempt.clamp.SetMTU(0)
 }
 
 // goLive publishes the runtime, then a connected status carrying the handshake
@@ -208,6 +215,7 @@ func goLive(attempt *startAttempt, dev *device.Device, st *starter, label status
 		dev: dev, starter: st, serverID: label.ServerID, serverName: label.ServerName,
 		activeTransport: kind, entryServerID: label.EntryServerID, entryServerName: label.EntryServerName,
 		postQuantum: postQuantum, cancel: attempt.cancel,
+		tun: attempt.tun, clamp: attempt.clamp, prepared: attempt.prepared,
 	}
 	attempt.live = true
 	mu.Unlock()

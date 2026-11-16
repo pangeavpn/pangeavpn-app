@@ -27,6 +27,8 @@ final class SettingsStore {
     // nil picks the lightest entry outside the exit's region.
     private(set) var multihopEntryId: String?
     var error: String?
+    // Set by the app to hand DNS, MTU and split-range changes to a running tunnel.
+    @ObservationIgnored var onTunnelSettingsChanged: (@MainActor () -> Void)?
 
     private let core: any CoreBridge
     private let defaults: UserDefaults
@@ -78,10 +80,12 @@ final class SettingsStore {
     func setCustomDns(_ text: String) async {
         let servers = Self.dnsServers(in: text)
         await edit { $0.customDns = servers }
+        onTunnelSettingsChanged?()
     }
 
     func setMtu(_ mtu: Int) async {
         await edit { $0.mtu = mtu }
+        onTunnelSettingsChanged?()
     }
 
     func setAllowLan(_ enabled: Bool) async {
@@ -163,12 +167,14 @@ final class SettingsStore {
     func setSplitTunnelEnabled(_ enabled: Bool) {
         defaults.set(enabled, forKey: SharedPrefs.Key.splitTunnelEnabled)
         splitTunnelEnabled = enabled
+        onTunnelSettingsChanged?()
     }
 
     // Callers validate first; this stores exactly what it is given.
     func setSplitTunnelRanges(_ ranges: [String]) {
         defaults.set(ranges, forKey: SharedPrefs.Key.splitTunnelRanges)
         splitTunnelRanges = ranges
+        onTunnelSettingsChanged?()
     }
 
     // A failure to run the probe at all reads as a failed probe, with the reason as its detail.

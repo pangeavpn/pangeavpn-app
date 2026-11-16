@@ -120,6 +120,8 @@ final class LifecycleCoreFake: LifecycleCore {
 
     var settings = AppSettings()
     var tunnel = LifecycleCoreFake.tunnelConfig(dns: ["10.66.0.1"])
+    // What liveConfig answers; nil answers the prepared tunnel.
+    var liveTunnel: TunnelConfig?
     var servers: [Server] = []
     var restoreError: Error?
     var locked: TunnelStartError?
@@ -162,6 +164,11 @@ final class LifecycleCoreFake: LifecycleCore {
         calls.append("prepareVia(\(exitId),\(entryId))")
         if let error = prepareErrors[exitId] { throw error }
         return tunnel
+    }
+
+    func liveConfig() throws -> TunnelConfig {
+        calls.append("liveConfig")
+        return liveTunnel ?? tunnel
     }
 
     func multihopEntries(exitId: String) -> [String] {

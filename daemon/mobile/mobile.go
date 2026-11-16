@@ -51,6 +51,10 @@ type preparedTunnel struct {
 	entryServerName string
 	// mtu is what the host was told to give the TUN.
 	mtu int
+	// address and serverDNS are what the hub assigned, so a live settings
+	// change can rebuild the host's interface without another registration.
+	address   string
+	serverDNS string
 	// starts counts the cascades still reading the keys; guarded by mu.
 	starts int
 }
