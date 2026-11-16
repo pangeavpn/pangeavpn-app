@@ -329,7 +329,7 @@ export const zh = {
   "settings.splitTunnel.ranges.blockedByApps": "未保存：请先在「已排除的应用」中修正或移除 {apps}。",
   "settings.splitTunnel.hint.dns": "域名解析（DNS）仍通过 VPN。",
   "settings.splitTunnel.hint.lockdown": "锁定模式已开启：VPN 断开时，被排除的应用和 IP 范围也会像其他流量一样被拦截。",
-  "settings.splitTunnel.hint.restart": "更改对新连接生效。已打开的应用请重新启动。",
+  "settings.splitTunnel.hint.restart": "更改立即生效。新排除的应用已打开的连接会重新建立一次；数分钟内无活动的连接将继续经由 VPN，直到关闭。",
   "settings.splitTunnel.hint.children": "被排除的应用启动的程序也会绕过 VPN。",
   "settings.splitTunnel.appsUnavailable.unsupportedOS": "此电脑不支持排除应用。IP 范围仍然有效。",
   "settings.splitTunnel.appsUnavailable.classifierFailed": "PangeaVPN 无法识别每个连接属于哪个应用，因此无法排除应用。IP 范围仍然有效。",
@@ -520,7 +520,7 @@ export const zh = {
   "toggle.lockdown.failed": "更新锁定模式失败。",
   "toggle.lockdown.on": "锁定模式已开启——断网保护将保持开启，直到您手动关闭。",
   "toggle.lockdown.off": "锁定模式已关闭——已恢复正常互联网访问。",
-  "toggle.splitTunnel.on": "已开启分应用代理。被排除的应用将在下次连接时绕过 VPN。",
+  "toggle.splitTunnel.on": "已开启分应用代理。被排除的应用现在即绕过 VPN；它们已打开的连接会重新建立一次。",
   "toggle.splitTunnel.off": "已关闭分应用代理。所有流量重新走 VPN。",
 
   // ── Verbose errors (hidden debug toggle) ──────────────

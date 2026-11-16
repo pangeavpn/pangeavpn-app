@@ -81,6 +81,7 @@ type pktInfo struct {
 	dstPort uint16
 	flags   uint8
 	seq     uint32
+	ack     uint32
 }
 
 // parseIPv4 validates the IPv4 and transport headers decide() relies on; ok=false means
@@ -129,6 +130,7 @@ func parseIPv4(b []byte) (info pktInfo, ok bool) {
 		info.srcPort = binary.BigEndian.Uint16(t[0:2])
 		info.dstPort = binary.BigEndian.Uint16(t[2:4])
 		info.seq = binary.BigEndian.Uint32(t[4:8])
+		info.ack = binary.BigEndian.Uint32(t[8:12])
 		info.flags = t[13]
 	case protoUDP:
 		if len(t) < 8 {
@@ -248,6 +250,35 @@ func replyPacket(uh, payload []byte, off, n int, id, ff uint16, src, dst netip.A
 		return p
 	}
 	copy(body, payload[off-len(uh):off-len(uh)+n])
+	return p
+}
+
+// buildTCPReset is a bare RST from -> to with sequence number seq, as the remote end of a
+// connection would send it. It keeps writeHeadroom spare bytes in front, like buildUDPReply.
+func buildTCPReset(from, to netip.AddrPort, seq uint32) *packetBuf {
+	n := header.IPv4MinimumSize + header.TCPMinimumSize
+	p := newPacketBuf(writeHeadroom + n)
+	clear(p.data)
+	ip := header.IPv4(p.data[writeHeadroom:])
+	src, dst := tcpip.AddrFrom4(from.Addr().As4()), tcpip.AddrFrom4(to.Addr().As4())
+	ip.Encode(&header.IPv4Fields{
+		TotalLength: uint16(n),
+		TTL:         64,
+		Protocol:    protoTCP,
+		SrcAddr:     src,
+		DstAddr:     dst,
+	})
+	ip.SetChecksum(^ip.CalculateChecksum())
+	t := header.TCP(ip[header.IPv4MinimumSize:])
+	t.Encode(&header.TCPFields{
+		SrcPort:    from.Port(),
+		DstPort:    to.Port(),
+		SeqNum:     seq,
+		DataOffset: header.TCPMinimumSize,
+		Flags:      header.TCPFlagRst,
+	})
+	xsum := header.PseudoHeaderChecksum(header.TCPProtocolNumber, src, dst, header.TCPMinimumSize)
+	t.SetChecksum(^t.CalculateChecksum(xsum))
 	return p
 }
 

@@ -24,6 +24,7 @@ type deviceStats struct {
 	outDrops        atomic.Uint64
 	revalidated     atomic.Uint64
 	torn            atomic.Uint64
+	moved           atomic.Uint64
 	tooMany         atomic.Uint64
 	bypassTCP       atomic.Int64
 	bypassUDP       atomic.Int64
@@ -39,6 +40,7 @@ func (s *deviceStats) snapshot() Counters {
 		OutDrops:        s.outDrops.Load(),
 		Revalidated:     s.revalidated.Load(),
 		Torn:            s.torn.Load(),
+		Moved:           s.moved.Load(),
 	}
 }
 
@@ -306,8 +308,8 @@ func (d *Device) Close() error {
 		d.c.deregister(d)
 		if e != nil {
 			s := d.stats.snapshot()
-			d.c.log.printf("split tunnel: engine stopped (classified=%d bypassed=%d lookupFails=%d pendingTimeouts=%d udpDrops=%d outDrops=%d revalidated=%d torn=%d)",
-				s.Classified, s.Bypassed, s.LookupFails, s.PendingTimeouts, s.UDPDrops, s.OutDrops, s.Revalidated, s.Torn)
+			d.c.log.printf("split tunnel: engine stopped (classified=%d bypassed=%d lookupFails=%d pendingTimeouts=%d udpDrops=%d outDrops=%d revalidated=%d torn=%d moved=%d)",
+				s.Classified, s.Bypassed, s.LookupFails, s.PendingTimeouts, s.UDPDrops, s.OutDrops, s.Revalidated, s.Torn, s.Moved)
 		}
 	})
 	return err

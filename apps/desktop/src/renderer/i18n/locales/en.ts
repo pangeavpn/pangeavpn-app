@@ -329,7 +329,7 @@ export const en = {
   "settings.splitTunnel.ranges.blockedByApps": "Not saved: first fix or remove {apps} in Excluded apps.",
   "settings.splitTunnel.hint.dns": "Name lookups (DNS) still go through the VPN.",
   "settings.splitTunnel.hint.lockdown": "Lockdown is on: while the VPN is disconnected, excluded apps and ranges are blocked like everything else.",
-  "settings.splitTunnel.hint.restart": "Changes apply to new connections. Restart an app that was already open.",
+  "settings.splitTunnel.hint.restart": "Changes apply at once. Open connections of a newly excluded app restart once; one that stays silent for a few minutes keeps using the VPN until it closes.",
   "settings.splitTunnel.hint.children": "Programs an excluded app starts bypass the VPN too.",
   "settings.splitTunnel.appsUnavailable.unsupportedOS": "Excluding apps isn't available on this computer. IP ranges still work.",
   "settings.splitTunnel.appsUnavailable.classifierFailed": "PangeaVPN couldn't tell which app owns each connection here, so apps can't be excluded. IP ranges still work.",
@@ -520,7 +520,7 @@ export const en = {
   "toggle.lockdown.failed": "Failed to update Lockdown.",
   "toggle.lockdown.on": "Lockdown on — the kill switch stays on until you turn it off.",
   "toggle.lockdown.off": "Lockdown off — normal internet restored.",
-  "toggle.splitTunnel.on": "Split tunnelling on. Excluded apps skip the VPN on their next connection.",
+  "toggle.splitTunnel.on": "Split tunnelling on. Excluded apps skip the VPN now; connections they already had open restart once.",
   "toggle.splitTunnel.off": "Split tunnelling off. Everything goes through the VPN again.",
 
   // ── Verbose errors (hidden debug toggle) ──────────────

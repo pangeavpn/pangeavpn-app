@@ -201,7 +201,7 @@ func FuzzDecide(f *testing.F) {
 		var sp spill
 		act := e.decide(pkt, time.Now(), &sp)
 		for _, it := range sp.items {
-			if it.act != actTunnel && it.act != actStack {
+			if it.act != actTunnel && it.act != actStack && it.act != actToApp {
 				t.Fatalf("spilled action %d", it.act)
 			}
 		}
