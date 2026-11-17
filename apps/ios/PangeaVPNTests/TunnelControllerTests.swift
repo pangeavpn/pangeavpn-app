@@ -21,6 +21,16 @@ final class TunnelControllerTests: XCTestCase {
         }
     }
 
+    func testSessionStartSurvivesTheExtensionsOwnReconnect() {
+        let first = Date(timeIntervalSince1970: 1_000)
+        let later = Date(timeIntervalSince1970: 2_000)
+        XCTAssertEqual(TunnelStatusMonitor.sessionStart(.connected, reported: first, held: nil), first)
+        XCTAssertEqual(TunnelStatusMonitor.sessionStart(.reasserting, reported: nil, held: first), first)
+        XCTAssertEqual(TunnelStatusMonitor.sessionStart(.connected, reported: later, held: first), first)
+        XCTAssertNil(TunnelStatusMonitor.sessionStart(.connecting, reported: nil, held: first))
+        XCTAssertNil(TunnelStatusMonitor.sessionStart(.disconnected, reported: nil, held: first))
+    }
+
     func testOnlyAKillSwitchTunnelThatMayBeStrandedIsDisabled() {
         let cases: [(includeAll: Bool, wasRunning: Bool, stopped: Bool, disable: Bool)] = [
             (true, false, true, true),

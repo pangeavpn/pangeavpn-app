@@ -37,10 +37,17 @@ final class FormatTests: XCTestCase {
     func testSessionClockOtherStates() {
         let now = Date()
         let start = now.addingTimeInterval(-60)
-        let others: [TunnelState] = [.disconnected, .connecting, .disconnecting, .error]
+        let others: [TunnelState] = [.disconnected, .disconnecting, .error]
         for state in others {
             XCTAssertEqual(Format.sessionClock(state: state, connectedDate: start, now: now), Format.emDash)
         }
+    }
+
+    func testSessionClockKeepsRunningThroughAReconnect() {
+        let now = Date(timeIntervalSince1970: 10_000)
+        let start = now.addingTimeInterval(-61)
+        XCTAssertEqual(Format.sessionClock(state: .connecting, connectedDate: start, now: now), "01:01")
+        XCTAssertEqual(Format.sessionClock(state: .connecting, connectedDate: nil, now: now), Format.emDash)
     }
 
     func testTransportStatus() {

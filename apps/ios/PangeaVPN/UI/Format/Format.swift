@@ -26,8 +26,9 @@ enum Format {
         return String(format: "%.1f %@", value, units[index])
     }
 
+    // A date while connecting means the session is reconnecting, not a fresh connect.
     static func sessionClock(state: TunnelState, connectedDate: Date?, now: Date) -> String {
-        guard state == .connected, let date = connectedDate else { return emDash }
+        guard state == .connected || state == .connecting, let date = connectedDate else { return emDash }
         return duration(seconds: Int(now.timeIntervalSince(date)))
     }
 }

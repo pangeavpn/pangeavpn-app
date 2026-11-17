@@ -57,7 +57,7 @@ final class TunnelStatusMonitor {
         guard let connection else { return }
         let previous = state
         state = TunnelController.state(for: connection.status)
-        connectedDate = state == .connected ? connection.connectedDate : nil
+        connectedDate = Self.sessionStart(connection.status, reported: connection.connectedDate, held: connectedDate)
         switch state {
         case .connecting, .connected:
             var next = previous == .disconnected ? TunnelStatus.disconnected : status
@@ -76,6 +76,15 @@ final class TunnelStatusMonitor {
         }
         onTransition?(previous, state)
         onChange?()
+    }
+
+    // The extension's own reconnect keeps the VPN session and its blocking routes, so the clock carries on.
+    nonisolated static func sessionStart(_ status: NEVPNStatus, reported: Date?, held: Date?) -> Date? {
+        switch status {
+        case .connected: return held ?? reported
+        case .reasserting: return held
+        default: return nil
+        }
     }
 
     private func reportDisconnect() {
