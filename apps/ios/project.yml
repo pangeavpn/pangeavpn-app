@@ -43,7 +43,9 @@ targets:
         # Standard WireGuard and TLS only, self-classified as mass market; the yearly BIS report covers it.
         ITSAppUsesNonExemptEncryption: false
         NSFaceIDUsageDescription: PangeaVPN asks for Face ID before showing your account number.
-        UILaunchScreen: {}
+        # Palette.bg, so launch hands over to the splash with no flash of system black or white.
+        UILaunchScreen:
+          UIColorName: LaunchBackground
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
         UISupportedInterfaceOrientations:
