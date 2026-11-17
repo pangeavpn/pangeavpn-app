@@ -39,5 +39,7 @@ dependencies {
     // so consumers need that supertype on their classpath.
     api(group = "", name = "pangeacore", ext = "aar")
 
-    testImplementation(kotlin("test"))
+    // Built-in Kotlin does not infer kotlin-test's JUnit flavour the way kotlin-android did,
+    // so name it: without it kotlin.test.Test is unresolved.
+    testImplementation(libs.kotlin.test.junit)
 }
