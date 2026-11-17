@@ -469,3 +469,32 @@ func TestEndingASessionDropsThePreparedKey(t *testing.T) {
 		})
 	}
 }
+
+func TestCachedServersReadsTheStoreWithoutTheHub(t *testing.T) {
+	_, _, h := newSignedInHub(t)
+	if raw, err := CachedServers(); err != nil || raw != "[]" {
+		t.Fatalf("CachedServers before any fetch = %q, %v; want []", raw, err)
+	}
+	h.handle("/api/client/regions", replyWith(http.StatusOK, regionsWith(t, "mine")))
+	if _, err := RestoreSession(); err != nil {
+		t.Fatalf("RestoreSession: %v", err)
+	}
+	h.offline()
+	before := len(h.requestsTo("/api/client/regions"))
+
+	raw, err := CachedServers()
+	if err != nil || !strings.Contains(raw, `"fra"`) || strings.Contains(raw, "mine") {
+		t.Fatalf("CachedServers = %s, %v", raw, err)
+	}
+	if after := len(h.requestsTo("/api/client/regions")); after != before {
+		t.Fatalf("CachedServers asked the hub: %d requests, want %d", after, before)
+	}
+}
+
+func TestCachedServersNeedsASession(t *testing.T) {
+	_, _, _ = newSignedInHub(t)
+	Logout()
+	if _, err := CachedServers(); err == nil {
+		t.Fatal("CachedServers signed out = nil error, want not authenticated")
+	}
+}

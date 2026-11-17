@@ -60,6 +60,7 @@ final class GatedCore: CoreBridge, @unchecked Sendable {
     func login(token: String) throws -> Session { try fake.login(token: token) }
     func logout() { fake.logout() }
     func listServers() throws -> [Server] { try fake.listServers() }
+    func cachedServers() throws -> [Server] { try fake.cachedServers() }
     func subscription() throws -> Subscription? { try fake.subscription() }
     func listDevices() throws -> [Device] { try fake.listDevices() }
     func removeDevice(id: String) throws { try fake.removeDevice(id: id) }

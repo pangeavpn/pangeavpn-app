@@ -26,6 +26,8 @@ protocol CoreBridge: AnyObject, Sendable {
     func login(token: String) throws -> Session
     func logout()
     func listServers() throws -> [Server]
+    // The list stored by the last fetch, read with no hub call; empty when none is stored.
+    func cachedServers() throws -> [Server]
     func subscription() throws -> Subscription?
     func listDevices() throws -> [Device]
     func removeDevice(id: String) throws

@@ -89,4 +89,36 @@ final class SessionLaunchRestoreTests: XCTestCase {
         XCTAssertNil(store.session)
         XCTAssertFalse(core.calls.contains("subscription"))
     }
+
+    // A stored list needs no hub, so launch never waits on one.
+    func testStoredServersOpenTheAppAtOnceAndTheAnswerReplacesThem() async {
+        let core = slowCore(.success(Session(email: "", name: "", servers: [fresh])))
+        core.restoreDelay = 3
+        core.cachedServersValue = [stale]
+        let store = SessionStore(core: core, tunnel: FakeTunnel(), timeouts: SessionTimeouts(launchRestore: 2))
+        let started = Date()
+        await store.restore()
+        XCTAssertLessThan(Date().timeIntervalSince(started), 1)
+        XCTAssertEqual(store.session?.servers, [stale])
+        XCTAssertEqual(store.session?.cached, true)
+        XCTAssertTrue(store.settling)
+        XCTAssertFalse(store.restoring)
+        let adopted = await eventually(within: .seconds(5)) { store.session?.servers == [fresh] && !store.settling }
+        XCTAssertTrue(adopted)
+    }
+
+    func testStoredServersStillLeaveWhenTheLateAnswerIsSignedOut() async {
+        let core = slowCore(.failure(CoreError(message: "mobile: no stored session")))
+        core.cachedServersValue = [stale]
+        let tunnel = FakeTunnel()
+        let store = makeStore(core, tunnel: tunnel)
+        await store.restore()
+        XCTAssertNotNil(store.session)
+        let ended = await eventually { store.session == nil && tunnel.removals == 1 && !store.settling }
+        XCTAssertTrue(ended)
+    }
 }
+
+private let stale = Server(id: "old-1", name: "Old", region: "eu", country: "DE", load: 10)
+private let fresh = Server(id: "new-1", name: "New", region: "eu", country: "DE", load: 10)
+

@@ -68,6 +68,11 @@ struct RootView: View {
             }
             .task { await launch() }
             .task(id: hasRestored && session.session != nil) { await loadSignedInData() }
+            .onChange(of: session.settling) { was, now in
+                // The stored list stood in; the restore that landed brings the fresh one or retries.
+                guard was, !now, let signedIn = session.session else { return }
+                Task { await Self.loadServers(servers, for: signedIn, settling: false) }
+            }
     }
 
     // Above every screen, so a purchase that signs in keeps its sheet as sign-in gives way to the main screen.
@@ -122,15 +127,16 @@ struct RootView: View {
         }
         let settings = self.settings
         let servers = self.servers
+        let settling = session.settling
         async let loadedSettings: Void = settings.load()
-        async let loadedServers: Void = Self.loadServers(servers, for: signedIn)
+        async let loadedServers: Void = Self.loadServers(servers, for: signedIn, settling: settling)
         _ = await (loadedSettings, loadedServers)
     }
 
-    // Restore and sign-in already fetched the list from the hub; only a stored copy
-    // or a sign-in still settling sends the app back for a fresh one.
-    private static func loadServers(_ servers: ServersStore, for session: Session) async {
-        if session.servers.isEmpty || session.cached {
+    // Restore and sign-in already fetched the list from the hub. A stored copy shows at once
+    // while the restore is still fetching; once it has settled, a stored copy sends the app back.
+    private static func loadServers(_ servers: ServersStore, for session: Session, settling: Bool) async {
+        if session.servers.isEmpty || (session.cached && !settling) {
             await servers.refresh()
         } else {
             await servers.use(session.servers)

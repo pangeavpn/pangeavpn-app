@@ -47,6 +47,10 @@ final class GoCore: CoreBridge {
         try CoreJSON.decodeList(call { MobileListServers($0) })
     }
 
+    func cachedServers() throws -> [Server] {
+        try CoreJSON.decodeList(call { MobileCachedServers($0) })
+    }
+
     func subscription() throws -> Subscription? {
         try CoreJSON.decodeOptional(call { MobileGetSubscription($0) })
     }

@@ -6,6 +6,7 @@ final class FakeCore: CoreBridge, @unchecked Sendable {
     var restoreResult: Result<Session, CoreError> = .failure(CoreError(message: "not authenticated"))
     var loginResult: Result<Session, CoreError> = .failure(CoreError(message: "not authenticated"))
     var serversResult: Result<[Server], CoreError> = .success([])
+    var cachedServersValue: [Server] = []
     var subscriptionResult: Result<Subscription?, CoreError> = .success(nil)
     var devicesResult: Result<[Device], CoreError> = .success([])
     var removeDeviceResult: Result<Void, CoreError> = .success(())
@@ -85,6 +86,11 @@ final class FakeCore: CoreBridge, @unchecked Sendable {
     func logout() {
         note("logout")
         if logoutDelay > 0 { Thread.sleep(forTimeInterval: logoutDelay) }
+    }
+
+    func cachedServers() throws -> [Server] {
+        note("cachedServers")
+        return cachedServersValue
     }
 
     func listServers() throws -> [Server] {

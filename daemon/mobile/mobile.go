@@ -354,6 +354,28 @@ func ListServers() (string, error) {
 	return string(b), nil
 }
 
+// CachedServers is this session's stored list, with no hub call, so a launch can
+// show servers at once; "[]" when none is stored.
+func CachedServers() (string, error) {
+	mu.Lock()
+	scope, ident := scopeLocked(), identity
+	mu.Unlock()
+	if scope.licenseKey == "" {
+		return "", errors.New("mobile: not authenticated")
+	}
+
+	srvs := restoreCachedServers(storedValue(keyServers), cacheOwner(scope.licenseKey, ident.publicKey()))
+	listed := publicServers(srvs)
+	if listed == nil {
+		listed = []publicServer{}
+	}
+	b, err := json.Marshal(listed)
+	if err != nil {
+		return "", fmt.Errorf("marshal servers: %w", err)
+	}
+	return string(b), nil
+}
+
 // GetSubscription returns the account's subscription info, or the literal
 // string "null" when the account has none.
 func GetSubscription() (string, error) {
