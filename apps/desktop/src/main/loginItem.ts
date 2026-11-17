@@ -50,7 +50,6 @@ export async function setLoginItemEnabled(enabled: boolean): Promise<void> {
   if (process.platform === "darwin" || process.platform === "win32") {
     app.setLoginItemSettings({
       openAtLogin: enabled,
-      openAsHidden: enabled,
       args: enabled ? [HIDDEN_ARG] : []
     });
     return;

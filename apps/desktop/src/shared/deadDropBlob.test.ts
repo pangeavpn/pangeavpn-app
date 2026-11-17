@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { generateKeyPairSync, sign } from "node:crypto";
+import { generateKeyPairSync, sign, type KeyObject } from "node:crypto";
 import { verifyDeadDropBlob, type DeadDropKeys } from "./deadDropBlob.ts";
 
-function makeKey(): { pub: string; priv: ReturnType<typeof generateKeyPairSync>["privateKey"] } {
+function makeKey(): { pub: string; priv: KeyObject } {
   const { publicKey, privateKey } = generateKeyPairSync("ed25519");
   const pub = (publicKey.export({ type: "spki", format: "der" }) as Buffer).subarray(12).toString("base64");
   return { pub, priv: privateKey };
