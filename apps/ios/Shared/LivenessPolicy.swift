@@ -34,3 +34,17 @@ struct LivenessPolicy: Equatable {
         return wallNow - TimeInterval(lastHandshake) > Self.staleAfter ? .stale : .healthy
     }
 }
+
+// WireGuard rekeys at 120 s on Go's monotonic clock, which iOS pauses in sleep,
+// while the server drops the keys at 180 s of real time, so the app renews them itself.
+enum WakeRekey {
+    static let rekeyAfter: TimeInterval = 120
+    // Handshake retries come every 5 s, so two misses mean the carrier itself is gone.
+    static let confirmWithin: TimeInterval = 12
+
+    // Awake seconds until the keys are due, 0 when already due; nil before any handshake.
+    static func delay(lastHandshake: Int64, wallNow: TimeInterval) -> TimeInterval? {
+        guard lastHandshake > 0 else { return nil }
+        return max(0, rekeyAfter - (wallNow - TimeInterval(lastHandshake)))
+    }
+}

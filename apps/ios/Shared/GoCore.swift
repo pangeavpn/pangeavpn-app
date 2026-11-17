@@ -145,6 +145,8 @@ final class GoCore: CoreBridge {
 
     func stopForSwitch() { MobileStopForSwitch() }
 
+    func rekey() { MobileRekey() }
+
     func start(tunFd: Int) throws {
         var err: NSError?
         let ok = MobileStart(tunFd, &err)

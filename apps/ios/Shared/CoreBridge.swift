@@ -57,6 +57,8 @@ protocol CoreBridge: AnyObject, Sendable {
     func stop()
     // Stops for an immediate start on the prepared server, reporting connecting, not disconnected.
     func stopForSwitch()
+    // Drops the session keys and handshakes again; a no-op with no tunnel running.
+    func rekey()
     func state() -> TunnelStatus
     func config() throws -> AppSettings
     func setConfig(_ settings: AppSettings) throws -> AppSettings

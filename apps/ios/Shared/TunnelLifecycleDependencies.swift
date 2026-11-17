@@ -44,6 +44,7 @@ protocol LifecycleCore {
     func start(tunFd: Int) throws
     func stop()
     func stopForSwitch()
+    func rekey()
     func state() -> TunnelStatus
 }
 

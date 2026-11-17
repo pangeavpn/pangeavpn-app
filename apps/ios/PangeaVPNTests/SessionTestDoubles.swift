@@ -92,6 +92,7 @@ final class GatedCore: CoreBridge, @unchecked Sendable {
     }
     func reload() throws { try fake.reload() }
     func networkChanged() { fake.networkChanged() }
+    func rekey() { fake.rekey() }
 }
 
 // Throwaway defaults and container for a wipe, so tests never clear the real ones.

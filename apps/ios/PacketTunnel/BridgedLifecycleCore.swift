@@ -29,5 +29,7 @@ struct BridgedLifecycleCore: LifecycleCore {
 
     func stopForSwitch() { bridge.stopForSwitch() }
 
+    func rekey() { bridge.rekey() }
+
     func state() -> TunnelStatus { bridge.state() }
 }

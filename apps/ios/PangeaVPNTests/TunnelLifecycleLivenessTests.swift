@@ -39,28 +39,57 @@ final class TunnelLifecycleLivenessTests: XCTestCase {
         XCTAssertEqual(rig.clock.pending, [])
     }
 
-    func testWakeGivesTheTunnelAGraceToHandshakeAgain() {
+    func testWakeAfterALongSleepRenewsTheKeysAtOnce() {
         let rig = LifecycleRig().running(on: "wifi")
-        rig.handshake(agedBy: 10)
-        rig.ticker.advance(by: 100)
         rig.handshake(agedBy: 3_600)
         rig.lifecycle.wake()
-        rig.ticker.advance(by: 16)
+        XCTAssertEqual(rig.core.calls, ["rekey"])
+        rig.handshake(agedBy: 0)
+        rig.ticker.advance(by: 45)
+        XCTAssertEqual(rig.clock.pending, [])
+        XCTAssertEqual(rig.events, [])
+    }
+
+    func testRenewedKeysWithNoHandshakeReconnectWithinSeconds() {
+        let rig = LifecycleRig().running(on: "wifi")
+        rig.handshake(agedBy: 3_600)
+        rig.lifecycle.wake()
+        rig.ticker.advance(by: WakeRekey.confirmWithin - 1)
         XCTAssertEqual(rig.clock.pending, [])
         rig.ticker.advance(by: 1)
         XCTAssertEqual(rig.clock.pending, [0])
         XCTAssertEqual(rig.events, [.reconnecting])
     }
 
-    func testWakeChecksFindARecoveredHandshakeHealthy() {
+    func testWakeOnYoungKeysRenewsThemOnceDue() {
         let rig = LifecycleRig().running(on: "wifi")
         rig.handshake(agedBy: 10)
         rig.ticker.advance(by: 100)
         rig.lifecycle.wake()
-        XCTAssertEqual(rig.ticker.pending.sorted(), [5, 17, 32])
-        rig.ticker.advance(by: 45)
+        XCTAssertEqual(rig.ticker.pending.sorted(), [5, 17, 32, 110])
+        rig.ticker.advance(by: 109)
+        XCTAssertEqual(rig.core.calls, [])
         XCTAssertEqual(rig.clock.pending, [])
-        XCTAssertEqual(rig.events, [])
+        rig.ticker.advance(by: 1)
+        XCTAssertEqual(rig.core.calls, ["rekey"])
+    }
+
+    func testWakeBeforeAnyHandshakeLeavesTheKeysAlone() {
+        let rig = LifecycleRig().running(on: "wifi")
+        rig.lifecycle.wake()
+        rig.ticker.advance(by: 200)
+        XCTAssertEqual(rig.core.calls, [])
+    }
+
+    func testRecoveryCancelsAPendingRenewal() {
+        let rig = LifecycleRig().running(on: "wifi")
+        rig.handshake(agedBy: 10)
+        rig.lifecycle.wake()
+        rig.path("cell")
+        rig.clock.advance(by: 1.5)
+        rig.core.clearCalls()
+        rig.ticker.advance(by: 120)
+        XCTAssertFalse(rig.core.calls.contains("rekey"))
     }
 
     func testRecoveryStopsLivenessChecksUntilTheTunnelIsBack() {

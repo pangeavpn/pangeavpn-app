@@ -187,6 +187,8 @@ final class LifecycleCoreFake: LifecycleCore {
 
     func stopForSwitch() { calls.append("stopForSwitch") }
 
+    func rekey() { calls.append("rekey") }
+
     func state() -> TunnelStatus { status }
 
     func clearCalls() { calls = [] }

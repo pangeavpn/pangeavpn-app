@@ -197,5 +197,7 @@ final class FakeCore: CoreBridge, @unchecked Sendable {
     func reload() throws { try record("reload", reloadResult) }
 
     func networkChanged() { note("networkChanged") }
+
+    func rekey() { note("rekey") }
 }
 #endif
