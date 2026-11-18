@@ -339,6 +339,9 @@ type CDNProfile struct {
 	Path       string `json:"path,omitempty"`
 	TargetHost string `json:"targetHost,omitempty"`
 	TargetPort int    `json:"targetPort,omitempty"`
+	// ExtraRootsPEM holds roots the signed-in user trusts that this service's account
+	// cannot see, such as a school's TLS-inspection CA. Set at dial time, never stored.
+	ExtraRootsPEM string `json:"-"`
 }
 
 // SnowflakeProfile carries per-device Tor Snowflake (WebRTC rendezvous)

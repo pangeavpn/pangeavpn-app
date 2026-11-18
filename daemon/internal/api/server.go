@@ -417,6 +417,25 @@ func NewHandler(token string, service *Service) http.Handler {
 		writeJSON(w, http.StatusOK, okResponse{OK: true})
 	}))
 
+	mux.Handle("/user-roots", withAuthAndLimit(token, limiter, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, maxBodySize)
+		var payload struct {
+			PEM *string `json:"pem"`
+		}
+		decoder := json.NewDecoder(r.Body)
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&payload); err != nil || payload.PEM == nil {
+			writeError(w, http.StatusBadRequest, "invalid json")
+			return
+		}
+		service.SetUserRoots(*payload.PEM)
+		writeJSON(w, http.StatusOK, okResponse{OK: true})
+	}))
+
 	mux.Handle("/killswitch/engage", withAuthAndLimit(token, limiter, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")

@@ -1,7 +1,9 @@
 package sbrelay
 
 import (
+	"crypto/x509"
 	"encoding/base64"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"net"
@@ -88,6 +90,11 @@ func buildCDN(p state.CDNProfile) (spec, error) {
 	if utlsAvailable {
 		tls.UTLS = &option.OutboundUTLSOptions{Enabled: true, Fingerprint: "chrome"}
 	}
+	extraRoots := parseRoots(p.ExtraRootsPEM)
+	remote := net.JoinHostPort(host, strconv.Itoa(remotePort)) + " (" + serverName + ")"
+	if len(extraRoots) > 0 {
+		remote += fmt.Sprintf(", trusting %d of the user's own roots", len(extraRoots))
+	}
 	return spec{
 		outbound: option.Outbound{Type: C.TypeVLESS, Tag: outboundTag, Options: &option.VLESSOutboundOptions{
 			DialerOptions:               protectedDialer(),
@@ -99,17 +106,42 @@ func buildCDN(p state.CDNProfile) (spec, error) {
 				HTTPUpgradeOptions: option.V2RayHTTPUpgradeOptions{Host: serverName, Path: path},
 			},
 		}},
-		remote:     net.JoinHostPort(host, strconv.Itoa(remotePort)) + " (" + serverName + ")",
+		remote:     remote,
 		targetHost: targetHost(p.TargetHost),
 		targetPort: targetPort(p.TargetPort),
 		localPort:  p.LocalPort,
 		annotate:   annotateCDN,
+		extraRoots: extraRoots,
 	}, nil
+}
+
+// parseRoots keeps the certificates Go can parse, re-encoded one per entry: one
+// unparseable entry in a user's store must not stop sing-box loading the rest.
+func parseRoots(bundle string) []string {
+	var roots []string
+	rest := []byte(bundle)
+	for {
+		var block *pem.Block
+		block, rest = pem.Decode(rest)
+		if block == nil {
+			return roots
+		}
+		if block.Type != "CERTIFICATE" {
+			continue
+		}
+		if _, err := x509.ParseCertificate(block.Bytes); err != nil {
+			continue
+		}
+		roots = append(roots, string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: block.Bytes})))
+	}
 }
 
 // annotateCDN names the usual cause of the bare EOF an edge returns when it
 // can't reach the origin or the path/UUID is wrong.
 func annotateCDN(err error) error {
+	if strings.Contains(err.Error(), "unknown authority") {
+		return fmt.Errorf("%w (neither this device nor its user trusts the certificate; a network filter may be inspecting TLS)", err)
+	}
 	if strings.Contains(err.Error(), "EOF") || strings.Contains(err.Error(), "unexpected status") {
 		return fmt.Errorf("%w (the CDN edge answered but the node did not accept the upgrade; verify the path, UUID and the edge's origin settings)", err)
 	}

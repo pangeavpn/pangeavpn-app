@@ -36,6 +36,8 @@ type spec struct {
 	targetPort int
 	localPort  int
 	annotate   func(error) error
+	// extraRoots are added to the system store, which the platform verifier still checks first.
+	extraRoots []string
 }
 
 type Manager[P comparable] struct {
@@ -87,14 +89,15 @@ func (m *Manager[P]) Start(ctx context.Context, profile P) error {
 		}
 	}
 
+	options := option.Options{
+		Log:       &option.LogOptions{Level: "warn"},
+		Outbounds: []option.Outbound{sp.outbound},
+	}
+	if len(sp.extraRoots) > 0 {
+		options.Certificate = &option.CertificateOptions{Certificate: sp.extraRoots}
+	}
 	engineCtx, cancel := context.WithCancel(context.Background())
-	engine, err := box.New(box.Options{
-		Context: registryContext(engineCtx),
-		Options: option.Options{
-			Log:       &option.LogOptions{Level: "warn"},
-			Outbounds: []option.Outbound{sp.outbound},
-		},
-	})
+	engine, err := box.New(box.Options{Context: registryContext(engineCtx), Options: options})
 	if err != nil {
 		cancel()
 		return fmt.Errorf("%s: build engine: %w", m.name, err)

@@ -165,6 +165,11 @@ type Service struct {
 	wg          wg.Manager
 	killSwitch  platform.KillSwitch
 
+	// userRootsPEM are roots the signed-in user trusts, sent by the app because this
+	// service's account cannot read them. Memory only; the app resends before each connect.
+	userRootsMu  sync.RWMutex
+	userRootsPEM string
+
 	// transportMemory remembers the last-good transport per network; nil disables
 	// the reorder/record optimization. Both fields are set once and read-only after.
 	transportMemory transportMemory
@@ -449,6 +454,21 @@ func NewService(
 // at startup; a nil store leaves it off, so connects always walk the full cascade.
 func (s *Service) SetTransportMemory(store transportMemory) {
 	s.transportMemory = store
+}
+
+func (s *Service) SetUserRoots(pem string) {
+	s.userRootsMu.Lock()
+	s.userRootsPEM = pem
+	s.userRootsMu.Unlock()
+}
+
+// cdnStart is the profile the CDN relay dials with: the CDN edge is the one TLS
+// a school's inspecting proxy can terminate, so it alone takes the user's roots.
+func (s *Service) cdnStart(profile state.CDNProfile) state.CDNProfile {
+	s.userRootsMu.RLock()
+	profile.ExtraRootsPEM = s.userRootsPEM
+	s.userRootsMu.RUnlock()
+	return profile
 }
 
 // ClearTransportMemory forgets every remembered network. No-op when the cache
@@ -1172,7 +1192,7 @@ func (s *Service) startTUICTransport(ctx context.Context, profile *state.Profile
 func (s *Service) startCDNTransport(ctx context.Context, profile *state.Profile, wireGuardProfile *state.WireGuardProfile) error {
 	cdnCopy := *profile.CDN
 	profile.CDN = &cdnCopy
-	start := cdnCopy
+	start := s.cdnStart(cdnCopy)
 	start.LocalPort = 0
 	return s.startRelay(ctx, s.cdn, func(ctx context.Context) error { return s.cdn.Start(ctx, start) }, &cdnCopy.LocalPort, wireGuardProfile)
 }
@@ -3492,7 +3512,7 @@ func (s *Service) recoverActiveTransport(ctx context.Context, profile state.Prof
 		if profile.CDN == nil {
 			return errors.New("active transport is cdn but profile has no cdn config")
 		}
-		start = func(ctx context.Context) error { return s.cdn.Start(ctx, *profile.CDN) }
+		start = func(ctx context.Context) error { return s.cdn.Start(ctx, s.cdnStart(*profile.CDN)) }
 		running = func() bool { return s.cdn.Status().Running }
 		localPort = profile.CDN.LocalPort
 	case "snowflake":
@@ -3949,7 +3969,7 @@ func (s *Service) restoreTransportForAdoption(ctx context.Context, profile *stat
 		}
 		s.machine.Set(state.StateConnecting, "restoring cdn for active tunnel")
 		s.logs.Add(state.LogInfo, state.SourceDaemon, "wireguard was already running; restoring cdn process")
-		if err := s.cdn.Start(ctx, *profile.CDN); err != nil {
+		if err := s.cdn.Start(ctx, s.cdnStart(*profile.CDN)); err != nil {
 			return fmt.Errorf("wireguard tunnel is already running but cdn restore failed: %w", err)
 		}
 		return nil

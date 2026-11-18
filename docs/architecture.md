@@ -124,6 +124,7 @@ client for the HTTP API registered in
 | `POST` | `/killswitch/permit` | Let hub control-plane IPv4 addresses through Lockdown |
 | `POST` | `/killswitch/clear` | Clear an inactive-session lock |
 | `POST` | `/transport-memory/clear` | Forget the last-good transport remembered for each network |
+| `POST` | `/user-roots` | Hand over the roots the signed-in user trusts (such as a school's TLS-inspection CA), which the CDN dial adds to the system store; held in memory only |
 | `POST` | `/realityproxy/start`, `/realityproxy/stop` | Run the local REALITY proxy that carries hub traffic |
 | `POST` | `/ssproxy/start`, `/ssproxy/stop` | Run the local Shadowsocks proxy that carries hub traffic |
 | `POST` | `/pq/offer`, `/pq/finish`, `/pq/encapsulate` | ML-KEM-768 key material for the peer's pre-shared key and the hub channel |
