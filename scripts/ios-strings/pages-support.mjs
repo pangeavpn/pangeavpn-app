@@ -122,15 +122,16 @@ export default {
     en: "On", es: "Activado", fr: "Activé", ru: "Вкл.",
     uk: "Увімк.", zh: "开启", ar: "مفعّل", fa: "روشن"
   },
+  // iOS's page has only logs, no toggles, so it does not use desktop's "leave these off" wording.
   developer_description: {
-    en: "Debugging diagnostics. Leave these off unless you were asked to turn one on.",
-    es: "Diagnósticos de depuración. Déjalas desactivadas salvo que te pidan activar alguna.",
-    fr: "Diagnostics de débogage. Laissez-les désactivés sauf si on vous demande d'en activer un.",
-    ru: "Диагностика для отладки. Не включайте без необходимости.",
-    uk: "Діагностика для налагодження. Не вмикайте без потреби.",
-    zh: "调试用的诊断项。除非有人要求，否则请保持关闭。",
-    ar: "أدوات تشخيص لتصحيح الأخطاء. اتركها معطّلة ما لم يُطلب منك تفعيل أحدها.",
-    fa: "ابزارهای عیب‌یابی. تا وقتی از شما خواسته نشده، خاموش بگذارید."
+    en: "Logs for troubleshooting. Share them only with PangeaVPN support.",
+    es: "Registros para resolver problemas. Compártelos solo con el soporte de PangeaVPN.",
+    fr: "Journaux de dépannage. Ne les partagez qu'avec l'assistance PangeaVPN.",
+    ru: "Журналы для устранения неполадок. Передавайте их только в поддержку PangeaVPN.",
+    uk: "Журнали для усунення несправностей. Передавайте їх лише підтримці PangeaVPN.",
+    zh: "用于排查问题的日志。只与 PangeaVPN 支持团队分享。",
+    ar: "سجلات لتشخيص المشكلات. لا تشاركها إلا مع دعم PangeaVPN.",
+    fa: "گزارش‌ها برای عیب‌یابی. فقط با پشتیبانی PangeaVPN به اشتراک بگذارید."
   },
   developer_app_log: {
     en: "App log", es: "Registro de la app", fr: "Journal de l'app", ru: "Журнал приложения",
