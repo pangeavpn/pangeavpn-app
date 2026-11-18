@@ -414,7 +414,6 @@
                in daemon/internal/transport/cascade.go; direct WireGuard trails because auto never picks it. -->
           <select id="preferredTransportSelect" aria-label="Censorship bypass" data-i18n-aria-label="settings.transport.heading" hidden>
             <option value="auto" data-i18n="settings.transport.auto">Automatic (recommended)</option>
-            <option value="tectonic" data-i18n="settings.transport.tectonic">Tectonic</option>
             <option value="reality" data-i18n="settings.transport.reality">VLESS+REALITY</option>
             <option value="cloak" data-i18n="settings.transport.cloak">Cloak</option>
             <option value="shadowsocks" data-i18n="settings.transport.shadowsocks">Shadowsocks</option>
@@ -424,6 +423,7 @@
             <option value="anytls" data-i18n="settings.transport.anytls">AnyTLS</option>
             <option value="cdn" data-i18n="settings.transport.cdn">CDN</option>
             <!-- Snowflake option gated for this release pending kill-switch dynamic-peer support; restore to re-enable user selection (it sorts after cdn). -->
+            <option value="tectonic" data-i18n="settings.transport.tectonic">Tectonic</option>
             <option value="wireguard" data-i18n="settings.transport.wireguard">WireGuard (no disguise)</option>
           </select>
           <button id="transportPickerBtn" class="settings-picker" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="transportPane">

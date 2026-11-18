@@ -173,7 +173,7 @@ function isDockIconAccent(value: unknown): value is DockIconAccent {
 let dockSwitching = false;
 // Panic wipe: the global removal shortcut is inert until the user opts in. Off by default.
 let panicWipeEnabled = false;
-// "auto" (tectonic, then reality, cloak, shadowsocks, hysteria2, tuic, naive, anytls, cdn, snowflake),
+// "auto" (reality, then cloak, shadowsocks, hysteria2, tuic, naive, anytls, cdn, snowflake, tectonic),
 // or one of those transports only, or "wireguard".
 let preferredTransport: "auto" | "tectonic" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "anytls" | "tuic" | "cdn" | "snowflake" | "wireguard" = "auto";
 // Stored language preference: a locale code, or "system" to follow the OS.
