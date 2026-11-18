@@ -3,7 +3,6 @@ package procmatch
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -129,7 +128,8 @@ func readHelperInfo(t *testing.T, dir, name string) helperInfo {
 			}
 			return info
 		}
-		if !errors.Is(err, os.ErrNotExist) || time.Now().After(deadline) {
+		// Not only "not there yet": Windows can refuse a just-renamed file with a sharing violation.
+		if time.Now().After(deadline) {
 			t.Fatalf("waiting for %s: %v", name, err)
 		}
 		time.Sleep(20 * time.Millisecond)

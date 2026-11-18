@@ -139,7 +139,8 @@ func parseRoots(bundle string) []string {
 // annotateCDN names the usual cause of the bare EOF an edge returns when it
 // can't reach the origin or the path/UUID is wrong.
 func annotateCDN(err error) error {
-	if strings.Contains(err.Error(), "unknown authority") {
+	// Go and Windows say "unknown authority"; the macOS verifier says "is not trusted".
+	if msg := err.Error(); strings.Contains(msg, "unknown authority") || strings.Contains(msg, "is not trusted") {
 		return fmt.Errorf("%w (neither this device nor its user trusts the certificate; a network filter may be inspecting TLS)", err)
 	}
 	if strings.Contains(err.Error(), "EOF") || strings.Contains(err.Error(), "unexpected status") {

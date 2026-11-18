@@ -175,7 +175,7 @@ func TestCDNTrustsRootsTheUserTrusts(t *testing.T) {
 		refused.Stop(ctx)
 		t.Fatal("dial with only the system store succeeded against an untrusted CA")
 	}
-	if !strings.Contains(err.Error(), "unknown authority") || !strings.Contains(err.Error(), "inspecting TLS") {
+	if !strings.Contains(err.Error(), "inspecting TLS") {
 		t.Fatalf("error does not name the untrusted certificate: %v", err)
 	}
 
