@@ -316,6 +316,10 @@ func TestPendingCapsSendNewFlowsToTunnel(t *testing.T) {
 				defer e.mu.Unlock()
 				return e.pending == 1
 			})
+			// Wait until the worker has taken its batch and is blocked in Classify: the
+			// second connection's ACKs queue a recheck lookup (the window is open after
+			// setRules), and one that joined this batch would be classified before release.
+			waitFor(t, 2*time.Second, "first flow in Classify", func() bool { return h.cls.classifiedPort(40050) })
 			start := time.Now()
 			c, _ := h.mustDial(40051, dst(remoteA, 7051))
 			if d := time.Since(start); d > time.Second {
