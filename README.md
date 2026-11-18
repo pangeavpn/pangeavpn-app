@@ -12,7 +12,7 @@ nine censorship-resistant transports, so the tunnel looks like ordinary HTTPS.
 [![Languages](https://img.shields.io/badge/languages-8-434C59?style=flat-square)](#languages)
 [![Website](https://img.shields.io/badge/site-pangeavpn.org-C3562B?style=flat-square)](https://pangeavpn.org)
 
-[Install](#install) · [Transports](#transports) · [How it works](#how-it-works) · [Verify your download](#verify-your-download) · [Security](#security) · [Build from source](#build-from-source) · [Docs](#documentation)
+[Install](#install) · [Transports](#transports) · [Tectonic](#tectonic-our-own-transport-beta) · [How it works](#how-it-works) · [Verify your download](#verify-your-download) · [Security](#security) · [Build from source](#build-from-source) · [Docs](#documentation)
 
 <br/>
 
@@ -45,19 +45,19 @@ PangeaVPN doesn't bet on one obfuscation scheme holding up forever. The daemon c
 
 ## Transports
 
-In auto mode the daemon works down this list until one connects. You can also pin a single transport.
+In auto mode the daemon works down this list and uses the first transport that actually carries traffic. It dials a few ahead in parallel, so one that's being silently dropped doesn't hold up the rest. You can also pin a single transport.
 
 | # | Transport | What the network sees |
 |:-:|---|---|
-| 1 | **Tectonic** | Several short TLS connections that look like Chrome loading an ordinary website |
-| 2 | **VLESS + REALITY** | A TLS handshake that borrows a real third-party site's certificate |
-| 3 | **Cloak** | A TLS session to a harmless-looking web host |
-| 4 | **Shadowsocks** | An encrypted stream on its own port with no TLS shape at all, so a block aimed at the TLS ones above doesn't touch it |
-| 5 | **Hysteria2** | QUIC / HTTP-3, hard to tell apart from modern web traffic |
-| 6 | **TUIC** | QUIC with an HTTP/3 handshake, like a browser on a modern site. Needs UDP to get through |
-| 7 | **NaiveProxy** | Traffic carrying a genuine Chrome TLS fingerprint |
-| 8 | **AnyTLS** | A TLS session whose record sizes are padded to blunt the TLS-in-TLS fingerprint |
-| 9 | **CDN** | An HTTPS connection to a content delivery network edge, never to our servers, so it survives every node address being blocked. Slower |
+| 1 | **VLESS + REALITY** | A TLS handshake that borrows a real third-party site's certificate |
+| 2 | **Cloak** | A TLS session to a harmless-looking web host |
+| 3 | **Shadowsocks** | An encrypted stream on its own port with no TLS shape at all, so a block aimed at the TLS ones above doesn't touch it |
+| 4 | **Hysteria2** | QUIC / HTTP-3, hard to tell apart from modern web traffic |
+| 5 | **TUIC** | QUIC with an HTTP/3 handshake, like a browser on a modern site. Needs UDP to get through |
+| 6 | **NaiveProxy** | Traffic carrying a genuine Chrome TLS fingerprint |
+| 7 | **AnyTLS** | A TLS session whose record sizes are padded to blunt the TLS-in-TLS fingerprint |
+| 8 | **CDN** | An HTTPS connection to a content delivery network edge, never to our servers, so it survives every node address being blocked. It also works behind school and office filters that decrypt HTTPS. Slower |
+| 9 | **Tectonic** *(beta)* | Several short-lived TLS connections that look like Chrome loading an ordinary website. [Our own transport](#tectonic-our-own-transport-beta) |
 
 Cloak is always available. The others switch on when the hub provisions them, so your exact cascade depends on your account and the node you land on.
 
@@ -67,11 +67,37 @@ Whichever transport comes up, the tunnel inside it is always WireGuard, and it n
 
 A Snowflake transport (WebRTC, as used by Tor) is written and wired up but switched off in current releases, because its peer address is only discovered at runtime and the kill switch can't permit it in advance. See `snowflakeReleaseGated` in [`daemon/internal/api/service.go`](daemon/internal/api/service.go).
 
+### Tectonic: our own transport (beta)
+
+Tectonic is the transport we built for PangeaVPN, and the one we mean to make the default once it has proven itself in the field.
+
+Almost every other transport carries the whole tunnel inside one long-lived connection, and one connection is easy to single out. A firewall can throttle it, reset it, or flag it just for staying open for hours. Tectonic spreads WireGuard across a small pool of short-lived TLS 1.3 connections called lanes. Each lane looks like Chrome loading an ordinary website, and lanes are swapped out every few tens of seconds to minutes, the way a browser cycles its connections.
+
+- **Hard to throttle.** If the network caps each connection, Tectonic notices and opens more lanes. Under a 4 Mbit/s per-connection cap it carried 10–24 Mbit/s, where a single-connection transport can never beat 4.
+- **Made for bad links.** Every lane has its own congestion window, so a lost packet slows one lane instead of the whole tunnel. With 1% packet loss it carried 1.4–3.7× as much as REALITY and AnyTLS.
+- **Responsive under load.** While the link is saturated, ping stays around 3× its idle value. REALITY's climbs to 12–17×.
+- **Shrugs off resets.** When a lane gets reset, the others carry on and a replacement opens. The longest stall measured was 139 ms. A REALITY transfer hit by the same reset carried nothing more.
+- **No speed tax.** The first packet reaches the node within about two round trips, and on a clean link it runs at 91–97% of plain WireGuard, level with REALITY.
+- **Probes find a real website.** Each node serves a real site on its own domain with a real certificate. The login is tied to the TLS session it rides in, so a captured login is useless anywhere else, and anything that fails it just gets the website.
+- **Survives network changes.** A session belongs to your device, not to a connection. Moving from Wi-Fi to mobile data rejoins the same session instead of starting over.
+- **Gaming mode.** Optionally sends game traffic over two lanes at once, so a lost packet doesn't freeze the game.
+- **No home-made cryptography.** Real TLS 1.3 outside and WireGuard inside. Tectonic adds only the login, framing, scheduling and traffic shaping, built from standard primitives.
+
+It's open source under the same licence: [pangeavpn/Tectonic](https://github.com/pangeavpn/Tectonic). The [design write-up](https://github.com/pangeavpn/Tectonic/blob/master/docs/design.md) explains every choice, and the [benchmark results](https://github.com/pangeavpn/Tectonic/tree/master/bench) have the full numbers behind the claims above.
+
+> [!WARNING]
+> **Tectonic is in beta.** It's implemented and covered by tests, including end-to-end runs with real WireGuard, but it hasn't been field-tested at scale. The numbers above come from our network lab, not from real-world networks, and part of its traffic shaping still uses placeholder values until we've recorded real Chrome sessions. That's why auto mode tries it last.
+>
+> To try it now, choose **Tectonic** in Settings under Censorship Bypass. If it connects, the app remembers that for the network, and auto mode tries it first there next time. We'd love to hear how it goes.
+>
+> It won't connect through a filter that decrypts HTTPS, which many schools and offices use. That's deliberate: its login only works over an unbroken TLS session. Auto mode moves on to the other transports there.
+
 ## Features
 
 | | |
 |---|---|
 | **Nine transports, automatic fallback** | Blocking one doesn't take you offline, and the client remembers what worked on each network |
+| **Tectonic** *(beta)* | Our own transport: WireGuard spread over short-lived, Chrome-like TLS connections that hold up under loss, resets and per-connection throttling |
 | **WireGuard core** | Modern crypto, low latency, fully in-process |
 | **Post-quantum tunnel keys** | An ML-KEM-768 exchange sets WireGuard's pre-shared key, so breaking X25519 later isn't enough to decrypt traffic recorded today |
 | **Multihop** | Enter through one server and leave through another. The network you're on only ever sees the entry |
@@ -267,6 +293,7 @@ daemon/                 Go daemon
   internal/state/       State machine, config store, log store
   internal/cloak/       In-process Cloak runtime
   internal/naive/       NaiveProxy transport (cgo)
+  internal/tectonic/    Tectonic transport (links github.com/pangeavpn/tectonic)
   internal/pq/          ML-KEM-768 key exchange
   internal/wg/          In-process WireGuard manager (build-tagged per OS)
   internal/platform/    Paths, kill switch, routes, WFP
@@ -287,6 +314,7 @@ docs/                   Architecture and packaging deep-dives
 | [Post-quantum protection](docs/post-quantum.md) | The ML-KEM-768 exchange behind WireGuard's pre-shared key and the `/v2/secure` channel |
 | [Dead-drop bootstrap](docs/deaddrop-bootstrap-design.md) | How a client that can't reach the hub learns new addresses from a signed public file |
 | [Edge relay](infra/edge-relay/README.md) | The CDN relay behind the `fronted` hub method, and how to deploy one |
+| [Tectonic design](https://github.com/pangeavpn/Tectonic/blob/master/docs/design.md) | How our own transport works, its threat model, and how its speed is measured |
 
 ## Roadmap
 
