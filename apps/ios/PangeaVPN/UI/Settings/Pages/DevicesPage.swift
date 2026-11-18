@@ -203,20 +203,21 @@ private struct DeviceCard: View {
 
     private var details: some View {
         VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(DeviceNames.display(device))
-                    .scaledFont(size: 16, weight: .semibold, relativeTo: .body)
-                    .foregroundStyle(Palette.text)
-                    .lineLimit(2)
-                if device.current {
-                    Text(String(localized: "devices_this_device", defaultValue: "This device"))
-                        .scaledFont(size: 11, weight: .semibold, relativeTo: .caption)
-                        .foregroundStyle(Palette.accent)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(Palette.accent.opacity(0.14), in: Capsule())
-                        .fixedSize()
+            // The badge drops under the name rather than squeezing it: beside the badge at large
+            // text, "Swift Fox" broke into two one-word lines.
+            if device.current {
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        name.fixedSize()
+                        currentBadge
+                    }
+                    VStack(alignment: .leading, spacing: 6) {
+                        name
+                        currentBadge
+                    }
                 }
+            } else {
+                name
             }
             if let added = HubDate.medium(device.createdAt) {
                 Text(String(format: String(localized: "devices_added", defaultValue: "Added %@"), added))
@@ -225,6 +226,23 @@ private struct DeviceCard: View {
             }
         }
         .accessibilityElement(children: .combine)
+    }
+
+    private var name: some View {
+        Text(DeviceNames.display(device))
+            .scaledFont(size: 16, weight: .semibold, relativeTo: .body)
+            .foregroundStyle(Palette.text)
+            .lineLimit(2)
+    }
+
+    private var currentBadge: some View {
+        Text(String(localized: "devices_this_device", defaultValue: "This device"))
+            .scaledFont(size: 11, weight: .semibold, relativeTo: .caption)
+            .foregroundStyle(Palette.accent)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(Palette.accent.opacity(0.14), in: Capsule())
+            .fixedSize()
     }
 }
 
@@ -250,6 +268,8 @@ private struct DeviceActionButton: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
                 .padding(.horizontal, 18)
+                // Clears the 44 pt floor at default sizes; at large text it keeps the label off the edge.
+                .padding(.vertical, 8)
                 .frame(maxWidth: stretch ? .infinity : nil, minHeight: 44)
                 .background(filled ? Palette.accent : Color.clear, in: Capsule())
                 .overlay(Capsule().strokeBorder(filled ? Color.clear : Palette.error.opacity(0.55), lineWidth: 1))

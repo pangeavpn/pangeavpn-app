@@ -4,6 +4,7 @@ import SwiftUI
 struct AccountNumberSheet: View {
     @Environment(SettingsStore.self) private var settings
     @Environment(ToastCenter.self) private var toasts
+    @Environment(\.dynamicTypeSize) private var typeSize
     // The circles scale with their glyphs' text styles, so neither glyph outgrows its circle at AX sizes.
     @ScaledMetric(relativeTo: .title3) private var markSize: CGFloat = 48
     @ScaledMetric(relativeTo: .footnote) private var copySize: CGFloat = 44
@@ -61,8 +62,16 @@ struct AccountNumberSheet: View {
             .accessibilityHidden(true)
     }
 
+    // At accessibility sizes the copy button sits under the number: beside it, the button's
+    // width left room for one group per line, and the number ran six lines tall.
+    private var numberLayout: AnyLayout {
+        typeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .trailing, spacing: 8))
+            : AnyLayout(HStackLayout(spacing: 8))
+    }
+
     private var numberBox: some View {
-        HStack(spacing: 8) {
+        numberLayout {
             GroupedCode(code: number)
                 .scaledFont(size: 17, weight: .medium, design: .monospaced, relativeTo: .body)
                 .foregroundStyle(Palette.text)
