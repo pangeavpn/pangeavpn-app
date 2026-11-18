@@ -36,7 +36,8 @@ final class ScreenCamera {
 
         static let light = Look(suffix: "light", style: .light, textSize: .large)
         static let dark = Look(suffix: "dark", style: .dark, textSize: .large)
-        static let largeText = Look(suffix: "light-ax3", style: .light, textSize: .accessibilityExtraExtraLarge)
+        // accessibilityExtraExtraLarge is AX4, the second-largest size in Settings.
+        static let largeText = Look(suffix: "light-ax4", style: .light, textSize: .accessibilityExtraExtraLarge)
         static let standard = [Look.light, Look.dark]
         static let all = [Look.light, Look.dark, Look.largeText]
     }
@@ -79,6 +80,10 @@ final class ScreenCamera {
 
     private let folder: URL
     private var orientation = Orientation.upright
+    // The status bar restyles a beat after the scene's style flips; a framebuffer capture taken
+    // too soon kept the last look's dark glyphs on a dark screen.
+    private var lastStyle: UIUserInterfaceStyle?
+    private static let styleSettle = Duration.milliseconds(500)
 
     init(root: URL) throws {
         folder = root.appendingPathComponent(ScreenGallery.deviceFolder, isDirectory: true)
@@ -168,6 +173,8 @@ final class ScreenCamera {
         let outcome: Result<Void, Error>
         do {
             try await settle(host, shot: shot, ready: ready)
+            if lastStyle != nil, lastStyle != shot.look.style { try await Task.sleep(for: Self.styleSettle) }
+            lastStyle = shot.look.style
             // A screen that fits has no end to show, and its top shot already covers it.
             var worthSaving = true
             if shot.scrollToEnd { worthSaving = try await scrollToEnd(host) }
