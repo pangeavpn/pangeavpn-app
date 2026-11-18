@@ -113,7 +113,7 @@ unavailable.
 | macOS x64/arm64 | Native CGO engine, when the matching archive resolves |
 | Linux x64/arm64 | Stub. The native resolver has no Linux implementation yet |
 | Android arm64-v8a | Native CGO engine, linked into the gomobile AAR (+16.6 MB) |
-| Android arm/x86/x86_64 | Unlinked; the cascade ends at Hysteria2 |
+| Android arm/x86/x86_64 | Unlinked; the cascade skips NaiveProxy |
 | Windows/macOS CI | `PANGEA_REQUIRE_NAIVE=1` turns missing native support into a build failure |
 
 The native inputs come from either a local NaiveProxy checkout or the pinned

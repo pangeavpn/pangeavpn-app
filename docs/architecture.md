@@ -45,7 +45,7 @@ flowchart LR
         Renderer[Sandboxed renderer] <-->|contextBridge + IPC| Main[Electron main process]
         Main -->|Bearer-authenticated HTTP<br/>127.0.0.1:8787| Daemon[Privileged Go daemon]
         OS[Application traffic and OS networking] --> WG[In-process WireGuard]
-        WG --> Transport[In-process transport<br/>REALITY / Cloak / Shadowsocks / Hysteria2 / TUIC / Naive / AnyTLS / CDN]
+        WG --> Transport[In-process transport<br/>REALITY / Cloak / Shadowsocks / Hysteria2 / TUIC / Naive / AnyTLS / CDN / Tectonic]
         Daemon -. owns .-> OS
         Daemon -. owns .-> WG
         Daemon -. owns .-> Transport
@@ -266,7 +266,7 @@ sequenceDiagram
     D->>D: Preflight profile and arm kill switch
     loop Available transports in fallback order
         D->>Node: Start transport and WireGuard
-        D->>D: Wait for a real WireGuard handshake
+        D->>D: Wait for a real WireGuard handshake and a DNS round trip
     end
     D-->>Main: CONNECTED or transport_exhausted
     Main-->>UI: Status and selected server
@@ -316,18 +316,36 @@ In automatic mode the daemon tries transports in this order:
 7. AnyTLS
 8. CDN
 9. Snowflake
+10. Tectonic (beta, so it comes last)
 
-Only transports configured in the selected profile are candidates, and the
-current profile model always includes Cloak. `snowflakeReleaseGated` removes
-Snowflake from release builds, because its WebRTC peer address is only found at
-runtime and the kill switch can't permit it in advance. NaiveProxy is only
-available when the build linked its native CGO engine (desktop when the native
-inputs resolve, Android on arm64-v8a only); otherwise a stub reports it
-unavailable.
+The order is `AutoCascadeOrder` in
+[`daemon/internal/transport/cascade.go`](../daemon/internal/transport/cascade.go),
+and the mobile core walks the same list. Only transports configured in the
+selected profile are candidates, and the current profile model always includes
+Cloak. `snowflakeReleaseGated` removes Snowflake from release builds, because
+its WebRTC peer address is only found at runtime and the kill switch can't
+permit it in advance. NaiveProxy is only available when the build linked its
+native CGO engine (desktop when the native inputs resolve, Android on arm64-v8a
+only); otherwise a stub reports it unavailable.
 
-Each candidate has to start and complete a real WireGuard handshake within the
-connection deadline. A candidate that fails is torn down before the next one
-starts.
+A candidate wins once it carries traffic, not just once it connects: WireGuard
+has to complete a handshake over it within 10 seconds, and a DNS query then has
+to make a round trip through the tunnel within 12 seconds. A transport that a
+network lets handshake and then starves fails that second check.
+
+By default the candidates race
+([`daemon/internal/transport/race.go`](../daemon/internal/transport/race.go)).
+Each one's connection to the node is dialled ahead, in rank order, 250 ms apart
+and at most three at a time, and a failed dial lets the next start at once.
+There is one WireGuard device, so the started candidates are then verified one
+at a time. The next to go is the best-ranked one that has connected, as long as
+everything ranked above it has failed or is still dialling after 3 seconds. On
+a healthy network that keeps the ranked order, and only a transport that looks
+blackholed loses its turn. Cloak and Shadowsocks only bind a local listener when
+started, so they are never dialled ahead and are started as part of their own
+check. The losers' connections are closed. `disableTransportRace` turns this
+off, and the daemon then tries one candidate at a time, tearing each down before
+the next starts.
 
 The daemon remembers the last transport that worked on each network and can
 move it to the front of the list. If that transport's data path later goes
@@ -376,6 +394,7 @@ Application traffic
 | NaiveProxy | [`daemon/internal/naive`](../daemon/internal/naive) with a CGO-linked native engine and in-process relay | Windows and macOS builds when the native inputs resolve; release CI requires it. Android arm64-v8a |
 | AnyTLS | [`daemon/internal/anytls`](../daemon/internal/anytls) using embedded sing-box (padded TLS session, WireGuard carried as UDP-over-TCP) | Enabled when provisioned |
 | CDN | [`daemon/internal/sbrelay`](../daemon/internal/sbrelay) using embedded sing-box (VLESS over HTTPUpgrade + TLS, dialled at a CDN edge that proxies to the node) | Enabled when provisioned |
+| Tectonic | [`daemon/internal/tectonic`](../daemon/internal/tectonic) using the [Tectonic](https://github.com/pangeavpn/Tectonic) library (WireGuard spread over short-lived TLS 1.3 lanes) | Beta. Enabled when the hub issues a credential, never under multihop; auto mode tries it last |
 | Snowflake | [`daemon/internal/snowflake`](../daemon/internal/snowflake) using the Tor Snowflake library | Implemented but release-gated |
 | Plain WireGuard | None. The tunnel dials the node directly and skips the loopback listener | Enabled on explicit user selection only |
 
@@ -384,6 +403,20 @@ null-routed. It dials a CDN edge IP instead, and that IP is excluded from the
 tunnel like every other transport endpoint. Other sites served from the same
 edge IP therefore bypass the tunnel whenever the server offers CDN, whichever
 transport is active.
+
+CDN is also the transport that survives a filter that decrypts HTTPS, as many
+schools and offices run. The filter re-signs the edge's certificate with its own
+CA, which the user's device trusts, but often only for the signed-in user. The
+daemon runs as root or LocalSystem and can't see that user's trust store. So
+before each `/connect` and `/switch`, the app posts every root its OS trusts
+beyond Node's bundled list to `/user-roots`
+([`userTrustedRoots.ts`](../apps/desktop/src/main/userTrustedRoots.ts)). The
+daemon holds them in memory and adds them to the system store for the CDN dial
+only. The OS verifier still runs first. The filter then sees the VLESS
+credential every client of that node shares, and WireGuard ciphertext it can't
+read; the node only routes that credential to WireGuard. Tectonic
+deliberately refuses these filters, since its login only holds on an unbroken
+TLS session.
 
 The daemon never launches a separate `wg`, `wg-quick`, `wireguard-go`, Cloak or
 NaiveProxy process. "In-process" is about the tunnel engines, though, not every

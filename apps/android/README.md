@@ -2,13 +2,15 @@
 
 Kotlin/Compose clients for phone, tablet, and Android TV. The tunnel and hub
 control plane are shared with the desktop app via a Go core compiled to an AAR
-with `gomobile` — WireGuard-inside-Cloak runs in-process, identical to desktop.
+with `gomobile`. WireGuard runs in-process inside the same transports as desktop
+(REALITY, Cloak, Shadowsocks, Hysteria2, TUIC, NaiveProxy on arm64-v8a, AnyTLS,
+CDN, and Tectonic, which is in beta), and auto mode walks them in the same order.
 
 ## Modules
 
 | Module | What it is |
 |---|---|
-| `daemon/mobile` (Go) | gomobile source: secure channel, DoH transport, provisioning, WireGuard + Cloak on the VpnService TUN fd. Builds to `pangeacore.aar`. |
+| `daemon/mobile` (Go) | gomobile source: secure channel, DoH transport, provisioning, WireGuard and its transports on the VpnService TUN fd. Builds to `pangeacore.aar`. |
 | `core` | VpnService, `TunnelBridge` (AAR wrapper), `SecretStore`, repositories, ViewModels, shared models. |
 | `ui-common` | Compose theme + reusable components + localized `strings.xml` (8 languages). |
 | `app-mobile` | Phone/tablet app (`org.pangeavpn.app`). |
