@@ -139,9 +139,9 @@ cd pangeavpn-app
 ## Verify your download
 
 > [!WARNING]
-> **Releases are not code-signed yet.** We'd rather tell you here than have you find out from a SmartScreen or Gatekeeper prompt.
+> **Windows releases are not code-signed yet.** We'd rather tell you here than have you find out from a SmartScreen prompt.
 
-A code-signing certificate needs either a registered legal entity or an annual fee the project doesn't cover right now. It's on the roadmap. Until then, Windows will show *"Windows protected your PC"* (click **More info → Run anyway**) and macOS will warn that it can't verify the developer.
+Until they are, Windows will show *"Windows protected your PC"* when you run the installer (click **More info → Run anyway**). Signing them is on the roadmap. The macOS `.pkg` is already signed with an Apple Developer ID and notarized by Apple, so Gatekeeper opens it without a warning.
 
 You don't have to take our word for anything:
 
@@ -320,8 +320,9 @@ docs/                   Architecture and packaging deep-dives
 
 Roughly in priority order:
 
-- **Mobile clients** for Android and iOS. This is the biggest gap by far.
-- **Code-signed releases** on Windows and macOS.
+- **Mobile releases.** Native iOS and Android apps are built from this repo ([`apps/ios`](apps/ios/README.md), [`apps/android`](apps/android/README.md)) on the same Go core as the desktop, and iOS builds are in TestFlight. Neither has a public release yet.
+- **Code-signed Windows releases.** macOS releases are already signed and notarized.
+- **Tectonic out of beta**, once it has proven itself in the field, and then the first transport auto mode tries.
 - **Auto-connect rules** for untrusted Wi-Fi, on boot, and after leaving a captive portal.
 - **Snowflake.** It's written but not switched on in production yet.
 - **SNI rotation and domain fronting**, to get past single-fingerprint blocks.
