@@ -7,7 +7,7 @@ import { normalizeCustomDns, resolveWireGuardDns } from "../shared/dns";
 import { MTU_DEFAULT, normalizeMtu, normalizeMtuOrDefault } from "../shared/mtu";
 import { resolveNaiveEndpoint } from "../shared/naiveEndpoint";
 import { directWireGuardEndpoint } from "../shared/wireguardEndpoint";
-import { buildShadowsocksProfile } from "../shared/shadowsocksProfile";
+import { buildShadowsocksProfile, isShadowsocksServerInfo } from "../shared/shadowsocksProfile";
 import { buildAnyTLSProfile } from "../shared/anytlsProfile";
 import { buildTUICProfile } from "../shared/tuicProfile";
 import { buildCDNProfile } from "../shared/cdnProfile";
@@ -188,6 +188,8 @@ interface RegisterResponse {
   };
   /** Per-device, expiring Tectonic credential for this node; absent when not issued. */
   tectonic?: TectonicHubBlock;
+  /** The dialled node's Shadowsocks settings as the hub holds them now; absent from older hubs. */
+  shadowsocks?: unknown;
 }
 
 interface DohAnswer {
@@ -1858,6 +1860,8 @@ export class PangeaApiClient {
     const cdn = server.cdn ? buildCDNProfile(server.cdn) : undefined;
     // Never under a hop: the node relays only to its own WireGuard, so it would egress at the entry.
     const tectonic = reg.tectonic && !isMultihop ? buildTectonicProfile(reg.tectonic, nodeIp) : undefined;
+    // The reply's copy is current; the cached list may be one this client cannot refresh.
+    const shadowsocks = isShadowsocksServerInfo(reg.shadowsocks) ? reg.shadowsocks : server.shadowsocks;
     const excludeIPs = uniqueNonEmpty([
       nodeIp,
       wireguardEndpoint?.host,
@@ -1866,7 +1870,7 @@ export class PangeaApiClient {
       server.naive?.remoteIp ?? server.naive?.remoteHost,
       server.reality?.remoteIp,
       server.hysteria2?.remoteIp,
-      server.shadowsocks?.remoteIp,
+      shadowsocks?.remoteIp,
       anytls?.remoteHost,
       tuic?.remoteHost,
       cdn?.remoteHost,
@@ -1947,9 +1951,7 @@ export class PangeaApiClient {
           ...(server.hysteria2.remotePorts?.length ? { remotePorts: server.hysteria2.remotePorts } : {})
         }
       } : {}),
-      ...(server.shadowsocks ? {
-        shadowsocks: buildShadowsocksProfile(server.shadowsocks, nodeIp)
-      } : {}),
+      ...(shadowsocks ? { shadowsocks: buildShadowsocksProfile(shadowsocks, nodeIp) } : {}),
       ...(anytls ? { anytls } : {}),
       ...(tuic ? { tuic } : {}),
       ...(tectonic ? { tectonic } : {}),

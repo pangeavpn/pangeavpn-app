@@ -22,6 +22,24 @@ export interface ShadowsocksProfileBlock {
   udpOverTcp?: boolean;
 }
 
+/** Shape check for a block that arrives outside the validated server list. */
+export function isShadowsocksServerInfo(value: unknown): value is ShadowsocksServerInfo {
+  const s = value as Partial<ShadowsocksServerInfo> | null;
+  const port = s?.remotePort;
+  return (
+    !!s &&
+    typeof s === "object" &&
+    typeof port === "number" &&
+    Number.isInteger(port) &&
+    port > 0 &&
+    port <= 65535 &&
+    typeof s.method === "string" &&
+    s.method.length > 0 &&
+    typeof s.password === "string" &&
+    s.password.length > 0
+  );
+}
+
 /** nodeIp is the node address the hub already named (cloak.remoteHost). */
 export function buildShadowsocksProfile(
   shadowsocks: ShadowsocksServerInfo,
