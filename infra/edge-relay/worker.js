@@ -7,8 +7,9 @@ const HUB_ORIGIN = "https://api.pangeavpn.org";
 // become an open proxy for arbitrary paths/hosts.
 const RELAY_PATHS = new Set(["/v1/secure", "/v2/secure"]);
 
-// Envelopes are small — a few KB at most. Anything larger is not our client.
-const MAX_BODY_BYTES = 64 * 1024;
+// The hub's own limit on these routes. Most envelopes are a few KB, but a
+// sealed diagnostics report runs to hundreds.
+const MAX_BODY_BYTES = 1024 * 1024;
 
 const UPSTREAM_TIMEOUT_MS = 20_000;
 

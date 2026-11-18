@@ -55,7 +55,7 @@ test("always forwards to the hub, whatever host the request names", async (t) =>
 test("refuses an empty or oversized body", async (t) => {
   const calls = stubUpstream(t);
   assert.equal((await worker.fetch(post("https://relay.example/v2/secure", ""))).status, 400);
-  const big = "x".repeat(64 * 1024 + 1);
+  const big = "x".repeat(1024 * 1024 + 1);
   assert.equal((await worker.fetch(post("https://relay.example/v2/secure", big))).status, 400);
   assert.equal(calls.length, 0);
 });

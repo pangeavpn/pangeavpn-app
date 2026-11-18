@@ -118,7 +118,8 @@ range would need CIDR support added on the hub first. The hub's
 because keeping it off the wire is the whole point of this path.
 
 The Worker's only limits on its own side are that it accepts POST only, on those
-two routes, with bodies up to 64 KB.
+two routes, with bodies up to 1 MB: the hub's own limit, which a sealed
+diagnostics report needs most of.
 
 **Cost.** The relay carries control-plane traffic only (login, regions, key
 registration). No tunnel data ever crosses it. The free tier is far more than
