@@ -9,7 +9,7 @@ enum TransportLabels {
     ]
 
     // Desktop's picker order, which is the order automatic mode walks.
-    static let pickerOrder: [Transport] = [.auto, .tectonic, .reality, .cloak, .shadowsocks, .hysteria2, .tuic, .anytls, .cdn]
+    static let pickerOrder: [Transport] = [.auto, .reality, .cloak, .shadowsocks, .hysteria2, .tuic, .anytls, .cdn, .tectonic]
 
     static func status(_ activeTransport: String?) -> String {
         activeTransport.flatMap { names[$0] } ?? ""
