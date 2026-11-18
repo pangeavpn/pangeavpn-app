@@ -35,6 +35,8 @@ final class SessionStore {
     private(set) var deletingAccount = false
     // A stored sign-in the hub could not confirm; the app offers a retry rather than sign-in.
     private(set) var restoreFailed = false
+    // The app opened on a stored sign-in while the restore still waits on the hub.
+    private(set) var settling = false
     var loginError: String?
     var showDeviceLimit = false
     private(set) var devices: [Device] = []
@@ -71,13 +73,18 @@ final class SessionStore {
         self.timeouts = timeouts
     }
 
-    // A slow hub never holds the app on its splash: past the deadline a stored sign-in opens the app,
-    // and the restore still in flight settles it when it lands.
+    // A stored server list opens the app at once; without one the hub gets a short deadline,
+    // past which a stored sign-in opens it. The restore still in flight settles it when it lands.
     func restore() async {
         restoring = true
         await sendClientInfoOnce()
         let started = generation
+        let stored = await storedServers()
         let pending = Task { await restoreOutcome() }
+        if !stored.isEmpty {
+            Self.log.info("opening with the stored server list, refreshing it behind")
+            return openSettling(Session(email: "", name: "", servers: stored, cached: true), pending, started)
+        }
         if let outcome = await BoundedCall.value(of: pending, within: timeouts.launchRestore) {
             await apply(outcome)
             return
@@ -87,10 +94,21 @@ final class SessionStore {
             return
         }
         Self.log.info("restore still waiting on the hub, opening with the stored sign-in")
-        session = Session(email: "", name: "", servers: [])
+        openSettling(Session(email: "", name: "", servers: []), pending, started)
+    }
+
+    private func openSettling(_ opened: Session, _ pending: Task<RestoreOutcome, Never>, _ started: Int) {
+        session = opened
         restoreFailed = false
         restoring = false
+        settling = true
         Task { await settleLateRestore(pending, started: started) }
+    }
+
+    // Read before the restore starts, so a hub search never holds it up.
+    private func storedServers() async -> [Server] {
+        let core = self.core
+        return (try? await CoreQueue.run { try core.cachedServers() }) ?? []
     }
 
     private func apply(_ outcome: RestoreOutcome) async {
@@ -113,6 +131,8 @@ final class SessionStore {
     private func settleLateRestore(_ pending: Task<RestoreOutcome, Never>, started: Int) async {
         let outcome = await pending.value
         guard started == generation else { return }
+        // Cleared in the same turn as the session update, so watchers see both together.
+        settling = false
         switch outcome {
         case .restored(let restored):
             session = restored
@@ -332,6 +352,7 @@ final class SessionStore {
         generation += 1
         session = nil
         restoreFailed = false
+        settling = false
         subscription = nil
         devices = []
         showDeviceLimit = false

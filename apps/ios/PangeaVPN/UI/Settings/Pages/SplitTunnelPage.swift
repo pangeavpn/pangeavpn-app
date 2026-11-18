@@ -18,7 +18,7 @@ struct SplitTunnelPage: View {
                 StoreSwitchRow(
                     title: String(localized: "split_tunnel_enabled_title", defaultValue: "Use split tunnelling"),
                     value: settings.splitTunnelEnabled,
-                    hint: String(localized: "split_tunnel_enabled_hint", defaultValue: "Off sends everything through the VPN. Your ranges are kept. Applies on next connect."),
+                    hint: String(localized: "split_tunnel_enabled_hint", defaultValue: "Off sends everything through the VPN. Your ranges are kept."),
                     apply: { await setEnabled($0) }
                 )
             }
@@ -45,7 +45,7 @@ struct SplitTunnelPage: View {
     private var rangesField: some View {
         CommittedField(
             label: Self.rangesTitle,
-            hint: String(localized: "split_tunnel_ranges_hint", defaultValue: "IPv4 addresses or ranges, separated by commas. Applies on next connect."),
+            hint: String(localized: "split_tunnel_ranges_hint", defaultValue: "IPv4 addresses or ranges, separated by commas."),
             placeholder: String(localized: "split_tunnel_ranges_placeholder", defaultValue: "192.0.2.0/24, 198.51.100.7"),
             initial: SplitTunnelRanges.text(settings.splitTunnelRanges),
             keyboard: .numbersAndPunctuation,
@@ -58,9 +58,9 @@ struct SplitTunnelPage: View {
         guard enabled != settings.splitTunnelEnabled else { return }
         settings.setSplitTunnelEnabled(enabled)
         if enabled {
-            toasts.show(String(localized: "split_tunnel_toast_on", defaultValue: "Split tunnelling on. Applies on next connect."), style: .success)
+            toasts.show(String(localized: "split_tunnel_toast_on", defaultValue: "Split tunnelling on."), style: .success)
         } else {
-            toasts.show(String(localized: "split_tunnel_toast_off", defaultValue: "Split tunnelling off. Applies on next connect."), style: .info)
+            toasts.show(String(localized: "split_tunnel_toast_off", defaultValue: "Split tunnelling off."), style: .info)
         }
     }
 

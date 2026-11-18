@@ -184,6 +184,8 @@ func provision(scope callScope, identityPub string, exit, entry *serverInfo, pos
 		serverName:      exit.Name,
 		entryServerID:   entryID,
 		entryServerName: entryName,
+		address:         reg.AssignedIP,
+		serverDNS:       reg.DNS,
 	}
 	return provisioned{tunnel: tunnel, reg: reg}, nil
 }

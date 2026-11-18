@@ -1,13 +1,12 @@
 plugins {
     alias(libs.plugins.android.library)
-    alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
 }
 
 android {
     namespace = "org.pangeavpn.core"
-    compileSdk = 35
+    compileSdk = 37
 
     defaultConfig {
         minSdk = 24
@@ -17,10 +16,6 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
-    }
-
-    kotlinOptions {
-        jvmTarget = "17"
     }
 
     buildFeatures {
@@ -44,5 +39,7 @@ dependencies {
     // so consumers need that supertype on their classpath.
     api(group = "", name = "pangeacore", ext = "aar")
 
-    testImplementation(kotlin("test"))
+    // Built-in Kotlin does not infer kotlin-test's JUnit flavour the way kotlin-android did,
+    // so name it: without it kotlin.test.Test is unresolved.
+    testImplementation(libs.kotlin.test.junit)
 }

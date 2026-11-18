@@ -155,7 +155,7 @@ final class SessionStoreTests: XCTestCase {
         await store.restore()
         XCTAssertEqual(store.session, signedIn)
         XCTAssertFalse(store.restoring)
-        XCTAssertEqual(Array(core.calls.dropFirst()), ["restoreSession", "subscription"])
+        XCTAssertEqual(Array(core.calls.dropFirst()), ["cachedServers", "restoreSession", "subscription"])
         XCTAssertEqual(tunnel.removals, 0)
     }
 
@@ -168,7 +168,7 @@ final class SessionStoreTests: XCTestCase {
             XCTAssertNil(store.session, message)
             XCTAssertFalse(store.restoring, message)
             XCTAssertNil(store.loginError, message)
-            XCTAssertEqual(Array(core.calls.dropFirst()), ["restoreSession"], message)
+            XCTAssertEqual(Array(core.calls.dropFirst()), ["cachedServers", "restoreSession"], message)
         }
     }
 

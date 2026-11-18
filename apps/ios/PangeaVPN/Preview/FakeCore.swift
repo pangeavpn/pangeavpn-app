@@ -6,6 +6,7 @@ final class FakeCore: CoreBridge, @unchecked Sendable {
     var restoreResult: Result<Session, CoreError> = .failure(CoreError(message: "not authenticated"))
     var loginResult: Result<Session, CoreError> = .failure(CoreError(message: "not authenticated"))
     var serversResult: Result<[Server], CoreError> = .success([])
+    var cachedServersValue: [Server] = []
     var subscriptionResult: Result<Subscription?, CoreError> = .success(nil)
     var devicesResult: Result<[Device], CoreError> = .success([])
     var removeDeviceResult: Result<Void, CoreError> = .success(())
@@ -87,6 +88,11 @@ final class FakeCore: CoreBridge, @unchecked Sendable {
         if logoutDelay > 0 { Thread.sleep(forTimeInterval: logoutDelay) }
     }
 
+    func cachedServers() throws -> [Server] {
+        note("cachedServers")
+        return cachedServersValue
+    }
+
     func listServers() throws -> [Server] {
         let result = serversResult
         note("listServers")
@@ -163,6 +169,8 @@ final class FakeCore: CoreBridge, @unchecked Sendable {
         try record("prepare(\(serverId))", prepareResult)
     }
 
+    func liveConfig() throws -> TunnelConfig { try record("liveConfig", prepareResult) }
+
     func start(tunFd: Int) throws { try record("start(\(tunFd))", startResult) }
 
     func stop() { note("stop") }
@@ -189,5 +197,7 @@ final class FakeCore: CoreBridge, @unchecked Sendable {
     func reload() throws { try record("reload", reloadResult) }
 
     func networkChanged() { note("networkChanged") }
+
+    func rekey() { note("rekey") }
 }
 #endif

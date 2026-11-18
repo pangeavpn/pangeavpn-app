@@ -107,13 +107,10 @@ const KEY_MAP = {
   "settings.network.heading": "settings_network_heading",
   "settings.network.description": "settings_network_description",
   "settings.network.allowLan.title": "settings_network_allowlan_title",
-  "settings.network.allowLan.hint": "settings_network_allowlan_hint",
   "settings.network.dns.title": "settings_network_dns_title",
   "settings.network.dns.placeholder": "settings_network_dns_placeholder",
-  "settings.network.dns.hint": "settings_network_dns_hint",
   "settings.network.dns.invalid": "settings_network_dns_invalid",
   "settings.network.mtu.title": "settings_network_mtu_title",
-  "settings.network.mtu.hint": "settings_network_mtu_hint",
   "settings.network.postQuantum.title": "settings_network_pq_title",
   "settings.network.postQuantum.hint": "settings_network_pq_hint",
   "devices.title": "devices_title",
@@ -130,6 +127,13 @@ const LOCKDOWN_TAIL_KEYS = {
   "settings.provisioning.hubShadowsocks.hint": "settings_censorship_shadowsocks_hint",
   "settings.provisioning.hubFronted.hint": "settings_censorship_fronted_hint",
   "settings.provisioning.hubNormal.hint": "settings_censorship_normal_hint"
+};
+
+// Desktop hints that close on "applies on next connect"; mobile applies these live, so it is cut.
+const NEXT_CONNECT_TAIL_KEYS = {
+  "settings.network.allowLan.hint": "settings_network_allowlan_hint",
+  "settings.network.dns.hint": "settings_network_dns_hint",
+  "settings.network.mtu.hint": "settings_network_mtu_hint"
 };
 
 // Mobile-only strings, translated inline for all 8 locales.
@@ -396,7 +400,15 @@ function buildEntries(code, localeData) {
     if (value === undefined) {
       throw new Error(`Missing desktop key "${desktopKey}" for locale "${code}"`);
     }
-    entries[androidKey] = dropLockdownSentence(value, code, desktopKey);
+    entries[androidKey] = dropLastSentence(value, code, desktopKey, /lockdown/i, "LOCKDOWN_TAIL_KEYS");
+  }
+
+  for (const [desktopKey, androidKey] of Object.entries(NEXT_CONNECT_TAIL_KEYS)) {
+    const value = localeData[desktopKey];
+    if (value === undefined) {
+      throw new Error(`Missing desktop key "${desktopKey}" for locale "${code}"`);
+    }
+    entries[androidKey] = dropLastSentence(value, code, desktopKey, /next connect/i, "NEXT_CONNECT_TAIL_KEYS");
   }
 
   for (const [androidKey, translations] of Object.entries(MOBILE_ONLY)) {
@@ -410,16 +422,16 @@ function buildEntries(code, localeData) {
   return entries;
 }
 
-// Fails loudly if desktop rewords a hint so its last sentence is no longer the
-// lockdown one; only English can be checked for that, the rest follow its shape.
-function dropLockdownSentence(value, code, desktopKey) {
+// Fails loudly if desktop rewords a hint so its last sentence no longer matches;
+// only English can be checked for that, the rest follow its shape.
+function dropLastSentence(value, code, desktopKey, expected, table) {
   const body = value.trimEnd().replace(/[.。]$/, "");
   const cut = Math.max(body.lastIndexOf(". "), body.lastIndexOf("。"));
   if (cut === -1) {
     throw new Error(`"${desktopKey}" for locale "${code}" has no sentence to drop`);
   }
-  if (code === "en" && !/lockdown/i.test(body.slice(cut))) {
-    throw new Error(`"${desktopKey}" no longer ends with its lockdown sentence; update LOCKDOWN_TAIL_KEYS`);
+  if (code === "en" && !expected.test(body.slice(cut))) {
+    throw new Error(`"${desktopKey}" no longer ends with the sentence ${table} cuts; update ${table}`);
   }
   return body.slice(0, cut + 1);
 }

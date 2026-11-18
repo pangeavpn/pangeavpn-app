@@ -61,6 +61,26 @@ extension TunnelLifecycle {
         }
     }
 
+    // DNS, MTU and split ranges reshape the running interface in place. Allow LAN rides the
+    // VPN profile's excludeLocalNetworks, so it still waits for the next connect.
+    func applyLive() {
+        guard phase == .running else { return log.info("live settings skipped: the tunnel is not running") }
+        // The app saved the change in its own process, so the core re-reads it first.
+        reloadCore()
+        do {
+            let tunnel = try core.liveConfig()
+            let ranges = SharedPrefs.excludedRanges(in: prefs)
+            let settings = try TunnelSettingsBuilder.build(tunnel, allowLan: allowLan, excludedRanges: ranges)
+            let fingerprint = TunnelSettingsBuilder.fingerprint(tunnel, allowLan: allowLan, excludedRanges: ranges)
+            guard fingerprint != appliedFingerprint else { return }
+            applySettings(settings, fingerprint: fingerprint) { [weak self] error in
+                if let error { self?.logFailure("live settings", error) }
+            }
+        } catch {
+            logFailure("live settings", error)
+        }
+    }
+
     // Every prepare reads the multihop choice, so a reconnect keeps the route the user picked.
     func prepareRoute() throws -> TunnelConfig {
         let exit = serverId

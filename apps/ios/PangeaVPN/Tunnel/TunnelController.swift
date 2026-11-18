@@ -92,6 +92,15 @@ final class TunnelController: TunnelControlling {
         _ = await write.result
     }
 
+    func applySettings() async {
+        guard let session = await runningSession() else { return }
+        do {
+            _ = try await ProviderChannel.send(ProviderChannel.applySettingsRequest, on: session)
+        } catch {
+            log.error("could not apply settings to the tunnel (\(error.logCode, privacy: .public)): \(error.localizedDescription, privacy: .private)")
+        }
+    }
+
     func extensionLogs() async -> String? {
         guard let session = await runningSession() else { return nil }
         do {

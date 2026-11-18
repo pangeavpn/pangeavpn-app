@@ -13,6 +13,7 @@ enum ProviderMessage: UInt8 {
     case state = 1
     case switchServer = 2
     case logs = 3
+    case applySettings = 4
 
     // A switch changes the tunnel, so the provider handles it; this answers the read-only kinds.
     static func reply(to message: Data, core: CoreBridge, reconnectDetail: String? = nil) throws -> Data? {
@@ -22,7 +23,7 @@ enum ProviderMessage: UInt8 {
             return try JSONEncoder().encode(status(core.state(), reconnectDetail: reconnectDetail))
         case .logs:
             return Data(core.logs().utf8)
-        case .switchServer:
+        case .switchServer, .applySettings:
             return nil
         }
     }

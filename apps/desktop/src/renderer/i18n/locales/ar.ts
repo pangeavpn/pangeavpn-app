@@ -329,7 +329,7 @@ export const ar = {
   "settings.splitTunnel.ranges.blockedByApps": "لم يتم الحفظ: أصلح {apps} أو أزله من «التطبيقات المستثناة» أولًا.",
   "settings.splitTunnel.hint.dns": "استعلامات الأسماء (DNS) تظل تمر عبر VPN.",
   "settings.splitTunnel.hint.lockdown": "الإغلاق التام مفعّل: ما دام VPN غير متصل، تُحجب التطبيقات والنطاقات المستثناة مثل كل شيء آخر.",
-  "settings.splitTunnel.hint.restart": "تسري التغييرات على الاتصالات الجديدة. أعد تشغيل أي تطبيق كان مفتوحًا.",
+  "settings.splitTunnel.hint.restart": "تسري التغييرات فورًا. تُعاد الاتصالات المفتوحة للتطبيق المستثنى حديثًا مرة واحدة، ويبقى الاتصال الخامل لبضع دقائق عبر VPN حتى يُغلق.",
   "settings.splitTunnel.hint.children": "البرامج التي يشغّلها تطبيق مستثنى تتجاوز VPN أيضًا.",
   "settings.splitTunnel.appsUnavailable.unsupportedOS": "استثناء التطبيقات غير متاح على هذا الكمبيوتر. نطاقات IP لا تزال تعمل.",
   "settings.splitTunnel.appsUnavailable.classifierFailed": "تعذّر على PangeaVPN معرفة التطبيق المالك لكل اتصال هنا، لذا لا يمكن استثناء التطبيقات. نطاقات IP لا تزال تعمل.",
@@ -520,7 +520,7 @@ export const ar = {
   "toggle.lockdown.failed": "فشل تحديث الإغلاق التام.",
   "toggle.lockdown.on": "الإغلاق التام مفعّل — يبقى مفتاح الإيقاف مفعّلًا حتى توقفه.",
   "toggle.lockdown.off": "الإغلاق التام متوقف — تمت استعادة الإنترنت العادي.",
-  "toggle.splitTunnel.on": "تم تفعيل الأنفاق المقسّمة. تتجاوز التطبيقات المستثناة VPN في اتصالها التالي.",
+  "toggle.splitTunnel.on": "تم تفعيل الأنفاق المقسّمة. تتجاوز التطبيقات المستثناة VPN الآن، وتُعاد اتصالاتها المفتوحة مرة واحدة.",
   "toggle.splitTunnel.off": "تم إيقاف الأنفاق المقسّمة. تمر كل الحركة عبر VPN مجددًا.",
 
   // ── Verbose errors (hidden debug toggle) ──────────────

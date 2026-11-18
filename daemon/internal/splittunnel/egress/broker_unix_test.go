@@ -296,6 +296,12 @@ func acceptingListener(t *testing.T) (net.Listener, <-chan net.Conn) {
 }
 
 func TestBrokerLateResponseClosesDescriptor(t *testing.T) {
+	// The broker's own copy outlives the send by sentHold; keep it short so the
+	// far side's EOF shows whether the client closed the stray.
+	// Registered first, so it runs after the broker's own cleanup has stopped it.
+	saved := sentHold
+	t.Cleanup(func() { sentHold = saved })
+	sentHold = 100 * time.Millisecond
 	ln, accepted := acceptingListener(t)
 	release := make(chan struct{})
 	answered := make(chan struct{})

@@ -131,6 +131,8 @@ func (e *engine) flushSpill(s *spill) {
 		case actStack:
 			e.link.deliver(it.p.data)
 			it.p.release()
+		case actToApp:
+			e.injectToApp(it.p)
 		default:
 			it.p.release()
 		}

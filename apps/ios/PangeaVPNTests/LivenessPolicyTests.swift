@@ -51,4 +51,11 @@ final class LivenessPolicyTests: XCTestCase {
         XCTAssertEqual(policy.verdict(lastHandshake: beforeSleep, wallNow: wall, now: 40), .healthy)
         XCTAssertEqual(policy.verdict(lastHandshake: beforeSleep, wallNow: wall + 3_600, now: 40), .stale)
     }
+
+    func testRekeyIsDueOnceTheHandshakeIsTwoMinutesOld() {
+        XCTAssertNil(WakeRekey.delay(lastHandshake: 0, wallNow: wall))
+        XCTAssertEqual(WakeRekey.delay(lastHandshake: handshake(agedBy: 30), wallNow: wall), 90)
+        XCTAssertEqual(WakeRekey.delay(lastHandshake: handshake(agedBy: 120), wallNow: wall), 0)
+        XCTAssertEqual(WakeRekey.delay(lastHandshake: handshake(agedBy: 3_600), wallNow: wall), 0)
+    }
 }

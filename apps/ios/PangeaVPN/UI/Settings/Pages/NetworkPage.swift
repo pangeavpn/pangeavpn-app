@@ -34,7 +34,7 @@ struct NetworkPage: View {
                 StoreSwitchRow(
                     title: String(localized: "settings_network_allowlan_title", defaultValue: "Allow LAN"),
                     value: settings.settings.allowLan,
-                    hint: String(localized: "settings_network_allowlan_hint", defaultValue: "Lets local traffic (router, printers, captive portals) skip the tunnel. Turn it on if Wi-Fi keeps dropping to \"No internet\". Applies on next connect."),
+                    hint: String(localized: "network_allowlan_hint", defaultValue: "Lets local traffic (router, printers, captive portals) skip the tunnel. Turn it on if Wi-Fi keeps dropping to \"No internet\". Applies on next connect."),
                     apply: { value in await setAllowLan(value) }
                 )
                 StoreSwitchRow(
@@ -48,7 +48,7 @@ struct NetworkPage: View {
             SettingsCard(Self.mtuTitle) {
                 CommittedField(
                     label: Self.mtuTitle,
-                    hint: String(localized: "settings_network_mtu_hint", defaultValue: "Packet size through the tunnel. Lower it if pages hang on a network that otherwise works. Default 1380. Applies on next connect."),
+                    hint: String(localized: "settings_network_mtu_hint", defaultValue: "Packet size through the tunnel. Lower it if pages hang on a network that otherwise works. Default 1380."),
                     placeholder: String(AppSettings().mtu),
                     initial: String(settings.settings.mtu),
                     keyboard: .numberPad,
@@ -75,7 +75,7 @@ struct NetworkPage: View {
         SettingsCard(Self.providerTitle) {
             DnsProviderMenu(title: Self.providerTitle, selection: dnsChoice, choose: choose)
                 .disabled(dnsSaving)
-            Text(String(localized: "network_dns_provider_hint", defaultValue: "Pick a resolver, or enter your own. Filtering comes from that service. Applies on next connect."))
+            Text(String(localized: "network_dns_provider_hint", defaultValue: "Pick a resolver, or enter your own. Filtering comes from that service."))
                 .scaledFont(size: 12, relativeTo: .caption)
                 .foregroundStyle(Palette.textMuted)
                 .fixedSize(horizontal: false, vertical: true)
@@ -85,7 +85,7 @@ struct NetworkPage: View {
             SettingsCard(Self.customDnsTitle) {
                 CommittedField(
                     label: Self.customDnsTitle,
-                    hint: String(localized: "settings_network_dns_hint", defaultValue: "IPv4 addresses, comma-separated. Blank uses the VPN default. Applies on next connect."),
+                    hint: String(localized: "settings_network_dns_hint", defaultValue: "IPv4 addresses, comma-separated. Blank uses the VPN default."),
                     placeholder: String(localized: "settings_network_dns_placeholder", defaultValue: "1.1.1.1, 1.0.0.1"),
                     initial: settings.settings.customDns.joined(separator: ", "),
                     keyboard: .numbersAndPunctuation,
@@ -167,8 +167,8 @@ struct NetworkPage: View {
             }
             let stored = settings.settings.customDns
             report(stored.isEmpty
-                ? String(localized: "network_dns_default_saved", defaultValue: "DNS restored to the VPN default. Takes effect on next connect.")
-                : String(format: String(localized: "network_dns_saved", defaultValue: "DNS set to %@. Takes effect on next connect."), stored.joined(separator: ", ")))
+                ? String(localized: "network_dns_default_saved", defaultValue: "DNS restored to the VPN default.")
+                : String(format: String(localized: "network_dns_saved", defaultValue: "DNS set to %@."), stored.joined(separator: ", ")))
         }
     }
 
@@ -182,7 +182,7 @@ struct NetworkPage: View {
         Task {
             await settings.setMtu(mtu)
             if settings.error == nil { mtuFieldID += 1 }
-            let format = String(localized: "network_mtu_saved", defaultValue: "Tunnel MTU set to %lld. Takes effect on next connect.")
+            let format = String(localized: "network_mtu_saved", defaultValue: "Tunnel MTU set to %lld.")
             report(String(format: format, settings.settings.mtu))
         }
     }

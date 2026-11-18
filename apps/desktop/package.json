@@ -17,18 +17,18 @@
   },
   "dependencies": {
     "@pangeavpn/shared-types": "file:../../packages/shared-types",
-    "electron-updater": "^6.8.9"
+    "electron-updater": "^6.8.11"
   },
   "devDependencies": {
-    "@types/node": "^24.12.2",
-    "electron": "^41.10.6",
-    "electron-builder": "^26.15.3",
-    "typescript": "^6.0.3"
+    "@types/node": "^26.6.6",
+    "electron": "^45.3.3",
+    "electron-builder": "^26.18.0",
+    "typescript": "^7.0.2"
   },
   "build": {
     "appId": "com.pangea.pangeavpn",
     "productName": "PangeaVPN",
-    "electronVersion": "41.10.6",
+    "electronVersion": "45.3.3",
     "electronFuses": {
       "runAsNode": false,
       "enableCookieEncryption": true,

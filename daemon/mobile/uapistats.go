@@ -35,6 +35,18 @@ func parseTunnelStats(uapi string) (rx, tx, lastHandshake int64) {
 	return rx, tx, lastHandshake
 }
 
+// peerKeys lists each peer's public_key, hex as UAPI prints it.
+func peerKeys(uapi string) []string {
+	var keys []string
+	for _, line := range strings.Split(uapi, "\n") {
+		key, value, ok := strings.Cut(strings.TrimSpace(line), "=")
+		if ok && key == "public_key" && value != "" {
+			keys = append(keys, value)
+		}
+	}
+	return keys
+}
+
 // buildUAPI renders the fixed single-peer config in UAPI's hex keys. The
 // pre-shared key is a peer attribute, so it must follow that peer's public_key.
 func buildUAPI(privRaw, pubRaw, pskRaw []byte, endpointPort int) string {

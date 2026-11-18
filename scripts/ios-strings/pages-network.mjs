@@ -410,15 +410,26 @@ export default {
     en: "DNS Provider", es: "Proveedor DNS", fr: "Fournisseur DNS", ru: "DNS-провайдер",
     uk: "DNS-провайдер", zh: "DNS 提供商", ar: "مزود DNS", fa: "ارائه‌دهنده DNS"
   },
+  // iOS reads Allow LAN from the VPN profile at connect, so unlike Android it applies on the next one.
+  network_allowlan_hint: {
+    en: "Lets local traffic (router, printers, captive portals) skip the tunnel. Turn it on if Wi-Fi keeps dropping to \"No internet\". Applies on next connect.",
+    es: "Deja que el tráfico local (router, impresoras, portales cautivos) evite el túnel. Actívalo si el Wi-Fi cae a \"Sin conexión\". Se aplica en la próxima conexión.",
+    fr: "Laisse le trafic local (routeur, imprimantes, portails captifs) éviter le tunnel. Activez-le si le Wi-Fi retombe sur \"Pas d'Internet\". Effectif à la prochaine connexion.",
+    ru: "Пропускает трафик локальной сети (роутер, принтеры, captive-порталы) мимо туннеля. Включите, если Wi-Fi срывается в \"Нет интернета\". Действует со следующего подключения.",
+    uk: "Пропускає трафік локальної мережі (маршрутизатор, принтери, кептив-портали) повз тунель. Увімкніть, якщо Wi-Fi зривається на \"Немає інтернету\". Діє з наступного підключення.",
+    zh: "让本地流量（路由器、打印机、强制门户）绕开隧道。若 Wi-Fi 老是掉到\"无网络连接\"，就开启它。下次连接时生效。",
+    ar: "يدع حركة الشبكة المحلية (الراوتر، الطابعات، البوابات المقيّدة) تتجاوز النفق. فعّله إذا ظلت Wi-Fi تسقط إلى \"لا يوجد إنترنت\". يسري عند الاتصال التالي.",
+    fa: "می‌گذارد ترافیک شبکه محلی (روتر، چاپگرها، درگاه‌های ورود) تونل را دور بزند. اگر Wi-Fi مدام به \"بدون اینترنت\" می‌افتد، روشنش کنید. از اتصال بعدی اعمال می‌شود."
+  },
   network_dns_provider_hint: {
-    en: "Pick a resolver, or enter your own. Filtering comes from that service. Applies on next connect.",
-    es: "Elige un servicio DNS, o introduce el tuyo. El filtrado viene de ese servicio. Se aplica en la próxima conexión.",
-    fr: "Choisissez un service DNS, ou saisissez le vôtre. Le filtrage vient de ce service. Effectif à la prochaine connexion.",
-    ru: "Выберите DNS-сервис или укажите свой. Фильтрация идёт от него. Действует со следующего подключения.",
-    uk: "Виберіть DNS-сервіс або введіть власний. Фільтрація йде від нього. Діє з наступного підключення.",
-    zh: "选一个 DNS 服务或填自己的。过滤来自该服务。下次连接时生效。",
-    ar: "اختر خدمة DNS أو أدخل عناوينك. التصفية تأتي من تلك الخدمة. يسري عند الاتصال التالي.",
-    fa: "یک سرویس DNS انتخاب کنید یا نشانی خودتان را وارد کنید. فیلترسازی از همان سرویس می‌آید. از اتصال بعدی اعمال می‌شود."
+    en: "Pick a resolver, or enter your own. Filtering comes from that service.",
+    es: "Elige un servicio DNS, o introduce el tuyo. El filtrado viene de ese servicio.",
+    fr: "Choisissez un service DNS, ou saisissez le vôtre. Le filtrage vient de ce service.",
+    ru: "Выберите DNS-сервис или укажите свой. Фильтрация идёт от него.",
+    uk: "Виберіть DNS-сервіс або введіть власний. Фільтрація йде від нього.",
+    zh: "选一个 DNS 服务或填自己的。过滤来自该服务。",
+    ar: "اختر خدمة DNS أو أدخل عناوينك. التصفية تأتي من تلك الخدمة.",
+    fa: "یک سرویس DNS انتخاب کنید یا نشانی خودتان را وارد کنید. فیلترسازی از همان سرویس می‌آید."
   },
   network_dns_automatic: {
     en: "Automatic (VPN default)",
@@ -473,24 +484,24 @@ export default {
     uk: "Власний", zh: "自定义", ar: "مخصص", fa: "سفارشی"
   },
   network_dns_saved: {
-    en: "DNS set to %@. Takes effect on next connect.",
-    es: "DNS establecido en %@. Se aplica en la próxima conexión.",
-    fr: "DNS défini sur %@. Prend effet à la prochaine connexion.",
-    ru: "DNS установлен на %@. Вступает в силу при следующем подключении.",
-    uk: "DNS встановлено на %@. Набуває чинності під час наступного підключення.",
-    zh: "DNS 已设置为 %@。将在下次连接时生效。",
-    ar: "تم تعيين DNS إلى %@. يسري عند الاتصال التالي.",
-    fa: "DNS روی %@ تنظیم شد. از اتصال بعدی اعمال می‌شود."
+    en: "DNS set to %@.",
+    es: "DNS establecido en %@.",
+    fr: "DNS défini sur %@.",
+    ru: "DNS установлен на %@.",
+    uk: "DNS встановлено на %@.",
+    zh: "DNS 已设置为 %@。",
+    ar: "تم تعيين DNS إلى %@.",
+    fa: "DNS روی %@ تنظیم شد."
   },
   network_dns_default_saved: {
-    en: "DNS restored to the VPN default. Takes effect on next connect.",
-    es: "DNS restaurado al valor predeterminado de la VPN. Se aplica en la próxima conexión.",
-    fr: "DNS restauré à la valeur VPN par défaut. Prend effet à la prochaine connexion.",
-    ru: "Восстановлен DNS VPN по умолчанию. Вступает в силу при следующем подключении.",
-    uk: "DNS відновлено до типового значення VPN. Набуває чинності під час наступного підключення.",
-    zh: "DNS 已恢复为 VPN 默认值。将在下次连接时生效。",
-    ar: "تمت استعادة DNS إلى إعداد VPN الافتراضي. يسري عند الاتصال التالي.",
-    fa: "DNS به پیش‌فرض VPN بازگردانده شد. از اتصال بعدی اعمال می‌شود."
+    en: "DNS restored to the VPN default.",
+    es: "DNS restaurado al valor predeterminado de la VPN.",
+    fr: "DNS restauré à la valeur VPN par défaut.",
+    ru: "Восстановлен DNS VPN по умолчанию.",
+    uk: "DNS відновлено до типового значення VPN.",
+    zh: "DNS 已恢复为 VPN 默认值。",
+    ar: "تمت استعادة DNS إلى إعداد VPN الافتراضي.",
+    fa: "DNS به پیش‌فرض VPN بازگردانده شد."
   },
   network_mtu_invalid: {
     en: "Enter a whole number between %lld and %lld.",
@@ -503,14 +514,14 @@ export default {
     fa: "یک عدد صحیح بین %lld و %lld وارد کنید."
   },
   network_mtu_saved: {
-    en: "Tunnel MTU set to %lld. Takes effect on next connect.",
-    es: "MTU del túnel establecida en %lld. Se aplica en la próxima conexión.",
-    fr: "MTU du tunnel définie sur %lld. Prend effet à la prochaine connexion.",
-    ru: "MTU туннеля установлен на %lld. Вступает в силу при следующем подключении.",
-    uk: "MTU тунелю встановлено на %lld. Набуває чинності під час наступного підключення.",
-    zh: "隧道 MTU 已设置为 %lld。将在下次连接时生效。",
-    ar: "تم ضبط MTU النفق على %lld. يسري عند الاتصال التالي.",
-    fa: "MTU تونل روی %lld تنظیم شد. از اتصال بعدی اعمال می‌شود."
+    en: "Tunnel MTU set to %lld.",
+    es: "MTU del túnel establecida en %lld.",
+    fr: "MTU du tunnel définie sur %lld.",
+    ru: "MTU туннеля установлен на %lld.",
+    uk: "MTU тунелю встановлено на %lld.",
+    zh: "隧道 MTU 已设置为 %lld。",
+    ar: "تم ضبط MTU النفق على %lld.",
+    fa: "MTU تونل روی %lld تنظیم شد."
   },
   network_summary_mtu: {
     en: "MTU %lld", es: "MTU %lld", fr: "MTU %lld", ru: "MTU %lld",

@@ -47,6 +47,10 @@ final class GoCore: CoreBridge {
         try CoreJSON.decodeList(call { MobileListServers($0) })
     }
 
+    func cachedServers() throws -> [Server] {
+        try CoreJSON.decodeList(call { MobileCachedServers($0) })
+    }
+
     func subscription() throws -> Subscription? {
         try CoreJSON.decodeOptional(call { MobileGetSubscription($0) })
     }
@@ -135,7 +139,13 @@ final class GoCore: CoreBridge {
         }
     }
 
+    func liveConfig() throws -> TunnelConfig {
+        try CoreJSON.decode(call { MobileLiveConfig($0) })
+    }
+
     func stopForSwitch() { MobileStopForSwitch() }
+
+    func rekey() { MobileRekey() }
 
     func start(tunFd: Int) throws {
         var err: NSError?

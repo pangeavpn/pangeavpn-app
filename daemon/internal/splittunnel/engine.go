@@ -27,6 +27,9 @@ type limits struct {
 	batchWait      time.Duration
 	pendingTimeout time.Duration
 	tunnelTTL      time.Duration
+	recheckWindow  time.Duration
+	resetLinger    time.Duration
+	resetTries     uint8
 	linger         time.Duration
 	lingerCap      int
 	dialFailLinger time.Duration
@@ -69,6 +72,9 @@ var defaultLimits = limits{
 	batchWait:      time.Millisecond,
 	pendingTimeout: time.Second,
 	tunnelTTL:      30 * time.Second,
+	recheckWindow:  2 * time.Minute,
+	resetLinger:    5 * time.Second,
+	resetTries:     3,
 	linger:         41 * time.Second,
 	lingerCap:      8192,
 	dialFailLinger: 10 * time.Second,
@@ -108,6 +114,8 @@ const (
 	actDrop
 	actStack
 	actHeld
+	// actToApp only appears in a spill: an engine-built packet for the host.
+	actToApp
 )
 
 type flowState uint8
@@ -117,6 +125,9 @@ const (
 	stateTunnel
 	stateBypass
 	stateLinger
+	// stateRecheck is an established tunnel connection being looked up again after the
+	// rules changed; its packets keep flowing to the tunnel meanwhile.
+	stateRecheck
 )
 
 // flow is one unit the classifier decides on: a TCP connection or a UDP source port.
@@ -138,8 +149,13 @@ type flow struct {
 	live         bool
 	aborted      bool
 	endedAt      time.Time
-	ep           tcpip.Endpoint
-	phys         net.Conn
+	// lastAck is the newest ACK the app sent on a stateRecheck flow: the sequence number its
+	// socket expects next. resetting means a RST was sent; rsts counts them.
+	lastAck   uint32
+	resetting bool
+	rsts      uint8
+	ep        tcpip.Endpoint
+	phys      net.Conn
 
 	sess         *udpSession
 	validatedAt  time.Time
@@ -199,6 +215,13 @@ type engine struct {
 	endedTCP    fifoCache
 	lastScan    time.Time
 
+	// Until recheckUntil, established tunnel connections are looked up once more, so an app
+	// that just became excluded leaves the tunnel without waiting for new connections.
+	recheckUntil time.Time
+	rechecked    fifoCache
+	recheckQ     []*flow
+	rechecking   int
+
 	udp          map[uint16]*flow
 	udpLive      map[*flow]struct{}
 	revalQ       []*flow
@@ -235,6 +258,10 @@ func newEngine(d *Device, bufLen, offset int) (*engine, error) {
 	}
 	e.tunnelTCP.init(lim.cacheEntries)
 	e.endedTCP.init(lim.cacheEntries)
+	e.rechecked.init(lim.cacheEntries)
+	if !d.rules.Load().empty() {
+		e.recheckUntil = time.Now().Add(lim.recheckWindow)
+	}
 	e.endedUDP.init(lim.cacheEntries)
 	e.frags.init()
 	e.link = newLinkEndpoint(d, uint32(d.mtu.Load()))
@@ -337,7 +364,7 @@ func (e *engine) decide(pkt []byte, now time.Time, sp *spill) action {
 	if info.proto == protoUDP {
 		return e.decideUDP(&info, pkt, now)
 	}
-	return e.decideTCP(&info, pkt, now)
+	return e.decideTCP(&info, pkt, now, sp)
 }
 
 // decideICMP drops ICMP errors about bypassed flows: they would tell the remote, through
@@ -369,7 +396,7 @@ func (e *engine) decideICMP(info *pktInfo, pkt []byte, now time.Time) action {
 	return actTunnel
 }
 
-func (e *engine) decideTCP(info *pktInfo, pkt []byte, now time.Time) action {
+func (e *engine) decideTCP(info *pktInfo, pkt []byte, now time.Time, sp *spill) action {
 	key := flowKey{srcPort: info.srcPort, dst: netip.AddrPortFrom(info.dst, info.dstPort)}
 	syn := info.flags&tcpFlagSyn != 0 && info.flags&tcpFlagAck == 0
 	e.mu.Lock()
@@ -378,10 +405,13 @@ func (e *engine) decideTCP(info *pktInfo, pkt []byte, now time.Time) action {
 		return actTunnel
 	}
 	if f := e.tcp[key]; f != nil {
-		if syn && (f.isn != info.seq || f.state == stateLinger || f.aborted) {
+		if syn && (f.isn != info.seq || f.state == stateLinger || f.state == stateRecheck || f.aborted) {
 			return e.newTCPLocked(key, info.seq, pkt, now, e.dropFlowLocked(f))
 		}
 		switch {
+		case f.state == stateRecheck:
+			e.recheckPacketLocked(f, info, sp)
+			return actTunnel
 		case f.state == statePending || f.draining:
 			return e.enqueueLocked(f, pkt)
 		case f.state == stateTunnel:
@@ -394,6 +424,7 @@ func (e *engine) decideTCP(info *pktInfo, pkt []byte, now time.Time) action {
 			e.tunnelTCP.remove(key)
 			return e.newTCPLocked(key, info.seq, pkt, now, nil)
 		}
+		e.maybeRecheckLocked(key, info, now)
 		return actTunnel
 	}
 	if e.endedTCP.get(key, now) != nil {
@@ -406,7 +437,66 @@ func (e *engine) decideTCP(info *pktInfo, pkt []byte, now time.Time) action {
 	if syn {
 		return e.newTCPLocked(key, info.seq, pkt, now, nil)
 	}
+	e.maybeRecheckLocked(key, info, now)
 	return actTunnel
+}
+
+// maybeRecheckLocked queues one more lookup for an established tunnel connection in the window;
+// only an ACK-carrying segment qualifies (it makes the RST acceptable), and nothing is held.
+func (e *engine) maybeRecheckLocked(key flowKey, info *pktInfo, now time.Time) {
+	if !now.Before(e.recheckUntil) || info.flags&tcpFlagAck == 0 || info.flags&(tcpFlagRst|tcpFlagFin) != 0 {
+		return
+	}
+	if e.rechecking >= e.lim.pendingFlows || !e.gateOpen() || e.rechecked.get(key, now) != nil {
+		return
+	}
+	f := &flow{proto: protoTCP, key: key, state: stateRecheck, lastAck: info.ack, deadline: now.Add(e.lim.pendingTimeout)}
+	e.tcp[key] = f
+	e.rechecking++
+	e.recheckQ = append(e.recheckQ, f)
+	e.kickWorker()
+}
+
+// recheckPacketLocked follows a rechecked connection's ACKs; while resetting, a newer ACK (e.g.
+// an RFC 5961 challenge ACK) gets another RST at exactly the sequence the app now expects.
+func (e *engine) recheckPacketLocked(f *flow, info *pktInfo, sp *spill) {
+	if info.flags&tcpFlagAck == 0 {
+		return
+	}
+	moved := info.ack != f.lastAck
+	f.lastAck = info.ack
+	if f.resetting && moved && f.rsts < e.lim.resetTries {
+		sp.add(actToApp, e.resetToAppLocked(f))
+	}
+}
+
+// resetToAppLocked builds a RST from the remote end at the app's expected sequence number.
+func (e *engine) resetToAppLocked(f *flow) *packetBuf {
+	f.rsts++
+	return buildTCPReset(f.key.dst, netip.AddrPortFrom(e.d.addr, f.key.srcPort), f.lastAck)
+}
+
+// forgetRecheckLocked removes a stateRecheck entry; later segments go to the tunnel again.
+func (e *engine) forgetRecheckLocked(f *flow) {
+	if e.tcp[f.key] == f {
+		delete(e.tcp, f.key)
+	}
+	if f.state == stateRecheck {
+		f.state = stateLinger
+		e.rechecking--
+	}
+}
+
+// injectToApp writes engine-built packets toward the host; a closed device drops them.
+func (e *engine) injectToApp(ps ...*packetBuf) {
+	raw := make([][]byte, len(ps))
+	for i, p := range ps {
+		raw[i] = p.data
+	}
+	_ = e.d.writeInjected(raw)
+	for _, p := range ps {
+		p.release()
+	}
 }
 
 // newTCPLocked starts classifying a SYN. prev holds the splice of the connection it
@@ -477,6 +567,9 @@ func (e *engine) releaseLiveLocked(f *flow) {
 
 // dropFlowLocked deletes an entry for good and returns what must be reset outside the lock.
 func (e *engine) dropFlowLocked(f *flow) []abortTarget {
+	if f.state == stateRecheck {
+		e.forgetRecheckLocked(f)
+	}
 	if e.tcp[f.key] == f {
 		delete(e.tcp, f.key)
 	}
@@ -524,6 +617,7 @@ func (e *engine) rulesChanged(rs *ruleSet) {
 		runTargets(targets)
 	}()
 	e.withLock(func() {
+		e.openRecheckLocked(rs, now)
 		for _, f := range e.tcp {
 			if f.state == stateBypass && !f.aborted && !rs.allows(f.owner.Chain) {
 				targets = append(targets, e.abortLocked(f, now))
@@ -531,6 +625,17 @@ func (e *engine) rulesChanged(rs *ruleSet) {
 		}
 		closing = e.udpRulesChangedLocked(rs, now)
 	})
+}
+
+// openRecheckLocked starts a fresh recheck window under rs, forgetting which connections
+// the previous rules already cleared.
+func (e *engine) openRecheckLocked(rs *ruleSet, now time.Time) {
+	e.rechecked.init(e.lim.cacheEntries)
+	if rs.empty() {
+		e.recheckUntil = time.Time{}
+		return
+	}
+	e.recheckUntil = now.Add(e.lim.recheckWindow)
 }
 
 // failSafeAll resets every bypassed connection, closes every UDP session and sends
@@ -658,7 +763,7 @@ func (e *engine) worker() {
 func (e *engine) queuedCount() int {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	return len(e.pendingQ) + len(e.revalQ)
+	return len(e.pendingQ) + len(e.revalQ) + len(e.recheckQ)
 }
 
 func (e *engine) takeBatch() []*flow {
@@ -692,6 +797,18 @@ func (e *engine) takeBatch() []*flow {
 	n = copy(e.revalQ, e.revalQ[i:])
 	clear(e.revalQ[n:])
 	e.revalQ = e.revalQ[:n]
+	i = 0
+	for ; i < len(e.recheckQ) && len(batch) < e.lim.batch; i++ {
+		f := e.recheckQ[i]
+		if !e.currentLocked(f) || f.state != stateRecheck || f.resetting || f.submitted {
+			continue
+		}
+		f.submitted = true
+		batch = append(batch, f)
+	}
+	n = copy(e.recheckQ, e.recheckQ[i:])
+	clear(e.recheckQ[n:])
+	e.recheckQ = e.recheckQ[:n]
 	e.inflight = batch
 	return batch
 }
@@ -782,6 +899,9 @@ func (e *engine) resolveAt(f *flow, res procmatch.Result, classified *ruleSet, s
 	if f.proto == protoUDP {
 		return e.resolveUDP(f, res, classified, snapAt, now)
 	}
+	if f.state == stateRecheck {
+		return e.resolveRecheck(f, res, classified, now)
+	}
 	var prev []abortTarget
 	var q []*packetBuf
 	var k sink
@@ -807,6 +927,10 @@ func (e *engine) resolveAt(f *flow, res procmatch.Result, classified *ruleSet, s
 			k.kind = sinkStack
 		} else {
 			f.state = stateTunnel
+			// Decided under the rules in force, so the recheck window has nothing to add.
+			if now.Before(e.recheckUntil) {
+				e.rechecked.put(f.key, 0, e.recheckUntil)
+			}
 		}
 		prev = f.prev
 		f.prev = nil
@@ -818,6 +942,34 @@ func (e *engine) resolveAt(f *flow, res procmatch.Result, classified *ruleSet, s
 	runTargets(prev)
 	e.drain(f, q, k)
 	return true
+}
+
+// resolveRecheck resets a connection whose owner is now excluded, so the app reconnects outside
+// the VPN. The server end isn't reset: the app's host RSTs its next segment anyway.
+func (e *engine) resolveRecheck(f *flow, res procmatch.Result, classified *ruleSet, now time.Time) bool {
+	var rst *packetBuf
+	resolved := false
+	e.withLock(func() {
+		if e.closed || !e.currentLocked(f) || f.state != stateRecheck || f.resetting {
+			return
+		}
+		resolved = true
+		f.submitted = false
+		f.owner = res.Owner
+		if e.bypassTCP >= e.lim.bypassTCP || !e.bypassVerdictLocked(res, classified) {
+			e.forgetRecheckLocked(f)
+			e.rechecked.put(f.key, 0, e.recheckUntil)
+			return
+		}
+		f.resetting = true
+		f.deadline = now.Add(e.lim.resetLinger)
+		e.d.stats.moved.Add(1)
+		rst = e.resetToAppLocked(f)
+	})
+	if rst != nil {
+		e.injectToApp(rst)
+	}
+	return resolved
 }
 
 type sinkKind uint8
@@ -950,10 +1102,15 @@ func (e *engine) sweep(now time.Time) {
 					delete(e.tcp, f.key)
 					e.endedTCP.put(f.key, 0, f.endedAt.Add(e.lim.endedTTL))
 				}
+			case stateRecheck:
+				if now.After(f.deadline) && !f.submitted {
+					e.forgetRecheckLocked(f)
+				}
 			}
 		}
 		e.tunnelTCP.sweep(now)
 		e.endedTCP.sweep(now)
+		e.rechecked.sweep(now)
 		e.endedUDP.sweep(now)
 		closing, drains = e.scanUDPLocked(now, closing, drains)
 	})
@@ -993,6 +1150,15 @@ func (e *engine) compactPendingLocked() {
 	}
 	clear(e.revalQ[n:])
 	e.revalQ = e.revalQ[:n]
+	n = 0
+	for _, f := range e.recheckQ {
+		if f.state == stateRecheck && !f.resetting && !f.submitted && e.currentLocked(f) {
+			e.recheckQ[n] = f
+			n++
+		}
+	}
+	clear(e.recheckQ[n:])
+	e.recheckQ = e.recheckQ[:n]
 }
 
 // finishFlow moves a bypass flow whose splice or dial has ended into linger, if it is

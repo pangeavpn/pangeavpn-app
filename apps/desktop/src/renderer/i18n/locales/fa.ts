@@ -329,7 +329,7 @@ export const fa = {
   "settings.splitTunnel.ranges.blockedByApps": "ذخیره نشد: ابتدا {apps} را در «برنامه‌های مستثنا» اصلاح یا حذف کنید.",
   "settings.splitTunnel.hint.dns": "جستجوی نام‌ها (DNS) همچنان از VPN می‌گذرد.",
   "settings.splitTunnel.hint.lockdown": "قفل کامل روشن است: تا وقتی VPN قطع است، برنامه‌ها و محدوده‌های مستثنا هم مثل بقیه مسدود می‌شوند.",
-  "settings.splitTunnel.hint.restart": "تغییرات روی اتصال‌های جدید اعمال می‌شود. برنامه‌ای را که از قبل باز بوده دوباره اجرا کنید.",
+  "settings.splitTunnel.hint.restart": "تغییرات بی‌درنگ اعمال می‌شود. اتصال‌های باز برنامه‌ای که تازه مستثنا شده یک بار از نو برقرار می‌شود؛ اتصالی که چند دقیقه بی‌فعالیت بماند تا بسته شدن از VPN می‌گذرد.",
   "settings.splitTunnel.hint.children": "برنامه‌هایی که یک برنامه مستثنا اجرا می‌کند هم از VPN عبور نمی‌کنند.",
   "settings.splitTunnel.appsUnavailable.unsupportedOS": "مستثنا کردن برنامه‌ها روی این رایانه در دسترس نیست. محدوده‌های IP همچنان کار می‌کنند.",
   "settings.splitTunnel.appsUnavailable.classifierFailed": "PangeaVPN نتوانست تشخیص دهد هر اتصال مال کدام برنامه است، پس برنامه‌ها را نمی‌توان مستثنا کرد. محدوده‌های IP همچنان کار می‌کنند.",
@@ -520,7 +520,7 @@ export const fa = {
   "toggle.lockdown.failed": "به‌روزرسانی قفل کامل ناموفق بود.",
   "toggle.lockdown.on": "قفل کامل روشن شد — کلید قطع اضطراری تا زمانی که آن را خاموش کنید روشن می‌ماند.",
   "toggle.lockdown.off": "قفل کامل خاموش شد — اینترنت عادی بازگردانده شد.",
-  "toggle.splitTunnel.on": "تونل تفکیک‌شده روشن شد. برنامه‌های مستثنا از اتصال بعدی‌شان از VPN عبور نمی‌کنند.",
+  "toggle.splitTunnel.on": "تونل تفکیک‌شده روشن شد. برنامه‌های مستثنا اکنون از VPN عبور نمی‌کنند؛ اتصال‌های بازشان یک بار از نو برقرار می‌شود.",
   "toggle.splitTunnel.off": "تونل تفکیک‌شده خاموش شد. همه ترافیک دوباره از VPN می‌گذرد.",
 
   // ── Verbose errors (hidden debug toggle) ──────────────

@@ -23,6 +23,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.pangeavpn.core.model.ConnState
+import org.pangeavpn.core.model.TunnelConfig
 import org.pangeavpn.core.model.TunnelStatus
 import org.pangeavpn.core.util.runCatchingCancellable
 
@@ -35,6 +36,7 @@ private const val BLACKHOLE_PREFIX_V6 = 128
 private const val REBUILD_SETTLE_MS = 1_500L
 private const val REBUILD_RETRY_MS = 3_000L
 private const val REBUILD_ATTEMPTS = 3
+private const val APPLY_SETTLE_MS = 400L
 
 class PangeaVpnService : VpnService() {
 
@@ -42,6 +44,7 @@ class PangeaVpnService : VpnService() {
     private var activeFd: ParcelFileDescriptor? = null
     private var activeServerId: String? = null
     private var rebuildJob: Job? = null
+    private var applyJob: Job? = null
     @Volatile private var foregroundActive = false
 
     override fun onCreate() {
@@ -68,6 +71,7 @@ class PangeaVpnService : VpnService() {
                 startTunnel(serverId)
             }
             ACTION_DISCONNECT -> stopTunnel()
+            ACTION_APPLY_SETTINGS -> applyLive()
         }
         return START_NOT_STICKY
     }
@@ -94,7 +98,12 @@ class PangeaVpnService : VpnService() {
     }
 
     private suspend fun establish(serverId: String) {
-        val config = TunnelBridge.prepare(serverId)
+        val pfd = openInterface(TunnelBridge.prepare(serverId))
+        TunnelBridge.start(pfd.detachFd().toLong())
+    }
+
+    /** Builds the interface for config; a second call replaces the running one in place. */
+    private suspend fun openInterface(config: TunnelConfig): ParcelFileDescriptor {
         val settings = TunnelBridge.getSettings()
         val builder = Builder()
             .setSession("PangeaVPN")
@@ -109,8 +118,23 @@ class PangeaVpnService : VpnService() {
         val pfd = builder.establish() ?: error("VPN permission not granted")
         activeFd?.close()
         activeFd = pfd
+        return pfd
+    }
 
-        TunnelBridge.start(pfd.detachFd().toLong())
+    /** Hands the running tunnel a rebuilt interface; the peer and transport stay up.
+     *  Settling first folds a burst of toggles into one apply, and a failure reconnects. */
+    private fun applyLive() {
+        if (activeServerId == null || rebuildJob?.isActive == true) return
+        applyJob?.cancel()
+        applyJob = scope.launch {
+            delay(APPLY_SETTLE_MS)
+            if (activeServerId == null || rebuildJob?.isActive == true) return@launch
+            val applied = runCatchingCancellable {
+                val pfd = openInterface(TunnelBridge.liveConfig())
+                TunnelBridge.swapTun(pfd.detachFd().toLong())
+            }
+            if (applied.isFailure) rebuild()
+        }
     }
 
     /** The underlay moved, so the transport's socket is dead even though the
@@ -124,6 +148,7 @@ class PangeaVpnService : VpnService() {
     }
 
     private fun rebuild() {
+        applyJob?.cancel()
         rebuildJob?.cancel()
         rebuildJob = scope.launch {
             // Settling first: a handover reports several times before it lands.
@@ -166,6 +191,7 @@ class PangeaVpnService : VpnService() {
      *  this scope, so stopping first could cancel the stop mid-flight. */
     private fun stopTunnel() {
         activeServerId = null
+        applyJob?.cancel()
         rebuildJob?.cancel()
         scope.launch {
             withContext(NonCancellable) { runCatchingCancellable { TunnelBridge.stop() } }
@@ -247,6 +273,7 @@ class PangeaVpnService : VpnService() {
     companion object {
         const val ACTION_CONNECT = "org.pangeavpn.core.action.CONNECT"
         const val ACTION_DISCONNECT = "org.pangeavpn.core.action.DISCONNECT"
+        const val ACTION_APPLY_SETTINGS = "org.pangeavpn.core.action.APPLY_SETTINGS"
         const val EXTRA_SERVER_ID = "org.pangeavpn.core.extra.SERVER_ID"
 
         fun connect(context: Context, serverId: String) {
@@ -254,6 +281,13 @@ class PangeaVpnService : VpnService() {
                 .setAction(ACTION_CONNECT)
                 .putExtra(EXTRA_SERVER_ID, serverId)
             ContextCompat.startForegroundService(context, intent)
+        }
+
+        /** A plain start: the service is already in the foreground whenever a tunnel is up. */
+        fun applySettings(context: Context) {
+            if (TunnelBridge.status.value.state != ConnState.CONNECTED) return
+            val intent = Intent(context, PangeaVpnService::class.java).setAction(ACTION_APPLY_SETTINGS)
+            runCatching { context.startService(intent) }
         }
 
         fun disconnect(context: Context) {

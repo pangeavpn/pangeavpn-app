@@ -59,3 +59,11 @@ func TestBuildUAPIOmitsThePresharedKeyWhenUnkeyed(t *testing.T) {
 		})
 	}
 }
+
+func TestPeerKeysListsEveryPeerButNotThePrivateKey(t *testing.T) {
+	uapi := "private_key=aa\npublic_key=bb\nrx_bytes=1\npublic_key=cc\npublic_key=\nerrno=0\n"
+	got := peerKeys(uapi)
+	if strings.Join(got, ",") != "bb,cc" {
+		t.Fatalf("peerKeys = %v, want [bb cc]", got)
+	}
+}

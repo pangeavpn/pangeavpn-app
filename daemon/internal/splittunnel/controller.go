@@ -53,6 +53,8 @@ type Counters struct {
 	OutDrops        uint64
 	Revalidated     uint64
 	Torn            uint64
+	// Moved counts tunnel connections reset because their app became excluded.
+	Moved uint64
 }
 
 func (c *Counters) add(o Counters) {
@@ -64,6 +66,7 @@ func (c *Counters) add(o Counters) {
 	c.OutDrops += o.OutDrops
 	c.Revalidated += o.Revalidated
 	c.Torn += o.Torn
+	c.Moved += o.Moved
 }
 
 var _ wg.SplitTunnelHook = (*Controller)(nil)

@@ -329,7 +329,7 @@ export const fr = {
   "settings.splitTunnel.ranges.blockedByApps": "Non enregistré : corrigez ou retirez d'abord {apps} dans Applications exclues.",
   "settings.splitTunnel.hint.dns": "Les résolutions de noms (DNS) passent toujours par le VPN.",
   "settings.splitTunnel.hint.lockdown": "Le verrouillage est activé : tant que le VPN est déconnecté, les applications et plages exclues sont bloquées comme le reste.",
-  "settings.splitTunnel.hint.restart": "Les changements s'appliquent aux nouvelles connexions. Redémarrez une application déjà ouverte.",
+  "settings.splitTunnel.hint.restart": "Les changements s'appliquent immédiatement. Les connexions ouvertes d'une application nouvellement exclue redémarrent une fois ; une connexion inactive pendant quelques minutes reste dans le VPN jusqu'à sa fermeture.",
   "settings.splitTunnel.hint.children": "Les programmes lancés par une application exclue contournent aussi le VPN.",
   "settings.splitTunnel.appsUnavailable.unsupportedOS": "L'exclusion d'applications n'est pas disponible sur cet ordinateur. Les plages IP fonctionnent toujours.",
   "settings.splitTunnel.appsUnavailable.classifierFailed": "PangeaVPN n'a pas pu déterminer quelle application ouvre chaque connexion ici, les applications ne peuvent donc pas être exclues. Les plages IP fonctionnent toujours.",
@@ -520,7 +520,7 @@ export const fr = {
   "toggle.lockdown.failed": "Échec de la mise à jour du Verrouillage.",
   "toggle.lockdown.on": "Verrouillage activé — le kill switch reste actif jusqu'à ce que vous le désactiviez.",
   "toggle.lockdown.off": "Verrouillage désactivé — accès Internet normal rétabli.",
-  "toggle.splitTunnel.on": "Tunnel divisé activé. Les applications exclues contournent le VPN dès leur prochaine connexion.",
+  "toggle.splitTunnel.on": "Tunnel divisé activé. Les applications exclues contournent désormais le VPN ; leurs connexions déjà ouvertes redémarrent une fois.",
   "toggle.splitTunnel.off": "Tunnel divisé désactivé. Tout repasse par le VPN.",
 
   // ── Verbose errors (hidden debug toggle) ──────────────

@@ -130,11 +130,59 @@ type brokerDialFunc func(ctx context.Context, req brokerRequest) (*os.File, erro
 
 const brokerMaxInFlight = 1024
 
+// sentHold is how long the broker keeps its copy of a descriptor it has sent. While a
+// descriptor is in flight its only reference is the message, and the macOS kernel's
+// in-flight garbage collector can then misjudge it as unreachable and flush the socket:
+// the client receives it already reading EOF. Holding a reference past the transit
+// keeps it reachable.
+var sentHold = 5 * time.Second
+
+// heldFiles keeps sent descriptors open for sentHold, and closes them all when the session ends.
+type heldFiles struct {
+	mu    sync.Mutex
+	files map[*os.File]*time.Timer
+	done  bool
+}
+
+func (h *heldFiles) hold(file *os.File) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.done {
+		file.Close()
+		return
+	}
+	if h.files == nil {
+		h.files = make(map[*os.File]*time.Timer)
+	}
+	h.files[file] = time.AfterFunc(sentHold, func() {
+		h.mu.Lock()
+		_, held := h.files[file]
+		delete(h.files, file)
+		h.mu.Unlock()
+		if held {
+			file.Close()
+		}
+	})
+}
+
+func (h *heldFiles) release() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.done = true
+	for file, timer := range h.files {
+		timer.Stop()
+		file.Close()
+	}
+	h.files = nil
+}
+
 // serveBroker answers requests until the peer closes; nil means a clean EOF.
 func serveBroker(c *net.UnixConn, dial brokerDialFunc) error {
 	fc := newFrameConn(c)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	var held heldFiles
+	defer held.release()
 	slots := make(chan struct{}, brokerMaxInFlight)
 	for {
 		body, err := fc.readFrame()
@@ -158,23 +206,29 @@ func serveBroker(c *net.UnixConn, dial brokerDialFunc) error {
 		go func() {
 			defer func() { <-slots }()
 			file, err := dial(ctx, req)
-			reply(fc, responseFor(req.ID, err), file)
-			if file != nil {
+			sent := reply(fc, responseFor(req.ID, err), file)
+			if file == nil {
+				return
+			}
+			if sent {
+				held.hold(file)
+			} else {
 				file.Close()
 			}
 		}()
 	}
 }
 
-func reply(fc *frameConn, resp brokerResponse, file *os.File) {
+// reply reports whether file's descriptor went out with the response.
+func reply(fc *frameConn, resp brokerResponse, file *os.File) bool {
 	if resp.Err != "" {
 		file = nil
 	}
 	frame, err := encodeFrame(resp)
 	if err != nil {
-		return
+		return false
 	}
-	_ = fc.writeFrame(frame, file)
+	return fc.writeFrame(frame, file) == nil && file != nil
 }
 
 func brokerDial(pin func(fd uintptr, ifindex int) error) brokerDialFunc {

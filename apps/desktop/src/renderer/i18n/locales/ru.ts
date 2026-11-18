@@ -329,7 +329,7 @@ export const ru = {
   "settings.splitTunnel.ranges.blockedByApps": "Не сохранено: сначала исправьте или уберите {apps} в списке «Исключённые приложения».",
   "settings.splitTunnel.hint.dns": "Запросы имён (DNS) по-прежнему идут через VPN.",
   "settings.splitTunnel.hint.lockdown": "Lockdown включён: пока VPN отключён, исключённые приложения и диапазоны блокируются, как и всё остальное.",
-  "settings.splitTunnel.hint.restart": "Изменения действуют для новых соединений. Перезапустите уже открытое приложение.",
+  "settings.splitTunnel.hint.restart": "Изменения действуют сразу. Открытые соединения только что исключённого приложения один раз перезапустятся; соединение, молчащее несколько минут, остаётся в VPN до закрытия.",
   "settings.splitTunnel.hint.children": "Программы, запущенные исключённым приложением, тоже идут в обход VPN.",
   "settings.splitTunnel.appsUnavailable.unsupportedOS": "Исключение приложений на этом компьютере недоступно. IP-диапазоны по-прежнему работают.",
   "settings.splitTunnel.appsUnavailable.classifierFailed": "PangeaVPN не смог определить, какому приложению принадлежит каждое соединение, поэтому приложения исключить нельзя. IP-диапазоны по-прежнему работают.",
@@ -520,7 +520,7 @@ export const ru = {
   "toggle.lockdown.failed": "Не удалось обновить Lockdown.",
   "toggle.lockdown.on": "Lockdown включён — Kill Switch остаётся включённым, пока вы его не выключите.",
   "toggle.lockdown.off": "Lockdown выключен — обычный интернет восстановлен.",
-  "toggle.splitTunnel.on": "Раздельное туннелирование включено. Исключённые приложения пойдут в обход VPN при следующем соединении.",
+  "toggle.splitTunnel.on": "Раздельное туннелирование включено. Исключённые приложения уже идут в обход VPN; их открытые соединения один раз перезапустятся.",
   "toggle.splitTunnel.off": "Раздельное туннелирование выключено. Весь трафик снова идёт через VPN.",
 
   // ── Verbose errors (hidden debug toggle) ──────────────

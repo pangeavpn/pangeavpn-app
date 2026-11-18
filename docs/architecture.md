@@ -529,8 +529,14 @@ Limits of this version:
 - Excluded apps get no IPv6 and no relayed ICMP errors, and they only bypass
   while a tunnel device exists. With the kill switch armed and no device they're
   blocked like everything else.
-- Connections an app opened before it was excluded stay in the tunnel. Removing
-  an app resets its bypassed TCP connections, which reconnect through the VPN.
+- For two minutes after the app rules change (or the engine starts), each
+  established tunnel TCP connection that sends a segment is looked up once more.
+  One whose app is now excluded gets a RST at the sequence number its last ACK
+  promised, repeated on a newer ACK such as an RFC 5961 challenge, so the app
+  reconnects outside the VPN. A connection silent for the whole window stays in
+  the tunnel until it closes. Tunnelled UDP ports are dropped from the table and
+  reclassified on their next datagram. Removing an app resets its bypassed TCP
+  connections, which reconnect through the VPN.
 - Exclusion passes to child processes only if the daemon saw the parent alive.
   Launchers that exit at once don't pass it on; the app picker uses folder rules
   for those.

@@ -12,6 +12,24 @@ extension TunnelLifecycle {
         wakeTimers = LivenessPolicy.wakeChecks.map { delay in
             clock.after(delay) { [weak self] in self?.checkLiveness(reason: "wake") }
         }
+        guard let due = WakeRekey.delay(lastHandshake: core.state().lastHandshake, wallNow: wallClock()) else { return }
+        if due == 0 { return renewKeys() }
+        wakeTimers.append(clock.after(due) { [weak self] in self?.renewKeys() })
+    }
+
+    // A fresh handshake keeps the session; only a carrier that stays silent costs a reconnect.
+    private func renewKeys() {
+        guard phase == .running else { return }
+        let before = core.state().lastHandshake
+        log.info("renewing the session keys after sleep")
+        core.rekey()
+        wakeTimers.append(ticker.after(WakeRekey.confirmWithin) { [weak self] in self?.confirmRenewal(since: before) })
+    }
+
+    private func confirmRenewal(since before: Int64) {
+        guard phase == .running, core.state().lastHandshake <= before else { return }
+        log.info("no handshake after renewing the keys, reconnecting")
+        beginRecovery(after: 0)
     }
 
     func scheduleLivenessTick() {

@@ -329,7 +329,7 @@ export const es = {
   "settings.splitTunnel.ranges.blockedByApps": "No se guardó: primero corrige o quita {apps} en Apps excluidas.",
   "settings.splitTunnel.hint.dns": "Las consultas de nombres (DNS) siguen pasando por la VPN.",
   "settings.splitTunnel.hint.lockdown": "El modo bloqueo está activado: con la VPN desconectada, las apps y rangos excluidos quedan bloqueados como todo lo demás.",
-  "settings.splitTunnel.hint.restart": "Los cambios se aplican a las conexiones nuevas. Reinicia las apps que ya estaban abiertas.",
+  "settings.splitTunnel.hint.restart": "Los cambios se aplican al instante. Las conexiones abiertas de una app recién excluida se reinician una vez; una que pase unos minutos sin actividad sigue en la VPN hasta cerrarse.",
   "settings.splitTunnel.hint.children": "Los programas que abre una app excluida también evitan la VPN.",
   "settings.splitTunnel.appsUnavailable.unsupportedOS": "Excluir apps no está disponible en este equipo. Los rangos IP siguen funcionando.",
   "settings.splitTunnel.appsUnavailable.classifierFailed": "PangeaVPN no pudo saber qué app abre cada conexión en este equipo, así que no se pueden excluir apps. Los rangos IP siguen funcionando.",
@@ -520,7 +520,7 @@ export const es = {
   "toggle.lockdown.failed": "No se pudo actualizar el Modo bloqueo.",
   "toggle.lockdown.on": "Modo bloqueo activado — el Kill Switch permanece activo hasta que lo desactives.",
   "toggle.lockdown.off": "Modo bloqueo desactivado — acceso a internet normal restaurado.",
-  "toggle.splitTunnel.on": "Túnel dividido activado. Las apps excluidas evitan la VPN en su próxima conexión.",
+  "toggle.splitTunnel.on": "Túnel dividido activado. Las apps excluidas ya evitan la VPN; las conexiones que tenían abiertas se reinician una vez.",
   "toggle.splitTunnel.off": "Túnel dividido desactivado. Todo vuelve a pasar por la VPN.",
 
   // ── Verbose errors (hidden debug toggle) ──────────────

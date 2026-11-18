@@ -26,6 +26,8 @@ protocol CoreBridge: AnyObject, Sendable {
     func login(token: String) throws -> Session
     func logout()
     func listServers() throws -> [Server]
+    // The list stored by the last fetch, read with no hub call; empty when none is stored.
+    func cachedServers() throws -> [Server]
     func subscription() throws -> Subscription?
     func listDevices() throws -> [Device]
     func removeDevice(id: String) throws
@@ -49,10 +51,14 @@ protocol CoreBridge: AnyObject, Sendable {
     // entryId "" is a plain single-hop prepare.
     func prepareVia(exitId: String, entryId: String) throws -> TunnelConfig
     func multihopEntries(exitId: String) -> [String]
+    // The running tunnel's interface under the settings saved now; throws when none runs.
+    func liveConfig() throws -> TunnelConfig
     func start(tunFd: Int) throws
     func stop()
     // Stops for an immediate start on the prepared server, reporting connecting, not disconnected.
     func stopForSwitch()
+    // Drops the session keys and handshakes again; a no-op with no tunnel running.
+    func rekey()
     func state() -> TunnelStatus
     func config() throws -> AppSettings
     func setConfig(_ settings: AppSettings) throws -> AppSettings

@@ -151,6 +151,16 @@ object TunnelBridge : StatusSink {
         Mobile.start(fd)
     }
 
+    /** The running tunnel's interface under the settings saved now; throws when none runs. */
+    suspend fun liveConfig(): TunnelConfig = withContext(Dispatchers.IO) {
+        json.decodeFromString(Mobile.liveConfig())
+    }
+
+    /** Moves the running tunnel onto a new interface; Go owns [fd] either way. */
+    suspend fun swapTun(fd: Long): Unit = withContext(Dispatchers.IO) {
+        Mobile.swapTUN(fd)
+    }
+
     suspend fun stop(): Unit = withContext(Dispatchers.IO) {
         Mobile.stop()
     }

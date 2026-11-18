@@ -60,6 +60,7 @@ final class GatedCore: CoreBridge, @unchecked Sendable {
     func login(token: String) throws -> Session { try fake.login(token: token) }
     func logout() { fake.logout() }
     func listServers() throws -> [Server] { try fake.listServers() }
+    func cachedServers() throws -> [Server] { try fake.cachedServers() }
     func subscription() throws -> Subscription? { try fake.subscription() }
     func listDevices() throws -> [Device] { try fake.listDevices() }
     func removeDevice(id: String) throws { try fake.removeDevice(id: id) }
@@ -79,6 +80,7 @@ final class GatedCore: CoreBridge, @unchecked Sendable {
         try fake.prepareVia(exitId: exitId, entryId: entryId)
     }
     func multihopEntries(exitId: String) -> [String] { fake.multihopEntries(exitId: exitId) }
+    func liveConfig() throws -> TunnelConfig { try fake.liveConfig() }
     func start(tunFd: Int) throws { try fake.start(tunFd: tunFd) }
     func stop() { fake.stop() }
     func stopForSwitch() { fake.stopForSwitch() }
@@ -90,6 +92,7 @@ final class GatedCore: CoreBridge, @unchecked Sendable {
     }
     func reload() throws { try fake.reload() }
     func networkChanged() { fake.networkChanged() }
+    func rekey() { fake.rekey() }
 }
 
 // Throwaway defaults and container for a wipe, so tests never clear the real ones.
