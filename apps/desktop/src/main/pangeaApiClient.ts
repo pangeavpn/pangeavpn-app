@@ -1446,19 +1446,16 @@ export class PangeaApiClient {
       timeoutMs?: number;
     }
   ): Promise<Response> {
-    const timeoutMs = options.timeoutMs ?? this.timeoutMs;
     // Race, don't just await: the cascade is shared, so this call abandons it on
     // its own deadline too (a dead tunnel makes the cascade last minutes).
     await raceAbort(
       this.ensureHub(),
-      deadlineSignal(timeoutMs, options.cancelSignal),
+      deadlineSignal(options.timeoutMs ?? this.timeoutMs, options.cancelSignal),
       () => new Error(options.cancelSignal?.aborted ? "Hub request aborted" : "Hub API timeout (path resolution)")
     );
 
     try {
-      // A deadline of its own: a slow search must not eat the request's time.
-      const signal = deadlineSignal(timeoutMs, options.cancelSignal);
-      const response = await this.sendHubFetch(path, { ...options, signal, timeoutMs });
+      const response = await this.sendHubFetch(path, options);
       this.hubFailureStreak = 0;
       this.hubResolutionFailedAtMs = 0;
       return response;
@@ -1572,7 +1569,6 @@ export class PangeaApiClient {
       method?: string;
       headers?: Record<string, string>;
       body?: string;
-      signal?: AbortSignal;
       cancelSignal?: AbortSignal;
       /** Transport deadline for one request; a large body needs more than the default. */
       timeoutMs?: number;
@@ -1585,16 +1581,19 @@ export class PangeaApiClient {
     const sealed = await this.sealRequest(method, path, headers, bodyObj);
     const envelopeJson = JSON.stringify(sealed.envelope);
 
+    // A deadline of its own, started here: the search for a route must not eat it.
+    const timeoutMs = options.timeoutMs ?? this.timeoutMs;
+    const signal = deadlineSignal(timeoutMs, options.cancelSignal);
     let rawResponse: Response;
     let responseText: string;
     try {
-      rawResponse = await this.resolveRawResponse(sealed.route, envelopeJson, options.signal, options.timeoutMs ?? this.timeoutMs);
+      rawResponse = await this.resolveRawResponse(sealed.route, envelopeJson, signal, timeoutMs);
       responseText = await rawResponse.text();
     } catch (err) {
       // The caller's own cancel is not the hub going quiet.
       if (options.cancelSignal?.aborted) throw err;
       const detail = err instanceof Error ? err.message : String(err);
-      throw new HubRequestUnansweredError(options.signal?.aborted ? `Hub API timeout (${method} ${path})` : detail);
+      throw new HubRequestUnansweredError(signal.aborted ? `Hub API timeout (${method} ${path})` : detail);
     }
 
     if (!rawResponse.ok) {
