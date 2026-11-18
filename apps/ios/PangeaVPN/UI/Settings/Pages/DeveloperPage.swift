@@ -19,7 +19,7 @@ struct DeveloperPage: View {
     init() {}
 
     var body: some View {
-        SettingsPage(.developer, description: String(localized: "developer_description", defaultValue: "Debugging diagnostics. Leave these off unless you were asked to turn one on.")) {
+        SettingsPage(.developer, description: String(localized: "developer_description", defaultValue: "Logs for troubleshooting. Share them only with PangeaVPN support.")) {
             LogPanel(
                 title: String(localized: "developer_app_log", defaultValue: "App log"),
                 text: diagnostics.appLog,

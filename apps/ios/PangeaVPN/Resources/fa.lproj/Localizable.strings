@@ -53,7 +53,7 @@
 "developer_copy_diagnostics" = "کپی اطلاعات عیب‌یابی";
 "developer_copy_diagnostics_hint" = "نسخهٔ برنامه، وضعیت اتصال، تنظیمات و گزارش‌های اخیر را کپی می‌کند. شماره حساب شما هرگز در آن نیست.";
 "developer_copy_logs" = "کپی گزارش‌ها";
-"developer_description" = "ابزارهای عیب‌یابی. تا وقتی از شما خواسته نشده، خاموش بگذارید.";
+"developer_description" = "گزارش‌ها برای عیب‌یابی. فقط با پشتیبانی PangeaVPN به اشتراک بگذارید.";
 "developer_log_empty" = "هنوز چیزی ثبت نشده است.";
 "developer_no_logs" = "گزارشی برای کپی وجود ندارد.";
 "developer_refresh" = "تازه‌سازی";

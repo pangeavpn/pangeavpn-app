@@ -53,7 +53,7 @@
 "developer_copy_diagnostics" = "复制诊断信息";
 "developer_copy_diagnostics_hint" = "复制应用版本、连接状态、设置和最近的日志。绝不包含你的账号。";
 "developer_copy_logs" = "复制日志";
-"developer_description" = "调试用的诊断项。除非有人要求，否则请保持关闭。";
+"developer_description" = "用于排查问题的日志。只与 PangeaVPN 支持团队分享。";
 "developer_log_empty" = "暂无日志。";
 "developer_no_logs" = "没有可复制的日志。";
 "developer_refresh" = "刷新";

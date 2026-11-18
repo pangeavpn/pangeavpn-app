@@ -53,7 +53,7 @@
 "developer_copy_diagnostics" = "Копировать диагностику";
 "developer_copy_diagnostics_hint" = "Копирует версию приложения, состояние подключения, настройки и последние записи журнала. Номер счёта никогда не включается.";
 "developer_copy_logs" = "Копировать журнал";
-"developer_description" = "Диагностика для отладки. Не включайте без необходимости.";
+"developer_description" = "Журналы для устранения неполадок. Передавайте их только в поддержку PangeaVPN.";
 "developer_log_empty" = "Записей пока нет.";
 "developer_no_logs" = "Нет записей для копирования.";
 "developer_refresh" = "Обновить";

@@ -53,7 +53,7 @@
 "developer_copy_diagnostics" = "نسخ التشخيصات";
 "developer_copy_diagnostics_hint" = "ينسخ إصدار التطبيق وحالة الاتصال والإعدادات والسجلات الأخيرة. لا يُضمَّن رقم حسابك أبدًا.";
 "developer_copy_logs" = "نسخ السجلّات";
-"developer_description" = "أدوات تشخيص لتصحيح الأخطاء. اتركها معطّلة ما لم يُطلب منك تفعيل أحدها.";
+"developer_description" = "سجلات لتشخيص المشكلات. لا تشاركها إلا مع دعم PangeaVPN.";
 "developer_log_empty" = "لا توجد سجلات بعد.";
 "developer_no_logs" = "لا توجد سجلّات لنسخها.";
 "developer_refresh" = "تحديث";

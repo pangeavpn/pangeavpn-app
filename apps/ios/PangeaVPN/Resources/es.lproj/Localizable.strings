@@ -53,7 +53,7 @@
 "developer_copy_diagnostics" = "Copiar diagnóstico";
 "developer_copy_diagnostics_hint" = "Copia la versión de la app, el estado de la conexión, los ajustes y los registros recientes. Tu número de cuenta nunca se incluye.";
 "developer_copy_logs" = "Copiar registros";
-"developer_description" = "Diagnósticos de depuración. Déjalas desactivadas salvo que te pidan activar alguna.";
+"developer_description" = "Registros para resolver problemas. Compártelos solo con el soporte de PangeaVPN.";
 "developer_log_empty" = "Aún no hay nada registrado.";
 "developer_no_logs" = "No hay registros para copiar.";
 "developer_refresh" = "Actualizar";

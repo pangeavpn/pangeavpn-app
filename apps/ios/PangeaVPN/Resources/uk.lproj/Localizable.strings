@@ -53,7 +53,7 @@
 "developer_copy_diagnostics" = "Копіювати діагностику";
 "developer_copy_diagnostics_hint" = "Копіює версію застосунку, стан підключення, налаштування та останні записи журналу. Номер рахунку ніколи не додається.";
 "developer_copy_logs" = "Копіювати журнали";
-"developer_description" = "Діагностика для налагодження. Не вмикайте без потреби.";
+"developer_description" = "Журнали для усунення несправностей. Передавайте їх лише підтримці PangeaVPN.";
 "developer_log_empty" = "Записів поки немає.";
 "developer_no_logs" = "Немає журналів для копіювання.";
 "developer_refresh" = "Оновити";

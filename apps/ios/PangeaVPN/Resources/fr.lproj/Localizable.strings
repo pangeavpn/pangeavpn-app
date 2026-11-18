@@ -53,7 +53,7 @@
 "developer_copy_diagnostics" = "Copier les diagnostics";
 "developer_copy_diagnostics_hint" = "Copie la version de l'app, l'état de la connexion, les réglages et les journaux récents. Votre numéro de compte n'est jamais inclus.";
 "developer_copy_logs" = "Copier les journaux";
-"developer_description" = "Diagnostics de débogage. Laissez-les désactivés sauf si on vous demande d'en activer un.";
+"developer_description" = "Journaux de dépannage. Ne les partagez qu'avec l'assistance PangeaVPN.";
 "developer_log_empty" = "Rien n'a encore été journalisé.";
 "developer_no_logs" = "Aucun journal à copier.";
 "developer_refresh" = "Actualiser";

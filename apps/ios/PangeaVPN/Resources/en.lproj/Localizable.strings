@@ -53,7 +53,7 @@
 "developer_copy_diagnostics" = "Copy Diagnostics";
 "developer_copy_diagnostics_hint" = "Copies the app version, connection status, settings and recent logs. Your account number is never included.";
 "developer_copy_logs" = "Copy Logs";
-"developer_description" = "Debugging diagnostics. Leave these off unless you were asked to turn one on.";
+"developer_description" = "Logs for troubleshooting. Share them only with PangeaVPN support.";
 "developer_log_empty" = "Nothing logged yet.";
 "developer_no_logs" = "No logs to copy.";
 "developer_refresh" = "Refresh";
