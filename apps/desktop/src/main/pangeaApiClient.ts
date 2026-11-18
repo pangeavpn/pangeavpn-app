@@ -2006,6 +2006,11 @@ export class PangeaApiClient {
       } : {}),
       // What the daemon permits through the kill switch without a lookup.
       transportEndpointIPs: excludeIPs,
+      // Every node a hub proxy may dial, or the kill switch refuses a hub route
+      // through any node but this session's own.
+      controlPlaneHosts: uniqueNonEmpty(
+        [...this.hubShadowsocks, ...this.hubReality].map((creds) => creds.remoteHost)
+      ).filter(isIPv4Literal),
       wireguard: {
         configText,
         tunnelName: "pangeavpn",

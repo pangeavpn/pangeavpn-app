@@ -425,8 +425,11 @@ type Profile struct {
 	Snowflake *SnowflakeProfile `json:"snowflake,omitempty"`
 	// TransportEndpointIPs are this node's transport endpoints as raw IPs. The
 	// kill switch permits these with no DNS lookup, which Lockdown mode blocks.
-	TransportEndpointIPs []string         `json:"transportEndpointIPs,omitempty"`
-	WireGuard            WireGuardProfile `json:"wireguard"`
+	TransportEndpointIPs []string `json:"transportEndpointIPs,omitempty"`
+	// ControlPlaneHosts are the nodes whose hub proxies may carry hub traffic. The
+	// kill switch lets one out only while a hub proxy to it runs.
+	ControlPlaneHosts []string         `json:"controlPlaneHosts,omitempty"`
+	WireGuard         WireGuardProfile `json:"wireguard"`
 }
 
 type Config struct {

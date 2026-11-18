@@ -4480,13 +4480,14 @@ func (s *Service) releaseOrphanedLockSettings() {
 // profile carries while a session runs: the hub is reachable through the tunnel then.
 var ErrPermitUnvouched = errors.New("kill switch permit refused: not a known hub or transport address while a session is active")
 
-// vouchedHosts is every IPv4 literal the stored profiles name: hub bypass hosts
-// and the transport remotes the hub itself handed out.
+// vouchedHosts is every IPv4 literal the stored profiles name: hub bypass hosts,
+// hub proxy nodes, and the transport remotes the hub itself handed out.
 func (s *Service) vouchedHosts() map[string]bool {
 	vouched := make(map[string]bool)
 	for _, profile := range s.config.Get().Profiles {
 		hosts := append([]string{profile.Cloak.RemoteHost}, profile.WireGuard.BypassHosts...)
 		hosts = append(hosts, profile.TransportEndpointIPs...)
+		hosts = append(hosts, profile.ControlPlaneHosts...)
 		if profile.Naive != nil {
 			hosts = append(hosts, profile.Naive.RemoteHost)
 		}

@@ -200,6 +200,9 @@ export const ProfileSchema = z.object({
    * it and every transport but Cloak would be blocked by our own kill switch.
    */
   transportEndpointIPs: z.array(z.string()).optional(),
+  /** Nodes whose hub proxies may carry hub traffic, as raw IPs. The kill switch
+   *  lets one out only while a hub proxy to it is running. */
+  controlPlaneHosts: z.array(z.string()).optional(),
   naive: NaiveProfileSchema.optional(),
   reality: RealityProfileSchema.optional(),
   hysteria2: Hysteria2ProfileSchema.optional(),
