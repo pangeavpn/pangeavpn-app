@@ -108,8 +108,20 @@ export class HubUnreachableError extends Error {
   }
 }
 
+/** A route was found and the request went out on it, but no answer came back:
+ *  the hub may have acted on it all the same. */
+export class HubRequestUnansweredError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "HubRequestUnansweredError";
+  }
+}
+
 // How long a fully failed cascade is believed before it is attempted again.
 const HUB_RETRY_COOLDOWN_MS = 20000;
+// An unanswered register may still have replaced this device's peer, so it is
+// asked again on the same route this many times before the connect gives up.
+const REGISTER_RETRIES = 1;
 // A daemon that is restarting cannot encapsulate for a moment; sealing is
 // retried this many times, this far apart, before the request is refused.
 const SEAL_RETRIES = 2;
@@ -131,6 +143,12 @@ function raceAbort<T>(
     signal.addEventListener("abort", onAbort, { once: true });
     work.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort));
   });
+}
+
+/** A deadline of its own that the caller's cancel can also end. */
+function deadlineSignal(timeoutMs: number, cancel?: AbortSignal): AbortSignal {
+  const deadline = AbortSignal.timeout(timeoutMs);
+  return cancel ? AbortSignal.any([deadline, cancel]) : deadline;
 }
 
 // DoH providers — all accessed by IP to avoid SNI-based blocking
@@ -357,7 +375,7 @@ function fetchFronted(
   }
 ): Promise<Response> {
   if (options.signal?.aborted) {
-    return Promise.reject(new ConnectCancelledError());
+    return Promise.reject(new Error("Request aborted"));
   }
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? 15000);
@@ -1382,22 +1400,25 @@ export class PangeaApiClient {
       method?: string;
       headers?: Record<string, string>;
       body?: string;
-      signal?: AbortSignal;
-      /** The caller's own cancel, undiluted by the request timeout composed
-       *  into `signal` — a slow cascade is not a cancelled one. */
+      /** The caller's own cancel; the deadlines are set here. */
       cancelSignal?: AbortSignal;
-      /** Transport deadline for one request; a large body needs more than the default. */
+      /** Allowed for finding a route, and again for the request once one is found. */
       timeoutMs?: number;
     }
   ): Promise<Response> {
+    const timeoutMs = options.timeoutMs ?? this.timeoutMs;
     // Race, don't just await: the cascade is shared, so this call abandons it on
     // its own deadline too (a dead tunnel makes the cascade last minutes).
-    await raceAbort(this.ensureHub(), options.signal ?? options.cancelSignal, () =>
-      options.cancelSignal?.aborted ? new ConnectCancelledError() : new Error("Hub API timeout (path resolution)")
+    await raceAbort(
+      this.ensureHub(),
+      deadlineSignal(timeoutMs, options.cancelSignal),
+      () => new Error(options.cancelSignal?.aborted ? "Hub request aborted" : "Hub API timeout (path resolution)")
     );
 
     try {
-      const response = await this.sendHubFetch(path, options);
+      // A deadline of its own: a slow search must not eat the request's time.
+      const signal = deadlineSignal(timeoutMs, options.cancelSignal);
+      const response = await this.sendHubFetch(path, { ...options, signal, timeoutMs });
       this.hubFailureStreak = 0;
       this.hubResolutionFailedAtMs = 0;
       return response;
@@ -1524,9 +1545,17 @@ export class PangeaApiClient {
     const sealed = await this.sealRequest(method, path, headers, bodyObj);
     const envelopeJson = JSON.stringify(sealed.envelope);
 
-    const rawResponse = await this.resolveRawResponse(sealed.route, envelopeJson, options.signal, options.timeoutMs ?? this.timeoutMs);
-
-    const responseText = await rawResponse.text();
+    let rawResponse: Response;
+    let responseText: string;
+    try {
+      rawResponse = await this.resolveRawResponse(sealed.route, envelopeJson, options.signal, options.timeoutMs ?? this.timeoutMs);
+      responseText = await rawResponse.text();
+    } catch (err) {
+      // The caller's own cancel is not the hub going quiet.
+      if (options.cancelSignal?.aborted) throw err;
+      const detail = err instanceof Error ? err.message : String(err);
+      throw new HubRequestUnansweredError(options.signal?.aborted ? `Hub API timeout (${method} ${path})` : detail);
+    }
 
     if (!rawResponse.ok) {
       throw new Error(`Secure channel error (${rawResponse.status}): ${responseText}`);
@@ -1581,45 +1610,32 @@ export class PangeaApiClient {
   }
 
   async tokenLogin(vpnAccessToken: string): Promise<TokenLoginResponse> {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    const response = await this.hubFetch("/api/client/token-login", {
+      method: "POST",
+      headers: SEALED_ENVELOPE_HEADERS,
+      body: JSON.stringify({
+        vpnAccessToken: vpnAccessToken.trim(),
+        ...(this.identityPubkey ? { identityPubkey: this.identityPubkey } : {})
+      })
+    });
 
-    try {
-      const response = await this.hubFetch("/api/client/token-login", {
-        method: "POST",
-        headers: SEALED_ENVELOPE_HEADERS,
-        body: JSON.stringify({
-          vpnAccessToken: vpnAccessToken.trim(),
-          ...(this.identityPubkey ? { identityPubkey: this.identityPubkey } : {})
-        }),
-        signal: controller.signal
-      });
-
-      if (!response.ok) {
-        const text = await response.text();
-        if (text.includes("SUBSCRIPTION_EXPIRED")) {
-          throw new SubscriptionExpiredError(
-            "This account's subscription has expired. Top up or resubscribe, then sign in again."
-          );
-        }
-        throw new LoginRejectedError(`Token login failed (${response.status}): ${text}`, response.status);
+    if (!response.ok) {
+      const text = await response.text();
+      if (text.includes("SUBSCRIPTION_EXPIRED")) {
+        throw new SubscriptionExpiredError(
+          "This account's subscription has expired. Top up or resubscribe, then sign in again."
+        );
       }
-
-      const data = (await response.json()) as TokenLoginResponse;
-      this.acceptLicenseKey(data.vpnAccessToken, "Token login");
-      this.rememberServers(data.servers);
-      this.rememberHubShadowsocks(data.servers);
-      this.rememberHubReality(data.servers);
-      this.rememberFrontedEndpoints(data.frontedEndpoints);
-      return data;
-    } catch (error) {
-      if (error instanceof Error && error.name === "AbortError") {
-        throw new Error("Token login request timeout");
-      }
-      throw error;
-    } finally {
-      clearTimeout(timer);
+      throw new LoginRejectedError(`Token login failed (${response.status}): ${text}`, response.status);
     }
+
+    const data = (await response.json()) as TokenLoginResponse;
+    this.acceptLicenseKey(data.vpnAccessToken, "Token login");
+    this.rememberServers(data.servers);
+    this.rememberHubShadowsocks(data.servers);
+    this.rememberHubReality(data.servers);
+    this.rememberFrontedEndpoints(data.frontedEndpoints);
+    return data;
   }
 
   /** The node list, falling back to the cached one when the hub is unreachable.
@@ -1771,6 +1787,19 @@ export class PangeaApiClient {
     this.onHubShadowsocks?.(this.hubShadowsocks);
   }
 
+  /** Asks again when no answer came back. The same keys go out each time, so a
+   *  register the hub did act on is simply repeated. */
+  private async register(body: unknown, signal?: AbortSignal): Promise<RegisterResponse> {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await this.hubRequest<RegisterResponse>("POST", "/api/register", body, signal);
+      } catch (err) {
+        if (!(err instanceof HubRequestUnansweredError) || attempt >= REGISTER_RETRIES) throw err;
+        console.log(`[register] No answer from the hub, asking again: ${sanitizeLog(err)}`);
+      }
+    }
+  }
+
   async provision(
     serverId: string,
     signal?: AbortSignal,
@@ -1794,9 +1823,7 @@ export class PangeaApiClient {
     // The daemon keeps the secret half; only the public key travels.
     const pqOffer = await this.offerPostQuantum();
 
-    const reg = await this.hubRequest<RegisterResponse>(
-      "POST",
-      "/api/register",
+    const reg = await this.register(
       {
         licenseKey: this.licenseKey,
         identityPubkey: this.identityPubkey,
@@ -1987,46 +2014,25 @@ export class PangeaApiClient {
     body?: unknown,
     options: { timeoutMs?: number; signal?: AbortSignal } = {}
   ): Promise<{ status: number; body: T | undefined }> {
-    const timeoutMs = options.timeoutMs ?? this.timeoutMs;
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-    const abortFromCaller = () => controller.abort();
-    if (options.signal) {
-      if (options.signal.aborted) controller.abort();
-      else options.signal.addEventListener("abort", abortFromCaller, { once: true });
-    }
-    try {
-      const response = await this.hubFetch(route, {
-        method,
-        headers: { "Content-Type": "application/json" },
-        body: body === undefined ? undefined : JSON.stringify(body),
-        signal: controller.signal,
-        timeoutMs
-      });
-      const text = await response.text();
-      return { status: response.status, body: (text ? JSON.parse(text) : undefined) as T | undefined };
-    } finally {
-      clearTimeout(timer);
-      options.signal?.removeEventListener("abort", abortFromCaller);
-    }
+    const response = await this.hubFetch(route, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      cancelSignal: options.signal,
+      timeoutMs: options.timeoutMs
+    });
+    const text = await response.text();
+    return { status: response.status, body: (text ? JSON.parse(text) : undefined) as T | undefined };
   }
 
   /** @param externalSignal Aborts this request when the caller's work is cancelled
-   *   (e.g. Stop mid-connect), composed with the timeout controller so either can abort. */
+   *   (e.g. Stop mid-connect). */
   private async hubRequest<T>(
     method: string,
     route: string,
     body?: unknown,
     externalSignal?: AbortSignal
   ): Promise<T> {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
-    const abortFromCaller = () => controller.abort();
-    if (externalSignal) {
-      if (externalSignal.aborted) controller.abort();
-      else externalSignal.addEventListener("abort", abortFromCaller, { once: true });
-    }
-
     try {
       const headers: Record<string, string> = {
         "Content-Type": "application/json"
@@ -2039,8 +2045,7 @@ export class PangeaApiClient {
         method,
         headers,
         body: body ? JSON.stringify(body) : undefined,
-        signal: controller.signal,
-        ...(externalSignal ? { cancelSignal: externalSignal } : {})
+        cancelSignal: externalSignal
       });
 
       if (!response.ok) {
@@ -2061,18 +2066,10 @@ export class PangeaApiClient {
       const text = await response.text();
       return (text ? JSON.parse(text) : undefined) as T;
     } catch (error) {
-      if (error instanceof Error && error.name === "AbortError") {
-        // Distinguish "the user stopped this" from "the hub is slow": the
-        // caller turns a cancellation into an idle UI, not an error toast.
-        if (externalSignal?.aborted) {
-          throw new ConnectCancelledError();
-        }
-        throw new Error(`Hub API timeout (${method} ${route})`);
-      }
+      // "The user stopped this", not "the hub is slow": the caller turns a
+      // cancellation into an idle UI, not an error toast.
+      if (externalSignal?.aborted) throw new ConnectCancelledError();
       throw error;
-    } finally {
-      clearTimeout(timer);
-      externalSignal?.removeEventListener("abort", abortFromCaller);
     }
   }
 }

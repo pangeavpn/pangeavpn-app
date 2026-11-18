@@ -45,6 +45,7 @@ import {
   PangeaApiClient,
   AuthError,
   ConnectCancelledError,
+  HubRequestUnansweredError,
   SubscriptionExpiredError
 } from "./pangeaApiClient";
 import type { HubRealityCreds } from "../shared/hubRealityCreds";
@@ -931,13 +932,14 @@ async function reconnectExistingProfile(): Promise<boolean> {
   }
 }
 
-// Only hub reachability failures are worth retrying on the existing profile: a hub
-// that answered has already replaced that peer, and a daemon error is not the hub's.
+// Only a hub that was never reached is worth retrying on the existing profile: one that
+// answered, or may have got the register, has replaced that peer; a daemon error is not the hub's.
 function isHubReachabilityFailure(err: unknown): boolean {
   return !(
     err instanceof AuthError ||
     err instanceof SubscriptionExpiredError ||
     err instanceof ConnectCancelledError ||
+    err instanceof HubRequestUnansweredError ||
     err instanceof DaemonHttpError
   );
 }
