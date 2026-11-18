@@ -182,6 +182,9 @@ final class SessionStore {
     func signOut() async {
         guard !signingOut, !deletingAccount else { return }
         signingOut = true
+        // Signing out starts now, not when it finishes: a launch restore landing while the
+        // tunnel and slot are let go would otherwise put the session back and fetch its plan.
+        generation += 1
         let holdsSlot = session != nil
         await tunnel.disconnect()
         await tunnel.removeConfiguration()

@@ -90,6 +90,19 @@ final class SessionLaunchRestoreTests: XCTestCase {
         XCTAssertFalse(core.calls.contains("subscription"))
     }
 
+    // The answer lands while the core is still logging out, before the session is cleared.
+    func testLateAnswerDuringSignOutIsDropped() async {
+        let core = slowCore(.success(signedIn))
+        core.logoutDelay = 0.8
+        let store = SessionStore(
+            core: core, tunnel: FakeTunnel(),
+            timeouts: SessionTimeouts(networkSettle: 0, launchRestore: 0.05))
+        await store.restore()
+        await store.signOut()
+        XCTAssertNil(store.session)
+        XCTAssertFalse(core.calls.contains("subscription"))
+    }
+
     // A stored list needs no hub, so launch never waits on one.
     func testStoredServersOpenTheAppAtOnceAndTheAnswerReplacesThem() async {
         let core = slowCore(.success(Session(email: "", name: "", servers: [fresh])))
