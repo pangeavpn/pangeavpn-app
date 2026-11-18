@@ -62,15 +62,25 @@ struct ServerRow: View {
                 .lineLimit(1)
                 .truncationMode(.tail)
             if let subtitle, !subtitle.isEmpty {
-                Text(subtitle)
-                    .scaledFont(size: 12, design: .monospaced, relativeTo: .caption)
-                    .foregroundStyle(Palette.textSecondary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.85)
-                    .truncationMode(.middle)
+                // Cutting the middle lost both the id and the qualifier ("eu-londo…est of 2"),
+                // so a subtitle too wide for the row drops its qualifier and keeps the id.
+                ViewThatFits(in: .horizontal) {
+                    subtitleText(subtitle)
+                    subtitleText(LineBreaks.lead(subtitle))
+                        .minimumScaleFactor(0.85)
+                }
+                .accessibilityLabel(subtitle)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func subtitleText(_ text: String) -> some View {
+        Text(text)
+            .scaledFont(size: 12, design: .monospaced, relativeTo: .caption)
+            .foregroundStyle(Palette.textSecondary)
+            .lineLimit(1)
+            .truncationMode(.tail)
     }
 }
 

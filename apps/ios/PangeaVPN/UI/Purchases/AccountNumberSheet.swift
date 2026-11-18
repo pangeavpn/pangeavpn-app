@@ -63,11 +63,9 @@ struct AccountNumberSheet: View {
 
     private var numberBox: some View {
         HStack(spacing: 8) {
-            Text(verbatim: number)
+            GroupedCode(code: number)
                 .scaledFont(size: 17, weight: .medium, design: .monospaced, relativeTo: .body)
                 .foregroundStyle(Palette.text)
-                .minimumScaleFactor(0.6)
-                .fixedSize(horizontal: false, vertical: true)
                 .textSelection(.enabled)
                 .privacySensitive()
                 .accessibilityLabel(Text(verbatim: number).speechSpellsOutCharacters())

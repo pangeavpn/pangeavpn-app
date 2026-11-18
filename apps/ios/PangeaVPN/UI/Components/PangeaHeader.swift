@@ -42,6 +42,9 @@ struct PangeaHeader: View {
         .padding(.leading, 20)
         .padding(.trailing, 10)
         .frame(minHeight: 52)
+        // Capped like the main screen: past this the icons outgrow their 44 pt targets and touch.
+        // Held down, each control still shows large in the system's large content viewer.
+        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
     }
 }
 
@@ -60,6 +63,7 @@ private struct IconControl: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(label)
+        .accessibilityShowsLargeContentViewer()
     }
 }
 

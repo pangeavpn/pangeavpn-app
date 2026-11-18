@@ -22,16 +22,16 @@ final class SubscriptionTextTests: XCTestCase {
     }
 
     func testActiveRenewing() {
-        XCTAssertEqual(line(sub("active", renews: true)), SubscriptionLine(text: "Renews Dec 26, 2026", warn: false))
+        XCTAssertEqual(line(sub("active", renews: true)), SubscriptionLine(text: "Renews Dec\u{00A0}26,\u{00A0}2026", warn: false))
     }
 
     func testActiveEndingWithoutRenewal() {
-        XCTAssertEqual(line(sub("active")), SubscriptionLine(text: "Expires Dec 26, 2026", warn: false))
+        XCTAssertEqual(line(sub("active")), SubscriptionLine(text: "Expires Dec\u{00A0}26,\u{00A0}2026", warn: false))
     }
 
     func testTrialGetsThePrefix() {
-        XCTAssertEqual(line(sub("trialing", renews: true)).text, "Free trial · Renews Dec 26, 2026")
-        XCTAssertEqual(line(sub("trialing")).text, "Free trial · Expires Dec 26, 2026")
+        XCTAssertEqual(line(sub("trialing", renews: true)).text, "Free trial · Renews Dec\u{00A0}26,\u{00A0}2026")
+        XCTAssertEqual(line(sub("trialing")).text, "Free trial · Expires Dec\u{00A0}26,\u{00A0}2026")
     }
 
     func testActiveWithoutDateDropsIt() {
@@ -40,12 +40,12 @@ final class SubscriptionTextTests: XCTestCase {
     }
 
     func testUnknownEntitlementDoesNotBlock() {
-        XCTAssertEqual(line(sub("active", renews: true, entitled: nil)).text, "Renews Dec 26, 2026")
+        XCTAssertEqual(line(sub("active", renews: true, entitled: nil)).text, "Renews Dec\u{00A0}26,\u{00A0}2026")
     }
 
     func testNotEntitledWinsOverActiveStatus() {
         let lapsed = sub("active", expiresAt: "2026-10-20T00:00:00Z", entitled: false)
-        XCTAssertEqual(line(lapsed), SubscriptionLine(text: "Subscription expired \u{2014} Oct 20, 2026", warn: true))
+        XCTAssertEqual(line(lapsed), SubscriptionLine(text: "Subscription expired \u{2014} Oct\u{00A0}20,\u{00A0}2026", warn: true))
     }
 
     func testNotEntitledWithoutDate() {
@@ -54,7 +54,7 @@ final class SubscriptionTextTests: XCTestCase {
 
     func testPastDue() {
         let due = sub("past_due", expiresAt: "2026-10-01T00:00:00Z")
-        XCTAssertEqual(line(due), SubscriptionLine(text: "Payment past due \u{2014} Oct 1, 2026", warn: true))
+        XCTAssertEqual(line(due), SubscriptionLine(text: "Payment past due \u{2014} Oct\u{00A0}1,\u{00A0}2026", warn: true))
         XCTAssertEqual(line(sub("past_due", expiresAt: nil)).text, "Payment past due")
     }
 
@@ -65,9 +65,9 @@ final class SubscriptionTextTests: XCTestCase {
     }
 
     func testCachedAnswerSaysOffline() {
-        XCTAssertEqual(line(sub("active", renews: true, cached: true)).text, "Renews Dec 26, 2026 (offline)")
+        XCTAssertEqual(line(sub("active", renews: true, cached: true)).text, "Renews Dec\u{00A0}26,\u{00A0}2026 (offline)")
         let lapsed = line(sub("active", entitled: false, cached: true))
-        XCTAssertEqual(lapsed.text, "Subscription expired \u{2014} Dec 26, 2026 (offline)")
+        XCTAssertEqual(lapsed.text, "Subscription expired \u{2014} Dec\u{00A0}26,\u{00A0}2026 (offline)")
         XCTAssertTrue(lapsed.warn)
     }
 

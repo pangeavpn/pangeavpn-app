@@ -69,11 +69,10 @@ struct TokenField: View {
 
     // A prompt stays on one line and truncates on narrow phones, so the field draws its own that wraps.
     private var placeholderText: some View {
-        Text(placeholder)
+        GroupedCode(code: placeholder)
             .scaledFont(size: 17, design: .monospaced, relativeTo: .body)
             .tracking(2.4)
             .foregroundStyle(Palette.textMuted)
-            .fixedSize(horizontal: false, vertical: true)
             .allowsHitTesting(false)
             .accessibilityHidden(true)
     }

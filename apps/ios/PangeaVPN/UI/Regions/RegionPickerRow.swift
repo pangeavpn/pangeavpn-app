@@ -59,11 +59,13 @@ struct RegionPickerRow: View {
         VStack(alignment: .leading, spacing: 2) {
             nameLine
             if !subtitle.isEmpty {
-                Text(subtitle)
+                // Wraps between words, never inside an id ("eu-" / "central-2") or before a "·".
+                Text(LineBreaks.separators(LineBreaks.ids(subtitle)))
                     .scaledFont(size: 11, design: .monospaced, relativeTo: .caption2)
                     .foregroundStyle(Palette.textMuted)
                     .lineLimit(2)
                     .truncationMode(.tail)
+                    .accessibilityLabel(subtitle)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

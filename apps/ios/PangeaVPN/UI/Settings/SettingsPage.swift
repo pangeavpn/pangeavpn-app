@@ -109,7 +109,7 @@ struct SettingsNavRow: View {
                         .foregroundStyle(tint ?? Palette.text)
                         .multilineTextAlignment(.leading)
                     if let value, !value.isEmpty {
-                        Text(value)
+                        Text(LineBreaks.separators(value))
                             .scaledFont(size: 12, design: .monospaced, relativeTo: .caption)
                             .foregroundStyle(Palette.textMuted)
                             .multilineTextAlignment(.leading)
@@ -178,7 +178,7 @@ struct SettingsRailRow: View {
                     .foregroundStyle(tint ?? Palette.text)
                     .multilineTextAlignment(.leading)
                 if let value, !value.isEmpty {
-                    Text(value)
+                    Text(LineBreaks.separators(value))
                         .scaledFont(size: 12, design: .monospaced, relativeTo: .caption)
                         .foregroundStyle(selected ? Palette.accent : Palette.textMuted)
                         .multilineTextAlignment(.leading)
@@ -244,6 +244,9 @@ struct SettingsCloseButton: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(String(localized: "settings_close", defaultValue: "Close"))
+        // Chrome, like the header: the glyph stops growing before it fills its 44 pt target.
+        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+        .accessibilityShowsLargeContentViewer()
     }
 }
 

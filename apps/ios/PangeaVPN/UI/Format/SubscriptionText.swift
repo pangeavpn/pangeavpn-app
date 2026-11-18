@@ -10,7 +10,8 @@ struct SubscriptionLine: Equatable, Sendable {
 enum SubscriptionText {
     static func line(_ sub: Subscription?, locale: Locale = .current, timeZone: TimeZone = .current) -> SubscriptionLine {
         guard let sub else { return SubscriptionLine(text: none, warn: false) }
-        let when = HubDate.medium(sub.expiresAt, locale: locale, timeZone: timeZone)
+        // Glued, so a wrapped line never splits the date ("Oct" / "20, 2026").
+        let when = HubDate.medium(sub.expiresAt, locale: locale, timeZone: timeZone).map(LineBreaks.unbroken)
         let base = baseLine(sub, when: when)
         guard sub.cached else { return base }
         let offline = String(localized: "settings_sub_offline", defaultValue: "(offline)")
