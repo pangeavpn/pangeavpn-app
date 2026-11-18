@@ -56,13 +56,13 @@ test("DaemonClient sends disableTransportRace only when racing is off", async (t
     let raw = "";
     req.on("data", (chunk) => (raw += chunk));
     req.on("end", () => {
-      bodies.push(JSON.parse(raw));
+      if (req.url !== "/user-roots") bodies.push(JSON.parse(raw));
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: true }));
     });
   });
 
-  const client = new DaemonClient(baseUrl, async () => "token");
+  const client = new DaemonClient(baseUrl, async () => "token", { userRoots: () => "" });
   await client.connect("profile");
   await client.connect("profile", { disableTransportRace: true });
   await client.switch("profile", { disableTransportRace: true });
@@ -70,6 +70,47 @@ test("DaemonClient sends disableTransportRace only when racing is off", async (t
   assert.equal("disableTransportRace" in bodies[0], false);
   assert.equal(bodies[1].disableTransportRace, true);
   assert.equal(bodies[2].disableTransportRace, true);
+});
+
+test("DaemonClient hands the user's roots over before each connect and switch", async (t) => {
+  const seen: { url: string; body: Record<string, unknown> }[] = [];
+  const { baseUrl } = await serve(t, (req, res) => {
+    let raw = "";
+    req.on("data", (chunk) => (raw += chunk));
+    req.on("end", () => {
+      seen.push({ url: req.url ?? "", body: JSON.parse(raw) });
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true }));
+    });
+  });
+
+  const client = new DaemonClient(baseUrl, async () => "token", { userRoots: () => "SCHOOL-CA" });
+  await client.connect("profile");
+  await client.switch("profile");
+
+  assert.deepEqual(
+    seen.map((r) => r.url),
+    ["/user-roots", "/connect", "/user-roots", "/switch"]
+  );
+  assert.equal(seen[0].body.pem, "SCHOOL-CA");
+});
+
+test("DaemonClient still connects through a daemon without the user-roots route", async (t) => {
+  const { baseUrl } = await serve(t, (req, res) => {
+    req.resume();
+    req.on("end", () => {
+      if (req.url === "/user-roots") {
+        res.writeHead(404);
+        res.end("404 page not found");
+        return;
+      }
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true }));
+    });
+  });
+
+  const client = new DaemonClient(baseUrl, async () => "token", { userRoots: () => "SCHOOL-CA" });
+  assert.deepEqual(await client.connect("profile"), { ok: true });
 });
 
 // The field failure this guards: a pooled keep-alive socket that died quietly

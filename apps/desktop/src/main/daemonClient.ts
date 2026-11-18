@@ -22,6 +22,7 @@ import {
   type SplitTunnelResult,
   type SplitTunnelWriteBody
 } from "../shared/splitTunnel.ts";
+import { userTrustedRootsPem } from "./userTrustedRoots.ts";
 
 export class TransportExhaustedError extends Error {
   constructor() {
@@ -58,14 +59,16 @@ export class DaemonClient implements PostQuantumProvider {
   private readonly connectTimeoutMs: number;
   private readonly disconnectTimeoutMs: number;
   private readonly signRequests: boolean;
+  private readonly userRoots: () => string;
 
   constructor(
     baseUrl: string,
     tokenProvider: () => Promise<string | string[]>,
-    options?: { defaultRequestTimeoutMs?: number; signRequests?: boolean }
+    options?: { defaultRequestTimeoutMs?: number; signRequests?: boolean; userRoots?: () => string }
   ) {
     this.baseUrl = baseUrl;
     this.tokenProvider = tokenProvider;
+    this.userRoots = options?.userRoots ?? userTrustedRootsPem;
     this.defaultRequestTimeoutMs = options?.defaultRequestTimeoutMs ?? 5000;
     // Any interactive Windows user can already read the token, so a bearer
     // header leaks nothing there and keeps working against an older daemon.
@@ -106,7 +109,19 @@ export class DaemonClient implements PostQuantumProvider {
     if (opts?.gamingMode) {
       body.gamingMode = true;
     }
+    await this.shareUserRoots(signal);
     return this.request<OkResponse>("POST", "/connect", body, this.connectTimeoutMs, signal);
+  }
+
+  // Best effort: an older daemon answers 404, and its CDN dial keeps the system store alone.
+  private async shareUserRoots(signal?: AbortSignal): Promise<void> {
+    try {
+      await this.request<OkResponse>("POST", "/user-roots", { pem: this.userRoots() }, undefined, signal);
+    } catch (error) {
+      if (!(error instanceof DaemonHttpError && error.status === 404)) {
+        console.warn("could not share the user's trusted roots with the daemon:", (error as Error).message);
+      }
+    }
   }
 
   async pqOffer(): Promise<PostQuantumOffer | null> {
@@ -300,6 +315,7 @@ export class DaemonClient implements PostQuantumProvider {
     if (opts?.gamingMode) {
       body.gamingMode = true;
     }
+    await this.shareUserRoots(signal);
     return this.request<OkResponse>("POST", "/switch", body, this.connectTimeoutMs, signal);
   }
 
