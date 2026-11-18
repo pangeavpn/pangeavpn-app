@@ -165,8 +165,13 @@ final class ScreenGalleryTests: XCTestCase {
 
     func testSettingsPagesAtLargeText() async throws {
         let (camera, stores) = try await gallery()
+        // The top shot is always taken: an end shot of a page that fits is skipped, and
+        // with no top shot beside it the page went unshot at this size.
         for route in [SettingsRoute.network, .killSwitch, .devices] {
-            try await camera.shoot("14-large-\(route)", looks: [.largeText], scrollToEnd: true) {
+            try await camera.shoot("14-large-\(route)", looks: [.largeText]) {
+                stores.stage(SettingsView(path: [route]))
+            }
+            try await camera.shoot("14-large-\(route)-end", looks: [.largeText], scrollToEnd: true) {
                 stores.stage(SettingsView(path: [route]))
             }
         }
