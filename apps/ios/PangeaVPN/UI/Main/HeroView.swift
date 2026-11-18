@@ -10,6 +10,16 @@ enum HeroText {
         }
     }
 
+    // The label is small bold text, so it takes the legible text shades; the dot keeps the bright ones.
+    static func labelColor(_ state: TunnelState) -> Color {
+        switch state {
+        case .connected: return Palette.connectedText
+        case .connecting, .disconnecting: return Palette.warningText
+        case .error: return Palette.errorText
+        case .disconnected: return Palette.textMuted
+        }
+    }
+
     static func emphasised(_ template: String, emphasis: String) -> AttributedString {
         guard let slot = template.range(of: "%1$@") else { return AttributedString(template) }
         var word = AttributedString(emphasis)
@@ -87,7 +97,7 @@ struct HeroKicker: View {
                             .kerning(1.8)
                             .scaledFont(size: 11, weight: .bold, relativeTo: .caption2)
                             .lineLimit(1)
-                            .foregroundStyle(HeroText.accent(face.state))
+                            .foregroundStyle(HeroText.labelColor(face.state))
                         if face.postQuantum { HeroChip.postQuantum }
                         if face.split { HeroChip.split }
                     }

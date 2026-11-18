@@ -17,8 +17,10 @@ enum Palette {
 
     static let connected = Color(hex: 0x10B981)
     static let connecting = Color(hex: 0xF59E0B)
-    // Amber as text: light mode needs the darker shade to stay legible on cream and white.
+    // The state colours as text: light mode needs darker shades to stay legible on cream and white.
     static let warningText = dynamic(dark: 0xF59E0B, light: 0xB45309)
+    static let connectedText = dynamic(dark: 0x10B981, light: 0x047857)
+    static let errorText = dynamic(dark: 0xF43F5E, light: 0xBE123C)
     static let error = Color(hex: 0xF43F5E)
     static let off = Color(hex: 0x5A5654)
 

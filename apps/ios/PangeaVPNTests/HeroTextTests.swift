@@ -63,6 +63,14 @@ final class HeroTextTests: XCTestCase {
         XCTAssertEqual(HeroText.accent(.disconnected), Palette.textMuted)
     }
 
+    func testLabelColorForEveryState() {
+        XCTAssertEqual(HeroText.labelColor(.connected), Palette.connectedText)
+        XCTAssertEqual(HeroText.labelColor(.connecting), Palette.warningText)
+        XCTAssertEqual(HeroText.labelColor(.disconnecting), Palette.warningText)
+        XCTAssertEqual(HeroText.labelColor(.error), Palette.errorText)
+        XCTAssertEqual(HeroText.labelColor(.disconnected), Palette.textMuted)
+    }
+
     func testHeadlineKeepsEmphasisSlot() {
         let states: [TunnelState] = [.disconnected, .connecting, .connected, .disconnecting, .error]
         for state in states { XCTAssertTrue(HeroText.headline(state).contains("%1$@")) }
