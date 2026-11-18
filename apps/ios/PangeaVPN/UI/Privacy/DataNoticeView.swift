@@ -92,6 +92,8 @@ struct DataNoticeView: View {
 }
 
 private struct DataNoticeRow: View {
+    // Grows with the glyph's text style, so the icon stays inside its tile at AX sizes.
+    @ScaledMetric(relativeTo: .body) private var tileSize: CGFloat = 36
     let systemImage: String
     let title: String
     let detail: String
@@ -101,7 +103,7 @@ private struct DataNoticeRow: View {
             Image(systemName: systemImage)
                 .scaledFont(size: 16, weight: .medium, relativeTo: .body)
                 .foregroundStyle(Palette.accent)
-                .frame(width: 36, height: 36)
+                .frame(width: tileSize, height: tileSize)
                 .background(Palette.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 4) {

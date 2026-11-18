@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct ChoiceRow: View {
+    // The check is body text, so its column grows with it; a fixed 18 pt clipped it to a sliver at AX sizes.
+    @ScaledMetric(relativeTo: .body) private var checkWidth: CGFloat = 18
     private let label: String
     private let selected: Bool
     private let hint: String?
@@ -32,7 +34,7 @@ struct ChoiceRow: View {
                 Text("\u{2713}")
                     .font(.body.weight(.bold))
                     .foregroundStyle(selected ? Palette.accent : Color.clear)
-                    .frame(width: 18)
+                    .frame(width: checkWidth)
                     .accessibilityHidden(true)
             }
             .padding(.horizontal, 14)

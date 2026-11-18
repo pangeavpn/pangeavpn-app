@@ -152,9 +152,7 @@ enum ExpiredText {
     static let checkHold = Duration.milliseconds(700)
 
     // Desktop's amber; light mode needs the darker shade to stay legible on cream.
-    static let warning = Color(UIColor { traits in
-        UIColor(hex: traits.userInterfaceStyle == .dark ? 0xF59E0B : 0xB45309)
-    })
+    static let warning = Palette.warningText
 
     // No answer, or a cached one, means the hub was not reached, so the old verdict proves nothing.
     static func verdict(reached: Bool, entitled: Bool, cached: Bool) -> ExpiredVerdict {

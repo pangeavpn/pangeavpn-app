@@ -29,6 +29,21 @@ struct TokenField: View {
     private static let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
 
     var body: some View {
+        // The placeholder takes part in layout, hidden once there is text, so the field is always
+        // tall enough for a whole account number, at every text size.
+        ZStack(alignment: .topLeading) {
+            placeholderText
+                .opacity(text.isEmpty ? 1 : 0)
+            field
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 15)
+        .background(focused ? Palette.accent.opacity(0.1) : Palette.surface, in: Self.shape)
+        .overlay(Self.shape.strokeBorder(borderColor, lineWidth: focused ? 2 : 1))
+        .clipShape(Self.shape)
+    }
+
+    private var field: some View {
         TextField("", text: $text, axis: .vertical)
         // A full account number wraps on every iPhone at default size; reserving two lines stops the field jumping.
         .lineLimit(2...)
@@ -50,14 +65,6 @@ struct TokenField: View {
             if clean != newValue { text = clean }
             if TokenInput.isReturnPress(old: oldValue, new: newValue) { submit() }
         }
-        .overlay(alignment: .topLeading) {
-            if text.isEmpty { placeholderText }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 15)
-        .background(focused ? Palette.accent.opacity(0.1) : Palette.surface, in: Self.shape)
-        .overlay(Self.shape.strokeBorder(borderColor, lineWidth: focused ? 2 : 1))
-        .clipShape(Self.shape)
     }
 
     // A prompt stays on one line and truncates on narrow phones, so the field draws its own that wraps.
@@ -66,7 +73,7 @@ struct TokenField: View {
             .scaledFont(size: 17, design: .monospaced, relativeTo: .body)
             .tracking(2.4)
             .foregroundStyle(Palette.textMuted)
-            .lineLimit(2)
+            .fixedSize(horizontal: false, vertical: true)
             .allowsHitTesting(false)
             .accessibilityHidden(true)
     }

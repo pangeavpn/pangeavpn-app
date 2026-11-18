@@ -129,7 +129,7 @@ struct AccountCard: View {
                 .foregroundStyle(Palette.text)
             Text(loading ? String(localized: "settings_account_loading", defaultValue: "Loading...") : line.text)
                 .scaledFont(size: 13, design: .monospaced, relativeTo: .footnote)
-                .foregroundStyle(line.warn && !loading ? Palette.connecting : Palette.textMuted)
+                .foregroundStyle(line.warn && !loading ? Palette.warningText : Palette.textMuted)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)

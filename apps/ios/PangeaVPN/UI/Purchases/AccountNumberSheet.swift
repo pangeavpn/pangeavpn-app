@@ -4,6 +4,9 @@ import SwiftUI
 struct AccountNumberSheet: View {
     @Environment(SettingsStore.self) private var settings
     @Environment(ToastCenter.self) private var toasts
+    // The circles scale with their glyphs' text styles, so neither glyph outgrows its circle at AX sizes.
+    @ScaledMetric(relativeTo: .title3) private var markSize: CGFloat = 48
+    @ScaledMetric(relativeTo: .footnote) private var copySize: CGFloat = 44
     private let number: String
     private let onDone: () -> Void
 
@@ -53,7 +56,7 @@ struct AccountNumberSheet: View {
         Image(systemName: "checkmark")
             .scaledFont(size: 20, weight: .semibold, relativeTo: .title3)
             .foregroundStyle(Palette.accent)
-            .frame(width: 48, height: 48)
+            .frame(width: markSize, height: markSize)
             .background(Palette.accent.opacity(0.14), in: Circle())
             .accessibilityHidden(true)
     }
@@ -73,7 +76,7 @@ struct AccountNumberSheet: View {
                 Image(systemName: "doc.on.doc")
                     .scaledFont(size: 15, weight: .medium, relativeTo: .footnote)
                     .foregroundStyle(Palette.textSecondary)
-                    .frame(width: 44, height: 44)
+                    .frame(width: copySize, height: copySize)
                     .background(Palette.elevated, in: Circle())
                     .overlay(Circle().strokeBorder(Palette.border, lineWidth: 1))
                     .contentShape(Circle())

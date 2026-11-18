@@ -87,26 +87,37 @@ struct SettingsNavRow: View {
         self.showsChevron = showsChevron
     }
 
+    // As in SettingsRailRow: at accessibility sizes the icon sits above the title, so the
+    // title keeps the row's width and a word like "Censorship" never breaks mid-word.
+    private var layout: AnyLayout {
+        typeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+            : AnyLayout(HStackLayout(spacing: 14))
+    }
+
     var body: some View {
         HStack(spacing: 14) {
-            Image(systemName: systemImage)
-                .scaledFont(size: 17, weight: .regular, relativeTo: .body)
-                .foregroundStyle(tint ?? Palette.textSecondary)
-                .frame(width: iconWidth)
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .scaledFont(size: 16, weight: .semibold, relativeTo: .body)
-                    .foregroundStyle(tint ?? Palette.text)
-                    .multilineTextAlignment(.leading)
-                if let value, !value.isEmpty {
-                    Text(value)
-                        .scaledFont(size: 12, design: .monospaced, relativeTo: .caption)
-                        .foregroundStyle(Palette.textMuted)
+            layout {
+                Image(systemName: systemImage)
+                    .scaledFont(size: 17, weight: .regular, relativeTo: .body)
+                    .foregroundStyle(tint ?? Palette.textSecondary)
+                    .frame(width: iconWidth)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .scaledFont(size: 16, weight: .semibold, relativeTo: .body)
+                        .foregroundStyle(tint ?? Palette.text)
                         .multilineTextAlignment(.leading)
-                        .lineLimit(typeSize.isAccessibilitySize ? 3 : 2)
-                        .truncationMode(.tail)
+                    if let value, !value.isEmpty {
+                        Text(value)
+                            .scaledFont(size: 12, design: .monospaced, relativeTo: .caption)
+                            .foregroundStyle(Palette.textMuted)
+                            .multilineTextAlignment(.leading)
+                            .lineLimit(typeSize.isAccessibilitySize ? 3 : 2)
+                            .truncationMode(.tail)
+                    }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             if showsChevron {

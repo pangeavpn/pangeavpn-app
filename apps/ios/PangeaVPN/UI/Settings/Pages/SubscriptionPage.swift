@@ -39,7 +39,7 @@ struct SubscriptionPage: View {
     private var planRow: some View {
         let line = SubscriptionText.line(session.subscription)
         return SettingsNavRow(systemImage: "calendar", title: line.text,
-                              tint: line.warn ? Palette.connecting : nil, showsChevron: false)
+                              tint: line.warn ? Palette.warningText : nil, showsChevron: false)
     }
 
     @ViewBuilder
