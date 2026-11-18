@@ -65,8 +65,8 @@ func TestSelectAutoFollowsCascadeOrder(t *testing.T) {
 	}
 }
 
-func TestAutoCascadeOrderLeadsWithTectonic(t *testing.T) {
-	want := []string{"tectonic", "reality", "cloak", "shadowsocks", "hysteria2", "tuic", "naive", "anytls", "cdn", "snowflake"}
+func TestAutoCascadeOrderTriesTectonicLast(t *testing.T) {
+	want := []string{"reality", "cloak", "shadowsocks", "hysteria2", "tuic", "naive", "anytls", "cdn", "snowflake", "tectonic"}
 	if !equal(transport.AutoCascadeOrder, want) {
 		t.Fatalf("got %v, want %v", transport.AutoCascadeOrder, want)
 	}

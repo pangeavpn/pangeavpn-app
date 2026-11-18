@@ -33,15 +33,15 @@ func TestStarterFor_TectonicNeedsItsBlockAndASingleHop(t *testing.T) {
 	}
 }
 
-func TestAutoCascadeTriesTectonicFirst(t *testing.T) {
+func TestAutoCascadeTriesTectonicLast(t *testing.T) {
 	svc := newTestService(t, &fakeCloakManager{}, &fakeNaiveManager{}, &fakeWGManager{}, &fakeKillSwitch{})
 	profile := tectonicTestProfile()
 	candidates, err := svc.transportCandidates(&profile, "auto")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(candidates) < 2 || candidates[0].Kind != "tectonic" || candidates[1].Kind != "cloak" {
-		t.Fatalf("cascade = %v, want tectonic then cloak", candidates)
+	if len(candidates) < 2 || candidates[0].Kind != "cloak" || candidates[len(candidates)-1].Kind != "tectonic" {
+		t.Fatalf("cascade = %v, want cloak first and tectonic last", candidates)
 	}
 }
 
