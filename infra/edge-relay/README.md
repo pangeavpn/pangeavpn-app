@@ -46,10 +46,17 @@ relay. That's why `fronted` is tried after our own paths, not before them.
 
 ```sh
 cd infra/edge-relay
-npx wrangler deploy
+npx wrangler deploy --env cdn
+npx wrangler deploy --env alt
+npx wrangler deploy --env org
 ```
 
-Note the hostname it prints (`pangea-edge-relay.<subdomain>.workers.dev`).
+Always name the environment. A bare `npx wrangler deploy` uses the top-level
+name and creates a separate `pangea-edge-relay` Worker that no client knows,
+leaving the three real relays on their old code.
+
+A new relay gets its own `[env.<name>]` block in `wrangler.toml`; note the
+hostname its first deploy prints (`<name>.<subdomain>.workers.dev`).
 
 > [!TIP]
 > Deploy **more than one**, on separate accounts and ideally on separate CDNs.
