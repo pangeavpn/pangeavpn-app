@@ -49,6 +49,7 @@ import {
   SubscriptionExpiredError
 } from "./pangeaApiClient";
 import type { HubRealityCreds } from "../shared/hubRealityCreds";
+import type { HubRoutes } from "./hubRouteMemory";
 import type { HubShadowsocksCreds } from "../shared/hubShadowsocksCreds";
 import type { CachedSubscription } from "../shared/cachedSubscription";
 import { beginAttempt, cancelAttempt, commitAttempt, endAttempt, isCancelled } from "./connectAttempt";
@@ -1532,6 +1533,12 @@ async function persistHubIp(ip: string): Promise<void> {
   }, "hub IP");
 }
 
+async function persistHubRoutes(routes: HubRoutes): Promise<void> {
+  await updateSettings((settings) => {
+    settings.hubRoutes = routes;
+  }, "hub routes");
+}
+
 async function persistHubShadowsocks(creds: HubShadowsocksCreds[]): Promise<void> {
   await updateSettings((settings) => {
     settings.hubShadowsocks = creds;
@@ -2748,6 +2755,7 @@ function applyPersistedSettings(settings: Record<string, unknown>): void {
   // existing install still has one to migrate.
   pangeaApiClient.setCachedHubShadowsocks(settings.hubShadowsocks);
   pangeaApiClient.setCachedHubReality(settings.hubReality);
+  pangeaApiClient.setCachedHubRoutes(settings.hubRoutes);
   // Edge relays, and the last node list the hub gave us. Both are what stands
   // between a blocked hub and a client with nowhere left to go.
   pangeaApiClient.setCachedFrontedEndpoints(settings.frontedEndpoints);
@@ -2812,6 +2820,7 @@ function wirePangeaApiClient(): void {
   });
   pangeaApiClient.onHubShadowsocksResolved((creds) => void persistHubShadowsocks(creds));
   pangeaApiClient.onHubRealityResolved((creds) => void persistHubReality(creds));
+  pangeaApiClient.onHubRoutesChanged((routes) => void persistHubRoutes(routes));
   pangeaApiClient.onFrontedEndpointsResolved((endpoints) => void persistFrontedEndpoints(endpoints));
   pangeaApiClient.onDeadDropStateChanged((state) => void persistDeadDropState(state));
   pangeaApiClient.onServersResolved((servers) => void persistServers(servers));

@@ -1,5 +1,6 @@
 import { generateKeyPairSync } from "node:crypto";
 import https from "node:https";
+import { networkInterfaces } from "node:os";
 import { app, net } from "electron";
 import type { Profile } from "@pangeavpn/shared-types";
 import type { ServerInfo, SubscriptionInfo } from "../shared/ipc";
@@ -39,6 +40,14 @@ import {
 import { HUB_HOSTNAME, normalHubHosts } from "../shared/hubHosts";
 import { isCachedServer, restoreCachedServers } from "../shared/cachedServers";
 import { isIPv4Literal } from "../shared/ipLiteral";
+import {
+  hubMethodAttemptOrder,
+  networkKeyOf,
+  recordHubRoute,
+  rememberedHubRoute,
+  restoreHubRoutes,
+  type HubRoutes
+} from "./hubRouteMemory";
 import { DEAD_DROP_KEYS } from "./deadDropKeys";
 import { deadDropDue, fetchDeadDropPayload } from "./deadDrop";
 import {
@@ -625,6 +634,10 @@ export class PangeaApiClient {
   private activeHubMethod: HubMethod | null = null;
   private activeHubDetail: string | null = null;
   private onHubStatus: ((status: HubStatus) => void) | null = null;
+  // Which method last won on each network, and the network the route in use was found on.
+  private hubRoutes: HubRoutes = {};
+  private onHubRoutes: ((routes: HubRoutes) => void) | null = null;
+  private hubNetwork = "";
   // One test at a time: a proxy probe borrows one of the daemon's proxies, so
   // two overlapping tests would fight over it.
   private hubTestInFlight = false;
@@ -782,6 +795,16 @@ export class PangeaApiClient {
   /** Called when fresh REALITY credentials arrive, so the caller can persist them. */
   onHubRealityResolved(fn: (creds: HubRealityCreds[]) => void): void {
     this.onHubReality = fn;
+  }
+
+  /** Restores the per-network route memory at startup. */
+  setCachedHubRoutes(stored: unknown): void {
+    this.hubRoutes = restoreHubRoutes(stored);
+  }
+
+  /** Called when a network's remembered route changes, so the caller can persist it. */
+  onHubRoutesChanged(fn: (routes: HubRoutes) => void): void {
+    this.onHubRoutes = fn;
   }
 
   /** Restores the cached node list at startup. */
@@ -1016,6 +1039,12 @@ export class PangeaApiClient {
   /** Ensures a working connection strategy to the hub API, trying enabled methods in
    *  order: cached/DoH IP, shadowsocks, fronted relay, then cleartext domain last. */
   private async ensureHub(): Promise<void> {
+    // A route found on another network says nothing about this one.
+    const network = this.hubReady && this.hubNetwork ? networkKeyOf(networkInterfaces()) : "";
+    if (network && network !== this.hubNetwork) {
+      console.log(`[HubURL] The network changed, finding the hub again`);
+      this.resetHubResolution();
+    }
     if (this.hubReady) {
       return;
     }
@@ -1053,88 +1082,23 @@ export class PangeaApiClient {
   private async resolveHubPath(reseeded = false): Promise<boolean> {
     console.log(`[HubURL] Finding working API connection...`);
 
-    // 1. Last known good IP — no lookup, so it works under a lockdown lock.
-    if (this.hubMethods.directIp && this.cachedHubIp) {
-      console.log(`[HubURL] Trying cached hub IP ${this.cachedHubIp}`);
-      this.dohResolvedIp = this.cachedHubIp;
-      if (await this.trySecureProbeCurrentPath()) {
-        console.log(`[HubURL] Cached hub IP works`);
-        this.setActiveHubMethod("directIp", this.cachedHubIp);
-        this.hubReady = true;
-        return true;
-      }
-      console.log(`[HubURL] Cached hub IP failed`);
-      this.dohResolvedIp = null;
-    }
+    // The route that last worked on this network goes first: the ladder's order
+    // costs a blocked network a timeout per rung, every time it is walked.
+    const network = networkKeyOf(networkInterfaces());
+    const remembered = rememberedHubRoute(this.hubRoutes, network, Date.now());
+    if (remembered) console.log(`[HubURL] ${remembered} worked on this network before, trying it first`);
 
-    // 2. DoH — resolve via encrypted DNS, connect to the IP with no SNI.
-    if (this.hubMethods.directIp && this.dohEnabled) {
-      const resolvedIp = await resolveViaDoH(HUB_HOSTNAME);
-      if (resolvedIp) {
-        console.log(`[HubURL] Trying DoH-resolved IP ${resolvedIp}`);
-        this.dohResolvedIp = resolvedIp;
-        if (await this.trySecureProbeCurrentPath()) {
-          console.log(`[HubURL] DoH secure probe works`);
-          this.rememberHubIp(resolvedIp);
-          this.setActiveHubMethod("directIp", resolvedIp);
-          this.hubReady = true;
-          return true;
-        }
-        console.log(`[HubURL] DoH secure probe failed`);
-        this.dohResolvedIp = null;
-      }
-    }
-
-    // 3. REALITY — the daemon proxies the envelope to a node user pinned to the hub.
-    if (this.hubMethods.reality) {
+    for (const method of hubMethodAttemptOrder(this.hubMethods, remembered)) {
       this.dohResolvedIp = null;
-      if (await this.tryRealityHubPath()) {
-        console.log(`[HubURL] REALITY hub path works`);
-        this.setActiveHubMethod("reality", this.hubReality[0]?.remoteHost ?? null);
-        this.hubReady = true;
-        return true;
+      if (!(await this.tryHubMethod(method))) continue;
+      this.hubReady = true;
+      this.hubNetwork = network;
+      // A remembered route keeps its date, so the ladder is walked again once it lapses.
+      if (method !== remembered && network) {
+        this.hubRoutes = recordHubRoute(this.hubRoutes, network, method, Date.now());
+        this.onHubRoutes?.(this.hubRoutes);
       }
-    }
-
-    // 4. Shadowsocks — the same, over SS-2022.
-    if (this.hubMethods.shadowsocks) {
-      this.dohResolvedIp = null;
-      if (await this.tryShadowsocksHubPath()) {
-        console.log(`[HubURL] Shadowsocks hub path works`);
-        this.setActiveHubMethod("shadowsocks", this.hubShadowsocks[0]?.remoteHost ?? null);
-        this.hubReady = true;
-        return true;
-      }
-    }
-
-    // 5. Edge relay — the CDN forwards the envelope to the hub for us.
-    if (this.hubMethods.fronted) {
-      this.dohResolvedIp = null;
-      if (await this.tryFrontedPath()) {
-        console.log(`[HubURL] Fronted relay works`);
-        this.setActiveHubMethod("fronted", this.frontedHost);
-        this.hubReady = true;
-        return true;
-      }
-    }
-
-    // 6. Plain HTTPS to the domain. Last because it is the only step whose
-    //    SNI names the hub in cleartext.
-    if (this.hubMethods.normal) {
-      this.dohResolvedIp = null;
-      for (const host of normalHubHosts()) {
-        console.log(`[HubURL] Trying direct domain: https://${host}`);
-        this.normalHost = host;
-        if (await this.trySecureProbeCurrentPath()) {
-          console.log(`[HubURL] Direct domain secure probe works`);
-          this.setActiveHubMethod("normal", host);
-          this.hubReady = true;
-          return true;
-        }
-        console.log(`[HubURL] Direct domain failed: ${host}`);
-      }
-      // Nothing answered; do not strand later requests on the mirror.
-      this.normalHost = HUB_HOSTNAME;
+      return true;
     }
 
     this.dohResolvedIp = null;
@@ -1157,6 +1121,80 @@ export class PangeaApiClient {
     // The probe is stricter than a real request (shorter timeout), so give the
     // domain one genuine attempt — but do not record the path as confirmed.
     console.log(`[HubURL] All strategies failed, falling back to direct domain`);
+    return false;
+  }
+
+  /** One rung of the ladder: true when the method now carries hub traffic. */
+  private async tryHubMethod(method: HubMethod): Promise<boolean> {
+    switch (method) {
+      case "directIp":
+        return this.tryDirectIpPath();
+      case "reality":
+        // The daemon proxies the envelope to a node user pinned to the hub.
+        if (!(await this.tryRealityHubPath())) return false;
+        console.log(`[HubURL] REALITY hub path works`);
+        this.setActiveHubMethod("reality", this.hubReality[0]?.remoteHost ?? null);
+        return true;
+      case "shadowsocks":
+        if (!(await this.tryShadowsocksHubPath())) return false;
+        console.log(`[HubURL] Shadowsocks hub path works`);
+        this.setActiveHubMethod("shadowsocks", this.hubShadowsocks[0]?.remoteHost ?? null);
+        return true;
+      case "fronted":
+        // The CDN forwards the envelope to the hub for us.
+        if (!(await this.tryFrontedPath())) return false;
+        console.log(`[HubURL] Fronted relay works`);
+        this.setActiveHubMethod("fronted", this.frontedHost);
+        return true;
+      case "normal":
+        return this.tryNormalPath();
+    }
+  }
+
+  private async tryDirectIpPath(): Promise<boolean> {
+    // Last known good IP — no lookup, so it works under a lockdown lock.
+    if (this.cachedHubIp) {
+      console.log(`[HubURL] Trying cached hub IP ${this.cachedHubIp}`);
+      this.dohResolvedIp = this.cachedHubIp;
+      if (await this.trySecureProbeCurrentPath()) {
+        console.log(`[HubURL] Cached hub IP works`);
+        this.setActiveHubMethod("directIp", this.cachedHubIp);
+        return true;
+      }
+      console.log(`[HubURL] Cached hub IP failed`);
+      this.dohResolvedIp = null;
+    }
+
+    // DoH — resolve via encrypted DNS, connect to the IP with no SNI.
+    const resolvedIp = this.dohEnabled ? await resolveViaDoH(HUB_HOSTNAME) : null;
+    if (!resolvedIp) return false;
+    console.log(`[HubURL] Trying DoH-resolved IP ${resolvedIp}`);
+    this.dohResolvedIp = resolvedIp;
+    if (await this.trySecureProbeCurrentPath()) {
+      console.log(`[HubURL] DoH secure probe works`);
+      this.rememberHubIp(resolvedIp);
+      this.setActiveHubMethod("directIp", resolvedIp);
+      return true;
+    }
+    console.log(`[HubURL] DoH secure probe failed`);
+    this.dohResolvedIp = null;
+    return false;
+  }
+
+  /** Plain HTTPS to the domain: the only rung whose SNI names the hub in cleartext. */
+  private async tryNormalPath(): Promise<boolean> {
+    for (const host of normalHubHosts()) {
+      console.log(`[HubURL] Trying direct domain: https://${host}`);
+      this.normalHost = host;
+      if (await this.trySecureProbeCurrentPath()) {
+        console.log(`[HubURL] Direct domain secure probe works`);
+        this.setActiveHubMethod("normal", host);
+        return true;
+      }
+      console.log(`[HubURL] Direct domain failed: ${host}`);
+    }
+    // Nothing answered; do not strand later requests on the mirror.
+    this.normalHost = HUB_HOSTNAME;
     return false;
   }
 
