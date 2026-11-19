@@ -103,14 +103,22 @@ type tectonicCDNInfo struct {
 
 // cdnInfo's remoteHost is the CDN-proxied hostname; remoteIp is an edge address.
 type cdnInfo struct {
-	RemoteHost string `json:"remoteHost"`
-	RemoteIP   string `json:"remoteIp,omitempty"`
-	RemotePort int    `json:"remotePort"`
+	RemoteHost string         `json:"remoteHost"`
+	RemoteIP   string         `json:"remoteIp,omitempty"`
+	RemotePort int            `json:"remotePort"`
+	UUID       string         `json:"uuid"`
+	Path       string         `json:"path"`
+	ServerName string         `json:"serverName,omitempty"`
+	TargetHost string         `json:"targetHost,omitempty"`
+	TargetPort int            `json:"targetPort,omitempty"`
+	VMess      *cdnVMessRoute `json:"vmess,omitempty"`
+}
+
+// cdnVMessRoute is the node's VMess-over-WebSocket inbound on the same hostname.
+type cdnVMessRoute struct {
 	UUID       string `json:"uuid"`
-	Path       string `json:"path"`
-	ServerName string `json:"serverName,omitempty"`
-	TargetHost string `json:"targetHost,omitempty"`
-	TargetPort int    `json:"targetPort,omitempty"`
+	Path       string `json:"path,omitempty"`
+	RemotePort int    `json:"remotePort,omitempty"`
 }
 
 // controlPlaneShadowsocksInfo reaches the hub rather than WireGuard.

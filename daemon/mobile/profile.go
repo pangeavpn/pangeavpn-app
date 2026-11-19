@@ -217,7 +217,7 @@ func buildCDN(info *cdnInfo) *state.CDNProfile {
 	if serverName == "" && !isIPLiteral(host) {
 		serverName = host
 	}
-	return &state.CDNProfile{
+	profile := &state.CDNProfile{
 		RemoteHost: dial,
 		RemotePort: info.RemotePort,
 		UUID:       info.UUID,
@@ -226,6 +226,11 @@ func buildCDN(info *cdnInfo) *state.CDNProfile {
 		TargetHost: info.TargetHost,
 		TargetPort: info.TargetPort,
 	}
+	// VMess leaves nothing readable past the upgrade, so it wins wherever the node serves it.
+	if route := info.VMess; route != nil && route.UUID != "" {
+		profile.Protocol, profile.UUID, profile.Path, profile.RemotePort = "vmess", route.UUID, route.Path, route.RemotePort
+	}
+	return profile
 }
 
 // tectonicDefaultPort is the node port when the hub's node names none.
