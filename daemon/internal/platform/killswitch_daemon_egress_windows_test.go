@@ -221,8 +221,13 @@ func TestLongPathNameExpandsShortNames(t *testing.T) {
 	if strings.EqualFold(short, exe) {
 		t.Skip("8.3 names are off on this volume")
 	}
-	if got := longPathName(short); !strings.EqualFold(got, exe) {
-		t.Fatalf("longPathName(%q) = %q, want %q", short, got, exe)
+	// The temp dir may itself sit under a short name (RUNNER~1), so want every part expanded.
+	got := longPathName(short)
+	if strings.Contains(got, "~") || !strings.HasSuffix(strings.ToLower(got), `\a-directory-name-well-past-eight-characters\pangea-daemon-image.exe`) {
+		t.Fatalf("longPathName(%q) = %q, want every component in its long form", short, got)
+	}
+	if again := longPathName(exe); !strings.EqualFold(again, got) {
+		t.Fatalf("long and short forms of one image name different paths: %q vs %q", again, got)
 	}
 	if got := longPathName(`C:\no\such\path.exe`); got != `C:\no\such\path.exe` {
 		t.Fatalf("a missing path changed to %q", got)
