@@ -146,6 +146,22 @@ func TestMirrorCloseRemovesAndStopsSyncing(t *testing.T) {
 	expectCalls(t, f.calls, nil)
 }
 
+// A disabled mirror (NoMirror) never touches the table: no add of its own, no removal of
+// another dialer's scoped default, not even on close.
+func TestMirrorDisabledNeverTouchesTheTable(t *testing.T) {
+	f := &fakeRouteTable{routes: []ribRoute{primaryRoute(4, mirrorGW), mirrorRoute(5, mirrorGW2)}}
+	m := f.mirror()
+	m.disable()
+	m.sync(f.routes)
+	m.setWanted(false)
+	m.sync(f.routes)
+	m.close()
+	expectCalls(t, f.calls, nil)
+	if idx, _, ok := selectDarwinDefault(f.routes, func(i int) (string, bool) { return map[int]string{4: "en0", 5: "en5"}[i], true }); !ok || idx != 4 {
+		t.Fatalf("identity still resolves from the table: got %d, %v", idx, ok)
+	}
+}
+
 func TestMirrorDeleteAlwaysScoped(t *testing.T) {
 	f := &fakeRouteTable{routes: []ribRoute{primaryRoute(9, mirrorGW), mirrorRoute(4, mirrorGW), mirrorRoute(5, mirrorGW2)}}
 	m := f.mirror()

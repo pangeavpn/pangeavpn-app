@@ -47,7 +47,6 @@ type rpFix struct {
 	mu       sync.Mutex
 	holders  int
 	backend  string
-	restore  string
 	run      func(stdin string, name string, args ...string) error
 	readFile func(string) ([]byte, error)
 	write    func(string, []byte) error
@@ -100,13 +99,14 @@ func (f *rpFix) install() error {
 		}
 		f.backend = "iptables"
 	}
+	// Left at 1 afterwards, as wg-quick does: it only affects packets that already carry a mark,
+	// and restoring it could undo another tool that set it while a pin was held.
 	prev, err := f.readFile(srcValidMarkPath)
 	if err != nil {
 		f.remove()
 		return fmt.Errorf("read src_valid_mark: %w", err)
 	}
-	f.restore = strings.TrimSpace(string(prev))
-	if f.restore != "1" {
+	if strings.TrimSpace(string(prev)) != "1" {
 		if err := f.write(srcValidMarkPath, []byte("1")); err != nil {
 			f.remove()
 			return fmt.Errorf("set src_valid_mark: %w", err)
@@ -122,10 +122,20 @@ func (f *rpFix) release() {
 		return
 	}
 	f.remove()
-	if f.restore != "" && f.restore != "1" {
-		_ = f.write(srcValidMarkPath, []byte(f.restore))
+}
+
+// RemoveOrphans drops the reply-mark rules a daemon that died holding a pin left behind;
+// called at startup, before any pin exists. They only ever match the daemon's own mark.
+func RemoveOrphans() {
+	rp.mu.Lock()
+	defer rp.mu.Unlock()
+	if rp.holders > 0 {
+		return
 	}
-	f.restore = ""
+	_ = rp.run("", "nft", "delete", "table", "inet", rpTable)
+	for _, rule := range rpIPTables {
+		_ = rp.run("", "iptables", iptablesArgs("-D", rule)...)
+	}
 }
 
 func (f *rpFix) remove() {

@@ -24,7 +24,8 @@ var newBroker = func() (egress.Dialer, error) {
 	if err != nil {
 		return nil, err
 	}
-	return egress.New(egress.Options{BrokerGID: gid})
+	// No mirror: the pin routes only its own addresses, never a scoped default anything could use.
+	return egress.New(egress.Options{BrokerGID: gid, NoMirror: true})
 }
 
 var (
@@ -57,7 +58,8 @@ func acquire(addrs []netip.Addr) (*Pin, error) {
 	if err != nil {
 		return nil, err
 	}
-	if id, err := d.Current(); err != nil || id.Name != name {
+	// Re-read each time: the broker resolves its NIC once, and the Mac may have moved since.
+	if _, id, _, err := d.Refresh(); err != nil || id.Name != name {
 		return nil, fmt.Errorf("the broker's egress interface (%v, %v) is not the default route's %s", id.Name, err, name)
 	}
 	var held []scopedHost

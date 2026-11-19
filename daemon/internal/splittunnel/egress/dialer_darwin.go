@@ -43,6 +43,9 @@ func New(opts Options) (Dialer, error) {
 	spawn := func() (*brokerProc, error) { return spawnBroker(exe, []string{brokerFlag}, []string{}, cred) }
 	log := newRateLog(opts.Logf)
 	m := newRouteMirror(fetchRoutes, runRoute, interfaceState, log)
+	if opts.NoMirror {
+		m.disable()
+	}
 	d := &darwinDialer{ids: newIdentityCache(func() (Identity, error) { return resolvePhysical(m) }), broker: newBrokerClient(spawn, log), mirror: m}
 	if err := d.broker.start(); err != nil {
 		return nil, fmt.Errorf("split egress broker: %w", err)

@@ -22,6 +22,7 @@ import (
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/auth"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/cloak"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/hysteria2"
+	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/nicpin"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/platform"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/reality"
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/shadowsocks"
@@ -95,6 +96,7 @@ func clearKillSwitchCommand() int {
 	}
 	// A daemon killed before closing its dialer leaves the macOS scoped default route behind.
 	egress.RemoveOrphanedRoutes(log.Printf)
+	nicpin.RemoveOrphans()
 	if err := clearKillSwitch(ctx); err != nil {
 		log.Printf("clear kill switch: %v", err)
 		return 1
@@ -201,6 +203,7 @@ func startDaemonRuntime() (*daemonRuntime, error) {
 	egress.RemoveOrphanedRoutes(func(format string, args ...any) {
 		logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf(format, args...))
 	})
+	nicpin.RemoveOrphans()
 
 	machine := state.NewMachine()
 	configStore, err := state.NewConfigStore(configPath)

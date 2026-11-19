@@ -33,6 +33,9 @@ type Dialer interface {
 type Options struct {
 	BrokerGID int
 	Logf      func(format string, args ...any)
+	// NoMirror (macOS) leaves the scoped default alone: a dialer whose caller routes its own
+	// destinations must neither add one any bound socket could use nor remove another's.
+	NoMirror bool
 }
 
 var (

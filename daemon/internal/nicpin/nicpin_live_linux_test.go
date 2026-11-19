@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -137,7 +138,10 @@ func TestLiveStrictReversePathAdmitsOnlyPinnedReplies(t *testing.T) {
 		t.Error("the fix let an unmarked socket reach the edge")
 	}
 	pin.Release()
-	if out, _ := os.ReadFile(srcValidMarkPath); string(out) != "0\n" {
-		t.Errorf("src_valid_mark left at %q after the last release", out)
+	if out, err := exec.Command("nft", "list", "table", "inet", rpTable).CombinedOutput(); err == nil {
+		t.Errorf("the reply-mark table outlived the last release:\n%s", out)
+	}
+	if out, _ := exec.Command("iptables", "-t", "mangle", "-S").CombinedOutput(); strings.Contains(string(out), rpTable) {
+		t.Errorf("the reply-mark iptables rules outlived the last release:\n%s", out)
 	}
 }

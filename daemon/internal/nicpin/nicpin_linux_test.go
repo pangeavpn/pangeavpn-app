@@ -56,8 +56,8 @@ func TestAcquire_LinuxLooseReversePathTouchesNothing(t *testing.T) {
 	}
 }
 
-// Strict rp_filter: the connmark restore and src_valid_mark come with the first pin and go
-// with the last, the sysctl back to what it was.
+// Strict rp_filter: the connmark restore and src_valid_mark come with the first pin; the rules
+// go with the last, and src_valid_mark stays 1 so no other tool's setting is undone.
 func TestAcquire_LinuxStrictReversePathCarriesTheMarkOntoReplies(t *testing.T) {
 	for _, nftFails := range []bool{false, true} {
 		h := &fakeHost{sysctl: "0", nftFails: nftFails}
@@ -87,8 +87,27 @@ func TestAcquire_LinuxStrictReversePathCarriesTheMarkOntoReplies(t *testing.T) {
 		if nftFails {
 			removed = h.saw("iptables -w 5 -t mangle -D PREROUTING")
 		}
-		if !removed || h.sysctl != "0" {
+		if !removed || h.sysctl != "1" {
 			t.Fatalf("nftFails=%v: last release removed %v, src_valid_mark %q: %v", nftFails, removed, h.sysctl, h.calls)
 		}
+	}
+}
+
+func TestRemoveOrphansDropsLeftoverRulesButNotLiveOnes(t *testing.T) {
+	h := &fakeHost{sysctl: "1"}
+	stubRP(t, h, true)
+	RemoveOrphans()
+	if !h.saw("nft delete table inet "+rpTable) || !h.saw("iptables -w 5 -t mangle -D PREROUTING") {
+		t.Fatalf("leftovers not removed: %v", h.calls)
+	}
+	pin, err := Acquire(context.Background(), "104.21.24.200")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pin.Release()
+	h.calls = nil
+	RemoveOrphans()
+	if len(h.calls) != 0 {
+		t.Fatalf("removed the rules a held pin needs: %v", h.calls)
 	}
 }

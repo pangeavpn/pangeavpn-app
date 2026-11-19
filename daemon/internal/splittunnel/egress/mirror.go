@@ -95,6 +95,13 @@ func (m *routeMirror) removeStale(plan mirrorPlan) {
 	m.remove(due)
 }
 
+// disable makes the mirror inert from the start: no sync adds or removes, and close is a no-op.
+func (m *routeMirror) disable() {
+	m.mu.Lock()
+	m.closed = true
+	m.mu.Unlock()
+}
+
 // close removes every mirror, so a stopped daemon leaves no scoped default behind.
 func (m *routeMirror) close() {
 	m.mu.Lock()
