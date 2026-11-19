@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/netip"
 	"os"
 	"reflect"
 	"strings"
@@ -32,6 +33,17 @@ var (
 // Protect, when set, keeps each lane's socket out of the tunnel before it connects.
 // Mobile points it at VpnService.protect(); desktop leaves it nil.
 var Protect func(fd int) bool
+
+// EdgePin is a CDN edge pinned to the physical NIC; see nicpin.Pin.
+type EdgePin struct {
+	Server  string
+	Control func(network, address string, c syscall.RawConn) error
+	Release func()
+}
+
+// EdgePinner pins a CDN edge's sockets to the physical NIC (desktop): the edge is a shared
+// address, so it never gets a route around the tunnel that every app would follow.
+type EdgePinner func(ctx context.Context, host string) (EdgePin, error)
 
 // Manager owns a loopback UDP listener WireGuard's peer Endpoint points at,
 // bridged to one Tectonic session.
@@ -58,6 +70,55 @@ type Manager struct {
 	// modes remembers the SNI mode that logged in per network for the process lifetime.
 	modes      tect.ModeStore
 	networkKey func() string
+	edgePin    EdgePinner
+}
+
+// SetEdgePinner makes every later Start with a CDN route pin its lanes to the physical NIC.
+func (m *Manager) SetEdgePinner(pin EdgePinner) {
+	m.startMu.Lock()
+	defer m.startMu.Unlock()
+	m.edgePin = pin
+}
+
+// pinEdge points the CDN lanes at the pinned edge address and binds their sockets. Direct
+// lanes are left to the node's own route, so a NIC change can't strand them on the old one.
+func (m *Manager) pinEdge(ctx context.Context, cfg *tect.Config, profile state.TectonicProfile) (func(), error) {
+	host := profile.CDNEdgeHost()
+	if m.edgePin == nil || cfg.Profile.CDN == nil || host == "" || cfg.Control != nil {
+		return func() {}, nil
+	}
+	// Without a pin the CDN lanes would dial unpinned; dropping just them keeps the direct lanes.
+	dropCDN := func(why error) (func(), error) {
+		cfg.Profile.CDN = nil
+		m.logs.Add(state.LogWarn, state.SourceTectonic, fmt.Sprintf("tectonic: CDN lanes off for this session: %v", why))
+		return func() {}, nil
+	}
+	pin, err := m.edgePin(ctx, host)
+	if err != nil {
+		return dropCDN(err)
+	}
+	release := pin.Release
+	if release == nil {
+		release = func() {}
+	}
+	server, perr := netip.ParseAddr(pin.Server)
+	if perr != nil || pin.Control == nil {
+		release()
+		return dropCDN(fmt.Errorf("pin for %s binds nothing", host))
+	}
+	port := "443"
+	if _, p, err := net.SplitHostPort(strings.TrimSpace(profile.CDN.Edge)); err == nil && p != "" {
+		port = p
+	}
+	cfg.Profile.CDN.Edge = net.JoinHostPort(pin.Server, port)
+	bind := pin.Control
+	cfg.Control = func(network, address string, c syscall.RawConn) error {
+		if dst, err := netip.ParseAddrPort(address); err == nil && dst.Addr().Unmap() == server.Unmap() {
+			return bind(network, address, c)
+		}
+		return nil
+	}
+	return release, nil
 }
 
 // modes is shared by every Manager so a transport rebuilt per connect (mobile) still
@@ -98,14 +159,20 @@ func (m *Manager) Start(ctx context.Context, profile state.TectonicProfile) erro
 		}
 	}
 
+	releasePin, err := m.pinEdge(ctx, &cfg, profile)
+	if err != nil {
+		return err
+	}
 	conn, err := tect.Dial(ctx, cfg)
 	if err != nil {
+		releasePin()
 		return fmt.Errorf("tectonic: %w", annotate(err))
 	}
 
 	localConn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: profile.LocalPort})
 	if err != nil {
 		conn.Close()
+		releasePin()
 		return fmt.Errorf("tectonic: listen local udp: %w", err)
 	}
 	boundPort := profile.LocalPort
@@ -155,6 +222,7 @@ func (m *Manager) Start(ctx context.Context, profile state.TectonicProfile) erro
 		close(done)
 		// Last, as it waits up to a second for CLOSE to reach the node, and nothing needs that.
 		conn.Close()
+		releasePin()
 	}()
 
 	return nil

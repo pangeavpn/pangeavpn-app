@@ -14,7 +14,6 @@ import { buildTUICProfile } from "../shared/tuicProfile";
 import { buildCDNProfile } from "../shared/cdnProfile";
 import {
   buildTectonicProfile,
-  tectonicCdnEdgeIp,
   tectonicNodeHosts,
   type TectonicHubBlock
 } from "../shared/tectonicProfile";
@@ -1910,15 +1909,12 @@ export class PangeaApiClient {
       shadowsocks?.remoteIp,
       anytls?.remoteHost,
       tuic?.remoteHost,
-      cdn?.remoteHost,
       // Every address its lanes may use, or the lanes taking the ones left
       // out would be blocked by the killswitch.
-      ...tectonicNodeHosts(tectonic),
-      // Like cdn above, the edge counts only as a literal; a CDN name is dropped.
-      tectonicCdnEdgeIp(tectonic)
+      ...tectonicNodeHosts(tectonic)
     ]).filter(isIPv4Literal);
-    // Snowflake is the exception and is left out: neither its broker nor its
-    // per-session volunteer proxy is an address ours to know up front.
+    // CDN edges (and Snowflake) stay in the tunnel: an edge serves other sites too, so the
+    // daemon pins its own sockets to the NIC instead of carving the address out for every app.
 
     const presharedKey = await this.finishPostQuantum(pqOffer, reg.pq);
 

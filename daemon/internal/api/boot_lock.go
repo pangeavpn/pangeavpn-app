@@ -17,7 +17,13 @@ func ArmBootLock(ctx context.Context, ks platform.KillSwitch) error {
 	if !persisted.Active {
 		return nil
 	}
-	if err := ks.Enable(ctx, persisted.EndpointIPs, persisted.AllowLAN, persisted.Locked); err != nil {
+	// An older version's endpoints may hold shared CDN addresses nothing here can vouch for,
+	// so that lock arms with no permits until the daemon reconciles it.
+	endpoints := persisted.EndpointIPs
+	if persisted.Version < platform.KillSwitchStateVersion {
+		endpoints = nil
+	}
+	if err := ks.Enable(ctx, endpoints, persisted.AllowLAN, persisted.Locked); err != nil {
 		return fmt.Errorf("arm boot lock: %w", err)
 	}
 	return nil

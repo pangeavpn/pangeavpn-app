@@ -22,7 +22,10 @@ func init() {
 	}
 }
 
-var _ SplitTunnelPermitter = (*linuxKillSwitch)(nil)
+var (
+	_ SplitTunnelPermitter  = (*linuxKillSwitch)(nil)
+	_ DaemonEgressPermitter = (*linuxKillSwitch)(nil)
+)
 
 // Seams so lifecycle tests never run nft or iptables.
 var (
@@ -40,6 +43,8 @@ type linuxKillSwitch struct {
 	allowLAN bool
 	// split is what every render carries for split tunnelling; never persisted.
 	split splitPermits
+	// shared is every daemon-only address seen this process; no render permits it to all apps.
+	shared []string
 
 	// Cached kernel probe under its own lock, so a 1Hz status poll neither
 	// forks nft each time nor holds up Enable/Clear behind a slow probe.
@@ -61,6 +66,7 @@ func (ks *linuxKillSwitch) Enable(ctx context.Context, endpointHosts []string, a
 	if err != nil {
 		return fmt.Errorf("kill switch enable: %w", err)
 	}
+	ips = withoutDaemonIPs(ips, ks.shared)
 
 	var tunnelInterface string
 	var prev KillSwitchState
@@ -105,6 +111,7 @@ func (ks *linuxKillSwitch) Enable(ctx context.Context, endpointHosts []string, a
 	st.Active = true
 	st.AllowLAN = allowLAN
 	st.EndpointIPs = ips
+	st.Version = KillSwitchStateVersion
 	st.TunnelInterface = tunnelInterface
 	st.Locked = locked
 	if err := saveKillSwitchState(st); err != nil {
@@ -146,6 +153,7 @@ func (ks *linuxKillSwitch) Update(ctx context.Context, tunnel TunnelRef) error {
 
 // render re-applies the live backend's rules. ks.mu held.
 func (ks *linuxKillSwitch) render(ctx context.Context, r ksRules) error {
+	r.EndpointIPs = withoutDaemonIPs(r.EndpointIPs, ks.shared)
 	if ks.useNFT {
 		if err := nftApply(ctx, r); err != nil {
 			return fmt.Errorf("(nft): %w", err)
@@ -162,7 +170,7 @@ func (ks *linuxKillSwitch) Clear(ctx context.Context) error {
 	ks.mu.Lock()
 	defer ks.mu.Unlock()
 	// Dropped first: a re-arm after a failed Clear must not bring the permits back.
-	ks.split = splitPermits{}
+	ks.split, ks.shared = splitPermits{}, nil
 
 	// Tear down both backends unconditionally: which one is live cannot be
 	// trusted after a restart (useNFT is in-memory only, never persisted).
@@ -216,6 +224,26 @@ func (ks *linuxKillSwitch) SetSplitCIDRs(ctx context.Context, cidrs []string) er
 	next := ks.split.clone()
 	next.CIDRs = normalized
 	return ks.setSplit(ctx, next)
+}
+
+// SetDaemonEgress permits hosts' addresses to the daemon's marked sockets only.
+func (ks *linuxKillSwitch) SetDaemonEgress(ctx context.Context, hosts, dedicated []string) error {
+	ips := resolveDaemonEgressHosts(ctx, hosts, dedicated)
+	ks.mu.Lock()
+	defer ks.mu.Unlock()
+	grew := len(unionSorted(ks.shared, ips)) != len(ks.shared)
+	ks.shared = unionSorted(ks.shared, ips)
+	next := ks.split.clone()
+	next.DaemonIPs = ips
+	if ks.split.equal(next) && !grew {
+		return nil
+	}
+	// setSplit re-renders through render, which strips shared from the endpoints.
+	err := ks.setSplit(ctx, next)
+	if ks.active {
+		pruneSharedFromState(ks.shared)
+	}
+	return err
 }
 
 // setSplit re-renders an armed lock with next; an idle switch only records it for

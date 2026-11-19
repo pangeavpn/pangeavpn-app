@@ -45,18 +45,21 @@ func TestAutoCascadeTriesTectonicLast(t *testing.T) {
 	}
 }
 
-func TestKillSwitchPermits_IncludeTectonicNodeAndCDNEdge(t *testing.T) {
+func TestKillSwitchPermits_TectonicNodeForAllAppsCDNEdgeForDaemonOnly(t *testing.T) {
 	permits := killSwitchPermits(tectonicTestProfile())
-	for _, want := range []string{"203.0.113.70", "198.51.100.9"} {
-		if !slices.Contains(permits, want) {
-			t.Errorf("killSwitchPermits() = %v, want %s", permits, want)
+	if !slices.Contains(permits, "203.0.113.70") {
+		t.Errorf("killSwitchPermits() = %v, want the node", permits)
+	}
+	// An older app also sent the edge among the endpoint IPs; it must still never reach every app.
+	profile := tectonicTestProfile()
+	profile.TransportEndpointIPs = []string{"203.0.113.70", "198.51.100.9"}
+	for _, p := range [][]string{killSwitchPermits(tectonicTestProfile()), killSwitchPermits(profile), withTransportBypassHosts(profile).BypassHosts} {
+		if slices.Contains(p, "198.51.100.9") {
+			t.Errorf("all-app permits or routes = %v, want the shared CDN edge left out", p)
 		}
 	}
-	// The hub's endpoint IPs replace node hosts, but the CDN edge is never among them.
-	profile := tectonicTestProfile()
-	profile.TransportEndpointIPs = []string{"203.0.113.70"}
-	if permits := killSwitchPermits(profile); !slices.Contains(permits, "198.51.100.9") {
-		t.Errorf("with endpoint IPs, permits = %v, want the CDN edge kept", permits)
+	if daemonOnly := daemonEgressHosts(profile); !slices.Contains(daemonOnly, "198.51.100.9") {
+		t.Errorf("daemonEgressHosts() = %v, want the CDN edge", daemonOnly)
 	}
 }
 

@@ -95,24 +95,39 @@ func buildCDN(p state.CDNProfile) (spec, error) {
 	if len(extraRoots) > 0 {
 		remote += fmt.Sprintf(", trusting %d of the user's own roots", len(extraRoots))
 	}
+	vless := &option.VLESSOutboundOptions{
+		DialerOptions:               protectedDialer(),
+		ServerOptions:               option.ServerOptions{Server: host, ServerPort: uint16(remotePort)},
+		UUID:                        p.UUID,
+		OutboundTLSOptionsContainer: option.OutboundTLSOptionsContainer{TLS: tls},
+		Transport: &option.V2RayTransportOptions{
+			Type:               C.V2RayTransportTypeHTTPUpgrade,
+			HTTPUpgradeOptions: option.V2RayHTTPUpgradeOptions{Host: serverName, Path: path},
+		},
+	}
 	return spec{
-		outbound: option.Outbound{Type: C.TypeVLESS, Tag: outboundTag, Options: &option.VLESSOutboundOptions{
-			DialerOptions:               protectedDialer(),
-			ServerOptions:               option.ServerOptions{Server: host, ServerPort: uint16(remotePort)},
-			UUID:                        p.UUID,
-			OutboundTLSOptionsContainer: option.OutboundTLSOptionsContainer{TLS: tls},
-			Transport: &option.V2RayTransportOptions{
-				Type:               C.V2RayTransportTypeHTTPUpgrade,
-				HTTPUpgradeOptions: option.V2RayHTTPUpgradeOptions{Host: serverName, Path: path},
-			},
-		}},
+		outbound:   option.Outbound{Type: C.TypeVLESS, Tag: outboundTag, Options: vless},
 		remote:     remote,
 		targetHost: targetHost(p.TargetHost),
 		targetPort: targetPort(p.TargetPort),
 		localPort:  p.LocalPort,
 		annotate:   annotateCDN,
 		extraRoots: extraRoots,
+		pinHost:    host,
+		applyPin: func(pin Pin) {
+			vless.Server = pin.Server
+			vless.DialerOptions = pinnedDialer(pin)
+		},
 	}, nil
+}
+
+// pinnedDialer binds the edge connection to the physical NIC: the edge is a shared CDN
+// address, so it never gets a route around the tunnel that every app would follow.
+func pinnedDialer(pin Pin) option.DialerOptions {
+	return option.DialerOptions{AbstractDialerOptions: option.AbstractDialerOptions{
+		BindInterface: pin.Interface,
+		RoutingMark:   option.FwMark(pin.Mark),
+	}}
 }
 
 // parseRoots keeps the certificates Go can parse, re-encoded one per entry: one

@@ -38,12 +38,27 @@ type spec struct {
 	annotate   func(error) error
 	// extraRoots are added to the system store, which the platform verifier still checks first.
 	extraRoots []string
+	// applyPin, set only for a shared destination, points the outbound at a pinned dial.
+	pinHost  string
+	applyPin func(Pin)
 }
+
+// Pin is a destination pinned to the physical NIC; see nicpin.Pin.
+type Pin struct {
+	Server    string
+	Interface string
+	Mark      uint32
+	Release   func()
+}
+
+// Pinner pins host's sockets to the physical NIC, or fails so the dial never goes unpinned.
+type Pinner func(ctx context.Context, host string) (Pin, error)
 
 type Manager[P comparable] struct {
 	name   string
 	source state.LogSource
 	build  func(P) (spec, error)
+	pin    Pinner
 
 	startMu sync.Mutex
 
@@ -65,6 +80,14 @@ var (
 	_ transport.SessionWaiter     = (*Manager[state.TUICProfile])(nil)
 	_ transport.BoundPortReporter = (*Manager[state.TUICProfile])(nil)
 )
+
+// SetPinner makes every later Start pin a shared destination's sockets to the physical NIC.
+// Desktop only: mobile protects sockets instead, and leaves this unset.
+func (m *Manager[P]) SetPinner(pin Pinner) {
+	m.startMu.Lock()
+	defer m.startMu.Unlock()
+	m.pin = pin
+}
 
 // Start dials the outbound synchronously, so an unreachable server or a bad
 // certificate fails here rather than at WireGuard's first handshake.
@@ -89,6 +112,22 @@ func (m *Manager[P]) Start(ctx context.Context, profile P) error {
 		}
 	}
 
+	releasePin := func() {}
+	if m.pin != nil && sp.applyPin != nil {
+		pin, err := m.pin(ctx, sp.pinHost)
+		if err != nil {
+			return fmt.Errorf("%s: %w", m.name, err)
+		}
+		if pin.Release != nil {
+			releasePin = pin.Release
+		}
+		if pin.Server == "" || (pin.Interface == "" && pin.Mark == 0) {
+			releasePin()
+			return fmt.Errorf("%s: pin for %s binds nothing; refusing to dial it unpinned", m.name, sp.pinHost)
+		}
+		sp.applyPin(pin)
+	}
+
 	options := option.Options{
 		Log:       &option.LogOptions{Level: "warn"},
 		Outbounds: []option.Outbound{sp.outbound},
@@ -100,17 +139,20 @@ func (m *Manager[P]) Start(ctx context.Context, profile P) error {
 	engine, err := box.New(box.Options{Context: registryContext(engineCtx), Options: options})
 	if err != nil {
 		cancel()
+		releasePin()
 		return fmt.Errorf("%s: build engine: %w", m.name, err)
 	}
 	if err := engine.Start(); err != nil {
 		engine.Close()
 		cancel()
+		releasePin()
 		return fmt.Errorf("%s: start engine: %w", m.name, err)
 	}
 	outbound, loaded := engine.Outbound().Outbound(outboundTag)
 	if !loaded {
 		engine.Close()
 		cancel()
+		releasePin()
 		return fmt.Errorf("%s: outbound not registered", m.name)
 	}
 
@@ -123,6 +165,7 @@ func (m *Manager[P]) Start(ctx context.Context, profile P) error {
 	if err != nil {
 		engine.Close()
 		cancel()
+		releasePin()
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return fmt.Errorf("%s: handshake: %w", m.name, ctxErr)
 		}
@@ -137,6 +180,7 @@ func (m *Manager[P]) Start(ctx context.Context, profile P) error {
 		remote.Close()
 		engine.Close()
 		cancel()
+		releasePin()
 		return fmt.Errorf("%s: listen local udp: %w", m.name, err)
 	}
 	boundPort := localConn.LocalAddr().(*net.UDPAddr).Port
@@ -177,6 +221,7 @@ func (m *Manager[P]) Start(ctx context.Context, profile P) error {
 			m.logs.Add(state.LogInfo, m.source, m.name+" stopped")
 		}
 		engine.Close()
+		releasePin()
 		close(done)
 	}()
 	return nil

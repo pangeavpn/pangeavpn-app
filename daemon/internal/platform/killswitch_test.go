@@ -179,7 +179,7 @@ func TestResolveEndpointHosts_ErrorsWhenNothingResolvesAndNoPriorState(t *testin
 // endpoint set exists on disk (e.g. Connect re-arming an active lockdown).
 func TestResolveEndpointHosts_FallsBackToPersistedOnWholesaleFailure(t *testing.T) {
 	isolateStateDir(t)
-	if err := saveKillSwitchState(KillSwitchState{Active: true, EndpointIPs: []string{"203.0.113.9"}}); err != nil {
+	if err := saveKillSwitchState(KillSwitchState{Active: true, EndpointIPs: []string{"203.0.113.9"}, Version: KillSwitchStateVersion}); err != nil {
 		t.Fatalf("save failed: %v", err)
 	}
 
@@ -202,7 +202,7 @@ func TestResolveEndpointHosts_FallsBackToPersistedOnWholesaleFailure(t *testing.
 // rather than replacing it, so a transient failure can't narrow a live lock.
 func TestResolveEndpointHosts_UnionsWithPersistedOnPartialFailure(t *testing.T) {
 	isolateStateDir(t)
-	if err := saveKillSwitchState(KillSwitchState{Active: true, EndpointIPs: []string{"203.0.113.9"}}); err != nil {
+	if err := saveKillSwitchState(KillSwitchState{Active: true, EndpointIPs: []string{"203.0.113.9"}, Version: KillSwitchStateVersion}); err != nil {
 		t.Fatalf("save failed: %v", err)
 	}
 
@@ -222,6 +222,31 @@ func TestResolveEndpointHosts_UnionsWithPersistedOnPartialFailure(t *testing.T) 
 	want := []string{"203.0.113.30", "203.0.113.9"}
 	if !stringSlicesEqual(ips, want) {
 		t.Fatalf("resolveEndpointHosts() = %v, want %v", ips, want)
+	}
+}
+
+// An older version's list may hold a shared CDN edge it resolved; a DNS failure must not
+// carry that into a lock this version then saves as current.
+func TestResolveEndpointHosts_IgnoresAnOlderVersionsState(t *testing.T) {
+	isolateStateDir(t)
+	if err := saveKillSwitchState(KillSwitchState{Active: true, EndpointIPs: []string{"104.21.24.200"}}); err != nil {
+		t.Fatalf("save failed: %v", err)
+	}
+	originalLookup := lookupResolverIP
+	lookupResolverIP = func(_ context.Context, _, host string) ([]net.IP, error) {
+		if host == "reachable.test" {
+			return []net.IP{net.ParseIP("203.0.113.30")}, nil
+		}
+		return nil, errors.New("dns blocked by kill switch")
+	}
+	defer func() { lookupResolverIP = originalLookup }()
+
+	ips, err := resolveEndpointHosts(context.Background(), []string{"blocked.test", "reachable.test"})
+	if err != nil || !stringSlicesEqual(ips, []string{"203.0.113.30"}) {
+		t.Fatalf("resolveEndpointHosts() = %v, %v; want only what resolved", ips, err)
+	}
+	if _, err := resolveEndpointHosts(context.Background(), []string{"blocked.test"}); err == nil {
+		t.Fatal("a wholesale failure fell back to an older version's endpoints")
 	}
 }
 

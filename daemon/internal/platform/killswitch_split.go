@@ -20,23 +20,30 @@ const splitEgressMark = "0x1ca6c"
 // little more than a DNS block.
 const minSplitCIDRBits = 8
 
-var _ SplitTunnelPermitter = (*noopKillSwitch)(nil)
+var (
+	_ SplitTunnelPermitter  = (*noopKillSwitch)(nil)
+	_ DaemonEgressPermitter = (*noopKillSwitch)(nil)
+)
 
-// splitPermits is what split tunnelling needs through the lock. Kept in memory
-// only, so a fresh process never re-arms permits a dead session asked for.
+// splitPermits is what the daemon's off-tunnel traffic needs through the lock. Kept
+// in memory only, so a fresh process never re-arms permits a dead session asked for.
 type splitPermits struct {
 	Egress bool
 	CIDRs  []string
+	// DaemonIPs are shared CDN addresses only the daemon's own pinned sockets may reach.
+	DaemonIPs []string
 }
 
-func (s splitPermits) empty() bool { return !s.Egress && len(s.CIDRs) == 0 }
+func (s splitPermits) empty() bool {
+	return !s.Egress && len(s.CIDRs) == 0 && len(s.DaemonIPs) == 0
+}
 
 func (s splitPermits) equal(o splitPermits) bool {
-	return s.Egress == o.Egress && slices.Equal(s.CIDRs, o.CIDRs)
+	return s.Egress == o.Egress && slices.Equal(s.CIDRs, o.CIDRs) && slices.Equal(s.DaemonIPs, o.DaemonIPs)
 }
 
 func (s splitPermits) clone() splitPermits {
-	return splitPermits{Egress: s.Egress, CIDRs: slices.Clone(s.CIDRs)}
+	return splitPermits{Egress: s.Egress, CIDRs: slices.Clone(s.CIDRs), DaemonIPs: slices.Clone(s.DaemonIPs)}
 }
 
 // narrowedSplit is what stays desired after a failed change: what is both enforced
@@ -47,6 +54,93 @@ func narrowedSplit(applied, next splitPermits) splitPermits {
 		if slices.Contains(applied.CIDRs, cidr) {
 			out.CIDRs = append(out.CIDRs, cidr)
 		}
+	}
+	for _, ip := range next.DaemonIPs {
+		if slices.Contains(applied.DaemonIPs, ip) {
+			out.DaemonIPs = append(out.DaemonIPs, ip)
+		}
+	}
+	return out
+}
+
+var cgnatPrefix = netip.MustParsePrefix("100.64.0.0/10")
+
+// DaemonEgressAddr refuses what no CDN edge is: a lookup answered with a LAN,
+// loopback or link-local address must not open a path there.
+func DaemonEgressAddr(addr netip.Addr) bool {
+	addr = addr.Unmap()
+	return addr.IsValid() && addr.IsGlobalUnicast() && !addr.IsPrivate() && !cgnatPrefix.Contains(addr)
+}
+
+// normalizeDaemonIPs keeps the public addresses, canonical, sorted and deduplicated.
+func normalizeDaemonIPs(ips []string) []string {
+	out := make([]string, 0, len(ips))
+	for _, raw := range ips {
+		addr, err := netip.ParseAddr(strings.TrimSpace(raw))
+		if err != nil || !DaemonEgressAddr(addr) {
+			KillSwitchWarn("kill switch: skipping daemon-only permit %q (not a public address)", raw)
+			continue
+		}
+		out = append(out, addr.Unmap().String())
+	}
+	slices.Sort(out)
+	return slices.Compact(out)
+}
+
+// renderableDaemonIPs re-checks every address right before it is written into rule
+// text; v4Only drops IPv6 for the backends whose lock blocks it outright.
+func renderableDaemonIPs(ips []string, v4Only bool) []string {
+	out := make([]string, 0, len(ips))
+	for _, ip := range ips {
+		addr, err := netip.ParseAddr(ip)
+		if err != nil || addr.String() != ip || !DaemonEgressAddr(addr) {
+			KillSwitchWarn("kill switch: skipping invalid daemon-only permit %q", ip)
+			continue
+		}
+		if v4Only && !addr.Is4() {
+			continue
+		}
+		out = append(out, ip)
+	}
+	return out
+}
+
+func unionSorted(a, b []string) []string {
+	out := slices.Concat(a, b)
+	slices.Sort(out)
+	return slices.Compact(out)
+}
+
+// pruneSharedFromState drops shared addresses from the saved endpoints, so a later boot
+// lock or cold-start re-arm cannot hand them back to every app.
+func pruneSharedFromState(shared []string) {
+	st, err := loadKillSwitchState()
+	if err != nil || !st.Active {
+		return
+	}
+	kept := withoutDaemonIPs(st.EndpointIPs, shared)
+	if len(kept) == len(st.EndpointIPs) {
+		return
+	}
+	st.EndpointIPs = kept
+	if err := saveKillSwitchState(st); err != nil {
+		KillSwitchWarn("kill switch: could not drop shared CDN addresses from the saved state: %v", err)
+	}
+}
+
+// withoutDaemonIPs keeps a daemon-only address out of the all-app permits, whichever list
+// (endpoints, a control-plane permit, an older version's state file) brought it in.
+func withoutDaemonIPs(ips, daemon []string) []string {
+	if len(daemon) == 0 {
+		return ips
+	}
+	out := make([]string, 0, len(ips))
+	for _, ip := range ips {
+		if addr, err := netip.ParseAddr(strings.TrimSpace(ip)); err == nil && slices.Contains(daemon, addr.Unmap().String()) {
+			KillSwitchWarn("kill switch: %s is a shared CDN address; permitting it to the daemon only", ip)
+			continue
+		}
+		out = append(out, ip)
 	}
 	return out
 }

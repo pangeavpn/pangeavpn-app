@@ -1046,6 +1046,60 @@ func (e *wfpEngine) addPermitSplitEgress(appID *wtFwpByteBlob, tunnelLUID uint64
 	return ids, err
 }
 
+// addPermitDaemonEgress lets only the daemon image reach a shared CDN address off-tunnel,
+// under the DNS block. Inbound is UDP only: TCP replies ride the connect's authorisation.
+func (e *wfpEngine) addPermitDaemonEgress(appID *wtFwpByteBlob, ipStr string) ([]uint64, error) {
+	ip := net.ParseIP(ipStr).To4()
+	if ip == nil {
+		return nil, fmt.Errorf("invalid IPv4 address: %s", ipStr)
+	}
+	if appID == nil {
+		return nil, fmt.Errorf("no daemon app id for %s", ipStr)
+	}
+	addrMask := wtFwpV4AddrAndMask{
+		addr: uint32(ip[0])<<24 | uint32(ip[1])<<16 | uint32(ip[2])<<8 | uint32(ip[3]),
+		mask: 0xFFFFFFFF,
+	}
+	app := wtFwpmFilterCondition0{
+		fieldKey:  cFWPM_CONDITION_ALE_APP_ID,
+		matchType: cFWP_MATCH_EQUAL,
+		conditionValue: wtFwpConditionValue0{
+			_type: cFWP_BYTE_BLOB_TYPE,
+			value: uintptr(unsafe.Pointer(appID)),
+		},
+	}
+	remote := wtFwpmFilterCondition0{
+		fieldKey:  cFWPM_CONDITION_IP_REMOTE_ADDRESS,
+		matchType: cFWP_MATCH_EQUAL,
+		conditionValue: wtFwpConditionValue0{
+			_type: cFWP_V4_ADDR_MASK,
+			value: uintptr(unsafe.Pointer(&addrMask)),
+		},
+	}
+	udp := wtFwpmFilterCondition0{
+		fieldKey:  cFWPM_CONDITION_IP_PROTOCOL,
+		matchType: cFWP_MATCH_EQUAL,
+		conditionValue: wtFwpConditionValue0{
+			_type: cFWP_UINT8,
+			value: uintptr(cIPPROTO_UDP),
+		},
+	}
+	defer runtime.KeepAlive(appID)
+	defer runtime.KeepAlive(&addrMask)
+	name := "PangeaVPN Allow Daemon Egress " + ipStr
+	ids := make([]uint64, 0, 2)
+	id, err := e.addFilter(cFWPM_LAYER_ALE_AUTH_CONNECT_V4, name, weightSplitPermit, cFWP_ACTION_PERMIT, []wtFwpmFilterCondition0{app, remote})
+	if err != nil {
+		return ids, err
+	}
+	ids = append(ids, id)
+	id, err = e.addFilter(cFWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4, name+" Inbound", weightSplitPermit, cFWP_ACTION_PERMIT, []wtFwpmFilterCondition0{app, remote, udp})
+	if err != nil {
+		return ids, err
+	}
+	return append(ids, id), nil
+}
+
 // addPermitSplitCIDR permits an excluded destination range, under the DNS block so a
 // resolver inside it still cannot be reached off-tunnel.
 func (e *wfpEngine) addPermitSplitCIDR(cidr string) ([]uint64, error) {

@@ -99,12 +99,6 @@ export function buildTectonicProfile(
   };
 }
 
-/** The CDN edge's host without its port; a name passes through for callers to drop. */
-export function tectonicCdnEdgeIp(block: TectonicProfileBlock | undefined): string | undefined {
-  const edge = block?.cdn?.edge;
-  if (!edge) return undefined;
-  return splitNode(edge).host;
-}
 
 /** The node's host without its port or brackets. */
 export function tectonicNodeHost(block: TectonicProfileBlock | undefined): string | undefined {

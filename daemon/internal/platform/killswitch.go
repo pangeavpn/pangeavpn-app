@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"sort"
@@ -38,6 +39,12 @@ type KillSwitch interface {
 type SplitTunnelPermitter interface {
 	SetSplitEgress(ctx context.Context, on bool) error
 	SetSplitCIDRs(ctx context.Context, cidrs []string) error
+}
+
+// DaemonEgressPermitter lets only the daemon's own sockets reach shared addresses (CDN
+// edges) off-tunnel; an all-process permit would leak every site hosted on them.
+type DaemonEgressPermitter interface {
+	SetDaemonEgress(ctx context.Context, hosts, dedicated []string) error
 }
 
 // TunnelRef scopes a permit to an adapter: Name is what pf/nftables match on;
@@ -91,7 +98,13 @@ type KillSwitchState struct {
 	// Locked marks an intentional Lockdown lock that must survive daemon
 	// restarts rather than being cleared as stale crash leftover.
 	Locked bool `json:"locked,omitempty"`
+	// Version below KillSwitchStateVersion means EndpointIPs may hold shared CDN addresses
+	// resolved before they became daemon-only, so they must not be re-armed for every app.
+	Version int `json:"version,omitempty"`
 }
+
+// KillSwitchStateVersion is stamped on every save.
+const KillSwitchStateVersion = 2
 
 const killSwitchStateFile = "killswitch-state.json"
 
@@ -147,6 +160,7 @@ func (n *noopKillSwitch) Clear(_ context.Context) error                         
 func (n *noopKillSwitch) Active() bool                                               { return false }
 func (n *noopKillSwitch) SetSplitEgress(_ context.Context, _ bool) error             { return nil }
 func (n *noopKillSwitch) SetSplitCIDRs(_ context.Context, _ []string) error          { return nil }
+func (n *noopKillSwitch) SetDaemonEgress(_ context.Context, _, _ []string) error     { return nil }
 
 var stateMu sync.Mutex
 
@@ -300,6 +314,57 @@ func stringSlicesEqual(a, b []string) bool {
 	return true
 }
 
+// resolveDaemonEgressHosts resolves like resolveEndpointHosts but never falls back to the
+// persisted endpoints: a host that fails to resolve stays unpermitted, failing closed.
+func resolveDaemonEgressHosts(ctx context.Context, hosts, dedicated []string) []string {
+	if len(hosts) == 0 {
+		return nil
+	}
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, endpointResolveTimeout)
+		defer cancel()
+	}
+	results := make([][]string, len(hosts))
+	errs := make([]error, len(hosts))
+	var wg sync.WaitGroup
+	for i, host := range hosts {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			results[i], errs[i] = resolveEndpointIPs(ctx, host)
+		}()
+	}
+	wg.Wait()
+	var out []string
+	for i, host := range hosts {
+		if errs[i] != nil {
+			if warn := EndpointResolveWarn; warn != nil {
+				warn(host, errs[i])
+			}
+			continue
+		}
+		out = append(out, results[i]...)
+	}
+	// An edge name answering with a hub or node address must not take that address's permit
+	// away from every app: it stays dedicated, and the edge simply needs no daemon-only pass.
+	keep := map[string]bool{}
+	for _, raw := range dedicated {
+		if addr, err := netip.ParseAddr(strings.TrimSpace(raw)); err == nil {
+			keep[addr.Unmap().String()] = true
+		}
+	}
+	var ips []string
+	for _, ip := range normalizeDaemonIPs(out) {
+		if keep[ip] {
+			KillSwitchWarn("kill switch: a CDN edge resolved to dedicated address %s; leaving it to the all-app permits", ip)
+			continue
+		}
+		ips = append(ips, ip)
+	}
+	return ips
+}
+
 // resolveEndpointHosts resolves each host to IPs, dedups and sorts, skipping
 // (and warning on) failures — falling back to/unioning with the persisted set.
 func resolveEndpointHosts(ctx context.Context, hosts []string) ([]string, error) {
@@ -351,6 +416,10 @@ func resolveEndpointHosts(ctx context.Context, hosts []string) ([]string, error)
 	}
 
 	prev, _ := loadKillSwitchState()
+	// An older version's list may hold shared CDN addresses; carrying it would re-save them as current.
+	if prev.Version < KillSwitchStateVersion {
+		prev.EndpointIPs = nil
+	}
 	if len(out) == 0 {
 		if len(prev.EndpointIPs) == 0 {
 			return nil, fmt.Errorf("no IPs resolved from endpoint hosts %v", hosts)

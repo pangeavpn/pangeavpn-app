@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   buildTectonicProfile,
-  tectonicCdnEdgeIp,
   tectonicNodeHost,
   tectonicNodeHosts
 } from "./tectonicProfile.ts";
@@ -89,14 +88,13 @@ test("omits optional fields the hub left out", () => {
   }
 });
 
-test("exposes the node and CDN edge hosts for the AllowedIPs exclusion", () => {
+test("exposes the node host, never the shared CDN edge, for the AllowedIPs exclusion", () => {
   const block = buildTectonicProfile(
     { ...base, cdn: { host: "cdn.example.net", path: "/ws", edge: "198.51.100.9:443" } },
     "192.0.2.10"
   );
   assert.equal(tectonicNodeHost(block), "203.0.113.7");
-  assert.equal(tectonicCdnEdgeIp(block), "198.51.100.9");
-  assert.equal(tectonicCdnEdgeIp(buildTectonicProfile(base, "192.0.2.10")), undefined);
+  assert.ok(!tectonicNodeHosts(block).includes("198.51.100.9"), "the CDN edge must stay in the tunnel");
 });
 
 // Lanes spread one per address, so a node with more than one sends them all.

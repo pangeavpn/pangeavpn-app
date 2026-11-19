@@ -22,7 +22,10 @@ func init() {
 	}
 }
 
-var _ SplitTunnelPermitter = (*windowsKillSwitch)(nil)
+var (
+	_ SplitTunnelPermitter  = (*windowsKillSwitch)(nil)
+	_ DaemonEgressPermitter = (*windowsKillSwitch)(nil)
+)
 
 type windowsKillSwitch struct {
 	mu              sync.Mutex
@@ -63,7 +66,11 @@ type windowsKillSwitch struct {
 	appliedSplit          splitPermits
 	splitEgressFilterIds  []uint64
 	splitCIDRFilterIds    []uint64
+	daemonEgressFilterIds []uint64
 	forwardSplitFilterIds []uint64
+	// shared is every daemon-only address seen this process: never an all-app permit,
+	// even after a failed swap narrowed split.DaemonIPs or the session moved on.
+	shared []string
 	// forwardSplitCIDRs is what the forward split IDs permit; it trails appliedSplit
 	// after a failed forward swap until applySplit retries it.
 	forwardSplitCIDRs []string
@@ -96,7 +103,7 @@ func (ks *windowsKillSwitch) arm(ctx context.Context, endpointHosts []string, al
 	if err != nil {
 		return fmt.Errorf("kill switch enable: %w", err)
 	}
-	ips = v4Permits(ips)
+	ips = withoutDaemonIPs(v4Permits(ips), ks.shared)
 
 	// A re-arm trusts its handle only while the persistent block is still
 	// installed; otherwise the lock is rebuilt from scratch below.
@@ -125,6 +132,7 @@ func (ks *windowsKillSwitch) arm(ctx context.Context, endpointHosts []string, al
 			// Lockdown lock still has to be recorded — see persistLockedUpgrade.
 			prev.Active = true
 			prev.EndpointIPs = ips
+			prev.Version = KillSwitchStateVersion
 			prev.AllowLAN = allowLAN
 			return persistLockedUpgrade(prev, locked)
 		}
@@ -175,6 +183,7 @@ func (ks *windowsKillSwitch) arm(ctx context.Context, endpointHosts []string, al
 
 		prev.Active = true // the load above may have failed; rules are live
 		prev.EndpointIPs = ips
+		prev.Version = KillSwitchStateVersion
 		prev.AllowLAN = allowLAN
 		// Raise-only, same as persistLockedUpgrade: a plain reconnect (locked
 		// false) must never clear a Lockdown marker a crash could still need.
@@ -191,6 +200,7 @@ func (ks *windowsKillSwitch) arm(ctx context.Context, endpointHosts []string, al
 	st.Active = true
 	st.AllowLAN = allowLAN
 	st.EndpointIPs = ips
+	st.Version = KillSwitchStateVersion
 	st.TunnelInterface = ""
 	st.Locked = locked
 	if err := saveKillSwitchState(st); err != nil {
@@ -232,6 +242,7 @@ func (ks *windowsKillSwitch) arm(ctx context.Context, endpointHosts []string, al
 	// ...and every split permit, so these IDs are the whole split set now.
 	ks.splitEgressFilterIds = ids.splitEgress
 	ks.splitCIDRFilterIds = ids.splitCIDR
+	ks.daemonEgressFilterIds = ids.daemonEgress
 	ks.forwardSplitFilterIds, ks.forwardSplitCIDRs = nil, nil
 	ks.appliedSplit = split.applied()
 	// The forward blocks are in the persistent set just installed; the permits
@@ -245,19 +256,26 @@ func (ks *windowsKillSwitch) arm(ctx context.Context, endpointHosts []string, al
 
 // lockFilterIds are the per-arm permits installWindowsLock added.
 type lockFilterIds struct {
-	endpoint, lan, splitEgress, splitCIDR []uint64
+	endpoint, lan, splitEgress, splitCIDR, daemonEgress []uint64
 }
 
-// windowsSplitSpec is what a fresh arm re-adds inside its transaction; the app id
-// is resolved beforehand, outside it. A nil appID means no egress permit.
+// windowsSplitSpec is what a fresh arm re-adds inside its transaction; the app ids
+// are resolved beforehand, outside it. A nil appID means no egress permit.
 type windowsSplitSpec struct {
 	appID      *wtFwpByteBlob
 	tunnelLUID uint64
 	cidrs      []string
+	// daemonAppID is nil when daemonIPs is empty or the image could not be named.
+	daemonAppID *wtFwpByteBlob
+	daemonIPs   []string
 }
 
 func (s windowsSplitSpec) applied() splitPermits {
-	return splitPermits{Egress: s.appID != nil, CIDRs: slices.Clone(s.cidrs)}
+	out := splitPermits{Egress: s.appID != nil, CIDRs: slices.Clone(s.cidrs)}
+	if s.daemonAppID != nil {
+		out.DaemonIPs = slices.Clone(s.daemonIPs)
+	}
+	return out
 }
 
 // splitInstallError marks a fresh arm that failed only on a split permit, so the
@@ -340,6 +358,15 @@ func installWindowsLock(engine *wfpEngine, ips []string, allowLAN bool, split wi
 			ids.splitCIDR = append(ids.splitCIDR, added...)
 			if err != nil {
 				return &splitInstallError{fmt.Errorf("permit split range %s: %w", cidr, err)}
+			}
+		}
+		if split.daemonAppID != nil {
+			for _, ip := range split.daemonIPs {
+				added, err := engine.addPermitDaemonEgress(split.daemonAppID, ip)
+				ids.daemonEgress = append(ids.daemonEgress, added...)
+				if err != nil {
+					return &splitInstallError{fmt.Errorf("permit daemon egress %s: %w", ip, err)}
+				}
 			}
 		}
 		return nil
@@ -514,7 +541,7 @@ func (ks *windowsKillSwitch) Clear(ctx context.Context) error {
 // disarm is Clear's body, run with ks.mu held.
 func (ks *windowsKillSwitch) disarm() error {
 	// Dropped first: a re-arm after a failed Clear must not bring the permits back.
-	ks.split = splitPermits{}
+	ks.split, ks.shared = splitPermits{}, nil
 	var errs []string
 
 	// A restarted daemon inherits no handle to the filters the previous
@@ -562,7 +589,7 @@ func (ks *windowsKillSwitch) disarm() error {
 			errs = append(errs, fmt.Sprintf("forward permit %d: %v", id, err))
 		}
 	}
-	for _, id := range slices.Concat(ks.splitEgressFilterIds, ks.splitCIDRFilterIds, ks.forwardSplitFilterIds) {
+	for _, id := range slices.Concat(ks.splitEgressFilterIds, ks.splitCIDRFilterIds, ks.daemonEgressFilterIds, ks.forwardSplitFilterIds) {
 		if err := engine.deleteFilter(id); err != nil {
 			errs = append(errs, fmt.Sprintf("split permit %d: %v", id, err))
 		}
@@ -612,6 +639,7 @@ func (ks *windowsKillSwitch) disarm() error {
 	ks.appliedSplit = splitPermits{}
 	ks.splitEgressFilterIds = nil
 	ks.splitCIDRFilterIds = nil
+	ks.daemonEgressFilterIds = nil
 	ks.forwardSplitFilterIds, ks.forwardSplitCIDRs = nil, nil
 
 	if err := removeKillSwitchState(); err != nil {
@@ -845,6 +873,12 @@ func (ks *windowsKillSwitch) applySplit(want splitPermits) error {
 			errs = append(errs, err)
 		}
 	}
+	daemonIPs := renderableDaemonIPs(want.DaemonIPs, true)
+	if !slices.Equal(daemonIPs, ks.appliedSplit.DaemonIPs) {
+		if err := ks.swapDaemonEgress(daemonIPs); err != nil {
+			errs = append(errs, err)
+		}
+	}
 	// Mirrors what the host lock permits, never more; also retries a failed forward swap.
 	if ks.forwardLock && !slices.Equal(ks.forwardSplitCIDRs, ks.appliedSplit.CIDRs) {
 		ks.swapForwardSplitPermits(ks.appliedSplit.CIDRs)
@@ -874,6 +908,51 @@ func (ks *windowsKillSwitch) swapSplitEgress(on bool) error {
 	ks.splitEgressFilterIds = ids
 	ks.appliedSplit.Egress = on
 	return nil
+}
+
+func (ks *windowsKillSwitch) swapDaemonEgress(ips []string) error {
+	var appID *wtFwpByteBlob
+	if len(ips) > 0 {
+		blob, free, err := daemonAppID()
+		if err != nil {
+			return fmt.Errorf("kill switch daemon egress: %w", err)
+		}
+		defer free()
+		appID = blob
+	}
+	ids, err := ks.swapFilters(ks.daemonEgressFilterIds, func() ([]uint64, error) {
+		var ids []uint64
+		for _, ip := range ips {
+			added, err := ks.engine.addPermitDaemonEgress(appID, ip)
+			ids = append(ids, added...)
+			if err != nil {
+				return ids, fmt.Errorf("permit daemon egress %s: %w", ip, err)
+			}
+		}
+		return ids, nil
+	})
+	if err != nil {
+		return fmt.Errorf("kill switch daemon egress: %w", err)
+	}
+	ks.daemonEgressFilterIds = ids
+	ks.appliedSplit.DaemonIPs = slices.Clone(ips)
+	return nil
+}
+
+// SetDaemonEgress permits hosts' addresses to the daemon image's sockets only, and
+// retires any all-app endpoint permit an earlier arm gave the same address.
+func (ks *windowsKillSwitch) SetDaemonEgress(ctx context.Context, hosts, dedicated []string) error {
+	ips := resolveDaemonEgressHosts(ctx, hosts, dedicated)
+	ks.mu.Lock()
+	defer ks.mu.Unlock()
+	ks.shared = unionSorted(ks.shared, ips)
+	next := ks.split.clone()
+	next.DaemonIPs = ips
+	err := ks.setSplit(next)
+	if ks.active && ks.engine != nil && len(withoutDaemonIPs(ks.lastEndpointIPs, ks.shared)) != len(ks.lastEndpointIPs) {
+		err = errors.Join(err, ks.arm(ctx, ks.lastEndpointIPs, ks.lastAllowLAN, false))
+	}
+	return err
 }
 
 func (ks *windowsKillSwitch) swapSplitCIDRs(cidrs []string) error {
@@ -951,16 +1030,31 @@ func (ks *windowsKillSwitch) swapFilters(old []uint64, add func() ([]uint64, err
 // transaction; release frees that BFE-allocated id once the arm is done.
 func (ks *windowsKillSwitch) splitSpec(want splitPermits) (windowsSplitSpec, func()) {
 	spec := windowsSplitSpec{tunnelLUID: ks.tunnelLUID, cidrs: renderableSplitCIDRs(want.CIDRs)}
-	if !want.Egress {
-		return spec, func() {}
+	var frees []func()
+	release := func() {
+		for _, free := range frees {
+			free()
+		}
 	}
-	appID, free, err := daemonAppID()
-	if err != nil {
-		KillSwitchWarn("kill switch enable: split-tunnel egress permit unavailable: %v", err)
-		return spec, func() {}
+	if want.Egress {
+		appID, free, err := daemonAppID()
+		if err != nil {
+			KillSwitchWarn("kill switch enable: split-tunnel egress permit unavailable: %v", err)
+		} else {
+			spec.appID = appID
+			frees = append(frees, free)
+		}
 	}
-	spec.appID = appID
-	return spec, free
+	if ips := renderableDaemonIPs(want.DaemonIPs, true); len(ips) > 0 {
+		appID, free, err := daemonAppID()
+		if err != nil {
+			KillSwitchWarn("kill switch enable: daemon-only egress permits unavailable: %v", err)
+		} else {
+			spec.daemonAppID, spec.daemonIPs = appID, ips
+			frees = append(frees, free)
+		}
+	}
+	return spec, release
 }
 
 func daemonAppID() (*wtFwpByteBlob, func(), error) {

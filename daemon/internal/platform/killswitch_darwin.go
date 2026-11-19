@@ -36,7 +36,10 @@ func init() {
 	}
 }
 
-var _ SplitTunnelPermitter = (*darwinKillSwitch)(nil)
+var (
+	_ SplitTunnelPermitter  = (*darwinKillSwitch)(nil)
+	_ DaemonEgressPermitter = (*darwinKillSwitch)(nil)
+)
 
 // Seams so lifecycle tests never reach pfctl or the directory service.
 var (
@@ -71,6 +74,8 @@ type darwinKillSwitch struct {
 	split     splitPermits
 	pfSplit   splitPermits
 	egressGID int
+	// shared is every daemon-only address seen this process; no render permits it to all apps.
+	shared []string
 
 	// Cached pf probe, so a 1Hz status poll does not fork pfctl each time.
 	liveAt time.Time
@@ -105,6 +110,7 @@ func (ks *darwinKillSwitch) Enable(ctx context.Context, endpointHosts []string, 
 	if err != nil {
 		return fmt.Errorf("kill switch enable: %w", err)
 	}
+	ips = withoutDaemonIPs(ips, ks.shared)
 
 	var tunnelInterface string
 	var prev KillSwitchState
@@ -173,6 +179,7 @@ func (ks *darwinKillSwitch) Enable(ctx context.Context, endpointHosts []string, 
 	st.Active = true
 	st.AllowLAN = allowLAN
 	st.EndpointIPs = ips
+	st.Version = KillSwitchStateVersion
 	st.TunnelInterface = tunnelInterface
 	st.Locked = locked
 	if err := saveKillSwitchState(st); err != nil {
@@ -219,7 +226,7 @@ func (ks *darwinKillSwitch) Clear(ctx context.Context) error {
 	ks.opMu.Lock()
 	defer ks.opMu.Unlock()
 	// Dropped first: a re-arm after a failed Clear must not bring the permits back.
-	ks.split, ks.egressGID = splitPermits{}, 0
+	ks.split, ks.egressGID, ks.shared = splitPermits{}, 0, nil
 
 	if err := pfRemoveAnchor(ctx); err != nil {
 		return fmt.Errorf("kill switch clear: remove anchor: %w", err)
@@ -277,6 +284,26 @@ func (ks *darwinKillSwitch) SetSplitCIDRs(ctx context.Context, cidrs []string) e
 	return ks.setSplit(ctx, next)
 }
 
+// SetDaemonEgress permits hosts' addresses to root's sockets only, which is the daemon.
+func (ks *darwinKillSwitch) SetDaemonEgress(ctx context.Context, hosts, dedicated []string) error {
+	ips := resolveDaemonEgressHosts(ctx, hosts, dedicated)
+	ks.opMu.Lock()
+	defer ks.opMu.Unlock()
+	grew := len(unionSorted(ks.shared, ips)) != len(ks.shared)
+	ks.shared = unionSorted(ks.shared, ips)
+	next := ks.split.clone()
+	next.DaemonIPs = ips
+	if ks.split.equal(next) && ks.pfSplit.equal(next) && !grew {
+		return nil
+	}
+	// setSplit re-renders through render, which strips shared from the endpoints.
+	err := ks.setSplit(ctx, next)
+	if active, _ := ks.snapshotState(); active {
+		pruneSharedFromState(ks.shared)
+	}
+	return err
+}
+
 // setSplit re-renders an armed lock with next; an idle switch only records it for
 // the next Enable. Always renders, so a retry repairs an earlier failed narrowing.
 func (ks *darwinKillSwitch) setSplit(ctx context.Context, next splitPermits) error {
@@ -301,6 +328,7 @@ func (ks *darwinKillSwitch) setSplit(ctx context.Context, next splitPermits) err
 // render loads r into the anchor, then ends the states of ranges it stopped
 // permitting: pf keeps established flows across a reload. opMu held.
 func (ks *darwinKillSwitch) render(ctx context.Context, r ksRules) error {
+	r.EndpointIPs = withoutDaemonIPs(r.EndpointIPs, ks.shared)
 	gid := 0
 	if r.Split.Egress {
 		gid = ks.egressGID

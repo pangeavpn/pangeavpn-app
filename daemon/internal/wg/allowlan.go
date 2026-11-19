@@ -315,6 +315,66 @@ func TransformWGConfigExclude(configText string, v4, v6 []netip.Prefix, keep []n
 	return strings.Join(out, "\n") + "\n", nil
 }
 
+// TransformWGConfigInclude adds each IPv4 include prefix that a [Peer] AllowedIPs line with
+// IPv4 entries does not already cover, so a carved-out address goes back into the tunnel.
+func TransformWGConfigInclude(configText string, include []netip.Prefix) (string, error) {
+	var include4 []netip.Prefix
+	for _, p := range maskedPrefixes(include) {
+		if p.Addr().Is4() {
+			include4 = append(include4, p)
+		}
+	}
+	if len(include4) == 0 {
+		return configText, nil
+	}
+	scanner := bufio.NewScanner(strings.NewReader(configText))
+	scanner.Buffer(make([]byte, 0, 1024), 1024*1024)
+	var out []string
+	section := ""
+	for scanner.Scan() {
+		rawLine := scanner.Text()
+		trimmed := strings.TrimSpace(rawLine)
+		if header, ok := sectionHeader(trimmed); ok {
+			section = header
+			out = append(out, rawLine)
+			continue
+		}
+		key, value, ok := parseKeyValue(trimmed)
+		if section != "peer" || !ok || !strings.EqualFold(key, "AllowedIPs") {
+			out = append(out, rawLine)
+			continue
+		}
+		var entries []netip.Prefix
+		var parts []string
+		for _, part := range splitCSV(value) {
+			prefix, err := parseAllowedIPEntry(part)
+			if err != nil {
+				return "", fmt.Errorf("invalid AllowedIPs entry %q: %w", part, err)
+			}
+			entries = append(entries, prefix.Masked())
+			parts = append(parts, prefix.String())
+		}
+		var v4 []netip.Prefix
+		for _, p := range entries {
+			if p.Addr().Is4() {
+				v4 = append(v4, p)
+			}
+		}
+		if len(v4) == 0 {
+			out = append(out, rawLine)
+			continue
+		}
+		for _, added := range reinclude(v4, include4)[len(v4):] {
+			parts = append(parts, added.String())
+		}
+		out = append(out, "AllowedIPs = "+strings.Join(parts, ", "))
+	}
+	if err := scanner.Err(); err != nil {
+		return "", fmt.Errorf("parse wg config for allowed-ips include: %w", err)
+	}
+	return strings.Join(out, "\n") + "\n", nil
+}
+
 // CountAllowedIPv4 reports how many IPv4 entries the config's [Peer] AllowedIPs lines carry.
 func CountAllowedIPv4(configText string) (int, error) {
 	scanner := bufio.NewScanner(strings.NewReader(configText))

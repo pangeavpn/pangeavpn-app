@@ -147,11 +147,15 @@ func iptablesApplyPlan(staging, staging6 string, r ksRules) []iptablesCommand {
 		plan = append(plan, ipt4("allow tunnel interface", "-A", staging, "-o", r.Tunnel, "-j", "ACCEPT"))
 	}
 
-	if r.AllowLAN || len(cidrs) > 0 || r.Split.Egress {
+	daemonIPs := renderableDaemonIPs(r.Split.DaemonIPs, true)
+	if r.AllowLAN || len(cidrs) > 0 || r.Split.Egress || len(daemonIPs) > 0 {
 		plan = append(plan, iptablesResolverDrops(staging)...)
 	}
 	if r.Split.Egress {
 		plan = append(plan, ipt4("allow split egress", "-A", staging, "-m", "mark", "--mark", splitEgressMark, "-j", "ACCEPT"))
+	}
+	for _, ip := range daemonIPs {
+		plan = append(plan, ipt4("allow daemon egress "+ip, "-A", staging, "-d", ip, "-m", "mark", "--mark", splitEgressMark, "-j", "ACCEPT"))
 	}
 	if r.AllowLAN {
 		for _, cidr := range LANAllowPrefixes {

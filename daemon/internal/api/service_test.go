@@ -691,9 +691,27 @@ type fakeKillSwitch struct {
 	splitEgress      bool
 	splitEgressCalls int
 	events           *callLog
+
+	// daemonEgress is the last SetDaemonEgress set; daemonEgressAtEnable is how many
+	// Enable calls had already run when it was set.
+	daemonEgress         []string
+	daemonEgressCalls    int
+	daemonEgressAtEnable int
 }
 
-var _ platform.SplitTunnelPermitter = (*fakeKillSwitch)(nil)
+var (
+	_ platform.SplitTunnelPermitter  = (*fakeKillSwitch)(nil)
+	_ platform.DaemonEgressPermitter = (*fakeKillSwitch)(nil)
+)
+
+func (f *fakeKillSwitch) SetDaemonEgress(_ context.Context, hosts, _ []string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.daemonEgressCalls++
+	f.daemonEgress = append([]string(nil), hosts...)
+	f.daemonEgressAtEnable = f.enableCount
+	return nil
+}
 
 func (f *fakeKillSwitch) SetSplitCIDRs(_ context.Context, cidrs []string) error {
 	f.mu.Lock()
@@ -1400,8 +1418,17 @@ func stubSessionRecordStore(t *testing.T) *sessionRecordStub {
 }
 
 // stubKillSwitchState points the persisted-state reader at a fixed value for
-// the duration of the test.
+// the duration of the test, saved by this version unless st names another.
 func stubKillSwitchState(t *testing.T, st platform.KillSwitchState) {
+	t.Helper()
+	if st.Version == 0 {
+		st.Version = platform.KillSwitchStateVersion
+	}
+	stubLegacyKillSwitchState(t, st)
+}
+
+// stubLegacyKillSwitchState serves st exactly, Version included.
+func stubLegacyKillSwitchState(t *testing.T, st platform.KillSwitchState) {
 	t.Helper()
 	original := loadKillSwitchState
 	loadKillSwitchState = func() (platform.KillSwitchState, error) { return st, nil }
@@ -3467,22 +3494,22 @@ func snowflakeProfileWithFronting() state.Profile {
 	return profile
 }
 
-func TestKillSwitchPermits_IncludesSnowflakeHostsWhenPresent(t *testing.T) {
+// Snowflake's broker, fronts, AMP cache and STUN servers are shared infrastructure: an
+// all-app permit or a route for them would take every site they serve out of the tunnel.
+func TestSnowflakeHostsAreDaemonOnly(t *testing.T) {
 	profile := snowflakeProfileWithFronting()
 	permits := killSwitchPermits(profile)
-	for _, want := range []string{"broker.example.com", "front.example.com", "amp.example.com", "stun.example.com"} {
-		if !slices.Contains(permits, want) {
-			t.Errorf("killSwitchPermits() = %v, want to contain %s", permits, want)
+	bypass := withTransportBypassHosts(profile).BypassHosts
+	daemonOnly := daemonEgressHosts(profile)
+	for _, host := range []string{"broker.example.com", "front.example.com", "amp.example.com", "stun.example.com"} {
+		if slices.Contains(permits, host) {
+			t.Errorf("killSwitchPermits() = %v, want no all-app permit for shared host %s", permits, host)
 		}
-	}
-}
-
-func TestWithTransportBypassHosts_IncludesSnowflakeHostsWhenPresent(t *testing.T) {
-	profile := snowflakeProfileWithFronting()
-	wgProfile := withTransportBypassHosts(profile)
-	for _, want := range []string{"broker.example.com", "front.example.com", "amp.example.com", "stun.example.com"} {
-		if !slices.Contains(wgProfile.BypassHosts, want) {
-			t.Errorf("withTransportBypassHosts().BypassHosts = %v, want to contain %s", wgProfile.BypassHosts, want)
+		if slices.Contains(bypass, host) {
+			t.Errorf("withTransportBypassHosts().BypassHosts = %v, want no route for shared host %s", bypass, host)
+		}
+		if !slices.Contains(daemonOnly, host) {
+			t.Errorf("daemonEgressHosts() = %v, want the daemon-only permit for %s", daemonOnly, host)
 		}
 	}
 }

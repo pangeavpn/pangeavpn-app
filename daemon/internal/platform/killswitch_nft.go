@@ -43,11 +43,17 @@ func buildNFTRuleset(r ksRules) string {
 		fmt.Fprintf(&b, "    meta nfproto ipv4 oifname \"%s\" accept\n", r.Tunnel)
 	}
 
-	if r.AllowLAN || len(cidrs) > 0 || r.Split.Egress {
+	daemonIPs := renderableDaemonIPs(r.Split.DaemonIPs, true)
+	if r.AllowLAN || len(cidrs) > 0 || r.Split.Egress || len(daemonIPs) > 0 {
 		writeNFTResolverDrops(&b)
 	}
 	if r.Split.Egress {
 		fmt.Fprintf(&b, "    meta nfproto ipv4 meta mark %s accept\n", splitEgressMark)
+	}
+	// Only the daemon's marked sockets: an unmarked app reaching a shared CDN address
+	// off-tunnel would leak every site that edge serves.
+	for _, ip := range daemonIPs {
+		fmt.Fprintf(&b, "    ip daddr %s meta mark %s accept\n", ip, splitEgressMark)
 	}
 
 	// Allow LAN ranges so captive portals and gateway probes work on

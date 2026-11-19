@@ -419,6 +419,10 @@ func NewService(
 	wgManager wg.Manager,
 	killSwitch platform.KillSwitch,
 ) *Service {
+	cdn := sbrelay.NewCDN(logs)
+	cdn.SetPinner(pinCDNEdge)
+	tectonicManager := tectonic.NewManager(logs, currentNetworkKey)
+	tectonicManager.SetEdgePinner(pinTectonicEdge)
 	return &Service{
 		machine:        machine,
 		logs:           logs,
@@ -430,8 +434,8 @@ func NewService(
 		shadowsocks:    shadowsocksManager,
 		anytls:         anytlsManager,
 		tuic:           sbrelay.NewTUIC(logs),
-		tectonic:       tectonic.NewManager(logs, currentNetworkKey),
-		cdn:            sbrelay.NewCDN(logs),
+		tectonic:       tectonicManager,
+		cdn:            cdn,
 		snowflake:      snowflakeManager,
 		wg:             wgManager,
 		killSwitch:     killSwitch,
@@ -783,6 +787,7 @@ func (s *Service) Connect(ctx context.Context, profileID string, opts ConnectOpt
 	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("connect requested with profile %s", profile.ID))
 	stepStart := time.Now()
 	permittedHosts := s.sessionKillSwitchPermits(profile, opts.AllowLAN)
+	s.syncDaemonEgress(ctx, daemonEgressHosts(profile))
 	if err := s.killSwitch.Enable(ctx, permittedHosts, opts.AllowLAN, opts.Lockdown); err != nil {
 		s.setError(fmt.Sprintf("kill switch enable failed: %v", err))
 		return err
@@ -827,6 +832,16 @@ func wireGuardProfileFor(profile state.Profile, allowLAN bool, splitCIDRs []neti
 	}
 	rewritten, err := carveAllowedIPs(wireGuardProfile, allowLAN, splitCIDRs)
 	if err != nil {
+		return state.WireGuardProfile{}, err
+	}
+	// Undo an older app's endpoint carve; a range the user split out stays theirs.
+	var include []netip.Prefix
+	for _, edge := range sharedEdgePrefixes(profile) {
+		if !slices.ContainsFunc(splitCIDRs, func(p netip.Prefix) bool { return p.Contains(edge.Addr()) }) {
+			include = append(include, edge)
+		}
+	}
+	if rewritten, err = wg.TransformWGConfigInclude(rewritten, include); err != nil {
 		return state.WireGuardProfile{}, err
 	}
 	wireGuardProfile.ConfigText = rewritten
@@ -907,6 +922,7 @@ func (s *Service) armKillSwitchForAdoptedTunnel(ctx context.Context, profile sta
 		return fmt.Errorf("allow-lan config transform failed: %w", err)
 	}
 	s.machine.Set(state.StateConnecting, "arming kill switch for adopted tunnel")
+	s.syncDaemonEgress(ctx, daemonEgressHosts(profile))
 	if err := s.killSwitch.Enable(ctx, s.sessionKillSwitchPermits(profile, opts.AllowLAN), opts.AllowLAN, opts.Lockdown); err != nil {
 		return fmt.Errorf("kill switch enable failed for adopted tunnel: %w", err)
 	}
@@ -1900,7 +1916,10 @@ func (s *Service) Switch(ctx context.Context, newProfileID string, opts ConnectO
 
 	s.machine.Set(state.StateConnecting, fmt.Sprintf("switching to %s: updating kill switch", newProfile.ID))
 	stepStart := time.Now()
+	s.syncDaemonEgress(ctx, daemonEgressHosts(newProfile))
 	if err := s.killSwitch.Enable(ctx, s.sessionKillSwitchPermits(newProfile, opts.AllowLAN), opts.AllowLAN, opts.Lockdown); err != nil {
+		// The session stays on the old server, so its CDN edge gets its permit back.
+		s.syncDaemonEgress(ctx, daemonEgressHosts(oldProfile))
 		return refuse(err, fmt.Sprintf("kill switch re-enable failed: %v", err))
 	}
 	lockMs := time.Since(stepStart).Milliseconds()
@@ -2027,6 +2046,11 @@ func (s *Service) PermitHosts(ctx context.Context, hosts []string) error {
 	if len(permits) == 0 {
 		permits = ipLiterals(s.storedControlPlaneHosts())
 	}
+	// A shared CDN edge is never permitted to every app nor routed around the tunnel.
+	if kept := s.withoutStoredSharedEdges(permits); len(kept) != len(permits) {
+		s.logs.Add(state.LogWarn, state.SourceDaemon, "kill switch: refused to permit a shared CDN address as a control-plane endpoint")
+		permits = kept
+	}
 	if len(permits) == 0 {
 		return errors.New("no control-plane IP to permit: none supplied and no provisioned profile carries one")
 	}
@@ -2051,7 +2075,7 @@ func (s *Service) PermitHosts(ctx context.Context, hosts []string) error {
 		return errors.New("kill switch is active but no persisted state describes it; refusing to re-apply")
 	}
 
-	merged := mergeUniqueSorted(persisted.EndpointIPs, permits)
+	merged := mergeUniqueSorted(s.persistedEndpoints(persisted), permits)
 	if slices.Equal(merged, sortedCopy(persisted.EndpointIPs)) {
 		return nil
 	}
@@ -2094,6 +2118,53 @@ func (s *Service) storedControlPlaneHosts() []string {
 		out = append(out, profile.WireGuard.BypassHosts...)
 	}
 	return out
+}
+
+// persistedEndpoints is what a re-arm from disk may permit to every app. A lock saved by an
+// older version may hold a named CDN edge's resolved addresses, so only vouched ones stay.
+func (s *Service) persistedEndpoints(st platform.KillSwitchState) []string {
+	ips := s.withoutStoredSharedEdges(st.EndpointIPs)
+	if st.Version >= platform.KillSwitchStateVersion {
+		return ips
+	}
+	vouched := s.vouchedHosts()
+	var kept, dropped []string
+	for _, ip := range ips {
+		if vouched[hostKey(ip)] {
+			kept = append(kept, ip)
+		} else {
+			dropped = append(dropped, ip)
+		}
+	}
+	if len(dropped) > 0 {
+		s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("kill switch: not re-arming %v from an older version's lock; no stored profile vouches for them", dropped))
+	}
+	return kept
+}
+
+// withoutStoredSharedEdges drops any stored profile's shared CDN edge from hosts.
+func (s *Service) withoutStoredSharedEdges(hosts []string) []string {
+	for _, profile := range s.config.Get().Profiles {
+		hosts = withoutSharedHosts(profile, hosts)
+	}
+	return hosts
+}
+
+// syncDaemonEgress hands the lock the shared CDN edges only the daemon's own pinned sockets
+// may reach. A failure leaves those transports blocked, never the edges open to every app.
+func (s *Service) syncDaemonEgress(ctx context.Context, hosts []string) {
+	permitter, ok := s.killSwitch.(platform.DaemonEgressPermitter)
+	if !ok {
+		return
+	}
+	vouched := s.vouchedHosts()
+	dedicated := make([]string, 0, len(vouched))
+	for ip := range vouched {
+		dedicated = append(dedicated, ip)
+	}
+	if err := permitter.SetDaemonEgress(ctx, hosts, dedicated); err != nil {
+		s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("kill switch: daemon-only CDN permits not applied, so CDN transports stay blocked: %v", err))
+	}
 }
 
 // ipLiterals keeps only entries that are already IPv4 addresses, so no caller
@@ -2140,9 +2211,10 @@ func (s *Service) EngageKillSwitch(ctx context.Context, profileID string, allowL
 	// IP literals only, so the lock lands instantly with no DNS resolution —
 	// which would otherwise delay the block (leaking until it lands) and can hang the request.
 	_ = profileID
-	hubPermits := ipLiterals(s.storedControlPlaneHosts())
+	hubPermits := s.withoutStoredSharedEdges(ipLiterals(s.storedControlPlaneHosts()))
 	ksCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
+	s.syncDaemonEgress(ksCtx, nil)
 	if err := s.killSwitch.Enable(ksCtx, hubPermits, allowLAN, true); err != nil {
 		s.logs.Add(state.LogError, state.SourceDaemon, fmt.Sprintf("kill switch engage failed: %v", err))
 		return err
@@ -2168,7 +2240,7 @@ func (s *Service) markKillSwitchLocked(ctx context.Context, allowLAN bool) error
 	}
 	ksCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	if err := s.killSwitch.Enable(ksCtx, persisted.EndpointIPs, allowLAN || persisted.AllowLAN, true); err != nil {
+	if err := s.killSwitch.Enable(ksCtx, s.persistedEndpoints(persisted), allowLAN || persisted.AllowLAN, true); err != nil {
 		s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("could not record lockdown on the engaged kill switch: %v", err))
 		return nil
 	}
@@ -2344,7 +2416,8 @@ func (s *Service) disconnect(ctx context.Context, mode teardownMode) error {
 				s.logs.Add(state.LogError, state.SourceDaemon, cleanupFailures[len(cleanupFailures)-1])
 			}
 			s.dropTunnelPermit(teardownCtx)
-			hubPermits := ipLiterals(s.storedControlPlaneHosts())
+			s.syncDaemonEgress(teardownCtx, nil)
+			hubPermits := s.withoutStoredSharedEdges(ipLiterals(s.storedControlPlaneHosts()))
 			if err := s.killSwitch.Enable(teardownCtx, hubPermits, false, true); err != nil {
 				// Not the shape Lockdown promised: the departing server may
 				// still be permitted through.
@@ -2554,6 +2627,8 @@ func (s *Service) UpdateConfig(cfg state.Config) error {
 func (s *Service) prefetchProfileHosts() {
 	for _, profile := range s.config.Get().Profiles {
 		platform.PrefetchHosts(withTransportBypassHosts(profile).BypassHosts)
+		// No longer routed, but the lock still resolves them; warm them while the tunnel carries the lookup.
+		platform.PrefetchHosts(daemonEgressHosts(profile))
 	}
 }
 
@@ -3320,6 +3395,7 @@ func (s *Service) rebuildSilentSession(ctx context.Context, profile state.Profil
 
 	// Bring-up assumes the kill switch is already armed — true across a rebuild of a
 	// live session, but not when a resume has taken the WFP session out from under us.
+	s.syncDaemonEgress(ctx, daemonEgressHosts(profile))
 	if !s.killSwitch.Active() {
 		s.logs.Add(state.LogWarn, state.SourceDaemon, "rebuild: kill switch was not armed; re-arming before bring-up")
 		if err := s.killSwitch.Enable(ctx, s.sessionKillSwitchPermits(profile, opts.AllowLAN), opts.AllowLAN, opts.Lockdown); err != nil {
@@ -3676,6 +3752,7 @@ func (s *Service) reconcileKillSwitchForAdoptedTunnel(ctx context.Context, profi
 	locked := err == nil && persisted.Active && persisted.Locked
 	allowLAN := err == nil && persisted.AllowLAN
 
+	s.syncDaemonEgress(ctx, daemonEgressHosts(profile))
 	if err := s.killSwitch.Enable(ctx, s.sessionKillSwitchPermits(profile, allowLAN), allowLAN, locked); err != nil {
 		s.logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("could not arm kill switch for adopted tunnel: %v", err))
 		return
@@ -3711,7 +3788,14 @@ func (s *Service) reconcilePersistedKillSwitch(ctx context.Context) platform.Kil
 
 	// No DNS here: port 53 may already be blocked, so the persisted IPs and
 	// the hub literal are all that can be permitted.
-	endpoints := s.withoutHubProxyPermits(mergeUniqueSorted(persisted.EndpointIPs, ipLiterals(s.storedControlPlaneHosts())))
+	endpoints := s.withoutHubProxyPermits(mergeUniqueSorted(s.persistedEndpoints(persisted), s.withoutStoredSharedEdges(ipLiterals(s.storedControlPlaneHosts()))))
+	// The recorded session reconnects through its own node; a boot lock that could not vouch
+	// for an older version's endpoints armed without it, and the rebuild keeps a live lock as is.
+	if record, err := loadSessionRecord(); err == nil && record.ProfileID != "" {
+		if recorded, ok := s.config.FindProfile(record.ProfileID); ok {
+			endpoints = mergeUniqueSorted(endpoints, ipLiterals(killSwitchPermits(recorded)))
+		}
+	}
 	s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("re-applying kill switch left by the previous process (lockdown=%v)", persisted.Locked))
 	var enableErr error
 	for attempt := 1; attempt <= startupLockReapplyAttempts; attempt++ {
@@ -3841,6 +3925,8 @@ func (s *Service) attachToRunningSession(ctx context.Context, profile state.Prof
 	if kind == "" || kind == "auto" {
 		kind = "cloak"
 	}
+	// A restored CDN transport dials at once, so its daemon-only permit must already be up.
+	s.syncDaemonEgress(ctx, daemonEgressHosts(profile))
 	if err := s.restoreTransportForAdoption(ctx, &profile, kind); err != nil {
 		return true, err
 	}
@@ -4346,8 +4432,8 @@ func (s *Service) hubProxyRemotes() []string {
 	return ipLiterals(hosts)
 }
 
-// killSwitchPermits is the cloak, naive, reality, hysteria2, anytls, and snowflake endpoints
-// (whichever are configured) plus any bypassHosts needing direct reachability.
+// killSwitchPermits is the dedicated transport endpoints and bypassHosts, open to every app;
+// shared CDN edges are left to daemonEgressHosts.
 func killSwitchPermitsFor(profile state.Profile, _ bool) []string {
 	return killSwitchPermits(profile)
 }
@@ -4363,6 +4449,53 @@ func killSwitchPermits(profile state.Profile) []string {
 			out = append(out, h)
 		}
 	}
+	return withoutSharedHosts(profile, out)
+}
+
+// sharedEdgeHosts are destinations on shared CDN infrastructure: their addresses serve
+// unrelated sites too, so they get no route and no all-app permit, only daemonEgressHosts.
+func sharedEdgeHosts(profile state.Profile) []string {
+	return slices.Concat(cdnHosts(profile.CDN), tectonicCDNHosts(profile.Tectonic), snowflakeHosts(profile.Snowflake))
+}
+
+// daemonEgressHosts is what the lock permits to the daemon's own sockets alone.
+func daemonEgressHosts(profile state.Profile) []string {
+	return sharedEdgeHosts(profile)
+}
+
+// withoutSharedHosts drops every shared edge, by name or by address literal, whatever
+// list it arrived in: the app has sent a CDN edge's IP as a transport endpoint before.
+func withoutSharedHosts(profile state.Profile, hosts []string) []string {
+	shared := map[string]bool{}
+	for _, host := range sharedEdgeHosts(profile) {
+		shared[hostKey(host)] = true
+	}
+	out := make([]string, 0, len(hosts))
+	for _, host := range hosts {
+		if !shared[hostKey(host)] {
+			out = append(out, host)
+		}
+	}
+	return out
+}
+
+func hostKey(host string) string {
+	host = strings.ToLower(strings.Trim(strings.TrimSpace(host), "[]"))
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.String()
+	}
+	return strings.TrimSuffix(host, ".")
+}
+
+// sharedEdgePrefixes are the shared edges given as IPv4 literals, which must stay inside
+// AllowedIPs: an edge carved out of the tunnel routes every site it serves around it.
+func sharedEdgePrefixes(profile state.Profile) []netip.Prefix {
+	var out []netip.Prefix
+	for _, host := range sharedEdgeHosts(profile) {
+		if addr, err := netip.ParseAddr(hostKey(host)); err == nil && addr.Unmap().Is4() {
+			out = append(out, netip.PrefixFrom(addr.Unmap(), 32))
+		}
+	}
 	return out
 }
 
@@ -4375,10 +4508,8 @@ func transportPermitHosts(profile state.Profile) []string {
 			out = append(out, ip)
 		}
 	}
-	// Snowflake's rendezvous hosts are never covered by the hub's endpoint IPs (those
-	// name the node, not the broker), so they're appended regardless of which branch runs.
 	if len(out) > 0 {
-		return append(append(append(out, cdnHosts(profile.CDN)...), tectonicCDNHosts(profile.Tectonic)...), snowflakeHosts(profile.Snowflake)...)
+		return out
 	}
 	if profile.Naive != nil {
 		if host := strings.TrimSpace(profile.Naive.RemoteHost); host != "" {
@@ -4415,7 +4546,7 @@ func transportPermitHosts(profile state.Profile) []string {
 			out = append(out, host)
 		}
 	}
-	return append(append(append(out, cdnHosts(profile.CDN)...), tectonicCDNHosts(profile.Tectonic)...), snowflakeHosts(profile.Snowflake)...)
+	return out
 }
 
 // tectonicCDNHosts is Tectonic's CDN edge, which like cdnHosts names the CDN, never the node.
@@ -4441,8 +4572,8 @@ func cdnHosts(p *state.CDNProfile) []string {
 	return nil
 }
 
-// withTransportBypassHosts adds the cloak, naive, reality, hysteria2,
-// shadowsocks, anytls and snowflake (whichever are configured) remote hosts to the bypass list.
+// withTransportBypassHosts adds the dedicated transport endpoints to the bypass list. Shared CDN
+// edges never get a route: their transports pin their own sockets instead (see edge_pin.go).
 func withTransportBypassHosts(profile state.Profile) state.WireGuardProfile {
 	copyProfile := profile.WireGuard
 	copyProfile.DNS = append([]string(nil), profile.WireGuard.DNS...)
@@ -4458,6 +4589,7 @@ func withTransportBypassHosts(profile state.Profile) state.WireGuardProfile {
 	// Same source as the kill-switch permits, and for the same reason: the
 	// hub's addresses when it sent any, never a node hostname we would have to look up (see transportPermitHosts).
 	copyProfile.BypassHosts = append(copyProfile.BypassHosts, transportPermitHosts(profile)...)
+	copyProfile.BypassHosts = withoutSharedHosts(profile, copyProfile.BypassHosts)
 	return copyProfile
 }
 
@@ -4527,15 +4659,13 @@ func (s *Service) vouchedHosts() map[string]bool {
 			hosts = append(hosts, profile.TUIC.RemoteHost)
 		}
 		if profile.Tectonic != nil {
-			hosts = append(hosts, profile.Tectonic.NodeHost(), profile.Tectonic.CDNEdgeHost())
-		}
-		if profile.CDN != nil {
-			hosts = append(hosts, profile.CDN.RemoteHost)
+			hosts = append(hosts, profile.Tectonic.NodeHost())
 		}
 		if host, _, err := net.SplitHostPort(profile.WireGuard.DirectEndpoint); err == nil {
 			hosts = append(hosts, host)
 		}
-		for _, ip := range ipLiterals(hosts) {
+		// Shared CDN edges are never vouched: a permit for one would open it to every app.
+		for _, ip := range ipLiterals(withoutSharedHosts(profile, hosts)) {
 			vouched[ip] = true
 		}
 	}
