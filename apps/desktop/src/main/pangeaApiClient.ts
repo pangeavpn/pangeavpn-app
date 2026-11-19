@@ -286,11 +286,10 @@ const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 // Every sealed envelope goes out as JSON; shared so the fetch calls below don't repeat it.
 const SEALED_ENVELOPE_HEADERS = { "Content-Type": "application/json" } as const;
 
-// Empty SNI and no cert check are deliberate: every call posts a sealed
-// sealed envelope, so TLS is carrier only. Do not "harden" this.
+// No SNI, no cert check and the bare IP as Host are deliberate: the envelope is sealed, so TLS
+// is only a carrier, and a filter that decrypts it reads no hostname. Do not "harden" this.
 function fetchDohResolved(
   ip: string,
-  hostname: string,
   requestPath: string,
   options: {
     method?: string;
@@ -330,7 +329,7 @@ function fetchDohResolved(
         method: options.method ?? "GET",
         headers: {
           ...options.headers,
-          Host: hostname
+          Host: ip.includes(":") ? `[${ip}]` : ip
         },
         ...DOH_TLS_OPTIONS
       },
@@ -996,7 +995,7 @@ export class PangeaApiClient {
           timeoutMs: 8000
         });
       } else if (path.kind === "ip") {
-        rawResponse = await fetchDohResolved(path.ip, HUB_HOSTNAME, sealed.route, {
+        rawResponse = await fetchDohResolved(path.ip, sealed.route, {
           method: "POST",
           headers: SEALED_ENVELOPE_HEADERS,
           body: envelopeJson,
@@ -1509,7 +1508,7 @@ export class PangeaApiClient {
       });
     }
     if (this.dohResolvedIp) {
-      return fetchDohResolved(this.dohResolvedIp, HUB_HOSTNAME, route, {
+      return fetchDohResolved(this.dohResolvedIp, route, {
         method: "POST",
         headers: SEALED_ENVELOPE_HEADERS,
         body,
@@ -1550,7 +1549,7 @@ export class PangeaApiClient {
       this.dohResolvedIp = resolvedIp;
       this.rememberHubIp(resolvedIp);
       this.setActiveHubMethod("directIp", resolvedIp);
-      return fetchDohResolved(resolvedIp, HUB_HOSTNAME, route, {
+      return fetchDohResolved(resolvedIp, route, {
         method: "POST",
         headers: SEALED_ENVELOPE_HEADERS,
         body,
@@ -1612,7 +1611,7 @@ export class PangeaApiClient {
           // so the branch order in this method reaches the DoH path just resolved.
           this.frontedHost = null;
           this.stopHubProxy();
-          const retryResponse = await fetchDohResolved(resolvedIp, HUB_HOSTNAME, sealed.route, {
+          const retryResponse = await fetchDohResolved(resolvedIp, sealed.route, {
             method: "POST",
             headers: SEALED_ENVELOPE_HEADERS,
             body: envelopeJson,
