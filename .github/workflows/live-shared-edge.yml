@@ -28,10 +28,12 @@ jobs:
           cache: true
           cache-dependency-path: daemon/go.sum
 
+      # The installer creates this memberless group; the egress broker's sockets carry it.
       - name: Live tests (macOS, as root)
         if: runner.os == 'macOS'
         working-directory: daemon
         run: |
+          sudo dseditgroup -o create -i 4242 -r "Pangea split egress" _pangeasplit
           go test -c -o "$RUNNER_TEMP/nicpin.test" ./internal/nicpin/
           go test -c -o "$RUNNER_TEMP/platform.test" ./internal/platform/
           sudo PANGEA_LIVE_PIN=1 "$RUNNER_TEMP/nicpin.test" -test.run Live -test.v
@@ -52,4 +54,11 @@ jobs:
         working-directory: daemon
         run: |
           go test -c -o "$RUNNER_TEMP/platform.test" ./internal/platform/
+          go test -c -o "$RUNNER_TEMP/nicpin.test" ./internal/nicpin/
           sudo unshare -n "$RUNNER_TEMP/platform.test" -test.run 'LiveDaemonEgress|LiveNFT|LiveIPTables' -test.v
+          sudo mkdir -p /var/run/netns
+          sudo unshare -n env PANGEA_LIVE_PIN=1 "$RUNNER_TEMP/nicpin.test" -test.run Live -test.v
+          # Again on the iptables fallback, as on a host without nft.
+          sudo mv /usr/sbin/nft /usr/sbin/nft.off
+          sudo unshare -n env PANGEA_LIVE_PIN=1 "$RUNNER_TEMP/nicpin.test" -test.run Live -test.v
+          sudo mv /usr/sbin/nft.off /usr/sbin/nft

@@ -41,4 +41,11 @@ func TestLivePinReachesTheTarget(t *testing.T) {
 	if err := dialVia(pin); err != nil {
 		t.Fatalf("pinned dial failed: %v", err)
 	}
+	if pin.Dial != nil {
+		conn, err := pin.Dial(context.Background(), "tcp4", liveTarget+":443")
+		if err != nil {
+			t.Fatalf("pinned dial through the broker failed: %v", err)
+		}
+		conn.Close()
+	}
 }

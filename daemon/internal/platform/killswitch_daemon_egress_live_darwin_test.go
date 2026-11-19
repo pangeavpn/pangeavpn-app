@@ -7,24 +7,31 @@ import (
 	"os/exec"
 	"regexp"
 	"strings"
+	"syscall"
 	"testing"
 )
 
 const liveTarget = "1.1.1.1"
 
-func runAs(user string, name string, args ...string) error {
-	if user == "" {
-		return exec.Command(name, args...).Run()
+// asCred runs name as root with gid as its group, or as plain root when gid is 0.
+func asCred(gid int, name string, args ...string) error {
+	cmd := exec.Command(name, args...)
+	if gid > 0 {
+		cmd.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: 0, Gid: uint32(gid)}}
 	}
-	return exec.Command("sudo", append([]string{"-u", user, name}, args...)...).Run()
+	return cmd.Run()
 }
 
-func ncReaches(user string) bool {
-	return runAs(user, "/usr/bin/nc", "-z", "-G", "3", liveTarget, "443") == nil
+func ncReachesAs(gid int) bool {
+	return asCred(gid, "/usr/bin/nc", "-z", "-G", "3", liveTarget, "443") == nil
 }
 
-func digReaches() bool {
-	return exec.Command("/usr/bin/dig", "+time=2", "+tries=1", "@"+liveTarget, "example.com").Run() == nil
+func nobodyReaches() bool {
+	return exec.Command("sudo", "-u", "nobody", "/usr/bin/nc", "-z", "-G", "3", liveTarget, "443").Run() == nil
+}
+
+func digReachesAs(gid int) bool {
+	return asCred(gid, "/usr/bin/dig", "+time=2", "+tries=1", "@"+liveTarget, "example.com") == nil
 }
 
 func pfctl(t *testing.T, stdin string, args ...string) string {
@@ -40,37 +47,43 @@ func pfctl(t *testing.T, stdin string, args ...string) string {
 	return string(out)
 }
 
-// Real pf must pass root's sockets (the daemon) to a daemon-only address, keep other
-// users' sockets blocked from it, and keep port 53 to it blocked even for root.
-func TestLivePFDaemonEgressPassesRootOnly(t *testing.T) {
+// Real pf must pass only the egress broker's group to a daemon-only address: plain root
+// (every other root process) and other users stay blocked, and port 53 stays blocked for all.
+func TestLivePFDaemonEgressPassesOnlyTheBrokersGroup(t *testing.T) {
 	if os.Getenv("PANGEA_LIVE_LOCK") != "1" {
 		t.Skip("set PANGEA_LIVE_LOCK=1 on a disposable machine")
 	}
 	if os.Geteuid() != 0 {
 		t.Skip("needs root")
 	}
-	if !ncReaches("") || !ncReaches("nobody") || !digReaches() {
+	gid, err := SplitEgressGroupID()
+	if err != nil {
+		t.Skipf("no usable %s group: %v", SplitEgressGroupName, err)
+	}
+	if !ncReachesAs(0) || !ncReachesAs(gid) || !nobodyReaches() || !digReachesAs(gid) {
 		t.Skipf("%s is not reachable from this machine without pf", liveTarget)
 	}
 
-	rules := append(pfDaemonEgressRules([]string{liveTarget}), "block out quick inet proto { tcp udp } to "+liveTarget)
+	rules := append(pfDaemonEgressRules([]string{liveTarget}, gid), "block out quick inet proto { tcp udp } to "+liveTarget)
 	pfctl(t, "anchor \"pangea-live\"\n", "-f", "-")
 	t.Cleanup(func() { _ = exec.Command("/sbin/pfctl", "-f", "/etc/pf.conf").Run() })
 	pfctl(t, strings.Join(rules, "\n")+"\n", "-a", "pangea-live", "-f", "-")
 	t.Cleanup(func() { _ = exec.Command("/sbin/pfctl", "-a", "pangea-live", "-F", "all").Run() })
-	token := regexp.MustCompile(`Token : (\d+)`).FindStringSubmatch(pfctl(t, "", "-E"))
-	if token != nil {
+	if token := regexp.MustCompile(`Token : (\d+)`).FindStringSubmatch(pfctl(t, "", "-E")); token != nil {
 		t.Cleanup(func() { _ = exec.Command("/sbin/pfctl", "-X", token[1]).Run() })
 	}
 	t.Logf("anchor:\n%s", pfctl(t, "", "-a", "pangea-live", "-s", "rules"))
 
-	if !ncReaches("") {
-		t.Error("root (the daemon) was refused through its daemon-only pass")
+	if !ncReachesAs(gid) {
+		t.Error("the broker's group was refused through its daemon-only pass")
 	}
-	if ncReaches("nobody") {
-		t.Error("another user's socket reached the shared address through the daemon-only pass")
+	if ncReachesAs(0) {
+		t.Error("a plain root socket (any root process) reached the shared address")
 	}
-	if digReaches() {
-		t.Error("root sent DNS to the shared address off-tunnel")
+	if nobodyReaches() {
+		t.Error("another user's socket reached the shared address")
+	}
+	if digReachesAs(gid) {
+		t.Error("the broker's group sent DNS to the shared address off-tunnel")
 	}
 }

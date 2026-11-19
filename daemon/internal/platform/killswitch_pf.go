@@ -149,17 +149,20 @@ func pfSplitRules(split splitPermits, egressGID int) []string {
 		rules = append(rules, fmt.Sprintf("block out quick proto { tcp udp } to any port { 53 853 } group %d", egressGID))
 		rules = append(rules, fmt.Sprintf("pass out quick inet proto { tcp udp } from any to any group %d", egressGID))
 	}
-	return append(rules, pfDaemonEgressRules(split.DaemonIPs)...)
+	return append(rules, pfDaemonEgressRules(split.DaemonIPs, egressGID)...)
 }
 
-// pfDaemonEgressRules passes root's sockets only (the daemon runs as root), and IPv4 only
-// as the daemon pins only IPv4 edges: a browser reaching a shared edge would leak its sites.
-func pfDaemonEgressRules(ips []string) []string {
+// pfDaemonEgressRules passes only the egress broker's memberless group, which carries the
+// daemon's pinned sockets and nothing else; without a verified gid nothing passes at all.
+func pfDaemonEgressRules(ips []string, egressGID int) []string {
+	if egressGID <= 0 {
+		return nil
+	}
 	var rules []string
 	for _, ip := range renderableDaemonIPs(ips, true) {
 		rules = append(rules,
 			fmt.Sprintf("block out quick inet proto { tcp udp } to %s port { 53 853 }", ip),
-			fmt.Sprintf("pass out quick inet proto { tcp udp } to %s user 0", ip))
+			fmt.Sprintf("pass out quick inet proto tcp to %s group %d", ip, egressGID))
 	}
 	return rules
 }

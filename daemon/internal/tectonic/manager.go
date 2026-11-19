@@ -38,6 +38,8 @@ var Protect func(fd int) bool
 type EdgePin struct {
 	Server  string
 	Control func(network, address string, c syscall.RawConn) error
+	// Dial, when set, opens the edge socket itself (the macOS broker) and wins over Control.
+	Dial    func(ctx context.Context, network, address string) (net.Conn, error)
 	Release func()
 }
 
@@ -84,7 +86,7 @@ func (m *Manager) SetEdgePinner(pin EdgePinner) {
 // lanes are left to the node's own route, so a NIC change can't strand them on the old one.
 func (m *Manager) pinEdge(ctx context.Context, cfg *tect.Config, profile state.TectonicProfile) (func(), error) {
 	host := profile.CDNEdgeHost()
-	if m.edgePin == nil || cfg.Profile.CDN == nil || host == "" || cfg.Control != nil {
+	if m.edgePin == nil || cfg.Profile.CDN == nil || host == "" || cfg.Control != nil || cfg.DialContext != nil {
 		return func() {}, nil
 	}
 	// Without a pin the CDN lanes would dial unpinned; dropping just them keeps the direct lanes.
@@ -102,7 +104,7 @@ func (m *Manager) pinEdge(ctx context.Context, cfg *tect.Config, profile state.T
 		release = func() {}
 	}
 	server, perr := netip.ParseAddr(pin.Server)
-	if perr != nil || pin.Control == nil {
+	if perr != nil || (pin.Control == nil && pin.Dial == nil) {
 		release()
 		return dropCDN(fmt.Errorf("pin for %s binds nothing", host))
 	}
@@ -111,9 +113,23 @@ func (m *Manager) pinEdge(ctx context.Context, cfg *tect.Config, profile state.T
 		port = p
 	}
 	cfg.Profile.CDN.Edge = net.JoinHostPort(pin.Server, port)
+	onEdge := func(address string) bool {
+		dst, err := netip.ParseAddrPort(address)
+		return err == nil && dst.Addr().Unmap() == server.Unmap()
+	}
+	if dial := pin.Dial; dial != nil {
+		var direct net.Dialer
+		cfg.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
+			if onEdge(address) {
+				return dial(ctx, network, address)
+			}
+			return direct.DialContext(ctx, network, address)
+		}
+		return release, nil
+	}
 	bind := pin.Control
 	cfg.Control = func(network, address string, c syscall.RawConn) error {
-		if dst, err := netip.ParseAddrPort(address); err == nil && dst.Addr().Unmap() == server.Unmap() {
+		if onEdge(address) {
 			return bind(network, address, c)
 		}
 		return nil

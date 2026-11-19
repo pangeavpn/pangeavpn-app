@@ -29,9 +29,12 @@ type Pin struct {
 	// Interface is the NIC to bind to; empty on Linux, which uses Mark instead.
 	Interface string
 	Mark      uint32
-	index     int
-	release   func()
-	once      sync.Once
+	// Dial, set on macOS, gets the socket from the egress broker: pf can match its dedicated
+	// group, where a pinned socket of the daemon's own would only match "any root process".
+	Dial    func(ctx context.Context, network, address string) (net.Conn, error)
+	index   int
+	release func()
+	once    sync.Once
 }
 
 // Release undoes the pinning; safe to call more than once and on nil.

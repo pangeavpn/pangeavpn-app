@@ -3,6 +3,7 @@ package tectonic
 import (
 	"context"
 	"errors"
+	"net"
 	"syscall"
 	"testing"
 	"time"
@@ -96,5 +97,32 @@ func TestPinEdge_FailsClosedAndLeavesDirectProfilesAlone(t *testing.T) {
 	}
 	if _, err := m.pinEdge(context.Background(), &cfg, profile); err != nil || cfg.Control != nil {
 		t.Fatalf("a profile with no CDN route was pinned: err=%v control=%v", err, cfg.Control != nil)
+	}
+}
+
+// On macOS the pin opens the edge socket itself; only CDN lanes may use it.
+func TestPinEdge_RoutesOnlyCDNLanesThroughThePinsDialer(t *testing.T) {
+	m := newTestManager()
+	var used []string
+	m.SetEdgePinner(func(context.Context, string) (EdgePin, error) {
+		return EdgePin{Server: "104.21.24.200", Dial: func(_ context.Context, _, address string) (net.Conn, error) {
+			used = append(used, address)
+			return nil, errors.New("test dialer")
+		}}, nil
+	})
+	profile := cdnTestProfile(t, "")
+	cfg, err := m.config(profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.pinEdge(context.Background(), &cfg, profile); err != nil || cfg.DialContext == nil || cfg.Control != nil {
+		t.Fatalf("pinEdge() = %v, dial set %v, control set %v; want the dialer installed", err, cfg.DialContext != nil, cfg.Control != nil)
+	}
+	_, _ = cfg.DialContext(context.Background(), "tcp", "104.21.24.200:443")
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	_, _ = cfg.DialContext(ctx, "tcp", "192.0.2.1:443")
+	if len(used) != 1 || used[0] != "104.21.24.200:443" {
+		t.Fatalf("pin dialer saw %v, want only the CDN edge", used)
 	}
 }

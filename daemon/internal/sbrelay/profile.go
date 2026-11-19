@@ -114,9 +114,13 @@ func buildCDN(p state.CDNProfile) (spec, error) {
 		annotate:   annotateCDN,
 		extraRoots: extraRoots,
 		pinHost:    host,
-		applyPin: func(pin Pin) {
+		applyPin: func(pin Pin) []option.Outbound {
 			vless.Server = pin.Server
 			vless.DialerOptions = pinnedDialer(pin)
+			if pin.Dial == nil {
+				return nil
+			}
+			return []option.Outbound{{Type: pinnedType, Tag: pinnedTag, Options: &pinnedOptions{Dial: pin.Dial}}}
 		},
 	}, nil
 }
@@ -124,6 +128,9 @@ func buildCDN(p state.CDNProfile) (spec, error) {
 // pinnedDialer binds the edge connection to the physical NIC: the edge is a shared CDN
 // address, so it never gets a route around the tunnel that every app would follow.
 func pinnedDialer(pin Pin) option.DialerOptions {
+	if pin.Dial != nil {
+		return option.DialerOptions{Detour: pinnedTag}
+	}
 	return option.DialerOptions{AbstractDialerOptions: option.AbstractDialerOptions{
 		BindInterface: pin.Interface,
 		RoutingMark:   option.FwMark(pin.Mark),

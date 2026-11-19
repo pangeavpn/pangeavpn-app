@@ -38,9 +38,10 @@ type spec struct {
 	annotate   func(error) error
 	// extraRoots are added to the system store, which the platform verifier still checks first.
 	extraRoots []string
-	// applyPin, set only for a shared destination, points the outbound at a pinned dial.
+	// applyPin, set only for a shared destination, points the outbound at a pinned dial and
+	// returns any outbound that dial needs alongside it.
 	pinHost  string
-	applyPin func(Pin)
+	applyPin func(Pin) []option.Outbound
 }
 
 // Pin is a destination pinned to the physical NIC; see nicpin.Pin.
@@ -48,6 +49,7 @@ type Pin struct {
 	Server    string
 	Interface string
 	Mark      uint32
+	Dial      func(ctx context.Context, network, address string) (net.Conn, error)
 	Release   func()
 }
 
@@ -113,6 +115,7 @@ func (m *Manager[P]) Start(ctx context.Context, profile P) error {
 	}
 
 	releasePin := func() {}
+	var pinOutbounds []option.Outbound
 	if m.pin != nil && sp.applyPin != nil {
 		pin, err := m.pin(ctx, sp.pinHost)
 		if err != nil {
@@ -121,16 +124,16 @@ func (m *Manager[P]) Start(ctx context.Context, profile P) error {
 		if pin.Release != nil {
 			releasePin = pin.Release
 		}
-		if pin.Server == "" || (pin.Interface == "" && pin.Mark == 0) {
+		if pin.Server == "" || (pin.Interface == "" && pin.Mark == 0 && pin.Dial == nil) {
 			releasePin()
 			return fmt.Errorf("%s: pin for %s binds nothing; refusing to dial it unpinned", m.name, sp.pinHost)
 		}
-		sp.applyPin(pin)
+		pinOutbounds = sp.applyPin(pin)
 	}
 
 	options := option.Options{
 		Log:       &option.LogOptions{Level: "warn"},
-		Outbounds: []option.Outbound{sp.outbound},
+		Outbounds: append([]option.Outbound{sp.outbound}, pinOutbounds...),
 	}
 	if len(sp.extraRoots) > 0 {
 		options.Certificate = &option.CertificateOptions{Certificate: sp.extraRoots}

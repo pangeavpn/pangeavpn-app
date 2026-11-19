@@ -3494,9 +3494,9 @@ func snowflakeProfileWithFronting() state.Profile {
 	return profile
 }
 
-// Snowflake's broker, fronts, AMP cache and STUN servers are shared infrastructure: an
-// all-app permit or a route for them would take every site they serve out of the tunnel.
-func TestSnowflakeHostsAreDaemonOnly(t *testing.T) {
+// Snowflake's broker, fronts, AMP cache and STUN servers are shared infrastructure, and its
+// sockets can't be pinned: no route, no all-app permit, and no daemon-only permit either.
+func TestSnowflakeHostsGetNoWayOut(t *testing.T) {
 	profile := snowflakeProfileWithFronting()
 	permits := killSwitchPermits(profile)
 	bypass := withTransportBypassHosts(profile).BypassHosts
@@ -3508,8 +3508,8 @@ func TestSnowflakeHostsAreDaemonOnly(t *testing.T) {
 		if slices.Contains(bypass, host) {
 			t.Errorf("withTransportBypassHosts().BypassHosts = %v, want no route for shared host %s", bypass, host)
 		}
-		if !slices.Contains(daemonOnly, host) {
-			t.Errorf("daemonEgressHosts() = %v, want the daemon-only permit for %s", daemonOnly, host)
+		if slices.Contains(daemonOnly, host) {
+			t.Errorf("daemonEgressHosts() = %v, want no daemon-only permit for unpinnable %s", daemonOnly, host)
 		}
 	}
 }

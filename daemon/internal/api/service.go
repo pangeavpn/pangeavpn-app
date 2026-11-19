@@ -4458,9 +4458,10 @@ func sharedEdgeHosts(profile state.Profile) []string {
 	return slices.Concat(cdnHosts(profile.CDN), tectonicCDNHosts(profile.Tectonic), snowflakeHosts(profile.Snowflake))
 }
 
-// daemonEgressHosts is what the lock permits to the daemon's own sockets alone.
+// daemonEgressHosts is what the lock permits to the daemon's own pinned sockets alone. Snowflake
+// is left out: its sockets can't be pinned, so its shared hosts get no way out at all.
 func daemonEgressHosts(profile state.Profile) []string {
-	return sharedEdgeHosts(profile)
+	return slices.Concat(cdnHosts(profile.CDN), tectonicCDNHosts(profile.Tectonic))
 }
 
 // withoutSharedHosts drops every shared edge, by name or by address literal, whatever

@@ -42,24 +42,26 @@ func TestNarrowedSplit_KeepsOnlyDaemonIPsBothWantedAndApplied(t *testing.T) {
 	}
 }
 
-// pf can't match a process, so it matches root (the daemon's uid): a browser's socket
-// to a shared edge off-tunnel must hit block-all, never this pass.
-func TestPFDaemonEgress_PassesRootOnlyResolversExcepted(t *testing.T) {
-	rules := pfSplitRules(splitPermits{DaemonIPs: []string{"104.21.24.200", "2606:4700::6810:18c8", "10.0.0.1", "1.2.3.4 port 53"}}, 0)
-	// No IPv6 pass: the daemon pins IPv4 edges only, so one would only widen the lock.
+// pf can't match a process, so it matches the egress broker's memberless group, which only
+// the daemon's pinned sockets carry: root's own sockets and any user's must hit block-all.
+func TestPFDaemonEgress_PassesOnlyTheBrokersGroup(t *testing.T) {
+	rules := pfSplitRules(splitPermits{DaemonIPs: []string{"104.21.24.200", "2606:4700::6810:18c8", "10.0.0.1", "1.2.3.4 port 53"}}, 4242)
 	want := []string{
 		"block out quick inet proto { tcp udp } to 104.21.24.200 port { 53 853 }",
-		"pass out quick inet proto { tcp udp } to 104.21.24.200 user 0",
+		"pass out quick inet proto tcp to 104.21.24.200 group 4242",
 	}
 	if !slices.Equal(rules, want) {
-		t.Fatalf("pfSplitRules() =\n%s\nwant\n%s", strings.Join(rules, "\n"), strings.Join(want, "\n"))
+		t.Fatalf("pfSplitRules() = %q, want %q", rules, want)
+	}
+	if rules := pfSplitRules(splitPermits{DaemonIPs: []string{"104.21.24.200"}}, 0); len(rules) != 0 {
+		t.Fatalf("with no verified group the edge still got rules: %v", rules)
 	}
 	main, err := buildPFRules(ksRules{EndpointIPs: []string{"203.0.113.5"}, Split: splitPermits{DaemonIPs: []string{"104.21.24.200"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(main, "104.21.24.200") {
-		t.Fatalf("the persisted anchor file names a daemon-only edge, which the boot job would re-arm:\n%s", main)
+		t.Fatalf("the persisted anchor file names a daemon-only edge, which the boot job would re-arm: %q", main)
 	}
 }
 

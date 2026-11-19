@@ -3,6 +3,8 @@ package sbrelay
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -118,5 +120,34 @@ func TestTUICIsNeverPinned(t *testing.T) {
 	}
 	if sp.applyPin != nil {
 		t.Fatal("TUIC spec asks to be pinned")
+	}
+}
+
+// On macOS the pin supplies the socket itself (the egress broker): the edge connection must
+// go through that dial, via the detour outbound, and never open a socket of sing-box's own.
+func TestCDNDialsThroughThePinsOwnDialer(t *testing.T) {
+	ca := newTestCA(t)
+	certPEM, keyPEM := ca.leaf(t, testCDNHost)
+	port := startCDNNode(t, certPEM, keyPEM)
+	profile := testCDNProfile(port, ca.pem)
+	profile.RemoteHost = "edge.unresolvable.invalid"
+
+	var dials atomic.Int32
+	var dialed string
+	m := NewCDN(state.NewLogStore(50))
+	m.SetPinner(func(context.Context, string) (Pin, error) {
+		return Pin{Server: "127.0.0.1", Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+			dials.Add(1)
+			dialed = network + " " + address
+			var d net.Dialer
+			return d.DialContext(ctx, network, address)
+		}}, nil
+	})
+	if err := m.Start(context.Background(), profile); err != nil {
+		t.Fatalf("dial through the pin's own dialer failed: %v", err)
+	}
+	defer m.Stop(context.Background())
+	if dials.Load() == 0 || dialed != fmt.Sprintf("tcp 127.0.0.1:%d", port) {
+		t.Fatalf("pin dialer used %d times (last %q), want the edge connection on it", dials.Load(), dialed)
 	}
 }

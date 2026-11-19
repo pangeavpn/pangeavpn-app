@@ -6,19 +6,59 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/netip"
 	"os/exec"
+	"slices"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/platform"
+	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/splittunnel/egress"
 )
 
-// acquire binds by IP_BOUND_IF plus a scoped host route per address (the tunnel's /1s beat
-// the unscoped default); unbound sockets never consult a scoped route, so no app follows it.
+// newBroker is replaced by tests; production spawns the split-egress broker under its group.
+var newBroker = func() (egress.Dialer, error) {
+	gid, err := platform.SplitEgressGroupID()
+	if err != nil {
+		return nil, err
+	}
+	return egress.New(egress.Options{BrokerGID: gid})
+}
+
+var (
+	brokerMu sync.Mutex
+	broker   egress.Dialer
+)
+
+func sharedBroker() (egress.Dialer, error) {
+	brokerMu.Lock()
+	defer brokerMu.Unlock()
+	if broker != nil {
+		return broker, nil
+	}
+	d, err := newBroker()
+	if err != nil {
+		return nil, fmt.Errorf("egress broker: %w", err)
+	}
+	broker = d
+	return d, nil
+}
+
+// acquire dials through the broker (pf's group, IP_BOUND_IF) over a scoped host route per
+// address, which beats the tunnel's /1s for bound sockets and is never seen by unbound ones.
 func acquire(addrs []netip.Addr) (*Pin, error) {
+	d, err := sharedBroker()
+	if err != nil {
+		return nil, err
+	}
 	name, index, gateway, err := physicalInterface()
 	if err != nil {
 		return nil, err
+	}
+	if id, err := d.Current(); err != nil || id.Name != name {
+		return nil, fmt.Errorf("the broker's egress interface (%v, %v) is not the default route's %s", id.Name, err, name)
 	}
 	var held []scopedHost
 	for _, addr := range addrs {
@@ -29,7 +69,14 @@ func acquire(addrs []netip.Addr) (*Pin, error) {
 		}
 		held = append(held, key)
 	}
-	return &Pin{Interface: name, index: index, release: func() { scoped.release(held) }}, nil
+	dial := func(ctx context.Context, network, address string) (net.Conn, error) {
+		dst, err := netip.ParseAddrPort(address)
+		if err != nil || !strings.HasPrefix(network, "tcp") || !slices.Contains(addrs, dst.Addr().Unmap()) {
+			return nil, fmt.Errorf("pinned dial to %s %s refused: not a pinned TCP address", network, address)
+		}
+		return d.DialTCP(ctx, netip.AddrPortFrom(dst.Addr().Unmap(), dst.Port()))
+	}
+	return &Pin{Interface: name, index: index, Dial: dial, release: func() { scoped.release(held) }}, nil
 }
 
 type scopedHost struct {

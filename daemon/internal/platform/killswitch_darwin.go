@@ -284,24 +284,35 @@ func (ks *darwinKillSwitch) SetSplitCIDRs(ctx context.Context, cidrs []string) e
 	return ks.setSplit(ctx, next)
 }
 
-// SetDaemonEgress permits hosts' addresses to root's sockets only, which is the daemon.
+// SetDaemonEgress permits hosts' addresses to the egress broker's group only, which only the
+// daemon's pinned sockets carry; without a verified group they stay blocked.
 func (ks *darwinKillSwitch) SetDaemonEgress(ctx context.Context, hosts, dedicated []string) error {
-	ips := resolveDaemonEgressHosts(ctx, hosts, dedicated)
+	resolved := resolveDaemonEgressHosts(ctx, hosts, dedicated)
+	ips, gid := resolved, 0
+	var gidErr error
+	if len(ips) > 0 {
+		if gid, gidErr = splitEgressGID(); gidErr != nil {
+			ips, gidErr = nil, fmt.Errorf("kill switch daemon egress: %w", gidErr)
+		}
+	}
 	ks.opMu.Lock()
 	defer ks.opMu.Unlock()
-	grew := len(unionSorted(ks.shared, ips)) != len(ks.shared)
-	ks.shared = unionSorted(ks.shared, ips)
+	if gid > 0 {
+		ks.egressGID = gid
+	}
+	grew := len(unionSorted(ks.shared, resolved)) != len(ks.shared)
+	ks.shared = unionSorted(ks.shared, resolved)
 	next := ks.split.clone()
 	next.DaemonIPs = ips
 	if ks.split.equal(next) && ks.pfSplit.equal(next) && !grew {
-		return nil
+		return gidErr
 	}
 	// setSplit re-renders through render, which strips shared from the endpoints.
 	err := ks.setSplit(ctx, next)
 	if active, _ := ks.snapshotState(); active {
 		pruneSharedFromState(ks.shared)
 	}
-	return err
+	return errors.Join(gidErr, err)
 }
 
 // setSplit re-renders an armed lock with next; an idle switch only records it for
@@ -330,7 +341,7 @@ func (ks *darwinKillSwitch) setSplit(ctx context.Context, next splitPermits) err
 func (ks *darwinKillSwitch) render(ctx context.Context, r ksRules) error {
 	r.EndpointIPs = withoutDaemonIPs(r.EndpointIPs, ks.shared)
 	gid := 0
-	if r.Split.Egress {
+	if r.Split.Egress || len(r.Split.DaemonIPs) > 0 {
 		gid = ks.egressGID
 	}
 	if err := pfApply(ctx, r, gid); err != nil {

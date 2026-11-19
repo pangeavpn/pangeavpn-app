@@ -18,7 +18,7 @@ func pinCDNEdge(ctx context.Context, host string) (sbrelay.Pin, error) {
 	if err != nil {
 		return sbrelay.Pin{}, err
 	}
-	return sbrelay.Pin{Server: pin.Server, Interface: pin.Interface, Mark: pin.Mark, Release: pin.Release}, nil
+	return sbrelay.Pin{Server: pin.Server, Interface: pin.Interface, Mark: pin.Mark, Dial: pin.Dial, Release: pin.Release}, nil
 }
 
 func pinTectonicEdge(ctx context.Context, host string) (tectonic.EdgePin, error) {
@@ -26,5 +26,5 @@ func pinTectonicEdge(ctx context.Context, host string) (tectonic.EdgePin, error)
 	if err != nil {
 		return tectonic.EdgePin{}, err
 	}
-	return tectonic.EdgePin{Server: pin.Server, Control: pin.Control(), Release: pin.Release}, nil
+	return tectonic.EdgePin{Server: pin.Server, Control: pin.Control(), Dial: pin.Dial, Release: pin.Release}, nil
 }

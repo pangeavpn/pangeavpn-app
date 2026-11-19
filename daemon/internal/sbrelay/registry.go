@@ -15,12 +15,13 @@ import (
 	"github.com/sagernet/sing-box/protocol/vless"
 )
 
-// registryContext wires only the TUIC and VLESS outbounds. The "local" DNS
+// registryContext wires only the TUIC, VLESS and pinned outbounds. The "local" DNS
 // transport is mandatory: box.New always wires it as the DNS fallback.
 func registryContext(ctx context.Context) context.Context {
 	outbounds := outbound.NewRegistry()
 	tuic.RegisterOutbound(outbounds)
 	vless.RegisterOutbound(outbounds)
+	registerPinned(outbounds)
 	transports := dns.NewTransportRegistry()
 	dnslocal.RegisterTransport(transports)
 	return box.Context(ctx, inbound.NewRegistry(), outbounds, endpoint.NewRegistry(), transports, boxservice.NewRegistry(), certificate.NewRegistry())
