@@ -4,8 +4,13 @@ package platform
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
+
+	"golang.org/x/sys/windows"
 )
 
 const (
@@ -189,5 +194,37 @@ func TestWindowsDaemonEgress_RetiresAnAllAppPermitTheEdgeAlreadyHad(t *testing.T
 	}
 	if slices.Contains(st.EndpointIPs, sharedEdgeA) || st.Version != KillSwitchStateVersion {
 		t.Fatalf("saved state = %+v, want the edge gone and the current version", st)
+	}
+}
+
+// An 8.3 short image path (a CI runner's RUNNER~1 temp dir) must give the same app id as the
+// long one: BFE matches the kernel's long path, so a short-path permit admits nothing.
+func TestLongPathNameExpandsShortNames(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "a-directory-name-well-past-eight-characters")
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	exe := filepath.Join(dir, "pangea-daemon-image.exe")
+	if err := os.WriteFile(exe, []byte("MZ"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	long, err := windows.UTF16PtrFromString(exe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	buf := make([]uint16, windows.MAX_LONG_PATH)
+	n, err := windows.GetShortPathName(long, &buf[0], uint32(len(buf)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	short := windows.UTF16ToString(buf[:n])
+	if strings.EqualFold(short, exe) {
+		t.Skip("8.3 names are off on this volume")
+	}
+	if got := longPathName(short); !strings.EqualFold(got, exe) {
+		t.Fatalf("longPathName(%q) = %q, want %q", short, got, exe)
+	}
+	if got := longPathName(`C:\no\such\path.exe`); got != `C:\no\such\path.exe` {
+		t.Fatalf("a missing path changed to %q", got)
 	}
 }

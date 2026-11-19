@@ -1,0 +1,55 @@
+name: Live shared-edge checks
+
+# Manual only: it loads real pf, WFP and nftables rules and routes, so run it on GitHub's
+# disposable runners (for instance before a release), never on a machine you use.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  live:
+    name: Live (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest, ubuntu-latest]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Go
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: daemon/go.mod
+          cache: true
+          cache-dependency-path: daemon/go.sum
+
+      - name: Live tests (macOS, as root)
+        if: runner.os == 'macOS'
+        working-directory: daemon
+        run: |
+          go test -c -o "$RUNNER_TEMP/nicpin.test" ./internal/nicpin/
+          go test -c -o "$RUNNER_TEMP/platform.test" ./internal/platform/
+          sudo PANGEA_LIVE_PIN=1 "$RUNNER_TEMP/nicpin.test" -test.run Live -test.v
+          sudo PANGEA_LIVE_LOCK=1 "$RUNNER_TEMP/platform.test" -test.run LivePFDaemonEgress -test.v
+
+      - name: Live tests (Windows, as admin)
+        if: runner.os == 'Windows'
+        working-directory: daemon
+        env:
+          PANGEA_LIVE_PIN: '1'
+          PANGEA_LIVE_LOCK: '1'
+        run: |
+          go test ./internal/nicpin/ -run Live -count=1 -v
+          go test ./internal/platform/ -run LiveWFPDaemonEgress -count=1 -v
+
+      - name: Live tests (Linux, root in a scratch netns)
+        if: runner.os == 'Linux'
+        working-directory: daemon
+        run: |
+          go test -c -o "$RUNNER_TEMP/platform.test" ./internal/platform/
+          sudo unshare -n "$RUNNER_TEMP/platform.test" -test.run 'LiveDaemonEgress|LiveNFT|LiveIPTables' -test.v

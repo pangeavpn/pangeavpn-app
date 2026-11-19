@@ -264,6 +264,8 @@ var wfpAppID = appIDFromFileName
 // appIDFromFileName returns BFE's app id for an image, its lower-cased NT device
 // path. free releases the BFE-allocated blob once every filter using it is added.
 func appIDFromFileName(path string) (blob *wtFwpByteBlob, free func(), err error) {
+	// BFE matches the kernel's long image path; an 8.3 short path (RUNNER~1) names nothing.
+	path = longPathName(path)
 	name, err := windows.UTF16PtrFromString(path)
 	if err != nil {
 		return nil, nil, fmt.Errorf("app id path: %w", err)
@@ -274,6 +276,20 @@ func appIDFromFileName(path string) (blob *wtFwpByteBlob, free func(), err error
 		return nil, nil, fmt.Errorf("FwpmGetAppIdFromFileName0: %w", windows.Errno(r))
 	}
 	return blob, func() { procFwpmFreeMemory0.Call(uintptr(unsafe.Pointer(&blob))) }, nil
+}
+
+// longPathName expands any 8.3 components of path, or returns it unchanged if it can't.
+func longPathName(path string) string {
+	short, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return path
+	}
+	buf := make([]uint16, windows.MAX_LONG_PATH)
+	n, err := windows.GetLongPathName(short, &buf[0], uint32(len(buf)))
+	if err != nil || n == 0 || int(n) > len(buf) {
+		return path
+	}
+	return windows.UTF16ToString(buf[:n])
 }
 
 func wfpOpen() (*wfpEngine, error) {
