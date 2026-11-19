@@ -283,8 +283,8 @@ export interface ServerInfo {
     targetHost?: string;
     targetPort?: number;
   };
-  /** VLESS over HTTPUpgrade+TLS through a CDN. `remoteHost` is the CDN-proxied
-   *  hostname and `remoteIp` an edge address, never the node's. */
+  /** VLESS over HTTPUpgrade, or VMess over a WebSocket when `vmess` is set, through a CDN.
+   *  `remoteHost` is the CDN-proxied hostname and `remoteIp` an edge address, never the node's. */
   cdn?: {
     remoteHost: string;
     remoteIp?: string;
@@ -294,6 +294,7 @@ export interface ServerInfo {
     serverName?: string;
     targetHost?: string;
     targetPort?: number;
+    vmess?: { uuid: string; path?: string; remotePort?: number };
   };
   /** Shadowsocks listener that reaches the hub instead of WireGuard, used as a
    *  fallback path for account traffic. Per-region, but the same for all. */

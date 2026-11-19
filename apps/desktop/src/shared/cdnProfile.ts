@@ -11,12 +11,15 @@ export interface CDNServerInfo {
   serverName?: string;
   targetHost?: string;
   targetPort?: number;
+  /** The node's VMess-over-WebSocket route on the same hostname; its edge port defaults to 443. */
+  vmess?: { uuid: string; path?: string; remotePort?: number };
 }
 
 export interface CDNProfileBlock {
   localPort: number;
   remoteHost: string;
   remotePort: number;
+  protocol?: "vmess";
   uuid: string;
   serverName: string;
   path: string;
@@ -30,13 +33,16 @@ export function buildCDNProfile(cdn: CDNServerInfo): CDNProfileBlock {
   // Never falls back to the node IP: a hostname dial goes to the CDN, not the node.
   const remoteHost = isIpLiteral(remoteIp) ? remoteIp : hubHost;
   const serverName = cdn.serverName?.trim() || (isIpLiteral(hubHost) ? "" : hubHost);
+  // VMess leaves nothing readable past the upgrade, so it wins wherever the node serves it.
+  const vmess = cdn.vmess?.uuid ? cdn.vmess : undefined;
   return {
     localPort: 0,
     remoteHost,
-    remotePort: cdn.remotePort || 443,
-    uuid: cdn.uuid,
+    remotePort: (vmess ? vmess.remotePort : cdn.remotePort) || 443,
+    ...(vmess ? { protocol: "vmess" as const } : {}),
+    uuid: vmess ? vmess.uuid : cdn.uuid,
     serverName,
-    path: cdn.path?.trim() || "/",
+    path: (vmess ? vmess.path : cdn.path)?.trim() || "/",
     ...(cdn.targetHost ? { targetHost: cdn.targetHost } : {}),
     ...(cdn.targetPort ? { targetPort: cdn.targetPort } : {})
   };
