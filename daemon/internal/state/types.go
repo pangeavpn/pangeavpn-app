@@ -328,12 +328,14 @@ type TUICProfile struct {
 	TargetPort int    `json:"targetPort,omitempty"`
 }
 
-// CDNProfile is VLESS over HTTPUpgrade+TLS dialled at a CDN edge that proxies to the node.
-// RemoteHost is the edge, never the node; ServerName is the proxied hostname.
+// CDNProfile is a TLS connection to a CDN edge that proxies to the node. RemoteHost is the
+// edge, never the node; ServerName is the proxied hostname.
 type CDNProfile struct {
 	LocalPort  int    `json:"localPort"`
 	RemoteHost string `json:"remoteHost"`
 	RemotePort int    `json:"remotePort"`
+	// Protocol is "" for VLESS over HTTPUpgrade or "vmess" for VMess over a WebSocket.
+	Protocol   string `json:"protocol,omitempty"`
 	UUID       string `json:"uuid"`
 	ServerName string `json:"serverName"`
 	Path       string `json:"path,omitempty"`

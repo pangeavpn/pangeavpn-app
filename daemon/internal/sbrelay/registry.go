@@ -11,16 +11,20 @@ import (
 	boxservice "github.com/sagernet/sing-box/adapter/service"
 	"github.com/sagernet/sing-box/dns"
 	dnslocal "github.com/sagernet/sing-box/dns/transport/local"
+	"github.com/sagernet/sing-box/protocol/direct"
 	"github.com/sagernet/sing-box/protocol/tuic"
 	"github.com/sagernet/sing-box/protocol/vless"
+	"github.com/sagernet/sing-box/protocol/vmess"
 )
 
-// registryContext wires only the TUIC, VLESS and pinned outbounds. The "local" DNS
-// transport is mandatory: box.New always wires it as the DNS fallback.
+// registryContext wires only the TUIC, VLESS, VMess, direct and pinned outbounds. The "local"
+// DNS transport is mandatory: box.New always wires it as the DNS fallback.
 func registryContext(ctx context.Context) context.Context {
 	outbounds := outbound.NewRegistry()
 	tuic.RegisterOutbound(outbounds)
 	vless.RegisterOutbound(outbounds)
+	vmess.RegisterOutbound(outbounds)
+	direct.RegisterOutbound(outbounds)
 	registerPinned(outbounds)
 	transports := dns.NewTransportRegistry()
 	dnslocal.RegisterTransport(transports)
