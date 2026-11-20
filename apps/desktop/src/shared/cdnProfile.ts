@@ -11,15 +11,16 @@ export interface CDNServerInfo {
   serverName?: string;
   targetHost?: string;
   targetPort?: number;
-  /** The node's VMess-over-WebSocket route on the same hostname; its edge port defaults to 443. */
+  /** The node's VMess-over-WebSocket route on the same hostname (the cdnws transport);
+   *  its edge port defaults to 443. */
   vmess?: { uuid: string; path?: string; remotePort?: number };
 }
 
+/** The same block feeds both CDN transports: `cdn` (VLESS) and `cdnws` (VMess). */
 export interface CDNProfileBlock {
   localPort: number;
   remoteHost: string;
   remotePort: number;
-  protocol?: "vmess";
   uuid: string;
   serverName: string;
   path: string;
@@ -27,22 +28,34 @@ export interface CDNProfileBlock {
   targetPort?: number;
 }
 
+/** VLESS over HTTPUpgrade through the edge: the `cdn` transport. */
 export function buildCDNProfile(cdn: CDNServerInfo): CDNProfileBlock {
+  return edgeProfile(cdn, cdn.uuid, cdn.path, cdn.remotePort);
+}
+
+/** VMess over a WebSocket through the same edge: the `cdnws` transport. Undefined when
+ *  the node serves only VLESS there. */
+export function buildCDNWSProfile(cdn: CDNServerInfo): CDNProfileBlock | undefined {
+  const vmess = cdn.vmess;
+  if (!vmess?.uuid) {
+    return undefined;
+  }
+  return edgeProfile(cdn, vmess.uuid, vmess.path, vmess.remotePort);
+}
+
+function edgeProfile(cdn: CDNServerInfo, uuid: string, path: string | undefined, remotePort: number | undefined): CDNProfileBlock {
   const remoteIp = cdn.remoteIp?.trim() ?? "";
   const hubHost = cdn.remoteHost?.trim() ?? "";
   // Never falls back to the node IP: a hostname dial goes to the CDN, not the node.
   const remoteHost = isIpLiteral(remoteIp) ? remoteIp : hubHost;
   const serverName = cdn.serverName?.trim() || (isIpLiteral(hubHost) ? "" : hubHost);
-  // VMess leaves nothing readable past the upgrade, so it wins wherever the node serves it.
-  const vmess = cdn.vmess?.uuid ? cdn.vmess : undefined;
   return {
     localPort: 0,
     remoteHost,
-    remotePort: (vmess ? vmess.remotePort : cdn.remotePort) || 443,
-    ...(vmess ? { protocol: "vmess" as const } : {}),
-    uuid: vmess ? vmess.uuid : cdn.uuid,
+    remotePort: remotePort || 443,
+    uuid,
     serverName,
-    path: (vmess ? vmess.path : cdn.path)?.trim() || "/",
+    path: path?.trim() || "/",
     ...(cdn.targetHost ? { targetHost: cdn.targetHost } : {}),
     ...(cdn.targetPort ? { targetPort: cdn.targetPort } : {})
   };

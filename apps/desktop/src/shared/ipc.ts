@@ -283,8 +283,9 @@ export interface ServerInfo {
     targetHost?: string;
     targetPort?: number;
   };
-  /** VLESS over HTTPUpgrade, or VMess over a WebSocket when `vmess` is set, through a CDN.
-   *  `remoteHost` is the CDN-proxied hostname and `remoteIp` an edge address, never the node's. */
+  /** VLESS over HTTPUpgrade through a CDN (the cdn transport), plus, when `vmess` is set,
+   *  VMess over a WebSocket on the same hostname (the cdnws transport). `remoteHost` is
+   *  the CDN-proxied hostname and `remoteIp` an edge address, never the node's. */
   cdn?: {
     remoteHost: string;
     remoteIp?: string;
@@ -344,6 +345,7 @@ export interface PublicServerInfo {
   anytls?: boolean;
   tuic?: boolean;
   cdn?: boolean;
+  cdnws?: boolean;
   snowflake?: boolean;
 }
 
@@ -363,6 +365,7 @@ export function toPublicServerInfo(server: ServerInfo): PublicServerInfo {
     anytls: Boolean(server.anytls),
     tuic: Boolean(server.tuic),
     cdn: Boolean(server.cdn),
+    cdnws: Boolean(server.cdn?.vmess?.uuid),
     snowflake: Boolean(server.snowflake)
   };
 }
@@ -436,8 +439,8 @@ export interface PangeaApi {
   /** Developer option: send hub traffic through the tunnel, not around it. */
   setHubInTunnel: (enabled: boolean) => Promise<void>;
   getHubInTunnel: () => Promise<boolean>;
-  setPreferredTransport: (value: "auto" | "tectonic" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "anytls" | "tuic" | "cdn" | "snowflake" | "wireguard") => Promise<void>;
-  getPreferredTransport: () => Promise<"auto" | "tectonic" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "anytls" | "tuic" | "cdn" | "snowflake" | "wireguard">;
+  setPreferredTransport: (value: "auto" | "tectonic" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "anytls" | "tuic" | "cdn" | "cdnws" | "snowflake" | "wireguard") => Promise<void>;
+  getPreferredTransport: () => Promise<"auto" | "tectonic" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "anytls" | "tuic" | "cdn" | "cdnws" | "snowflake" | "wireguard">;
   setLaunchAtStartup: (enabled: boolean) => Promise<void>;
   getLaunchAtStartup: () => Promise<boolean>;
   /** Kill switch stays armed while disconnected. Independent of auto-connect. */

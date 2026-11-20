@@ -11,7 +11,7 @@ import { directWireGuardEndpoint } from "../shared/wireguardEndpoint";
 import { buildShadowsocksProfile, isShadowsocksServerInfo } from "../shared/shadowsocksProfile";
 import { buildAnyTLSProfile } from "../shared/anytlsProfile";
 import { buildTUICProfile } from "../shared/tuicProfile";
-import { buildCDNProfile } from "../shared/cdnProfile";
+import { buildCDNProfile, buildCDNWSProfile } from "../shared/cdnProfile";
 import {
   buildTectonicProfile,
   tectonicNodeHosts,
@@ -1893,6 +1893,7 @@ export class PangeaApiClient {
     const anytls = server.anytls ? buildAnyTLSProfile(server.anytls, nodeIp) : undefined;
     const tuic = server.tuic ? buildTUICProfile(server.tuic, nodeIp) : undefined;
     const cdn = server.cdn ? buildCDNProfile(server.cdn) : undefined;
+    const cdnws = server.cdn ? buildCDNWSProfile(server.cdn) : undefined;
     // Never under a hop: the node relays only to its own WireGuard, so it would egress at the entry.
     const tectonic = reg.tectonic && !isMultihop ? buildTectonicProfile(reg.tectonic, nodeIp) : undefined;
     // The reply's copy is current; the cached list may be one this client cannot refresh.
@@ -1988,6 +1989,7 @@ export class PangeaApiClient {
       ...(tuic ? { tuic } : {}),
       ...(tectonic ? { tectonic } : {}),
       ...(cdn ? { cdn } : {}),
+      ...(cdnws ? { cdnws } : {}),
       ...(server.snowflake ? {
         snowflake: {
           localPort: 0,

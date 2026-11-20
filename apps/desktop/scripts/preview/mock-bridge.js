@@ -58,6 +58,7 @@
     anytls: idle,
     tuic: idle,
     cdn: idle,
+    cdnws: idle,
     snowflake: idle,
     wireguard: {
       running: live,

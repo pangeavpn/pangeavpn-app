@@ -671,6 +671,7 @@ const TRANSPORT_DESCRIPTIONS: Record<string, MessageKey> = {
   anytls: "settings.transport.anytls.desc",
   tuic: "settings.transport.tuic.desc",
   cdn: "settings.transport.cdn.desc",
+  cdnws: "settings.transport.cdnws.desc",
   wireguard: "settings.transport.wireguard.desc"
 };
 
@@ -4077,7 +4078,8 @@ const TRANSPORT_LABELS: Record<string, string> = {
   hysteria2: "Hysteria2",
   anytls: "AnyTLS",
   tuic: "TUIC",
-  cdn: "CDN",
+  cdn: "CDN (VLESS)",
+  cdnws: "CDN (VMess)",
   snowflake: "Snowflake",
   wireguard: "WireGuard",
 };
@@ -4814,6 +4816,7 @@ type TransportChoice =
   | "anytls"
   | "tuic"
   | "cdn"
+  | "cdnws"
   | "snowflake"
   | "wireguard";
 
@@ -4835,6 +4838,8 @@ function serverSupportsTransport(server: ServerInfo, transport: TransportChoice)
       return Boolean(server.tuic);
     case "cdn":
       return Boolean(server.cdn);
+    case "cdnws":
+      return Boolean(server.cdnws);
     case "snowflake":
       return Boolean(server.snowflake);
     // Per-device credential from /api/register, not the server list: any node may have it.

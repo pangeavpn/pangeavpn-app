@@ -137,6 +137,7 @@ declare global {
     anytls?: boolean;
     tuic?: boolean;
     cdn?: boolean;
+    cdnws?: boolean;
     snowflake?: boolean;
   }
 
@@ -233,8 +234,8 @@ declare global {
     /** Developer option: send hub traffic through the tunnel, not around it. */
     setHubInTunnel: (enabled: boolean) => Promise<void>;
     getHubInTunnel: () => Promise<boolean>;
-    setPreferredTransport: (value: "auto" | "tectonic" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "anytls" | "tuic" | "cdn" | "snowflake" | "wireguard") => Promise<void>;
-    getPreferredTransport: () => Promise<"auto" | "tectonic" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "anytls" | "tuic" | "cdn" | "snowflake" | "wireguard">;
+    setPreferredTransport: (value: "auto" | "tectonic" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "anytls" | "tuic" | "cdn" | "cdnws" | "snowflake" | "wireguard") => Promise<void>;
+    getPreferredTransport: () => Promise<"auto" | "tectonic" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "anytls" | "tuic" | "cdn" | "cdnws" | "snowflake" | "wireguard">;
     setLaunchAtStartup: (enabled: boolean) => Promise<void>;
     getLaunchAtStartup: () => Promise<boolean>;
     setLockdown: (enabled: boolean) => Promise<void>;
