@@ -36,6 +36,7 @@ func buildProfile(server *serverInfo) *state.Profile {
 		AnyTLS:      buildAnyTLS(server.AnyTLS, nodeIP),
 		TUIC:        buildTUIC(server.TUIC, nodeIP),
 		CDN:         buildCDN(server.CDN),
+		CDNWS:       buildCDNWS(server.CDN),
 		Snowflake:   buildSnowflake(server.Snowflake),
 	}
 }
@@ -202,12 +203,25 @@ func buildTUIC(info *tuicInfo, nodeIP string) *state.TUICProfile {
 	}
 }
 
-// buildCDN ports apps/desktop/src/shared/cdnProfile.ts. It never falls back to
-// the node's address: hiding that address is the transport's whole point.
+// buildCDN ports buildCDNProfile in apps/desktop/src/shared/cdnProfile.ts. It never
+// falls back to the node's address: hiding that address is the transport's whole point.
 func buildCDN(info *cdnInfo) *state.CDNProfile {
 	if info == nil {
 		return nil
 	}
+	return cdnEdgeProfile(info, info.UUID, info.Path, info.RemotePort)
+}
+
+// buildCDNWS ports buildCDNWSProfile: the node's VMess route through the same edge,
+// nil when the node serves only VLESS there.
+func buildCDNWS(info *cdnInfo) *state.CDNProfile {
+	if info == nil || info.VMess == nil || info.VMess.UUID == "" {
+		return nil
+	}
+	return cdnEdgeProfile(info, info.VMess.UUID, info.VMess.Path, info.VMess.RemotePort)
+}
+
+func cdnEdgeProfile(info *cdnInfo, uuid, path string, remotePort int) *state.CDNProfile {
 	host := strings.TrimSpace(info.RemoteHost)
 	dial := host
 	if remoteIP := strings.TrimSpace(info.RemoteIP); isIPLiteral(remoteIP) {
@@ -217,20 +231,15 @@ func buildCDN(info *cdnInfo) *state.CDNProfile {
 	if serverName == "" && !isIPLiteral(host) {
 		serverName = host
 	}
-	profile := &state.CDNProfile{
+	return &state.CDNProfile{
 		RemoteHost: dial,
-		RemotePort: info.RemotePort,
-		UUID:       info.UUID,
+		RemotePort: remotePort,
+		UUID:       uuid,
 		ServerName: serverName,
-		Path:       info.Path,
+		Path:       path,
 		TargetHost: info.TargetHost,
 		TargetPort: info.TargetPort,
 	}
-	// VMess leaves nothing readable past the upgrade, so it wins wherever the node serves it.
-	if route := info.VMess; route != nil && route.UUID != "" {
-		profile.Protocol, profile.UUID, profile.Path, profile.RemotePort = "vmess", route.UUID, route.Path, route.RemotePort
-	}
-	return profile
 }
 
 // tectonicDefaultPort is the node port when the hub's node names none.

@@ -21,8 +21,26 @@ func NewTUIC(logs *state.LogStore) *Manager[state.TUICProfile] {
 	return &Manager[state.TUICProfile]{name: "tuic", source: state.SourceTUIC, logs: logs, build: buildTUIC}
 }
 
+// NewCDN is VLESS over HTTPUpgrade through the CDN edge.
 func NewCDN(logs *state.LogStore) *Manager[state.CDNProfile] {
-	return &Manager[state.CDNProfile]{name: "cdn", source: state.SourceCDN, logs: logs, build: buildCDN}
+	return &Manager[state.CDNProfile]{name: "cdn", source: state.SourceCDN, logs: logs, build: cdnBuilder("cdn", cdnVLESS)}
+}
+
+// NewCDNWS is VMess over a WebSocket through the same kind of edge: past the upgrade a
+// filter that decrypts TLS reads only VMess ciphertext.
+func NewCDNWS(logs *state.LogStore) *Manager[state.CDNProfile] {
+	return &Manager[state.CDNProfile]{name: "cdnws", source: state.SourceCDNWS, logs: logs, build: cdnBuilder("cdnws", cdnVMess)}
+}
+
+type cdnProtocol int
+
+const (
+	cdnVLESS cdnProtocol = iota
+	cdnVMess
+)
+
+func cdnBuilder(name string, protocol cdnProtocol) func(state.CDNProfile) (spec, error) {
+	return func(p state.CDNProfile) (spec, error) { return buildCDN(name, protocol, p) }
 }
 
 func buildTUIC(p state.TUICProfile) (spec, error) {
@@ -65,22 +83,22 @@ func buildTUIC(p state.TUICProfile) (spec, error) {
 	}, nil
 }
 
-func buildCDN(p state.CDNProfile) (spec, error) {
+func buildCDN(name string, protocol cdnProtocol, p state.CDNProfile) (spec, error) {
 	host := strings.TrimSpace(p.RemoteHost)
 	remotePort := p.RemotePort
 	if remotePort == 0 {
 		remotePort = 443
 	}
-	if err := validatePorts("cdn", host, remotePort, p.LocalPort, p.TargetPort); err != nil {
+	if err := validatePorts(name, host, remotePort, p.LocalPort, p.TargetPort); err != nil {
 		return spec{}, err
 	}
 	if p.UUID == "" {
-		return spec{}, errors.New("cdn uuid is required")
+		return spec{}, fmt.Errorf("%s uuid is required", name)
 	}
 	// The edge routes on SNI and Host, so the proxied hostname is never optional.
 	serverName := strings.TrimSpace(p.ServerName)
 	if serverName == "" || net.ParseIP(serverName) != nil {
-		return spec{}, errors.New("cdn serverName must be the CDN-proxied hostname")
+		return spec{}, fmt.Errorf("%s serverName must be the CDN-proxied hostname", name)
 	}
 	path := p.Path
 	if path == "" {
@@ -97,8 +115,8 @@ func buildCDN(p state.CDNProfile) (spec, error) {
 	var dialer *option.DialerOptions
 	var dialAt *option.ServerOptions
 	via := "VLESS over HTTPUpgrade"
-	switch p.Protocol {
-	case "":
+	switch protocol {
+	case cdnVLESS:
 		vless := &option.VLESSOutboundOptions{
 			DialerOptions:               protectedDialer(),
 			ServerOptions:               server,
@@ -110,7 +128,7 @@ func buildCDN(p state.CDNProfile) (spec, error) {
 			},
 		}
 		outbound, dialer, dialAt = option.Outbound{Type: C.TypeVLESS, Tag: outboundTag, Options: vless}, &vless.DialerOptions, &vless.ServerOptions
-	case "vmess":
+	case cdnVMess:
 		// Everything after the upgrade is VMess ciphertext, so a filter that decrypts TLS reads nothing.
 		vmess := &option.VMessOutboundOptions{
 			DialerOptions:               protectedDialer(),
@@ -128,7 +146,7 @@ func buildCDN(p state.CDNProfile) (spec, error) {
 		outbound, dialer, dialAt = option.Outbound{Type: C.TypeVMess, Tag: outboundTag, Options: vmess}, &vmess.DialerOptions, &vmess.ServerOptions
 		via = "VMess over WebSocket"
 	default:
-		return spec{}, fmt.Errorf("cdn protocol %q is not supported", p.Protocol)
+		return spec{}, fmt.Errorf("%s: unknown protocol %d", name, protocol)
 	}
 
 	extraRoots := parseRoots(p.ExtraRootsPEM)

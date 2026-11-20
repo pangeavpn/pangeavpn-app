@@ -93,6 +93,11 @@ func (s *starter) StarterFor(profile *state.Profile, kind string) (transport.Sta
 			return nil, transport.NotConfigured
 		}
 		return s.startCDN, s.singBoxAvailability()
+	case "cdnws":
+		if profile.CDNWS == nil {
+			return nil, transport.NotConfigured
+		}
+		return s.startCDNWS, s.singBoxAvailability()
 	case "naive":
 		if !naiveLinked {
 			return nil, transport.Unavailable
@@ -261,6 +266,12 @@ func (s *starter) startCDN(ctx context.Context, profile *state.Profile, _ *state
 	start := *profile.CDN
 	start.LocalPort = 0
 	return startRelay(ctx, s, "cdn", sbrelay.NewCDN(s.logs), start)
+}
+
+func (s *starter) startCDNWS(ctx context.Context, profile *state.Profile, _ *state.WireGuardProfile) error {
+	start := *profile.CDNWS
+	start.LocalPort = 0
+	return startRelay(ctx, s, "cdnws", sbrelay.NewCDNWS(s.logs), start)
 }
 
 func startRelay[P comparable](ctx context.Context, s *starter, kind string, mgr *sbrelay.Manager[P], profile P) error {

@@ -114,7 +114,8 @@ type cdnInfo struct {
 	VMess      *cdnVMessRoute `json:"vmess,omitempty"`
 }
 
-// cdnVMessRoute is the node's VMess-over-WebSocket inbound on the same hostname.
+// cdnVMessRoute is the node's VMess-over-WebSocket inbound on the same hostname: the
+// cdnws transport, offered beside the VLESS route rather than in its place.
 type cdnVMessRoute struct {
 	UUID       string `json:"uuid"`
 	Path       string `json:"path,omitempty"`
@@ -189,6 +190,7 @@ type publicServer struct {
 	AnyTLS      bool   `json:"anytls"`
 	TUIC        bool   `json:"tuic"`
 	CDN         bool   `json:"cdn"`
+	CDNWS       bool   `json:"cdnws"`
 	Naive       bool   `json:"naive"`
 	Snowflake   bool   `json:"snowflake"`
 }

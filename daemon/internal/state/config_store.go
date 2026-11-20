@@ -420,6 +420,12 @@ func profilePortClaims(profile Profile) ([]portClaim, error) {
 		}
 		claims = append(claims, portClaim{"cdn", profile.CDN.LocalPort})
 	}
+	if profile.CDNWS != nil {
+		if profile.CDNWS.RemoteHost == "" {
+			return nil, fmt.Errorf("profile %s cdnws missing remote host", profile.ID)
+		}
+		claims = append(claims, portClaim{"cdnws", profile.CDNWS.LocalPort})
+	}
 	if profile.Snowflake != nil {
 		if profile.Snowflake.BrokerURL == "" {
 			return nil, fmt.Errorf("profile %s snowflake missing broker url", profile.ID)
@@ -466,6 +472,7 @@ func cloneProfile(profile Profile) Profile {
 	copyProfile.TUIC = clonePtr(profile.TUIC)
 	copyProfile.Tectonic = CloneTectonicProfile(profile.Tectonic)
 	copyProfile.CDN = clonePtr(profile.CDN)
+	copyProfile.CDNWS = clonePtr(profile.CDNWS)
 	copyProfile.Snowflake = cloneSnowflakeProfile(profile.Snowflake)
 	return copyProfile
 }
