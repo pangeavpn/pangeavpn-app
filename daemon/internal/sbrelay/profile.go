@@ -179,7 +179,7 @@ func buildCDN(name string, protocol cdnProtocol, p state.CDNProfile, ech []byte)
 		remote += fmt.Sprintf(", trusting %d of the user's own roots", len(extraRoots))
 	}
 	probe := &option.DirectOutboundOptions{DialerOptions: protectedDialer()}
-	refusal := &refusalProbe{tag: probeTag, at: dialAt, serverName: serverName, path: path, roots: extraRoots, ech: ech}
+	refusal := &refusalProbe{tag: probeTag, at: dialAt, serverName: serverName, path: path, roots: extraRoots, ech: ech, websocket: protocol == cdnVMess}
 	return spec{
 		outbound:   outbound,
 		extra:      []option.Outbound{{Type: C.TypeDirect, Tag: probeTag, Options: probe}},

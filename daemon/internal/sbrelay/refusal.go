@@ -36,6 +36,8 @@ type refusalProbe struct {
 	path       string
 	roots      []string
 	ech        []byte
+	// websocket sends a real WebSocket key, as the VMess route does; HTTPUpgrade servers 404 one.
+	websocket bool
 }
 
 func (r *refusalProbe) annotate(ctx context.Context, engine *box.Box, err error) error {
@@ -78,10 +80,13 @@ func (r *refusalProbe) whoRefused(ctx context.Context, engine *box.Box) string {
 		return ""
 	}
 	defer tlsConn.Close()
-	var key [16]byte
-	rand.Read(key[:])
-	request := fmt.Sprintf("GET %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: %s\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: %s\r\n\r\n",
-		r.path, r.serverName, browserUserAgent, base64.StdEncoding.EncodeToString(key[:]))
+	upgrade := "Connection: Upgrade\r\nUpgrade: websocket\r\n"
+	if r.websocket {
+		var key [16]byte
+		rand.Read(key[:])
+		upgrade += "Sec-WebSocket-Version: 13\r\nSec-WebSocket-Key: " + base64.StdEncoding.EncodeToString(key[:]) + "\r\n"
+	}
+	request := fmt.Sprintf("GET %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: %s\r\n%s\r\n", r.path, r.serverName, browserUserAgent, upgrade)
 	if _, err := io.WriteString(tlsConn, request); err != nil {
 		return ""
 	}
