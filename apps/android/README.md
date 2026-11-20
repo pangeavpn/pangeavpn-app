@@ -4,7 +4,7 @@ Kotlin/Compose clients for phone, tablet, and Android TV. The tunnel and hub
 control plane are shared with the desktop app via a Go core compiled to an AAR
 with `gomobile`. WireGuard runs in-process inside the same transports as desktop
 (REALITY, Cloak, Shadowsocks, Hysteria2, TUIC, NaiveProxy on arm64-v8a, AnyTLS,
-CDN, and Tectonic, which is in beta), and auto mode walks them in the same order.
+CDN over VMess and over VLESS, and Tectonic, which is in beta), and auto mode walks them in the same order.
 
 ## Modules
 

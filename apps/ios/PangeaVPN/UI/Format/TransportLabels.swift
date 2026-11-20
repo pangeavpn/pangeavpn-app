@@ -4,12 +4,12 @@ enum TransportLabels {
     // Product names, so they read the same in every language, as on desktop.
     private static let names: [String: String] = [
         "tectonic": "Tectonic", "cloak": "Cloak", "reality": "VLESS+REALITY", "shadowsocks": "Shadowsocks",
-        "hysteria2": "Hysteria2", "anytls": "AnyTLS", "tuic": "TUIC", "cdn": "CDN",
+        "hysteria2": "Hysteria2", "anytls": "AnyTLS", "tuic": "TUIC", "cdn": "CDN (VLESS)", "cdnws": "CDN (VMess)",
         "snowflake": "Snowflake", "naive": "NaiveProxy", "wireguard": "WireGuard",
     ]
 
     // Desktop's picker order, which is the order automatic mode walks.
-    static let pickerOrder: [Transport] = [.auto, .reality, .cloak, .shadowsocks, .hysteria2, .tuic, .anytls, .cdn, .tectonic]
+    static let pickerOrder: [Transport] = [.auto, .reality, .cloak, .shadowsocks, .hysteria2, .tuic, .anytls, .cdnws, .cdn, .tectonic]
 
     static func status(_ activeTransport: String?) -> String {
         activeTransport.flatMap { names[$0] } ?? ""
@@ -25,7 +25,8 @@ enum TransportLabels {
         case .hysteria2: return String(localized: "settings_transport_hysteria2", defaultValue: "Hysteria2")
         case .anytls: return String(localized: "settings_transport_anytls", defaultValue: "AnyTLS")
         case .tuic: return String(localized: "settings_transport_tuic", defaultValue: "TUIC")
-        case .cdn: return String(localized: "settings_transport_cdn", defaultValue: "CDN")
+        case .cdn: return String(localized: "settings_transport_cdn", defaultValue: "CDN (VLESS)")
+        case .cdnws: return String(localized: "settings_transport_cdnws", defaultValue: "CDN (VMess)")
         }
     }
 
@@ -49,6 +50,8 @@ enum TransportLabels {
             return String(localized: "bypass_tuic_desc", defaultValue: "QUIC that looks like ordinary HTTP/3. Needs a network that lets UDP through.")
         case .cdn:
             return String(localized: "bypass_cdn_desc", defaultValue: "Goes through a content delivery network, so blocking our servers' addresses doesn't stop it. Slower than the others.")
+        case .cdnws:
+            return String(localized: "bypass_cdnws_desc", defaultValue: "Also goes through a content delivery network, and stays unreadable even on networks that open up HTTPS traffic. Slower than the others.")
         }
     }
 

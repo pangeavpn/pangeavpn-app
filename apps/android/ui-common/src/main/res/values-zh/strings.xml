@@ -77,7 +77,8 @@
     <string name="settings_title">设置</string>
     <string name="settings_transport_anytls">AnyTLS</string>
     <string name="settings_transport_auto">自动（推荐）</string>
-    <string name="settings_transport_cdn">CDN</string>
+    <string name="settings_transport_cdn">CDN (VLESS)</string>
+    <string name="settings_transport_cdnws">CDN (VMess)</string>
     <string name="settings_transport_cloak">Cloak</string>
     <string name="settings_transport_description">PangeaVPN 如何伪装您的流量。</string>
     <string name="settings_transport_gaming_hint">通过两条连接同时发送游戏流量，丢一个包也不会让游戏卡住。会多用一点流量，也更容易被识别。仅适用于 Tectonic。下次连接时生效。</string>
@@ -103,7 +104,8 @@
     <string name="toggle_off">关闭</string>
     <string name="toggle_on">开启</string>
     <string name="transport_status_anytls">混淆：AnyTLS</string>
-    <string name="transport_status_cdn">混淆：CDN</string>
+    <string name="transport_status_cdn">混淆：CDN (VLESS)</string>
+    <string name="transport_status_cdnws">混淆：CDN (VMess)</string>
     <string name="transport_status_cloak">混淆：Cloak</string>
     <string name="transport_status_hysteria2">混淆：Hysteria2</string>
     <string name="transport_status_naive">混淆：NaiveProxy</string>

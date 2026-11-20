@@ -26,6 +26,7 @@
 "bypass_anytls_desc" = "Una sesión TLS con relleno, que suaviza el patrón TLS-en-TLS que otros transportes TLS dejan ver.";
 "bypass_auto_desc" = "Elige el disfraz que logra pasar y recuerda cuál funcionó en esta red.";
 "bypass_cdn_desc" = "Pasa por una red de distribución de contenidos, así que bloquear las direcciones de nuestros servidores no lo detiene. Más lento que los demás.";
+"bypass_cdnws_desc" = "También pasa por una red de distribución de contenidos y sigue siendo ilegible incluso en redes que abren el tráfico HTTPS. Más lento que los demás.";
 "bypass_cloak_desc" = "TLS dirigido a un sitio señuelo, así el tráfico parece una visita corriente.";
 "bypass_hysteria2_desc" = "UDP y QUIC en lugar de TCP. Vale la pena si se caen todas las conexiones TCP.";
 "bypass_reality_desc" = "Toma prestado el saludo TLS de un sitio real, así los sondeos ven un sitio auténtico. El disfraz más sólido.";
@@ -401,7 +402,8 @@
 "settings_title" = "Ajustes";
 "settings_transport_anytls" = "AnyTLS";
 "settings_transport_auto" = "Automático (recomendado)";
-"settings_transport_cdn" = "CDN";
+"settings_transport_cdn" = "CDN (VLESS)";
+"settings_transport_cdnws" = "CDN (VMess)";
 "settings_transport_cloak" = "Cloak";
 "settings_transport_description" = "Cómo PangeaVPN camufla tu tráfico.";
 "settings_transport_gaming_hint" = "Envía el tráfico de los juegos por dos conexiones a la vez, para que un paquete perdido no congele la partida. Usa algo más de datos y es más fácil de detectar. Solo con Tectonic. Se aplica en la próxima conexión.";
@@ -490,7 +492,8 @@
 "toggle_off" = "Desactivado";
 "toggle_on" = "Activado";
 "transport_status_anytls" = "Ofuscación: AnyTLS";
-"transport_status_cdn" = "Ofuscación: CDN";
+"transport_status_cdn" = "Ofuscación: CDN (VLESS)";
+"transport_status_cdnws" = "Ofuscación: CDN (VMess)";
 "transport_status_cloak" = "Ofuscación: Cloak";
 "transport_status_hysteria2" = "Ofuscación: Hysteria2";
 "transport_status_naive" = "Ofuscación: NaiveProxy";

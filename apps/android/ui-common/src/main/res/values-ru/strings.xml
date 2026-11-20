@@ -77,7 +77,8 @@
     <string name="settings_title">Настройки</string>
     <string name="settings_transport_anytls">AnyTLS</string>
     <string name="settings_transport_auto">Автоматически (рекомендуется)</string>
-    <string name="settings_transport_cdn">CDN</string>
+    <string name="settings_transport_cdn">CDN (VLESS)</string>
+    <string name="settings_transport_cdnws">CDN (VMess)</string>
     <string name="settings_transport_cloak">Cloak</string>
     <string name="settings_transport_description">Как PangeaVPN маскирует ваш трафик.</string>
     <string name="settings_transport_gaming_hint">Отправляет игровой трафик по двум соединениям сразу, чтобы потерянный пакет не замораживал игру. Расходует чуть больше трафика и заметнее для блокировок. Только для Tectonic. Действует со следующего подключения.</string>
@@ -103,7 +104,8 @@
     <string name="toggle_off">Выкл</string>
     <string name="toggle_on">Вкл</string>
     <string name="transport_status_anytls">Обфускация: AnyTLS</string>
-    <string name="transport_status_cdn">Обфускация: CDN</string>
+    <string name="transport_status_cdn">Обфускация: CDN (VLESS)</string>
+    <string name="transport_status_cdnws">Обфускация: CDN (VMess)</string>
     <string name="transport_status_cloak">Обфускация: Cloak</string>
     <string name="transport_status_hysteria2">Обфускация: Hysteria2</string>
     <string name="transport_status_naive">Обфускация: NaiveProxy</string>

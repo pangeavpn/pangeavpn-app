@@ -77,7 +77,8 @@
     <string name="settings_title">الإعدادات</string>
     <string name="settings_transport_anytls">AnyTLS</string>
     <string name="settings_transport_auto">تلقائي (موصى به)</string>
-    <string name="settings_transport_cdn">CDN</string>
+    <string name="settings_transport_cdn">CDN (VLESS)</string>
+    <string name="settings_transport_cdnws">CDN (VMess)</string>
     <string name="settings_transport_cloak">Cloak</string>
     <string name="settings_transport_description">كيف يموّه PangeaVPN حركة بياناتك.</string>
     <string name="settings_transport_gaming_hint">يرسل حركة الألعاب عبر اتصالين في آن واحد حتى لا تتجمد اللعبة عند فقدان حزمة. يستهلك بيانات أكثر قليلاً ويسهل كشفه. مع Tectonic فقط. يسري عند الاتصال التالي.</string>
@@ -103,7 +104,8 @@
     <string name="toggle_off">معطّل</string>
     <string name="toggle_on">مفعّل</string>
     <string name="transport_status_anytls">التمويه: AnyTLS</string>
-    <string name="transport_status_cdn">التمويه: CDN</string>
+    <string name="transport_status_cdn">التمويه: CDN (VLESS)</string>
+    <string name="transport_status_cdnws">التمويه: CDN (VMess)</string>
     <string name="transport_status_cloak">التمويه: Cloak</string>
     <string name="transport_status_hysteria2">التمويه: Hysteria2</string>
     <string name="transport_status_naive">التمويه: NaiveProxy</string>
