@@ -239,6 +239,7 @@ func cdnEdgeProfile(info *cdnInfo, uuid, path string, remotePort int) *state.CDN
 		Path:       path,
 		TargetHost: info.TargetHost,
 		TargetPort: info.TargetPort,
+		ECHConfig:  info.ECH,
 	}
 }
 

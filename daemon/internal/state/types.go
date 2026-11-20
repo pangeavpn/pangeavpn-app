@@ -342,6 +342,9 @@ type CDNProfile struct {
 	Path       string `json:"path,omitempty"`
 	TargetHost string `json:"targetHost,omitempty"`
 	TargetPort int    `json:"targetPort,omitempty"`
+	// ECHConfig is the edge's ECHConfigList, base64 as in its HTTPS record: with it a filter
+	// that blocks by SNI sees only the CDN's public name, never this hostname.
+	ECHConfig string `json:"echConfig,omitempty"`
 	// ExtraRootsPEM holds roots the signed-in user trusts that this service's account
 	// cannot see, such as a school's TLS-inspection CA. Set at dial time, never stored.
 	ExtraRootsPEM string `json:"-"`

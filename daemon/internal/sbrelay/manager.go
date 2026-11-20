@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -44,6 +45,8 @@ type spec struct {
 	// returns any outbound that dial needs alongside it.
 	pinHost  string
 	applyPin func(Pin) []option.Outbound
+	// fallback is the same route without ECH, dialed when this one fails.
+	fallback *spec
 }
 
 // Pin is a destination pinned to the physical NIC; see nicpin.Pin.
@@ -116,6 +119,19 @@ func (m *Manager[P]) Start(ctx context.Context, profile P) error {
 		}
 	}
 
+	err = m.launch(ctx, profile, sp)
+	// A refused upgrade came from the edge itself, so dialing it without ECH changes nothing.
+	if err == nil || sp.fallback == nil || ctx.Err() != nil || refusedUpgrade(err) {
+		return err
+	}
+	m.logs.Add(state.LogWarn, m.source, fmt.Sprintf("%s over ECH failed, dialing without it: %v", m.name, err))
+	if plainErr := m.launch(ctx, profile, *sp.fallback); plainErr != nil {
+		return fmt.Errorf("%w; over ECH before that: %v", plainErr, strings.TrimPrefix(err.Error(), m.name+": "))
+	}
+	return nil
+}
+
+func (m *Manager[P]) launch(ctx context.Context, profile P, sp spec) error {
 	releasePin := func() {}
 	var pinOutbounds []option.Outbound
 	if m.pin != nil && sp.applyPin != nil {

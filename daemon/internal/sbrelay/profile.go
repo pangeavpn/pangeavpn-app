@@ -39,8 +39,25 @@ const (
 	cdnVMess
 )
 
+// cdnBuilder dials over ECH when the profile carries a config, and plainly if that fails:
+// a network may block the CDN's ECH name while still passing this hostname.
 func cdnBuilder(name string, protocol cdnProtocol) func(state.CDNProfile) (spec, error) {
-	return func(p state.CDNProfile) (spec, error) { return buildCDN(name, protocol, p) }
+	return func(p state.CDNProfile) (spec, error) {
+		plain, err := buildCDN(name, protocol, p, nil)
+		if err != nil || p.ECHConfig == "" {
+			return plain, err
+		}
+		ech, err := base64.StdEncoding.DecodeString(strings.TrimSpace(p.ECHConfig))
+		if err != nil || len(ech) < 2 || int(ech[0])<<8|int(ech[1]) != len(ech)-2 {
+			return spec{}, fmt.Errorf("%s echConfig must be a base64 ECHConfigList", name)
+		}
+		sp, err := buildCDN(name, protocol, p, ech)
+		if err != nil {
+			return spec{}, err
+		}
+		sp.fallback = &plain
+		return sp, nil
+	}
 }
 
 func buildTUIC(p state.TUICProfile) (spec, error) {
@@ -83,7 +100,7 @@ func buildTUIC(p state.TUICProfile) (spec, error) {
 	}, nil
 }
 
-func buildCDN(name string, protocol cdnProtocol, p state.CDNProfile) (spec, error) {
+func buildCDN(name string, protocol cdnProtocol, p state.CDNProfile, ech []byte) (spec, error) {
 	host := strings.TrimSpace(p.RemoteHost)
 	remotePort := p.RemotePort
 	if remotePort == 0 {
@@ -105,7 +122,11 @@ func buildCDN(name string, protocol cdnProtocol, p state.CDNProfile) (spec, erro
 		path = "/"
 	}
 	tls := &option.OutboundTLSOptions{Enabled: true, ServerName: serverName}
-	if utlsAvailable {
+	if ech != nil {
+		// Go's own TLS: sing-box redials with the edge's retry configs only for crypto/tls.
+		config := pem.EncodeToMemory(&pem.Block{Type: "ECH CONFIGS", Bytes: ech})
+		tls.ECH = &option.OutboundECHOptions{Enabled: true, Config: badoption.Listable[string]{string(config)}}
+	} else if utlsAvailable {
 		tls.UTLS = &option.OutboundUTLSOptions{Enabled: true, Fingerprint: "chrome"}
 	}
 	server := option.ServerOptions{Server: host, ServerPort: uint16(remotePort)}
@@ -149,13 +170,16 @@ func buildCDN(name string, protocol cdnProtocol, p state.CDNProfile) (spec, erro
 		return spec{}, fmt.Errorf("%s: unknown protocol %d", name, protocol)
 	}
 
+	if ech != nil {
+		via += " with ECH"
+	}
 	extraRoots := parseRoots(p.ExtraRootsPEM)
 	remote := net.JoinHostPort(host, strconv.Itoa(remotePort)) + " (" + serverName + "), " + via
 	if len(extraRoots) > 0 {
 		remote += fmt.Sprintf(", trusting %d of the user's own roots", len(extraRoots))
 	}
 	probe := &option.DirectOutboundOptions{DialerOptions: protectedDialer()}
-	refusal := &refusalProbe{tag: probeTag, at: dialAt, serverName: serverName, path: path, roots: extraRoots}
+	refusal := &refusalProbe{tag: probeTag, at: dialAt, serverName: serverName, path: path, roots: extraRoots, ech: ech}
 	return spec{
 		outbound:   outbound,
 		extra:      []option.Outbound{{Type: C.TypeDirect, Tag: probeTag, Options: probe}},

@@ -112,6 +112,7 @@ type cdnInfo struct {
 	TargetHost string         `json:"targetHost,omitempty"`
 	TargetPort int            `json:"targetPort,omitempty"`
 	VMess      *cdnVMessRoute `json:"vmess,omitempty"`
+	ECH        string         `json:"ech,omitempty"`
 }
 
 // cdnVMessRoute is the node's VMess-over-WebSocket inbound on the same hostname: the

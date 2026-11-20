@@ -12,7 +12,7 @@ import (
 func TestCDNTransportsDifferOnlyInProtocol(t *testing.T) {
 	profile := testCDNProfile(443, "")
 
-	vless, err := buildCDN("cdn", cdnVLESS, profile)
+	vless, err := buildCDN("cdn", cdnVLESS, profile, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -21,7 +21,7 @@ func TestCDNTransportsDifferOnlyInProtocol(t *testing.T) {
 		t.Fatalf("cdn outbound = %s %+v, want VLESS over HTTPUpgrade on %s", vless.outbound.Type, vless.outbound.Options, testCDNPath)
 	}
 
-	vmess, err := buildCDN("cdnws", cdnVMess, profile)
+	vmess, err := buildCDN("cdnws", cdnVMess, profile, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
