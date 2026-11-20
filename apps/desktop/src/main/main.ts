@@ -1262,6 +1262,7 @@ async function provisionAcrossServers(
   let initialProfiles: Profile[] | null = null;
   let configChanged = false;
   let committed = false;
+  const provisioned = new Map<string, Profile>();
   try {
     const initialConfig = await withDaemonRestartOnUnavailable(
       () => daemonClient.getConfig(),
@@ -1290,6 +1291,7 @@ async function provisionAcrossServers(
 
         if (isCancelled(attempt)) throw new ConnectCancelledError();
         const profile = await provisionProfileForServer(serverId, attempt.controller.signal, entryServerId);
+        provisioned.set(profile.id, profile);
         configChanged = true;
         return await dialServer(profile, index, mode, attempt);
       },
@@ -1344,7 +1346,9 @@ async function provisionAcrossServers(
     throw err;
   } finally {
     if (configChanged && !committed && initialProfiles) {
-      await daemonClient.setConfig(initialProfiles).catch((error) => {
+      // Re-provisioning a server made its node drop the key in the snapshot's profile; keep the live one.
+      const restored = initialProfiles.map((profile) => provisioned.get(profile.id) ?? profile);
+      await daemonClient.setConfig(restored).catch((error) => {
         console.warn("connect: profile restore failed", sanitizeLog(error));
       });
     }
