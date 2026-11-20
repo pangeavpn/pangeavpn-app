@@ -296,6 +296,7 @@ export interface ServerInfo {
     targetHost?: string;
     targetPort?: number;
     vmess?: { uuid: string; path?: string; remotePort?: number };
+    ech?: string;
   };
   /** Shadowsocks listener that reaches the hub instead of WireGuard, used as a
    *  fallback path for account traffic. Per-region, but the same for all. */

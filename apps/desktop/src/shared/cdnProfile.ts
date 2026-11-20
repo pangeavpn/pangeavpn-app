@@ -14,6 +14,8 @@ export interface CDNServerInfo {
   /** The node's VMess-over-WebSocket route on the same hostname (the cdnws transport);
    *  its edge port defaults to 443. */
   vmess?: { uuid: string; path?: string; remotePort?: number };
+  /** The edge's ECHConfigList (base64): the daemon then hides the hostname from SNI filters. */
+  ech?: string;
 }
 
 /** The same block feeds both CDN transports: `cdn` (VLESS) and `cdnws` (VMess). */
@@ -26,6 +28,7 @@ export interface CDNProfileBlock {
   path: string;
   targetHost?: string;
   targetPort?: number;
+  echConfig?: string;
 }
 
 /** VLESS over HTTPUpgrade through the edge: the `cdn` transport. */
@@ -57,6 +60,7 @@ function edgeProfile(cdn: CDNServerInfo, uuid: string, path: string | undefined,
     serverName,
     path: path?.trim() || "/",
     ...(cdn.targetHost ? { targetHost: cdn.targetHost } : {}),
-    ...(cdn.targetPort ? { targetPort: cdn.targetPort } : {})
+    ...(cdn.targetPort ? { targetPort: cdn.targetPort } : {}),
+    ...(cdn.ech?.trim() ? { echConfig: cdn.ech.trim() } : {})
   };
 }
