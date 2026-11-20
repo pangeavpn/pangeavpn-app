@@ -173,9 +173,9 @@ function isDockIconAccent(value: unknown): value is DockIconAccent {
 let dockSwitching = false;
 // Panic wipe: the global removal shortcut is inert until the user opts in. Off by default.
 let panicWipeEnabled = false;
-// "auto" (reality, then cloak, shadowsocks, hysteria2, tuic, naive, anytls, cdn, snowflake, tectonic),
+// "auto" (reality, then cloak, shadowsocks, hysteria2, tuic, naive, anytls, cdnws, cdn, snowflake, tectonic),
 // or one of those transports only, or "wireguard".
-let preferredTransport: "auto" | "tectonic" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "anytls" | "tuic" | "cdn" | "snowflake" | "wireguard" = "auto";
+let preferredTransport: "auto" | "tectonic" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "anytls" | "tuic" | "cdn" | "cdnws" | "snowflake" | "wireguard" = "auto";
 // Stored language preference: a locale code, or "system" to follow the OS.
 let localePref = "system";
 const hiddenLaunch = process.argv.some(isHiddenLaunchArg);
@@ -1262,6 +1262,7 @@ async function provisionAcrossServers(
   let initialProfiles: Profile[] | null = null;
   let configChanged = false;
   let committed = false;
+  const provisioned = new Map<string, Profile>();
   try {
     const initialConfig = await withDaemonRestartOnUnavailable(
       () => daemonClient.getConfig(),
@@ -1290,6 +1291,7 @@ async function provisionAcrossServers(
 
         if (isCancelled(attempt)) throw new ConnectCancelledError();
         const profile = await provisionProfileForServer(serverId, attempt.controller.signal, entryServerId);
+        provisioned.set(profile.id, profile);
         configChanged = true;
         return await dialServer(profile, index, mode, attempt);
       },
@@ -1344,7 +1346,9 @@ async function provisionAcrossServers(
     throw err;
   } finally {
     if (configChanged && !committed && initialProfiles) {
-      await daemonClient.setConfig(initialProfiles).catch((error) => {
+      // Re-provisioning a server made its node drop the key in the snapshot's profile; keep the live one.
+      const restored = initialProfiles.map((profile) => provisioned.get(profile.id) ?? profile);
+      await daemonClient.setConfig(restored).catch((error) => {
         console.warn("connect: profile restore failed", sanitizeLog(error));
       });
     }
@@ -1412,7 +1416,7 @@ async function cancelConnectAttempt(): Promise<void> {
 function connectionOptions(): {
   allowLAN: boolean;
   lockdown: boolean;
-  preferredTransport?: "tectonic" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "anytls" | "tuic" | "cdn" | "snowflake" | "wireguard";
+  preferredTransport?: "tectonic" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "anytls" | "tuic" | "cdn" | "cdnws" | "snowflake" | "wireguard";
   disableTransportRace?: boolean;
   gamingMode?: boolean;
 } {
@@ -1599,6 +1603,7 @@ function sanitizePublicServer(candidate: unknown): PublicServerInfo | null {
     anytls: Boolean(s.anytls),
     tuic: Boolean(s.tuic),
     cdn: Boolean(s.cdn),
+    cdnws: Boolean(s.cdnws),
     snowflake: Boolean(s.snowflake)
   };
 }
@@ -1666,6 +1671,7 @@ function redactConfigForRenderer(config: ConfigResponse): ConfigResponse {
         ? { ...profile.tectonic, keyId: "<redacted>", deviceKey: "<redacted>" }
         : profile.tectonic,
       cdn: profile.cdn ? { ...profile.cdn, uuid: "<redacted>", path: "<redacted>" } : profile.cdn,
+      cdnws: profile.cdnws ? { ...profile.cdnws, uuid: "<redacted>", path: "<redacted>" } : profile.cdnws,
       wireguard: { ...profile.wireguard, configText: redactWireGuardKeys(profile.wireguard.configText) }
     }))
   };
@@ -2124,7 +2130,7 @@ function registerTransportSettingsHandlers(): void {
     () => pangeaApiClient.getHubInTunnel()
   );
 
-  ipcMain.handle(IPC_CHANNELS.setPreferredTransport, async (_event, value: "auto" | "tectonic" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "anytls" | "tuic" | "cdn" | "snowflake" | "wireguard") => {
+  ipcMain.handle(IPC_CHANNELS.setPreferredTransport, async (_event, value: "auto" | "tectonic" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "anytls" | "tuic" | "cdn" | "cdnws" | "snowflake" | "wireguard") => {
     preferredTransport =
       value === "cloak" ||
       value === "naive" ||
@@ -2135,6 +2141,7 @@ function registerTransportSettingsHandlers(): void {
       value === "anytls" ||
       value === "tuic" ||
       value === "cdn" ||
+      value === "cdnws" ||
       value === "snowflake" ||
       value === "wireguard"
         ? value
@@ -2713,6 +2720,7 @@ function applyPersistedSettings(settings: Record<string, unknown>): void {
     settings.preferredTransport === "anytls" ||
     settings.preferredTransport === "tuic" ||
     settings.preferredTransport === "cdn" ||
+    settings.preferredTransport === "cdnws" ||
     settings.preferredTransport === "snowflake" ||
     settings.preferredTransport === "wireguard"
   ) {

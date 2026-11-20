@@ -432,3 +432,24 @@ func TestBuildTectonicCarriesTheOtherNodeAddresses(t *testing.T) {
 		t.Fatalf("nodes = %v, want none", plain.Nodes)
 	}
 }
+
+func TestBuildCDNWSIsTheVMessRouteBesideVLESS(t *testing.T) {
+	info := &cdnInfo{RemoteHost: "edge.example", RemoteIP: "198.51.100.9", RemotePort: 443, UUID: "vless-uuid", Path: "/v",
+		VMess: &cdnVMessRoute{UUID: "vmess-uuid", Path: "/m", RemotePort: 2083}}
+	vless, ws := buildCDN(info), buildCDNWS(info)
+	if vless == nil || *vless != (state.CDNProfile{RemoteHost: "198.51.100.9", RemotePort: 443, UUID: "vless-uuid", ServerName: "edge.example", Path: "/v"}) {
+		t.Fatalf("cdn = %+v, want the VLESS route untouched", vless)
+	}
+	if ws == nil || *ws != (state.CDNProfile{RemoteHost: "198.51.100.9", RemotePort: 2083, UUID: "vmess-uuid", ServerName: "edge.example", Path: "/m"}) {
+		t.Fatalf("cdnws = %+v, want the VMess route on the same edge", ws)
+	}
+
+	info.VMess = &cdnVMessRoute{Path: "/m"}
+	if got := buildCDNWS(info); got != nil {
+		t.Fatalf("cdnws without a uuid = %+v, want nil", got)
+	}
+	info.VMess = nil
+	if got := buildCDNWS(info); got != nil {
+		t.Fatalf("cdnws without a route = %+v, want nil", got)
+	}
+}

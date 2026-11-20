@@ -216,7 +216,7 @@ func TestParseRootsSkipsWhatGoCannotUse(t *testing.T) {
 		t.Fatal("an empty bundle produced roots")
 	}
 
-	sp, err := buildCDN(testCDNProfile(443, bundle))
+	sp, err := buildCDN("cdn", cdnVLESS, testCDNProfile(443, bundle), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

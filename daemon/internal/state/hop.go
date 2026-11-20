@@ -83,6 +83,12 @@ func ApplyHop(p Profile) Profile {
 		cdn.TargetHost = loopbackHost
 		out.CDN = &cdn
 	}
+	if p.CDNWS != nil {
+		cdnws := *p.CDNWS
+		cdnws.TargetPort = singBoxTargetPort(p.Hop)
+		cdnws.TargetHost = loopbackHost
+		out.CDNWS = &cdnws
+	}
 	// Tectonic's node hands every session to its own WireGuard and takes no
 	// per-session target, so through an entry node it would egress there.
 	if p.Hop != nil {

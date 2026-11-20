@@ -200,6 +200,6 @@ final class ModelsTests: XCTestCase {
 
     func testTransportRawValues() {
         XCTAssertEqual(Transport.allCases.map(\.rawValue),
-                       ["auto", "tectonic", "cloak", "reality", "shadowsocks", "hysteria2", "anytls", "tuic", "cdn"])
+                       ["auto", "tectonic", "cloak", "reality", "shadowsocks", "hysteria2", "anytls", "tuic", "cdnws", "cdn"])
     }
 }

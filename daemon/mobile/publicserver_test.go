@@ -23,7 +23,7 @@ func serverWithEveryTransport(t *testing.T) serverInfo {
 		TUIC: &tuicInfo{RemoteHost: "1.2.3.4", RemotePort: 8444, UUID: "secret-tuic-uuid", Password: "secret-tuic-pass",
 			PinSHA256: "secret-tuic-pin"},
 		CDN: &cdnInfo{RemoteHost: "edge.example", RemoteIP: "1.2.3.4", RemotePort: 443, UUID: "secret-cdn-uuid",
-			Path: "/secret-cdn-path"},
+			Path: "/secret-cdn-path", VMess: &cdnVMessRoute{UUID: "secret-cdnws-uuid", Path: "/secret-cdnws-path"}},
 		ControlPlaneShadowsocks: &controlPlaneShadowsocksInfo{RemoteHost: "1.2.3.4", RemotePort: 8389, Method: "aes-256-gcm",
 			Password: "secret-cp-ss-pass"},
 		ControlPlaneReality: &controlPlaneRealityInfo{RemoteHost: "1.2.3.4", RemotePort: 9443, UUID: "secret-cp-uuid",
@@ -50,6 +50,8 @@ func everyBlockRunnable(p *state.Profile, kind string) bool {
 		return p.TUIC != nil
 	case "cdn":
 		return p.CDN != nil
+	case "cdnws":
+		return p.CDNWS != nil
 	case "naive":
 		return p.Naive != nil
 	case "snowflake":
@@ -71,7 +73,7 @@ func TestPublicServerJSONCarriesNoCredentials(t *testing.T) {
 		}
 	}
 	want := `[{"id":"fra","name":"Frankfurt","region":"eu-central","country":"DE","load":12,"multihop":true,` +
-		`"cloak":true,"reality":true,"hysteria2":true,"shadowsocks":true,"anytls":true,"tuic":true,"cdn":true,"naive":true,"snowflake":true}]`
+		`"cloak":true,"reality":true,"hysteria2":true,"shadowsocks":true,"anytls":true,"tuic":true,"cdn":true,"cdnws":true,"naive":true,"snowflake":true}]`
 	if out != want {
 		t.Fatalf("got  %s\nwant %s", out, want)
 	}
@@ -80,7 +82,7 @@ func TestPublicServerJSONCarriesNoCredentials(t *testing.T) {
 func TestPublicServerFlagsNeedTheBlockAndTheBuild(t *testing.T) {
 	bare := serverInfo{ID: "lon", Name: "London", Region: "eu-west", Country: "GB", Cloak: cloakInfo{RemoteHost: "5.6.7.8"}}
 	got := toPublicServers([]serverInfo{bare}, everyBlockRunnable)[0]
-	if !got.Cloak || got.Reality || got.Hysteria2 || got.Shadowsocks || got.AnyTLS || got.TUIC || got.CDN || got.Naive || got.Snowflake || got.Multihop {
+	if !got.Cloak || got.Reality || got.Hysteria2 || got.Shadowsocks || got.AnyTLS || got.TUIC || got.CDN || got.CDNWS || got.Naive || got.Snowflake || got.Multihop {
 		t.Fatalf("a server with only cloak = %+v", got)
 	}
 
@@ -92,7 +94,7 @@ func TestPublicServerFlagsNeedTheBlockAndTheBuild(t *testing.T) {
 
 	alwaysYes := func(*state.Profile, string) bool { return true }
 	got = toPublicServers([]serverInfo{bare}, alwaysYes)[0]
-	if got.Reality || got.Naive || got.Snowflake {
+	if got.Reality || got.Naive || got.Snowflake || got.CDNWS {
 		t.Fatalf("a block the hub never advertised was flagged: %+v", got)
 	}
 }

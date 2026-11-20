@@ -88,6 +88,7 @@ const KEY_MAP = {
   "settings.transport.anytls": "settings_transport_anytls",
   "settings.transport.tuic": "settings_transport_tuic",
   "settings.transport.cdn": "settings_transport_cdn",
+  "settings.transport.cdnws": "settings_transport_cdnws",
   "settings.transport.snowflake": "settings_transport_snowflake",
   "settings.transport.race.title": "settings_transport_race_title",
   "settings.transport.race.hint": "settings_transport_race_hint",
@@ -175,8 +176,12 @@ const MOBILE_ONLY = {
     uk: "Обфускація: TUIC", zh: "混淆：TUIC", ar: "التمويه: TUIC", fa: "مبهم‌سازی: TUIC"
   },
   transport_status_cdn: {
-    en: "Obfuscation: CDN", es: "Ofuscación: CDN", fr: "Obfuscation : CDN", ru: "Обфускация: CDN",
-    uk: "Обфускація: CDN", zh: "混淆：CDN", ar: "التمويه: CDN", fa: "مبهم‌سازی: CDN"
+    en: "Obfuscation: CDN (VLESS)", es: "Ofuscación: CDN (VLESS)", fr: "Obfuscation : CDN (VLESS)", ru: "Обфускация: CDN (VLESS)",
+    uk: "Обфускація: CDN (VLESS)", zh: "混淆：CDN (VLESS)", ar: "التمويه: CDN (VLESS)", fa: "مبهم‌سازی: CDN (VLESS)"
+  },
+  transport_status_cdnws: {
+    en: "Obfuscation: CDN (VMess)", es: "Ofuscación: CDN (VMess)", fr: "Obfuscation : CDN (VMess)", ru: "Обфускация: CDN (VMess)",
+    uk: "Обфускація: CDN (VMess)", zh: "混淆：CDN (VMess)", ar: "التمويه: CDN (VMess)", fa: "مبهم‌سازی: CDN (VMess)"
   },
   transport_status_naive: {
     en: "Obfuscation: NaiveProxy", es: "Ofuscación: NaiveProxy", fr: "Obfuscation : NaiveProxy", ru: "Обфускация: NaiveProxy",

@@ -15,10 +15,10 @@ struct Server: Codable, Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case id, name, region, country, load, multihop
-        case reality, hysteria2, shadowsocks, anytls, tuic, cdn, naive, snowflake
+        case reality, hysteria2, shadowsocks, anytls, tuic, cdn, cdnws, naive, snowflake
     }
 
-    private static let advertised: [CodingKeys] = [.reality, .hysteria2, .shadowsocks, .anytls, .tuic, .cdn, .naive, .snowflake]
+    private static let advertised: [CodingKeys] = [.reality, .hysteria2, .shadowsocks, .anytls, .tuic, .cdn, .cdnws, .naive, .snowflake]
 
     init(id: String, name: String, region: String, country: String, load: Int?,
          transports: Set<String> = Server.universalTransports, multihop: Bool = false) {
@@ -244,7 +244,7 @@ struct TunnelStatus: Codable, Equatable, Sendable {
 }
 
 enum Transport: String, CaseIterable, Sendable {
-    case auto, tectonic, cloak, reality, shadowsocks, hysteria2, anytls, tuic, cdn
+    case auto, tectonic, cloak, reality, shadowsocks, hysteria2, anytls, tuic, cdnws, cdn
 }
 
 struct HubMethods: Codable, Equatable, Sendable {

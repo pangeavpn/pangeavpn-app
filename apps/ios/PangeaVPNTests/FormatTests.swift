@@ -68,7 +68,7 @@ final class FormatTests: XCTestCase {
         let expected: [Transport: String] = [
             .auto: "Automatic (recommended)", .tectonic: "Tectonic", .cloak: "Cloak", .reality: "VLESS+REALITY",
             .shadowsocks: "Shadowsocks", .hysteria2: "Hysteria2", .anytls: "AnyTLS",
-            .tuic: "TUIC", .cdn: "CDN",
+            .tuic: "TUIC", .cdn: "CDN (VLESS)", .cdnws: "CDN (VMess)",
         ]
         XCTAssertEqual(expected.count, Transport.allCases.count)
         for transport in Transport.allCases {

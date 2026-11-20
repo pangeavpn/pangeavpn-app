@@ -161,6 +161,7 @@ type Service struct {
 	tuic        tuicManager
 	tectonic    tectonicManager
 	cdn         cdnManager
+	cdnws       cdnManager
 	snowflake   snowflakeManager
 	wg          wg.Manager
 	killSwitch  platform.KillSwitch
@@ -421,6 +422,8 @@ func NewService(
 ) *Service {
 	cdn := sbrelay.NewCDN(logs)
 	cdn.SetPinner(pinCDNEdge)
+	cdnws := sbrelay.NewCDNWS(logs)
+	cdnws.SetPinner(pinCDNEdge)
 	tectonicManager := tectonic.NewManager(logs, currentNetworkKey)
 	tectonicManager.SetEdgePinner(pinTectonicEdge)
 	return &Service{
@@ -436,6 +439,7 @@ func NewService(
 		tuic:           sbrelay.NewTUIC(logs),
 		tectonic:       tectonicManager,
 		cdn:            cdn,
+		cdnws:          cdnws,
 		snowflake:      snowflakeManager,
 		wg:             wgManager,
 		killSwitch:     killSwitch,
@@ -591,6 +595,8 @@ func (s *Service) managerForKind(kind string) transport.Manager {
 		return s.tectonic
 	case "cdn":
 		return s.cdn
+	case "cdnws":
+		return s.cdnws
 	case "snowflake":
 		return s.snowflake
 	case transportKindWireGuard:
@@ -1213,6 +1219,14 @@ func (s *Service) startCDNTransport(ctx context.Context, profile *state.Profile,
 	return s.startRelay(ctx, s.cdn, func(ctx context.Context) error { return s.cdn.Start(ctx, start) }, &cdnCopy.LocalPort, wireGuardProfile)
 }
 
+func (s *Service) startCDNWSTransport(ctx context.Context, profile *state.Profile, wireGuardProfile *state.WireGuardProfile) error {
+	cdnwsCopy := *profile.CDNWS
+	profile.CDNWS = &cdnwsCopy
+	start := s.cdnStart(cdnwsCopy)
+	start.LocalPort = 0
+	return s.startRelay(ctx, s.cdnws, func(ctx context.Context) error { return s.cdnws.Start(ctx, start) }, &cdnwsCopy.LocalPort, wireGuardProfile)
+}
+
 type statusManager interface {
 	transport.Manager
 	Status() state.TransportStatus
@@ -1385,6 +1399,11 @@ func (s *Service) StarterFor(profile *state.Profile, kind string) (transport.Sta
 			return nil, transport.NotConfigured
 		}
 		return s.startCDNTransport, transport.Available
+	case "cdnws":
+		if profile.CDNWS == nil {
+			return nil, transport.NotConfigured
+		}
+		return s.startCDNWSTransport, transport.Available
 	case "snowflake":
 		if snowflakeReleaseGated {
 			return nil, transport.Unavailable
@@ -1760,6 +1779,10 @@ func transportLocalPort(profile *state.Profile, kind string) int {
 	case "cdn":
 		if profile.CDN != nil {
 			return profile.CDN.LocalPort
+		}
+	case "cdnws":
+		if profile.CDNWS != nil {
+			return profile.CDNWS.LocalPort
 		}
 	case "snowflake":
 		if profile.Snowflake != nil {
@@ -2534,6 +2557,7 @@ func (s *Service) Status(ctx context.Context) state.StatusResponse {
 	tuicStatus := s.tuic.Status()
 	tectonicStatus := s.tectonic.Status()
 	cdnStatus := s.cdn.Status()
+	cdnwsStatus := s.cdnws.Status()
 	snowflakeStatus := s.snowflake.Status()
 
 	wgStatus := state.WireGuardStatus{Running: false, Detail: "not connected"}
@@ -2569,6 +2593,7 @@ func (s *Service) Status(ctx context.Context) state.StatusResponse {
 		TUIC:                tuicStatus,
 		Tectonic:            tectonicStatus,
 		CDN:                 cdnStatus,
+		CDNWS:               cdnwsStatus,
 		Snowflake:           snowflakeStatus,
 		WireGuard:           wgStatus,
 		KillSwitchActive:    s.killSwitch.Active(),
@@ -2873,6 +2898,8 @@ func (s *Service) runHealthCheck(ctx context.Context) {
 		transportRunning = s.tectonic.Status().Running
 	case "cdn":
 		transportRunning = s.cdn.Status().Running
+	case "cdnws":
+		transportRunning = s.cdnws.Status().Running
 	case "snowflake":
 		transportRunning = s.snowflake.Status().Running
 	case transportKindWireGuard:
@@ -3591,6 +3618,16 @@ func (s *Service) recoverActiveTransport(ctx context.Context, profile state.Prof
 		start = func(ctx context.Context) error { return s.cdn.Start(ctx, s.cdnStart(*profile.CDN)) }
 		running = func() bool { return s.cdn.Status().Running }
 		localPort = profile.CDN.LocalPort
+	case "cdnws":
+		if s.cdnws.Status().Running {
+			return nil
+		}
+		if profile.CDNWS == nil {
+			return errors.New("active transport is cdnws but profile has no cdnws config")
+		}
+		start = func(ctx context.Context) error { return s.cdnws.Start(ctx, s.cdnStart(*profile.CDNWS)) }
+		running = func() bool { return s.cdnws.Status().Running }
+		localPort = profile.CDNWS.LocalPort
 	case "snowflake":
 		if s.snowflake.Status().Running {
 			return nil
@@ -4059,6 +4096,19 @@ func (s *Service) restoreTransportForAdoption(ctx context.Context, profile *stat
 			return fmt.Errorf("wireguard tunnel is already running but cdn restore failed: %w", err)
 		}
 		return nil
+	case "cdnws":
+		if s.cdnws.Status().Running {
+			return nil
+		}
+		if profile.CDNWS == nil {
+			return errors.New("wireguard tunnel is already running but this profile has no cdnws configuration to restore")
+		}
+		s.machine.Set(state.StateConnecting, "restoring cdnws for active tunnel")
+		s.logs.Add(state.LogInfo, state.SourceDaemon, "wireguard was already running; restoring cdnws process")
+		if err := s.cdnws.Start(ctx, s.cdnStart(*profile.CDNWS)); err != nil {
+			return fmt.Errorf("wireguard tunnel is already running but cdnws restore failed: %w", err)
+		}
+		return nil
 	case "snowflake":
 		if snowflakeReleaseGated {
 			return errors.New("snowflake transport is temporarily unavailable")
@@ -4193,6 +4243,10 @@ func deepCopyProfile(profile state.Profile) state.Profile {
 	if profile.CDN != nil {
 		cdnCopy := *profile.CDN
 		out.CDN = &cdnCopy
+	}
+	if profile.CDNWS != nil {
+		cdnwsCopy := *profile.CDNWS
+		out.CDNWS = &cdnwsCopy
 	}
 	if profile.Snowflake != nil {
 		snowflakeCopy := *profile.Snowflake
@@ -4455,13 +4509,13 @@ func killSwitchPermits(profile state.Profile) []string {
 // sharedEdgeHosts are destinations on shared CDN infrastructure: their addresses serve
 // unrelated sites too, so they get no route and no all-app permit, only daemonEgressHosts.
 func sharedEdgeHosts(profile state.Profile) []string {
-	return slices.Concat(cdnHosts(profile.CDN), tectonicCDNHosts(profile.Tectonic), snowflakeHosts(profile.Snowflake))
+	return slices.Concat(cdnHosts(profile.CDN), cdnHosts(profile.CDNWS), tectonicCDNHosts(profile.Tectonic), snowflakeHosts(profile.Snowflake))
 }
 
 // daemonEgressHosts is what the lock permits to the daemon's own pinned sockets alone. Snowflake
 // is left out: its sockets can't be pinned, so its shared hosts get no way out at all.
 func daemonEgressHosts(profile state.Profile) []string {
-	return slices.Concat(cdnHosts(profile.CDN), tectonicCDNHosts(profile.Tectonic))
+	return slices.Concat(cdnHosts(profile.CDN), cdnHosts(profile.CDNWS), tectonicCDNHosts(profile.Tectonic))
 }
 
 // withoutSharedHosts drops every shared edge, by name or by address literal, whatever

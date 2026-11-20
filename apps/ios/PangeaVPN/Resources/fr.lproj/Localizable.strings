@@ -26,6 +26,7 @@
 "bypass_anytls_desc" = "Une session TLS avec remplissage, qui atténue la signature TLS-dans-TLS que d'autres transports TLS laissent voir.";
 "bypass_auto_desc" = "Choisit le déguisement qui passe et retient ce qui a marché sur ce réseau.";
 "bypass_cdn_desc" = "Passe par un réseau de diffusion de contenu, donc bloquer les adresses de nos serveurs ne l'arrête pas. Plus lent que les autres.";
+"bypass_cdnws_desc" = "Passe aussi par un réseau de diffusion de contenu et reste illisible même sur les réseaux qui ouvrent le trafic HTTPS. Plus lent que les autres.";
 "bypass_cloak_desc" = "TLS visant un site leurre, si bien que le trafic ressemble à une visite ordinaire.";
 "bypass_hysteria2_desc" = "UDP et QUIC au lieu de TCP. À essayer quand toutes les connexions TCP tombent.";
 "bypass_reality_desc" = "Emprunte la poignée de main TLS d'un vrai site, si bien que les sondages voient un site authentique. Le déguisement le plus solide.";
@@ -401,7 +402,8 @@
 "settings_title" = "Paramètres";
 "settings_transport_anytls" = "AnyTLS";
 "settings_transport_auto" = "Automatique (recommandé)";
-"settings_transport_cdn" = "CDN";
+"settings_transport_cdn" = "CDN (VLESS)";
+"settings_transport_cdnws" = "CDN (VMess)";
 "settings_transport_cloak" = "Cloak";
 "settings_transport_description" = "Comment PangeaVPN camoufle votre trafic.";
 "settings_transport_gaming_hint" = "Envoie le trafic des jeux sur deux connexions à la fois, pour qu'un paquet perdu ne fige pas la partie. Consomme un peu plus de données et se repère plus facilement. Tectonic uniquement. Effectif à la prochaine connexion.";
@@ -490,7 +492,8 @@
 "toggle_off" = "Désactivé";
 "toggle_on" = "Activé";
 "transport_status_anytls" = "Obfuscation : AnyTLS";
-"transport_status_cdn" = "Obfuscation : CDN";
+"transport_status_cdn" = "Obfuscation : CDN (VLESS)";
+"transport_status_cdnws" = "Obfuscation : CDN (VMess)";
 "transport_status_cloak" = "Obfuscation : Cloak";
 "transport_status_hysteria2" = "Obfuscation : Hysteria2";
 "transport_status_naive" = "Obfuscation : NaiveProxy";

@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -30,18 +31,22 @@ var ProtectPath string
 
 // spec is what a transport's profile builds into: the outbound plus where it relays.
 type spec struct {
-	outbound   option.Outbound
+	outbound option.Outbound
+	// extra outbounds ride in the same engine; annotate may dial them while the pin still holds.
+	extra      []option.Outbound
 	remote     string
 	targetHost string
 	targetPort int
 	localPort  int
-	annotate   func(error) error
+	annotate   func(context.Context, *box.Box, error) error
 	// extraRoots are added to the system store, which the platform verifier still checks first.
 	extraRoots []string
 	// applyPin, set only for a shared destination, points the outbound at a pinned dial and
 	// returns any outbound that dial needs alongside it.
 	pinHost  string
 	applyPin func(Pin) []option.Outbound
+	// fallback is the same route without ECH, dialed when this one fails.
+	fallback *spec
 }
 
 // Pin is a destination pinned to the physical NIC; see nicpin.Pin.
@@ -114,6 +119,19 @@ func (m *Manager[P]) Start(ctx context.Context, profile P) error {
 		}
 	}
 
+	err = m.launch(ctx, profile, sp)
+	// A refused upgrade came from the edge itself, so dialing it without ECH changes nothing.
+	if err == nil || sp.fallback == nil || ctx.Err() != nil || refusedUpgrade(err) {
+		return err
+	}
+	m.logs.Add(state.LogWarn, m.source, fmt.Sprintf("%s over ECH failed, dialing without it: %v", m.name, err))
+	if plainErr := m.launch(ctx, profile, *sp.fallback); plainErr != nil {
+		return fmt.Errorf("%w; over ECH before that: %v", plainErr, strings.TrimPrefix(err.Error(), m.name+": "))
+	}
+	return nil
+}
+
+func (m *Manager[P]) launch(ctx context.Context, profile P, sp spec) error {
 	releasePin := func() {}
 	var pinOutbounds []option.Outbound
 	if m.pin != nil && sp.applyPin != nil {
@@ -131,9 +149,10 @@ func (m *Manager[P]) Start(ctx context.Context, profile P) error {
 		pinOutbounds = sp.applyPin(pin)
 	}
 
+	outbounds := append([]option.Outbound{sp.outbound}, sp.extra...)
 	options := option.Options{
 		Log:       &option.LogOptions{Level: "warn"},
-		Outbounds: append([]option.Outbound{sp.outbound}, pinOutbounds...),
+		Outbounds: append(outbounds, pinOutbounds...),
 	}
 	if len(sp.extraRoots) > 0 {
 		options.Certificate = &option.CertificateOptions{Certificate: sp.extraRoots}
@@ -166,15 +185,14 @@ func (m *Manager[P]) Start(ctx context.Context, profile P) error {
 	stopPropagation()
 	dialCancel()
 	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			err = ctxErr
+		} else if sp.annotate != nil {
+			err = sp.annotate(ctx, engine, err)
+		}
 		engine.Close()
 		cancel()
 		releasePin()
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return fmt.Errorf("%s: handshake: %w", m.name, ctxErr)
-		}
-		if sp.annotate != nil {
-			err = sp.annotate(err)
-		}
 		return fmt.Errorf("%s: handshake: %w", m.name, err)
 	}
 

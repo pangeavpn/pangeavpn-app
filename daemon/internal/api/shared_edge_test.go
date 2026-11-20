@@ -212,3 +212,15 @@ func TestPinCDNEdge_FailsClosed(t *testing.T) {
 		t.Error("pinTectonicEdge() = nil error, want the dial refused rather than left unpinned")
 	}
 }
+
+// The VMess route rides the same shared edge, so it gets the same daemon-only treatment.
+func TestCDNWSEdge_IsASharedEdgeLikeCDN(t *testing.T) {
+	profile := testProfile()
+	profile.CDNWS = &state.CDNProfile{RemoteHost: testCDNEdgeName, UUID: "u", ServerName: testCDNEdgeName, Path: "/p"}
+	if got := sharedEdgeHosts(profile); !slices.Equal(got, []string{testCDNEdgeName}) {
+		t.Errorf("sharedEdgeHosts() = %v, want [%s]", got, testCDNEdgeName)
+	}
+	if got := daemonEgressHosts(profile); !slices.Equal(got, []string{testCDNEdgeName}) {
+		t.Errorf("daemonEgressHosts() = %v, want [%s]", got, testCDNEdgeName)
+	}
+}

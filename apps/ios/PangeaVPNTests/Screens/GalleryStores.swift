@@ -3,7 +3,7 @@ import SwiftUI
 
 enum GalleryData {
     private static let everyTransport: Set<String> = [
-        "cloak", "wireguard", "reality", "hysteria2", "shadowsocks", "anytls", "tuic", "cdn",
+        "cloak", "wireguard", "reality", "hysteria2", "shadowsocks", "anytls", "tuic", "cdn", "cdnws",
     ]
 
     // The live regions, so every screenshot shows what the service really offers.

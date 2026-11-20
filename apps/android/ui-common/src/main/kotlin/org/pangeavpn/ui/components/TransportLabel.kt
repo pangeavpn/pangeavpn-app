@@ -16,6 +16,7 @@ fun transportStatusLabel(activeTransport: String): String = when (activeTranspor
     "anytls" -> stringResource(R.string.transport_status_anytls)
     "tuic" -> stringResource(R.string.transport_status_tuic)
     "cdn" -> stringResource(R.string.transport_status_cdn)
+    "cdnws" -> stringResource(R.string.transport_status_cdnws)
     "snowflake" -> stringResource(R.string.transport_status_snowflake)
     // Only arm64-v8a links the naive engine; elsewhere it is never reported.
     "naive" -> stringResource(R.string.transport_status_naive)
