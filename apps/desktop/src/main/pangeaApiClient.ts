@@ -61,6 +61,7 @@ import {
   type SealedRequest
 } from "./secureChannel";
 import { sanitizeLog } from "./logSanitize";
+import { DESKTOP_LINK_REDEEM_ROUTE, DesktopLinkCodeError } from "./desktopLink";
 import {
   parsePostQuantumAnswer,
   type PostQuantumOffer,
@@ -934,6 +935,8 @@ export class PangeaApiClient {
     return this.licenseKey;
   }
 
+  private namesWrapKey: Buffer | null = null;
+
   private resetHubResolution(): void {
     this.dohResolvedIp = null;
     this.frontedHost = null;
@@ -1675,6 +1678,41 @@ export class PangeaApiClient {
     return data;
   }
 
+  /** Trades a browser sign-in code for this app's own sign-in token, sealed
+   *  to its ephemeral key, plus the browser's sealed names wrap key when it
+   *  had one. Anonymous: the code is the only thing tying it to anyone, and
+   *  the hub only ever relays ciphertext. */
+  async redeemDesktopLink(code: string): Promise<{ sealed: string; namesWrapSealed: string | null }> {
+    const response = await this.hubFetch(DESKTOP_LINK_REDEEM_ROUTE, {
+      method: "POST",
+      headers: SEALED_ENVELOPE_HEADERS,
+      body: JSON.stringify({ code })
+    });
+    if (response.status === 429 || response.status >= 500) {
+      throw new LoginRejectedError(`Browser sign-in redeem failed (${response.status})`, response.status);
+    }
+    if (!response.ok) {
+      // Unknown, used and expired read the same; the body adds nothing worth logging.
+      throw new DesktopLinkCodeError(`Browser sign-in code rejected (${response.status})`);
+    }
+    const data = (await response.json()) as { sealed?: unknown; namesWrapSealed?: unknown };
+    if (typeof data.sealed !== "string") {
+      throw new DesktopLinkCodeError("Browser sign-in redeem returned no sealed credential");
+    }
+    return { sealed: data.sealed, namesWrapSealed: typeof data.namesWrapSealed === "string" ? data.namesWrapSealed : null };
+  }
+
+  /** Signs this app's own token out on the server. Only meaningful for an
+   *  app token: an account number is the account, not a revocable sign-in. */
+  async revokeAppToken(): Promise<void> {
+    await this.hubRequest<unknown>("POST", "/api/client/app-token/revoke", {});
+  }
+
+  /** The wrap key a browser sign-in was handed for the device-names key. */
+  setNamesWrapKey(key: Buffer | null): void {
+    this.namesWrapKey = key?.length === 32 ? key : null;
+  }
+
   /** The node list, falling back to the cached one when the hub is unreachable.
    *  An AuthError or expired subscription still propagates — that's the hub answering "no". */
   async getServers(): Promise<ServerInfo[]> {
@@ -1722,7 +1760,7 @@ export class PangeaApiClient {
 
   async listDevices(): Promise<DeviceInfo[]> {
     const data = await this.hubRequest<HubDeviceList>("GET", "/api/device/list");
-    return shownDevices(data, this.licenseKey);
+    return shownDevices(data, this.licenseKey, this.namesWrapKey);
   }
 
   async removeDevice(deviceId: string): Promise<void> {
@@ -1731,7 +1769,7 @@ export class PangeaApiClient {
 
   async renameDevice(deviceId: string, name: string): Promise<void> {
     const call = (method: string, route: string, body?: unknown) => this.hubRequest<unknown>(method, route, body);
-    await renameDeviceOnHub(call, this.licenseKey, deviceId, name);
+    await renameDeviceOnHub(call, this.licenseKey, deviceId, name, this.namesWrapKey);
   }
 
   /** Drops the post-failure cooldown. Pressing Connect is the user asking for
@@ -2029,6 +2067,7 @@ export class PangeaApiClient {
 
   clearCache(): void {
     this.licenseKey = null;
+    this.namesWrapKey = null;
     this.cachedServers = [];
     // The node list is account-scoped, so it goes when the account does. The hub IP,
     // relays and control-plane credentials survive: they let a signed-out client sign in again.

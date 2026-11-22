@@ -3,6 +3,7 @@ import path from "node:path";
 import type { AuthState, AuthUser } from "../shared/ipc";
 import { ensureUserStateDir, getAppSupportDir, getUserStateDir } from "./platformPaths";
 import { readSecret, writeSecret } from "./secureStore";
+import { AUTH_FILE_NAMES } from "./authFiles";
 
 // Auth files (session, license key, identity keys) are written by the Electron
 // app as the user, so they live in the user directory, not the daemon's.
@@ -24,7 +25,7 @@ interface StoredSession {
 let cachedSession: StoredSession | null = null;
 
 function getSessionFilePath(): string {
-  return path.join(getUserAuthDir(), "auth-session.dat");
+  return path.join(getUserAuthDir(), AUTH_FILE_NAMES.session);
 }
 
 async function saveSession(session: StoredSession): Promise<void> {
@@ -77,6 +78,7 @@ export async function logout(): Promise<void> {
   await clearSession();
   await clearLicenseKey();
   await clearIdentityKeyPair();
+  await clearNamesWrapKey();
   // Clean up legacy auth-tokens.dat from old Auth0 flow
   try {
     await fs.rm(path.join(getAppSupportDir(), "auth-tokens.dat"), { force: true });
@@ -88,7 +90,7 @@ export async function logout(): Promise<void> {
 // --- License key persistence (encrypted at rest) ---
 
 function getLicenseKeyPath(): string {
-  return path.join(getUserAuthDir(), "license-key.dat");
+  return path.join(getUserAuthDir(), AUTH_FILE_NAMES.licenseKey);
 }
 
 export async function saveLicenseKey(key: string): Promise<void> {
@@ -121,12 +123,12 @@ interface IdentityKeyPair {
 }
 
 function getIdentityKeyPath(): string {
-  return path.join(getUserAuthDir(), "identity-key.dat");
+  return path.join(getUserAuthDir(), AUTH_FILE_NAMES.identityKey);
 }
 
 /** Legacy path used before the rename to identity-key.dat */
 function getLegacyWgKeyPath(): string {
-  return path.join(getUserAuthDir(), "wg-device-key.dat");
+  return path.join(getUserAuthDir(), AUTH_FILE_NAMES.legacyWgKey);
 }
 
 export async function saveIdentityKeyPair(keys: IdentityKeyPair): Promise<void> {
@@ -171,6 +173,39 @@ export async function clearIdentityKeyPair(): Promise<void> {
   // Also clean up legacy file if it still exists
   try {
     await fs.rm(getLegacyWgKeyPath(), { force: true });
+  } catch {
+    // best-effort
+  }
+}
+
+// --- Device-names wrap key (browser sign-in only, encrypted at rest) ---
+// An app token can't derive the key that unwraps the account's device-names
+// key, so the browser hands it over sealed; it lives here like the identity key.
+
+function getNamesWrapKeyPath(): string {
+  return path.join(getUserAuthDir(), AUTH_FILE_NAMES.namesWrap);
+}
+
+export async function saveNamesWrapKey(key: Buffer): Promise<void> {
+  if (key.length !== 32) throw new Error("names wrap key must be 32 bytes");
+  await ensureUserAuthDir();
+  await writeSecret(getNamesWrapKeyPath(), key.toString("base64url"));
+}
+
+export async function loadNamesWrapKey(): Promise<Buffer | null> {
+  try {
+    const encoded = (await readSecret(getNamesWrapKeyPath()))?.trim();
+    if (!encoded) return null;
+    const key = Buffer.from(encoded, "base64url");
+    return key.length === 32 ? key : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function clearNamesWrapKey(): Promise<void> {
+  try {
+    await fs.rm(getNamesWrapKeyPath(), { force: true });
   } catch {
     // best-effort
   }

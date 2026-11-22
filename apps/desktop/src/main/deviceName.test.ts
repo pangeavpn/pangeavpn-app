@@ -5,7 +5,10 @@ import { readFileSync } from "node:fs";
 import {
   NAME_KEY_UNREADABLE,
   RENAME_NEEDS_ACCOUNT_NUMBER,
+  RENAME_NEEDS_NAMES_KEY,
   checkDeviceName,
+  isAppToken,
+  wrapKeyFor,
   newNameKey,
   normalizeAccountNumber,
   numberWrapKey,
@@ -279,4 +282,65 @@ test("a bad name never reaches the hub", async () => {
   const hub = fakeHub([{ devices: [], nameKey: null }]);
   await assert.rejects(renameDevice(hub.call, v.account_number, v.device_id, "a".repeat(41)), /1-40 characters/);
   assert.equal(hub.calls.length, 0);
+});
+
+// ── App token (browser sign-in) ──
+const TOKEN = "pgt1_" + "A".repeat(43);
+const WRAP = () => numberWrapKey(v.account_number)!;
+
+test("an app token is recognised and never turned into a wrap key itself", () => {
+  assert.equal(isAppToken(TOKEN), true);
+  assert.equal(isAppToken("pgt1_short"), false);
+  assert.equal(isAppToken(v.account_number), false);
+  assert.equal(wrapKeyFor(TOKEN), null);
+  assert.equal(wrapKeyFor(TOKEN, null), null);
+  assert.equal(wrapKeyFor(TOKEN, Buffer.alloc(16)), null);
+  assert.equal(wrapKeyFor(TOKEN, WRAP())?.toString("hex"), v.number_wrap_key_hex);
+  assert.equal(wrapKeyFor(v.account_number)?.toString("hex"), v.number_wrap_key_hex);
+});
+
+test("a token with the browser's wrap key opens names like the account number", () => {
+  const names = shownDevices({ devices: rows(), nameKey: v.name_key.sealed }, TOKEN, WRAP()).map((d) => d.friendlyName);
+  assert.deepEqual(names, ["Work laptop", "Calm Owl", "Legacy Name", "d4", "5e6d7a8b"]);
+  const body = sealRename({ devices: [], nameKey: v.name_key.sealed }, TOKEN, v.device_id, "Desk", WRAP());
+  assert.deepEqual(Object.keys(body), ["deviceId", "sealedName"]);
+  assert.equal(openName(K, v.device_id, body.sealedName), "Desk");
+});
+
+test("a token without a wrap key shows labels and never creates or overwrites the nameKey", () => {
+  const names = shownDevices({ devices: rows(), nameKey: v.name_key.sealed }, TOKEN).map((d) => d.friendlyName);
+  assert.deepEqual(names, ["Swift Fox", "Calm Owl", "Legacy Name", "d4", "5e6d7a8b"]);
+  for (const nameKey of [v.name_key.sealed, null]) {
+    assert.throws(() => sealRename({ devices: [], nameKey }, TOKEN, v.device_id, "Desk"), { message: RENAME_NEEDS_NAMES_KEY });
+  }
+  // Even with a wrap key, an empty hub gets no key minted from a browser sign-in.
+  assert.throws(() => sealRename({ devices: [], nameKey: null }, TOKEN, v.device_id, "Desk", WRAP()), {
+    message: RENAME_NEEDS_NAMES_KEY
+  });
+  // A stale wrap key that doesn't open the hub's key is refused, not replaced.
+  assert.throws(() => sealRename({ devices: [], nameKey: v.name_key.sealed }, TOKEN, v.device_id, "Desk", Buffer.alloc(32, 7)), {
+    message: RENAME_NEEDS_NAMES_KEY
+  });
+});
+
+test("renaming on a v2 hub with a token and no wrap key sends nothing", async () => {
+  for (const nameKey of [v.name_key.sealed, null]) {
+    const hub = fakeHub([{ devices: [], nameKey }]);
+    await assert.rejects(renameDevice(hub.call, TOKEN, v.device_id, "Desk"), { message: RENAME_NEEDS_NAMES_KEY });
+    assert.equal(hub.renames().length, 0);
+  }
+});
+
+test("renaming with a token and the wrap key sends only the sealed name", async () => {
+  const hub = fakeHub([{ devices: [], nameKey: v.name_key.sealed }]);
+  await renameDevice(hub.call, TOKEN, v.device_id, "Desk", WRAP());
+  const [body] = hub.renames();
+  assert.deepEqual(Object.keys(body), ["deviceId", "sealedName"]);
+  assert.equal(openName(K, v.device_id, body.sealedName), "Desk");
+});
+
+test("a token on an old hub keeps today's plaintext rename", async () => {
+  const hub = fakeHub([{ devices: [] }]);
+  await renameDevice(hub.call, TOKEN, "d1", "Desk");
+  assert.deepEqual(hub.renames(), [{ deviceId: "d1", friendlyName: "Desk" }]);
 });

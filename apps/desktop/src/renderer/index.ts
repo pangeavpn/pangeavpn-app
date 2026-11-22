@@ -21,7 +21,7 @@ import {
   resolveRegionStyle,
   type RegionStyle
 } from "./regionStyles.js";
-import { formatAccountNumberInput, normalizeAccountNumber } from "./accountNumber.js";
+import { formatAccountNumberInput, formatSignInCodeInput, normalizeAccountNumber } from "./accountNumber.js";
 import { loginErrorText } from "./loginErrorText.js";
 import {
   buildServerRetryOrder,
@@ -495,8 +495,23 @@ function isSubModalOpen(): boolean {
 const accountNumberValue = document.getElementById("accountNumberValue") as HTMLSpanElement;
 const accountNumberToggleBtn = document.getElementById("accountNumberToggleBtn") as HTMLButtonElement;
 const accountNumberCopyBtn = document.getElementById("accountNumberCopyBtn") as HTMLButtonElement;
+const accountNumberField = document.getElementById("accountNumberField") as HTMLElement;
+const accountBrowserNotice = document.getElementById("accountBrowserNotice") as HTMLElement;
+const accountBrowserGetNumberBtn = document.getElementById("accountBrowserGetNumberBtn") as HTMLButtonElement;
 const ACCOUNT_NUMBER_MASK = "••••-••••-••••-••••-••••-••••";
+const ACCOUNT_NUMBER_PAGE = "https://pangeavpn.org/app";
 let revealedAccountNumber: string | null = null;
+
+/** A browser sign-in has no account number on this computer: the row turns
+ *  into a pointer to the website, where the number can be seen. */
+function showAccountSignInMethod(browser: boolean): void {
+  accountBrowserNotice.hidden = !browser;
+  accountNumberField.hidden = browser;
+}
+
+accountBrowserGetNumberBtn.addEventListener("click", () => {
+  void window.openExternal?.(ACCOUNT_NUMBER_PAGE);
+});
 
 function hideAccountNumber(): void {
   revealedAccountNumber = null;
@@ -509,12 +524,16 @@ function hideAccountNumber(): void {
 
 // Fetched only on demand so the credential never sits in the DOM unasked.
 async function revealAccountNumber(): Promise<void> {
-  const number = pangeaApi ? await pangeaApi.getAccountNumber().catch(() => null) : null;
-  if (!number) {
+  const result = pangeaApi ? await pangeaApi.getAccountNumber().catch(() => null) : null;
+  if (result?.kind === "browser") {
+    showAccountSignInMethod(true);
+    return;
+  }
+  if (result?.kind !== "number") {
     accountNumberValue.textContent = t("common.dash");
     return;
   }
-  revealedAccountNumber = formatAccountNumberInput(number);
+  revealedAccountNumber = formatAccountNumberInput(result.value);
   accountNumberValue.textContent = revealedAccountNumber;
   accountNumberValue.classList.add("revealed");
   accountNumberToggleBtn.textContent = t("settings.account.hide");
@@ -552,6 +571,7 @@ function openSettings(): void {
   // reachable from the sign-in screen for language, theme and bypass methods.
   settingsAccountActions.hidden = !authState.authenticated;
   settingsAccountBar.hidden = !authState.authenticated;
+  showAccountSignInMethod(authState.signInMethod === "browser");
   if (authState.authenticated) void refreshSubscription();
   void loadSplitTunnel();
   activateOverlay(settingsOverlay);
@@ -1480,7 +1500,10 @@ const devicesModalCloseBtn = document.getElementById("devicesModalCloseBtn") as 
 const devicesModalMessage = document.getElementById("devicesModalMessage") as HTMLParagraphElement;
 const menuDevicesBtn = document.getElementById("menuDevicesBtn") as HTMLButtonElement;
 
-let pendingLoginToken: string | null = null;
+/** What Continue on the device-limit screen retries. A browser sign-in keeps
+ *  its credential in the main process; only a typed number lives here. */
+type PendingLogin = { kind: "token"; token: string } | { kind: "browser" };
+let pendingLogin: PendingLogin | null = null;
 let deviceRemovedCount = 0;
 
 function formatDeviceDate(iso: string): string {
@@ -1497,9 +1520,9 @@ function generateFallbackName(): string {
   return `${adj} ${noun}`;
 }
 
-async function showDeviceLimitScreen(token: string): Promise<void> {
+async function showDeviceLimitScreen(pending: PendingLogin): Promise<void> {
   if (!pangeaApi) return;
-  pendingLoginToken = token;
+  pendingLogin = pending;
   deviceRemovedCount = 0;
   deviceLimitTitle.textContent = t("deviceLimit.title");
   deviceLimitSubtitle.textContent = t("deviceLimit.subtitle");
@@ -1639,6 +1662,7 @@ interface DeviceRowEls {
 function renameFailureText(err: unknown): string {
   const text = String(err);
   if (text.includes("1-40 characters")) return t("devices.renameLength");
+  if (text.includes("Signed in with the browser")) return t("devices.renameNeedsNamesKey");
   if (text.includes("Sign in with your account number")) return t("devices.renameNeedsAccountNumber");
   return t("devices.renameFailed");
 }
@@ -1796,14 +1820,16 @@ async function handleDeviceRemove(deviceId: string, itemEl: HTMLElement, btn: HT
 }
 
 deviceLimitContinueBtn.addEventListener("click", async () => {
-  if (!pangeaApi || !pendingLoginToken) return;
+  if (!pangeaApi || !pendingLogin) return;
+  const pending = pendingLogin;
   deviceLimitContinueBtn.disabled = true;
   deviceLimitMessage.textContent = t("login.signingIn");
   try {
-    authState = await pangeaApi.login(pendingLoginToken);
+    authState = pending.kind === "token" ? await pangeaApi.login(pending.token) : await pangeaApi.retryBrowserSignIn();
     if (authState.authenticated) {
-      pangeaApi.rememberAccountNumber(pendingLoginToken).catch(() => {});
-      pendingLoginToken = null;
+      // The main process remembers a browser sign-in's number itself.
+      if (pending.kind === "token") pangeaApi.rememberAccountNumber(pending.token).catch(() => {});
+      pendingLogin = null;
       deviceLimitScreen.hidden = true;
       loginScreenMessage.textContent = "";
       loginTokenInput.value = "";
@@ -1840,7 +1866,7 @@ deviceLimitLogoutBtn.addEventListener("click", async () => {
   } catch {
     // best-effort
   } finally {
-    pendingLoginToken = null;
+    pendingLogin = null;
     deviceLimitScreen.hidden = true;
     loginScreen.hidden = false;
     loginScreenMessage.textContent = "";
@@ -1888,7 +1914,7 @@ loginScreenBtn.addEventListener("click", async () => {
       loginScreenBtn.disabled = false;
       loginTokenInput.disabled = false;
       loginScreenMessage.textContent = "";
-      await showDeviceLimitScreen(token);
+      await showDeviceLimitScreen({ kind: "token", token });
     } else {
       loginScreenMessage.textContent = loginErrorText(authState.error, t);
     }
@@ -1900,6 +1926,125 @@ loginScreenBtn.addEventListener("click", async () => {
       loginTokenInput.disabled = false;
     }
   }
+});
+
+// ── Browser sign-in ──
+// The main process opens pangeavpn.org and waits on 127.0.0.1 for the redirect;
+// the code the website shows is the fallback when that redirect can't land.
+
+const loginChooser = document.getElementById("loginChooser") as HTMLElement;
+const browserSignInBtn = document.getElementById("browserSignInBtn") as HTMLButtonElement;
+const browserSignInPanel = document.getElementById("browserSignInPanel") as HTMLElement;
+const browserSignInPairCode = document.getElementById("browserSignInPairCode") as HTMLElement;
+const browserSignInCodeForm = document.getElementById("browserSignInCodeForm") as HTMLElement;
+const browserSignInCodeInput = document.getElementById("browserSignInCodeInput") as HTMLInputElement;
+const browserSignInCodeBtn = document.getElementById("browserSignInCodeBtn") as HTMLButtonElement;
+const browserSignInEnterCodeBtn = document.getElementById("browserSignInEnterCodeBtn") as HTMLButtonElement;
+const browserSignInCancelBtn = document.getElementById("browserSignInCancelBtn") as HTMLButtonElement;
+
+function setBrowserSignInMode(active: boolean): void {
+  loginChooser.hidden = active;
+  browserSignInPanel.hidden = !active;
+  if (!active) {
+    browserSignInPairCode.textContent = "";
+    browserSignInCodeForm.hidden = true;
+    browserSignInEnterCodeBtn.hidden = false;
+    browserSignInCodeInput.value = "";
+    browserSignInCodeInput.disabled = false;
+    browserSignInCodeBtn.disabled = false;
+  }
+}
+
+async function handleBrowserSignInState(state: AuthState): Promise<void> {
+  authState = state;
+  if (state.authenticated) {
+    setBrowserSignInMode(false);
+    loginScreenMessage.textContent = "";
+    updateAuthUI();
+    if (state.friendlyName) {
+      localStorage.setItem(MY_DEVICE_NAME_KEY, state.friendlyName);
+      showToast(t("auth.deviceNamed", { name: state.friendlyName }), 6000, true);
+    }
+    await refreshServers();
+  } else if (state.error === "DEVICE_LIMIT_REACHED") {
+    setBrowserSignInMode(false);
+    loginScreenMessage.textContent = "";
+    await showDeviceLimitScreen({ kind: "browser" });
+  } else {
+    // Stay on the waiting panel: a mistyped code can be corrected, and Cancel starts over.
+    loginScreenMessage.textContent = loginErrorText(state.error, t);
+  }
+}
+
+browserSignInBtn.addEventListener("click", async () => {
+  if (!pangeaApi) return;
+  browserSignInBtn.disabled = true;
+  loginScreenMessage.textContent = t("login.browser.opening");
+  try {
+    const result = await pangeaApi.startBrowserSignIn({
+      done: t("login.browser.pageDone"),
+      invalid: t("login.browser.pageInvalid")
+    });
+    if (!result.ok) {
+      loginScreenMessage.textContent = t("login.browser.startFailed");
+      return;
+    }
+    browserSignInPairCode.textContent = result.pairingCode;
+    loginScreenMessage.textContent = "";
+    setBrowserSignInMode(true);
+    browserSignInCancelBtn.focus();
+  } catch (error) {
+    loginScreenMessage.textContent = reportError("browserSignIn", error, t("login.browser.startFailed"));
+  } finally {
+    browserSignInBtn.disabled = false;
+  }
+});
+
+browserSignInEnterCodeBtn.addEventListener("click", () => {
+  browserSignInCodeForm.hidden = false;
+  browserSignInEnterCodeBtn.hidden = true;
+  browserSignInCodeInput.focus();
+});
+
+browserSignInCodeInput.addEventListener("input", () => {
+  const formatted = formatSignInCodeInput(browserSignInCodeInput.value);
+  if (formatted !== browserSignInCodeInput.value) browserSignInCodeInput.value = formatted;
+});
+
+browserSignInCodeInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") browserSignInCodeBtn.click();
+});
+
+browserSignInCodeBtn.addEventListener("click", async () => {
+  if (!pangeaApi) return;
+  const code = formatSignInCodeInput(browserSignInCodeInput.value);
+  if (code.length !== 11) {
+    loginScreenMessage.textContent = t("login.browser.enterCodePrompt");
+    return;
+  }
+  browserSignInCodeBtn.disabled = true;
+  browserSignInCodeInput.disabled = true;
+  loginScreenMessage.textContent = t("login.signingIn");
+  try {
+    await handleBrowserSignInState(await pangeaApi.submitBrowserSignInCode(code));
+  } catch (error) {
+    loginScreenMessage.textContent = reportError("browserSignInCode", error);
+  } finally {
+    browserSignInCodeBtn.disabled = false;
+    browserSignInCodeInput.disabled = false;
+  }
+});
+
+browserSignInCancelBtn.addEventListener("click", async () => {
+  await pangeaApi?.cancelBrowserSignIn().catch(() => {});
+  setBrowserSignInMode(false);
+  loginScreenMessage.textContent = "";
+});
+
+pangeaApi?.onBrowserSignInResult((state) => {
+  // Only meaningful while the waiting panel is up; a late result after Cancel is dropped.
+  if (browserSignInPanel.hidden) return;
+  void handleBrowserSignInState(state);
 });
 
 serverConnectBtn.addEventListener("click", async () => {
@@ -3441,6 +3586,7 @@ function showLoginScreen(): void {
   loginScreen.style.opacity = "";
   loginScreen.style.transform = "";
   refreshCachedTokenBtn();
+  setBrowserSignInMode(false);
   loginTokenInput.focus();
 }
 

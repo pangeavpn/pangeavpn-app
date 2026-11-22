@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { formatAccountNumberInput, normalizeAccountNumber } from "./accountNumber.ts";
+import { formatAccountNumberInput, formatSignInCodeInput, normalizeAccountNumber } from "./accountNumber.ts";
 
 test("legacy digit-only tokens pass through untouched", () => {
   assert.equal(normalizeAccountNumber("0123456789012345"), "0123456789012345");
@@ -41,4 +41,11 @@ test("format does not reject over-long or unexpected characters", () => {
 test("empty input stays empty", () => {
   assert.equal(normalizeAccountNumber(""), "");
   assert.equal(formatAccountNumberInput(""), "");
+});
+
+test("the browser sign-in code is shown as XXXXX-XXXXX with Crockford folding", () => {
+  assert.equal(formatSignInCodeInput("7k3mq"), "7K3MQ");
+  assert.equal(formatSignInCodeInput("7k3mq9xa2p"), "7K3MQ-9XA2P");
+  assert.equal(formatSignInCodeInput("oil00 11111 22"), "01100-11111");
+  assert.equal(formatSignInCodeInput("7K3MQ-9U!A"), "7K3MQ-9A");
 });

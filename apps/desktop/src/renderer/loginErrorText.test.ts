@@ -18,6 +18,7 @@ test("every code has its own message", () => {
     "TIMEOUT",
     "REGISTRATION_FAILED",
     "LOCAL_STORAGE_FAILED",
+    "INVALID_CODE",
     "UNKNOWN"
   ];
   const keys = codes.map((code) => loginErrorText(code, t));

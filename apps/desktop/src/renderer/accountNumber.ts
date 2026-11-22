@@ -19,6 +19,18 @@ export function normalizeAccountNumber(value: string): string {
     .replace(/[IL]/g, "1");
 }
 
+/** The browser sign-in code as it's typed: Crockford, upper case, XXXXX-XXXXX. */
+export function formatSignInCodeInput(value: string): string {
+  const compact = value
+    .replace(/[\s-]/g, "")
+    .toUpperCase()
+    .replace(/O/g, "0")
+    .replace(/[IL]/g, "1")
+    .replace(/[^0-9A-HJKMNP-TV-Z]/g, "")
+    .slice(0, 10);
+  return compact.length > 5 ? `${compact.slice(0, 5)}-${compact.slice(5)}` : compact;
+}
+
 /** Display form for what is being typed: upper case, blocks of 4. */
 export function formatAccountNumberInput(value: string): string {
   const trimmed = value.trim();
