@@ -332,3 +332,10 @@ test("long runs of four-character words are scanned quickly", () => {
   assert.equal(redactDiagnostics(line, ""), line);
   assert.ok(Date.now() - started < 10_000, `took ${Date.now() - started}ms`);
 });
+
+test("a browser sign-in app token is redacted whole", () => {
+  const token = "pgt1_aB3-_xaB3-_xaB3-_xaB3-_xaB3-_xaB3-_xaB3-_xQ";
+  const out = redactDiagnostics(`credential=${token} done`);
+  assert.ok(!out.includes("pgt1_"), out);
+  assert.ok(out.includes("[redacted:appToken]"), out);
+});

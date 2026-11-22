@@ -18,6 +18,7 @@ function safeString(value: unknown): string {
 }
 
 const SECRET_PATTERNS: ReadonlyArray<readonly [RegExp, string]> = [
+  [/(?<![A-Za-z0-9])pgt1_[A-Za-z0-9_-]{43}(?![A-Za-z0-9_-])/g, "[redacted]"],
   [/\bBearer\s+[A-Za-z0-9\-_.]+/gi, "Bearer [redacted]"],
   [/(x-license-key["']?\s*[:=]\s*["']?)[^\s"',}]+/gi, "$1[redacted]"],
   [/\b[0-9a-f]{64}\b/gi, "[redacted]"],
