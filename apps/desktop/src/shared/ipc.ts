@@ -210,6 +210,8 @@ export interface AuthState {
   friendlyName?: string | null;
   /** Present while signed in. */
   signInMethod?: SignInMethod;
+  /** Browser sign-in only: the waiting session is gone, so the screen must start over. */
+  sessionEnded?: boolean;
 }
 
 export interface ServerInfo {

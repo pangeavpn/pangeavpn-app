@@ -1970,6 +1970,9 @@ async function handleBrowserSignInState(state: AuthState): Promise<void> {
     setBrowserSignInMode(false);
     loginScreenMessage.textContent = "";
     await showDeviceLimitScreen({ kind: "browser" });
+  } else if (state.sessionEnded) {
+    setBrowserSignInMode(false);
+    loginScreenMessage.textContent = state.error ? loginErrorText(state.error, t) : "";
   } else {
     // Stay on the waiting panel: a mistyped code can be corrected, and Cancel starts over.
     loginScreenMessage.textContent = loginErrorText(state.error, t);
@@ -2042,8 +2045,8 @@ browserSignInCancelBtn.addEventListener("click", async () => {
 });
 
 pangeaApi?.onBrowserSignInResult((state) => {
-  // Only meaningful while the waiting panel is up; a late result after Cancel is dropped.
-  if (browserSignInPanel.hidden) return;
+  // A late failure after Cancel is dropped, but a sign-in that landed must still show.
+  if (browserSignInPanel.hidden && !state.authenticated) return;
   void handleBrowserSignInState(state);
 });
 

@@ -2032,9 +2032,11 @@ async function redeemBrowserSignIn(session: BrowserSignInSession, code: string):
     // Browser sign-in only ever hands over the app's own token, never an account number.
     if (!isAppToken(token)) throw new DesktopLinkSealError("browser sign-in did not return an app token");
     const namesWrap = openNamesWrap(redeemed.namesWrapSealed, session.keys);
-    // The code is spent and the key has done its job.
+    // Cancelled or replaced while redeeming: don't sign in behind the user's back.
+    if (browserSignIn !== session) return { authenticated: false, user: null, sessionEnded: true };
     endBrowserSignIn(session);
-    return await finishBrowserSignIn(token, namesWrap);
+    const state = await finishBrowserSignIn(token, namesWrap);
+    return state.authenticated || state.error === "DEVICE_LIMIT_REACHED" ? state : { ...state, sessionEnded: true };
   } catch (err) {
     // A typo or a network blip leaves the session up so the user can try the code again.
     console.warn("browser sign-in redeem failed:", sanitizeLog(err));
@@ -2059,7 +2061,7 @@ function watchBrowserSignInRedirect(session: BrowserSignInSession): void {
       // Cancelled or replaced: nobody is waiting. Timed out: tell the screen.
       if (browserSignIn !== session) return;
       endBrowserSignIn(session);
-      sendBrowserSignInResult({ authenticated: false, user: null, error: "INVALID_CODE" });
+      sendBrowserSignInResult({ authenticated: false, user: null, error: "INVALID_CODE", sessionEnded: true });
     }
   );
 }
@@ -2094,7 +2096,8 @@ async function handleBrowserSignInCode(rawCode: unknown): Promise<AuthState> {
   const code = normalizeDesktopLinkCode(rawCode);
   const session = browserSignIn;
   // No session means no key to open the seal with: the code can't work here.
-  if (!code || !session) return { authenticated: false, user: null, error: "INVALID_CODE" };
+  if (!session) return { authenticated: false, user: null, error: "INVALID_CODE", sessionEnded: true };
+  if (!code) return { authenticated: false, user: null, error: "INVALID_CODE" };
   if (session.busy) return { authenticated: false, user: null, error: "UNKNOWN" };
   return redeemBrowserSignIn(session, code);
 }

@@ -129,6 +129,7 @@ declare global {
     error?: LoginErrorCode;
     friendlyName?: string | null;
     signInMethod?: "accountNumber" | "browser";
+    sessionEnded?: boolean;
   }
 
   /** Renderer-facing view of a server: display fields plus per-transport
