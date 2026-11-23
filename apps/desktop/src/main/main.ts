@@ -1111,9 +1111,14 @@ function fingerprintForServer(serverId: string, entryServerId: string | null): s
     customDns: pangeaApiClient.getCustomDns(),
     hubInTunnel: pangeaApiClient.getHubInTunnel(),
     server: entryServerId
-      ? { exit, entry: servers.find((server) => server.id === entryServerId) ?? null }
-      : exit
+      ? { exit: withoutEch(exit), entry: withoutEch(servers.find((server) => server.id === entryServerId) ?? null) }
+      : withoutEch(exit)
   });
+}
+
+// The hub rotates ECH keys every few minutes and the edge hands back retry configs, so a rotation needs no new peer.
+function withoutEch(server: ServerInfo | null): ServerInfo | null {
+  return server?.cdn ? { ...server, cdn: { ...server.cdn, ech: undefined } } : server;
 }
 
 // The still-fresh peer the hub registered on an earlier run, if any — reusing
