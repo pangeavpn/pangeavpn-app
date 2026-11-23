@@ -2002,10 +2002,27 @@ async function finishBrowserSignIn(token: string, namesWrap: Buffer | null): Pro
   if (state.authenticated) {
     pendingBrowserCredential = null;
     await storeNamesWrapKey(namesWrap);
+  } else if (state.error === "DEVICE_LIMIT_REACHED") {
+    pendingBrowserCredential = { token, namesWrap };
+    // The device-limit screen lists devices by name, which needs the wrap key now.
+    pangeaApiClient.setNamesWrapKey(namesWrap);
   } else {
-    pendingBrowserCredential = state.error === "DEVICE_LIMIT_REACHED" ? { token, namesWrap } : null;
+    pendingBrowserCredential = null;
+    revokeUnusedToken(token);
   }
   return state;
+}
+
+function revokeUnusedToken(token: string): void {
+  pangeaApiClient.revokeUnusedAppToken(token).catch((err) => {
+    console.warn("unused app token revoke failed:", sanitizeLog(err));
+  });
+}
+
+/** Leaving the device-limit screen without Continue: the held token will never be used. */
+function dropPendingBrowserCredential(): void {
+  if (pendingBrowserCredential) revokeUnusedToken(pendingBrowserCredential.token);
+  pendingBrowserCredential = null;
 }
 
 /** Device names degrade to labels without it, so a failure here never fails sign-in. */
@@ -2038,7 +2055,10 @@ async function redeemBrowserSignIn(session: BrowserSignInSession, code: string):
     if (!isAppToken(token)) throw new DesktopLinkSealError("browser sign-in did not return an app token");
     const namesWrap = openNamesWrap(redeemed.namesWrapSealed, session.keys);
     // Cancelled or replaced while redeeming: don't sign in behind the user's back.
-    if (browserSignIn !== session) return { authenticated: false, user: null, sessionEnded: true };
+    if (browserSignIn !== session) {
+      revokeUnusedToken(token);
+      return { authenticated: false, user: null, sessionEnded: true };
+    }
     endBrowserSignIn(session);
     const state = await finishBrowserSignIn(token, namesWrap);
     return state.authenticated || state.error === "DEVICE_LIMIT_REACHED" ? state : { ...state, sessionEnded: true };
@@ -2073,7 +2093,7 @@ function watchBrowserSignInRedirect(session: BrowserSignInSession): void {
 
 async function handleBrowserSignInStart(rawText: unknown): Promise<BrowserSignInStartResult> {
   endBrowserSignIn();
-  pendingBrowserCredential = null;
+  dropPendingBrowserCredential();
   let session: BrowserSignInSession | null = null;
   try {
     const keys = generateDesktopLinkKeys();
@@ -2116,7 +2136,7 @@ function registerBrowserSignInHandlers(): void {
   });
   ipcMain.handle(IPC_CHANNELS.authBrowserSignInCancel, async () => {
     endBrowserSignIn();
-    pendingBrowserCredential = null;
+    dropPendingBrowserCredential();
   });
 }
 

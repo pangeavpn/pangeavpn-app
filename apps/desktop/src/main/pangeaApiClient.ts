@@ -1708,6 +1708,16 @@ export class PangeaApiClient {
     await this.hubRequest<unknown>("POST", "/api/client/app-token/revoke", {});
   }
 
+  /** Revokes a token this client never finished signing in with. */
+  async revokeUnusedAppToken(token: string): Promise<void> {
+    const response = await this.hubFetch("/api/client/app-token/revoke", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-License-Key": token },
+      body: "{}"
+    });
+    if (!response.ok) throw new Error(`app token revoke failed: HTTP ${response.status}`);
+  }
+
   /** The wrap key a browser sign-in was handed for the device-names key. */
   setNamesWrapKey(key: Buffer | null): void {
     this.namesWrapKey = key?.length === 32 ? key : null;
