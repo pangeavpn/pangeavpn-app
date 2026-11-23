@@ -36,6 +36,7 @@ const (
 	SourceTectonic    LogSource = "tectonic"
 	SourceTUIC        LogSource = "tuic"
 	SourceCDN         LogSource = "cdn"
+	SourceCDNWS       LogSource = "cdnws"
 	SourceSnowflake   LogSource = "snowflake"
 	SourceWireGuard   LogSource = "wireguard"
 )
@@ -77,7 +78,7 @@ type StatusResponse struct {
 	// ProfileID is the profile the session runs on (or is held for), "" when idle.
 	ProfileID string `json:"profileId,omitempty"`
 	// ActiveTransport is "tectonic", "cloak", "naive", "reality", "hysteria2", "shadowsocks",
-	// "anytls", "tuic", "cdn", "snowflake", "wireguard" (no transport at all), or "" when disconnected.
+	// "anytls", "tuic", "cdn", "cdnws", "snowflake", "wireguard" (no transport at all), or "" when disconnected.
 	ActiveTransport string `json:"activeTransport"`
 	// ConnectingTransport is the candidate the cascade is trying right now,
 	// "" outside a bring-up. Lets clients show "via X" while connecting.
@@ -91,6 +92,7 @@ type StatusResponse struct {
 	AnyTLS              TransportStatus `json:"anytls"`
 	TUIC                TransportStatus `json:"tuic"`
 	CDN                 TransportStatus `json:"cdn"`
+	CDNWS               TransportStatus `json:"cdnws"`
 	Snowflake           TransportStatus `json:"snowflake"`
 	WireGuard           WireGuardStatus `json:"wireguard"`
 	KillSwitchActive    bool            `json:"killSwitchActive"`
@@ -328,8 +330,9 @@ type TUICProfile struct {
 	TargetPort int    `json:"targetPort,omitempty"`
 }
 
-// CDNProfile is VLESS over HTTPUpgrade+TLS dialled at a CDN edge that proxies to the node.
-// RemoteHost is the edge, never the node; ServerName is the proxied hostname.
+// CDNProfile is a TLS connection to a CDN edge that proxies to the node: VLESS over
+// HTTPUpgrade as Profile.CDN, VMess over a WebSocket as Profile.CDNWS. RemoteHost is the
+// edge, never the node; ServerName is the proxied hostname.
 type CDNProfile struct {
 	LocalPort  int    `json:"localPort"`
 	RemoteHost string `json:"remoteHost"`
@@ -339,6 +342,9 @@ type CDNProfile struct {
 	Path       string `json:"path,omitempty"`
 	TargetHost string `json:"targetHost,omitempty"`
 	TargetPort int    `json:"targetPort,omitempty"`
+	// ECHConfig is the edge's ECHConfigList, base64 as in its HTTPS record: with it a filter
+	// that blocks by SNI sees only the CDN's public name, never this hostname.
+	ECHConfig string `json:"echConfig,omitempty"`
 	// ExtraRootsPEM holds roots the signed-in user trusts that this service's account
 	// cannot see, such as a school's TLS-inspection CA. Set at dial time, never stored.
 	ExtraRootsPEM string `json:"-"`
@@ -385,7 +391,7 @@ const DefaultWireGuardPort = 51820
 // node relaying WireGuard to the exit node holding the peer. Nil means single-hop.
 type HopProfile struct {
 	// SingBoxPort is the entry's loopback hop port for REALITY, Hysteria2,
-	// Shadowsocks, AnyTLS, TUIC and CDN.
+	// Shadowsocks, AnyTLS, TUIC and both CDN transports.
 	SingBoxPort int `json:"singBoxPort"`
 	// CloakProxyMethod is the entry's ProxyBook key routing to this exit.
 	CloakProxyMethod string `json:"cloakProxyMethod,omitempty"`
@@ -423,6 +429,9 @@ type Profile struct {
 	// Never set on a multihop profile: see ApplyHop.
 	Tectonic *TectonicProfile `json:"tectonic,omitempty"`
 	CDN      *CDNProfile      `json:"cdn,omitempty"`
+	// CDNWS is the node's VMess-over-WebSocket route through the same CDN; nil when the
+	// node serves only VLESS there.
+	CDNWS *CDNProfile `json:"cdnws,omitempty"`
 	// Snowflake is optional; nil means this profile has no Snowflake
 	// transport configured.
 	Snowflake *SnowflakeProfile `json:"snowflake,omitempty"`

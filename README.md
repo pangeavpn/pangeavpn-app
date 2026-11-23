@@ -56,8 +56,9 @@ In auto mode the daemon works down this list and uses the first transport that a
 | 5 | **TUIC** | QUIC with an HTTP/3 handshake, like a browser on a modern site. Needs UDP to get through |
 | 6 | **NaiveProxy** | Traffic carrying a genuine Chrome TLS fingerprint |
 | 7 | **AnyTLS** | A TLS session whose record sizes are padded to blunt the TLS-in-TLS fingerprint |
-| 8 | **CDN** | An HTTPS connection to a content delivery network edge, never to our servers, so it survives every node address being blocked. It also works behind school and office filters that decrypt HTTPS. Slower |
-| 9 | **Tectonic** *(beta)* | Several short-lived TLS connections that look like Chrome loading an ordinary website. [Our own transport](#tectonic-our-own-transport-beta) |
+| 8 | **CDN (VMess)** | An HTTPS connection to a content delivery network edge, never to our servers, so it survives every node address being blocked. It also works behind school and office filters that decrypt HTTPS, and a filter that does sees only a browser-style WebSocket and VMess ciphertext. Slower |
+| 9 | **CDN (VLESS)** | The same CDN route with VLESS over HTTPUpgrade, tried when a node's VMess route is missing or refused. A filter that decrypts HTTPS can read the node credential it carries. Slower |
+| 10 | **Tectonic** *(beta)* | Several short-lived TLS connections that look like Chrome loading an ordinary website. [Our own transport](#tectonic-our-own-transport-beta) |
 
 Cloak is always available. The others switch on when the hub provisions them, so your exact cascade depends on your account and the node you land on.
 

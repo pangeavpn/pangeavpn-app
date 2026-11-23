@@ -58,6 +58,7 @@
     anytls: idle,
     tuic: idle,
     cdn: idle,
+    cdnws: idle,
     snowflake: idle,
     wireguard: {
       running: live,
@@ -77,6 +78,7 @@
   const hubMethods = { directIp: true, reality: true, shadowsocks: true, fronted: true, normal: true };
   // ?daemon=down fails every status poll; ?daemon=setup also reports a Mac account outside the group.
   const daemon = q.get("daemon");
+  const browserSignIn = q.get("signin") === "browser";
   const answers = {
     getStatus: () => (daemon ? Promise.reject(new Error("daemon unavailable")) : status()),
     needsAccountSetup: daemon === "setup",
@@ -90,7 +92,16 @@
     logout: () => {
       authenticated = false;
     },
-    getAuthState: () => ({ authenticated, user: authenticated ? { email: "", name: "" } : null }),
+    // ?signin=browser previews a computer signed in through the browser (no account number on it).
+    getAuthState: () =>
+      authenticated
+        ? { authenticated, user: { email: "", name: "" }, signInMethod: browserSignIn ? "browser" : "accountNumber" }
+        : { authenticated, user: null },
+    startBrowserSignIn: { ok: true, pairingCode: "297 264" },
+    submitBrowserSignInCode: () => {
+      authenticated = true;
+      return { authenticated: true, user: { email: "", name: "" }, signInMethod: "browser" };
+    },
     getServers: servers,
     getCachedServers: servers,
     getSubscription: () => new Promise((resolve) => setTimeout(() => resolve(plans[sub] ?? null), latencyMs)),
@@ -105,7 +116,7 @@
     getPreferredTransport: () => q.get("transport") || "auto",
     getTransportRace: true,
     getGamingMode: false,
-    getAccountNumber: "ABCD-EFGH-JKMN-PQRS",
+    getAccountNumber: () => (browserSignIn ? { kind: "browser" } : { kind: "number", value: "ABCD-EFGH-JKMN-PQRS" }),
     getRememberedAccountNumber: null,
     listDevices: [],
     getIsPackaged: false,

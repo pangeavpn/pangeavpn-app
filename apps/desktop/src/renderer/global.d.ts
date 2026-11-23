@@ -108,13 +108,28 @@ declare global {
     | "HUB_UNREACHABLE"
     | "TIMEOUT"
     | "REGISTRATION_FAILED"
+    | "LOCAL_STORAGE_FAILED"
+    | "INVALID_CODE"
     | "UNKNOWN";
+
+  /** Mirrors BrowserSignInStartResult in shared/ipc.ts. */
+  type BrowserSignInStartResult =
+    | { ok: true; pairingCode: string }
+    | { ok: false; error: LoginErrorCode };
+
+  /** Mirrors AccountNumberResult in shared/ipc.ts. */
+  type AccountNumberResult =
+    | { kind: "number"; value: string }
+    | { kind: "browser" }
+    | { kind: "none" };
 
   interface AuthState {
     authenticated: boolean;
     user: AuthUser | null;
     error?: LoginErrorCode;
     friendlyName?: string | null;
+    signInMethod?: "accountNumber" | "browser";
+    sessionEnded?: boolean;
   }
 
   /** Renderer-facing view of a server: display fields plus per-transport
@@ -137,6 +152,7 @@ declare global {
     anytls?: boolean;
     tuic?: boolean;
     cdn?: boolean;
+    cdnws?: boolean;
     snowflake?: boolean;
   }
 
@@ -233,8 +249,8 @@ declare global {
     /** Developer option: send hub traffic through the tunnel, not around it. */
     setHubInTunnel: (enabled: boolean) => Promise<void>;
     getHubInTunnel: () => Promise<boolean>;
-    setPreferredTransport: (value: "auto" | "tectonic" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "anytls" | "tuic" | "cdn" | "snowflake" | "wireguard") => Promise<void>;
-    getPreferredTransport: () => Promise<"auto" | "tectonic" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "anytls" | "tuic" | "cdn" | "snowflake" | "wireguard">;
+    setPreferredTransport: (value: "auto" | "tectonic" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "anytls" | "tuic" | "cdn" | "cdnws" | "snowflake" | "wireguard") => Promise<void>;
+    getPreferredTransport: () => Promise<"auto" | "tectonic" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "anytls" | "tuic" | "cdn" | "cdnws" | "snowflake" | "wireguard">;
     setLaunchAtStartup: (enabled: boolean) => Promise<void>;
     getLaunchAtStartup: () => Promise<boolean>;
     setLockdown: (enabled: boolean) => Promise<void>;
@@ -279,8 +295,13 @@ declare global {
     /** Backed by the main-process secure store — never localStorage. */
     rememberAccountNumber: (accountNumber: string) => Promise<void>;
     getRememberedAccountNumber: () => Promise<string | null>;
-    getAccountNumber: () => Promise<string | null>;
+    getAccountNumber: () => Promise<AccountNumberResult>;
     clearRememberedAccountNumber: () => Promise<void>;
+    startBrowserSignIn: (text?: { done: string; invalid: string }) => Promise<BrowserSignInStartResult>;
+    submitBrowserSignInCode: (code: string) => Promise<AuthState>;
+    retryBrowserSignIn: () => Promise<AuthState>;
+    cancelBrowserSignIn: () => Promise<void>;
+    onBrowserSignInResult: (callback: (state: AuthState) => void) => () => void;
   }
 
   interface AutoUpdaterApi {

@@ -11,7 +11,7 @@ import { directWireGuardEndpoint } from "../shared/wireguardEndpoint";
 import { buildShadowsocksProfile, isShadowsocksServerInfo } from "../shared/shadowsocksProfile";
 import { buildAnyTLSProfile } from "../shared/anytlsProfile";
 import { buildTUICProfile } from "../shared/tuicProfile";
-import { buildCDNProfile } from "../shared/cdnProfile";
+import { buildCDNProfile, buildCDNWSProfile } from "../shared/cdnProfile";
 import {
   buildTectonicProfile,
   tectonicNodeHosts,
@@ -61,6 +61,7 @@ import {
   type SealedRequest
 } from "./secureChannel";
 import { sanitizeLog } from "./logSanitize";
+import { DESKTOP_LINK_REDEEM_ROUTE, DesktopLinkCodeError } from "./desktopLink";
 import {
   parsePostQuantumAnswer,
   type PostQuantumOffer,
@@ -286,11 +287,10 @@ const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 // Every sealed envelope goes out as JSON; shared so the fetch calls below don't repeat it.
 const SEALED_ENVELOPE_HEADERS = { "Content-Type": "application/json" } as const;
 
-// Empty SNI and no cert check are deliberate: every call posts a sealed
-// sealed envelope, so TLS is carrier only. Do not "harden" this.
+// No SNI, no cert check and the bare IP as Host are deliberate: the envelope is sealed, so TLS
+// is only a carrier, and a filter that decrypts it reads no hostname. Do not "harden" this.
 function fetchDohResolved(
   ip: string,
-  hostname: string,
   requestPath: string,
   options: {
     method?: string;
@@ -330,7 +330,7 @@ function fetchDohResolved(
         method: options.method ?? "GET",
         headers: {
           ...options.headers,
-          Host: hostname
+          Host: ip.includes(":") ? `[${ip}]` : ip
         },
         ...DOH_TLS_OPTIONS
       },
@@ -935,6 +935,8 @@ export class PangeaApiClient {
     return this.licenseKey;
   }
 
+  private namesWrapKey: Buffer | null = null;
+
   private resetHubResolution(): void {
     this.dohResolvedIp = null;
     this.frontedHost = null;
@@ -996,7 +998,7 @@ export class PangeaApiClient {
           timeoutMs: 8000
         });
       } else if (path.kind === "ip") {
-        rawResponse = await fetchDohResolved(path.ip, HUB_HOSTNAME, sealed.route, {
+        rawResponse = await fetchDohResolved(path.ip, sealed.route, {
           method: "POST",
           headers: SEALED_ENVELOPE_HEADERS,
           body: envelopeJson,
@@ -1509,7 +1511,7 @@ export class PangeaApiClient {
       });
     }
     if (this.dohResolvedIp) {
-      return fetchDohResolved(this.dohResolvedIp, HUB_HOSTNAME, route, {
+      return fetchDohResolved(this.dohResolvedIp, route, {
         method: "POST",
         headers: SEALED_ENVELOPE_HEADERS,
         body,
@@ -1550,7 +1552,7 @@ export class PangeaApiClient {
       this.dohResolvedIp = resolvedIp;
       this.rememberHubIp(resolvedIp);
       this.setActiveHubMethod("directIp", resolvedIp);
-      return fetchDohResolved(resolvedIp, HUB_HOSTNAME, route, {
+      return fetchDohResolved(resolvedIp, route, {
         method: "POST",
         headers: SEALED_ENVELOPE_HEADERS,
         body,
@@ -1612,7 +1614,7 @@ export class PangeaApiClient {
           // so the branch order in this method reaches the DoH path just resolved.
           this.frontedHost = null;
           this.stopHubProxy();
-          const retryResponse = await fetchDohResolved(resolvedIp, HUB_HOSTNAME, sealed.route, {
+          const retryResponse = await fetchDohResolved(resolvedIp, sealed.route, {
             method: "POST",
             headers: SEALED_ENVELOPE_HEADERS,
             body: envelopeJson,
@@ -1676,6 +1678,51 @@ export class PangeaApiClient {
     return data;
   }
 
+  /** Trades a browser sign-in code for this app's own sign-in token, sealed
+   *  to its ephemeral key, plus the browser's sealed names wrap key when it
+   *  had one. Anonymous: the code is the only thing tying it to anyone, and
+   *  the hub only ever relays ciphertext. */
+  async redeemDesktopLink(code: string): Promise<{ sealed: string; namesWrapSealed: string | null }> {
+    const response = await this.hubFetch(DESKTOP_LINK_REDEEM_ROUTE, {
+      method: "POST",
+      headers: SEALED_ENVELOPE_HEADERS,
+      body: JSON.stringify({ code })
+    });
+    if (response.status === 429 || response.status >= 500) {
+      throw new LoginRejectedError(`Browser sign-in redeem failed (${response.status})`, response.status);
+    }
+    if (!response.ok) {
+      // Unknown, used and expired read the same; the body adds nothing worth logging.
+      throw new DesktopLinkCodeError(`Browser sign-in code rejected (${response.status})`);
+    }
+    const data = (await response.json()) as { sealed?: unknown; namesWrapSealed?: unknown };
+    if (typeof data.sealed !== "string") {
+      throw new DesktopLinkCodeError("Browser sign-in redeem returned no sealed credential");
+    }
+    return { sealed: data.sealed, namesWrapSealed: typeof data.namesWrapSealed === "string" ? data.namesWrapSealed : null };
+  }
+
+  /** Signs this app's own token out on the server. Only meaningful for an
+   *  app token: an account number is the account, not a revocable sign-in. */
+  async revokeAppToken(): Promise<void> {
+    await this.hubRequest<unknown>("POST", "/api/client/app-token/revoke", {});
+  }
+
+  /** Revokes a token this client never finished signing in with. */
+  async revokeUnusedAppToken(token: string): Promise<void> {
+    const response = await this.hubFetch("/api/client/app-token/revoke", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-License-Key": token },
+      body: "{}"
+    });
+    if (!response.ok) throw new Error(`app token revoke failed: HTTP ${response.status}`);
+  }
+
+  /** The wrap key a browser sign-in was handed for the device-names key. */
+  setNamesWrapKey(key: Buffer | null): void {
+    this.namesWrapKey = key?.length === 32 ? key : null;
+  }
+
   /** The node list, falling back to the cached one when the hub is unreachable.
    *  An AuthError or expired subscription still propagates — that's the hub answering "no". */
   async getServers(): Promise<ServerInfo[]> {
@@ -1723,7 +1770,7 @@ export class PangeaApiClient {
 
   async listDevices(): Promise<DeviceInfo[]> {
     const data = await this.hubRequest<HubDeviceList>("GET", "/api/device/list");
-    return shownDevices(data, this.licenseKey);
+    return shownDevices(data, this.licenseKey, this.namesWrapKey);
   }
 
   async removeDevice(deviceId: string): Promise<void> {
@@ -1732,7 +1779,7 @@ export class PangeaApiClient {
 
   async renameDevice(deviceId: string, name: string): Promise<void> {
     const call = (method: string, route: string, body?: unknown) => this.hubRequest<unknown>(method, route, body);
-    await renameDeviceOnHub(call, this.licenseKey, deviceId, name);
+    await renameDeviceOnHub(call, this.licenseKey, deviceId, name, this.namesWrapKey);
   }
 
   /** Drops the post-failure cooldown. Pressing Connect is the user asking for
@@ -1894,6 +1941,7 @@ export class PangeaApiClient {
     const anytls = server.anytls ? buildAnyTLSProfile(server.anytls, nodeIp) : undefined;
     const tuic = server.tuic ? buildTUICProfile(server.tuic, nodeIp) : undefined;
     const cdn = server.cdn ? buildCDNProfile(server.cdn) : undefined;
+    const cdnws = server.cdn ? buildCDNWSProfile(server.cdn) : undefined;
     // Never under a hop: the node relays only to its own WireGuard, so it would egress at the entry.
     const tectonic = reg.tectonic && !isMultihop ? buildTectonicProfile(reg.tectonic, nodeIp) : undefined;
     // The reply's copy is current; the cached list may be one this client cannot refresh.
@@ -1938,7 +1986,7 @@ export class PangeaApiClient {
       cloak: {
         localPort: 51820,
         remoteHost: server.cloak.remoteHost,
-        remotePort: 443,
+        remotePort: server.cloak.remotePort ?? 443,
         uid: server.cloak.uid,
         publicKey: server.cloak.publicKey,
         encryptionMethod: "plain",
@@ -1989,6 +2037,7 @@ export class PangeaApiClient {
       ...(tuic ? { tuic } : {}),
       ...(tectonic ? { tectonic } : {}),
       ...(cdn ? { cdn } : {}),
+      ...(cdnws ? { cdnws } : {}),
       ...(server.snowflake ? {
         snowflake: {
           localPort: 0,
@@ -2028,6 +2077,7 @@ export class PangeaApiClient {
 
   clearCache(): void {
     this.licenseKey = null;
+    this.namesWrapKey = null;
     this.cachedServers = [];
     // The node list is account-scoped, so it goes when the account does. The hub IP,
     // relays and control-plane credentials survive: they let a signed-out client sign in again.

@@ -26,6 +26,7 @@
 "bypass_anytls_desc" = "یک نشست TLS با لایه‌گذاری که الگوی TLS-در-TLS را که دیگر ترابری‌های TLS نشان می‌دهند، هموار می‌کند.";
 "bypass_auto_desc" = "استتاری را که از فیلتر عبور می‌کند انتخاب می‌کند و به‌یاد می‌سپارد روی این شبکه چه جواب داد.";
 "bypass_cdn_desc" = "از راه یک شبکه توزیع محتوا (CDN) می‌رود، پس مسدود کردن نشانی سرورهای ما جلویش را نمی‌گیرد. کندتر از بقیه است.";
+"bypass_cdnws_desc" = "این هم از راه یک شبکه توزیع محتوا (CDN) می‌رود و حتی در شبکه‌هایی که ترافیک HTTPS را باز می‌کنند، خواندنی نیست. کندتر از بقیه است.";
 "bypass_cloak_desc" = "TLS به‌سمت یک سایت طعمه، طوری که ترافیک مثل بازدیدی عادی به‌نظر برسد.";
 "bypass_hysteria2_desc" = "UDP و QUIC به‌جای TCP. وقتی همه اتصال‌های TCP می‌افتند، ارزش امتحان دارد.";
 "bypass_reality_desc" = "دست‌دادن TLS یک سایت واقعی را قرض می‌گیرد، پس کاوش‌ها یک سایت اصیل می‌بینند. قوی‌ترین استتار.";
@@ -401,7 +402,8 @@
 "settings_title" = "تنظیمات";
 "settings_transport_anytls" = "AnyTLS";
 "settings_transport_auto" = "خودکار (توصیه‌شده)";
-"settings_transport_cdn" = "CDN";
+"settings_transport_cdn" = "CDN (VLESS)";
+"settings_transport_cdnws" = "CDN (VMess)";
 "settings_transport_cloak" = "Cloak";
 "settings_transport_description" = "چگونه PangeaVPN ترافیک شما را استتار می‌کند.";
 "settings_transport_gaming_hint" = "ترافیک بازی را هم‌زمان از دو اتصال می‌فرستد تا گم شدن یک بسته بازی را متوقف نکند. کمی داده بیشتر مصرف می‌کند و راحت‌تر شناسایی می‌شود. فقط با Tectonic. از اتصال بعدی اعمال می‌شود.";
@@ -490,7 +492,8 @@
 "toggle_off" = "خاموش";
 "toggle_on" = "روشن";
 "transport_status_anytls" = "مبهم‌سازی: AnyTLS";
-"transport_status_cdn" = "مبهم‌سازی: CDN";
+"transport_status_cdn" = "مبهم‌سازی: CDN (VLESS)";
+"transport_status_cdnws" = "مبهم‌سازی: CDN (VMess)";
 "transport_status_cloak" = "مبهم‌سازی: Cloak";
 "transport_status_hysteria2" = "مبهم‌سازی: Hysteria2";
 "transport_status_naive" = "مبهم‌سازی: NaiveProxy";

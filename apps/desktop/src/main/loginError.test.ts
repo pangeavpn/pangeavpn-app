@@ -123,3 +123,8 @@ test("a non-numeric status is ignored rather than trusted", () => {
   (err as Error & { status: unknown }).status = "401";
   assert.equal(classifyLoginError(err), "UNKNOWN");
 });
+
+test("a rejected or unopenable browser sign-in code is INVALID_CODE, not a bad account number", () => {
+  assert.equal(classifyLoginError(named("DesktopLinkCodeError", "Browser sign-in code rejected (404)")), "INVALID_CODE");
+  assert.equal(classifyLoginError(named("DesktopLinkSealError", "sealed credential did not open")), "INVALID_CODE");
+});

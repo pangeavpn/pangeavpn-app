@@ -42,13 +42,15 @@ type Memory interface {
 
 // AutoCascadeOrder is the auto-mode fallback order: REALITY leads for active probing, consecutive
 // rungs hide differently so one block rarely stops the next, and Tectonic trails while in beta.
-var AutoCascadeOrder = []string{"reality", "cloak", "shadowsocks", "hysteria2", "tuic", "naive", "anytls", "cdn", "snowflake", "tectonic"}
+// cdnws leads cdn: past the upgrade it leaves a TLS-decrypting filter only ciphertext, and
+// cdn still gets a turn when the edge has no route to the node's VMess listener.
+var AutoCascadeOrder = []string{"reality", "cloak", "shadowsocks", "hysteria2", "tuic", "naive", "anytls", "cdnws", "cdn", "snowflake", "tectonic"}
 
 // knownKinds keeps an explicit request for something else an "unknown"
 // error rather than silently reporting it as unconfigured.
 var knownKinds = map[string]struct{}{
 	"tectonic": {}, "cloak": {}, "reality": {}, "shadowsocks": {}, "hysteria2": {}, "tuic": {},
-	"naive": {}, "anytls": {}, "cdn": {}, "snowflake": {},
+	"naive": {}, "anytls": {}, "cdnws": {}, "cdn": {}, "snowflake": {},
 }
 
 // IsAuto reports whether a selection means "walk the cascade".

@@ -77,7 +77,8 @@
     <string name="settings_title">تنظیمات</string>
     <string name="settings_transport_anytls">AnyTLS</string>
     <string name="settings_transport_auto">خودکار (توصیه‌شده)</string>
-    <string name="settings_transport_cdn">CDN</string>
+    <string name="settings_transport_cdn">CDN (VLESS)</string>
+    <string name="settings_transport_cdnws">CDN (VMess)</string>
     <string name="settings_transport_cloak">Cloak</string>
     <string name="settings_transport_description">چگونه PangeaVPN ترافیک شما را استتار می‌کند.</string>
     <string name="settings_transport_gaming_hint">ترافیک بازی را هم‌زمان از دو اتصال می‌فرستد تا گم شدن یک بسته بازی را متوقف نکند. کمی داده بیشتر مصرف می‌کند و راحت‌تر شناسایی می‌شود. فقط با Tectonic. از اتصال بعدی اعمال می‌شود.</string>
@@ -103,7 +104,8 @@
     <string name="toggle_off">خاموش</string>
     <string name="toggle_on">روشن</string>
     <string name="transport_status_anytls">مبهم‌سازی: AnyTLS</string>
-    <string name="transport_status_cdn">مبهم‌سازی: CDN</string>
+    <string name="transport_status_cdn">مبهم‌سازی: CDN (VLESS)</string>
+    <string name="transport_status_cdnws">مبهم‌سازی: CDN (VMess)</string>
     <string name="transport_status_cloak">مبهم‌سازی: Cloak</string>
     <string name="transport_status_hysteria2">مبهم‌سازی: Hysteria2</string>
     <string name="transport_status_naive">مبهم‌سازی: NaiveProxy</string>

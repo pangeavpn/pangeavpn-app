@@ -9,6 +9,8 @@ import {
   type PanicPhase,
   type PanicWipeContext
 } from "./panicWipe.ts";
+import { AUTH_FILE_NAMES } from "./authFiles.ts";
+import path from "node:path";
 
 function ctx(overrides: Partial<PanicWipeContext> = {}): PanicWipeContext {
   return {
@@ -170,4 +172,17 @@ test("a failing removePath does not abort the wipe", async () => {
   await performPanicWipe(ctx(), actions);
   assert.ok(rec.calls.includes("quit"));
   assert.ok(rec.calls.includes("requestDaemonUninstall"));
+});
+
+test("every auth file, the browser sign-in's names-wrap.dat included, is inside a wiped directory", () => {
+  for (const platform of ["win32", "darwin", "linux"] as const) {
+    const c = platform === "win32" ? ctx() : ctx({ platform, homeDir: "/home/alice", userStateDir: "/home/alice/.config/pangeavpn-desktop" });
+    const join = platform === "win32" ? path.win32.join : path.posix.join;
+    const removed = userStatePathsToRemove(c);
+    for (const name of Object.values(AUTH_FILE_NAMES)) {
+      const file = join(c.userStateDir, name);
+      assert.ok(removed.some((dir) => file.startsWith(join(dir, ""))), `${platform}: ${name} survives the wipe`);
+    }
+  }
+  assert.equal(AUTH_FILE_NAMES.namesWrap, "names-wrap.dat");
 });

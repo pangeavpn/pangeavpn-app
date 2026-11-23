@@ -534,6 +534,101 @@ body[data-theme="light"] .login-brand {
   font-size: 0.85rem;
 }
 
+.settings-browser-notice {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.settings-browser-notice[hidden],
+#accountNumberField[hidden] {
+  display: none;
+}
+
+.settings-browser-notice-body {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+
+.login-chooser,
+.browser-signin {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+}
+
+.login-chooser[hidden],
+.browser-signin[hidden],
+.browser-signin-code[hidden] {
+  display: none;
+}
+
+.login-note {
+  margin: 0;
+  max-width: 330px;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.login-or {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 330px;
+  max-width: 100%;
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+.login-or::before,
+.login-or::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+/* The account-number button is the quieter of the two ways in. */
+.login-button.btn-ghost:hover:not(:disabled) {
+  box-shadow: none;
+}
+
+.browser-signin-pair {
+  margin: 0;
+  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+  font-size: 1.6rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--text-primary);
+}
+
+.browser-signin-code {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.browser-signin-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.browser-signin-action {
+  padding: 8px 16px;
+  font-size: 0.85rem;
+  border: none;
+  cursor: pointer;
+}
+
 /* ── Toast notifications ─────────────────────────────────── */
 
 .toast-container {

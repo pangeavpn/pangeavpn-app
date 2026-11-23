@@ -68,6 +68,30 @@ test("checkTrack fails when the dot runs ahead of its label mid-slide", () => {
   assert.equal(Math.round(result.worst.deviation), 32);
 });
 
+test("measureFrame reports the label and dot heights", () => {
+  const found = measureFrame(row({ label: 200, dot: 200 }), WIDTH, HEIGHT, g);
+  assert.equal(found.labelHeight, 25);
+  assert.equal(found.dotHeight, 23);
+});
+
+test("checkTrack skips a frame where a sheet covers the bottom of the label", () => {
+  const whole = (label, dot) => ({ label, dot, labelHeight: 25, dotHeight: 25 });
+  const rows = [150, 165, 180, 195, 200, ...Array(10).fill(200)].map((y) => whole(y, y + 1));
+  // Half the label hidden: its visible ink centres 6px high while the dot is where it belongs.
+  rows.splice(8, 0, { label: 194, dot: 201, labelHeight: 12, dotHeight: 25 });
+  const result = checkTrack(rows.map((s, frame) => ({ frame, ...s })), g);
+  assert.equal(result.ok, true);
+  assert.equal(result.covered, 1);
+});
+
+test("checkTrack still fails a whole label that drifts from its dot", () => {
+  const rows = [150, 165, 180, 195, 200, ...Array(10).fill(200)].map((y) => ({ label: y, dot: y + 1, labelHeight: 25, dotHeight: 25 }));
+  rows.splice(8, 0, { label: 194, dot: 201, labelHeight: 25, dotHeight: 25 });
+  const result = checkTrack(rows.map((s, frame) => ({ frame, ...s })), g);
+  assert.equal(result.ok, false);
+  assert.equal(result.covered, 0);
+});
+
 test("checkTrack refuses a tour where the row never moves", () => {
   const result = checkTrack(track(Array(20).fill([200, 200])), g);
   assert.equal(result.exercised, false);

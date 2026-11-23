@@ -26,6 +26,7 @@
 "bypass_anytls_desc" = "A padded TLS session, smoothing the TLS-in-TLS shape other TLS transports leak.";
 "bypass_auto_desc" = "Picks the disguise that gets through and remembers what worked on this network.";
 "bypass_cdn_desc" = "Goes through a content delivery network, so blocking our servers' addresses doesn't stop it. Slower than the others.";
+"bypass_cdnws_desc" = "Also goes through a content delivery network, and stays unreadable even on networks that open up HTTPS traffic. Slower than the others.";
 "bypass_cloak_desc" = "TLS aimed at a decoy site, so the traffic looks like an ordinary visit there.";
 "bypass_hysteria2_desc" = "UDP and QUIC instead of TCP. Worth a try when every TCP connection dies.";
 "bypass_reality_desc" = "Borrows a real site's TLS handshake, so probes see a genuine site. The strongest disguise.";
@@ -401,7 +402,8 @@
 "settings_title" = "Settings";
 "settings_transport_anytls" = "AnyTLS";
 "settings_transport_auto" = "Automatic (recommended)";
-"settings_transport_cdn" = "CDN";
+"settings_transport_cdn" = "CDN (VLESS)";
+"settings_transport_cdnws" = "CDN (VMess)";
 "settings_transport_cloak" = "Cloak";
 "settings_transport_description" = "How PangeaVPN disguises your traffic.";
 "settings_transport_gaming_hint" = "Sends game traffic over two connections at once, so a lost packet doesn't freeze the game. Uses a little more data and is easier to spot. Tectonic only. Applies on next connect.";
@@ -490,7 +492,8 @@
 "toggle_off" = "Off";
 "toggle_on" = "On";
 "transport_status_anytls" = "Obfuscation: AnyTLS";
-"transport_status_cdn" = "Obfuscation: CDN";
+"transport_status_cdn" = "Obfuscation: CDN (VLESS)";
+"transport_status_cdnws" = "Obfuscation: CDN (VMess)";
 "transport_status_cloak" = "Obfuscation: Cloak";
 "transport_status_hysteria2" = "Obfuscation: Hysteria2";
 "transport_status_naive" = "Obfuscation: NaiveProxy";

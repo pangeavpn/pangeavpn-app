@@ -18,6 +18,7 @@ export const LogSourceSchema = z.enum([
   "anytls",
   "tuic",
   "cdn",
+  "cdnws",
   "snowflake",
   "wireguard"
 ]);
@@ -132,7 +133,8 @@ export const TectonicProfileSchema = z.object({
   sni: z.string().optional()
 });
 
-// remoteHost is a CDN edge, never the node; serverName is the CDN-proxied hostname.
+// remoteHost is a CDN edge, never the node; serverName is the CDN-proxied hostname. The
+// same shape carries both CDN transports: VLESS as `cdn`, VMess over a WebSocket as `cdnws`.
 export const CDNProfileSchema = z.object({
   localPort: z.number().int().nonnegative(),
   remoteHost: z.string().min(1),
@@ -141,7 +143,8 @@ export const CDNProfileSchema = z.object({
   serverName: z.string().min(1),
   path: z.string().optional(),
   targetHost: z.string().optional(),
-  targetPort: z.number().int().positive().optional()
+  targetPort: z.number().int().positive().optional(),
+  echConfig: z.string().optional()
 });
 
 export const SnowflakeProfileSchema = z.object({
@@ -211,6 +214,7 @@ export const ProfileSchema = z.object({
   tuic: TUICProfileSchema.optional(),
   tectonic: TectonicProfileSchema.optional(),
   cdn: CDNProfileSchema.optional(),
+  cdnws: CDNProfileSchema.optional(),
   snowflake: SnowflakeProfileSchema.optional(),
   wireguard: WireGuardProfileSchema
 });
@@ -223,10 +227,10 @@ export const StatusResponseSchema = z.object({
   state: DaemonStateSchema,
   detail: z.string(),
   activeTransport: z
-    .enum(["tectonic", "cloak", "naive", "reality", "hysteria2", "shadowsocks", "anytls", "tuic", "cdn", "snowflake", "wireguard", ""])
+    .enum(["tectonic", "cloak", "naive", "reality", "hysteria2", "shadowsocks", "anytls", "tuic", "cdn", "cdnws", "snowflake", "wireguard", ""])
     .default(""),
   connectingTransport: z
-    .enum(["tectonic", "cloak", "naive", "reality", "hysteria2", "shadowsocks", "anytls", "tuic", "cdn", "snowflake", "wireguard", ""])
+    .enum(["tectonic", "cloak", "naive", "reality", "hysteria2", "shadowsocks", "anytls", "tuic", "cdn", "cdnws", "snowflake", "wireguard", ""])
     .default(""),
   cloak: z.object({
     running: z.boolean(),
@@ -264,6 +268,13 @@ export const StatusResponseSchema = z.object({
     running: z.boolean(),
     pid: z.number().nullable()
   }),
+  // Defaulted: a daemon from before the split sends no cdnws block.
+  cdnws: z
+    .object({
+      running: z.boolean(),
+      pid: z.number().nullable()
+    })
+    .default({ running: false, pid: null }),
   snowflake: z.object({
     running: z.boolean(),
     pid: z.number().nullable()
@@ -313,7 +324,7 @@ export const ConnectRequestSchema = z.object({
   // "wireguard" is the direct method: no transport, straight to the node. Only
   // ever set when the user asks for it — the daemon's auto cascade never picks it.
   preferredTransport: z
-    .enum(["tectonic", "cloak", "naive", "reality", "hysteria2", "shadowsocks", "anytls", "tuic", "cdn", "snowflake", "wireguard"])
+    .enum(["tectonic", "cloak", "naive", "reality", "hysteria2", "shadowsocks", "anytls", "tuic", "cdn", "cdnws", "snowflake", "wireguard"])
     .optional(),
   allowLAN: z.boolean().optional(),
   lockdown: z.boolean().optional()

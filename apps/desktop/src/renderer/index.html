@@ -68,20 +68,50 @@
       </div>
       <div class="login-content">
         <h1 data-i18n="app.brand">PangeaVPN</h1>
-        <p class="login-subtitle"><span data-i18n="login.subtitle">Login with your account code.</span> <a class="login-link" id="loginDashboardLink" href="https://pangeavpn.org/app" data-i18n="login.getToken">Find your account number</a></p>
-        <input
-          id="loginTokenInput"
-          class="login-token-input"
-          type="text"
-          placeholder="ABCD-EFGH-JKMN-PQRS-TVWX-YZ01"
-          data-i18n-placeholder="login.tokenPlaceholder"
-          autocomplete="off"
-          spellcheck="false"
-          aria-label="Account number"
-          data-i18n-aria-label="login.tokenAriaLabel"
-        />
-        <button id="cachedTokenBtn" class="cached-token-btn" type="button" hidden></button>
-        <button id="loginScreenBtn" class="login-button" type="button" data-i18n="login.signIn">Sign In</button>
+        <div id="loginChooser" class="login-chooser">
+          <button id="browserSignInBtn" class="login-button" type="button" data-i18n="login.browser.signIn">Sign in with browser</button>
+          <p class="login-note" data-i18n="login.browser.note">Opens pangeavpn.org in your browser. For the most private sign-in, use your account number instead.</p>
+          <div class="login-or" aria-hidden="true"><span data-i18n="login.or">or</span></div>
+          <p class="login-subtitle"><span data-i18n="login.subtitle">Login with your account code.</span> <a class="login-link" id="loginDashboardLink" href="https://pangeavpn.org/app" data-i18n="login.getToken">Find your account number</a></p>
+          <input
+            id="loginTokenInput"
+            class="login-token-input"
+            type="text"
+            placeholder="ABCD-EFGH-JKMN-PQRS-TVWX-YZ01"
+            data-i18n-placeholder="login.tokenPlaceholder"
+            autocomplete="off"
+            spellcheck="false"
+            aria-label="Account number"
+            data-i18n-aria-label="login.tokenAriaLabel"
+          />
+          <button id="cachedTokenBtn" class="cached-token-btn" type="button" hidden></button>
+          <button id="loginScreenBtn" class="login-button btn-ghost" type="button" data-i18n="login.signIn">Sign In</button>
+        </div>
+        <div id="browserSignInPanel" class="browser-signin" hidden>
+          <p id="browserSignInStatus" class="login-subtitle" data-i18n="login.browser.waiting">Finish signing in in your browser.</p>
+          <p class="login-note" data-i18n="login.browser.pairLabel">Check that the website shows this code:</p>
+          <p id="browserSignInPairCode" class="browser-signin-pair" dir="ltr" translate="no"></p>
+          <div id="browserSignInCodeForm" class="browser-signin-code" hidden>
+            <input
+              id="browserSignInCodeInput"
+              class="login-token-input"
+              type="text"
+              dir="ltr"
+              placeholder="XXXXX-XXXXX"
+              data-i18n-placeholder="login.browser.codePlaceholder"
+              autocomplete="off"
+              spellcheck="false"
+              maxlength="11"
+              aria-label="Sign-in code from the website"
+              data-i18n-aria-label="login.browser.codeAriaLabel"
+            />
+            <button id="browserSignInCodeBtn" class="login-button" type="button" data-i18n="login.signIn">Sign In</button>
+          </div>
+          <div class="browser-signin-actions">
+            <button id="browserSignInEnterCodeBtn" class="btn-ghost browser-signin-action" type="button" data-i18n="login.browser.enterCode">Enter code instead</button>
+            <button id="browserSignInCancelBtn" class="btn-ghost browser-signin-action" type="button" data-i18n="login.browser.cancel">Cancel</button>
+          </div>
+        </div>
         <p id="loginScreenMessage" class="login-message" role="alert" aria-live="assertive"></p>
       </div>
     </div>
@@ -385,7 +415,12 @@
       <div id="settingsPane" class="settings-pane">
         <!-- Here, not in the rail: the account number needs the full width. -->
         <div id="settingsAccountBar" class="settings-account-bar">
-          <div class="settings-field">
+          <div id="accountBrowserNotice" class="settings-field settings-browser-notice" hidden>
+            <span class="settings-field-label" data-i18n="settings.account.browserTitle">Signed in with your browser</span>
+            <p class="settings-browser-notice-body" data-i18n="settings.account.browserBody">This computer has its own sign-in, so the app doesn't hold your account number. You can see it on the website.</p>
+            <button id="accountBrowserGetNumberBtn" class="settings-inline-btn settings-browser-notice-btn" type="button" data-i18n="settings.account.browserGetNumber">Get my account number</button>
+          </div>
+          <div id="accountNumberField" class="settings-field">
             <span class="settings-field-head">
               <span class="settings-field-label" data-i18n="settings.account.number">Account Number</span>
               <span class="settings-field-btns">
@@ -421,7 +456,8 @@
             <option value="tuic" data-i18n="settings.transport.tuic">TUIC</option>
             <option value="naive" data-i18n="settings.transport.naive">NaiveProxy</option>
             <option value="anytls" data-i18n="settings.transport.anytls">AnyTLS</option>
-            <option value="cdn" data-i18n="settings.transport.cdn">CDN</option>
+            <option value="cdnws" data-i18n="settings.transport.cdnws">CDN (VMess)</option>
+            <option value="cdn" data-i18n="settings.transport.cdn">CDN (VLESS)</option>
             <!-- Snowflake option gated for this release pending kill-switch dynamic-peer support; restore to re-enable user selection (it sorts after cdn). -->
             <option value="tectonic" data-i18n="settings.transport.tectonic">Tectonic</option>
             <option value="wireguard" data-i18n="settings.transport.wireguard">WireGuard (no disguise)</option>

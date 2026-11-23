@@ -26,6 +26,7 @@
 "bypass_anytls_desc" = "TLS-сесія із заповненням, що згладжує ознаку TLS-у-TLS, яку видають інші TLS-транспорти.";
 "bypass_auto_desc" = "Обирає маскування, яке проходить, і запам'ятовує, що спрацювало в цій мережі.";
 "bypass_cdn_desc" = "Іде через мережу доставки контенту (CDN), тож блокування адрес наших серверів його не зупиняє. Повільніший за інші.";
+"bypass_cdnws_desc" = "Теж іде через мережу доставки контенту (CDN) і лишається нечитабельним навіть у мережах, що розкривають HTTPS-трафік. Повільніший за інші.";
 "bypass_cloak_desc" = "TLS під сайт-прикриття, тож трафік має вигляд звичайного візиту туди.";
 "bypass_hysteria2_desc" = "UDP і QUIC замість TCP. Варто спробувати, коли всі TCP-з'єднання обриваються.";
 "bypass_reality_desc" = "Позичає TLS-рукостискання справжнього сайта, тож зонди бачать автентичний сайт. Найміцніше маскування.";
@@ -401,7 +402,8 @@
 "settings_title" = "Налаштування";
 "settings_transport_anytls" = "AnyTLS";
 "settings_transport_auto" = "Автоматично (рекомендовано)";
-"settings_transport_cdn" = "CDN";
+"settings_transport_cdn" = "CDN (VLESS)";
+"settings_transport_cdnws" = "CDN (VMess)";
 "settings_transport_cloak" = "Cloak";
 "settings_transport_description" = "Як PangeaVPN маскує ваш трафік.";
 "settings_transport_gaming_hint" = "Надсилає ігровий трафік двома з’єднаннями одночасно, щоб втрачений пакет не заморожував гру. Витрачає трохи більше даних і помітніший для блокувань. Лише для Tectonic. Діє з наступного підключення.";
@@ -490,7 +492,8 @@
 "toggle_off" = "Вимк";
 "toggle_on" = "Увімк";
 "transport_status_anytls" = "Обфускація: AnyTLS";
-"transport_status_cdn" = "Обфускація: CDN";
+"transport_status_cdn" = "Обфускація: CDN (VLESS)";
+"transport_status_cdnws" = "Обфускація: CDN (VMess)";
 "transport_status_cloak" = "Обфускація: Cloak";
 "transport_status_hysteria2" = "Обфускація: Hysteria2";
 "transport_status_naive" = "Обфускація: NaiveProxy";

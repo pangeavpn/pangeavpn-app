@@ -45,7 +45,7 @@ flowchart LR
         Renderer[Sandboxed renderer] <-->|contextBridge + IPC| Main[Electron main process]
         Main -->|Bearer-authenticated HTTP<br/>127.0.0.1:8787| Daemon[Privileged Go daemon]
         OS[Application traffic and OS networking] --> WG[In-process WireGuard]
-        WG --> Transport[In-process transport<br/>REALITY / Cloak / Shadowsocks / Hysteria2 / TUIC / Naive / AnyTLS / CDN / Tectonic]
+        WG --> Transport[In-process transport<br/>REALITY / Cloak / Shadowsocks / Hysteria2 / TUIC / Naive / AnyTLS / CDN VMess / CDN VLESS / Tectonic]
         Daemon -. owns .-> OS
         Daemon -. owns .-> WG
         Daemon -. owns .-> Transport
@@ -314,9 +314,10 @@ In automatic mode the daemon tries transports in this order:
 5. TUIC
 6. NaiveProxy
 7. AnyTLS
-8. CDN
-9. Snowflake
-10. Tectonic (beta, so it comes last)
+8. CDN over VMess (`cdnws`)
+9. CDN over VLESS (`cdn`)
+10. Snowflake
+11. Tectonic (beta, so it comes last)
 
 The order is `AutoCascadeOrder` in
 [`daemon/internal/transport/cascade.go`](../daemon/internal/transport/cascade.go),
@@ -393,7 +394,8 @@ Application traffic
 | TUIC | [`daemon/internal/sbrelay`](../daemon/internal/sbrelay) using embedded sing-box (TUIC v5 over QUIC, node certificate pinned) | Enabled when provisioned |
 | NaiveProxy | [`daemon/internal/naive`](../daemon/internal/naive) with a CGO-linked native engine and in-process relay | Windows and macOS builds when the native inputs resolve; release CI requires it. Android arm64-v8a |
 | AnyTLS | [`daemon/internal/anytls`](../daemon/internal/anytls) using embedded sing-box (padded TLS session, WireGuard carried as UDP-over-TCP) | Enabled when provisioned |
-| CDN | [`daemon/internal/sbrelay`](../daemon/internal/sbrelay) using embedded sing-box (VLESS over HTTPUpgrade + TLS, dialled at a CDN edge that proxies to the node) | Enabled when provisioned |
+| CDN VMess (`cdnws`) | [`daemon/internal/sbrelay`](../daemon/internal/sbrelay) using embedded sing-box (VMess over a WebSocket + TLS, dialled at a CDN edge that proxies to the node) | Enabled when the node's `cdn` block carries a `vmess` route |
+| CDN VLESS (`cdn`) | [`daemon/internal/sbrelay`](../daemon/internal/sbrelay) using embedded sing-box (VLESS over HTTPUpgrade + TLS, dialled at the same kind of edge) | Enabled when provisioned |
 | Tectonic | [`daemon/internal/tectonic`](../daemon/internal/tectonic) using the [Tectonic](https://github.com/pangeavpn/Tectonic) library (WireGuard spread over short-lived TLS 1.3 lanes) | Beta. Enabled when the hub issues a credential, never under multihop; auto mode tries it last |
 | Snowflake | [`daemon/internal/snowflake`](../daemon/internal/snowflake) using the Tor Snowflake library | Implemented but release-gated |
 | Plain WireGuard | None. The tunnel dials the node directly and skips the loopback listener | Enabled on explicit user selection only |
@@ -412,9 +414,12 @@ before each `/connect` and `/switch`, the app posts every root its OS trusts
 beyond Node's bundled list to `/user-roots`
 ([`userTrustedRoots.ts`](../apps/desktop/src/main/userTrustedRoots.ts)). The
 daemon holds them in memory and adds them to the system store for the CDN dial
-only. The OS verifier still runs first. The filter then sees the VLESS
+only. The OS verifier still runs first. Over `cdn` the filter then sees the VLESS
 credential every client of that node shares, and WireGuard ciphertext it can't
-read; the node only routes that credential to WireGuard. Tectonic
+read; the node only routes that credential to WireGuard. Over `cdnws` it sees a
+browser-style WebSocket upgrade and then only VMess ciphertext, which is why auto
+mode tries `cdnws` first. Both come from the node's one `cdn` block: the VLESS
+fields build `cdn`, and its `vmess` route, when present, builds `cdnws`. Tectonic
 deliberately refuses these filters, since its login only holds on an unbroken
 TLS session.
 

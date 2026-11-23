@@ -11,8 +11,14 @@ export interface CDNServerInfo {
   serverName?: string;
   targetHost?: string;
   targetPort?: number;
+  /** The node's VMess-over-WebSocket route on the same hostname (the cdnws transport);
+   *  its edge port defaults to 443. */
+  vmess?: { uuid: string; path?: string; remotePort?: number };
+  /** The edge's ECHConfigList (base64): the daemon then hides the hostname from SNI filters. */
+  ech?: string;
 }
 
+/** The same block feeds both CDN transports: `cdn` (VLESS) and `cdnws` (VMess). */
 export interface CDNProfileBlock {
   localPort: number;
   remoteHost: string;
@@ -22,9 +28,25 @@ export interface CDNProfileBlock {
   path: string;
   targetHost?: string;
   targetPort?: number;
+  echConfig?: string;
 }
 
+/** VLESS over HTTPUpgrade through the edge: the `cdn` transport. */
 export function buildCDNProfile(cdn: CDNServerInfo): CDNProfileBlock {
+  return edgeProfile(cdn, cdn.uuid, cdn.path, cdn.remotePort);
+}
+
+/** VMess over a WebSocket through the same edge: the `cdnws` transport. Undefined when
+ *  the node serves only VLESS there. */
+export function buildCDNWSProfile(cdn: CDNServerInfo): CDNProfileBlock | undefined {
+  const vmess = cdn.vmess;
+  if (!vmess?.uuid) {
+    return undefined;
+  }
+  return edgeProfile(cdn, vmess.uuid, vmess.path, vmess.remotePort);
+}
+
+function edgeProfile(cdn: CDNServerInfo, uuid: string, path: string | undefined, remotePort: number | undefined): CDNProfileBlock {
   const remoteIp = cdn.remoteIp?.trim() ?? "";
   const hubHost = cdn.remoteHost?.trim() ?? "";
   // Never falls back to the node IP: a hostname dial goes to the CDN, not the node.
@@ -33,11 +55,12 @@ export function buildCDNProfile(cdn: CDNServerInfo): CDNProfileBlock {
   return {
     localPort: 0,
     remoteHost,
-    remotePort: cdn.remotePort || 443,
-    uuid: cdn.uuid,
+    remotePort: remotePort || 443,
+    uuid,
     serverName,
-    path: cdn.path?.trim() || "/",
+    path: path?.trim() || "/",
     ...(cdn.targetHost ? { targetHost: cdn.targetHost } : {}),
-    ...(cdn.targetPort ? { targetPort: cdn.targetPort } : {})
+    ...(cdn.targetPort ? { targetPort: cdn.targetPort } : {}),
+    ...(cdn.ech?.trim() ? { echConfig: cdn.ech.trim() } : {})
   };
 }

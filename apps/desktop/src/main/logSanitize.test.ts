@@ -54,3 +54,9 @@ test("unwraps Error messages and stringifies everything else", () => {
   assert.equal(sanitizeLog(42), "42");
   assert.equal(sanitizeLog({ a: 1 }), "[object Object]");
 });
+
+test("a browser sign-in app token is blanked wherever it appears", () => {
+  const token = "pgt1_aB3-_xaB3-_xaB3-_xaB3-_xaB3-_xaB3-_xaB3-_xQ";
+  assert.equal(sanitizeLog(`redeem failed for ${token}.`), "redeem failed for [redacted].");
+  assert.ok(!sanitizeLog(new Error(`Hub API error (401): ${token}`)).includes("pgt1_"));
+});

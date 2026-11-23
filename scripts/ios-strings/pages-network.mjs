@@ -130,6 +130,16 @@ export default {
     ar: "يمرّ عبر شبكة توصيل محتوى (CDN)، فلا يوقفه حجب عناوين خوادمنا. أبطأ من غيره.",
     fa: "از راه یک شبکه توزیع محتوا (CDN) می‌رود، پس مسدود کردن نشانی سرورهای ما جلویش را نمی‌گیرد. کندتر از بقیه است."
   },
+  bypass_cdnws_desc: {
+    en: "Also goes through a content delivery network, and stays unreadable even on networks that open up HTTPS traffic. Slower than the others.",
+    es: "También pasa por una red de distribución de contenidos y sigue siendo ilegible incluso en redes que abren el tráfico HTTPS. Más lento que los demás.",
+    fr: "Passe aussi par un réseau de diffusion de contenu et reste illisible même sur les réseaux qui ouvrent le trafic HTTPS. Plus lent que les autres.",
+    ru: "Тоже идёт через сеть доставки контента (CDN) и остаётся нечитаемым даже в сетях, которые вскрывают HTTPS-трафик. Медленнее остальных.",
+    uk: "Теж іде через мережу доставки контенту (CDN) і лишається нечитабельним навіть у мережах, що розкривають HTTPS-трафік. Повільніший за інші.",
+    zh: "同样经由内容分发网络（CDN）连接，即使在会解密 HTTPS 流量的网络上也无法被读取。比其他方式慢。",
+    ar: "يمرّ هو أيضًا عبر شبكة توصيل محتوى (CDN)، ويبقى غير مقروء حتى على الشبكات التي تفكّ تشفير حركة HTTPS. أبطأ من غيره.",
+    fa: "این هم از راه یک شبکه توزیع محتوا (CDN) می‌رود و حتی در شبکه‌هایی که ترافیک HTTPS را باز می‌کنند، خواندنی نیست. کندتر از بقیه است."
+  },
   bypass_regions_note: {
     en: "Regions that don't offer the selected method are hidden from the region list.",
     es: "Las regiones que no ofrecen el método elegido se ocultan de la lista de regiones.",

@@ -95,6 +95,11 @@ const CH = {
   getRememberedAccountNumber: "auth:getRememberedAccountNumber",
   getAccountNumber: "auth:getAccountNumber",
   clearRememberedAccountNumber: "auth:clearRememberedAccountNumber",
+  authBrowserSignInStart: "auth:browserSignInStart",
+  authBrowserSignInCode: "auth:browserSignInCode",
+  authBrowserSignInRetry: "auth:browserSignInRetry",
+  authBrowserSignInCancel: "auth:browserSignInCancel",
+  authBrowserSignInResult: "auth:browserSignInResult",
 } as const;
 
 const daemonApi = {
@@ -145,7 +150,7 @@ const pangeaApi = {
   getCustomDns: () => ipcRenderer.invoke(CH.getCustomDns),
   setHubInTunnel: (enabled: boolean) => ipcRenderer.invoke(CH.setHubInTunnel, enabled),
   getHubInTunnel: () => ipcRenderer.invoke(CH.getHubInTunnel),
-  setPreferredTransport: (value: "auto" | "tectonic" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "anytls" | "tuic" | "cdn" | "snowflake" | "wireguard") =>
+  setPreferredTransport: (value: "auto" | "tectonic" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "anytls" | "tuic" | "cdn" | "cdnws" | "snowflake" | "wireguard") =>
     ipcRenderer.invoke(CH.setPreferredTransport, value),
   getPreferredTransport: () => ipcRenderer.invoke(CH.getPreferredTransport),
   setLaunchAtStartup: (enabled: boolean) => ipcRenderer.invoke(CH.setLaunchAtStartup, enabled),
@@ -194,6 +199,16 @@ const pangeaApi = {
   getRememberedAccountNumber: () => ipcRenderer.invoke(CH.getRememberedAccountNumber),
   getAccountNumber: () => ipcRenderer.invoke(CH.getAccountNumber),
   clearRememberedAccountNumber: () => ipcRenderer.invoke(CH.clearRememberedAccountNumber),
+  startBrowserSignIn: (text?: { done: string; invalid: string }) =>
+    ipcRenderer.invoke(CH.authBrowserSignInStart, text),
+  submitBrowserSignInCode: (code: string) => ipcRenderer.invoke(CH.authBrowserSignInCode, code),
+  retryBrowserSignIn: () => ipcRenderer.invoke(CH.authBrowserSignInRetry),
+  cancelBrowserSignIn: () => ipcRenderer.invoke(CH.authBrowserSignInCancel),
+  onBrowserSignInResult: (callback: (state: unknown) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, state: unknown) => callback(state);
+    ipcRenderer.on(CH.authBrowserSignInResult, listener);
+    return () => ipcRenderer.removeListener(CH.authBrowserSignInResult, listener);
+  },
 };
 
 const autoUpdaterApi = {

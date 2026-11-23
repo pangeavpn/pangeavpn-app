@@ -5,7 +5,7 @@ go 1.26.10
 require (
 	github.com/clarkduvall/hyperloglog v0.0.0-20171127014514-a0107a5d8004
 	github.com/godbus/dbus/v5 v5.2.4
-	github.com/pangeavpn/tectonic v0.0.0-20261115015847-ad4c173c1403
+	github.com/pangeavpn/tectonic v0.0.0-20261123190350-3785355452a9
 	github.com/sagernet/gvisor v0.0.0-20260727.0-sing-box-mod.1
 	github.com/sagernet/sing v0.9.7-0.20261023115459-5dc452e537bf
 	github.com/sagernet/sing-box v1.14.4

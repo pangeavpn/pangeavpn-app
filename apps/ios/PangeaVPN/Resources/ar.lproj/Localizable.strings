@@ -26,6 +26,7 @@
 "bypass_anytls_desc" = "جلسة TLS مبطَّنة، تخفّف بصمة TLS داخل TLS التي تظهرها وسائط TLS الأخرى.";
 "bypass_auto_desc" = "يختار التمويه الذي ينجح في العبور ويتذكّر ما نجح على هذه الشبكة.";
 "bypass_cdn_desc" = "يمرّ عبر شبكة توصيل محتوى (CDN)، فلا يوقفه حجب عناوين خوادمنا. أبطأ من غيره.";
+"bypass_cdnws_desc" = "يمرّ هو أيضًا عبر شبكة توصيل محتوى (CDN)، ويبقى غير مقروء حتى على الشبكات التي تفكّ تشفير حركة HTTPS. أبطأ من غيره.";
 "bypass_cloak_desc" = "TLS موجَّه إلى موقع خادع، فتبدو الحركة كزيارة عادية له.";
 "bypass_hysteria2_desc" = "UDP وQUIC بدل TCP. يستحق التجربة عندما تنقطع كل اتصالات TCP.";
 "bypass_reality_desc" = "يستعير مصافحة TLS من موقع حقيقي، فيرى الفحص موقعًا أصيلًا. أقوى تمويه.";
@@ -401,7 +402,8 @@
 "settings_title" = "الإعدادات";
 "settings_transport_anytls" = "AnyTLS";
 "settings_transport_auto" = "تلقائي (موصى به)";
-"settings_transport_cdn" = "CDN";
+"settings_transport_cdn" = "CDN (VLESS)";
+"settings_transport_cdnws" = "CDN (VMess)";
 "settings_transport_cloak" = "Cloak";
 "settings_transport_description" = "كيف يموّه PangeaVPN حركة بياناتك.";
 "settings_transport_gaming_hint" = "يرسل حركة الألعاب عبر اتصالين في آن واحد حتى لا تتجمد اللعبة عند فقدان حزمة. يستهلك بيانات أكثر قليلاً ويسهل كشفه. مع Tectonic فقط. يسري عند الاتصال التالي.";
@@ -490,7 +492,8 @@
 "toggle_off" = "معطّل";
 "toggle_on" = "مفعّل";
 "transport_status_anytls" = "التمويه: AnyTLS";
-"transport_status_cdn" = "التمويه: CDN";
+"transport_status_cdn" = "التمويه: CDN (VLESS)";
+"transport_status_cdnws" = "التمويه: CDN (VMess)";
 "transport_status_cloak" = "التمويه: Cloak";
 "transport_status_hysteria2" = "التمويه: Hysteria2";
 "transport_status_naive" = "التمويه: NaiveProxy";

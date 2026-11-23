@@ -33,7 +33,10 @@ import {
 import {
   IPC_CHANNELS,
   toPublicServerInfo,
+  type AccountNumberResult,
   type AuthState,
+  type BrowserSignInStartResult,
+  type SignInMethod,
   type ConnectResult,
   type DiagnosticsSendResult,
   type PublicServerInfo,
@@ -67,6 +70,19 @@ import { collectDiagnostics } from "./diagnosticsReport";
 import { collectWindowsHostSnapshot } from "./hostSnapshot";
 import { uploadDiagnostics } from "./diagnosticsUpload";
 import { classifyLoginError } from "./loginError";
+import {
+  buildDesktopLinkUrl,
+  desktopLinkPairingCode,
+  generateDesktopLinkKeys,
+  newDesktopLinkState,
+  normalizeDesktopLinkCode,
+  openDesktopLinkNamesWrap,
+  openDesktopLinkSeal,
+  DesktopLinkSealError,
+  type DesktopLinkKeys
+} from "./desktopLink";
+import { isAppToken } from "./deviceName";
+import { startLoopbackCallback, type LoopbackCallback, type LoopbackPageText } from "./loopbackCallback";
 import { shouldShowTrayHint, trayHintBodyKey } from "./trayHint";
 import { anchorPosition, canAnchorWindow, samePoint, type AnchorRect } from "./windowAnchor";
 import {
@@ -173,9 +189,9 @@ function isDockIconAccent(value: unknown): value is DockIconAccent {
 let dockSwitching = false;
 // Panic wipe: the global removal shortcut is inert until the user opts in. Off by default.
 let panicWipeEnabled = false;
-// "auto" (reality, then cloak, shadowsocks, hysteria2, tuic, naive, anytls, cdn, snowflake, tectonic),
+// "auto" (reality, then cloak, shadowsocks, hysteria2, tuic, naive, anytls, cdnws, cdn, snowflake, tectonic),
 // or one of those transports only, or "wireguard".
-let preferredTransport: "auto" | "tectonic" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "anytls" | "tuic" | "cdn" | "snowflake" | "wireguard" = "auto";
+let preferredTransport: "auto" | "tectonic" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "anytls" | "tuic" | "cdn" | "cdnws" | "snowflake" | "wireguard" = "auto";
 // Stored language preference: a locale code, or "system" to follow the OS.
 let localePref = "system";
 const hiddenLaunch = process.argv.some(isHiddenLaunchArg);
@@ -1095,9 +1111,14 @@ function fingerprintForServer(serverId: string, entryServerId: string | null): s
     customDns: pangeaApiClient.getCustomDns(),
     hubInTunnel: pangeaApiClient.getHubInTunnel(),
     server: entryServerId
-      ? { exit, entry: servers.find((server) => server.id === entryServerId) ?? null }
-      : exit
+      ? { exit: withoutEch(exit), entry: withoutEch(servers.find((server) => server.id === entryServerId) ?? null) }
+      : withoutEch(exit)
   });
+}
+
+// The hub rotates ECH keys every few minutes and the edge hands back retry configs, so a rotation needs no new peer.
+function withoutEch(server: ServerInfo | null): ServerInfo | null {
+  return server?.cdn ? { ...server, cdn: { ...server.cdn, ech: undefined } } : server;
 }
 
 // The still-fresh peer the hub registered on an earlier run, if any — reusing
@@ -1262,6 +1283,7 @@ async function provisionAcrossServers(
   let initialProfiles: Profile[] | null = null;
   let configChanged = false;
   let committed = false;
+  const provisioned = new Map<string, Profile>();
   try {
     const initialConfig = await withDaemonRestartOnUnavailable(
       () => daemonClient.getConfig(),
@@ -1290,6 +1312,7 @@ async function provisionAcrossServers(
 
         if (isCancelled(attempt)) throw new ConnectCancelledError();
         const profile = await provisionProfileForServer(serverId, attempt.controller.signal, entryServerId);
+        provisioned.set(profile.id, profile);
         configChanged = true;
         return await dialServer(profile, index, mode, attempt);
       },
@@ -1344,7 +1367,9 @@ async function provisionAcrossServers(
     throw err;
   } finally {
     if (configChanged && !committed && initialProfiles) {
-      await daemonClient.setConfig(initialProfiles).catch((error) => {
+      // Re-provisioning a server made its node drop the key in the snapshot's profile; keep the live one.
+      const restored = initialProfiles.map((profile) => provisioned.get(profile.id) ?? profile);
+      await daemonClient.setConfig(restored).catch((error) => {
         console.warn("connect: profile restore failed", sanitizeLog(error));
       });
     }
@@ -1412,7 +1437,7 @@ async function cancelConnectAttempt(): Promise<void> {
 function connectionOptions(): {
   allowLAN: boolean;
   lockdown: boolean;
-  preferredTransport?: "tectonic" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "anytls" | "tuic" | "cdn" | "snowflake" | "wireguard";
+  preferredTransport?: "tectonic" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "anytls" | "tuic" | "cdn" | "cdnws" | "snowflake" | "wireguard";
   disableTransportRace?: boolean;
   gamingMode?: boolean;
 } {
@@ -1599,6 +1624,7 @@ function sanitizePublicServer(candidate: unknown): PublicServerInfo | null {
     anytls: Boolean(s.anytls),
     tuic: Boolean(s.tuic),
     cdn: Boolean(s.cdn),
+    cdnws: Boolean(s.cdnws),
     snowflake: Boolean(s.snowflake)
   };
 }
@@ -1666,6 +1692,7 @@ function redactConfigForRenderer(config: ConfigResponse): ConfigResponse {
         ? { ...profile.tectonic, keyId: "<redacted>", deviceKey: "<redacted>" }
         : profile.tectonic,
       cdn: profile.cdn ? { ...profile.cdn, uuid: "<redacted>", path: "<redacted>" } : profile.cdn,
+      cdnws: profile.cdnws ? { ...profile.cdnws, uuid: "<redacted>", path: "<redacted>" } : profile.cdnws,
       wireguard: { ...profile.wireguard, configText: redactWireGuardKeys(profile.wireguard.configText) }
     }))
   };
@@ -1847,7 +1874,7 @@ async function handleAuthLoginIpc(vpnToken: string): Promise<AuthState> {
       // The hub is demonstrably reachable right now — the cheapest moment this
       // device will ever get to learn its renewal date.
       refreshSubscriptionCache("sign-in");
-      return { ...authState, friendlyName: effectiveFriendlyName };
+      return { ...authState, friendlyName: effectiveFriendlyName, signInMethod: signInMethodFor(data.vpnAccessToken) };
     } catch (postRegErr) {
       console.warn("post-registration setup failed:", sanitizeLog(postRegErr));
       await pangeaApiClient.deregisterDevice(identityPublicKey).catch(() => {});
@@ -1872,6 +1899,8 @@ async function handleAuthLogoutIpc(): Promise<void> {
   // Stop any in-flight cascade first, or it can resume after we've cleared
   // the license key and claim a managed profile for the wrong account.
   cancelAttempt();
+  endBrowserSignIn();
+  pendingBrowserCredential = null;
 
   try {
     const status = await daemonClient.getStatus();
@@ -1892,6 +1921,16 @@ async function handleAuthLogoutIpc(): Promise<void> {
     // best-effort — server may be unreachable
   }
 
+  // A browser sign-in's token is this computer's own sign-in: end it on the
+  // server too. Last, because the deregister above still authenticates with it.
+  if (isAppToken(pangeaApiClient.getLicenseKey())) {
+    try {
+      await pangeaApiClient.revokeAppToken();
+    } catch (err) {
+      console.warn("app token revoke failed:", sanitizeLog(err));
+    }
+  }
+
   if (managedProfileId) {
     try {
       const config = await daemonClient.getConfig();
@@ -1908,6 +1947,197 @@ async function handleAuthLogoutIpc(): Promise<void> {
   pangeaApiClient.clearCache();
   await auth.logout();
   void refreshTrayStatus();
+}
+
+// ---- Browser sign-in (desktop link) ----
+// The website seals the credential to an ephemeral key held only here; the
+// code that comes back (redirect or typed) is worthless without it. The
+// credential then goes through handleAuthLoginIpc like a typed account number.
+
+const BROWSER_SIGN_IN_TTL_MS = 10 * 60 * 1000;
+
+interface BrowserSignInSession {
+  keys: DesktopLinkKeys;
+  loopback: LoopbackCallback;
+  busy: boolean;
+}
+
+let browserSignIn: BrowserSignInSession | null = null;
+/** Held only while the device-limit screen is up for a browser sign-in, so
+ *  Continue can retry without sending the credential to the renderer. */
+let pendingBrowserCredential: { token: string; namesWrap: Buffer | null } | null = null;
+
+function signInMethodFor(credential: string | null): SignInMethod {
+  return isAppToken(credential) ? "browser" : "accountNumber";
+}
+
+/** Drops the session, and with it the only copy of the ephemeral key. */
+function endBrowserSignIn(session: BrowserSignInSession | null = browserSignIn): void {
+  if (!session) return;
+  if (browserSignIn === session) browserSignIn = null;
+  session.loopback.close();
+}
+
+function browserSignInPageText(raw: unknown): LoopbackPageText | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const { done, invalid } = raw as Record<string, unknown>;
+  if (typeof done !== "string" || typeof invalid !== "string") return undefined;
+  if (done.length === 0 || invalid.length === 0 || done.length > 300 || invalid.length > 300) return undefined;
+  return { done, invalid };
+}
+
+async function rememberAccountNumberSecret(accountNumber: string): Promise<void> {
+  // A token is this computer's sign-in, not an account number to offer again.
+  if (isAppToken(accountNumber.trim())) return;
+  const dir = path.join(app.getPath("appData"), "pangeavpn-desktop");
+  await fs.mkdir(dir, { recursive: true, mode: 0o700 });
+  await writeSecret(path.join(dir, "remembered-account.dat"), accountNumber.trim());
+}
+
+/** The typed-number path with the app's own token. Nothing is remembered
+ *  for the cached-number button (a token is not an account number, and any
+ *  number already remembered stays as it was); the names wrap key is kept. */
+async function finishBrowserSignIn(token: string, namesWrap: Buffer | null): Promise<AuthState> {
+  const state = await handleAuthLoginIpc(token);
+  if (state.authenticated) {
+    pendingBrowserCredential = null;
+    await storeNamesWrapKey(namesWrap);
+  } else if (state.error === "DEVICE_LIMIT_REACHED") {
+    pendingBrowserCredential = { token, namesWrap };
+    // The device-limit screen lists devices by name, which needs the wrap key now.
+    pangeaApiClient.setNamesWrapKey(namesWrap);
+  } else {
+    pendingBrowserCredential = null;
+    revokeUnusedToken(token);
+  }
+  return state;
+}
+
+function revokeUnusedToken(token: string): void {
+  pangeaApiClient.revokeUnusedAppToken(token).catch((err) => {
+    console.warn("unused app token revoke failed:", sanitizeLog(err));
+  });
+}
+
+/** Leaving the device-limit screen without Continue: the held token will never be used. */
+function dropPendingBrowserCredential(): void {
+  if (pendingBrowserCredential) revokeUnusedToken(pendingBrowserCredential.token);
+  pendingBrowserCredential = null;
+}
+
+/** Device names degrade to labels without it, so a failure here never fails sign-in. */
+async function storeNamesWrapKey(namesWrap: Buffer | null): Promise<void> {
+  pangeaApiClient.setNamesWrapKey(namesWrap);
+  try {
+    if (namesWrap) await auth.saveNamesWrapKey(namesWrap);
+    else await auth.clearNamesWrapKey();
+  } catch (err) {
+    console.warn("storing names wrap key failed:", sanitizeLog(err));
+  }
+}
+
+function openNamesWrap(sealed: string | null, keys: DesktopLinkKeys): Buffer | null {
+  if (!sealed) return null;
+  try {
+    return openDesktopLinkNamesWrap(sealed, keys);
+  } catch (err) {
+    console.warn("names wrap key did not open; device names stay as labels:", sanitizeLog(err));
+    return null;
+  }
+}
+
+async function redeemBrowserSignIn(session: BrowserSignInSession, code: string): Promise<AuthState> {
+  session.busy = true;
+  try {
+    const redeemed = await pangeaApiClient.redeemDesktopLink(code);
+    const token = openDesktopLinkSeal(redeemed.sealed, session.keys);
+    // Browser sign-in only ever hands over the app's own token, never an account number.
+    if (!isAppToken(token)) throw new DesktopLinkSealError("browser sign-in did not return an app token");
+    const namesWrap = openNamesWrap(redeemed.namesWrapSealed, session.keys);
+    // Cancelled or replaced while redeeming: don't sign in behind the user's back.
+    if (browserSignIn !== session) {
+      revokeUnusedToken(token);
+      return { authenticated: false, user: null, sessionEnded: true };
+    }
+    endBrowserSignIn(session);
+    const state = await finishBrowserSignIn(token, namesWrap);
+    return state.authenticated || state.error === "DEVICE_LIMIT_REACHED" ? state : { ...state, sessionEnded: true };
+  } catch (err) {
+    // A typo or a network blip leaves the session up so the user can try the code again.
+    console.warn("browser sign-in redeem failed:", sanitizeLog(err));
+    return { authenticated: false, user: null, error: classifyLoginError(err) };
+  } finally {
+    session.busy = false;
+  }
+}
+
+function sendBrowserSignInResult(state: AuthState): void {
+  showMainWindow();
+  mainWindow?.webContents.send(IPC_CHANNELS.authBrowserSignInResult, state);
+}
+
+function watchBrowserSignInRedirect(session: BrowserSignInSession): void {
+  session.loopback.code.then(
+    async (code) => {
+      if (browserSignIn !== session || session.busy) return;
+      sendBrowserSignInResult(await redeemBrowserSignIn(session, code));
+    },
+    () => {
+      // Cancelled or replaced: nobody is waiting. Timed out: tell the screen.
+      if (browserSignIn !== session) return;
+      endBrowserSignIn(session);
+      sendBrowserSignInResult({ authenticated: false, user: null, error: "INVALID_CODE", sessionEnded: true });
+    }
+  );
+}
+
+async function handleBrowserSignInStart(rawText: unknown): Promise<BrowserSignInStartResult> {
+  endBrowserSignIn();
+  dropPendingBrowserCredential();
+  let session: BrowserSignInSession | null = null;
+  try {
+    const keys = generateDesktopLinkKeys();
+    const state = newDesktopLinkState();
+    const loopback = await startLoopbackCallback({
+      state,
+      timeoutMs: BROWSER_SIGN_IN_TTL_MS,
+      text: browserSignInPageText(rawText)
+    });
+    session = { keys, loopback, busy: false };
+    browserSignIn = session;
+    watchBrowserSignInRedirect(session);
+    const url = buildDesktopLinkUrl(keys.k, state, loopback.port);
+    if (!isSafeExternalUrl(url)) throw new Error("browser sign-in URL refused");
+    await shell.openExternal(url);
+    return { ok: true, pairingCode: desktopLinkPairingCode(keys.publicKey) };
+  } catch (err) {
+    console.warn("browser sign-in start failed:", sanitizeLog(err));
+    endBrowserSignIn(session);
+    return { ok: false, error: "UNKNOWN" };
+  }
+}
+
+async function handleBrowserSignInCode(rawCode: unknown): Promise<AuthState> {
+  const code = normalizeDesktopLinkCode(rawCode);
+  const session = browserSignIn;
+  // No session means no key to open the seal with: the code can't work here.
+  if (!session) return { authenticated: false, user: null, error: "INVALID_CODE", sessionEnded: true };
+  if (!code) return { authenticated: false, user: null, error: "INVALID_CODE" };
+  if (session.busy) return { authenticated: false, user: null, error: "UNKNOWN" };
+  return redeemBrowserSignIn(session, code);
+}
+
+function registerBrowserSignInHandlers(): void {
+  ipcMain.handle(IPC_CHANNELS.authBrowserSignInStart, async (_event, text: unknown) => handleBrowserSignInStart(text));
+  ipcMain.handle(IPC_CHANNELS.authBrowserSignInCode, async (_event, code: unknown) => handleBrowserSignInCode(code));
+  ipcMain.handle(IPC_CHANNELS.authBrowserSignInRetry, async (): Promise<AuthState> => {
+    if (!pendingBrowserCredential) return { authenticated: false, user: null, error: "INVALID_CODE" };
+    return finishBrowserSignIn(pendingBrowserCredential.token, pendingBrowserCredential.namesWrap);
+  });
+  ipcMain.handle(IPC_CHANNELS.authBrowserSignInCancel, async () => {
+    endBrowserSignIn();
+    dropPendingBrowserCredential();
+  });
 }
 
 function registerConnectionHandlers(): void {
@@ -2008,17 +2238,21 @@ function registerAuthHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.authLogin, async (_event, vpnToken: string) => handleAuthLoginIpc(vpnToken));
 
   ipcMain.handle(IPC_CHANNELS.authLogout, async () => handleAuthLogoutIpc());
+  registerBrowserSignInHandlers();
 
-  ipcMain.handle(IPC_CHANNELS.authGetState, async () => {
+  ipcMain.handle(IPC_CHANNELS.authGetState, async (): Promise<AuthState> => {
     const state = await auth.getAuthState();
     // If authenticated and license key loaded but not yet in API client, restore it
     if (state.authenticated && !pangeaApiClient.getLicenseKey()) {
       const savedKey = await auth.loadLicenseKey().catch(() => null);
       if (savedKey) {
         pangeaApiClient.setLicenseKey(savedKey);
+        if (isAppToken(savedKey)) pangeaApiClient.setNamesWrapKey(await auth.loadNamesWrapKey());
       }
     }
-    return state;
+    if (!state.authenticated) return state;
+    const credential = pangeaApiClient.getLicenseKey() ?? (await auth.loadLicenseKey().catch(() => null));
+    return { ...state, signInMethod: signInMethodFor(credential) };
   });
 }
 
@@ -2124,7 +2358,7 @@ function registerTransportSettingsHandlers(): void {
     () => pangeaApiClient.getHubInTunnel()
   );
 
-  ipcMain.handle(IPC_CHANNELS.setPreferredTransport, async (_event, value: "auto" | "tectonic" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "anytls" | "tuic" | "cdn" | "snowflake" | "wireguard") => {
+  ipcMain.handle(IPC_CHANNELS.setPreferredTransport, async (_event, value: "auto" | "tectonic" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "anytls" | "tuic" | "cdn" | "cdnws" | "snowflake" | "wireguard") => {
     preferredTransport =
       value === "cloak" ||
       value === "naive" ||
@@ -2135,6 +2369,7 @@ function registerTransportSettingsHandlers(): void {
       value === "anytls" ||
       value === "tuic" ||
       value === "cdn" ||
+      value === "cdnws" ||
       value === "snowflake" ||
       value === "wireguard"
         ? value
@@ -2402,23 +2637,27 @@ function registerServerAndDeviceHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.rememberAccountNumber, async (_event, accountNumber: unknown) => {
     if (typeof accountNumber !== "string" || accountNumber.trim().length === 0) return;
-    const dir = path.join(app.getPath("appData"), "pangeavpn-desktop");
-    await (await import("node:fs/promises")).default.mkdir(dir, { recursive: true, mode: 0o700 });
-    await writeSecret(path.join(dir, "remembered-account.dat"), accountNumber.trim());
+    await rememberAccountNumberSecret(accountNumber);
   });
 
   ipcMain.handle(IPC_CHANNELS.getRememberedAccountNumber, async () => {
     try {
       const dir = path.join(app.getPath("appData"), "pangeavpn-desktop");
-      return await readSecret(path.join(dir, "remembered-account.dat"));
+      const remembered = await readSecret(path.join(dir, "remembered-account.dat"));
+      // Never offer a token on the cached-number button, whatever wrote it.
+      return remembered && !isAppToken(remembered.trim()) ? remembered : null;
     } catch {
       return null;
     }
   });
 
-  ipcMain.handle(IPC_CHANNELS.getAccountNumber, async () => {
-    if (!(await auth.getAuthState()).authenticated) return null;
-    return auth.loadLicenseKey();
+  ipcMain.handle(IPC_CHANNELS.getAccountNumber, async (): Promise<AccountNumberResult> => {
+    if (!(await auth.getAuthState()).authenticated) return { kind: "none" };
+    const credential = await auth.loadLicenseKey();
+    if (!credential) return { kind: "none" };
+    // A browser sign-in holds its own token, not the account number: say so instead.
+    if (isAppToken(credential)) return { kind: "browser" };
+    return { kind: "number", value: credential };
   });
 
   ipcMain.handle(IPC_CHANNELS.clearRememberedAccountNumber, async () => {
@@ -2713,6 +2952,7 @@ function applyPersistedSettings(settings: Record<string, unknown>): void {
     settings.preferredTransport === "anytls" ||
     settings.preferredTransport === "tuic" ||
     settings.preferredTransport === "cdn" ||
+    settings.preferredTransport === "cdnws" ||
     settings.preferredTransport === "snowflake" ||
     settings.preferredTransport === "wireguard"
   ) {
@@ -3144,6 +3384,8 @@ async function boot(): Promise<void> {
   const savedKey = await auth.loadLicenseKey().catch(() => null);
   if (savedKey) {
     pangeaApiClient.setLicenseKey(savedKey);
+    // A browser sign-in can't derive the device-names wrap key; restore the one it was handed.
+    if (isAppToken(savedKey)) pangeaApiClient.setNamesWrapKey(await auth.loadNamesWrapKey());
   }
 
   // Restore persistent identity keypair (if exists from previous sign-in)

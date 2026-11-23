@@ -136,7 +136,12 @@ export const IPC_CHANNELS = {
   rememberAccountNumber: "auth:rememberAccountNumber",
   getRememberedAccountNumber: "auth:getRememberedAccountNumber",
   getAccountNumber: "auth:getAccountNumber",
-  clearRememberedAccountNumber: "auth:clearRememberedAccountNumber"
+  clearRememberedAccountNumber: "auth:clearRememberedAccountNumber",
+  authBrowserSignInStart: "auth:browserSignInStart",
+  authBrowserSignInCode: "auth:browserSignInCode",
+  authBrowserSignInRetry: "auth:browserSignInRetry",
+  authBrowserSignInCancel: "auth:browserSignInCancel",
+  authBrowserSignInResult: "auth:browserSignInResult"
 } as const;
 
 export interface DaemonApi {
@@ -173,13 +178,40 @@ export type LoginErrorCode =
   | "TIMEOUT"
   | "REGISTRATION_FAILED"
   | "LOCAL_STORAGE_FAILED"
+  | "INVALID_CODE"
   | "UNKNOWN";
+
+/** Starting browser sign-in: the pairing code to show while the browser is out. */
+export type BrowserSignInStartResult =
+  | { ok: true; pairingCode: string }
+  | { ok: false; error: LoginErrorCode };
+
+/** Localised copy for the page the app serves the browser on 127.0.0.1. */
+export interface BrowserSignInPageText {
+  done: string;
+  invalid: string;
+}
+
+/** How this computer is signed in: with the account number itself, or with
+ *  its own token from a browser sign-in (the app then has no number to show). */
+export type SignInMethod = "accountNumber" | "browser";
+
+/** What the account-number row may show. A browser sign-in's token is never
+ *  handed to the renderer: it gets "browser" and points at the website. */
+export type AccountNumberResult =
+  | { kind: "number"; value: string }
+  | { kind: "browser" }
+  | { kind: "none" };
 
 export interface AuthState {
   authenticated: boolean;
   user: AuthUser | null;
   error?: LoginErrorCode;
   friendlyName?: string | null;
+  /** Present while signed in. */
+  signInMethod?: SignInMethod;
+  /** Browser sign-in only: the waiting session is gone, so the screen must start over. */
+  sessionEnded?: boolean;
 }
 
 export interface ServerInfo {
@@ -193,6 +225,8 @@ export interface ServerInfo {
   multihop?: boolean;
   cloak: {
     remoteHost: string;
+    /** Cloak's port, when the hub moved the node off 443; defaults to 443. */
+    remotePort?: number;
     uid: string;
     publicKey: string;
     // Optional cover SNI advertised by the hub (daemon defaults to www.microsoft.com when absent).
@@ -283,8 +317,9 @@ export interface ServerInfo {
     targetHost?: string;
     targetPort?: number;
   };
-  /** VLESS over HTTPUpgrade+TLS through a CDN. `remoteHost` is the CDN-proxied
-   *  hostname and `remoteIp` an edge address, never the node's. */
+  /** VLESS over HTTPUpgrade through a CDN (the cdn transport), plus, when `vmess` is set,
+   *  VMess over a WebSocket on the same hostname (the cdnws transport). `remoteHost` is
+   *  the CDN-proxied hostname and `remoteIp` an edge address, never the node's. */
   cdn?: {
     remoteHost: string;
     remoteIp?: string;
@@ -294,6 +329,8 @@ export interface ServerInfo {
     serverName?: string;
     targetHost?: string;
     targetPort?: number;
+    vmess?: { uuid: string; path?: string; remotePort?: number };
+    ech?: string;
   };
   /** Shadowsocks listener that reaches the hub instead of WireGuard, used as a
    *  fallback path for account traffic. Per-region, but the same for all. */
@@ -343,6 +380,7 @@ export interface PublicServerInfo {
   anytls?: boolean;
   tuic?: boolean;
   cdn?: boolean;
+  cdnws?: boolean;
   snowflake?: boolean;
 }
 
@@ -362,6 +400,7 @@ export function toPublicServerInfo(server: ServerInfo): PublicServerInfo {
     anytls: Boolean(server.anytls),
     tuic: Boolean(server.tuic),
     cdn: Boolean(server.cdn),
+    cdnws: Boolean(server.cdn?.vmess?.uuid),
     snowflake: Boolean(server.snowflake)
   };
 }
@@ -435,8 +474,8 @@ export interface PangeaApi {
   /** Developer option: send hub traffic through the tunnel, not around it. */
   setHubInTunnel: (enabled: boolean) => Promise<void>;
   getHubInTunnel: () => Promise<boolean>;
-  setPreferredTransport: (value: "auto" | "tectonic" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "anytls" | "tuic" | "cdn" | "snowflake" | "wireguard") => Promise<void>;
-  getPreferredTransport: () => Promise<"auto" | "tectonic" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "anytls" | "tuic" | "cdn" | "snowflake" | "wireguard">;
+  setPreferredTransport: (value: "auto" | "tectonic" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "anytls" | "tuic" | "cdn" | "cdnws" | "snowflake" | "wireguard") => Promise<void>;
+  getPreferredTransport: () => Promise<"auto" | "tectonic" | "cloak" | "naive" | "reality" | "hysteria2" | "shadowsocks" | "anytls" | "tuic" | "cdn" | "cdnws" | "snowflake" | "wireguard">;
   setLaunchAtStartup: (enabled: boolean) => Promise<void>;
   getLaunchAtStartup: () => Promise<boolean>;
   /** Kill switch stays armed while disconnected. Independent of auto-connect. */
@@ -480,7 +519,16 @@ export interface PangeaApi {
   /** Backed by the main-process secure store — never localStorage. */
   rememberAccountNumber: (accountNumber: string) => Promise<void>;
   getRememberedAccountNumber: () => Promise<string | null>;
-  /** The credential this device is signed in with; null while signed out. */
-  getAccountNumber: () => Promise<string | null>;
+  /** The account number this device is signed in with, or why there isn't one to show. */
+  getAccountNumber: () => Promise<AccountNumberResult>;
   clearRememberedAccountNumber: () => Promise<void>;
+  /** Opens pangeavpn.org in the browser and waits for its redirect back. */
+  startBrowserSignIn: (text?: BrowserSignInPageText) => Promise<BrowserSignInStartResult>;
+  /** The fallback: the code the website showed, typed by the user. */
+  submitBrowserSignInCode: (code: string) => Promise<AuthState>;
+  /** Retries the last browser sign-in after devices were freed up. */
+  retryBrowserSignIn: () => Promise<AuthState>;
+  cancelBrowserSignIn: () => Promise<void>;
+  /** Fires when the browser's redirect (not a typed code) finished a sign-in. */
+  onBrowserSignInResult: (callback: (state: AuthState) => void) => () => void;
 }

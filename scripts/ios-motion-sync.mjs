@@ -8,6 +8,8 @@ const SATURATION = 60;
 const REFERENCE_WIDTH = 1206;
 const SETTLED_RUN = 8;
 const STILL = 0.75;
+// A label or dot shorter than this share of its usual height is partly covered, so its centre is wrong.
+const WHOLE = 0.85;
 
 // Pixel bounds for a 1206 px wide (iPhone 17 Pro) capture, scaled to the video's width.
 export function geometry(width) {
@@ -76,13 +78,27 @@ export function measureFrame(rgb, width, height, g = geometry(width)) {
       .filter((b) => b.ink / (b.width * b.height) >= 0.5 && distance(b.colour, line.colour) <= 80);
     if (blobs.length === 0) continue;
     const nearest = blobs.reduce((a, b) => (Math.abs(a.centre - line.centre) <= Math.abs(b.centre - line.centre) ? a : b));
-    return { label: line.centre, dot: nearest.centre };
+    return { label: line.centre, dot: nearest.centre, labelHeight: line.height, dotHeight: nearest.height };
   }
   return null;
 }
 
+const median = (values) => {
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted.length ? sorted[Math.floor(sorted.length / 2)] : 0;
+};
+
+// Drops frames where something passing over the row (a sheet being dismissed, say) cuts off part of the
+// label or dot: the visible ink then gives a centre that has moved even though the row has not.
+export function wholeSamples(samples) {
+  const label = median(samples.map((s) => s.labelHeight ?? 0));
+  const dot = median(samples.map((s) => s.dotHeight ?? 0));
+  return samples.filter((s) => (s.labelHeight ?? label) >= label * WHOLE && (s.dotHeight ?? dot) >= dot * WHOLE);
+}
+
 // Each sample's dot offset is judged against the offset the row settles at, so a fixed design offset passes.
-export function checkTrack(samples, g) {
+export function checkTrack(allSamples, g) {
+  const samples = wholeSamples(allSamples);
   const settledFrom = new Array(samples.length);
   let settled = samples.length ? samples.at(-1).dot - samples.at(-1).label : 0;
   for (let i = samples.length - 1; i >= 0; i--) {
@@ -103,7 +119,7 @@ export function checkTrack(samples, g) {
   const slide = labels.length ? Math.max(...labels) - Math.min(...labels) : 0;
   const exercised = moving >= g.minMoving;
   const ok = exercised && worst.deviation <= g.tolerance;
-  return { ok, exercised, worst, worstFrames: ranked.slice(0, 5), moving, slide, samples: samples.length };
+  return { ok, exercised, worst, worstFrames: ranked.slice(0, 5), moving, slide, samples: samples.length, covered: allSamples.length - samples.length };
 }
 
 function probeWidth(video) {
@@ -160,7 +176,7 @@ async function main() {
   const { g, samples, frames } = await measureVideo(video);
   const result = checkTrack(samples, g);
   const worst = result.worst.deviation.toFixed(1);
-  console.log(`${frames} frames, status row found in ${result.samples}, ${result.moving} mid-slide, slid ${result.slide.toFixed(0)}px`);
+  console.log(`${frames} frames, status row found in ${result.samples + result.covered} (${result.covered} partly covered, skipped), ${result.moving} mid-slide, slid ${result.slide.toFixed(0)}px`);
   console.log(`widest dot/label split: ${worst}px at frame ${result.worst.frame} (allowed ${g.tolerance.toFixed(1)}px)`);
   console.log(`worst frames: ${result.worstFrames.map((w) => `${w.frame}=${w.deviation.toFixed(1)}px`).join(", ")}`);
   if (!result.exercised) {

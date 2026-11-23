@@ -24,6 +24,7 @@ func toPublicServers(servers []serverInfo, runnable func(profile *state.Profile,
 			AnyTLS:      offers(s.AnyTLS != nil, "anytls"),
 			TUIC:        offers(s.TUIC != nil, "tuic"),
 			CDN:         offers(s.CDN != nil, "cdn"),
+			CDNWS:       offers(s.CDN != nil && s.CDN.VMess != nil && s.CDN.VMess.UUID != "", "cdnws"),
 			Naive:       offers(s.Naive != nil, "naive"),
 			Snowflake:   offers(s.Snowflake != nil, "snowflake"),
 		})

@@ -5,12 +5,16 @@ const NAME_KEY_PREFIX = "wk1:";
 const SEALED_NAME_PREFIX = "zk2:";
 const NAME_KEY_AAD = "nameKey";
 const ACCOUNT_NUMBER = /^[0-9A-HJKMNP-TV-Z]{24}$/;
+const APP_TOKEN = /^pgt1_[A-Za-z0-9_-]{43}$/;
 const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/;
 const UNSAFE_CHARS = /[\p{Cc}\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/u;
 
 export const NAME_MAX = 40;
 export const RENAME_NEEDS_ACCOUNT_NUMBER = "Sign in with your account number to rename devices";
 export const NAME_KEY_UNREADABLE = "This account's device names key does not open with your account number";
+// Distinct from the account-number message: the renderer tells the user to
+// rename on the website or sign in with their number instead.
+export const RENAME_NEEDS_NAMES_KEY = "Signed in with the browser without this account's device names key";
 
 export interface DeviceRow {
   id: string;
@@ -48,6 +52,19 @@ export function numberWrapKey(credential: string | null): Buffer | null {
   const normalized = normalizeAccountNumber(credential ?? "");
   if (!ACCOUNT_NUMBER.test(normalized)) return null;
   return Buffer.from(hkdfSync("sha256", normalized, SALT, "wrap:number:v1", 32));
+}
+
+/** A browser sign-in's own credential: `pgt1_` plus 32 random bytes. */
+export function isAppToken(credential: string | null | undefined): boolean {
+  return typeof credential === "string" && APP_TOKEN.test(credential);
+}
+
+/** The key that opens the account's wk1 nameKey. An account number derives
+ *  it; an app token has only what the browser handed over (namesWrap), and is
+ *  never itself turned into a key — that key would open nothing. */
+export function wrapKeyFor(credential: string | null, namesWrap?: Buffer | null): Buffer | null {
+  if (isAppToken(credential)) return namesWrap?.length === 32 ? namesWrap : null;
+  return numberWrapKey(credential);
 }
 
 export const newNameKey = (): Buffer => randomBytes(32);
@@ -105,30 +122,47 @@ export function displayName(row: HubDeviceRow, k: Buffer | null): string {
 }
 
 /** Puts each row's display name in friendlyName; an old hub's rows pass through. */
-export function shownDevices(list: HubDeviceList, credential: string | null): DeviceRow[] {
+export function shownDevices(list: HubDeviceList, credential: string | null, namesWrap?: Buffer | null): DeviceRow[] {
   const v2 = speaksNamesV2(list);
-  const k = v2 ? unwrapNameKey(numberWrapKey(credential), list.nameKey) : null;
+  const k = v2 ? unwrapNameKey(wrapKeyFor(credential, namesWrap), list.nameKey) : null;
   return list.devices.map((device) => {
     const { label: _label, sealedName: _sealedName, ...row } = device;
     return v2 ? { ...row, friendlyName: displayName(device, k) } : row;
   });
 }
 
-/** Seals name under the account's key, creating that key when the hub has none. */
-export function sealRename(list: HubDeviceList, credential: string | null, deviceId: string, name: string): SealedRename {
-  const wrapKey = numberWrapKey(credential);
-  if (!wrapKey) throw new Error(RENAME_NEEDS_ACCOUNT_NUMBER);
+/** Seals name under the account's key, creating that key when the hub has none.
+ *  Only an account number may create it: an app token's handed-over wrap key
+ *  can't be checked against anything until a key exists, and a wrong one
+ *  would lock every other device out of the names. */
+export function sealRename(
+  list: HubDeviceList,
+  credential: string | null,
+  deviceId: string,
+  name: string,
+  namesWrap?: Buffer | null
+): SealedRename {
+  const token = isAppToken(credential);
+  const wrapKey = wrapKeyFor(credential, namesWrap);
+  if (!wrapKey) throw new Error(token ? RENAME_NEEDS_NAMES_KEY : RENAME_NEEDS_ACCOUNT_NUMBER);
   if (list.nameKey) {
     const k = unwrapNameKey(wrapKey, list.nameKey);
-    if (!k) throw new Error(NAME_KEY_UNREADABLE);
+    if (!k) throw new Error(token ? RENAME_NEEDS_NAMES_KEY : NAME_KEY_UNREADABLE);
     return { deviceId, sealedName: sealName(k, deviceId, name) };
   }
+  if (token) throw new Error(RENAME_NEEDS_NAMES_KEY);
   const k = newNameKey();
   return { deviceId, sealedName: sealName(k, deviceId, name), nameKey: wrapNameKey(wrapKey, k) };
 }
 
 /** Retries once when another device created the account's key between the list and the rename. */
-export async function renameDevice(call: HubCall, credential: string | null, deviceId: string, name: unknown): Promise<void> {
+export async function renameDevice(
+  call: HubCall,
+  credential: string | null,
+  deviceId: string,
+  name: unknown,
+  namesWrap?: Buffer | null
+): Promise<void> {
   const trimmed = checkDeviceName(name);
   for (let retried = false; ; retried = true) {
     const list = (await call("GET", "/api/device/list")) as HubDeviceList | undefined;
@@ -136,7 +170,7 @@ export async function renameDevice(call: HubCall, credential: string | null, dev
       await call("POST", "/api/device/rename", { deviceId, friendlyName: trimmed });
       return;
     }
-    const body = sealRename(list, credential, deviceId, trimmed);
+    const body = sealRename(list, credential, deviceId, trimmed, namesWrap);
     try {
       await call("POST", "/api/device/rename", body);
       return;

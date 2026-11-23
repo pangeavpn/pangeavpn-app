@@ -10,6 +10,7 @@ type cloakInfo struct {
 	UID        string `json:"uid"`
 	PublicKey  string `json:"publicKey"`
 	ServerName string `json:"serverName,omitempty"`
+	RemotePort int    `json:"remotePort,omitempty"`
 }
 
 // realityInfo and the transport structs below mirror ServerInfo in
@@ -103,14 +104,24 @@ type tectonicCDNInfo struct {
 
 // cdnInfo's remoteHost is the CDN-proxied hostname; remoteIp is an edge address.
 type cdnInfo struct {
-	RemoteHost string `json:"remoteHost"`
-	RemoteIP   string `json:"remoteIp,omitempty"`
-	RemotePort int    `json:"remotePort"`
+	RemoteHost string         `json:"remoteHost"`
+	RemoteIP   string         `json:"remoteIp,omitempty"`
+	RemotePort int            `json:"remotePort"`
+	UUID       string         `json:"uuid"`
+	Path       string         `json:"path"`
+	ServerName string         `json:"serverName,omitempty"`
+	TargetHost string         `json:"targetHost,omitempty"`
+	TargetPort int            `json:"targetPort,omitempty"`
+	VMess      *cdnVMessRoute `json:"vmess,omitempty"`
+	ECH        string         `json:"ech,omitempty"`
+}
+
+// cdnVMessRoute is the node's VMess-over-WebSocket inbound on the same hostname: the
+// cdnws transport, offered beside the VLESS route rather than in its place.
+type cdnVMessRoute struct {
 	UUID       string `json:"uuid"`
-	Path       string `json:"path"`
-	ServerName string `json:"serverName,omitempty"`
-	TargetHost string `json:"targetHost,omitempty"`
-	TargetPort int    `json:"targetPort,omitempty"`
+	Path       string `json:"path,omitempty"`
+	RemotePort int    `json:"remotePort,omitempty"`
 }
 
 // controlPlaneShadowsocksInfo reaches the hub rather than WireGuard.
@@ -181,6 +192,7 @@ type publicServer struct {
 	AnyTLS      bool   `json:"anytls"`
 	TUIC        bool   `json:"tuic"`
 	CDN         bool   `json:"cdn"`
+	CDNWS       bool   `json:"cdnws"`
 	Naive       bool   `json:"naive"`
 	Snowflake   bool   `json:"snowflake"`
 }

@@ -70,6 +70,8 @@ const WINDOWS_HOME =
 // Order matters: the widest shapes run first so a narrower rule cannot bite a
 // piece out of one and leave the rest readable.
 const RULES: readonly Rule[] = [
+  // A browser sign-in's own credential; first, before the base64 rule can split it.
+  [/(?<![A-Za-z0-9])pgt1_[A-Za-z0-9_-]{43}(?![A-Za-z0-9_-])/g, "[redacted:appToken]"],
   [WINDOWS_HOME, "$1[redacted:user]"],
   [/(\/home\/)[^/\s"':]+/g, "$1[redacted:user]"],
   [/(?<![\w.-])\/root(?=[/\s"':,;)\]}]|$)/gm, "/[redacted:user]"],

@@ -25,6 +25,12 @@ export function isCachedServer(value: unknown): value is ServerInfo {
   if (!cloak || typeof cloak !== "object" || Array.isArray(cloak)) return false;
   if (!isNonEmptyString(cloak.remoteHost)) return false;
   if (!isNonEmptyString(cloak.uid) || !isNonEmptyString(cloak.publicKey)) return false;
+  if (
+    cloak.remotePort !== undefined &&
+    !(Number.isInteger(cloak.remotePort) && cloak.remotePort > 0 && cloak.remotePort <= 65535)
+  ) {
+    return false;
+  }
 
   return (
     isOptionalBlock(s.naive) &&

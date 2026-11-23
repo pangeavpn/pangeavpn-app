@@ -2,13 +2,15 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { isCachedServer, restoreCachedServers } from "./cachedServers.ts";
 
+const CLOAK = { remoteHost: "1.2.3.4", uid: "uid-1", publicKey: "pk-1" };
+
 function server(overrides: Record<string, unknown> = {}) {
   return {
     id: "fra-1",
     name: "Frankfurt",
     region: "eu-central",
     country: "DE",
-    cloak: { remoteHost: "1.2.3.4", uid: "uid-1", publicKey: "pk-1" },
+    cloak: CLOAK,
     ...overrides
   };
 }
@@ -37,6 +39,14 @@ test("the cloak block and each of its fields are required", () => {
   assert.equal(isCachedServer(server({ cloak: { uid: "u", publicKey: "p" } })), false);
   assert.equal(isCachedServer(server({ cloak: { remoteHost: "h", publicKey: "p" } })), false);
   assert.equal(isCachedServer(server({ cloak: { remoteHost: "h", uid: "u" } })), false);
+});
+
+test("a cloak port is accepted when valid and rejected when not", () => {
+  assert.equal(isCachedServer(server({ cloak: { ...CLOAK, remotePort: 8447 } })), true);
+  assert.equal(isCachedServer(server({ cloak: { ...CLOAK, remotePort: 443 } })), true);
+  for (const bad of [0, 65536, 443.5, "8447"]) {
+    assert.equal(isCachedServer(server({ cloak: { ...CLOAK, remotePort: bad } })), false);
+  }
 });
 
 test("optional transport blocks pass through, but only as objects", () => {

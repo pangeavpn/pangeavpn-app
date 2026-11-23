@@ -77,7 +77,8 @@
     <string name="settings_title">Ajustes</string>
     <string name="settings_transport_anytls">AnyTLS</string>
     <string name="settings_transport_auto">Automático (recomendado)</string>
-    <string name="settings_transport_cdn">CDN</string>
+    <string name="settings_transport_cdn">CDN (VLESS)</string>
+    <string name="settings_transport_cdnws">CDN (VMess)</string>
     <string name="settings_transport_cloak">Cloak</string>
     <string name="settings_transport_description">Cómo PangeaVPN camufla tu tráfico.</string>
     <string name="settings_transport_gaming_hint">Envía el tráfico de los juegos por dos conexiones a la vez, para que un paquete perdido no congele la partida. Usa algo más de datos y es más fácil de detectar. Solo con Tectonic. Se aplica en la próxima conexión.</string>
@@ -103,7 +104,8 @@
     <string name="toggle_off">Desactivado</string>
     <string name="toggle_on">Activado</string>
     <string name="transport_status_anytls">Ofuscación: AnyTLS</string>
-    <string name="transport_status_cdn">Ofuscación: CDN</string>
+    <string name="transport_status_cdn">Ofuscación: CDN (VLESS)</string>
+    <string name="transport_status_cdnws">Ofuscación: CDN (VMess)</string>
     <string name="transport_status_cloak">Ofuscación: Cloak</string>
     <string name="transport_status_hysteria2">Ofuscación: Hysteria2</string>
     <string name="transport_status_naive">Ofuscación: NaiveProxy</string>

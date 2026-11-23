@@ -12,6 +12,7 @@ const LOGIN_ERROR_KEYS: Record<LoginErrorCode, MessageKey> = {
   TIMEOUT: "login.error.timeout",
   REGISTRATION_FAILED: "login.error.registrationFailed",
   LOCAL_STORAGE_FAILED: "login.error.localStorageFailed",
+  INVALID_CODE: "login.error.invalidCode",
   UNKNOWN: "login.error.unknown"
 };
 

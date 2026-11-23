@@ -106,6 +106,11 @@ func synthesizedProfile(p *state.Profile, synth func(string) string) (*state.Pro
 		cdn.RemoteHost = m.host(cdn.RemoteHost)
 		out.CDN = &cdn
 	}
+	if p.CDNWS != nil {
+		cdnws := *p.CDNWS
+		cdnws.RemoteHost = m.host(cdnws.RemoteHost)
+		out.CDNWS = &cdnws
+	}
 	// Cloned whole, since scrub clears the prepared key. The SNI is the cover
 	// domain, never the node, so only the addresses change.
 	if p.Tectonic != nil {

@@ -61,6 +61,8 @@ export function classifyLoginError(err: unknown): LoginErrorCode {
   const name = String(error.name ?? "");
   if (name === "SubscriptionExpiredError") return "SUBSCRIPTION_EXPIRED";
   if (name === "HubUnreachableError") return "HUB_UNREACHABLE";
+  // A seal that won't open was meant for another app's key: same remedy as a dead code.
+  if (name === "DesktopLinkCodeError" || name === "DesktopLinkSealError") return "INVALID_CODE";
 
   const status = statusOf(error);
   if (status !== null) return fromStatus(status);

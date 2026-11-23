@@ -21,8 +21,43 @@ func NewTUIC(logs *state.LogStore) *Manager[state.TUICProfile] {
 	return &Manager[state.TUICProfile]{name: "tuic", source: state.SourceTUIC, logs: logs, build: buildTUIC}
 }
 
+// NewCDN is VLESS over HTTPUpgrade through the CDN edge.
 func NewCDN(logs *state.LogStore) *Manager[state.CDNProfile] {
-	return &Manager[state.CDNProfile]{name: "cdn", source: state.SourceCDN, logs: logs, build: buildCDN}
+	return &Manager[state.CDNProfile]{name: "cdn", source: state.SourceCDN, logs: logs, build: cdnBuilder("cdn", cdnVLESS)}
+}
+
+// NewCDNWS is VMess over a WebSocket through the same kind of edge: past the upgrade a
+// filter that decrypts TLS reads only VMess ciphertext.
+func NewCDNWS(logs *state.LogStore) *Manager[state.CDNProfile] {
+	return &Manager[state.CDNProfile]{name: "cdnws", source: state.SourceCDNWS, logs: logs, build: cdnBuilder("cdnws", cdnVMess)}
+}
+
+type cdnProtocol int
+
+const (
+	cdnVLESS cdnProtocol = iota
+	cdnVMess
+)
+
+// cdnBuilder dials over ECH when the profile carries a config, and plainly if that fails:
+// a network may block the CDN's ECH name while still passing this hostname.
+func cdnBuilder(name string, protocol cdnProtocol) func(state.CDNProfile) (spec, error) {
+	return func(p state.CDNProfile) (spec, error) {
+		plain, err := buildCDN(name, protocol, p, nil)
+		if err != nil || p.ECHConfig == "" {
+			return plain, err
+		}
+		ech, err := base64.StdEncoding.DecodeString(strings.TrimSpace(p.ECHConfig))
+		if err != nil || len(ech) < 2 || int(ech[0])<<8|int(ech[1]) != len(ech)-2 {
+			return plain, nil
+		}
+		sp, err := buildCDN(name, protocol, p, ech)
+		if err != nil {
+			return spec{}, err
+		}
+		sp.fallback = &plain
+		return sp, nil
+	}
 }
 
 func buildTUIC(p state.TUICProfile) (spec, error) {
@@ -65,64 +100,124 @@ func buildTUIC(p state.TUICProfile) (spec, error) {
 	}, nil
 }
 
-func buildCDN(p state.CDNProfile) (spec, error) {
+func buildCDN(name string, protocol cdnProtocol, p state.CDNProfile, ech []byte) (spec, error) {
 	host := strings.TrimSpace(p.RemoteHost)
 	remotePort := p.RemotePort
 	if remotePort == 0 {
 		remotePort = 443
 	}
-	if err := validatePorts("cdn", host, remotePort, p.LocalPort, p.TargetPort); err != nil {
+	if err := validatePorts(name, host, remotePort, p.LocalPort, p.TargetPort); err != nil {
 		return spec{}, err
 	}
 	if p.UUID == "" {
-		return spec{}, errors.New("cdn uuid is required")
+		return spec{}, fmt.Errorf("%s uuid is required", name)
 	}
 	// The edge routes on SNI and Host, so the proxied hostname is never optional.
 	serverName := strings.TrimSpace(p.ServerName)
 	if serverName == "" || net.ParseIP(serverName) != nil {
-		return spec{}, errors.New("cdn serverName must be the CDN-proxied hostname")
+		return spec{}, fmt.Errorf("%s serverName must be the CDN-proxied hostname", name)
 	}
 	path := p.Path
 	if path == "" {
 		path = "/"
 	}
 	tls := &option.OutboundTLSOptions{Enabled: true, ServerName: serverName}
-	if utlsAvailable {
+	if ech != nil {
+		// Go's own TLS: sing-box redials with the edge's retry configs only for crypto/tls.
+		config := pem.EncodeToMemory(&pem.Block{Type: "ECH CONFIGS", Bytes: ech})
+		tls.ECH = &option.OutboundECHOptions{Enabled: true, Config: badoption.Listable[string]{string(config)}}
+	} else if utlsAvailable {
 		tls.UTLS = &option.OutboundUTLSOptions{Enabled: true, Fingerprint: "chrome"}
 	}
+	server := option.ServerOptions{Server: host, ServerPort: uint16(remotePort)}
+	tlsOptions := option.OutboundTLSOptionsContainer{TLS: tls}
+
+	var outbound option.Outbound
+	var dialer *option.DialerOptions
+	var dialAt *option.ServerOptions
+	via := "VLESS over HTTPUpgrade"
+	switch protocol {
+	case cdnVLESS:
+		vless := &option.VLESSOutboundOptions{
+			DialerOptions:               protectedDialer(),
+			ServerOptions:               server,
+			UUID:                        p.UUID,
+			OutboundTLSOptionsContainer: tlsOptions,
+			Transport: &option.V2RayTransportOptions{
+				Type:               C.V2RayTransportTypeHTTPUpgrade,
+				HTTPUpgradeOptions: option.V2RayHTTPUpgradeOptions{Host: serverName, Path: path},
+			},
+		}
+		outbound, dialer, dialAt = option.Outbound{Type: C.TypeVLESS, Tag: outboundTag, Options: vless}, &vless.DialerOptions, &vless.ServerOptions
+	case cdnVMess:
+		// Everything after the upgrade is VMess ciphertext, so a filter that decrypts TLS reads nothing.
+		vmess := &option.VMessOutboundOptions{
+			DialerOptions:               protectedDialer(),
+			ServerOptions:               server,
+			UUID:                        p.UUID,
+			Security:                    "auto",
+			GlobalPadding:               true,
+			AuthenticatedLength:         true,
+			OutboundTLSOptionsContainer: tlsOptions,
+			Transport: &option.V2RayTransportOptions{
+				Type:             C.V2RayTransportTypeWebsocket,
+				WebsocketOptions: option.V2RayWebsocketOptions{Path: path, Headers: browserHeaders(serverName)},
+			},
+		}
+		outbound, dialer, dialAt = option.Outbound{Type: C.TypeVMess, Tag: outboundTag, Options: vmess}, &vmess.DialerOptions, &vmess.ServerOptions
+		via = "VMess over WebSocket"
+	default:
+		return spec{}, fmt.Errorf("%s: unknown protocol %d", name, protocol)
+	}
+
+	if ech != nil {
+		via += " with ECH"
+	}
 	extraRoots := parseRoots(p.ExtraRootsPEM)
-	remote := net.JoinHostPort(host, strconv.Itoa(remotePort)) + " (" + serverName + ")"
+	remote := net.JoinHostPort(host, strconv.Itoa(remotePort)) + " (" + serverName + "), " + via
 	if len(extraRoots) > 0 {
 		remote += fmt.Sprintf(", trusting %d of the user's own roots", len(extraRoots))
 	}
-	vless := &option.VLESSOutboundOptions{
-		DialerOptions:               protectedDialer(),
-		ServerOptions:               option.ServerOptions{Server: host, ServerPort: uint16(remotePort)},
-		UUID:                        p.UUID,
-		OutboundTLSOptionsContainer: option.OutboundTLSOptionsContainer{TLS: tls},
-		Transport: &option.V2RayTransportOptions{
-			Type:               C.V2RayTransportTypeHTTPUpgrade,
-			HTTPUpgradeOptions: option.V2RayHTTPUpgradeOptions{Host: serverName, Path: path},
-		},
-	}
+	probe := &option.DirectOutboundOptions{DialerOptions: protectedDialer()}
+	refusal := &refusalProbe{tag: probeTag, at: dialAt, serverName: serverName, path: path, roots: extraRoots, ech: ech, websocket: protocol == cdnVMess}
 	return spec{
-		outbound:   option.Outbound{Type: C.TypeVLESS, Tag: outboundTag, Options: vless},
+		outbound:   outbound,
+		extra:      []option.Outbound{{Type: C.TypeDirect, Tag: probeTag, Options: probe}},
 		remote:     remote,
 		targetHost: targetHost(p.TargetHost),
 		targetPort: targetPort(p.TargetPort),
 		localPort:  p.LocalPort,
-		annotate:   annotateCDN,
+		annotate:   refusal.annotate,
 		extraRoots: extraRoots,
 		pinHost:    host,
 		applyPin: func(pin Pin) []option.Outbound {
-			vless.Server = pin.Server
-			vless.DialerOptions = pinnedDialer(pin)
+			dialAt.Server = pin.Server
+			*dialer = pinnedDialer(pin)
 			if pin.Dial == nil {
+				probe.DialerOptions = *dialer
 				return nil
 			}
+			// A direct outbound can't take a detour, so the probe dials the pin's own outbound.
+			refusal.tag = pinnedTag
 			return []option.Outbound{{Type: pinnedType, Tag: pinnedTag, Options: &pinnedOptions{Dial: pin.Dial}}}
 		},
 	}, nil
+}
+
+// browserUserAgent matches the Chrome release that sing-box's uTLS "chrome" fingerprint copies.
+const browserUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36"
+
+// browserHeaders are what Chrome adds to a WebSocket upgrade; the library writes the rest.
+func browserHeaders(serverName string) badoption.HTTPHeader {
+	return badoption.HTTPHeader{
+		"Host":            {serverName},
+		"User-Agent":      {browserUserAgent},
+		"Origin":          {"https://" + serverName},
+		"Pragma":          {"no-cache"},
+		"Cache-Control":   {"no-cache"},
+		"Accept-Encoding": {"gzip, deflate, br, zstd"},
+		"Accept-Language": {"en-US,en;q=0.9"},
+	}
 }
 
 // pinnedDialer binds the edge connection to the physical NIC: the edge is a shared CDN
@@ -156,19 +251,6 @@ func parseRoots(bundle string) []string {
 		}
 		roots = append(roots, string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: block.Bytes})))
 	}
-}
-
-// annotateCDN names the usual cause of the bare EOF an edge returns when it
-// can't reach the origin or the path/UUID is wrong.
-func annotateCDN(err error) error {
-	// Go and Windows say "unknown authority"; the macOS verifier says "is not trusted".
-	if msg := err.Error(); strings.Contains(msg, "unknown authority") || strings.Contains(msg, "is not trusted") {
-		return fmt.Errorf("%w (neither this device nor its user trusts the certificate; a network filter may be inspecting TLS)", err)
-	}
-	if strings.Contains(err.Error(), "EOF") || strings.Contains(err.Error(), "unexpected status") {
-		return fmt.Errorf("%w (the CDN edge answered but the node did not accept the upgrade; verify the path, UUID and the edge's origin settings)", err)
-	}
-	return err
 }
 
 func validatePorts(name, host string, remotePort, localPort, targetPort int) error {
