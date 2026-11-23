@@ -17,13 +17,17 @@ import (
 // consumes. Optional blocks stay nil when the hub omits them.
 func buildProfile(server *serverInfo) *state.Profile {
 	nodeIP := server.Cloak.RemoteHost
+	cloakPort := server.Cloak.RemotePort
+	if cloakPort <= 0 {
+		cloakPort = 443
+	}
 	return &state.Profile{
 		ID:   "auto-" + server.ID,
 		Name: server.Name,
 		Cloak: state.CloakProfile{
 			LocalPort:        0,
 			RemoteHost:       nodeIP,
-			RemotePort:       443,
+			RemotePort:       cloakPort,
 			UID:              server.Cloak.UID,
 			PublicKey:        server.Cloak.PublicKey,
 			EncryptionMethod: "plain",

@@ -143,7 +143,8 @@ export const CDNProfileSchema = z.object({
   serverName: z.string().min(1),
   path: z.string().optional(),
   targetHost: z.string().optional(),
-  targetPort: z.number().int().positive().optional()
+  targetPort: z.number().int().positive().optional(),
+  echConfig: z.string().optional()
 });
 
 export const SnowflakeProfileSchema = z.object({

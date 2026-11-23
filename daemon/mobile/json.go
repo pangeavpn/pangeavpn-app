@@ -10,6 +10,7 @@ type cloakInfo struct {
 	UID        string `json:"uid"`
 	PublicKey  string `json:"publicKey"`
 	ServerName string `json:"serverName,omitempty"`
+	RemotePort int    `json:"remotePort,omitempty"`
 }
 
 // realityInfo and the transport structs below mirror ServerInfo in
