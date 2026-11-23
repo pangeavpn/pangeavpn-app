@@ -55,7 +55,7 @@ export const uk = {
   "login.browser.codeAriaLabel": "Код входу із сайту",
   "login.browser.cancel": "Скасувати",
   "login.browser.startFailed": "Не вдалося відкрити браузер. Увійдіть за допомогою номера акаунта.",
-  "login.browser.pageDone": "Ви увійшли. Можете закрити цю вкладку й повернутися до PangeaVPN.",
+  "login.browser.pageDone": "Підтверджено. Поверніться до PangeaVPN, щоб завершити вхід. Цю вкладку можна закрити.",
   "login.browser.pageInvalid": "Це посилання для входу не відповідає застосунку PangeaVPN. Почніть знову в застосунку.",
 
   // ── Device-limit screen ───────────────────────────────

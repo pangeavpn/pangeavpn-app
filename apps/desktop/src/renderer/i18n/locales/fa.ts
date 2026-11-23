@@ -55,7 +55,7 @@ export const fa = {
   "login.browser.codeAriaLabel": "کد ورود از وب‌سایت",
   "login.browser.cancel": "لغو",
   "login.browser.startFailed": "مرورگر باز نشد. با شماره حساب خود وارد شوید.",
-  "login.browser.pageDone": "وارد شدید. می‌توانید این زبانه را ببندید و به PangeaVPN برگردید.",
+  "login.browser.pageDone": "تأیید شد. برای پایان ورود به PangeaVPN برگردید. می‌توانید این زبانه را ببندید.",
   "login.browser.pageInvalid": "این پیوند ورود با برنامه PangeaVPN مطابقت ندارد. از داخل برنامه دوباره شروع کنید.",
 
   // ── Device-limit screen ───────────────────────────────

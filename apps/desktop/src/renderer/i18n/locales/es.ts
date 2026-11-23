@@ -55,7 +55,7 @@ export const es = {
   "login.browser.codeAriaLabel": "Código de inicio de sesión del sitio web",
   "login.browser.cancel": "Cancelar",
   "login.browser.startFailed": "No se pudo abrir tu navegador. Inicia sesión con tu número de cuenta.",
-  "login.browser.pageDone": "Has iniciado sesión. Puedes cerrar esta pestaña y volver a PangeaVPN.",
+  "login.browser.pageDone": "Aprobado. Vuelve a PangeaVPN para terminar de iniciar sesión. Puedes cerrar esta pestaña.",
   "login.browser.pageInvalid": "Este enlace de inicio de sesión no coincide con la aplicación PangeaVPN. Vuelve a empezar desde la aplicación.",
 
   // ── Device-limit screen ───────────────────────────────

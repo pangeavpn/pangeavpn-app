@@ -55,7 +55,7 @@ export const fr = {
   "login.browser.codeAriaLabel": "Code de connexion du site",
   "login.browser.cancel": "Annuler",
   "login.browser.startFailed": "Impossible d'ouvrir votre navigateur. Connectez-vous avec votre numéro de compte.",
-  "login.browser.pageDone": "Vous êtes connecté. Vous pouvez fermer cet onglet et revenir à PangeaVPN.",
+  "login.browser.pageDone": "Approuvé. Revenez à PangeaVPN pour terminer la connexion. Vous pouvez fermer cet onglet.",
   "login.browser.pageInvalid": "Ce lien de connexion ne correspond pas à l'application PangeaVPN. Recommencez depuis l'application.",
 
   // ── Device-limit screen ───────────────────────────────

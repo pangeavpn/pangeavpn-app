@@ -55,7 +55,7 @@ export const zh = {
   "login.browser.codeAriaLabel": "网站上的登录代码",
   "login.browser.cancel": "取消",
   "login.browser.startFailed": "无法打开浏览器。请改用账户号码登录。",
-  "login.browser.pageDone": "您已登录。可以关闭此标签页并返回 PangeaVPN。",
+  "login.browser.pageDone": "已批准。请返回 PangeaVPN 完成登录。可以关闭此标签页。",
   "login.browser.pageInvalid": "此登录链接与 PangeaVPN 应用不匹配。请在应用中重新开始。",
 
   // ── Device-limit screen ───────────────────────────────

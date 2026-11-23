@@ -55,7 +55,7 @@ export const ar = {
   "login.browser.codeAriaLabel": "رمز تسجيل الدخول من الموقع",
   "login.browser.cancel": "إلغاء",
   "login.browser.startFailed": "تعذّر فتح المتصفح. سجّل الدخول برقم حسابك بدلاً من ذلك.",
-  "login.browser.pageDone": "تم تسجيل دخولك. يمكنك إغلاق علامة التبويب هذه والعودة إلى PangeaVPN.",
+  "login.browser.pageDone": "تمت الموافقة. عُد إلى PangeaVPN لإكمال تسجيل الدخول. يمكنك إغلاق علامة التبويب هذه.",
   "login.browser.pageInvalid": "رابط تسجيل الدخول هذا لا يطابق تطبيق PangeaVPN. ابدأ من جديد من التطبيق.",
 
   // ── Device-limit screen ───────────────────────────────

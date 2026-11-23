@@ -55,7 +55,7 @@ export const en = {
   "login.browser.codeAriaLabel": "Sign-in code from the website",
   "login.browser.cancel": "Cancel",
   "login.browser.startFailed": "Couldn't open your browser. Sign in with your account number instead.",
-  "login.browser.pageDone": "You're signed in. You can close this tab and return to PangeaVPN.",
+  "login.browser.pageDone": "Approved. Return to PangeaVPN to finish signing in. You can close this tab.",
   "login.browser.pageInvalid": "This sign-in link doesn't match the PangeaVPN app. Start again from the app.",
 
   // ── Device-limit screen ───────────────────────────────

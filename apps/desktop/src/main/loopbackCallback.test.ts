@@ -55,7 +55,7 @@ test("a good callback resolves the normalised code, answers with hardened header
     assert.equal(res.headers["cache-control"], "no-store");
     assert.equal(res.headers["referrer-policy"], "no-referrer");
     assert.equal(res.headers["content-security-policy"], "default-src 'none'; style-src 'unsafe-inline'");
-    assert.match(res.body, /signed in/);
+    assert.match(res.body, /finish signing in/);
     await assert.rejects(get(cb.port, `/callback?code=7K3MQ9XA2P&state=${STATE}`));
   });
 });

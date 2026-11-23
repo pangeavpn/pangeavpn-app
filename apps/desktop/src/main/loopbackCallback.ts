@@ -16,7 +16,7 @@ export interface LoopbackPageText {
 }
 
 export const DEFAULT_LOOPBACK_TEXT: LoopbackPageText = {
-  done: "You're signed in. You can close this tab and return to PangeaVPN.",
+  done: "Approved. Return to PangeaVPN to finish signing in. You can close this tab.",
   invalid: "This sign-in link doesn't match the PangeaVPN app. Start again from the app."
 };
 
