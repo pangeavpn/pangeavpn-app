@@ -1976,7 +1976,7 @@ export class PangeaApiClient {
       cloak: {
         localPort: 51820,
         remoteHost: server.cloak.remoteHost,
-        remotePort: 443,
+        remotePort: server.cloak.remotePort ?? 443,
         uid: server.cloak.uid,
         publicKey: server.cloak.publicKey,
         encryptionMethod: "plain",

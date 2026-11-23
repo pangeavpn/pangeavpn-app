@@ -223,6 +223,8 @@ export interface ServerInfo {
   multihop?: boolean;
   cloak: {
     remoteHost: string;
+    /** Cloak's port, when the hub moved the node off 443; defaults to 443. */
+    remotePort?: number;
     uid: string;
     publicKey: string;
     // Optional cover SNI advertised by the hub (daemon defaults to www.microsoft.com when absent).
