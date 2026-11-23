@@ -86,7 +86,11 @@ func (r *refusalProbe) whoRefused(ctx context.Context, engine *box.Box) string {
 		rand.Read(key[:])
 		upgrade += "Sec-WebSocket-Version: 13\r\nSec-WebSocket-Key: " + base64.StdEncoding.EncodeToString(key[:]) + "\r\n"
 	}
-	request := fmt.Sprintf("GET %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: %s\r\n%s\r\n", r.path, r.serverName, browserUserAgent, upgrade)
+	path := r.path
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
+	request := fmt.Sprintf("GET %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: %s\r\n%s\r\n", path, r.serverName, browserUserAgent, upgrade)
 	if _, err := io.WriteString(tlsConn, request); err != nil {
 		return ""
 	}

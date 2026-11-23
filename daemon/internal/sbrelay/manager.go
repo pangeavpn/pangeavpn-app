@@ -4,6 +4,7 @@ package sbrelay
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -23,6 +24,8 @@ import (
 const (
 	outboundTag = "relay-out"
 	dialTimeout = 10 * time.Second
+	// An ECH attempt has a plain fallback behind it, so a network that drops it shouldn't cost the full wait.
+	echDialTimeout = 6 * time.Second
 )
 
 // ProtectPath, when set, is the unix socket each outbound fd is handed to.
@@ -121,7 +124,8 @@ func (m *Manager[P]) Start(ctx context.Context, profile P) error {
 
 	err = m.launch(ctx, profile, sp)
 	// A refused upgrade came from the edge itself, so dialing it without ECH changes nothing.
-	if err == nil || sp.fallback == nil || ctx.Err() != nil || refusedUpgrade(err) {
+	var pinErr pinError
+	if err == nil || sp.fallback == nil || ctx.Err() != nil || refusedUpgrade(err) || errors.As(err, &pinErr) {
 		return err
 	}
 	m.logs.Add(state.LogWarn, m.source, fmt.Sprintf("%s over ECH failed, dialing without it: %v", m.name, err))
@@ -137,14 +141,14 @@ func (m *Manager[P]) launch(ctx context.Context, profile P, sp spec) error {
 	if m.pin != nil && sp.applyPin != nil {
 		pin, err := m.pin(ctx, sp.pinHost)
 		if err != nil {
-			return fmt.Errorf("%s: %w", m.name, err)
+			return pinError{fmt.Errorf("%s: %w", m.name, err)}
 		}
 		if pin.Release != nil {
 			releasePin = pin.Release
 		}
 		if pin.Server == "" || (pin.Interface == "" && pin.Mark == 0 && pin.Dial == nil) {
 			releasePin()
-			return fmt.Errorf("%s: pin for %s binds nothing; refusing to dial it unpinned", m.name, sp.pinHost)
+			return pinError{fmt.Errorf("%s: pin for %s binds nothing; refusing to dial it unpinned", m.name, sp.pinHost)}
 		}
 		pinOutbounds = sp.applyPin(pin)
 	}
@@ -179,7 +183,11 @@ func (m *Manager[P]) launch(ctx context.Context, profile P, sp spec) error {
 	}
 
 	destination := M.ParseSocksaddrHostPort(sp.targetHost, uint16(sp.targetPort))
-	dialCtx, dialCancel := context.WithTimeout(engineCtx, dialTimeout)
+	timeout := dialTimeout
+	if sp.fallback != nil {
+		timeout = echDialTimeout
+	}
+	dialCtx, dialCancel := context.WithTimeout(engineCtx, timeout)
 	stopPropagation := context.AfterFunc(ctx, dialCancel)
 	remote, err := outbound.ListenPacket(dialCtx, destination)
 	stopPropagation()
@@ -335,3 +343,8 @@ func (m *Manager[P]) forceReset() {
 		engine.Close()
 	}
 }
+
+// pinError fails the same way with or without ECH, so it skips the plain retry.
+type pinError struct{ error }
+
+func (e pinError) Unwrap() error { return e.error }

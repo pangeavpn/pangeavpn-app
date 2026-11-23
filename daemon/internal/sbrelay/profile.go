@@ -49,7 +49,7 @@ func cdnBuilder(name string, protocol cdnProtocol) func(state.CDNProfile) (spec,
 		}
 		ech, err := base64.StdEncoding.DecodeString(strings.TrimSpace(p.ECHConfig))
 		if err != nil || len(ech) < 2 || int(ech[0])<<8|int(ech[1]) != len(ech)-2 {
-			return spec{}, fmt.Errorf("%s echConfig must be a base64 ECHConfigList", name)
+			return plain, nil
 		}
 		sp, err := buildCDN(name, protocol, p, ech)
 		if err != nil {
