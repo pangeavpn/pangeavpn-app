@@ -39,6 +39,10 @@ export class HostOfflineError extends Error {
   }
 }
 
+// A hub-proxy start dials a node before it can answer: on a filtered network
+// that outlasts the 5 s default, which aborted starts that were still working.
+const HUB_PROXY_START_TIMEOUT_MS = 15_000;
+
 /** Any non-2xx daemon reply; the status tells an old daemon from a broken one. */
 export class DaemonHttpError extends Error {
   readonly status: number;
@@ -186,7 +190,7 @@ export class DaemonClient implements PostQuantumProvider {
       proxyUsername?: string;
       proxyPassword?: string;
       error?: string;
-    }>("POST", "/ssproxy/start", profile);
+    }>("POST", "/ssproxy/start", profile, HUB_PROXY_START_TIMEOUT_MS);
     if (!res.ok || !res.port) {
       throw new Error(res.error || "shadowsocks proxy failed to start");
     }
@@ -218,7 +222,7 @@ export class DaemonClient implements PostQuantumProvider {
       proxyUsername?: string;
       proxyPassword?: string;
       error?: string;
-    }>("POST", "/realityproxy/start", profile);
+    }>("POST", "/realityproxy/start", profile, HUB_PROXY_START_TIMEOUT_MS);
     if (!res.ok || !res.port || !res.proxyUsername || !res.proxyPassword) {
       throw new Error(res.error || "reality proxy failed to start");
     }
