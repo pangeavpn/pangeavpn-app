@@ -128,6 +128,9 @@ export class HubRequestUnansweredError extends Error {
 
 // How long a fully failed cascade is believed before it is attempted again.
 const HUB_RETRY_COOLDOWN_MS = 20000;
+// A path is re-probed on a network change before the ladder is re-walked: long
+// enough to keep a live route, short enough not to pay a timeout for a dead one.
+const HUB_NETWORK_CHANGE_PROBE_MS = 4000;
 // An unanswered register may still have replaced this device's peer, so it is
 // asked again on the same route this many times before the connect gives up.
 const REGISTER_RETRIES = 1;
@@ -960,8 +963,8 @@ export class PangeaApiClient {
 
   /** Verify the secure route is reachable and decryptable on the current transport
    *  path; uses /api/client/regions since the hub rejects unauthenticated /health with 403. */
-  private async trySecureProbeCurrentPath(): Promise<boolean> {
-    return this.probeSecurePath(this.currentProbePath());
+  private async trySecureProbeCurrentPath(timeoutMs?: number): Promise<boolean> {
+    return this.probeSecurePath(this.currentProbePath(), timeoutMs);
   }
 
   /** The path the next hub request would take, as an explicit value. */
@@ -975,7 +978,7 @@ export class PangeaApiClient {
     return { kind: "domain", host: this.normalHost };
   }
 
-  private async probeSecurePath(path: HubProbePath): Promise<boolean> {
+  private async probeSecurePath(path: HubProbePath, timeoutMs?: number): Promise<boolean> {
     const sealed = await this.sealRequest("GET", "/api/client/regions", {}, undefined);
     const envelopeJson = JSON.stringify(sealed.envelope);
 
@@ -986,7 +989,7 @@ export class PangeaApiClient {
           method: "POST",
           headers: SEALED_ENVELOPE_HEADERS,
           body: envelopeJson,
-          timeoutMs: 8000,
+          timeoutMs: timeoutMs ?? 8000,
           proxyUsername: path.username,
           proxyPassword: path.password
         });
@@ -995,18 +998,18 @@ export class PangeaApiClient {
           method: "POST",
           headers: SEALED_ENVELOPE_HEADERS,
           body: envelopeJson,
-          timeoutMs: 8000
+          timeoutMs: timeoutMs ?? 8000
         });
       } else if (path.kind === "ip") {
         rawResponse = await fetchDohResolved(path.ip, sealed.route, {
           method: "POST",
           headers: SEALED_ENVELOPE_HEADERS,
           body: envelopeJson,
-          timeoutMs: 5000
+          timeoutMs: timeoutMs ?? 5000
         });
       } else {
         const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 5000);
+        const timer = setTimeout(() => controller.abort(), timeoutMs ?? 5000);
         try {
           rawResponse = await net.fetch(`https://${path.host}${sealed.route}`, {
             method: "POST",
@@ -1040,11 +1043,17 @@ export class PangeaApiClient {
   /** Ensures a working connection strategy to the hub API, trying enabled methods in
    *  order: cached/DoH IP, shadowsocks, fronted relay, then cleartext domain last. */
   private async ensureHub(): Promise<void> {
-    // A route found on another network says nothing about this one.
+    // A route found on another network says nothing about this one, but a path
+    // that still answers has survived the move — cheaper than re-walking the ladder.
     const network = this.hubReady && this.hubNetwork ? networkKeyOf(networkInterfaces()) : "";
     if (network && network !== this.hubNetwork) {
-      console.log(`[HubURL] The network changed, finding the hub again`);
-      this.resetHubResolution();
+      if (await this.trySecureProbeCurrentPath(HUB_NETWORK_CHANGE_PROBE_MS)) {
+        console.log(`[HubURL] The hub path survived the network change`);
+        this.hubNetwork = network;
+      } else {
+        console.log(`[HubURL] The network changed, finding the hub again`);
+        this.resetHubResolution();
+      }
     }
     if (this.hubReady) {
       return;
