@@ -136,6 +136,10 @@ type connectRequest struct {
 
 type disconnectRequest struct {
 	KeepKillSwitch bool `json:"keepKillSwitch,omitempty"`
+	// Reason names the app-side path that asked for teardown (e.g. "user",
+	// "cancel-dial", "tray"). Logged so a diagnostics report attributes a
+	// disconnect even when the app log has already rolled past it.
+	Reason string `json:"reason,omitempty"`
 }
 
 type engageKillSwitchRequest struct {
@@ -380,6 +384,7 @@ func NewHandler(token string, service *Service) http.Handler {
 			return
 		}
 
+		service.NoteDisconnectReason(req.Reason)
 		err := service.Disconnect(r.Context(), req.KeepKillSwitch)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, serviceErrorResponse(err))

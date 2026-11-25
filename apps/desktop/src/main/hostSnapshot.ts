@@ -46,3 +46,54 @@ export function collectWindowsHostSnapshot(): Promise<string> {
     );
   });
 }
+
+// macOS equivalent: the VPN/security/TLS-interception software the daemon cannot
+// see from inside the tunnel. No bare "tun"/"tap" here — ifconfig lists adapters
+// already, and those words make the process match too broad.
+export const DARWIN_SOFTWARE_PATTERN =
+  "vpn|nord|mullvad|proton|express|surfshark|cyberghost|windscribe|tunnelbear|privateinternet|" +
+  "zscaler|netskope|umbrella|anyconnect|globalprotect|forcepoint|bluecoat|broadcom|symantec|" +
+  "forti|paloalto|checkpoint|sophos|crowdstrike|sentinel|cylance|carbonblack|cloudflare|warp|" +
+  "adguard|nextdns|eset|kaspersky|norton|mcafee|bitdefender|avast|malwarebytes|webroot|trend|" +
+  "jamf|intune|santa|littlesnitch|lulu|murus|wireguard|openvpn|pangea";
+
+// Each line labels its probe so a report reader can scan sections. The default
+// route's interface + address, the resolver, any system proxy/PAC, and a
+// filtered pass over processes and the system-trust CAs together show whether a
+// filter or TLS interceptor (e.g. Zscaler) sits in front of this Mac. The
+// diagnostics redactor keeps RFC1918/link-local addresses, so a VPN client's
+// private addresses survive while real endpoints are stripped.
+const DARWIN_SCRIPT = [
+  "echo '## os'; sw_vers 2>/dev/null",
+  "echo '## interfaces'; ifconfig 2>/dev/null",
+  "echo '## default route'; route -n get default 2>/dev/null",
+  "echo '## routing table (inet)'; netstat -rn -f inet 2>/dev/null | head -n 40",
+  "echo '## dns'; scutil --dns 2>/dev/null | grep -Ei 'nameserver|if_index|reach|domain' | head -n 40",
+  "echo '## system proxies'; scutil --proxy 2>/dev/null",
+  "echo '## network services'; networksetup -listnetworkserviceorder 2>/dev/null",
+  `echo '## interceptor/security software (processes)'; ps -axo comm= 2>/dev/null | grep -Ei '${DARWIN_SOFTWARE_PATTERN}' | sort -u | head -n 60`,
+  `echo '## system-trust CAs matching known interceptors'; security find-certificate -a /Library/Keychains/System.keychain 2>/dev/null | grep -i labl | grep -Ei '${DARWIN_SOFTWARE_PATTERN}' | sort -u | head -n 40`
+].join("\n");
+
+/** Runs unelevated: reads only what a standard user may, and never a private key
+ *  (find-certificate on the System keychain lists cert labels, not secrets). */
+export function collectDarwinHostSnapshot(): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile(
+      "/bin/sh",
+      ["-c", DARWIN_SCRIPT],
+      { timeout: HOST_SNAPSHOT_TIMEOUT_MS, maxBuffer: HOST_SNAPSHOT_MAX_BYTES },
+      (error, stdout, stderr) => {
+        // A trailing grep with no match exits non-zero though the sections above
+        // it printed, so trust stdout and only surface error when nothing came.
+        const text = String(stdout ?? "").trim();
+        if (error && text.length === 0) {
+          reject(error);
+          return;
+        }
+        const detail = String(stderr ?? "").trim();
+        resolve(text.length > 0 ? text : `<empty>${detail ? `\n${detail}` : ""}`);
+      }
+    );
+  });
+}

@@ -67,7 +67,7 @@ import { sanitizeLog } from "./logSanitize";
 import { isMissingFile, readSettings, writeSettings } from "./settingsFile";
 import { LOG_FILE_NAME, installConsoleFileSink } from "./logFileSink";
 import { collectDiagnostics } from "./diagnosticsReport";
-import { collectWindowsHostSnapshot } from "./hostSnapshot";
+import { collectWindowsHostSnapshot, collectDarwinHostSnapshot } from "./hostSnapshot";
 import { uploadDiagnostics } from "./diagnosticsUpload";
 import { classifyLoginError } from "./loginError";
 import {
@@ -919,7 +919,7 @@ async function connectExistingProfile(attempt: ReturnType<typeof beginAttempt>):
   if (isCancelled(attempt)) {
     if (result.ok) {
       await daemonClient
-        .disconnect({ keepKillSwitch: lockdownEnabled })
+        .disconnect({ keepKillSwitch: lockdownEnabled, reason: "cancel-reuse" })
         .catch((err) => console.warn("cancel: fallback teardown failed", sanitizeLog(err)));
     }
     return false;
@@ -1041,7 +1041,7 @@ async function disconnectFromTray(): Promise<void> {
   let explicitFailure = false;
   try {
     const result = await withDaemonRestartOnUnavailable(
-      () => daemonClient.disconnect({ keepKillSwitch: lockdownEnabled }),
+      () => daemonClient.disconnect({ keepKillSwitch: lockdownEnabled, reason: "tray" }),
       "tray disconnect"
     );
     if (!result.ok) {
@@ -1239,7 +1239,7 @@ async function dialServer(
   if (isCancelled(attempt)) {
     if (result.ok) {
       await daemonClient
-        .disconnect({ keepKillSwitch: lockdownEnabled })
+        .disconnect({ keepKillSwitch: lockdownEnabled, reason: "cancel-dial" })
         .catch((err) => console.warn("cancel: disconnect failed", sanitizeLog(err)));
     }
     throw new ConnectCancelledError();
@@ -1333,7 +1333,7 @@ async function provisionAcrossServers(
       void persistProvisionedProfiles();
       if (isCancelled(attempt)) {
         await daemonClient
-          .disconnect({ keepKillSwitch: lockdownEnabled })
+          .disconnect({ keepKillSwitch: lockdownEnabled, reason: "cancel-cleanup" })
           .catch((error) => console.warn("cancel: disconnect after cleanup failed", sanitizeLog(error)));
         throw new ConnectCancelledError();
       }
@@ -1427,7 +1427,7 @@ async function cancelConnectAttempt(): Promise<void> {
   // Straight to disconnect, with no status round-trip first: the daemon
   // interrupts its own in-flight connect, and a redundant one is a no-op there.
   try {
-    await daemonClient.disconnect({ keepKillSwitch: lockdownEnabled });
+    await daemonClient.disconnect({ keepKillSwitch: lockdownEnabled, reason: "cancel-attempt" });
   } catch (err) {
     console.warn("cancel: daemon teardown failed", sanitizeLog(err));
   }
@@ -1905,7 +1905,7 @@ async function handleAuthLogoutIpc(): Promise<void> {
   try {
     const status = await daemonClient.getStatus();
     if (status.state === "CONNECTED" || status.state === "CONNECTING") {
-      await daemonClient.disconnect({ keepKillSwitch: lockdownEnabled });
+      await daemonClient.disconnect({ keepKillSwitch: lockdownEnabled, reason: "logout" });
     }
   } catch {
     // daemon may be unavailable
@@ -2153,7 +2153,7 @@ function registerConnectionHandlers(): void {
     // so it can't silently reconnect moments after the user's Disconnect.
     cancelAttempt();
     const result = await withDaemonRestartOnUnavailable(
-      () => daemonClient.disconnect({ keepKillSwitch: lockdownEnabled }),
+      () => daemonClient.disconnect({ keepKillSwitch: lockdownEnabled, reason: "user" }),
       "disconnect"
     );
     void refreshTrayStatus();
@@ -2221,7 +2221,12 @@ function registerConnectionHandlers(): void {
         crashDumpsDir: app.getPath("crashDumps"),
         logFileName: LOG_FILE_NAME,
         daemonRing: () => daemonClient.getLogs(0),
-        hostSnapshot: process.platform === "win32" ? collectWindowsHostSnapshot : undefined,
+        hostSnapshot:
+          process.platform === "win32"
+            ? collectWindowsHostSnapshot
+            : process.platform === "darwin"
+              ? collectDarwinHostSnapshot
+              : undefined,
         note: typeof note === "string" ? note : undefined
       });
       return await uploadDiagnostics(payload, {
@@ -3283,7 +3288,7 @@ async function triggerPanicWipe(): Promise<void> {
   await performPanicWipe(buildPanicContext(), {
     lowerLock: async () => {
       try {
-        await daemonClient.disconnect({ keepKillSwitch: false });
+        await daemonClient.disconnect({ keepKillSwitch: false, reason: "panic-wipe" });
       } catch (err) {
         console.warn("panic wipe: disconnect failed", sanitizeLog(err));
       }

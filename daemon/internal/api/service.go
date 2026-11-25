@@ -237,6 +237,13 @@ type Service struct {
 	// outlived one does not re-arm the hold it cleared. Guarded by recoveryMu.
 	netChangeGen uint64
 
+	// lastNetSig is the last default-route signature (interface|address) logged, so
+	// onNetworkChanged records a flap only when the route actually moves. On a network
+	// whose client shifts the local address (a corporate VPN such as Zscaler), the
+	// cadence of these ring entries is the signal that tells us whether a handshake can
+	// ever complete. Guarded by recoveryMu.
+	lastNetSig string
+
 	// resumeFreshUntil marks the window after a host resume in which a single failed
 	// probe round is enough to rebuild; resumeNotedAt dedupes one wake's notifications.
 	resumeFreshUntil time.Time
@@ -2281,6 +2288,17 @@ const (
 	teardownShutdown                     // process exit: keep everything for the next start
 )
 
+// NoteDisconnectReason records, in the ring buffer a diagnostics report captures,
+// which app-side path asked for the next teardown. The desktop app log can roll
+// past the moment before a report is sent, so without this a disconnect in the
+// daemon ring has no attributable cause.
+func (s *Service) NoteDisconnectReason(reason string) {
+	if reason == "" {
+		reason = "unspecified"
+	}
+	s.logs.Add(state.LogInfo, state.SourceDaemon, "disconnect requested by app: "+reason)
+}
+
 // Disconnect tears down the active VPN session. When keepKillSwitch is true (Lockdown
 // mode), the firewall rules stay engaged until the caller explicitly clears them.
 func (s *Service) Disconnect(ctx context.Context, keepKillSwitch bool) error {
@@ -2805,9 +2823,15 @@ func (s *Service) onNetworkChanged() {
 		// The network the retry was booked on is gone, so its return is a real change.
 		s.recoveryMu.Lock()
 		s.recoveryNetwork = ""
+		changed := s.lastNetSig != "down"
+		s.lastNetSig = "down"
 		s.recoveryMu.Unlock()
+		if changed {
+			s.logs.Add(state.LogInfo, state.SourceDaemon, "network changed: no usable default route (link down)")
+		}
 		return
 	}
+	iface, addr := s.defaultRouteDescription()
 	network := s.currentNetworkKey()
 	s.recoveryMu.Lock()
 	now := time.Now()
@@ -2825,8 +2849,30 @@ func (s *Service) onNetworkChanged() {
 	s.offlineHoldUntil = time.Time{}
 	s.upstreamProbeAt = time.Time{}
 	s.netChangeGen++
+	sig := iface + "|" + addr
+	changed := sig != s.lastNetSig
+	s.lastNetSig = sig
 	s.recoveryMu.Unlock()
+	// Log only a real move, so the ring's timestamps measure how fast the default
+	// route flaps — the number that decides whether any handshake can finish.
+	if changed {
+		s.logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf(
+			"network changed: default route now via %s %s", iface, addr))
+	}
 	s.kickHealthCheck()
+}
+
+// defaultRouteDescription names the interface and address carrying the default
+// route, for the network-change log. It never fails: an unknown route still logs.
+func (s *Service) defaultRouteDescription() (iface, addr string) {
+	if s.physicalRoute == nil {
+		return "unknown", ""
+	}
+	name, address, err := s.physicalRoute()
+	if err != nil {
+		return "unknown", ""
+	}
+	return name, address
 }
 
 // noPhysicalRoute is a definite "nothing to dial from". Windows' hint can still say

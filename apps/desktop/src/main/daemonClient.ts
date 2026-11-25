@@ -229,8 +229,19 @@ export class DaemonClient implements PostQuantumProvider {
     return this.request<OkResponse>("POST", "/realityproxy/stop");
   }
 
-  async disconnect(opts?: { keepKillSwitch?: boolean }, signal?: AbortSignal): Promise<OkResponse> {
-    const body = opts?.keepKillSwitch ? { keepKillSwitch: true } : undefined;
+  async disconnect(
+    opts?: { keepKillSwitch?: boolean; reason?: string },
+    signal?: AbortSignal
+  ): Promise<OkResponse> {
+    // reason names the teardown path for the daemon log, so a diagnostics
+    // report can attribute a disconnect even after the app log has rolled.
+    const body =
+      opts?.keepKillSwitch || opts?.reason
+        ? {
+            ...(opts?.keepKillSwitch ? { keepKillSwitch: true } : {}),
+            ...(opts?.reason ? { reason: opts.reason } : {})
+          }
+        : undefined;
     return this.request<OkResponse>("POST", "/disconnect", body, this.disconnectTimeoutMs, signal);
   }
 
