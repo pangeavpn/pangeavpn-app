@@ -2157,8 +2157,18 @@ async function sniProbeTargets(): Promise<SniProbeTarget[]> {
       config.profiles.find((profile) => profile.id === lastConnectedProfileId && profile.tectonic) ??
       config.profiles.find((profile) => profile.tectonic);
     if (!preferred?.tectonic) return [];
+    const targets: SniProbeTarget[] = [];
     const { host, port } = splitNode(preferred.tectonic.node);
-    return [{ host, port: port ?? 443, pins: preferred.tectonic.pins ?? [] }];
+    targets.push({ host, port: port ?? 443, pins: preferred.tectonic.pins ?? [] });
+    if (preferred.reality) {
+      targets.push({
+        host: preferred.reality.remoteHost,
+        port: preferred.reality.remotePort,
+        pins: [],
+        issuerOnly: true
+      });
+    }
+    return targets;
   } catch {
     return [];
   }

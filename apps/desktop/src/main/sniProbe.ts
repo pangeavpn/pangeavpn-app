@@ -6,9 +6,11 @@ export interface SniProbeTarget {
   host: string;
   port: number;
   pins: string[];
+  /** REALITY serves the cover site's own chain, so only the issuer decides. */
+  issuerOnly?: boolean;
 }
 
-export type SniProbeVerdict = "node" | "intercepted" | "failed";
+export type SniProbeVerdict = "node" | "transparent" | "intercepted" | "failed";
 
 export interface SniProbeOutcome {
   sni: string;
@@ -21,6 +23,9 @@ export interface SniProbeOutcome {
 }
 
 const PROBE_TIMEOUT_MS = 4000;
+
+const INTERCEPTOR_CA =
+  /zscaler|netskope|umbrella|forcepoint|bluecoat|symantec|paloalto|checkpoint|fortinet|sophos|eset|kaspersky|crowdstrike|jamf|santa|cloudflare/i;
 
 // The pin hashes the certificate's SubjectPublicKeyInfo, which is what
 // X509Certificate exports; Certificate.pubkey is a different encoding.
@@ -70,7 +75,13 @@ export function probeSni(
       const subject = name(cert?.subject);
       // With no pin to compare, a self-signed certificate can only be the node.
       const selfSigned = issuer.length > 0 && issuer === subject;
-      const verdict = target.pins.includes(pin) || (!target.pins.length && selfSigned) ? "node" : "intercepted";
+      const verdict = target.issuerOnly
+        ? INTERCEPTOR_CA.test(issuer)
+          ? "intercepted"
+          : "transparent"
+        : target.pins.includes(pin) || (!target.pins.length && selfSigned)
+          ? "node"
+          : "intercepted";
       finish(verdict, { issuer, subject, ...(pin ? { pin } : {}) });
     });
   });
