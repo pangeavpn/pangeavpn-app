@@ -225,6 +225,9 @@ func startDaemonRuntime() (*daemonRuntime, error) {
 	// An unresolvable permit host is skipped rather than failing Enable; surface
 	// it so a transport quietly losing its permit stays visible.
 	platform.EndpointResolveWarn = func(host string, err error) {
+		if !resolveWarningIsNew(host, err) {
+			return
+		}
 		logs.Add(state.LogWarn, state.SourceDaemon, fmt.Sprintf("kill switch could not resolve permit host %s, skipping: %v", host, err))
 	}
 	// Degraded-but-closed: the lock holds but something is off. These become

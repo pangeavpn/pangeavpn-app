@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/pangeavpn/pangeavpn-desktop/daemon/internal/platform"
@@ -43,4 +44,29 @@ func attachLogFile(logs *state.LogStore) {
 
 	fmt.Fprintf(os.Stderr, "\n=== daemon start %s ===\n", time.Now().Format(time.RFC3339))
 	logs.Add(state.LogInfo, state.SourceDaemon, fmt.Sprintf("crash log: %s", crashPath))
+}
+
+const resolveWarnRepeat = 10 * time.Minute
+
+var (
+	resolveWarnMu     sync.Mutex
+	resolveWarnedKeys = map[string]time.Time{}
+)
+
+// resolveWarningIsNew keeps one unreachable permit host to one line per window:
+// every profile sync retries the same names and they fail every time behind a lock.
+func resolveWarningIsNew(host string, err error) bool {
+	key := host + "|" + err.Error()
+	resolveWarnMu.Lock()
+	defer resolveWarnMu.Unlock()
+
+	now := time.Now()
+	if at, seen := resolveWarnedKeys[key]; seen && now.Sub(at) < resolveWarnRepeat {
+		return false
+	}
+	if len(resolveWarnedKeys) > 256 {
+		resolveWarnedKeys = map[string]time.Time{}
+	}
+	resolveWarnedKeys[key] = now
+	return true
 }
