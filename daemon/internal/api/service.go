@@ -2619,6 +2619,8 @@ func (s *Service) Status(ctx context.Context) state.StatusResponse {
 		TransportsExhausted: s.transportsAreExhausted(),
 		Offline:             offlineForState(stateValue, s.offlineNow()),
 		SplitTunnel:         s.splitTunnelStatus(),
+		StartedAt:           state.ProcessStartedAt,
+		Build:               state.Build(),
 	}
 }
 
@@ -2638,6 +2640,25 @@ func offlineForState(current state.DaemonState, hostOffline bool) bool {
 
 func (s *Service) Logs(since int64) []state.LogEntry {
 	return s.logs.Since(since)
+}
+
+// FileLogs returns the on-disk log tail. The ring dies with the process, so the
+// file is the only source for what happened before this boot.
+func (s *Service) FileLogs(maxBytes int64) ([]state.LogEntry, error) {
+	path, err := platform.LogPath()
+	if err != nil {
+		return nil, err
+	}
+	return state.TailEntries(path, maxBytes)
+}
+
+// CrashLog returns the daemon's raw stderr, where a panic or fatal fault lands.
+func (s *Service) CrashLog(maxBytes int64) (string, error) {
+	path, err := platform.CrashLogPath()
+	if err != nil {
+		return "", err
+	}
+	return state.TailText(path, maxBytes)
 }
 
 func (s *Service) Config() state.Config {

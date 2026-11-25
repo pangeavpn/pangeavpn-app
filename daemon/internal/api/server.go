@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -674,6 +675,40 @@ func NewHandler(token string, service *Service) http.Handler {
 		writeJSON(w, http.StatusOK, service.Logs(since))
 	}))
 
+	mux.Handle("/logs/file", withAuthAndLimit(token, limiter, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		maxBytes, ok := logTailSize(w, r)
+		if !ok {
+			return
+		}
+		entries, err := service.FileLogs(maxBytes)
+		if err != nil {
+			writeLogTailError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, entries)
+	}))
+
+	mux.Handle("/logs/crash", withAuthAndLimit(token, limiter, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		maxBytes, ok := logTailSize(w, r)
+		if !ok {
+			return
+		}
+		text, err := service.CrashLog(maxBytes)
+		if err != nil {
+			writeLogTailError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, crashLogResponse{Text: text})
+	}))
+
 	registerPostQuantumRoutes(mux, token, limiter)
 
 	// Never behind opMu: a POST saves, applies the app rules live and leaves the ranges
@@ -771,4 +806,35 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 
 func writeError(w http.ResponseWriter, status int, message string) {
 	writeJSON(w, status, map[string]string{"error": message})
+}
+
+// maxLogTailBytes caps what one log read may pull out of the daemon's own file.
+const maxLogTailBytes = 1 << 20
+
+type crashLogResponse struct {
+	Text string `json:"text"`
+}
+
+func logTailSize(w http.ResponseWriter, r *http.Request) (int64, bool) {
+	raw := r.URL.Query().Get("max")
+	if raw == "" {
+		return 64 << 10, true
+	}
+	value, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || value <= 0 || value > maxLogTailBytes {
+		writeError(w, http.StatusBadRequest, "max must be between 1 and 1048576")
+		return 0, false
+	}
+	return value, true
+}
+
+// writeLogTailError answers "no such log" as 404, so a report can say the daemon
+// has never crashed rather than showing a failure.
+func writeLogTailError(w http.ResponseWriter, err error) {
+	if errors.Is(err, os.ErrNotExist) {
+		writeError(w, http.StatusNotFound, "log file not present")
+		return
+	}
+	log.Printf("log tail: %s", sanitizeLog(err.Error()))
+	writeError(w, http.StatusInternalServerError, "log unavailable")
 }

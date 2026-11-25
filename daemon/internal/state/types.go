@@ -107,6 +107,20 @@ type StatusResponse struct {
 	Offline bool `json:"offline"`
 	// SplitTunnel summarises split tunnelling; absent where the daemon has none wired in.
 	SplitTunnel *SplitTunnelStatus `json:"splitTunnel,omitempty"`
+	// StartedAt is when this process began, in unix milliseconds.
+	StartedAt int64 `json:"startedAt"`
+	// Build names the binary that answered: the app's own version says nothing
+	// about a daemon installed or upgraded separately.
+	Build DaemonBuild `json:"build"`
+}
+
+// DaemonBuild is what the Go toolchain recorded about this build; the fields
+// are empty for a build made outside a checkout or with -buildvcs=false.
+type DaemonBuild struct {
+	Version  string `json:"version,omitempty"`
+	Revision string `json:"revision,omitempty"`
+	Time     string `json:"time,omitempty"`
+	Modified bool   `json:"modified,omitempty"`
 }
 
 // SplitTunnelStatus carries counts only: the app paths and ranges stay on GET /split-tunnel,
