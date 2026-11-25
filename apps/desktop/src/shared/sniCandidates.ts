@@ -7,6 +7,9 @@ export const SNI_PROBE_CANDIDATES = [
   "oscdn.apple.com",
   "updates.cdn-apple.com",
   "courier.push.apple.com",
+  "update.googleapis.com",
+  "dl.google.com",
+  "download.windowsupdate.com",
   "objects.githubusercontent.com",
   "www.microsoft.com"
 ];
