@@ -2154,12 +2154,23 @@ async function sniProbeTargets(): Promise<SniProbeTarget[]> {
     const config = await daemonClient.getConfig();
     // One node answers for the whole network, so probe the one in use.
     const preferred =
-      config.profiles.find((profile) => profile.id === lastConnectedProfileId && profile.tectonic) ??
-      config.profiles.find((profile) => profile.tectonic);
-    if (!preferred?.tectonic) return [];
+      config.profiles.find((profile) => profile.id === lastConnectedProfileId) ??
+      config.profiles.find((profile) => profile.tectonic || profile.reality);
+    if (!preferred) return [];
     const targets: SniProbeTarget[] = [];
-    const { host, port } = splitNode(preferred.tectonic.node);
-    targets.push({ host, port: port ?? 443, pins: preferred.tectonic.pins ?? [] });
+    const node = preferred.tectonic
+      ? splitNode(preferred.tectonic.node)
+      : preferred.reality
+        ? splitNode(preferred.reality.remoteHost)
+        : null;
+    // REALITY's host is the node's address too, so 443 is probed either way.
+    if (node) {
+      targets.push({
+        host: node.host,
+        port: node.port ?? 443,
+        pins: preferred.tectonic?.pins ?? []
+      });
+    }
     if (preferred.reality) {
       targets.push({
         host: preferred.reality.remoteHost,
