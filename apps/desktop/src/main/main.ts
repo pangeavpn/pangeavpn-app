@@ -72,6 +72,7 @@ import { SNI_PROBE_CANDIDATES } from "../shared/sniCandidates";
 import { splitNode } from "../shared/tectonicProfile";
 import type { SniProbeTarget } from "./sniProbe";
 import { uploadDiagnostics } from "./diagnosticsUpload";
+import { spoolDiagnostics } from "./diagnosticsSpool.ts";
 import { classifyLoginError } from "./loginError";
 import {
   buildDesktopLinkUrl,
@@ -2274,6 +2275,11 @@ function registerConnectionHandlers(): void {
               : undefined,
         note: typeof note === "string" ? note : undefined
       });
+      // The hub can be unreachable for minutes at a time; keep the report beside
+      // the logs so a failed send still leaves something to attach or re-send.
+      await spoolDiagnostics(payload, app.getPath("logs")).catch((err) =>
+        console.warn("diagnostics: could not spool the report", sanitizeLog(err))
+      );
       return await uploadDiagnostics(payload, {
         send: (route, report, signal) => pangeaApiClient.anonymousRequest("POST", route, report, { timeoutMs: 30000, signal })
       });
