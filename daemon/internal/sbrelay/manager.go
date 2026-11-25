@@ -189,7 +189,11 @@ func (m *Manager[P]) launch(ctx context.Context, profile P, sp spec) error {
 	}
 	dialCtx, dialCancel := context.WithTimeout(engineCtx, timeout)
 	stopPropagation := context.AfterFunc(ctx, dialCancel)
-	remote, err := outbound.ListenPacket(dialCtx, destination)
+	// QUIC (TUIC) redials through a spurious "network changed" reset within the
+	// dial budget; a single flap mid-handshake must not fail the transport.
+	remote, err := transport.ListenPacketResilient(dialCtx, func(c context.Context) (net.PacketConn, error) {
+		return outbound.ListenPacket(c, destination)
+	})
 	stopPropagation()
 	dialCancel()
 	if err != nil {

@@ -217,7 +217,9 @@ func (m *Manager) WaitForSession(ctx context.Context, timeout time.Duration) err
 		return fmt.Errorf("hysteria2: resolve relay destination: %w", err)
 	}
 
-	pc, err := ob.ListenPacket(waitCtx, M.SocksaddrFromNet(target))
+	pc, err := transport.ListenPacketResilient(waitCtx, func(c context.Context) (net.PacketConn, error) {
+		return ob.ListenPacket(c, M.SocksaddrFromNet(target))
+	})
 	if err != nil {
 		return fmt.Errorf("hysteria2: session handshake failed: %w", err)
 	}
