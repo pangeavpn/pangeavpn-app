@@ -68,6 +68,9 @@ import { isMissingFile, readSettings, writeSettings } from "./settingsFile";
 import { LOG_FILE_NAME, installConsoleFileSink } from "./logFileSink";
 import { collectDiagnostics } from "./diagnosticsReport";
 import { collectWindowsHostSnapshot, collectDarwinHostSnapshot } from "./hostSnapshot";
+import { SNI_PROBE_CANDIDATES } from "../shared/sniCandidates";
+import { splitNode } from "../shared/tectonicProfile";
+import type { SniProbeTarget } from "./sniProbe";
 import { uploadDiagnostics } from "./diagnosticsUpload";
 import { classifyLoginError } from "./loginError";
 import {
@@ -2140,6 +2143,27 @@ function registerBrowserSignInHandlers(): void {
   });
 }
 
+/** Probes each candidate name against the node's 443, so one report says which
+ *  disguises reach the node untouched and which something decrypts. */
+async function collectDarwinSnapshotWithSniProbe(): Promise<string> {
+  return collectDarwinHostSnapshot(await sniProbeTargets(), SNI_PROBE_CANDIDATES);
+}
+
+async function sniProbeTargets(): Promise<SniProbeTarget[]> {
+  try {
+    const config = await daemonClient.getConfig();
+    // One node answers for the whole network, so probe the one in use.
+    const preferred =
+      config.profiles.find((profile) => profile.id === lastConnectedProfileId && profile.tectonic) ??
+      config.profiles.find((profile) => profile.tectonic);
+    if (!preferred?.tectonic) return [];
+    const { host, port } = splitNode(preferred.tectonic.node);
+    return [{ host, port: port ?? 443, pins: preferred.tectonic.pins ?? [] }];
+  } catch {
+    return [];
+  }
+}
+
 function registerConnectionHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.getStatus, async () => {
     const status = await withDaemonRestartOnUnavailable(() => daemonClient.getStatus(), "status", { allowRestart: false });
@@ -2225,7 +2249,7 @@ function registerConnectionHandlers(): void {
           process.platform === "win32"
             ? collectWindowsHostSnapshot
             : process.platform === "darwin"
-              ? collectDarwinHostSnapshot
+              ? collectDarwinSnapshotWithSniProbe
               : undefined,
         note: typeof note === "string" ? note : undefined
       });

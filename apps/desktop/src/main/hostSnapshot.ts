@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { collectSniProbe, type SniProbeTarget } from "./sniProbe.ts";
 
 const HOST_SNAPSHOT_TIMEOUT_MS = 20_000;
 const HOST_SNAPSHOT_MAX_BYTES = 256 * 1024;
@@ -86,7 +87,15 @@ const DARWIN_SCRIPT = [
 
 /** Runs unelevated: reads only what a standard user may, and never a private key
  *  (find-certificate on the System keychain lists cert labels, not secrets). */
-export function collectDarwinHostSnapshot(): Promise<string> {
+export function collectDarwinHostSnapshot(
+  targets: readonly SniProbeTarget[] = [],
+  snis: readonly string[] = []
+): Promise<string> {
+  return Promise.all([runDarwinSnapshot(), ...targets.map((target) => collectSniProbe(target, snis))])
+    .then(([snapshot, ...probes]) => [snapshot, ...probes].filter(Boolean).join("\n"));
+}
+
+function runDarwinSnapshot(): Promise<string> {
   return new Promise((resolve, reject) => {
     execFile(
       "/bin/sh",

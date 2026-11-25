@@ -33,7 +33,7 @@ export interface TectonicProfileBlock {
 const DEFAULT_PORT = 443;
 
 // Splits "host", "host:port", "[v6]" or "[v6]:port"; a bare v6 has no port.
-function splitNode(node: string): { host: string; port?: number } {
+export function splitNode(node: string): { host: string; port?: number } {
   const bracketed = /^\[([^\]]+)\](?::(\d+))?$/.exec(node);
   if (bracketed) return { host: bracketed[1], port: parsePort(bracketed[2]) };
   if (isIPv6Literal(node)) return { host: node };
