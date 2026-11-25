@@ -181,6 +181,8 @@ github.com/pangeavpn/cloak v0.0.0-20260511185428-bf0aeb6365cb h1:fov6CYiB/WW07Yt
 github.com/pangeavpn/cloak v0.0.0-20260511185428-bf0aeb6365cb/go.mod h1:QaaW0f6yCoiX7GwxTe7mDuO1j3FmIlQ/R1nsjUYh8lY=
 github.com/pangeavpn/tectonic v0.0.0-20261123190350-3785355452a9 h1:VQj7/BSqPzgfHFVHJk32Vf5MaDixZEI+WF/TlXeSFlc=
 github.com/pangeavpn/tectonic v0.0.0-20261123190350-3785355452a9/go.mod h1:OXon7YJAm19fCLZsIh9ErdoJJ3rHpBgs7MBc56pQypY=
+github.com/pangeavpn/tectonic v0.0.0-20261125172044-ce318c498f3a h1:FPJLuZ9/EGARxvTCZKQrTfZFwE4/FFoDhjGv4KzU0Fo=
+github.com/pangeavpn/tectonic v0.0.0-20261125172044-ce318c498f3a/go.mod h1:OXon7YJAm19fCLZsIh9ErdoJJ3rHpBgs7MBc56pQypY=
 github.com/patrickmn/go-cache v2.1.0+incompatible h1:HRMgzkcYKYpi3C8ajMPV8OFXaaRUnok+kx1WdO15EQc=
 github.com/patrickmn/go-cache v2.1.0+incompatible/go.mod h1:3Qf8kWWT7OJRJbdiICTKqZju1ZixQ/KpMGzzAfe6+WQ=
 github.com/pion/datachannel v1.6.2 h1:7EXQ8TH3vTouBUdRWYbcX2edSx9Yj6k5zl5P+qyxEPc=
