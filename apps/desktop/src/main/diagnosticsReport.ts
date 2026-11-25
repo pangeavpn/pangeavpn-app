@@ -8,6 +8,7 @@ export const SECTION_MAX_BYTES = 64 * 1024;
 /** Hub body limit is 1mb and JSON escaping inflates text, so half is the cap. */
 export const TOTAL_MAX_BYTES = 512 * 1024;
 const MAX_NOTE_CHARS = 500;
+const CRASH_SECTION_MAX_BYTES = 16 * 1024;
 const NOTE_SCAN_CHARS = 2000;
 const REDACTED_HEAD = "[redacted:";
 const MAX_CRASH_ENTRIES = 40;
@@ -37,9 +38,16 @@ export interface DiagnosticsSources {
   appSupportDir: string;
   crashDumpsDir: string;
   logFileName: string;
-  /** The daemon's in-memory log ring, fetched over its API: on Windows the
-   *  service's file log is admin-only, so this is the only daemon log a report can carry. */
+  /** The daemon's in-memory log ring, fetched over its API: it covers this boot
+   *  only, and dies with the process. */
   daemonRing?: () => Promise<DaemonRingEntry[]>;
+  /** The daemon's own log file, read by the daemon: a service install's file is
+   *  admin-only here, so this is the only way a report carries pre-boot history. */
+  daemonFileLog?: () => Promise<DaemonRingEntry[]>;
+  /** The daemon's raw stderr log, which is where a panic or fatal fault lands. */
+  daemonCrashLog?: () => Promise<string>;
+  /** GET /status: build identity, process start and the session's transport state. */
+  daemonStatus?: () => Promise<unknown>;
   /** Security products, VPN services, adapters and firewall profiles: where a
    *  probe reply can vanish outside anything the daemon itself can log. */
   hostSnapshot?: () => Promise<string>;
@@ -79,6 +87,87 @@ async function daemonRingSection(fetchRing: DiagnosticsSources["daemonRing"]): P
       ? `<${name} empty>`
       : redactDiagnostics(tailText(formatDaemonRing(ring), SECTION_MAX_BYTES));
     return { name, bytes: Buffer.byteLength(text), text };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    const text = `<${name} unavailable: ${redactDiagnostics(reason)}>`;
+    return { name, bytes: Buffer.byteLength(text), text };
+  }
+}
+
+function entriesSection(name: string, entries: readonly DaemonRingEntry[]): DiagnosticsSection {
+  const text = entries.length === 0
+    ? `<${name} empty>`
+    : redactDiagnostics(tailText(formatDaemonRing(entries), SECTION_MAX_BYTES));
+  return { name, bytes: Buffer.byteLength(text), text };
+}
+
+function textSection(name: string, text: string, maxBytes = SECTION_MAX_BYTES): DiagnosticsSection {
+  const kept = redactDiagnostics(tailText(text, maxBytes));
+  return { name, bytes: Buffer.byteLength(kept), text: kept };
+}
+
+async function daemonLogSection(sources: DiagnosticsSources): Promise<DiagnosticsSection> {
+  const name = "daemon.log";
+  if (sources.daemonFileLog) {
+    try {
+      return entriesSection(name, await sources.daemonFileLog());
+    } catch {
+      // An older daemon has no /logs/file; the files below still may.
+    }
+  }
+  // The service daemon writes under logs/, where this process is usually denied;
+  // the flat path is only the desktop-spawned daemon's stderr.
+  const candidates = [
+    path.join(sources.appSupportDir, "logs", name),
+    path.join(sources.appSupportDir, name)
+  ];
+  let failure: unknown;
+  for (const candidate of candidates) {
+    try {
+      return textSection(name, await readTail(candidate, SECTION_MAX_BYTES));
+    } catch (error) {
+      failure ??= error;
+    }
+  }
+  const text = `<${name} ${describeError(failure ?? new Error("unreadable"))}>`;
+  return { name, bytes: Buffer.byteLength(text), text };
+}
+
+async function daemonCrashSection(sources: DiagnosticsSources): Promise<DiagnosticsSection> {
+  const name = "daemon-crash.log";
+  const missing = "<no daemon crash log>";
+  let failure: unknown;
+  if (sources.daemonCrashLog) {
+    try {
+      const raw = await sources.daemonCrashLog();
+      if (raw.trim().length > 0) return textSection(name, raw, CRASH_SECTION_MAX_BYTES);
+      return { name, bytes: Buffer.byteLength(missing), text: missing };
+    } catch (error) {
+      failure = error;
+    }
+  }
+  try {
+    const raw = await readTail(path.join(sources.appSupportDir, "logs", name), CRASH_SECTION_MAX_BYTES);
+    if (raw.trim().length > 0) return textSection(name, raw, CRASH_SECTION_MAX_BYTES);
+    return { name, bytes: Buffer.byteLength(missing), text: missing };
+  } catch (error) {
+    failure ??= error;
+  }
+  if ((failure as { code?: string } | undefined)?.code === "ENOENT") {
+    return { name, bytes: Buffer.byteLength(missing), text: missing };
+  }
+  const text = `<${name} ${describeError(failure ?? new Error("unreadable"))}>`;
+  return { name, bytes: Buffer.byteLength(text), text };
+}
+
+async function daemonStatusSection(status: DiagnosticsSources["daemonStatus"]): Promise<DiagnosticsSection> {
+  const name = "daemon-status";
+  if (!status) {
+    const text = `<${name} not collected>`;
+    return { name, bytes: Buffer.byteLength(text), text };
+  }
+  try {
+    return textSection(name, JSON.stringify(await status(), null, 2));
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     const text = `<${name} unavailable: ${redactDiagnostics(reason)}>`;
@@ -205,13 +294,17 @@ function dropCutMarker(cut: string): string {
 }
 
 export async function collectDiagnostics(sources: DiagnosticsSources): Promise<DiagnosticsPayload> {
+  // Small and hard-won sections come first: capTotal truncates from the end, and
+  // a log file is the cheapest thing to lose.
   const sections = [
+    await daemonStatusSection(sources.daemonStatus),
+    await hostSection(sources.hostSnapshot),
+    await daemonRingSection(sources.daemonRing),
+    await daemonLogSection(sources),
+    await daemonCrashSection(sources),
+    await fileSection("daemon-elevated.log", path.join(sources.appSupportDir, "daemon-elevated.log")),
     await fileSection("app.log", path.join(sources.logDir, sources.logFileName)),
     await fileSection("app.log.1", path.join(sources.logDir, `${sources.logFileName}.1`)),
-    await fileSection("daemon.log", path.join(sources.appSupportDir, "daemon.log")),
-    await fileSection("daemon-elevated.log", path.join(sources.appSupportDir, "daemon-elevated.log")),
-    await daemonRingSection(sources.daemonRing),
-    await hostSection(sources.hostSnapshot),
     await crashSection(sources.crashDumpsDir)
   ];
 

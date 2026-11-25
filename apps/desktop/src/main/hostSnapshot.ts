@@ -13,6 +13,13 @@ const SOFTWARE_PATTERN =
 // software beside it, the adapters it competes with, and the firewall's stance.
 const SCRIPT = [
   "$ErrorActionPreference = 'SilentlyContinue'",
+  "'## system'",
+  "$os = Get-CimInstance Win32_OperatingSystem; 'system | ' + $os.Caption + ' | build=' + $os.BuildNumber + ' | boot=' + $os.LastBootUpTime.ToUniversalTime().ToString('o') + ' | uptimeMin=' + [int]((Get-Date) - $os.LastBootUpTime).TotalMinutes",
+  "Get-TimeZone | ForEach-Object { 'timezone | ' + $_.Id + ' | utcOffsetMin=' + [int]$_.BaseUtcOffset.TotalMinutes }",
+  // The service's own restarts (a crash, an upgrade install) are the one event
+  // an otherwise healthy report cannot show from inside the app.
+  "'## daemon service events'",
+  "Get-WinEvent -FilterHashtable @{LogName='System'; ProviderName='Service Control Manager'; StartTime=(Get-Date).AddDays(-14)} | Where-Object { $_.Message -match 'Pangea' } | Select-Object -First 8 | ForEach-Object { 'svc | ' + $_.TimeCreated.ToUniversalTime().ToString('o') + ' | ' + $_.Id + ' | ' + (($_.Message -split \"`r?`n\")[0]) }",
   "'## security products'",
   "Get-CimInstance -Namespace root/SecurityCenter2 -ClassName AntiVirusProduct | ForEach-Object { 'av | ' + $_.displayName + ' | state=' + $_.productState }",
   "Get-CimInstance -Namespace root/SecurityCenter2 -ClassName FirewallProduct | ForEach-Object { 'fw | ' + $_.displayName + ' | state=' + $_.productState }",

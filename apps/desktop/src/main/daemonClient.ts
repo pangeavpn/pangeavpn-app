@@ -339,6 +339,19 @@ export class DaemonClient implements PostQuantumProvider {
     return this.request<LogEntry[]>("GET", `/logs${query}`);
   }
 
+  // The daemon reads its own file log: the service's copy is admin-only here,
+  // and only the file remembers the sessions before this boot.
+  async getFileLogs(maxBytes?: number): Promise<LogEntry[]> {
+    const query = typeof maxBytes === "number" ? `?max=${maxBytes}` : "";
+    return this.request<LogEntry[]>("GET", `/logs/file${query}`);
+  }
+
+  async getCrashLog(maxBytes?: number): Promise<string> {
+    const query = typeof maxBytes === "number" ? `?max=${maxBytes}` : "";
+    const reply = await this.request<{ text: string }>("GET", `/logs/crash${query}`);
+    return reply.text;
+  }
+
   async getConfig(): Promise<ConfigResponse> {
     return this.request<ConfigResponse>("GET", "/config");
   }

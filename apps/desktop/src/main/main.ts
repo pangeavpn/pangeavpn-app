@@ -2267,6 +2267,9 @@ function registerConnectionHandlers(): void {
         crashDumpsDir: app.getPath("crashDumps"),
         logFileName: LOG_FILE_NAME,
         daemonRing: () => daemonClient.getLogs(0),
+        daemonFileLog: () => daemonClient.getFileLogs(),
+        daemonCrashLog: () => daemonClient.getCrashLog(),
+        daemonStatus: () => daemonClient.getStatus(),
         hostSnapshot:
           process.platform === "win32"
             ? collectWindowsHostSnapshot

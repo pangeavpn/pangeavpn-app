@@ -116,7 +116,7 @@ client for the HTTP API registered in
 | Method | Route | Purpose |
 | --- | --- | --- |
 | `GET` | `/ping` | Unauthenticated liveness check |
-| `GET` | `/status` | State, active transport, WireGuard counters and kill switch status |
+| `GET` | `/status` | State, active transport, WireGuard counters, kill switch status, and the daemon's build revision and start time |
 | `POST` | `/connect` | Connect with a selected profile and transport preference |
 | `POST` | `/disconnect` | Stop the tunnel, optionally keeping Lockdown |
 | `POST` | `/switch` | Replace the active profile without dropping the kill switch first |
@@ -129,6 +129,7 @@ client for the HTTP API registered in
 | `POST` | `/ssproxy/start`, `/ssproxy/stop` | Run the local Shadowsocks proxy that carries hub traffic |
 | `POST` | `/pq/offer`, `/pq/finish`, `/pq/encapsulate` | ML-KEM-768 key material for the peer's pre-shared key and the hub channel |
 | `GET` | `/logs?since=<id>` | Read in-memory daemon log entries |
+| `GET` | `/logs/file?max=<bytes>`, `/logs/crash?max=<bytes>` | Tail the daemon's own log file and raw crash log, which only the daemon can read on a service install |
 | `GET`, `POST` | `/config` | Read or replace stored profiles |
 | `GET`, `POST` | `/split-tunnel` | Read or save the excluded apps and IPv4 ranges; answers without waiting on a running connect |
 
