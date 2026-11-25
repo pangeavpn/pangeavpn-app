@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, X509Certificate } from "node:crypto";
 import { connect } from "node:tls";
 
 /** The node address and the pins its self-signed certificate must hold. */
@@ -22,8 +22,17 @@ export interface SniProbeOutcome {
 
 const PROBE_TIMEOUT_MS = 4000;
 
-const spkiPin = (pubkey?: Buffer): string =>
-  pubkey && pubkey.length > 0 ? createHash("sha256").update(pubkey).digest("base64") : "";
+// The pin hashes the certificate's SubjectPublicKeyInfo, which is what
+// X509Certificate exports; Certificate.pubkey is a different encoding.
+const spkiPin = (raw?: Buffer): string => {
+  if (!raw || raw.length === 0) return "";
+  try {
+    const key = new X509Certificate(raw).publicKey.export({ type: "spki", format: "der" });
+    return createHash("sha256").update(key).digest("base64");
+  } catch {
+    return "";
+  }
+};
 
 const name = (value?: { CN?: string | string[]; O?: string | string[] }): string =>
   [value?.CN, value?.O]
@@ -56,7 +65,7 @@ export function probeSni(
     socket.once("error", (err: Error) => finish("failed", { error: err.message }));
     socket.once("secureConnect", () => {
       const cert = socket.getPeerCertificate();
-      const pin = spkiPin(cert?.pubkey);
+      const pin = spkiPin(cert?.raw);
       const issuer = name(cert?.issuer);
       const subject = name(cert?.subject);
       // With no pin to compare, a self-signed certificate can only be the node.
