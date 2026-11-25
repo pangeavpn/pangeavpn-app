@@ -69,6 +69,15 @@ const DARWIN_SCRIPT = [
   "echo '## default route'; route -n get default 2>/dev/null",
   "echo '## routing table (inet)'; netstat -rn -f inet 2>/dev/null | head -n 40",
   "echo '## dns'; scutil --dns 2>/dev/null | grep -Ei 'nameserver|if_index|reach|domain' | head -n 40",
+  // Does outbound UDP work at all, and does QUIC on 443 specifically? A filter
+  // that blocks UDP/443 (common with Zscaler) stops hysteria2/tuic while leaving
+  // DNS/UDP53 alone, so the two lines together localise the block.
+  "echo '## udp egress'; " +
+    "if command -v dig >/dev/null 2>&1; then " +
+    "if [ -n \"$(dig +time=2 +tries=1 +short @1.1.1.1 cloudflare.com A 2>/dev/null)\" ]; then echo 'udp/53 to 1.1.1.1: ok'; else echo 'udp/53 to 1.1.1.1: no reply (blocked or filtered)'; fi; " +
+    "else echo 'udp/53: dig unavailable'; fi; " +
+    "if curl --http3-only -s -o /dev/null -m 4 https://cloudflare.com 2>/dev/null; then echo 'quic udp/443 to cloudflare: ok'; " +
+    "else echo 'quic udp/443 to cloudflare: failed (blocked, or this curl lacks http3)'; fi",
   "echo '## system proxies'; scutil --proxy 2>/dev/null",
   "echo '## network services'; networksetup -listnetworkserviceorder 2>/dev/null",
   `echo '## interceptor/security software (processes)'; ps -axo comm= 2>/dev/null | grep -Ei '${DARWIN_SOFTWARE_PATTERN}' | sort -u | head -n 60`,
